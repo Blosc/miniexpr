@@ -1,6 +1,7 @@
 /* Test chunked evaluation API */
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
