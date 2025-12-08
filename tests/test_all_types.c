@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <complex.h>
 #include <math.h>
@@ -59,16 +60,16 @@ int main() {
     
     /* Integer types */
     printf("Signed Integers:\n");
-    TEST("int8_t",  ME_INT8,  int8_t,  "%d", i, "a+5", a[i]+5);
-    TEST("int16_t", ME_INT16, int16_t, "%d", i*10, "a+100", a[i]+100);
-    TEST("int32_t", ME_INT32, int32_t, "%d", i*1000, "a+b", a[i]+b[i]);
-    TEST("int64_t", ME_INT64, int64_t, "%lld", (long long)i*1000000, "a*2", a[i]*2);
+    TEST("int8_t",  ME_INT8,  int8_t,  "%" PRId8, i, "a+5", a[i]+5);
+    TEST("int16_t", ME_INT16, int16_t, "%" PRId16, i*10, "a+100", a[i]+100);
+    TEST("int32_t", ME_INT32, int32_t, "%" PRId32, i*1000, "a+b", a[i]+b[i]);
+    TEST("int64_t", ME_INT64, int64_t, "%" PRId64, i*1000000, "a*2", a[i]*2);
     
     printf("\nUnsigned Integers:\n");
-    TEST("uint8_t",  ME_UINT8,  uint8_t,  "%u", i, "a+10", a[i]+10);
-    TEST("uint16_t", ME_UINT16, uint16_t, "%u", i*100, "a+200", a[i]+200);
-    TEST("uint32_t", ME_UINT32, uint32_t, "%u", i*1000, "a+b", a[i]+b[i]);
-    TEST("uint64_t", ME_UINT64, uint64_t, "%llu", (unsigned long long)i*1000000, "a*3", a[i]*3);
+    TEST("uint8_t",  ME_UINT8,  uint8_t,  "%" PRIu8, i, "a+10", a[i]+10);
+    TEST("uint16_t", ME_UINT16, uint16_t, "%" PRIu16, i*100, "a+200", a[i]+200);
+    TEST("uint32_t", ME_UINT32, uint32_t, "%" PRIu32, i*1000, "a+b", a[i]+b[i]);
+    TEST("uint64_t", ME_UINT64, uint64_t, "%" PRIu64, i*1000000, "a*3", a[i]*3);
     
     printf("\nFloating Point:\n");
     TEST("float",  ME_FLOAT32, float,  "%.2f", i*0.5f, "a+5.0", a[i]+5.0f);
