@@ -43,8 +43,8 @@ int main() {
     double output[3];
 
     me_variable vars[] = {
-        {"a", a_data, ME_VARIABLE, 0},
-        {"b", b_data, ME_VARIABLE, 0}
+        {"a", ME_FLOAT64, a_data},
+        {"b", ME_FLOAT64, b_data}
     };
 
     me_expr *expr4 = me_compile("a**b", vars, 2, output, 3, ME_FLOAT64, &err);
@@ -78,8 +78,8 @@ int main() {
     int32_t int_out[2];
 
     me_variable int_vars[] = {
-        {"a", int_a, ME_VARIABLE, 0},
-        {"b", int_b, ME_VARIABLE, 0}
+        {"a", ME_INT32, int_a},
+        {"b", ME_INT32, int_b}
     };
 
     me_expr *expr6 = me_compile("a^b", int_vars, 2, int_out, 2, ME_INT32, &err);

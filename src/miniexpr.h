@@ -105,11 +105,19 @@ enum {
 
 typedef struct me_variable {
     const char *name;
-    const void *address;
-    int type;
-    void *context;
-    me_dtype dtype; // Data type of this variable
+    me_dtype dtype;      // Data type of this variable (0 = use output dtype)
+    const void *address; // Pointer to data (NULL for me_compile_chunk)
+    int type;            // ME_VARIABLE for user variables (0 = auto-set to ME_VARIABLE)
+    void *context;       // For closures/functions (NULL for normal variables)
 } me_variable;
+
+/* Note: When initializing variables, only name/dtype/address are typically needed.
+ * Unspecified fields default to 0/NULL, which is correct for normal use:
+ *   {"varname"}                          → defaults all fields
+ *   {"varname", ME_FLOAT64}              → for me_compile_chunk with mixed types
+ *   {"varname", ME_FLOAT64, var_array}   → for me_compile with address
+ * Advanced users can specify type for closures/functions if needed.
+ */
 
 
 /* Parses the input expression and binds variables. */
@@ -119,6 +127,31 @@ typedef struct me_variable {
 me_expr *me_compile(const char *expression, const me_variable *variables, int var_count,
                     void *output, int nitems, me_dtype dtype, int *error);
 
+/* Compile expression for chunked evaluation.
+ * This variant is optimized for use with me_eval_chunk() and me_eval_chunk_threadsafe(),
+ * where variable and output pointers are provided later during evaluation.
+ *
+ * Parameters:
+ *   expression: The expression string to compile
+ *   variables: Array of variable definitions. Only the 'name' field is required.
+ *              Variables will be matched by position (ordinal order) during me_eval_chunk().
+ *   var_count: Number of variables
+ *   dtype: Expected output data type
+ *   error: Optional pointer to receive error position (0 on success, >0 on error)
+ *
+ * Returns: Compiled expression ready for chunked evaluation, or NULL on error
+ *
+ * Example (minimal - recommended):
+ *   me_variable vars[] = {{"x"}, {"y"}};  // Just the names!
+ *   me_expr *expr = me_compile_chunk("x + y", vars, 2, ME_FLOAT64, &err);
+ *
+ *   // Later, provide data in same order as variable definitions
+ *   const void *data[] = {x_array, y_array};  // x first, y second
+ *   me_eval_chunk(expr, data, 2, output, nitems);
+ */
+me_expr *me_compile_chunk(const char *expression, const me_variable *variables,
+                          int var_count, me_dtype dtype, int *error);
+
 /* Evaluates the expression on vectors. */
 void me_eval(const me_expr *n);
 
@@ -127,14 +160,14 @@ void me_eval_fused(const me_expr *n);
 
 /* Evaluates compiled expression with new variable and output pointers.
  * This allows processing large arrays in chunks without recompiling.
- * 
+ *
  * Parameters:
  *   expr: Compiled expression (from me_compile)
  *   vars_chunk: Array of pointers to variable data chunks (same order as in me_compile)
  *   n_vars: Number of variables (must match the number used in me_compile)
  *   output_chunk: Pointer to output buffer for this chunk
  *   chunk_nitems: Number of elements in this chunk
- * 
+ *
  * Note: The chunks must have the same data types as the original variables.
  * WARNING: This function is NOT thread-safe. Use me_eval_chunk_threadsafe() for
  *          concurrent evaluation from multiple threads.
@@ -146,7 +179,7 @@ void me_eval_chunk(const me_expr *expr, const void **vars_chunk, int n_vars,
  * This function can be safely called from multiple threads simultaneously on the
  * same compiled expression. It creates a temporary clone of the expression tree
  * for each call, eliminating race conditions at the cost of some memory allocation.
- * 
+ *
  * Use this when you need to evaluate the same expression in parallel across
  * different chunks from multiple threads.
  */

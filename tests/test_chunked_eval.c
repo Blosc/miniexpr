@@ -29,18 +29,20 @@ int main() {
     printf("Test 1: Simple expression (a + b)\n");
     printf("  Total size: %d, Chunk size: %d\n", TOTAL_SIZE, CHUNK_SIZE);
 
-    me_variable vars[] = {{"a", a_full}, {"b", b_full}};
+    // Variables for compilation (just the names)
+    me_variable vars[] = {{"a"}, {"b"}};
     int err;
 
-    // Compile once with initial pointers
-    me_expr *expr = me_compile("a + b", vars, 2, result_monolithic, TOTAL_SIZE, ME_FLOAT64, &err);
+    // Compile once for chunked evaluation
+    me_expr *expr = me_compile_chunk("a + b", vars, 2, ME_FLOAT64, &err);
     if (!expr) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
         return 1;
     }
 
-    // Evaluate monolithically for reference
-    me_eval(expr);
+    // Evaluate monolithically for reference (using temporary full arrays)
+    const void *vars_full[2] = {a_full, b_full};
+    me_eval_chunk(expr, vars_full, 2, result_monolithic, TOTAL_SIZE);
 
     // Now evaluate in chunks using new API
     int num_chunks = TOTAL_SIZE / CHUNK_SIZE;
@@ -78,14 +80,14 @@ int main() {
     // Test 2: Complex expression
     printf("\nTest 2: Complex expression (sqrt(a*a + b*b))\n");
 
-    expr = me_compile("sqrt(a*a + b*b)", vars, 2, result_monolithic, TOTAL_SIZE, ME_FLOAT64, &err);
+    expr = me_compile_chunk("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &err);
     if (!expr) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
         return 1;
     }
 
     // Evaluate monolithically
-    me_eval(expr);
+    me_eval_chunk(expr, vars_full, 2, result_monolithic, TOTAL_SIZE);
 
     // Evaluate in chunks
     for (int chunk = 0; chunk < num_chunks; chunk++) {
@@ -133,18 +135,19 @@ int main() {
     }
 
     me_variable vars_int[] = {
-        {"a", a_int, ME_VARIABLE, NULL, ME_INT32},
-        {"b", b_int, ME_VARIABLE, NULL, ME_INT32}
+        {"a", ME_INT32, a_int},
+        {"b", ME_INT32, b_int}
     };
 
-    expr = me_compile("a + b", vars_int, 2, result_int_mono, TOTAL_SIZE, ME_INT32, &err);
+    expr = me_compile_chunk("a + b", vars_int, 2, ME_INT32, &err);
     if (!expr) {
         printf("  ❌ FAILED: Compilation error\n");
         return 1;
     }
 
     // Monolithic
-    me_eval(expr);
+    const void *vars_int_full[2] = {a_int, b_int};
+    me_eval_chunk(expr, vars_int_full, 2, result_int_mono, TOTAL_SIZE);
 
     // Chunked
     for (int chunk = 0; chunk < num_chunks; chunk++) {

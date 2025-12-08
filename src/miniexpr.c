@@ -417,35 +417,36 @@ static double npr(double n, double r) { return ncr(n, r) * fac(r); }
 
 static const me_variable functions[] = {
     /* must be in alphabetical order */
-    {"abs", fabs, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"acos", acos, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"asin", asin, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"atan", atan, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"atan2", atan2, ME_FUNCTION2 | ME_FLAG_PURE, 0},
-    {"ceil", ceil, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"cos", cos, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"cosh", cosh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"e", e, ME_FUNCTION0 | ME_FLAG_PURE, 0},
-    {"exp", exp, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"fac", fac, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"floor", floor, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"ln", log, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    /* Format: {name, dtype, address, type, context} */
+    {"abs", 0, fabs, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"acos", 0, acos, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"asin", 0, asin, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"atan", 0, atan, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"atan2", 0, atan2, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"ceil", 0, ceil, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"cos", 0, cos, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"cosh", 0, cosh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"e", 0, e, ME_FUNCTION0 | ME_FLAG_PURE, 0},
+    {"exp", 0, exp, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"fac", 0, fac, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"floor", 0, floor, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"ln", 0, log, ME_FUNCTION1 | ME_FLAG_PURE, 0},
 #ifdef ME_NAT_LOG
-    {"log", log, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"log", 0, log, ME_FUNCTION1 | ME_FLAG_PURE, 0},
 #else
-    {"log", log10, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"log", 0, log10, ME_FUNCTION1 | ME_FLAG_PURE, 0},
 #endif
-    {"log10", log10, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"ncr", ncr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
-    {"npr", npr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
-    {"pi", pi, ME_FUNCTION0 | ME_FLAG_PURE, 0},
-    {"pow", pow, ME_FUNCTION2 | ME_FLAG_PURE, 0},
-    {"sin", sin, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"sinh", sinh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"sqrt", sqrt, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"tan", tan, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"tanh", tanh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {0, 0, 0, 0}
+    {"log10", 0, log10, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"ncr", 0, ncr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"npr", 0, npr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"pi", 0, pi, ME_FUNCTION0 | ME_FLAG_PURE, 0},
+    {"pow", 0, pow, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"sin", 0, sin, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"sinh", 0, sinh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"sqrt", 0, sqrt, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"tan", 0, tan, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"tanh", 0, tanh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {0, 0, 0, 0, 0}
 };
 
 static const me_variable *find_builtin(const char *name, int len) {
@@ -2881,6 +2882,51 @@ me_expr *me_compile(const char *expression, const me_variable *variables, int va
         if (error) *error = 0;
         return root;
     }
+}
+
+// Synthetic addresses for ordinal matching (when user provides NULL addresses)
+static char synthetic_var_addresses[100];
+
+me_expr *me_compile_chunk(const char *expression, const me_variable *variables,
+                          int var_count, me_dtype dtype, int *error) {
+    // For chunked evaluation, we compile without specific output/nitems
+    // If variables have NULL addresses, assign synthetic unique addresses for ordinal matching
+    me_variable *vars_copy = NULL;
+    int needs_synthetic = 0;
+
+    if (variables && var_count > 0) {
+        // Check if any variables have NULL addresses
+        for (int i = 0; i < var_count; i++) {
+            if (variables[i].address == NULL) {
+                needs_synthetic = 1;
+                break;
+            }
+        }
+
+        if (needs_synthetic) {
+            // Create copy with synthetic addresses
+            vars_copy = malloc(var_count * sizeof(me_variable));
+            if (!vars_copy) {
+                if (error) *error = -1;
+                return NULL;
+            }
+
+            for (int i = 0; i < var_count; i++) {
+                vars_copy[i] = variables[i];
+                if (vars_copy[i].address == NULL) {
+                    // Use address in synthetic array (each index is unique)
+                    vars_copy[i].address = &synthetic_var_addresses[i];
+                }
+            }
+
+            me_expr *result = me_compile(expression, vars_copy, var_count, NULL, 0, dtype, error);
+            free(vars_copy);
+            return result;
+        }
+    }
+
+    // No NULL addresses, use variables as-is
+    return me_compile(expression, variables, var_count, NULL, 0, dtype, error);
 }
 
 static void pn(const me_expr *n, int depth) {

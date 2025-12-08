@@ -16,39 +16,39 @@ int main() {
     double a[] = {3.0, 5.0, 8.0, 1.0};
     double b[] = {4.0, 12.0, 15.0, 1.0};
     int n = 4;
-    
+
     // Output array
     double result[4];
-    
+
     // Define variables that will be used in the expression
     me_variable vars[] = {
         {"a", &a, ME_VARIABLE, NULL, ME_FLOAT64},
         {"b", &b, ME_VARIABLE, NULL, ME_FLOAT64}
     };
-    
+
     // Compile the expression
     int error;
-    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2, 
+    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2,
                                 result, n, ME_FLOAT64, &error);
-    
+
     if (!expr) {
         printf("Parse error at position %d\n", error);
         return 1;
     }
-    
+
     // Evaluate the expression
     me_eval(expr);
-    
+
     // Print results
     printf("Computing sqrt(a*a + b*b):\n");
     for (int i = 0; i < n; i++) {
-        printf("a=%.1f, b=%.1f -> distance=%.2f\n", 
+        printf("a=%.1f, b=%.1f -> distance=%.2f\n",
                a[i], b[i], result[i]);
     }
-    
+
     // Clean up
     me_free(expr);
-    
+
     return 0;
 }
 ```

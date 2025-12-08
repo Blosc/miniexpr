@@ -35,26 +35,26 @@ typedef struct {
 
 void* worker_thread(void *arg) {
     thread_data_t *data = (thread_data_t*)arg;
-    
+
     int chunk_size = data->end_idx - data->start_idx;
-    
+
     // Prepare pointers to this thread's chunk
     const void *vars_chunk[] = {
         &data->x[data->start_idx],
         &data->y[data->start_idx]
     };
-    
+
     void *output_chunk = &data->result[data->start_idx];
-    
+
     printf("Thread %d: Processing elements %d to %d (%d elements)\n",
            data->thread_id, data->start_idx, data->end_idx - 1, chunk_size);
-    
+
     // Thread-safe evaluation
-    me_eval_chunk_threadsafe(data->expr, vars_chunk, 2, 
+    me_eval_chunk_threadsafe(data->expr, vars_chunk, 2,
                              output_chunk, chunk_size);
-    
+
     printf("Thread %d: Completed\n", data->thread_id);
-    
+
     return NULL;
 }
 
@@ -63,31 +63,28 @@ int main() {
     double *x = malloc(TOTAL_SIZE * sizeof(double));
     double *y = malloc(TOTAL_SIZE * sizeof(double));
     double *result = malloc(TOTAL_SIZE * sizeof(double));
-    
+
     if (!x || !y || !result) {
         printf("Memory allocation failed\n");
         return 1;
     }
-    
+
     // Initialize with sample data
     printf("Initializing %d elements...\n", TOTAL_SIZE);
     for (int i = 0; i < TOTAL_SIZE; i++) {
         x[i] = (double)i / 1000.0;
         y[i] = (double)i / 2000.0;
     }
-    
-    // Compile the expression once
+
+    // Compile the expression once for chunked evaluation
     // Expression: sin(x) * cos(y) + sqrt(x*x + y*y)
-    double x_init = 0.0, y_init = 0.0, result_init = 0.0;
-    me_variable vars[] = {
-        {"x", &x_init, ME_VARIABLE, NULL, ME_FLOAT64},
-        {"y", &y_init, ME_VARIABLE, NULL, ME_FLOAT64}
-    };
-    
+    // Define variables (just the names - everything else optional)
+    me_variable vars[] = {{"x"}, {"y"}};
+
     int error;
-    me_expr *expr = me_compile("sin(x) * cos(y) + sqrt(x*x + y*y)", 
-                                vars, 2, &result_init, 1, ME_FLOAT64, &error);
-    
+    me_expr *expr = me_compile_chunk("sin(x) * cos(y) + sqrt(x*x + y*y)",
+                                      vars, 2, ME_FLOAT64, &error);
+
     if (!expr) {
         printf("Parse error at position %d\n", error);
         free(x);
@@ -95,49 +92,49 @@ int main() {
         free(result);
         return 1;
     }
-    
+
     printf("Expression compiled successfully\n");
     printf("Starting parallel processing with %d threads...\n\n", NUM_THREADS);
-    
+
     // Create threads
     pthread_t threads[NUM_THREADS];
     thread_data_t thread_data[NUM_THREADS];
-    
+
     int chunk_size = TOTAL_SIZE / NUM_THREADS;
-    
+
     for (int i = 0; i < NUM_THREADS; i++) {
         thread_data[i].expr = expr;
         thread_data[i].x = x;
         thread_data[i].y = y;
         thread_data[i].result = result;
         thread_data[i].start_idx = i * chunk_size;
-        thread_data[i].end_idx = (i == NUM_THREADS - 1) ? 
+        thread_data[i].end_idx = (i == NUM_THREADS - 1) ?
                                   TOTAL_SIZE : (i + 1) * chunk_size;
         thread_data[i].thread_id = i;
-        
+
         pthread_create(&threads[i], NULL, worker_thread, &thread_data[i]);
     }
-    
+
     // Wait for all threads to complete
     for (int i = 0; i < NUM_THREADS; i++) {
         pthread_join(threads[i], NULL);
     }
-    
+
     printf("\nAll threads completed!\n\n");
-    
+
     // Verify results
     printf("Sample results:\n");
     for (int i = 0; i < 5; i++) {
-        printf("x=%.3f, y=%.3f -> result=%.6f\n", 
+        printf("x=%.3f, y=%.3f -> result=%.6f\n",
                x[i], y[i], result[i]);
     }
-    
+
     // Clean up
     me_free(expr);
     free(x);
     free(y);
     free(result);
-    
+
     return 0;
 }
 ```
@@ -201,34 +198,34 @@ typedef struct {
 void* worker_dynamic(void *arg) {
     work_queue_t *queue = (work_queue_t*)arg;
     int chunks_processed = 0;
-    
+
     while (1) {
         // Get next chunk (thread-safe)
         pthread_mutex_lock(&queue->mutex);
         int chunk_id = queue->next_chunk++;
         pthread_mutex_unlock(&queue->mutex);
-        
+
         if (chunk_id >= queue->total_chunks) {
             break;  // No more work
         }
-        
+
         // Calculate chunk boundaries
         int start = chunk_id * CHUNK_SIZE;
         int size = CHUNK_SIZE;
         if (start + size > TOTAL_SIZE) {
             size = TOTAL_SIZE - start;
         }
-        
+
         // Process this chunk
         const void *vars_chunk[] = {&queue->input[start]};
         void *output_chunk = &queue->output[start];
-        
+
         me_eval_chunk_threadsafe(queue->expr, vars_chunk, 1,
                                  output_chunk, size);
-        
+
         chunks_processed++;
     }
-    
+
     printf("Thread completed %d chunks\n", chunks_processed);
     return NULL;
 }
@@ -236,27 +233,24 @@ void* worker_dynamic(void *arg) {
 int main() {
     double *input = malloc(TOTAL_SIZE * sizeof(double));
     double *output = malloc(TOTAL_SIZE * sizeof(double));
-    
+
     // Initialize data
     for (int i = 0; i < TOTAL_SIZE; i++) {
         input[i] = (double)i;
     }
-    
-    // Compile expression: x^2 + 2*x + 1
-    double init = 0.0;
-    me_variable vars[] = {
-        {"x", &init, ME_VARIABLE, NULL, ME_FLOAT64}
-    };
-    
+
+    // Compile expression for chunked evaluation: x^2 + 2*x + 1
+    // Define variable (just the name - everything else optional)
+    me_variable vars[] = {{"x"}};
+
     int error;
-    me_expr *expr = me_compile("x*x + 2*x + 1", vars, 1,
-                                &init, 1, ME_FLOAT64, &error);
-    
+    me_expr *expr = me_compile_chunk("x*x + 2*x + 1", vars, 1, ME_FLOAT64, &error);
+
     if (!expr) {
         printf("Parse error\n");
         return 1;
     }
-    
+
     // Set up work queue
     work_queue_t queue;
     queue.expr = expr;
@@ -265,29 +259,29 @@ int main() {
     queue.next_chunk = 0;
     queue.total_chunks = (TOTAL_SIZE + CHUNK_SIZE - 1) / CHUNK_SIZE;
     pthread_mutex_init(&queue.mutex, NULL);
-    
+
     printf("Processing %d elements in %d chunks with %d threads\n",
            TOTAL_SIZE, queue.total_chunks, NUM_THREADS);
-    
+
     // Create worker threads
     pthread_t threads[NUM_THREADS];
     for (int i = 0; i < NUM_THREADS; i++) {
         pthread_create(&threads[i], NULL, worker_dynamic, &queue);
     }
-    
+
     // Wait for completion
     for (int i = 0; i < NUM_THREADS; i++) {
         pthread_join(threads[i], NULL);
     }
-    
+
     printf("Processing complete!\n");
-    
+
     // Clean up
     pthread_mutex_destroy(&queue.mutex);
     me_free(expr);
     free(input);
     free(output);
-    
+
     return 0;
 }
 ```
@@ -309,55 +303,51 @@ int main() {
     double *a = malloc(TOTAL_SIZE * sizeof(double));
     double *b = malloc(TOTAL_SIZE * sizeof(double));
     double *c = malloc(TOTAL_SIZE * sizeof(double));
-    
+
     // Initialize
     for (int i = 0; i < TOTAL_SIZE; i++) {
         a[i] = i * 0.1;
         b[i] = i * 0.2;
     }
-    
-    // Compile expression
-    double init_a = 0.0, init_b = 0.0, init_c = 0.0;
-    me_variable vars[] = {
-        {"a", &init_a, ME_VARIABLE, NULL, ME_FLOAT64},
-        {"b", &init_b, ME_VARIABLE, NULL, ME_FLOAT64}
-    };
-    
+
+    // Compile expression for chunked evaluation
+    // Define variables (just the names - everything else optional)
+    me_variable vars[] = {{"a"}, {"b"}};
+
     int error;
-    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2,
-                                &init_c, 1, ME_FLOAT64, &error);
-    
+    me_expr *expr = me_compile_chunk("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error);
+
     if (!expr) {
         printf("Parse error\n");
         return 1;
     }
-    
+
     printf("Processing %d elements with OpenMP...\n", TOTAL_SIZE);
-    
+
     // Parallel processing with OpenMP
     #pragma omp parallel for schedule(dynamic, 1)
     for (int chunk = 0; chunk < TOTAL_SIZE; chunk += CHUNK_SIZE) {
-        int size = (chunk + CHUNK_SIZE > TOTAL_SIZE) ? 
+        int size = (chunk + CHUNK_SIZE > TOTAL_SIZE) ?
                    (TOTAL_SIZE - chunk) : CHUNK_SIZE;
-        
+
         const void *vars_chunk[] = {&a[chunk], &b[chunk]};
-        
+
         me_eval_chunk_threadsafe(expr, vars_chunk, 2, &c[chunk], size);
-        
+
         #pragma omp critical
         {
-            printf("Thread %d processed chunk at %d\n", 
+            printf("Thread %d processed chunk at %d\n",
                    omp_get_thread_num(), chunk);
         }
     }
-    
+
     printf("Done!\n");
-    
+
     me_free(expr);
     free(a);
     free(b);
     free(c);
-    
+
     return 0;
 }
 ```

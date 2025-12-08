@@ -22,8 +22,8 @@ int main() {
     }
 
     me_variable vars1[] = {
-        {"a", a_int32, ME_VARIABLE, NULL, ME_INT32},
-        {"b", b_int64, ME_VARIABLE, NULL, ME_INT64}
+        {"a", ME_INT32, a_int32},
+        {"b", ME_INT64, b_int64}
     };
 
     int err;
@@ -56,8 +56,8 @@ int main() {
     }
 
     me_variable vars2[] = {
-        {"a", a_int32, ME_VARIABLE, NULL, ME_INT32},
-        {"b", b_float, ME_VARIABLE, NULL, ME_FLOAT32}
+        {"a", ME_INT32, a_int32},
+        {"b", ME_FLOAT32, b_float}
     };
 
     me_expr *expr2 = me_compile("a + b", vars2, 2, result_float, VECTOR_SIZE, ME_FLOAT32, &err);
@@ -89,8 +89,8 @@ int main() {
     }
 
     me_variable vars3[] = {
-        {"a", b_float, ME_VARIABLE, NULL, ME_FLOAT32},
-        {"b", b_double, ME_VARIABLE, NULL, ME_FLOAT64}
+        {"a", ME_FLOAT32, b_float},
+        {"b", ME_FLOAT64, b_double}
     };
 
     me_expr *expr3 = me_compile("a + b", vars3, 2, result_double, VECTOR_SIZE, ME_FLOAT64, &err);

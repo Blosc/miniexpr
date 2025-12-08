@@ -29,7 +29,7 @@ int main() {
         int32_t *result = malloc(n * sizeof(int32_t));
         for (int i = 0; i < n; i++) a[i] = i;
 
-        me_variable vars[] = {{"a", a}};
+        me_variable vars[] = {{"a", ME_INT32, a}};
         int err;
         me_expr *expr = me_compile("a+5", vars, 1, result, n, ME_INT32, &err);
 
@@ -51,7 +51,7 @@ int main() {
         uint64_t *result = malloc(n * sizeof(uint64_t));
         for (int i = 0; i < n; i++) a[i] = i;
 
-        me_variable vars[] = {{"a", a}};
+        me_variable vars[] = {{"a", ME_INT32, a}};
         int err;
         me_expr *expr = me_compile("a+5", vars, 1, result, n, ME_UINT64, &err);
 
@@ -73,7 +73,7 @@ int main() {
         float *result = malloc(n * sizeof(float));
         for (int i = 0; i < n; i++) a[i] = i * 0.1f;
 
-        me_variable vars[] = {{"a", a}};
+        me_variable vars[] = {{"a", ME_INT32, a}};
         int err;
         me_expr *expr = me_compile("a+5", vars, 1, result, n, ME_FLOAT32, &err);
 
@@ -95,7 +95,7 @@ int main() {
         double *result = malloc(n * sizeof(double));
         for (int i = 0; i < n; i++) a[i] = i * 0.1;
 
-        me_variable vars[] = {{"a", a}};
+        me_variable vars[] = {{"a", ME_INT32, a}};
         int err;
         me_expr *expr = me_compile("a+5", vars, 1, result, n, ME_FLOAT64, &err);
 
@@ -117,7 +117,7 @@ int main() {
         float complex *result = malloc(n * sizeof(float complex));
         for (int i = 0; i < n; i++) a[i] = (float) i + (float) i * I;
 
-        me_variable vars[] = {{"a", a}};
+        me_variable vars[] = {{"a", ME_INT32, a}};
         int err;
         me_expr *expr = me_compile("a+5", vars, 1, result, n, ME_COMPLEX64, &err);
 
@@ -146,7 +146,7 @@ int main() {
             b[i] = n - i;
         }
 
-        me_variable vars[] = {{"a", a}, {"b", b}};
+        me_variable vars[] = {{"a", ME_INT32, a}, {"b", ME_INT32, b}};
         int err;
         me_expr *expr = me_compile("sqrt(a*a+b*b)", vars, 2, result, n, ME_INT32, &err);
 
@@ -173,7 +173,7 @@ int main() {
             b[i] = n - i;
         }
 
-        me_variable vars[] = {{"a", a}, {"b", b}};
+        me_variable vars[] = {{"a", ME_UINT64, a}, {"b", ME_UINT64, b}};
         int err;
         me_expr *expr = me_compile("sqrt(a*a+b*b)", vars, 2, result, n, ME_UINT64, &err);
 
@@ -200,7 +200,7 @@ int main() {
             b[i] = (n - i) * 0.1f;
         }
 
-        me_variable vars[] = {{"a", a}, {"b", b}};
+        me_variable vars[] = {{"a", ME_FLOAT32, a}, {"b", ME_FLOAT32, b}};
         int err;
         me_expr *expr = me_compile("sqrt(a*a+b*b)", vars, 2, result, n, ME_FLOAT32, &err);
 
@@ -227,7 +227,7 @@ int main() {
             b[i] = (n - i) * 0.1;
         }
 
-        me_variable vars[] = {{"a", a}, {"b", b}};
+        me_variable vars[] = {{"a", ME_FLOAT64, a}, {"b", ME_FLOAT64, b}};
         int err;
         me_expr *expr = me_compile("sqrt(a*a+b*b)", vars, 2, result, n, ME_FLOAT64, &err);
 
@@ -254,7 +254,7 @@ int main() {
             b[i] = (float) (n - i) * 0.1f + (float) (n - i) * 0.1f * I;
         }
 
-        me_variable vars[] = {{"a", a}, {"b", b}};
+        me_variable vars[] = {{"a", ME_COMPLEX64, a}, {"b", ME_COMPLEX64, b}};
         int err;
         me_expr *expr = me_compile("sqrt(a*a+b*b)", vars, 2, result, n, ME_COMPLEX64, &err);
 

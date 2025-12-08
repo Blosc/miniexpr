@@ -28,10 +28,10 @@ int main() {
     double g[] = {9.81, 9.81, 9.81, 9.81, 9.81};
     double v[] = {20.0, 20.0, 20.0, 20.0, 20.0};
     int n = 5;
-    
+
     // Output array
     double y[5];
-    
+
     // Define variables
     me_variable vars[] = {
         {"h", &h, ME_VARIABLE, NULL, ME_FLOAT64},
@@ -40,23 +40,23 @@ int main() {
         {"g", &g, ME_VARIABLE, NULL, ME_FLOAT64},
         {"v", &v, ME_VARIABLE, NULL, ME_FLOAT64}
     };
-    
+
     // Complex expression for projectile motion
-    const char *expression = 
+    const char *expression =
         "h + x*tan(angle) - (g*x*x)/(2*v*v*cos(angle)*cos(angle))";
-    
+
     // Compile the expression
     int error;
     me_expr *expr = me_compile(expression, vars, 5, y, n, ME_FLOAT64, &error);
-    
+
     if (!expr) {
         printf("Parse error at position %d\n", error);
         return 1;
     }
-    
+
     // Evaluate the expression
     me_eval(expr);
-    
+
     // Print results
     printf("Projectile Trajectory (v=20 m/s, angle=45°):\n");
     printf("Distance (m) | Height (m)\n");
@@ -64,10 +64,10 @@ int main() {
     for (int i = 0; i < n; i++) {
         printf("%12.1f | %10.2f\n", x[i], y[i]);
     }
-    
+
     // Clean up
     me_free(expr);
-    
+
     return 0;
 }
 ```

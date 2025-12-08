@@ -33,8 +33,8 @@ void benchmark_mixed_types(const char *expr_str, ExprType expr_type, int nitems)
 
     // MiniExpr with type promotion
     me_variable vars[] = {
-        {"a", a_i64, ME_VARIABLE, NULL, ME_INT64},
-        {"b", b_f32, ME_VARIABLE, NULL, ME_FLOAT32}
+        {"a", ME_INT64, a_i64},
+        {"b", ME_FLOAT32, b_f32}
     };
 
     int err;

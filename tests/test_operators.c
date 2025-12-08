@@ -38,8 +38,8 @@ void test_bitwise_and_int() {
     int32_t result[VECTOR_SIZE] = {0};
 
     me_variable vars[] = {
-        {"a", a, ME_VARIABLE, 0},
-        {"b", b, ME_VARIABLE, 0}
+        {"a", ME_INT32, a},
+        {"b", ME_INT32, b}
     };
 
     int err;
@@ -70,8 +70,8 @@ void test_bitwise_or_int() {
     int32_t result[VECTOR_SIZE] = {0};
 
     me_variable vars[] = {
-        {"a", a, ME_VARIABLE, 0},
-        {"b", b, ME_VARIABLE, 0}
+        {"a", ME_INT32, a},
+        {"b", ME_INT32, b}
     };
 
     int err;
@@ -102,8 +102,8 @@ void test_bitwise_xor_int() {
     int32_t result[VECTOR_SIZE] = {0};
 
     me_variable vars[] = {
-        {"a", a, ME_VARIABLE, 0},
-        {"b", b, ME_VARIABLE, 0}
+        {"a", ME_INT32, a},
+        {"b", ME_INT32, b}
     };
 
     int err;
@@ -134,8 +134,8 @@ void test_bit_shift_left() {
     int32_t result[VECTOR_SIZE] = {0};
 
     me_variable vars[] = {
-        {"a", a, ME_VARIABLE, 0},
-        {"b", b, ME_VARIABLE, 0}
+        {"a", ME_INT32, a},
+        {"b", ME_INT32, b}
     };
 
     int err;
@@ -166,8 +166,8 @@ void test_bit_shift_right() {
     int32_t result[VECTOR_SIZE] = {0};
 
     me_variable vars[] = {
-        {"a", a, ME_VARIABLE, 0},
-        {"b", b, ME_VARIABLE, 0}
+        {"a", ME_INT32, a},
+        {"b", ME_INT32, b}
     };
 
     int err;
@@ -198,8 +198,8 @@ void test_comparison_eq_float() {
     float result[VECTOR_SIZE] = {0};
 
     me_variable vars[] = {
-        {"a", a, ME_VARIABLE, 0},
-        {"b", b, ME_VARIABLE, 0}
+        {"a", ME_FLOAT32, a},
+        {"b", ME_FLOAT32, b}
     };
 
     int err;
@@ -230,8 +230,8 @@ void test_comparison_lt_int() {
     int32_t result[VECTOR_SIZE] = {0};
 
     me_variable vars[] = {
-        {"a", a, ME_VARIABLE, 0},
-        {"b", b, ME_VARIABLE, 0}
+        {"a", ME_INT32, a},
+        {"b", ME_INT32, b}
     };
 
     int err;
@@ -262,8 +262,8 @@ void test_logical_bool() {
     bool result[VECTOR_SIZE] = {0};
 
     me_variable vars[] = {
-        {"a", a, ME_VARIABLE, 0},
-        {"b", b, ME_VARIABLE, 0}
+        {"a", ME_BOOL, a},
+        {"b", ME_BOOL, b}
     };
 
     // Test AND

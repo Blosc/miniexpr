@@ -98,3 +98,11 @@ clean:
 # Pattern rule for object files (if needed for future extensions)
 $(BUILDDIR)/%.o: $(SRCDIR)/%.c $(LIB_HDR) | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+# Check for trailing whitespace
+check-whitespace:
+	@./check-whitespace.sh
+
+# Fix trailing whitespace
+fix-whitespace:
+	@./check-whitespace.sh --fix

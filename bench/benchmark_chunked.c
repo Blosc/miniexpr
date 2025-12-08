@@ -28,11 +28,12 @@ void benchmark_expression(const char *expr_str, int total_size, int chunk_size) 
         b[i] = (total_size - i) * 0.05;
     }
 
-    me_variable vars[] = {{"a", a}, {"b", b}};
+    // Variables for compilation (just the names)
+    me_variable vars[] = {{"a"}, {"b"}};
     int err;
 
-    // Compile expression
-    me_expr *expr = me_compile(expr_str, vars, 2, result, total_size, ME_FLOAT64, &err);
+    // Compile expression for chunked evaluation
+    me_expr *expr = me_compile_chunk(expr_str, vars, 2, ME_FLOAT64, &err);
     if (!expr) {
         printf("Failed to compile expression\n");
         free(a);
@@ -41,11 +42,12 @@ void benchmark_expression(const char *expr_str, int total_size, int chunk_size) 
         return;
     }
 
-    // Benchmark 1: Monolithic evaluation
+    // Benchmark 1: Monolithic evaluation (using me_eval_chunk with full array)
     const int iterations = 10;
     double start = get_time();
     for (int iter = 0; iter < iterations; iter++) {
-        me_eval(expr);
+        const void *vars_full[2] = {a, b};
+        me_eval_chunk(expr, vars_full, 2, result, total_size);
     }
     double monolithic_time = (get_time() - start) / iterations;
 

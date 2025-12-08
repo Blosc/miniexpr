@@ -57,18 +57,18 @@ int test_parallel_evaluation(int use_threadsafe) {
         b[i] = (TOTAL_SIZE - i) * 0.05;
     }
 
-    // Compile expression
-    me_variable vars[] = {{"a", a}, {"b", b}};
+    // Variables for compilation (just the names)
+    me_variable vars[] = {{"a"}, {"b"}};
     int err;
-    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2,
-                               result_serial, TOTAL_SIZE, ME_FLOAT64, &err);
+    me_expr *expr = me_compile_chunk("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &err);
     if (!expr) {
         printf("  ❌ Compilation failed\n");
         return 1;
     }
 
     // Serial evaluation for reference
-    me_eval(expr);
+    const void *vars_serial[2] = {a, b};
+    me_eval_chunk(expr, vars_serial, 2, result_serial, TOTAL_SIZE);
 
     // Parallel evaluation
     pthread_t threads[NUM_THREADS];
@@ -126,7 +126,7 @@ int main() {
     printf("=== Thread Safety Test for Chunked Evaluation ===\n");
     printf("Testing with %d threads, %d elements per chunk\n", NUM_THREADS, CHUNK_SIZE);
 
-    // Only test thread-safe version 
+    // Only test thread-safe version
     // (non-thread-safe version will crash with race conditions)
     printf("\nTesting THREAD-SAFE version:\n");
     int result = test_parallel_evaluation(1);

@@ -15,11 +15,38 @@ miniexpr is designed to be embedded directly into larger projects, not distribut
 
 ### `me_compile()`
 ```c
-me_expr *me_compile(const char *expression, const me_variable *variables, 
-                    int var_count, void *output, int nitems, 
+me_expr *me_compile(const char *expression, const me_variable *variables,
+                    int var_count, void *output, int nitems,
                     me_dtype dtype, int *error);
 ```
 Parses an expression string and creates a compiled expression tree. Variables are bound at compile time. Returns `NULL` on error.
+
+### `me_compile_chunk()`
+```c
+me_expr *me_compile_chunk(const char *expression, const me_variable *variables,
+                          int var_count, me_dtype dtype, int *error);
+```
+Compiles an expression for chunked evaluation. This variant is optimized for use with `me_eval_chunk()` and `me_eval_chunk_threadsafe()`, where variable and output pointers are provided during evaluation rather than compilation.
+
+**Simple Usage**: Just provide variable names - everything else is optional:
+
+```c
+me_variable vars[] = {{"x"}, {"y"}};  // Just the names!
+me_expr *expr = me_compile_chunk("x + y", vars, 2, ME_FLOAT64, &err);
+
+// Later, provide data in the same order as vars array
+const void *data[] = {x_array, y_array};  // x first, y second
+me_eval_chunk(expr, data, 2, output, nitems);
+```
+
+For mixed types:
+```c
+me_variable vars[] = {{"temp", ME_FLOAT64}, {"count", ME_INT32}};
+```
+
+Variables are matched by position (order) in the arrays. Unspecified fields (address, type, context) default to NULL/0.
+
+Returns `NULL` on error.
 
 ### `me_eval()`
 ```c
@@ -73,6 +100,18 @@ miniexpr supports various data types through the `me_dtype` enumeration:
 To use miniexpr in your project, simply include the source files (`miniexpr.c` and `miniexpr.h`) directly in your build system.
 
 For examples and detailed usage, see the [Getting Started Guide](doc/get-started.md).
+
+## Contributing
+
+After cloning the repository, install the Git hooks:
+
+```bash
+./scripts/install-hooks.sh
+```
+
+This sets up automatic checks for code quality (e.g., trailing whitespace).
+
+See [CODE_QUALITY.md](CODE_QUALITY.md) for more details on code quality tools.
 
 ## License
 

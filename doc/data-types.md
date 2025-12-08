@@ -23,36 +23,36 @@ int main() {
     int32_t width[] = {5, 10, 15, 20};
     int32_t height[] = {3, 7, 12, 8};
     int n = 4;
-    
+
     // Output array (also 32-bit integers)
     int32_t area[4];
-    
+
     // Define variables with INT32 type
     me_variable vars[] = {
         {"width", &width, ME_VARIABLE, NULL, ME_INT32},
         {"height", &height, ME_VARIABLE, NULL, ME_INT32}
     };
-    
+
     // Compile the expression
     int error;
-    me_expr *expr = me_compile("width * height", vars, 2, 
+    me_expr *expr = me_compile("width * height", vars, 2,
                                 area, n, ME_INT32, &error);
-    
+
     if (!expr) {
         printf("Parse error at position %d\n", error);
         return 1;
     }
-    
+
     // Evaluate
     me_eval(expr);
-    
+
     // Print results
     printf("Rectangle Areas (INT32):\n");
     for (int i = 0; i < n; i++) {
-        printf("Width=%d, Height=%d -> Area=%d\n", 
+        printf("Width=%d, Height=%d -> Area=%d\n",
                width[i], height[i], area[i]);
     }
-    
+
     me_free(expr);
     return 0;
 }
@@ -80,31 +80,31 @@ int main() {
     // Using float (32-bit) instead of double (64-bit)
     float radius[] = {1.0f, 2.5f, 5.0f, 10.0f};
     int n = 4;
-    
+
     float area[4];
-    
+
     me_variable vars[] = {
         {"r", &radius, ME_VARIABLE, NULL, ME_FLOAT32}
     };
-    
+
     // Circle area: π * r²
     // Using an approximation of π
     int error;
-    me_expr *expr = me_compile("3.14159265 * r * r", vars, 1, 
+    me_expr *expr = me_compile("3.14159265 * r * r", vars, 1,
                                 area, n, ME_FLOAT32, &error);
-    
+
     if (!expr) {
         printf("Parse error at position %d\n", error);
         return 1;
     }
-    
+
     me_eval(expr);
-    
+
     printf("Circle Areas (FLOAT32):\n");
     for (int i = 0; i < n; i++) {
         printf("Radius=%.2f -> Area=%.2f\n", radius[i], area[i]);
     }
-    
+
     me_free(expr);
     return 0;
 }
@@ -132,38 +132,38 @@ When you mix types, miniexpr automatically promotes to the appropriate type:
 int main() {
     // Integer counts
     int32_t items[] = {10, 25, 50, 100};
-    
+
     // Floating-point prices
     double price[] = {2.99, 15.50, 7.25, 0.99};
-    
+
     int n = 4;
-    
+
     // Result will be double (promoted from int32)
     double total[4];
-    
+
     me_variable vars[] = {
         {"items", &items, ME_VARIABLE, NULL, ME_INT32},
         {"price", &price, ME_VARIABLE, NULL, ME_FLOAT64}
     };
-    
+
     // Calculate total cost with 8% tax
     int error;
     me_expr *expr = me_compile("items * price * 1.08", vars, 2,
                                 total, n, ME_FLOAT64, &error);
-    
+
     if (!expr) {
         printf("Parse error at position %d\n", error);
         return 1;
     }
-    
+
     me_eval(expr);
-    
+
     printf("Shopping Cart (Mixed Types):\n");
     for (int i = 0; i < n; i++) {
         printf("Items=%d × $%.2f = $%.2f (with tax)\n",
                items[i], price[i], total[i]);
     }
-    
+
     me_free(expr);
     return 0;
 }
@@ -194,33 +194,33 @@ int main() {
     uint8_t green[] = {0, 64, 128, 192};
     uint8_t blue[] = {0, 0, 64, 128};
     int n = 4;
-    
+
     // Grayscale conversion: 0.299*R + 0.587*G + 0.114*B
     uint8_t gray[4];
-    
+
     me_variable vars[] = {
         {"r", &red, ME_VARIABLE, NULL, ME_UINT8},
         {"g", &green, ME_VARIABLE, NULL, ME_UINT8},
         {"b", &blue, ME_VARIABLE, NULL, ME_UINT8}
     };
-    
+
     int error;
     me_expr *expr = me_compile("0.299*r + 0.587*g + 0.114*b", vars, 3,
                                 gray, n, ME_UINT8, &error);
-    
+
     if (!expr) {
         printf("Parse error at position %d\n", error);
         return 1;
     }
-    
+
     me_eval(expr);
-    
+
     printf("RGB to Grayscale (UINT8):\n");
     for (int i = 0; i < n; i++) {
         printf("RGB(%3d,%3d,%3d) -> Gray=%3d\n",
                red[i], green[i], blue[i], gray[i]);
     }
-    
+
     me_free(expr);
     return 0;
 }
