@@ -57,106 +57,103 @@
 int main() {
     printf("Testing All C99 Types\n");
     printf("=====================\n\n");
-    
+
     /* Integer types */
     printf("Signed Integers:\n");
-    TEST("int8_t",  ME_INT8,  int8_t,  "%" PRId8, i, "a+5", a[i]+5);
+    TEST("int8_t", ME_INT8, int8_t, "%" PRId8, i, "a+5", a[i]+5);
     TEST("int16_t", ME_INT16, int16_t, "%" PRId16, i*10, "a+100", a[i]+100);
     TEST("int32_t", ME_INT32, int32_t, "%" PRId32, i*1000, "a+b", a[i]+b[i]);
     TEST("int64_t", ME_INT64, int64_t, "%" PRId64, i*1000000, "a*2", a[i]*2);
-    
+
     printf("\nUnsigned Integers:\n");
-    TEST("uint8_t",  ME_UINT8,  uint8_t,  "%" PRIu8, i, "a+10", a[i]+10);
+    TEST("uint8_t", ME_UINT8, uint8_t, "%" PRIu8, i, "a+10", a[i]+10);
     TEST("uint16_t", ME_UINT16, uint16_t, "%" PRIu16, i*100, "a+200", a[i]+200);
     TEST("uint32_t", ME_UINT32, uint32_t, "%" PRIu32, i*1000, "a+b", a[i]+b[i]);
     TEST("uint64_t", ME_UINT64, uint64_t, "%" PRIu64, i*1000000, "a*3", a[i]*3);
-    
+
     printf("\nFloating Point:\n");
-    TEST("float",  ME_FLOAT32, float,  "%.2f", i*0.5f, "a+5.0", a[i]+5.0f);
+    TEST("float", ME_FLOAT32, float, "%.2f", i*0.5f, "a+5.0", a[i]+5.0f);
     TEST("double", ME_FLOAT64, double, "%.2f", i*0.5, "a+b", a[i]+b[i]);
-    
+
     printf("\n✅ All basic type tests passed!\n\n");
-    
+
     /* Complex numbers need special testing */
-    printf("Complex Numbers:\n");
-    {
+    printf("Complex Numbers:\n"); {
         const int n = 10;
         float complex *a = malloc(n * sizeof(float complex));
         float complex *result = malloc(n * sizeof(float complex));
-        
+
         for (int i = 0; i < n; i++) {
-            a[i] = (float)i + (float)i*I;  // i + i*I
+            a[i] = (float) i + (float) i * I; // i + i*I
         }
-        
+
         me_variable vars[] = {{"a", a}};
         int err;
         me_expr *expr = me_compile("a+5", vars, 1, result, n, ME_COMPLEX64, &err);
-        
+
         if (!expr) {
             printf("❌ complex64: Failed to compile\n");
         } else {
             me_eval(expr);
-            
+
             int passed = 1;
             for (int i = 0; i < n && passed; i++) {
                 float complex expected = a[i] + 5.0f;
-                if (crealf(result[i]) != crealf(expected) || 
+                if (crealf(result[i]) != crealf(expected) ||
                     cimagf(result[i]) != cimagf(expected)) {
                     passed = 0;
                     printf("❌ complex64: Mismatch at [%d]\n", i);
                 }
             }
-            
+
             if (passed) {
                 printf("✅ float complex: 'a+5' passed\n");
             }
-            
+
             me_free(expr);
         }
-        
+
         free(a);
         free(result);
-    }
-    
-    {
+    } {
         const int n = 10;
         double complex *a = malloc(n * sizeof(double complex));
         double complex *result = malloc(n * sizeof(double complex));
-        
+
         for (int i = 0; i < n; i++) {
-            a[i] = (double)i + (double)i*I;
+            a[i] = (double) i + (double) i * I;
         }
-        
+
         me_variable vars[] = {{"a", a}};
         int err;
         me_expr *expr = me_compile("a*2", vars, 1, result, n, ME_COMPLEX128, &err);
-        
+
         if (!expr) {
             printf("❌ complex128: Failed to compile\n");
         } else {
             me_eval(expr);
-            
+
             int passed = 1;
             for (int i = 0; i < n && passed; i++) {
                 double complex expected = a[i] * 2.0;
-                if (creal(result[i]) != creal(expected) || 
+                if (creal(result[i]) != creal(expected) ||
                     cimag(result[i]) != cimag(expected)) {
                     passed = 0;
                     printf("❌ complex128: Mismatch at [%d]\n", i);
                 }
             }
-            
+
             if (passed) {
                 printf("✅ double complex: 'a*2' passed\n");
             }
-            
+
             me_free(expr);
         }
-        
+
         free(a);
         free(result);
     }
-    
+
     printf("\n🎉 All 13 C99 types working!\n");
     printf("\nSupported types:\n");
     printf("  • int8_t, int16_t, int32_t, int64_t\n");
@@ -164,6 +161,6 @@ int main() {
     printf("  • float, double\n");
     printf("  • float complex, double complex\n");
     printf("  • bool (uses int8_t evaluator)\n");
-    
+
     return 0;
 }

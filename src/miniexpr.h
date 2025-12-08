@@ -40,48 +40,54 @@
 
 #ifdef __cplusplus
 extern "C" {
-#endif
 
+#endif
 
 
 /* Data type enumeration - Full C99 support */
 typedef enum {
     /* Boolean */
     ME_BOOL,
-    
+
     /* Signed integers */
     ME_INT8,
     ME_INT16,
     ME_INT32,
     ME_INT64,
-    
+
     /* Unsigned integers */
     ME_UINT8,
     ME_UINT16,
     ME_UINT32,
     ME_UINT64,
-    
+
     /* Floating point */
     ME_FLOAT32,
     ME_FLOAT64,
-    
+
     /* Complex (C99) */
-    ME_COMPLEX64,   /* float complex */
-    ME_COMPLEX128   /* double complex */
+    ME_COMPLEX64, /* float complex */
+    ME_COMPLEX128 /* double complex */
 } me_dtype;
 
 typedef struct me_expr {
     int type;
-    union {double value; const double *bound; const void *function;};
+
+    union {
+        double value;
+        const double *bound;
+        const void *function;
+    };
+
     /* Vector operation info */
-    void *output;     // Generic pointer (can be float* or double*)
+    void *output; // Generic pointer (can be float* or double*)
     int nitems;
-    me_dtype dtype;   // Data type for this expression (result type after promotion)
+    me_dtype dtype; // Data type for this expression (result type after promotion)
     me_dtype input_dtype; // Original input type (for variables/constants)
     /* Bytecode info (for fused evaluation) */
-    void *bytecode;  // Pointer to compiled bytecode
-    int ncode;       // Number of instructions
-    void *parameters[1];  // Must be last (flexible array member)
+    void *bytecode; // Pointer to compiled bytecode
+    int ncode; // Number of instructions
+    void *parameters[1]; // Must be last (flexible array member)
 } me_expr;
 
 
@@ -102,16 +108,15 @@ typedef struct me_variable {
     const void *address;
     int type;
     void *context;
-    me_dtype dtype;  // Data type of this variable
+    me_dtype dtype; // Data type of this variable
 } me_variable;
-
 
 
 /* Parses the input expression and binds variables. */
 /* Returns NULL on error. */
 /* dtype parameter is ignored - result type is inferred from variable types */
 /* The actual result type is returned in n->dtype */
-me_expr *me_compile(const char *expression, const me_variable *variables, int var_count, 
+me_expr *me_compile(const char *expression, const me_variable *variables, int var_count,
                     void *output, int nitems, me_dtype dtype, int *error);
 
 /* Evaluates the expression on vectors. */
@@ -134,7 +139,7 @@ void me_eval_fused(const me_expr *n);
  * WARNING: This function is NOT thread-safe. Use me_eval_chunk_threadsafe() for
  *          concurrent evaluation from multiple threads.
  */
-void me_eval_chunk(const me_expr *expr, const void **vars_chunk, int n_vars, 
+void me_eval_chunk(const me_expr *expr, const void **vars_chunk, int n_vars,
                    void *output_chunk, int chunk_nitems);
 
 /* Thread-safe version of me_eval_chunk.
@@ -145,8 +150,8 @@ void me_eval_chunk(const me_expr *expr, const void **vars_chunk, int n_vars,
  * Use this when you need to evaluate the same expression in parallel across
  * different chunks from multiple threads.
  */
-void me_eval_chunk_threadsafe(const me_expr *expr, const void **vars_chunk, 
-                               int n_vars, void *output_chunk, int chunk_nitems);
+void me_eval_chunk_threadsafe(const me_expr *expr, const void **vars_chunk,
+                              int n_vars, void *output_chunk, int chunk_nitems);
 
 /* Prints debugging information on the syntax tree. */
 void me_print(const me_expr *n);

@@ -13,32 +13,34 @@ double get_time() {
 
 void benchmark_expression(const char *expr_str, int total_size, int chunk_size) {
     printf("\n=== Benchmarking: %s ===\n", expr_str);
-    printf("Total size: %d elements (%.1f MB per array)\n", 
+    printf("Total size: %d elements (%.1f MB per array)\n",
            total_size, total_size * sizeof(double) / (1024.0 * 1024.0));
     printf("Chunk size: %d elements\n", chunk_size);
-    
+
     // Allocate arrays
     double *a = malloc(total_size * sizeof(double));
     double *b = malloc(total_size * sizeof(double));
     double *result = malloc(total_size * sizeof(double));
-    
+
     // Initialize
     for (int i = 0; i < total_size; i++) {
         a[i] = i * 0.1;
         b[i] = (total_size - i) * 0.05;
     }
-    
+
     me_variable vars[] = {{"a", a}, {"b", b}};
     int err;
-    
+
     // Compile expression
     me_expr *expr = me_compile(expr_str, vars, 2, result, total_size, ME_FLOAT64, &err);
     if (!expr) {
         printf("Failed to compile expression\n");
-        free(a); free(b); free(result);
+        free(a);
+        free(b);
+        free(result);
         return;
     }
-    
+
     // Benchmark 1: Monolithic evaluation
     const int iterations = 10;
     double start = get_time();
@@ -46,7 +48,7 @@ void benchmark_expression(const char *expr_str, int total_size, int chunk_size) 
         me_eval(expr);
     }
     double monolithic_time = (get_time() - start) / iterations;
-    
+
     // Benchmark 2: Chunked evaluation
     int num_chunks = total_size / chunk_size;
     start = get_time();
@@ -61,18 +63,18 @@ void benchmark_expression(const char *expr_str, int total_size, int chunk_size) 
         }
     }
     double chunked_time = (get_time() - start) / iterations;
-    
+
     // Calculate throughput
     double data_processed_gb = (total_size * sizeof(double) * 3.0) / (1024.0 * 1024.0 * 1024.0); // a, b, result
     double mono_throughput = data_processed_gb / monolithic_time;
     double chunk_throughput = data_processed_gb / chunked_time;
-    
+
     printf("\nResults:\n");
     printf("  Monolithic eval: %.4f s  (%.2f GB/s)\n", monolithic_time, mono_throughput);
     printf("  Chunked eval:    %.4f s  (%.2f GB/s)\n", chunked_time, chunk_throughput);
     printf("  Overhead:        %.2f%%\n", ((chunked_time - monolithic_time) / monolithic_time) * 100.0);
     printf("  Chunks per sec:  %.0f\n", num_chunks / chunked_time);
-    
+
     me_free(expr);
     free(a);
     free(b);
@@ -83,36 +85,36 @@ int main() {
     printf("========================================\n");
     printf("MiniExpr Chunked Evaluation Benchmark\n");
     printf("========================================\n");
-    
+
     // Test 1: 100M elements with different chunk sizes
     printf("\n--- 100M elements, varying chunk sizes ---\n");
-    
+
     const int total_100m = 100 * 1024 * 1024;
-    
-    benchmark_expression("a + b", total_100m, 1024 * 1024);      // 1M chunks
+
+    benchmark_expression("a + b", total_100m, 1024 * 1024); // 1M chunks
     benchmark_expression("a + b", total_100m, 10 * 1024 * 1024); // 10M chunks
-    
+
     // Test 2: Complex expression
     printf("\n--- Complex expression: sqrt(a*a + b*b) ---\n");
     benchmark_expression("sqrt(a*a + b*b)", total_100m, 1024 * 1024);
     benchmark_expression("sqrt(a*a + b*b)", total_100m, 10 * 1024 * 1024);
-    
+
     // Test 3: Very complex expression
     printf("\n--- Very complex: sin(a) * cos(b) + sqrt(a*b) ---\n");
     benchmark_expression("sin(a) * cos(b) + sqrt(a*b)", total_100m, 1024 * 1024);
-    
+
     // Test 4: Show scalability with different total sizes
     printf("\n--- Scalability test (1M chunk size) ---\n");
     printf("\nExpression: sqrt(a*a + b*b)\n");
-    
+
     const int sizes[] = {10 * 1024 * 1024, 50 * 1024 * 1024, 100 * 1024 * 1024};
     const char *size_names[] = {"10M", "50M", "100M"};
-    
+
     for (int i = 0; i < 3; i++) {
         printf("\nSize: %s elements\n", size_names[i]);
         benchmark_expression("sqrt(a*a + b*b)", sizes[i], 1024 * 1024);
     }
-    
+
     printf("\n========================================\n");
     printf("Benchmark complete!\n");
     printf("\nKey observations:\n");
@@ -121,6 +123,6 @@ int main() {
     printf("- No recompilation needed between chunks\n");
     printf("- Memory-efficient for out-of-core processing\n");
     printf("========================================\n");
-    
+
     return 0;
 }
