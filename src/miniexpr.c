@@ -56,6 +56,7 @@ For log = natural log uncomment the next line. */
 #include <stdint.h>
 #include <stdbool.h>
 #include <complex.h>
+#include <assert.h>
 
 #ifndef NAN
 #define NAN (0.0/0.0)
@@ -76,6 +77,7 @@ enum {
 
 
 /* Type promotion table following NumPy rules */
+/* Note: ME_AUTO (0) should never appear in type promotion, so we index from 1 */
 static const me_dtype type_promotion_table[13][13] = {
     /* Rows: left operand, Columns: right operand */
     /* BOOL,  INT8,    INT16,   INT32,   INT64,   UINT8,   UINT16,  UINT32,  UINT64,  FLOAT32, FLOAT64, COMPLEX64, COMPLEX128 */
@@ -135,10 +137,24 @@ static const me_dtype type_promotion_table[13][13] = {
 
 /* Promote two types according to NumPy rules */
 static me_dtype promome_types(me_dtype a, me_dtype b) {
-    if (a >= 0 && a < 13 && b >= 0 && b < 13) {
-        return type_promotion_table[a][b];
+    // ME_AUTO should have been resolved during compilation
+    if (a == ME_AUTO || b == ME_AUTO) {
+        fprintf(stderr, "FATAL: ME_AUTO in type promotion (a=%d, b=%d). This is a bug.\n", a, b);
+#ifdef NDEBUG
+        abort(); // Release build: terminate immediately
+#else
+        assert(0 && "ME_AUTO should be resolved during compilation"); // Debug: trigger debugger
+#endif
     }
-    return ME_FLOAT64; // Fallback
+
+    // Adjust indices since table starts at ME_BOOL (index 1), not ME_AUTO (index 0)
+    int a_idx = a - 1;
+    int b_idx = b - 1;
+    if (a_idx >= 0 && a_idx < 13 && b_idx >= 0 && b_idx < 13) {
+        return type_promotion_table[a_idx][b_idx];
+    }
+    fprintf(stderr, "WARNING: Invalid dtype in type promotion (a=%d, b=%d). Falling back to FLOAT64.\n", a, b);
+    return ME_FLOAT64; // Fallback for out-of-range types
 }
 
 /* Get size of a type in bytes */
@@ -2358,6 +2374,14 @@ void me_eval(const me_expr *n) {
     bool all_match = all_variables_match_type(n, result_type);
     if (result_type == n->dtype && all_match) {
         // Fast path: no promotion needed
+        if (n->dtype == ME_AUTO) {
+            fprintf(stderr, "FATAL: ME_AUTO dtype in evaluation. This is a bug.\n");
+#ifdef NDEBUG
+            abort(); // Release build: terminate immediately
+#else
+            assert(0 && "ME_AUTO should be resolved during compilation"); // Debug: trigger debugger
+#endif
+        }
         switch (n->dtype) {
             case ME_BOOL: me_eval_i8(n);
                 break;
@@ -2385,6 +2409,13 @@ void me_eval(const me_expr *n) {
                 break;
             case ME_COMPLEX128: me_eval_c128(n);
                 break;
+            default:
+                fprintf(stderr, "FATAL: Invalid dtype %d in evaluation.\n", n->dtype);
+#ifdef NDEBUG
+                abort(); // Release build: terminate immediately
+#else
+                assert(0 && "Invalid dtype"); // Debug: trigger debugger
+#endif
         }
         return;
     }
@@ -2409,6 +2440,14 @@ void me_eval(const me_expr *n) {
     ((me_expr *) n)->dtype = result_type;
 
     // Evaluate with promoted types
+    if (result_type == ME_AUTO) {
+        fprintf(stderr, "FATAL: ME_AUTO result type in evaluation. This is a bug.\n");
+#ifdef NDEBUG
+        abort(); // Release build: terminate immediately
+#else
+        assert(0 && "ME_AUTO should be resolved during compilation"); // Debug: trigger debugger
+#endif
+    }
     switch (result_type) {
         case ME_BOOL: me_eval_i8(n);
             break;
@@ -2436,6 +2475,13 @@ void me_eval(const me_expr *n) {
             break;
         case ME_COMPLEX128: me_eval_c128(n);
             break;
+        default:
+            fprintf(stderr, "FATAL: Invalid result type %d in evaluation.\n", result_type);
+#ifdef NDEBUG
+            abort(); // Release build: terminate immediately
+#else
+            assert(0 && "Invalid dtype"); // Debug: trigger debugger
+#endif
     }
 
     // Restore original variable bindings
@@ -2842,9 +2888,8 @@ me_expr *me_compile(const char *expression, const me_variable *variables, int va
         }
         for (int i = 0; i < var_count; i++) {
             vars_copy[i] = variables[i];
-            // If dtype not set (0 = ME_BOOL, which is unlikely for user variables),
-            // use the expression's dtype
-            if (vars_copy[i].dtype == 0 && vars_copy[i].type == 0) {
+            // If dtype not set (ME_AUTO), use the expression's dtype
+            if (vars_copy[i].dtype == ME_AUTO && vars_copy[i].type == 0) {
                 vars_copy[i].dtype = dtype;
                 vars_copy[i].type = ME_VARIABLE;
             }

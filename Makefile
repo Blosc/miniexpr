@@ -2,7 +2,8 @@
 # Organized structure: src/, bench/, tests/
 
 CC = gcc
-CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2
+CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG
+DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g
 LDFLAGS = -lm
 
 # Directories
@@ -24,7 +25,7 @@ BENCH_BINS = $(patsubst $(BENCHDIR)/%.c,$(BUILDDIR)/%,$(BENCH_SRCS))
 TEST_SRCS = $(wildcard $(TESTDIR)/*.c)
 TEST_BINS = $(patsubst $(TESTDIR)/%.c,$(BUILDDIR)/%,$(TEST_SRCS))
 
-.PHONY: all lib bench test clean help
+.PHONY: all lib bench test clean help debug debug-test
 
 # Default target
 all: lib bench
@@ -35,11 +36,13 @@ help:
 	@echo "====================="
 	@echo ""
 	@echo "Targets:"
-	@echo "  make lib       - Build library object file"
-	@echo "  make bench     - Build all benchmarks"
-	@echo "  make test      - Build and run all tests"
-	@echo "  make clean     - Remove all build artifacts"
-	@echo "  make help      - Show this help"
+	@echo "  make lib          - Build library object file (release mode)"
+	@echo "  make bench        - Build all benchmarks"
+	@echo "  make test         - Build and run all tests"
+	@echo "  make debug        - Build library in debug mode (-g -O0, asserts enabled)"
+	@echo "  make debug-test   - Build and run tests in debug mode"
+	@echo "  make clean        - Remove all build artifacts"
+	@echo "  make help         - Show this help"
 	@echo ""
 	@echo "Individual benchmarks:"
 	@echo "  make $(BUILDDIR)/benchmark_all_types"
@@ -60,6 +63,16 @@ $(LIB_OBJ): $(LIB_SRC) $(LIB_HDR) | $(BUILDDIR)
 	@echo "Building library..."
 	$(CC) $(CFLAGS) -c $(LIB_SRC) -o $@
 	@echo "✓ Library built: $@"
+
+# Build library in debug mode
+debug: CFLAGS = $(DEBUG_CFLAGS)
+debug: clean lib
+	@echo "✓ Debug build complete (asserts enabled, -g -O0)"
+
+# Build and run tests in debug mode
+debug-test: CFLAGS = $(DEBUG_CFLAGS)
+debug-test: clean test
+	@echo "✓ Debug tests complete"
 
 # Build all benchmarks
 bench: $(BENCH_BINS)

@@ -46,6 +46,9 @@ extern "C" {
 
 /* Data type enumeration - Full C99 support */
 typedef enum {
+    /* Automatic type inference */
+    ME_AUTO,
+
     /* Boolean */
     ME_BOOL,
 
@@ -105,7 +108,7 @@ enum {
 
 typedef struct me_variable {
     const char *name;
-    me_dtype dtype;      // Data type of this variable (0 = use output dtype)
+    me_dtype dtype;      // Data type of this variable (ME_AUTO = use output dtype)
     const void *address; // Pointer to data (NULL for me_compile_chunk)
     int type;            // ME_VARIABLE for user variables (0 = auto-set to ME_VARIABLE)
     void *context;       // For closures/functions (NULL for normal variables)
