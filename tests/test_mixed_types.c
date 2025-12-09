@@ -27,7 +27,7 @@ int main() {
     };
 
     int err;
-    me_expr *expr1 = me_compile("a + b", vars1, 2, result_int64, VECTOR_SIZE, ME_INT64, &err);
+    me_expr *expr1 = me_compile("a + b", vars1, 2, result_int64, VECTOR_SIZE, ME_AUTO, &err);
 
     if (!expr1) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
@@ -60,7 +60,7 @@ int main() {
         {"b", ME_FLOAT32, b_float}
     };
 
-    me_expr *expr2 = me_compile("a + b", vars2, 2, result_float, VECTOR_SIZE, ME_FLOAT32, &err);
+    me_expr *expr2 = me_compile("a + b", vars2, 2, result_float, VECTOR_SIZE, ME_AUTO, &err);
 
     if (!expr2) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
@@ -93,7 +93,7 @@ int main() {
         {"b", ME_FLOAT64, b_double}
     };
 
-    me_expr *expr3 = me_compile("a + b", vars3, 2, result_double, VECTOR_SIZE, ME_FLOAT64, &err);
+    me_expr *expr3 = me_compile("a + b", vars3, 2, result_double, VECTOR_SIZE, ME_AUTO, &err);
 
     if (!expr3) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);

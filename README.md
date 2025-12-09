@@ -39,12 +39,29 @@ const void *data[] = {x_array, y_array};  // x first, y second
 me_eval_chunk(expr, data, 2, output, nitems);
 ```
 
-For mixed types:
+For mixed types (use `ME_AUTO` for output dtype to infer from variables):
 ```c
 me_variable vars[] = {{"temp", ME_FLOAT64}, {"count", ME_INT32}};
+me_expr *expr = me_compile_chunk("temp * count", vars, 2, ME_AUTO, &err);
+// Result type will be inferred (ME_FLOAT64 in this case)
 ```
 
 Variables are matched by position (order) in the arrays. Unspecified fields (address, type, context) default to NULL/0.
+
+### `dtype` Parameter Rules
+
+The `dtype` parameter has two mutually exclusive modes:
+
+1. **Uniform Type** (Simple): Set `dtype` to a specific type (e.g., `ME_FLOAT64`)
+   - All variables must be `ME_AUTO`
+   - All data uses the specified type
+
+2. **Mixed Types** (Advanced): Set `dtype` to `ME_AUTO`
+   - All variables must have explicit types
+   - Result type is inferred from type promotion rules
+   - Check `expr->dtype` for the inferred type
+
+Mixing modes (some vars with types, some `ME_AUTO`) will cause compilation to fail.
 
 Returns `NULL` on error.
 

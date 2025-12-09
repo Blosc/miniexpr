@@ -23,7 +23,7 @@
         expected[i] = (type)(expected_expr); \
     } \
     \
-    me_variable vars[] = {{"a", type_enum, a}, {"b", type_enum, b}}; \
+    me_variable vars[] = {{"a", ME_AUTO, a}, {"b", ME_AUTO, b}}; \
     int err; \
     me_expr *expr = me_compile(test_expr, vars, 2, result, n, type_enum, &err); \
     \
@@ -87,7 +87,7 @@ int main() {
             a[i] = (float) i + (float) i * I; // i + i*I
         }
 
-        me_variable vars[] = {{"a", ME_COMPLEX64, a}};
+        me_variable vars[] = {{"a", ME_AUTO, a}};
         int err;
         me_expr *expr = me_compile("a+5", vars, 1, result, n, ME_COMPLEX64, &err);
 
@@ -124,7 +124,7 @@ int main() {
             a[i] = (double) i + (double) i * I;
         }
 
-        me_variable vars[] = {{"a", ME_COMPLEX128, a}};
+        me_variable vars[] = {{"a", ME_AUTO, a}};
         int err;
         me_expr *expr = me_compile("a*2", vars, 1, result, n, ME_COMPLEX128, &err);
 

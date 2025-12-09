@@ -24,7 +24,7 @@ void test_correctness() {
         b[i] = n - i;
     }
 
-    me_variable vars[] = {{"a", ME_FLOAT64, a}, {"b", ME_FLOAT64, b}};
+    me_variable vars[] = {{"a", ME_AUTO, a}, {"b", ME_AUTO, b}};
     int err;
 
     // Test sqrt(a*a + b*b)
@@ -94,7 +94,7 @@ void benchmark_comparison() {
             b[i] = (n - i) * 0.1;
         }
 
-        me_variable vars[] = {{"a", ME_FLOAT64, a}, {"b", ME_FLOAT64, b}};
+        me_variable vars[] = {{"a", ME_AUTO, a}, {"b", ME_AUTO, b}};
         int err;
 
         printf("\n--- Vector size: %d, iterations: %d ---\n", n, iterations);

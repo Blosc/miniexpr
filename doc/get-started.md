@@ -22,8 +22,8 @@ int main() {
 
     // Define variables that will be used in the expression
     me_variable vars[] = {
-        {"a", &a, ME_VARIABLE, NULL, ME_FLOAT64},
-        {"b", &b, ME_VARIABLE, NULL, ME_FLOAT64}
+        {"a", ME_AUTO, a},
+        {"b", ME_AUTO, b}
     };
 
     // Compile the expression
@@ -67,12 +67,12 @@ a=1.0, b=1.0 -> distance=1.41
 
 1. **Define your data**: Create arrays for input variables (`a` and `b`) and output (`result`).
 
-2. **Set up variables**: Create an array of `me_variable` structures that bind variable names to memory addresses. Each variable specifies:
+2. **Set up variables**: Create an array of `me_variable` structures that bind variable names to memory addresses. The simplest form only requires:
    - `name`: The identifier used in the expression
+   - `dtype`: Set to `ME_AUTO` to use the output dtype
    - `address`: Pointer to the data array
-   - `type`: Set to `ME_VARIABLE` for input variables
-   - `context`: Usually `NULL`
-   - `dtype`: The data type (e.g., `ME_FLOAT64` for double precision)
+
+   For mixed types, specify explicit dtypes and use `ME_AUTO` as the output dtype (see data-types.md).
 
 3. **Compile the expression**: Call `me_compile()` with:
    - The expression string

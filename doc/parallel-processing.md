@@ -78,7 +78,7 @@ int main() {
 
     // Compile the expression once for chunked evaluation
     // Expression: sin(x) * cos(y) + sqrt(x*x + y*y)
-    // Define variables (just the names - everything else optional)
+    // Define variables (minimal form - names only, will use ME_FLOAT64)
     me_variable vars[] = {{"x"}, {"y"}};
 
     int error;

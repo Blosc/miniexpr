@@ -125,8 +125,14 @@ typedef struct me_variable {
 
 /* Parses the input expression and binds variables. */
 /* Returns NULL on error. */
-/* dtype parameter is ignored - result type is inferred from variable types */
-/* The actual result type is returned in n->dtype */
+/*
+ * The dtype parameter controls variable type handling:
+ *   - If dtype is ME_AUTO: All variables must have explicit dtypes (not ME_AUTO).
+ *                          Output dtype is inferred from the expression.
+ *   - If dtype is specified: All variables must be ME_AUTO.
+ *                            Both variables and output use this dtype.
+ * The actual result type is available in expr->dtype after compilation.
+ */
 me_expr *me_compile(const char *expression, const me_variable *variables, int var_count,
                     void *output, int nitems, me_dtype dtype, int *error);
 
@@ -139,14 +145,20 @@ me_expr *me_compile(const char *expression, const me_variable *variables, int va
  *   variables: Array of variable definitions. Only the 'name' field is required.
  *              Variables will be matched by position (ordinal order) during me_eval_chunk().
  *   var_count: Number of variables
- *   dtype: Expected output data type
+ *   dtype: Data type handling (same rules as me_compile):
+ *          - ME_AUTO: All variables must specify their dtypes, output is inferred
+ *          - Specific type: All variables must be ME_AUTO, this type is used for all
  *   error: Optional pointer to receive error position (0 on success, >0 on error)
  *
  * Returns: Compiled expression ready for chunked evaluation, or NULL on error
  *
- * Example (minimal - recommended):
- *   me_variable vars[] = {{"x"}, {"y"}};  // Just the names!
+ * Example 1 (simple - all same type):
+ *   me_variable vars[] = {{"x"}, {"y"}};  // Both ME_AUTO
  *   me_expr *expr = me_compile_chunk("x + y", vars, 2, ME_FLOAT64, &err);
+ *
+ * Example 2 (mixed types):
+ *   me_variable vars[] = {{"x", ME_INT32}, {"y", ME_FLOAT64}};
+ *   me_expr *expr = me_compile_chunk("x + y", vars, 2, ME_AUTO, &err);
  *
  *   // Later, provide data in same order as variable definitions
  *   const void *data[] = {x_array, y_array};  // x first, y second

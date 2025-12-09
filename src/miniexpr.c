@@ -2878,6 +2878,37 @@ static void optimize(me_expr *n) {
 
 me_expr *me_compile(const char *expression, const me_variable *variables, int var_count,
                     void *output, int nitems, me_dtype dtype, int *error) {
+    // Validate dtype usage: either all vars are ME_AUTO (use dtype), or dtype is ME_AUTO (use var dtypes)
+    if (variables && var_count > 0) {
+        int auto_count = 0;
+        int specified_count = 0;
+
+        for (int i = 0; i < var_count; i++) {
+            if (variables[i].dtype == ME_AUTO) {
+                auto_count++;
+            } else {
+                specified_count++;
+            }
+        }
+
+        // Check the two valid modes
+        if (dtype == ME_AUTO) {
+            // Mode 1: Output dtype is ME_AUTO, all variables must have explicit dtypes
+            if (auto_count > 0) {
+                fprintf(stderr, "Error: When output dtype is ME_AUTO, all variable dtypes must be specified (not ME_AUTO)\n");
+                if (error) *error = -1;
+                return NULL;
+            }
+        } else {
+            // Mode 2: Output dtype is specified, all variables must be ME_AUTO
+            if (specified_count > 0) {
+                fprintf(stderr, "Error: When output dtype is specified, all variable dtypes must be ME_AUTO\n");
+                if (error) *error = -1;
+                return NULL;
+            }
+        }
+    }
+
     // Create a copy of variables with dtype filled in (if not already set)
     me_variable *vars_copy = NULL;
     if (variables && var_count > 0) {
@@ -2888,7 +2919,7 @@ me_expr *me_compile(const char *expression, const me_variable *variables, int va
         }
         for (int i = 0; i < var_count; i++) {
             vars_copy[i] = variables[i];
-            // If dtype not set (ME_AUTO), use the expression's dtype
+            // If dtype not set (ME_AUTO), use the provided dtype
             if (vars_copy[i].dtype == ME_AUTO && vars_copy[i].type == 0) {
                 vars_copy[i].dtype = dtype;
                 vars_copy[i].type = ME_VARIABLE;
@@ -2900,7 +2931,7 @@ me_expr *me_compile(const char *expression, const me_variable *variables, int va
     s.start = s.next = expression;
     s.lookup = vars_copy ? vars_copy : variables;
     s.lookup_len = var_count;
-    s.target_dtype = dtype; // Set target dtype for constants
+    s.target_dtype = (dtype != ME_AUTO) ? dtype : ME_FLOAT64; // Set target dtype for constants
 
     next_token(&s);
     me_expr *root = list(&s);
@@ -2923,7 +2954,14 @@ me_expr *me_compile(const char *expression, const me_variable *variables, int va
         optimize(root);
         root->output = output;
         root->nitems = nitems;
-        root->dtype = dtype;
+
+        // If dtype is ME_AUTO, infer from expression; otherwise use provided dtype
+        if (dtype == ME_AUTO) {
+            root->dtype = infer_result_type(root);
+        } else {
+            root->dtype = dtype;
+        }
+
         if (error) *error = 0;
         return root;
     }

@@ -27,10 +27,10 @@ int main() {
     // Output array (also 32-bit integers)
     int32_t area[4];
 
-    // Define variables with INT32 type
+    // Define variables with ME_AUTO (will use output dtype)
     me_variable vars[] = {
-        {"width", &width, ME_VARIABLE, NULL, ME_INT32},
-        {"height", &height, ME_VARIABLE, NULL, ME_INT32}
+        {"width", ME_AUTO, width},
+        {"height", ME_AUTO, height}
     };
 
     // Compile the expression
@@ -84,7 +84,7 @@ int main() {
     float area[4];
 
     me_variable vars[] = {
-        {"r", &radius, ME_VARIABLE, NULL, ME_FLOAT32}
+        {"r", ME_AUTO, radius}
     };
 
     // Circle area: π * r²
@@ -141,15 +141,17 @@ int main() {
     // Result will be double (promoted from int32)
     double total[4];
 
+    // For mixed types, specify explicit dtypes and use ME_AUTO for output
     me_variable vars[] = {
-        {"items", &items, ME_VARIABLE, NULL, ME_INT32},
-        {"price", &price, ME_VARIABLE, NULL, ME_FLOAT64}
+        {"items", ME_INT32, items},
+        {"price", ME_FLOAT64, price}
     };
 
     // Calculate total cost with 8% tax
+    // Using ME_AUTO lets the library infer the result type (ME_FLOAT64)
     int error;
     me_expr *expr = me_compile("items * price * 1.08", vars, 2,
-                                total, n, ME_FLOAT64, &error);
+                                total, n, ME_AUTO, &error);
 
     if (!expr) {
         printf("Parse error at position %d\n", error);
@@ -199,9 +201,9 @@ int main() {
     uint8_t gray[4];
 
     me_variable vars[] = {
-        {"r", &red, ME_VARIABLE, NULL, ME_UINT8},
-        {"g", &green, ME_VARIABLE, NULL, ME_UINT8},
-        {"b", &blue, ME_VARIABLE, NULL, ME_UINT8}
+        {"r", ME_AUTO, red},
+        {"g", ME_AUTO, green},
+        {"b", ME_AUTO, blue}
     };
 
     int error;

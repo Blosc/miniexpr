@@ -34,11 +34,11 @@ int main() {
 
     // Define variables
     me_variable vars[] = {
-        {"h", &h, ME_VARIABLE, NULL, ME_FLOAT64},
-        {"x", &x, ME_VARIABLE, NULL, ME_FLOAT64},
-        {"angle", &angle, ME_VARIABLE, NULL, ME_FLOAT64},
-        {"g", &g, ME_VARIABLE, NULL, ME_FLOAT64},
-        {"v", &v, ME_VARIABLE, NULL, ME_FLOAT64}
+        {"h", ME_AUTO, h},
+        {"x", ME_AUTO, x},
+        {"angle", ME_AUTO, angle},
+        {"g", ME_AUTO, g},
+        {"v", ME_AUTO, v}
     };
 
     // Complex expression for projectile motion

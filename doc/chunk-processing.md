@@ -36,10 +36,11 @@ int main() {
         celsius[i] = -50.0 + (i * 0.0001); // Range from -50°C to 50°C
     }
 
-    // Define variables (just the names - everything else optional)
+    // Define variables (minimal form - name only, dtypes default to ME_AUTO)
     me_variable vars[] = {{"c"}};
 
     // Compile the expression once for chunked evaluation
+    // All variables will use ME_FLOAT64 since output dtype is specified
     int error;
     me_expr *expr = me_compile_chunk("c * 9/5 + 32", vars, 1, ME_FLOAT64, &error);
 

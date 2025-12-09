@@ -71,8 +71,8 @@ int main() {
         bool result[VECTOR_SIZE] = {0};
 
         me_variable vars[] = {
-            {"a", ME_BOOL, a},
-            {"b", ME_BOOL, b}
+            {"a", ME_AUTO, a},
+            {"b", ME_AUTO, b}
         };
 
         int err;
@@ -144,12 +144,12 @@ int main() {
 
         me_variable vars[] = {
             {"a", ME_BOOL, a},    // Explicit ME_BOOL
-            {"b", ME_AUTO, b}     // Let it infer from output dtype
+            {"b", ME_INT32, b}    // Explicit ME_INT32
         };
 
         int err;
-        // Simple expression: cast bool to int and add
-        me_expr *expr = me_compile("a + b", vars, 2, result, VECTOR_SIZE, ME_INT32, &err);
+        // Simple expression: cast bool to int and add - use ME_AUTO to infer result
+        me_expr *expr = me_compile("a + b", vars, 2, result, VECTOR_SIZE, ME_AUTO, &err);
 
         if (!expr) {
             printf("  ❌ FAIL: Compilation error at position %d\n", err);

@@ -135,8 +135,8 @@ int main() {
     }
 
     me_variable vars_int[] = {
-        {"a", ME_INT32, a_int},
-        {"b", ME_INT32, b_int}
+        {"a", ME_AUTO, a_int},
+        {"b", ME_AUTO, b_int}
     };
 
     expr = me_compile_chunk("a + b", vars_int, 2, ME_INT32, &err);
