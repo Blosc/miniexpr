@@ -88,32 +88,16 @@ int main() {
     printf("MiniExpr Chunked Evaluation Benchmark\n");
     printf("========================================\n");
 
-    // Test 1: 100M elements with different chunk sizes
-    printf("\n--- 100M elements, varying chunk sizes ---\n");
+    // Test different dataset sizes: 1M, 10M, 50M
+    printf("\n--- Scalability test (varying dataset sizes) ---\n");
+    printf("Expression: sqrt(a*a + b*b)\n");
+    printf("Chunk size: 1M elements\n");
 
-    const int total_100m = 100 * 1024 * 1024;
-
-    benchmark_expression("a + b", total_100m, 1024 * 1024); // 1M chunks
-    benchmark_expression("a + b", total_100m, 10 * 1024 * 1024); // 10M chunks
-
-    // Test 2: Complex expression
-    printf("\n--- Complex expression: sqrt(a*a + b*b) ---\n");
-    benchmark_expression("sqrt(a*a + b*b)", total_100m, 1024 * 1024);
-    benchmark_expression("sqrt(a*a + b*b)", total_100m, 10 * 1024 * 1024);
-
-    // Test 3: Very complex expression
-    printf("\n--- Very complex: sin(a) * cos(b) + sqrt(a*b) ---\n");
-    benchmark_expression("sin(a) * cos(b) + sqrt(a*b)", total_100m, 1024 * 1024);
-
-    // Test 4: Show scalability with different total sizes
-    printf("\n--- Scalability test (1M chunk size) ---\n");
-    printf("\nExpression: sqrt(a*a + b*b)\n");
-
-    const int sizes[] = {10 * 1024 * 1024, 50 * 1024 * 1024, 100 * 1024 * 1024};
-    const char *size_names[] = {"10M", "50M", "100M"};
+    const int sizes[] = {1 * 1024 * 1024, 10 * 1024 * 1024, 50 * 1024 * 1024};
+    const char *size_names[] = {"1M", "10M", "50M"};
 
     for (int i = 0; i < 3; i++) {
-        printf("\nSize: %s elements\n", size_names[i]);
+        printf("\n--- Dataset: %s elements ---\n", size_names[i]);
         benchmark_expression("sqrt(a*a + b*b)", sizes[i], 1024 * 1024);
     }
 
