@@ -66,6 +66,11 @@ For log = natural log uncomment the next line. */
 #define INFINITY (1.0/0.0)
 #endif
 
+/* Include Accelerate framework optimizations on macOS */
+#ifdef __APPLE__
+#include "miniexpr_accelerate.h"
+#endif
+
 
 typedef double (*me_fun2)(double, double);
 
@@ -390,7 +395,7 @@ void me_free(me_expr *n) {
 }
 
 
-static double pi(void) { return 3.14159265358979323846; }
+static double me_pi(void) { return 3.14159265358979323846; }
 static double e(void) { return 2.71828182845904523536; }
 
 static double fac(double a) {
@@ -455,7 +460,7 @@ static const me_variable functions[] = {
     {"log10", 0, log10, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"ncr", 0, ncr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"npr", 0, npr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
-    {"pi", 0, pi, ME_FUNCTION0 | ME_FLAG_PURE, 0},
+    {"pi", 0, me_pi, ME_FUNCTION0 | ME_FLAG_PURE, 0},
     {"pow", 0, pow, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"sin", 0, sin, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"sinh", 0, sinh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
@@ -1142,59 +1147,87 @@ static double me_eval_scalar(const me_expr *n) {
 
 /* Specialized vector operations for better performance */
 static void vec_add(const double *a, const double *b, double *out, int n) {
+#ifdef __APPLE__
+    vec_add_accel_f64(a, b, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = a[i] + b[i];
     }
+#endif
 }
 
 static void vec_sub(const double *a, const double *b, double *out, int n) {
+#ifdef __APPLE__
+    vec_sub_accel_f64(a, b, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = a[i] - b[i];
     }
+#endif
 }
 
 static void vec_mul(const double *a, const double *b, double *out, int n) {
+#ifdef __APPLE__
+    vec_mul_accel_f64(a, b, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = a[i] * b[i];
     }
+#endif
 }
 
 static void vec_div(const double *a, const double *b, double *out, int n) {
+#ifdef __APPLE__
+    vec_div_accel_f64(a, b, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = a[i] / b[i];
     }
+#endif
 }
 
 static void vec_add_scalar(const double *a, double b, double *out, int n) {
+#ifdef __APPLE__
+    vec_add_scalar_accel_f64(a, b, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = a[i] + b;
     }
+#endif
 }
 
 static void vec_mul_scalar(const double *a, double b, double *out, int n) {
+#ifdef __APPLE__
+    vec_mul_scalar_accel_f64(a, b, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = a[i] * b;
     }
+#endif
 }
 
 static void vec_pow(const double *a, const double *b, double *out, int n) {
+#ifdef __APPLE__
+    vec_pow_accel_f64(a, b, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = pow(a[i], b[i]);
     }
+#endif
 }
 
 static void vec_pow_scalar(const double *a, double b, double *out, int n) {
@@ -1206,35 +1239,51 @@ static void vec_pow_scalar(const double *a, double b, double *out, int n) {
 }
 
 static void vec_sqrt(const double *a, double *out, int n) {
+#ifdef __APPLE__
+    vec_sqrt_accel_f64(a, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = sqrt(a[i]);
     }
+#endif
 }
 
 static void vec_sin(const double *a, double *out, int n) {
+#ifdef __APPLE__
+    vec_sin_accel_f64(a, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = sin(a[i]);
     }
+#endif
 }
 
 static void vec_cos(const double *a, double *out, int n) {
+#ifdef __APPLE__
+    vec_cos_accel_f64(a, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = cos(a[i]);
     }
+#endif
 }
 
 static void vec_negate(const double *a, double *out, int n) {
+#ifdef __APPLE__
+    vec_negate_accel_f64(a, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = -a[i];
     }
+#endif
 }
 
 /* ============================================================================
@@ -1242,59 +1291,87 @@ static void vec_negate(const double *a, double *out, int n) {
  * ============================================================================ */
 
 static void vec_add_f32(const float *a, const float *b, float *out, int n) {
+#ifdef __APPLE__
+    vec_add_accel_f32(a, b, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = a[i] + b[i];
     }
+#endif
 }
 
 static void vec_sub_f32(const float *a, const float *b, float *out, int n) {
+#ifdef __APPLE__
+    vec_sub_accel_f32(a, b, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = a[i] - b[i];
     }
+#endif
 }
 
 static void vec_mul_f32(const float *a, const float *b, float *out, int n) {
+#ifdef __APPLE__
+    vec_mul_accel_f32(a, b, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = a[i] * b[i];
     }
+#endif
 }
 
 static void vec_div_f32(const float *a, const float *b, float *out, int n) {
+#ifdef __APPLE__
+    vec_div_accel_f32(a, b, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = a[i] / b[i];
     }
+#endif
 }
 
 static void vec_add_scalar_f32(const float *a, float b, float *out, int n) {
+#ifdef __APPLE__
+    vec_add_scalar_accel_f32(a, b, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = a[i] + b;
     }
+#endif
 }
 
 static void vec_mul_scalar_f32(const float *a, float b, float *out, int n) {
+#ifdef __APPLE__
+    vec_mul_scalar_accel_f32(a, b, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = a[i] * b;
     }
+#endif
 }
 
 static void vec_pow_f32(const float *a, const float *b, float *out, int n) {
+#ifdef __APPLE__
+    vec_pow_accel_f32(a, b, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = powf(a[i], b[i]);
     }
+#endif
 }
 
 static void vec_pow_scalar_f32(const float *a, float b, float *out, int n) {
@@ -1306,35 +1383,51 @@ static void vec_pow_scalar_f32(const float *a, float b, float *out, int n) {
 }
 
 static void vec_sqrt_f32(const float *a, float *out, int n) {
+#ifdef __APPLE__
+    vec_sqrt_accel_f32(a, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = sqrtf(a[i]);
     }
+#endif
 }
 
 static void vec_sin_f32(const float *a, float *out, int n) {
+#ifdef __APPLE__
+    vec_sin_accel_f32(a, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = sinf(a[i]);
     }
+#endif
 }
 
 static void vec_cos_f32(const float *a, float *out, int n) {
+#ifdef __APPLE__
+    vec_cos_accel_f32(a, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = cosf(a[i]);
     }
+#endif
 }
 
 static void vec_negame_f32(const float *a, float *out, int n) {
+#ifdef __APPLE__
+    vec_negate_accel_f32(a, out, n);
+#else
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = -a[i];
     }
+#endif
 }
 
 /* ============================================================================

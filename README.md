@@ -10,6 +10,7 @@ miniexpr is designed to be embedded directly into larger projects, not distribut
 - Multiple numeric data types (integers, floats, complex numbers)
 - Vectorized evaluation for processing arrays efficiently
 - Thread-safe operations for parallel processing
+- **macOS Accelerate framework** for optimized SIMD operations (automatic)
 
 ## Main Functions
 
