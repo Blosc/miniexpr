@@ -46,7 +46,7 @@ void benchmark_expression(const char *type_name, me_dtype dtype, int use_double,
             }
         }
 
-        me_variable vars[] = {{"a", dtype, a}, {"b", dtype, b}};
+        me_variable vars[] = {{"a", ME_AUTO, a}, {"b", ME_AUTO, b}};
         int err;
 
         printf("\n--- Vector size: %d, iterations: %d ---\n", n, iterations);

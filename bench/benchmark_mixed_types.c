@@ -32,13 +32,14 @@ void benchmark_mixed_types(const char *expr_str, ExprType expr_type, int nitems)
     }
 
     // MiniExpr with type promotion
+    // For mixed types, use ME_AUTO to infer the output type
     me_variable vars[] = {
         {"a", ME_INT64, a_i64},
         {"b", ME_FLOAT32, b_f32}
     };
 
     int err;
-    me_expr *expr = me_compile(expr_str, vars, 2, result, nitems, ME_FLOAT64, &err);
+    me_expr *expr = me_compile(expr_str, vars, 2, result, nitems, ME_AUTO, &err);
 
     if (!expr) {
         printf("  ERROR: Failed to compile '%s'\n", expr_str);
