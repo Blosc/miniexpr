@@ -89,12 +89,21 @@ int main() {
     printf("========================================\n");
 
     // Test different dataset sizes: 1M, 10M, 50M
-    printf("\n--- Scalability test (varying dataset sizes) ---\n");
-    printf("Expression: sqrt(a*a + b*b)\n");
-    printf("Chunk size: 1M elements\n");
-
     const int sizes[] = {1 * 1024 * 1024, 10 * 1024 * 1024, 50 * 1024 * 1024};
     const char *size_names[] = {"1M", "10M", "50M"};
+
+    // Test 1: Simple expression
+    printf("\n--- Simple Expression: a + b ---\n");
+    printf("Chunk size: 1M elements\n");
+
+    for (int i = 0; i < 3; i++) {
+        printf("\n--- Dataset: %s elements ---\n", size_names[i]);
+        benchmark_expression("a + b", sizes[i], 1024 * 1024);
+    }
+
+    // Test 2: Complex expression
+    printf("\n\n--- Complex Expression: sqrt(a*a + b*b) ---\n");
+    printf("Chunk size: 1M elements\n");
 
     for (int i = 0; i < 3; i++) {
         printf("\n--- Dataset: %s elements ---\n", size_names[i]);
