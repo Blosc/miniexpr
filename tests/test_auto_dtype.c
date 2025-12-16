@@ -31,17 +31,18 @@ int main() {
 
         /* Use ME_AUTO (0) to let the compiler infer the type from variables */
         me_variable vars[] = {
-            {"a", ME_AUTO, a},  // Explicitly use ME_AUTO
-            {"b", ME_AUTO, b}
+            {"a", ME_AUTO},  // Explicitly use ME_AUTO
+            {"b", ME_AUTO}
         };
 
         int err;
-        me_expr *expr = me_compile("a + b", vars, 2, result, VECTOR_SIZE, ME_INT32, &err);
+        me_expr *expr = me_compile_chunk("a + b", vars, 2, ME_INT32, &err);
 
         if (!expr) {
             printf("  ❌ FAIL: Compilation error at position %d\n", err);
         } else {
-            me_eval(expr);
+            const void *var_ptrs[] = {a, b};
+            me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
             bool passed = true;
             for (int i = 0; i < VECTOR_SIZE && passed; i++) {
@@ -71,17 +72,18 @@ int main() {
         bool result[VECTOR_SIZE] = {0};
 
         me_variable vars[] = {
-            {"a", ME_AUTO, a},
-            {"b", ME_AUTO, b}
+            {"a", ME_AUTO},
+            {"b", ME_AUTO}
         };
 
         int err;
-        me_expr *expr = me_compile("a & b", vars, 2, result, VECTOR_SIZE, ME_BOOL, &err);
+        me_expr *expr = me_compile_chunk("a & b", vars, 2, ME_BOOL, &err);
 
         if (!expr) {
             printf("  ❌ FAIL: Compilation error at position %d\n", err);
         } else {
-            me_eval(expr);
+            const void *var_ptrs[] = {a, b};
+            me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
             bool passed = true;
             for (int i = 0; i < VECTOR_SIZE && passed; i++) {
@@ -149,12 +151,13 @@ int main() {
 
         int err;
         // Simple expression: cast bool to int and add - use ME_AUTO to infer result
-        me_expr *expr = me_compile("a + b", vars, 2, result, VECTOR_SIZE, ME_AUTO, &err);
+        me_expr *expr = me_compile_chunk("a + b", vars, 2, ME_AUTO, &err);
 
         if (!expr) {
             printf("  ❌ FAIL: Compilation error at position %d\n", err);
         } else {
-            me_eval(expr);
+            const void *var_ptrs[] = {a, b};
+            me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
             bool passed = true;
             for (int i = 0; i < VECTOR_SIZE && passed; i++) {

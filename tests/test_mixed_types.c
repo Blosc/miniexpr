@@ -22,19 +22,20 @@ int main() {
     }
 
     me_variable vars1[] = {
-        {"a", ME_INT32, a_int32},
-        {"b", ME_INT64, b_int64}
+        {"a", ME_INT32},
+        {"b", ME_INT64}
     };
 
     int err;
-    me_expr *expr1 = me_compile("a + b", vars1, 2, result_int64, VECTOR_SIZE, ME_AUTO, &err);
+    me_expr *expr1 = me_compile_chunk("a + b", vars1, 2, ME_AUTO, &err);
 
     if (!expr1) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
         printf("  This shows runtime type mismatch detection is working!\n");
     } else {
         printf("  ✓ Compilation succeeded\n");
-        me_eval(expr1);
+        const void *var_ptrs1[] = {a_int32, b_int64};
+        me_eval_chunk_threadsafe(expr1, var_ptrs1, 2, result_int64, VECTOR_SIZE);
 
         printf("  Results: ");
         for (int i = 0; i < 5; i++) {
@@ -56,18 +57,19 @@ int main() {
     }
 
     me_variable vars2[] = {
-        {"a", ME_INT32, a_int32},
-        {"b", ME_FLOAT32, b_float}
+        {"a", ME_INT32},
+        {"b", ME_FLOAT32}
     };
 
-    me_expr *expr2 = me_compile("a + b", vars2, 2, result_float, VECTOR_SIZE, ME_AUTO, &err);
+    me_expr *expr2 = me_compile_chunk("a + b", vars2, 2, ME_AUTO, &err);
 
     if (!expr2) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
         printf("  This shows runtime type mismatch detection is working!\n");
     } else {
         printf("  ✓ Compilation succeeded\n");
-        me_eval(expr2);
+        const void *var_ptrs2[] = {a_int32, b_float};
+        me_eval_chunk_threadsafe(expr2, var_ptrs2, 2, result_float, VECTOR_SIZE);
 
         printf("  Results: ");
         for (int i = 0; i < 5; i++) {
@@ -89,18 +91,19 @@ int main() {
     }
 
     me_variable vars3[] = {
-        {"a", ME_FLOAT32, b_float},
-        {"b", ME_FLOAT64, b_double}
+        {"a", ME_FLOAT32},
+        {"b", ME_FLOAT64}
     };
 
-    me_expr *expr3 = me_compile("a + b", vars3, 2, result_double, VECTOR_SIZE, ME_AUTO, &err);
+    me_expr *expr3 = me_compile_chunk("a + b", vars3, 2, ME_AUTO, &err);
 
     if (!expr3) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
         printf("  This shows runtime type mismatch detection is working!\n");
     } else {
         printf("  ✓ Compilation succeeded\n");
-        me_eval(expr3);
+        const void *var_ptrs3[] = {b_float, b_double};
+        me_eval_chunk_threadsafe(expr3, var_ptrs3, 2, result_double, VECTOR_SIZE);
 
         printf("  Results: ");
         for (int i = 0; i < 5; i++) {

@@ -27,16 +27,12 @@ int main() {
     // Output array (also 32-bit integers)
     int32_t area[4];
 
-    // Define variables with ME_AUTO (will use output dtype)
-    me_variable vars[] = {
-        {"width", ME_AUTO, width},
-        {"height", ME_AUTO, height}
-    };
+    // Define variables (names only for uniform type)
+    me_variable vars[] = {{"width"}, {"height"}};
 
     // Compile the expression
     int error;
-    me_expr *expr = me_compile("width * height", vars, 2,
-                                area, n, ME_INT32, &error);
+    me_expr *expr = me_compile_chunk("width * height", vars, 2, ME_INT32, &error);
 
     if (!expr) {
         printf("Parse error at position %d\n", error);
@@ -44,7 +40,8 @@ int main() {
     }
 
     // Evaluate
-    me_eval(expr);
+    const void *var_ptrs[] = {width, height};
+    me_eval_chunk_threadsafe(expr, var_ptrs, 2, area, n);
 
     // Print results
     printf("Rectangle Areas (INT32):\n");
@@ -83,22 +80,20 @@ int main() {
 
     float area[4];
 
-    me_variable vars[] = {
-        {"r", ME_AUTO, radius}
-    };
+    me_variable vars[] = {{"r"}};
 
     // Circle area: π * r²
     // Using an approximation of π
     int error;
-    me_expr *expr = me_compile("3.14159265 * r * r", vars, 1,
-                                area, n, ME_FLOAT32, &error);
+    me_expr *expr = me_compile_chunk("3.14159265 * r * r", vars, 1, ME_FLOAT32, &error);
 
     if (!expr) {
         printf("Parse error at position %d\n", error);
         return 1;
     }
 
-    me_eval(expr);
+    const void *var_ptrs[] = {radius};
+    me_eval_chunk_threadsafe(expr, var_ptrs, 1, area, n);
 
     printf("Circle Areas (FLOAT32):\n");
     for (int i = 0; i < n; i++) {
@@ -143,22 +138,22 @@ int main() {
 
     // For mixed types, specify explicit dtypes and use ME_AUTO for output
     me_variable vars[] = {
-        {"items", ME_INT32, items},
-        {"price", ME_FLOAT64, price}
+        {"items", ME_INT32},
+        {"price", ME_FLOAT64}
     };
 
     // Calculate total cost with 8% tax
     // Using ME_AUTO lets the library infer the result type (ME_FLOAT64)
     int error;
-    me_expr *expr = me_compile("items * price * 1.08", vars, 2,
-                                total, n, ME_AUTO, &error);
+    me_expr *expr = me_compile_chunk("items * price * 1.08", vars, 2, ME_AUTO, &error);
 
     if (!expr) {
         printf("Parse error at position %d\n", error);
         return 1;
     }
 
-    me_eval(expr);
+    const void *var_ptrs[] = {items, price};
+    me_eval_chunk_threadsafe(expr, var_ptrs, 2, total, n);
 
     printf("Shopping Cart (Mixed Types):\n");
     for (int i = 0; i < n; i++) {
@@ -200,22 +195,18 @@ int main() {
     // Grayscale conversion: 0.299*R + 0.587*G + 0.114*B
     uint8_t gray[4];
 
-    me_variable vars[] = {
-        {"r", ME_AUTO, red},
-        {"g", ME_AUTO, green},
-        {"b", ME_AUTO, blue}
-    };
+    me_variable vars[] = {{"r"}, {"g"}, {"b"}};
 
     int error;
-    me_expr *expr = me_compile("0.299*r + 0.587*g + 0.114*b", vars, 3,
-                                gray, n, ME_UINT8, &error);
+    me_expr *expr = me_compile_chunk("0.299*r + 0.587*g + 0.114*b", vars, 3, ME_UINT8, &error);
 
     if (!expr) {
         printf("Parse error at position %d\n", error);
         return 1;
     }
 
-    me_eval(expr);
+    const void *var_ptrs[] = {red, green, blue};
+    me_eval_chunk_threadsafe(expr, var_ptrs, 3, gray, n);
 
     printf("RGB to Grayscale (UINT8):\n");
     for (int i = 0; i < n; i++) {

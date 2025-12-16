@@ -123,19 +123,6 @@ typedef struct me_variable {
  */
 
 
-/* Parses the input expression and binds variables. */
-/* Returns NULL on error. */
-/*
- * The dtype parameter controls variable type handling:
- *   - If dtype is ME_AUTO: All variables must have explicit dtypes (not ME_AUTO).
- *                          Output dtype is inferred from the expression.
- *   - If dtype is specified: All variables must be ME_AUTO.
- *                            Both variables and output use this dtype.
- * The actual result type is available in expr->dtype after compilation.
- */
-me_expr *me_compile(const char *expression, const me_variable *variables, int var_count,
-                    void *output, int nitems, me_dtype dtype, int *error);
-
 /* Compile expression for chunked evaluation.
  * This variant is optimized for use with me_eval_chunk() and me_eval_chunk_threadsafe(),
  * where variable and output pointers are provided later during evaluation.
@@ -167,41 +154,25 @@ me_expr *me_compile(const char *expression, const me_variable *variables, int va
 me_expr *me_compile_chunk(const char *expression, const me_variable *variables,
                           int var_count, me_dtype dtype, int *error);
 
-/* Evaluates the expression on vectors. */
-void me_eval(const me_expr *n);
-
-/* Evaluates using fused bytecode (faster for complex expressions). */
-void me_eval_fused(const me_expr *n);
-
-/* Evaluates compiled expression with new variable and output pointers.
- * This allows processing large arrays in chunks without recompiling.
- *
- * Parameters:
- *   expr: Compiled expression (from me_compile)
- *   vars_chunk: Array of pointers to variable data chunks (same order as in me_compile)
- *   n_vars: Number of variables (must match the number used in me_compile)
- *   output_chunk: Pointer to output buffer for this chunk
- *   chunk_nitems: Number of elements in this chunk
- *
- * Note: The chunks must have the same data types as the original variables.
- * WARNING: This function is NOT thread-safe. Use me_eval_chunk_threadsafe() for
- *          concurrent evaluation from multiple threads.
- */
-void me_eval_chunk(const me_expr *expr, const void **vars_chunk, int n_vars,
-                   void *output_chunk, int chunk_nitems);
-
-/* Thread-safe version of me_eval_chunk.
+/* Evaluates compiled expression with variable and output pointers.
  * This function can be safely called from multiple threads simultaneously on the
  * same compiled expression. It creates a temporary clone of the expression tree
  * for each call, eliminating race conditions at the cost of some memory allocation.
  *
- * Use this when you need to evaluate the same expression in parallel across
- * different chunks from multiple threads.
+ * Parameters:
+ *   expr: Compiled expression (from me_compile_chunk)
+ *   vars_chunk: Array of pointers to variable data chunks (same order as in me_compile_chunk)
+ *   n_vars: Number of variables (must match the number used in me_compile_chunk)
+ *   output_chunk: Pointer to output buffer for this chunk
+ *   chunk_nitems: Number of elements in this chunk
+ *
+ * Use this function for both serial and parallel evaluation. It is thread-safe
+ * and can be used from multiple threads to process different chunks simultaneously.
  */
 void me_eval_chunk_threadsafe(const me_expr *expr, const void **vars_chunk,
                               int n_vars, void *output_chunk, int chunk_nitems);
 
-/* Prints debugging information on the syntax tree. */
+/* Prints the expression tree for debugging purposes. */
 void me_print(const me_expr *n);
 
 /* Frees the expression. */

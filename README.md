@@ -11,22 +11,18 @@ miniexpr is designed to be embedded directly into larger projects, not distribut
 - Vectorized evaluation for processing arrays efficiently
 - Thread-safe operations for parallel processing
 
-## Main Functions
+**Note**: This is a pre-alpha project.
 
-### `me_compile()`
-```c
-me_expr *me_compile(const char *expression, const me_variable *variables,
-                    int var_count, void *output, int nitems,
-                    me_dtype dtype, int *error);
-```
-Parses an expression string and creates a compiled expression tree. Variables are bound at compile time. Returns `NULL` on error.
+## API Functions
+
+miniexpr provides a simple, focused API with just two main functions:
 
 ### `me_compile_chunk()`
 ```c
 me_expr *me_compile_chunk(const char *expression, const me_variable *variables,
                           int var_count, me_dtype dtype, int *error);
 ```
-Compiles an expression for chunked evaluation. This variant is optimized for use with `me_eval_chunk()` and `me_eval_chunk_threadsafe()`, where variable and output pointers are provided during evaluation rather than compilation.
+Compiles an expression for evaluation. Variable and output pointers are provided during evaluation rather than compilation.
 
 **Simple Usage**: Just provide variable names - everything else is optional:
 
@@ -36,7 +32,7 @@ me_expr *expr = me_compile_chunk("x + y", vars, 2, ME_FLOAT64, &err);
 
 // Later, provide data in the same order as vars array
 const void *data[] = {x_array, y_array};  // x first, y second
-me_eval_chunk(expr, data, 2, output, nitems);
+me_eval_chunk_threadsafe(expr, data, 2, output, nitems);
 ```
 
 For mixed types (use `ME_AUTO` for output dtype to infer from variables):
@@ -46,9 +42,9 @@ me_expr *expr = me_compile_chunk("temp * count", vars, 2, ME_AUTO, &err);
 // Result type will be inferred (ME_FLOAT64 in this case)
 ```
 
-Variables are matched by position (order) in the arrays. Unspecified fields (address, type, context) default to NULL/0.
+Variables are matched by position (order) in the arrays. Unspecified fields default to NULL/0.
 
-### `dtype` Parameter Rules
+#### `dtype` Parameter Rules
 
 The `dtype` parameter has two mutually exclusive modes:
 
@@ -63,45 +59,25 @@ The `dtype` parameter has two mutually exclusive modes:
 
 Mixing modes (some vars with types, some `ME_AUTO`) will cause compilation to fail.
 
-Returns `NULL` on error.
-
-### `me_eval()`
-```c
-void me_eval(const me_expr *n);
-```
-Evaluates the compiled expression on vectors. Results are written to the output buffer specified during compilation.
-
-### `me_eval_fused()`
-```c
-void me_eval_fused(const me_expr *n);
-```
-Evaluates using fused bytecode for faster execution on complex expressions.
-
-### `me_eval_chunk()`
-```c
-void me_eval_chunk(const me_expr *expr, const void **vars_chunk, int n_vars,
-                   void *output_chunk, int chunk_nitems);
-```
-Evaluates a compiled expression with new variable and output pointers, allowing processing of large arrays in chunks without recompilation. **Not thread-safe**.
-
 ### `me_eval_chunk_threadsafe()`
 ```c
 void me_eval_chunk_threadsafe(const me_expr *expr, const void **vars_chunk,
                                int n_vars, void *output_chunk, int chunk_nitems);
 ```
-Thread-safe version of `me_eval_chunk()` for parallel evaluation across multiple threads.
+Evaluates the compiled expression with new variable and output pointers. This allows processing arrays in chunks without recompilation, and is thread-safe for parallel evaluation across multiple threads.
+
+**Parameters:**
+- `expr`: Compiled expression (from `me_compile_chunk`)
+- `vars_chunk`: Array of pointers to variable data chunks (same order as in `me_compile_chunk`)
+- `n_vars`: Number of variables (must match the number used in `me_compile_chunk`)
+- `output_chunk`: Pointer to output buffer for this chunk
+- `chunk_nitems`: Number of elements in this chunk
 
 ### `me_free()`
 ```c
 void me_free(me_expr *n);
 ```
 Frees the compiled expression. Safe to call on `NULL` pointers.
-
-### `me_print()`
-```c
-void me_print(const me_expr *n);
-```
-Prints debugging information about the syntax tree.
 
 ## Data Types
 
@@ -116,7 +92,31 @@ miniexpr supports various data types through the `me_dtype` enumeration:
 
 To use miniexpr in your project, simply include the source files (`miniexpr.c` and `miniexpr.h`) directly in your build system.
 
-For examples and detailed usage, see the [Getting Started Guide](doc/get-started.md).
+### Quick Example
+
+```c
+#include "miniexpr.h"
+
+// Define variables
+me_variable vars[] = {{"x"}, {"y"}};
+int err;
+
+// Compile expression
+me_expr *expr = me_compile_chunk("x + y", vars, 2, ME_FLOAT64, &err);
+
+// Prepare data
+double x_data[] = {1.0, 2.0, 3.0};
+double y_data[] = {4.0, 5.0, 6.0};
+double result[3];
+
+const void *var_ptrs[] = {x_data, y_data};
+
+// Evaluate (thread-safe)
+me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, 3);
+
+// Clean up
+me_free(expr);
+```
 
 ## Contributing
 
