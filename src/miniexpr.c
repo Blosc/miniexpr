@@ -157,7 +157,7 @@ static const me_dtype type_promotion_table[13][13] = {
 };
 
 /* Promote two types according to NumPy rules */
-static me_dtype promome_types(me_dtype a, me_dtype b) {
+static me_dtype promote_types(me_dtype a, me_dtype b) {
     // ME_AUTO should have been resolved during compilation
     if (a == ME_AUTO || b == ME_AUTO) {
         fprintf(stderr, "FATAL: ME_AUTO in type promotion (a=%d, b=%d). This is a bug.\n", a, b);
@@ -266,7 +266,7 @@ static me_dtype infer_result_type(const me_expr *n) {
 
             for (int i = 0; i < arity; i++) {
                 me_dtype param_type = infer_result_type((const me_expr *) n->parameters[i]);
-                result = promome_types(result, param_type);
+                result = promote_types(result, param_type);
             }
 
             return result;
@@ -277,7 +277,7 @@ static me_dtype infer_result_type(const me_expr *n) {
 }
 
 /* Apply type promotion to a binary operation node */
-static me_expr *creame_conversion_node(me_expr *source, me_dtype target_dtype) {
+static me_expr *create_conversion_node(me_expr *source, me_dtype target_dtype) {
     /* Create a unary conversion node that converts source to target_dtype */
     me_expr *conv = NEW_EXPR(ME_FUNCTION1 | ME_FLAG_PURE, source);
     if (conv) {
@@ -297,7 +297,7 @@ static void apply_type_promotion(me_expr *node) {
     if (left && right) {
         me_dtype left_type = left->dtype;
         me_dtype right_type = right->dtype;
-        me_dtype promoted = promome_types(left_type, right_type);
+        me_dtype promoted = promote_types(left_type, right_type);
 
         // Store the promoted output type
         node->dtype = promoted;
@@ -554,150 +554,153 @@ static double logical_or(double a, double b) { return ((int) a) || ((int) b) ? 1
 static double logical_not(double a) { return !(int) a ? 1.0 : 0.0; }
 static double logical_xor(double a, double b) { return ((int) a) != ((int) b) ? 1.0 : 0.0; }
 
+static bool is_identifier_start(char c) {
+    return isalpha((unsigned char) c) || c == '_';
+}
+
+static bool is_identifier_char(char c) {
+    return isalnum((unsigned char) c) || c == '_';
+}
+
+static void skip_whitespace(state *s) {
+    while (*s->next && isspace((unsigned char) *s->next)) {
+        s->next++;
+    }
+}
+
+static void read_number_token(state *s) {
+    s->value = strtod(s->next, (char **) &s->next);
+    s->type = TOK_NUMBER;
+}
+
+static void read_identifier_token(state *s) {
+    const char *start = s->next;
+    while (is_identifier_char(*s->next)) {
+        s->next++;
+    }
+
+    const me_variable *var = find_lookup(s, start, s->next - start);
+    if (!var) {
+        var = find_builtin(start, s->next - start);
+    }
+
+    if (!var) {
+        s->type = TOK_ERROR;
+        return;
+    }
+
+    switch (TYPE_MASK(var->type)) {
+        case ME_VARIABLE:
+            s->type = TOK_VARIABLE;
+            s->bound = var->address;
+            s->dtype = var->dtype;
+            break;
+
+        case ME_CLOSURE0:
+        case ME_CLOSURE1:
+        case ME_CLOSURE2:
+        case ME_CLOSURE3:
+        case ME_CLOSURE4:
+        case ME_CLOSURE5:
+        case ME_CLOSURE6:
+        case ME_CLOSURE7:
+            s->context = var->context;
+            /* Falls through. */
+        case ME_FUNCTION0:
+        case ME_FUNCTION1:
+        case ME_FUNCTION2:
+        case ME_FUNCTION3:
+        case ME_FUNCTION4:
+        case ME_FUNCTION5:
+        case ME_FUNCTION6:
+        case ME_FUNCTION7:
+            s->type = var->type;
+            s->function = var->address;
+            break;
+    }
+}
+
+typedef struct {
+    const char *literal;
+    int token_type;
+    me_fun2 function;
+} operator_spec;
+
+static bool handle_multi_char_operator(state *s) {
+    static const operator_spec multi_ops[] = {
+        {"**", TOK_POW, pow},
+        {"<<", TOK_SHIFT, bit_shl},
+        {">>", TOK_SHIFT, bit_shr},
+        {"==", TOK_COMPARE, cmp_eq},
+        {"!=", TOK_COMPARE, cmp_ne},
+        {"<=", TOK_COMPARE, cmp_le},
+        {">=", TOK_COMPARE, cmp_ge},
+    };
+
+    for (size_t i = 0; i < sizeof(multi_ops) / sizeof(multi_ops[0]); i++) {
+        const operator_spec *op = &multi_ops[i];
+        size_t len = strlen(op->literal);
+        if (strncmp(s->next, op->literal, len) == 0) {
+            s->type = op->token_type;
+            s->function = op->function;
+            s->next += len;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void handle_single_char_operator(state *s, char c) {
+    s->next++;
+    switch (c) {
+        case '+': s->type = TOK_INFIX; s->function = add; break;
+        case '-': s->type = TOK_INFIX; s->function = sub; break;
+        case '*': s->type = TOK_INFIX; s->function = mul; break;
+        case '/': s->type = TOK_INFIX; s->function = divide; break;
+        case '%': s->type = TOK_INFIX; s->function = fmod; break;
+        case '&': s->type = TOK_BITWISE; s->function = bit_and; break;
+        case '|': s->type = TOK_BITWISE; s->function = bit_or; break;
+        case '^': s->type = TOK_BITWISE; s->function = bit_xor; break;
+        case '~': s->type = TOK_BITWISE; s->function = bit_not; break;
+        case '<': s->type = TOK_COMPARE; s->function = cmp_lt; break;
+        case '>': s->type = TOK_COMPARE; s->function = cmp_gt; break;
+        case '(': s->type = TOK_OPEN; break;
+        case ')': s->type = TOK_CLOSE; break;
+        case ',': s->type = TOK_SEP; break;
+        default: s->type = TOK_ERROR; break;
+    }
+}
+
+static void read_operator_token(state *s) {
+    if (handle_multi_char_operator(s)) {
+        return;
+    }
+
+    if (!*s->next) {
+        s->type = TOK_END;
+        return;
+    }
+
+    handle_single_char_operator(s, *s->next);
+}
 
 void next_token(state *s) {
     s->type = TOK_NULL;
 
     do {
+        skip_whitespace(s);
+
         if (!*s->next) {
             s->type = TOK_END;
             return;
         }
 
-        /* Try reading a number. */
         if ((s->next[0] >= '0' && s->next[0] <= '9') || s->next[0] == '.') {
-            s->value = strtod(s->next, (char **) &s->next);
-            s->type = TOK_NUMBER;
+            read_number_token(s);
+        } else if (is_identifier_start(s->next[0])) {
+            read_identifier_token(s);
         } else {
-            /* Look for a variable or builtin function call. */
-            if (isalpha(s->next[0])) {
-                const char *start;
-                start = s->next;
-                while (isalpha(s->next[0]) || isdigit(s->next[0]) || (s->next[0] == '_')) s->next++;
-
-                const me_variable *var = find_lookup(s, start, s->next - start);
-                if (!var) var = find_builtin(start, s->next - start);
-
-                if (!var) {
-                    s->type = TOK_ERROR;
-                } else {
-                    switch (TYPE_MASK(var->type)) {
-                        case ME_VARIABLE:
-                            s->type = TOK_VARIABLE;
-                            s->bound = var->address;
-                            s->dtype = var->dtype; // Store the variable's type
-                            break;
-
-                        case ME_CLOSURE0:
-                        case ME_CLOSURE1:
-                        case ME_CLOSURE2:
-                        case ME_CLOSURE3: /* Falls through. */
-                        case ME_CLOSURE4:
-                        case ME_CLOSURE5:
-                        case ME_CLOSURE6:
-                        case ME_CLOSURE7: /* Falls through. */
-                            s->context = var->context; /* Falls through. */
-
-                        case ME_FUNCTION0:
-                        case ME_FUNCTION1:
-                        case ME_FUNCTION2:
-                        case ME_FUNCTION3: /* Falls through. */
-                        case ME_FUNCTION4:
-                        case ME_FUNCTION5:
-                        case ME_FUNCTION6:
-                        case ME_FUNCTION7: /* Falls through. */
-                            s->type = var->type;
-                            s->function = var->address;
-                            break;
-                    }
-                }
-            } else {
-                /* Look for an operator or special character. */
-                char c = s->next[0];
-                char next_c = s->next[1];
-
-                /* Multi-character operators */
-                if (c == '*' && next_c == '*') {
-                    s->type = TOK_POW;
-                    s->function = (const void *) pow;
-                    s->next += 2;
-                } else if (c == '<' && next_c == '<') {
-                    s->type = TOK_SHIFT;
-                    s->function = bit_shl;
-                    s->next += 2;
-                } else if (c == '>' && next_c == '>') {
-                    s->type = TOK_SHIFT;
-                    s->function = bit_shr;
-                    s->next += 2;
-                } else if (c == '=' && next_c == '=') {
-                    s->type = TOK_COMPARE;
-                    s->function = cmp_eq;
-                    s->next += 2;
-                } else if (c == '!' && next_c == '=') {
-                    s->type = TOK_COMPARE;
-                    s->function = cmp_ne;
-                    s->next += 2;
-                } else if (c == '<' && next_c == '=') {
-                    s->type = TOK_COMPARE;
-                    s->function = cmp_le;
-                    s->next += 2;
-                } else if (c == '>' && next_c == '=') {
-                    s->type = TOK_COMPARE;
-                    s->function = cmp_ge;
-                    s->next += 2;
-                } else {
-                    /* Single-character operators */
-                    s->next++;
-                    switch (c) {
-                        case '+': s->type = TOK_INFIX;
-                            s->function = add;
-                            break;
-                        case '-': s->type = TOK_INFIX;
-                            s->function = sub;
-                            break;
-                        case '*': s->type = TOK_INFIX;
-                            s->function = mul;
-                            break;
-                        case '/': s->type = TOK_INFIX;
-                            s->function = divide;
-                            break;
-                        case '%': s->type = TOK_INFIX;
-                            s->function = fmod;
-                            break;
-                        case '&': s->type = TOK_BITWISE;
-                            s->function = bit_and;
-                            break;
-                        case '|': s->type = TOK_BITWISE;
-                            s->function = bit_or;
-                            break;
-                        case '^': s->type = TOK_BITWISE;
-                            s->function = bit_xor;
-                            break; /* XOR for ints/bools */
-                        case '~': s->type = TOK_BITWISE;
-                            s->function = bit_not;
-                            break;
-                        case '<': s->type = TOK_COMPARE;
-                            s->function = cmp_lt;
-                            break;
-                        case '>': s->type = TOK_COMPARE;
-                            s->function = cmp_gt;
-                            break;
-                        case '(': s->type = TOK_OPEN;
-                            break;
-                        case ')': s->type = TOK_CLOSE;
-                            break;
-                        case ',': s->type = TOK_SEP;
-                            break;
-                        case ' ':
-                        case '\t':
-                        case '\n':
-                        case '\r': s->type = TOK_NULL;
-                            break;
-                        default: s->type = TOK_ERROR;
-                            break;
-                    }
-                }
-            }
+            read_operator_token(s);
         }
     } while (s->type == TOK_NULL);
 }
@@ -2244,7 +2247,7 @@ static void save_variable_bindings(const me_expr *node,
 }
 
 /* Recursively promote variables in expression tree */
-static void promome_variables_in_tree(me_expr *n, me_dtype target_type,
+static void promote_variables_in_tree(me_expr *n, me_dtype target_type,
                                       promoted_var_t *promotions, int *promo_count,
                                       int nitems) {
     if (!n) return;
@@ -2297,7 +2300,7 @@ static void promome_variables_in_tree(me_expr *n, me_dtype target_type,
         case ME_CLOSURE7: {
             const int arity = ARITY(n->type);
             for (int i = 0; i < arity; i++) {
-                promome_variables_in_tree((me_expr *) n->parameters[i], target_type,
+                promote_variables_in_tree((me_expr *) n->parameters[i], target_type,
                                           promotions, promo_count, nitems);
             }
             break;
@@ -2337,8 +2340,7 @@ static void restore_variables_in_tree(me_expr *n, const void **original_bounds,
         case ME_CLOSURE7: {
             const int arity = ARITY(n->type);
             for (int i = 0; i < arity; i++) {
-                restore_variables_in_tree((me_expr *) n->parameters[i],
-                                          original_bounds, original_types, restore_idx);
+                restore_variables_in_tree((me_expr *) n->parameters[i], original_bounds, original_types, restore_idx);
             }
             break;
         }
@@ -2454,7 +2456,7 @@ static void me_eval(const me_expr *n) {
     save_variable_bindings(n, original_bounds, original_types, &save_idx);
 
     // Promote variables
-    promome_variables_in_tree((me_expr *) n, result_type, promotions, &promo_count, n->nitems);
+    promote_variables_in_tree((me_expr *) n, result_type, promotions, &promo_count, n->nitems);
 
     // Update expression type
     me_dtype saved_dtype = n->dtype;
@@ -3033,6 +3035,3 @@ void me_print(const me_expr *n) {
 me_dtype me_get_dtype(const me_expr *expr) {
     return expr ? expr->dtype : ME_AUTO;
 }
-
-
-
