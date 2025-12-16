@@ -23,22 +23,44 @@ typedef struct {
     int num_inputs;
     void *output;
     size_t start_idx;
-    size_t nitems;
+    size_t total_elements;
+    size_t chunk_elements;
+    pthread_mutex_t *work_mutex;
+    size_t *next_chunk_idx;
 } thread_data_t;
 
 static void *eval_thread(void *arg) {
     thread_data_t *data = (thread_data_t *)arg;
 
-    // Adjust input pointers to start position
-    const void *adjusted_inputs[10];
-    for (int i = 0; i < data->num_inputs; i++) {
-        adjusted_inputs[i] = (const double *)data->inputs[i] + data->start_idx;
+    while (1) {
+        // Get next chunk to process
+        size_t my_chunk_idx;
+        pthread_mutex_lock(data->work_mutex);
+        my_chunk_idx = *data->next_chunk_idx;
+        if (my_chunk_idx >= data->total_elements) {
+            pthread_mutex_unlock(data->work_mutex);
+            break;
+        }
+        *data->next_chunk_idx += data->chunk_elements;
+        pthread_mutex_unlock(data->work_mutex);
+
+        // Calculate actual chunk size (last chunk may be smaller)
+        size_t chunk_size = data->chunk_elements;
+        if (my_chunk_idx + chunk_size > data->total_elements) {
+            chunk_size = data->total_elements - my_chunk_idx;
+        }
+
+        // Adjust input pointers to chunk position
+        const void *adjusted_inputs[10];
+        for (int i = 0; i < data->num_inputs; i++) {
+            adjusted_inputs[i] = (const double *)data->inputs[i] + my_chunk_idx;
+        }
+
+        double *output = (double *)data->output + my_chunk_idx;
+
+        me_eval_chunk_threadsafe(data->expr, adjusted_inputs, data->num_inputs,
+                                output, chunk_size);
     }
-
-    double *output = (double *)data->output + data->start_idx;
-
-    me_eval_chunk_threadsafe(data->expr, adjusted_inputs, data->num_inputs,
-                            output, data->nitems);
 
     return NULL;
 }
@@ -77,41 +99,36 @@ static double benchmark_chunksize(size_t chunk_bytes) {
 
     const void *inputs[] = {a, b};
 
-    // Benchmark
+    // Benchmark - use work queue pattern to avoid thread creation overhead
+    pthread_mutex_t work_mutex = PTHREAD_MUTEX_INITIALIZER;
+    size_t next_chunk_idx = 0;
+    
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
 
-    // Process in parallel with given chunk size
-    size_t processed = 0;
-    while (processed < total_elements) {
-        pthread_t threads[NUM_THREADS];
-        thread_data_t thread_data[NUM_THREADS];
-        int num_threads_created = 0;
-
-        for (int i = 0; i < NUM_THREADS && processed < total_elements; i++) {
-            size_t elements_this_chunk = chunk_elements;
-            if (processed + elements_this_chunk > total_elements) {
-                elements_this_chunk = total_elements - processed;
-            }
-
-            thread_data[i].expr = expr;
-            thread_data[i].inputs = inputs;
-            thread_data[i].num_inputs = 2;
-            thread_data[i].output = result;
-            thread_data[i].start_idx = processed;
-            thread_data[i].nitems = elements_this_chunk;
-
-            pthread_create(&threads[i], NULL, eval_thread, &thread_data[i]);
-            num_threads_created++;
-
-            processed += elements_this_chunk;
-        }
-
-        // Wait for threads to complete
-        for (int i = 0; i < num_threads_created; i++) {
-            pthread_join(threads[i], NULL);
-        }
+    // Create threads once - they'll pull chunks from work queue
+    pthread_t threads[NUM_THREADS];
+    thread_data_t thread_data[NUM_THREADS];
+    
+    for (int i = 0; i < NUM_THREADS; i++) {
+        thread_data[i].expr = expr;
+        thread_data[i].inputs = inputs;
+        thread_data[i].num_inputs = 2;
+        thread_data[i].output = result;
+        thread_data[i].total_elements = total_elements;
+        thread_data[i].chunk_elements = chunk_elements;
+        thread_data[i].work_mutex = &work_mutex;
+        thread_data[i].next_chunk_idx = &next_chunk_idx;
+        
+        pthread_create(&threads[i], NULL, eval_thread, &thread_data[i]);
     }
+    
+    // Wait for all threads to complete
+    for (int i = 0; i < NUM_THREADS; i++) {
+        pthread_join(threads[i], NULL);
+    }
+    
+    pthread_mutex_destroy(&work_mutex);
 
     clock_gettime(CLOCK_MONOTONIC, &end);
 
