@@ -86,6 +86,7 @@ static double benchmark_chunksize(size_t chunk_bytes) {
     while (processed < total_elements) {
         pthread_t threads[NUM_THREADS];
         thread_data_t thread_data[NUM_THREADS];
+        int num_threads_created = 0;
 
         for (int i = 0; i < NUM_THREADS && processed < total_elements; i++) {
             size_t elements_this_chunk = chunk_elements;
@@ -101,17 +102,13 @@ static double benchmark_chunksize(size_t chunk_bytes) {
             thread_data[i].nitems = elements_this_chunk;
 
             pthread_create(&threads[i], NULL, eval_thread, &thread_data[i]);
+            num_threads_created++;
 
             processed += elements_this_chunk;
         }
 
         // Wait for threads to complete
-        int active_threads = (processed <= total_elements) ? NUM_THREADS : (NUM_THREADS - ((processed - total_elements + chunk_elements - 1) / chunk_elements));
-        if (processed > total_elements) {
-            active_threads = NUM_THREADS;
-        }
-
-        for (int i = 0; i < NUM_THREADS && i < active_threads; i++) {
+        for (int i = 0; i < num_threads_created; i++) {
             pthread_join(threads[i], NULL);
         }
     }
