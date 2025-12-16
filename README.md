@@ -118,6 +118,33 @@ me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, 3);
 me_free(expr);
 ```
 
+## Examples
+
+The `examples/` directory contains complete, runnable examples demonstrating various features:
+
+- **01_simple_expression.c** - Basic arithmetic expressions (beginner)
+- **02_complex_expression.c** - Complex formulas with trigonometry
+- **03_mixed_types.c** - Type promotion and ME_AUTO inference
+- **04_large_dataset.c** - Processing 1M elements in chunks
+- **05_parallel_evaluation.c** - Multi-threaded parallel processing
+- **06_debug_print.c** - Expression tree visualization with me_print()
+
+Build and run:
+```bash
+make examples
+./build/01_simple_expression
+```
+
+See [examples/README.md](examples/README.md) for detailed documentation of each example.
+
+## Documentation
+
+- **[examples/README.md](examples/README.md)** - Complete examples with explanations
+- **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - Complete API reference
+- **[doc/get-started.md](doc/get-started.md)** - Getting started guide
+- **[doc/data-types.md](doc/data-types.md)** - Data types guide
+- **[doc/parallel-processing.md](doc/parallel-processing.md)** - Parallel processing patterns
+
 ## Contributing
 
 After cloning the repository, install the Git hooks:

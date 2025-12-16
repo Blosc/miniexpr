@@ -1,0 +1,338 @@
+# miniexpr Examples
+
+This directory contains practical examples demonstrating various features and use cases of the miniexpr library.
+
+## Quick Start
+
+To build and run all examples:
+
+```bash
+make examples
+```
+
+To run a specific example:
+
+```bash
+./build/01_simple_expression
+```
+
+## Examples Overview
+
+### 01_simple_expression.c
+**Basic arithmetic expression evaluation**
+
+- **What it demonstrates**: Simple two-variable arithmetic expression
+- **Expression**: `(x + y) * 2`
+- **Concepts**: Basic compilation, evaluation, and cleanup
+- **Best for**: First-time users learning the API
+
+**Run it:**
+```bash
+./build/01_simple_expression
+```
+
+**Expected output:**
+```
+=== Simple Expression Example ===
+Expression: (x + y) * 2
+
+Results:
+  x     y     (x+y)*2
+----  ----  ---------
+   1    10         22
+   2    20         44
+   ...
+```
+
+---
+
+### 02_complex_expression.c
+**Complex mathematical formulas with functions**
+
+- **What it demonstrates**: Multi-variable expressions with built-in math functions
+- **Expression**: `v*t*cos(angle) - 0.5*g*t*t` (projectile motion)
+- **Concepts**: Multiple variables, trigonometry, nested operations
+- **Best for**: Scientific computing applications
+
+**Run it:**
+```bash
+./build/02_complex_expression
+```
+
+**Use cases:**
+- Physics simulations
+- Engineering calculations
+- Scientific data processing
+
+---
+
+### 03_mixed_types.c
+**Automatic type promotion and inference**
+
+- **What it demonstrates**: Mixing different data types (int32 and float64)
+- **Expression**: `a + b` where a=int32, b=float64
+- **Concepts**: ME_AUTO type inference, type promotion
+- **Best for**: Working with heterogeneous data
+
+**Run it:**
+```bash
+./build/03_mixed_types
+```
+
+**Key features:**
+- Automatic type promotion (int32 → float64)
+- ME_AUTO infers output type from inputs
+- Explicit type specification in variables
+
+---
+
+### 04_large_dataset.c
+**Processing large arrays efficiently**
+
+- **What it demonstrates**: Chunk-based processing for memory efficiency
+- **Dataset size**: 44.7 million elements (~1GB working set)
+- **Chunk size**: 32K elements (768 KB, cache-optimized)
+- **Expression**: `sqrt(a*a + b*b)` (4 FLOPs/element)
+- **Concepts**: Chunked evaluation, memory management, performance
+- **Best for**: Large-scale data processing
+
+**Run it:**
+```bash
+./build/04_large_dataset
+```
+
+**Use cases:**
+- Processing datasets larger than available memory
+- Streaming data from disk
+- Reducing memory footprint
+- Improving cache efficiency
+
+**Performance metrics included:**
+- Processing time
+- Throughput (Melems/sec)
+- Computational performance (GFLOP/s)
+- Memory bandwidth (GB/s)
+
+---
+
+### 05_parallel_evaluation.c
+**Multi-threaded parallel processing**
+
+- **What it demonstrates**: Thread-safe parallel evaluation
+- **Threads**: 4 concurrent workers
+- **Total size**: 44.7 million elements (~1GB working set)
+- **Chunk size**: 32K elements (768 KB, cache-optimized)
+- **Expression**: `sqrt(a*a + b*b)` (4 FLOPs/element convention, ~23 actual)
+- **Concepts**: Thread safety, parallel processing, performance scaling
+- **Best for**: Multi-core performance optimization
+
+**Run it:**
+```bash
+./build/05_parallel_evaluation
+```
+
+**Key features:**
+- `me_eval_chunk_threadsafe()` allows concurrent evaluation
+- Same compiled expression used by multiple threads
+- Linear speedup with number of cores
+- No locks needed - expression is read-only
+
+**Performance metrics included:**
+- Throughput (Melems/sec)
+- Computational performance (GFLOP/s)
+- Memory bandwidth (GB/s)
+- Speedup analysis
+
+**Use cases:**
+- High-performance computing
+- Real-time data processing
+- Maximizing CPU utilization
+
+**Important Notes:**
+
+**On Speedup:**
+This example shows **~2.85× speedup** over serial using cache-optimized 32K chunks.
+The chunk size is critical for parallel performance:
+- 32K elements = 768 KB fits in L3 cache
+- 4 threads × 768 KB = 3 MB total (fits in typical L3)
+- Minimizes cache misses and memory bandwidth contention
+- Result: 1445 Melems/sec vs 507 Melems/sec serial
+
+**On Cache Optimization:**
+Chunk size matters enormously for parallel performance:
+- Tested 10 sizes from 4K to 2M elements
+- 32K elements (768 KB) is optimal for this machine
+- Performance drops sharply with larger chunks (cache overflow)
+- See `examples/test_chunk_sizes.c` for the benchmark tool
+
+**On FLOP Counting:**
+- **Convention**: sqrt = 1 FLOP (industry standard)
+- **Reality**: sqrt ≈ 20 FLOPs (hardware cycles: ~15-20 vs ~3-5 for mul/add)
+- We report conventional count in metrics, document actual in comments
+
+---
+
+### 06_debug_print.c
+**Expression tree visualization for debugging**
+
+- **What it demonstrates**: Using `me_print()` to visualize expression trees
+- **Expressions**: Various complexity levels
+- **Concepts**: Debugging, tree structure, operator precedence
+- **Best for**: Understanding how expressions are parsed
+
+**Run it:**
+```bash
+./build/06_debug_print
+```
+
+**What you'll see:**
+- Tree structure with indentation
+- Function nodes (f0, f1, f2, ...)
+- Variable references (bound <address>)
+- Constant values
+
+**Use cases:**
+- Debugging complex expressions
+- Understanding operator precedence
+- Verifying expression parsing
+- Learning the internal representation
+
+---
+
+## Building Examples
+
+### Using the Makefile
+
+Add to your `Makefile`:
+
+```make
+EXAMPLE_SRCS = $(wildcard examples/*.c)
+EXAMPLE_BINS = $(patsubst examples/%.c,$(BUILDDIR)/%,$(EXAMPLE_SRCS))
+
+examples: $(EXAMPLE_BINS)
+
+$(BUILDDIR)/%: examples/%.c $(BUILDDIR)/miniexpr.o
+	@echo "Building example: $@"
+	$(CC) $(CFLAGS) -Isrc $< $(BUILDDIR)/miniexpr.o -o $@ -lm
+```
+
+Then run:
+```bash
+make examples
+```
+
+### Manual Compilation
+
+Compile any example manually:
+
+```bash
+gcc -O2 -Isrc examples/01_simple_expression.c build/miniexpr.o -o 01_simple_expression -lm
+```
+
+For the parallel example (requires pthreads):
+```bash
+gcc -O2 -Isrc examples/05_parallel_evaluation.c build/miniexpr.o -o 05_parallel_evaluation -lm -lpthread
+```
+
+---
+
+## Common Patterns
+
+### Basic Pattern (used in most examples)
+
+```c
+// 1. Define variables
+me_variable vars[] = {{"x"}, {"y"}};
+
+// 2. Compile expression
+int error;
+me_expr *expr = me_compile_chunk("x + y", vars, 2, ME_FLOAT64, &error);
+
+// 3. Prepare data pointers
+const void *var_ptrs[] = {x_data, y_data};
+
+// 4. Evaluate
+me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, n);
+
+// 5. Cleanup
+me_free(expr);
+```
+
+### Error Handling Pattern
+
+```c
+if (!expr) {
+    printf("Parse error at position %d\n", error);
+    return 1;
+}
+```
+
+### Chunk Processing Pattern
+
+```c
+for (int chunk = 0; chunk < num_chunks; chunk++) {
+    int offset = chunk * CHUNK_SIZE;
+    int size = min(CHUNK_SIZE, TOTAL_SIZE - offset);
+
+    const void *var_ptrs[] = {&data[offset]};
+    me_eval_chunk_threadsafe(expr, var_ptrs, 1, &result[offset], size);
+}
+```
+
+---
+
+## Performance Tips
+
+From the examples, you can learn:
+
+1. **Compile once, evaluate many times** (Examples 04, 05)
+   - Compilation is more expensive than evaluation
+   - Reuse compiled expressions when possible
+
+2. **Use chunking for large datasets** (Example 04)
+   - Better cache utilization
+   - Enables streaming from disk
+   - Reduces memory footprint
+
+3. **Parallelize for performance** (Example 05)
+   - `me_eval_chunk_threadsafe()` enables safe parallelism
+   - Linear speedup with number of cores
+   - No synchronization overhead
+
+4. **Choose appropriate data types** (Example 03)
+   - Let ME_AUTO infer types when mixing
+   - Use explicit types for control
+   - Understand promotion rules
+
+---
+
+## Next Steps
+
+After trying these examples:
+
+1. **Modify them**: Change expressions and see what happens
+2. **Combine patterns**: Use chunking + parallelism together
+3. **Read the docs**: Check `doc/` directory for detailed tutorials
+4. **Write your own**: Adapt examples to your use case
+
+## Additional Resources
+
+- **API Reference**: `../QUICK_REFERENCE.md`
+- **Getting Started Guide**: `../doc/get-started.md`
+- **Data Types Guide**: `../doc/data-types.md`
+- **Parallel Processing Guide**: `../doc/parallel-processing.md`
+
+---
+
+## Summary Table
+
+| Example | Complexity | Key Concept | Lines | Time to Run |
+|---------|-----------|-------------|-------|-------------|
+| 01 | ⭐ Simple | Basic API | ~50 | <1s |
+| 02 | ⭐⭐ Moderate | Math functions | ~70 | <1s |
+| 03 | ⭐⭐ Moderate | Type mixing | ~75 | <1s |
+| 04 | ⭐⭐⭐ Advanced | Large data | ~110 | ~1s |
+| 05 | ⭐⭐⭐ Advanced | Parallelism | ~140 | ~1s |
+| 06 | ⭐ Simple | Debugging | ~70 | <1s |
+
+**Start with Example 01, then explore based on your needs!** 🚀
