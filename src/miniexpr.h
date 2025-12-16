@@ -78,7 +78,7 @@ typedef struct me_expr {
 
     union {
         double value;
-        const double *bound;
+        const void *bound;
         const void *function;
     };
 

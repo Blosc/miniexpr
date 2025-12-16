@@ -1086,7 +1086,7 @@ static double me_eval_scalar(const me_expr *n) {
 
     switch (TYPE_MASK(n->type)) {
         case ME_CONSTANT: return n->value;
-        case ME_VARIABLE: return *n->bound;
+        case ME_VARIABLE: return *(const double *)n->bound;
 
         case ME_FUNCTION0:
         case ME_FUNCTION1:
