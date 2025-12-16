@@ -192,7 +192,7 @@ int test_mixed_types() {
     }
 
     if (passed) {
-        printf("  ✅ PASSED (inferred type: %d)\n", expr->dtype);
+        printf("  ✅ PASSED (inferred type: %d)\n", me_get_dtype(expr));
     }
 
     me_free(expr);

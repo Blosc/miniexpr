@@ -29,7 +29,7 @@ int main() {
 
         if (expr) {
             printf("  ✅ PASS: Compilation succeeded\n");
-            printf("  Result dtype: %d\n", expr->dtype);
+            printf("  Result dtype: %d\n", me_get_dtype(expr));
             me_free(expr);
         } else {
             printf("  ❌ FAIL: Should have succeeded\n");
@@ -44,7 +44,7 @@ int main() {
 
         if (expr) {
             printf("  ✅ PASS: Compilation succeeded\n");
-            printf("  Inferred result dtype: %d (ME_INT32=%d)\n", expr->dtype, ME_INT32);
+            printf("  Inferred result dtype: %d (ME_INT32=%d)\n", me_get_dtype(expr), ME_INT32);
             me_free(expr);
         } else {
             printf("  ❌ FAIL: Should have succeeded\n");

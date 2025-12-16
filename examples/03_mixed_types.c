@@ -37,10 +37,11 @@ int main() {
     }
 
     printf("Inferred result type: ");
-    switch (expr->dtype) {
+    me_dtype result_dtype = me_get_dtype(expr);
+    switch (result_dtype) {
         case ME_INT32: printf("ME_INT32\n"); break;
         case ME_FLOAT64: printf("ME_FLOAT64\n"); break;
-        default: printf("%d\n", expr->dtype);
+        default: printf("%d\n", result_dtype);
     }
     printf("\n");
 

@@ -75,6 +75,27 @@ enum {
     TOK_BITWISE, TOK_SHIFT, TOK_COMPARE, TOK_POW
 };
 
+/* Internal definition of me_expr (opaque to users) */
+struct me_expr {
+    int type;
+
+    union {
+        double value;
+        const void *bound;
+        const void *function;
+    };
+
+    /* Vector operation info */
+    void *output; // Generic pointer (can be float* or double*)
+    int nitems;
+    me_dtype dtype; // Data type for this expression (result type after promotion)
+    me_dtype input_dtype; // Original input type (for variables/constants)
+    /* Bytecode info (for fused evaluation) */
+    void *bytecode; // Pointer to compiled bytecode
+    int ncode; // Number of instructions
+    void *parameters[1]; // Must be last (flexible array member)
+};
+
 
 /* Type promotion table following NumPy rules */
 /* Note: ME_AUTO (0) should never appear in type promotion, so we index from 1 */
@@ -3007,6 +3028,10 @@ static void pn(const me_expr *n, int depth) {
 
 void me_print(const me_expr *n) {
     pn(n, 0);
+}
+
+me_dtype me_get_dtype(const me_expr *expr) {
+    return expr ? expr->dtype : ME_AUTO;
 }
 
 

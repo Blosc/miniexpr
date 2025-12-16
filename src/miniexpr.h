@@ -73,25 +73,8 @@ typedef enum {
     ME_COMPLEX128 /* double complex */
 } me_dtype;
 
-typedef struct me_expr {
-    int type;
-
-    union {
-        double value;
-        const void *bound;
-        const void *function;
-    };
-
-    /* Vector operation info */
-    void *output; // Generic pointer (can be float* or double*)
-    int nitems;
-    me_dtype dtype; // Data type for this expression (result type after promotion)
-    me_dtype input_dtype; // Original input type (for variables/constants)
-    /* Bytecode info (for fused evaluation) */
-    void *bytecode; // Pointer to compiled bytecode
-    int ncode; // Number of instructions
-    void *parameters[1]; // Must be last (flexible array member)
-} me_expr;
+/* Opaque type for compiled expressions */
+typedef struct me_expr me_expr;
 
 
 enum {
@@ -178,6 +161,11 @@ void me_print(const me_expr *n);
 /* Frees the expression. */
 /* This is safe to call on NULL pointers. */
 void me_free(me_expr *n);
+
+/* Get the result data type of a compiled expression.
+ * Returns the dtype that will be used for the output of me_eval_chunk_threadsafe().
+ */
+me_dtype me_get_dtype(const me_expr *expr);
 
 
 #ifdef __cplusplus
