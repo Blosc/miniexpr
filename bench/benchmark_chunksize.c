@@ -1,7 +1,7 @@
 /*
- * Benchmark to find optimal chunk size for thread-safe evaluation
+ * Benchmark with single persistent thread pool across all tests
  * Tests various chunk sizes from 1 KB to 130 MB with 4 threads
- *
+ * 
  * Usage: ./benchmark_chunksize
  *
  * Output: CSV-style results showing performance for each chunk size
@@ -12,123 +12,174 @@
 #include <pthread.h>
 #include <time.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include "miniexpr.h"
 
 #define NUM_THREADS 4
 #define TOTAL_SIZE_MB 1024  // 1 GB total dataset
 
 typedef struct {
+    // Work parameters (reset for each test)
     me_expr *expr;
     const void **inputs;
     int num_inputs;
     void *output;
-    size_t start_idx;
     size_t total_elements;
     size_t chunk_elements;
-    pthread_mutex_t *work_mutex;
-    size_t *next_chunk_idx;
-} thread_data_t;
+    
+    // Shared work queue
+    pthread_mutex_t work_mutex;
+    pthread_cond_t work_available;
+    pthread_cond_t all_done;
+    size_t next_chunk_idx;
+    size_t completed_elements;
+    bool work_ready;
+    bool should_exit;
+} thread_pool_t;
 
-static void *eval_thread(void *arg) {
-    thread_data_t *data = (thread_data_t *)arg;
-
+static void *worker_thread(void *arg) {
+    thread_pool_t *pool = (thread_pool_t *)arg;
+    
     while (1) {
-        // Get next chunk to process
-        size_t my_chunk_idx;
-        pthread_mutex_lock(data->work_mutex);
-        my_chunk_idx = *data->next_chunk_idx;
-        if (my_chunk_idx >= data->total_elements) {
-            pthread_mutex_unlock(data->work_mutex);
+        pthread_mutex_lock(&pool->work_mutex);
+        
+        // Wait for work or exit signal
+        while (!pool->work_ready && !pool->should_exit) {
+            pthread_cond_wait(&pool->work_available, &pool->work_mutex);
+        }
+        
+        if (pool->should_exit) {
+            pthread_mutex_unlock(&pool->work_mutex);
             break;
         }
-        *data->next_chunk_idx += data->chunk_elements;
-        pthread_mutex_unlock(data->work_mutex);
-
-        // Calculate actual chunk size (last chunk may be smaller)
-        size_t chunk_size = data->chunk_elements;
-        if (my_chunk_idx + chunk_size > data->total_elements) {
-            chunk_size = data->total_elements - my_chunk_idx;
+        
+        // Process chunks until all work is done
+        while (pool->next_chunk_idx < pool->total_elements) {
+            // Get next chunk
+            size_t my_chunk_idx = pool->next_chunk_idx;
+            size_t chunk_size = pool->chunk_elements;
+            if (my_chunk_idx + chunk_size > pool->total_elements) {
+                chunk_size = pool->total_elements - my_chunk_idx;
+            }
+            
+            pool->next_chunk_idx += chunk_size;
+            pthread_mutex_unlock(&pool->work_mutex);
+            
+            // Do the work (outside mutex)
+            const void *adjusted_inputs[10];
+            for (int i = 0; i < pool->num_inputs; i++) {
+                adjusted_inputs[i] = (const double *)pool->inputs[i] + my_chunk_idx;
+            }
+            double *output = (double *)pool->output + my_chunk_idx;
+            
+            me_eval_chunk_threadsafe(pool->expr, adjusted_inputs, pool->num_inputs,
+                                    output, chunk_size);
+            
+            // Update completion status
+            pthread_mutex_lock(&pool->work_mutex);
+            pool->completed_elements += chunk_size;
+            if (pool->completed_elements >= pool->total_elements) {
+                pool->work_ready = false;
+                pthread_cond_signal(&pool->all_done);
+            }
         }
-
-        // Adjust input pointers to chunk position
-        const void *adjusted_inputs[10];
-        for (int i = 0; i < data->num_inputs; i++) {
-            adjusted_inputs[i] = (const double *)data->inputs[i] + my_chunk_idx;
-        }
-
-        double *output = (double *)data->output + my_chunk_idx;
-
-        me_eval_chunk_threadsafe(data->expr, adjusted_inputs, data->num_inputs,
-                                output, chunk_size);
+        
+        pthread_mutex_unlock(&pool->work_mutex);
     }
-
+    
     return NULL;
 }
 
-static double benchmark_chunksize(size_t chunk_bytes) {
-    const size_t total_elements = (TOTAL_SIZE_MB * 1024 * 1024) / sizeof(double);
+static thread_pool_t* create_thread_pool(int num_threads, pthread_t **threads_out) {
+    thread_pool_t *pool = malloc(sizeof(thread_pool_t));
+    if (!pool) return NULL;
+    
+    pool->expr = NULL;
+    pool->inputs = NULL;
+    pool->num_inputs = 0;
+    pool->output = NULL;
+    pool->total_elements = 0;
+    pool->chunk_elements = 0;
+    pool->next_chunk_idx = 0;
+    pool->completed_elements = 0;
+    pool->work_ready = false;
+    pool->should_exit = false;
+    
+    pthread_mutex_init(&pool->work_mutex, NULL);
+    pthread_cond_init(&pool->work_available, NULL);
+    pthread_cond_init(&pool->all_done, NULL);
+    
+    pthread_t *threads = malloc(num_threads * sizeof(pthread_t));
+    if (!threads) {
+        free(pool);
+        return NULL;
+    }
+    
+    for (int i = 0; i < num_threads; i++) {
+        pthread_create(&threads[i], NULL, worker_thread, pool);
+    }
+    
+    *threads_out = threads;
+    return pool;
+}
+
+static void destroy_thread_pool(thread_pool_t *pool, pthread_t *threads, int num_threads) {
+    pthread_mutex_lock(&pool->work_mutex);
+    pool->should_exit = true;
+    pthread_cond_broadcast(&pool->work_available);
+    pthread_mutex_unlock(&pool->work_mutex);
+    
+    for (int i = 0; i < num_threads; i++) {
+        pthread_join(threads[i], NULL);
+    }
+    
+    pthread_mutex_destroy(&pool->work_mutex);
+    pthread_cond_destroy(&pool->work_available);
+    pthread_cond_destroy(&pool->all_done);
+    
+    free(threads);
+    free(pool);
+}
+
+static double benchmark_chunksize(thread_pool_t *pool, size_t chunk_bytes,
+                                   double *a, double *b, double *result,
+                                   size_t total_elements) {
     const size_t chunk_elements = chunk_bytes / sizeof(double);
-
     if (chunk_elements == 0) return 0.0;
-
-    // Allocate arrays
-    double *a = malloc(total_elements * sizeof(double));
-    double *b = malloc(total_elements * sizeof(double));
-    double *result = malloc(total_elements * sizeof(double));
-
-    if (!a || !b || !result) {
-        free(a); free(b); free(result);
-        return 0.0;
-    }
-
-    // Initialize data
-    for (size_t i = 0; i < total_elements; i++) {
-        a[i] = (double)(i % 1000) / 100.0;
-        b[i] = (double)((i + 500) % 1000) / 100.0;
-    }
 
     // Compile expression
     me_variable vars[] = {{"a"}, {"b"}};
     int error;
     me_expr *expr = me_compile_chunk("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error);
-
-    if (!expr) {
-        free(a); free(b); free(result);
-        return 0.0;
-    }
+    if (!expr) return 0.0;
 
     const void *inputs[] = {a, b};
 
-    // Benchmark - use work queue pattern to avoid thread creation overhead
-    pthread_mutex_t work_mutex = PTHREAD_MUTEX_INITIALIZER;
-    size_t next_chunk_idx = 0;
+    // Setup work for thread pool
+    pthread_mutex_lock(&pool->work_mutex);
+    pool->expr = expr;
+    pool->inputs = inputs;
+    pool->num_inputs = 2;
+    pool->output = result;
+    pool->total_elements = total_elements;
+    pool->chunk_elements = chunk_elements;
+    pool->next_chunk_idx = 0;
+    pool->completed_elements = 0;
+    pool->work_ready = true;
+    pthread_mutex_unlock(&pool->work_mutex);
     
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
 
-    // Create threads once - they'll pull chunks from work queue
-    pthread_t threads[NUM_THREADS];
-    thread_data_t thread_data[NUM_THREADS];
+    // Signal threads that work is available
+    pthread_cond_broadcast(&pool->work_available);
     
-    for (int i = 0; i < NUM_THREADS; i++) {
-        thread_data[i].expr = expr;
-        thread_data[i].inputs = inputs;
-        thread_data[i].num_inputs = 2;
-        thread_data[i].output = result;
-        thread_data[i].total_elements = total_elements;
-        thread_data[i].chunk_elements = chunk_elements;
-        thread_data[i].work_mutex = &work_mutex;
-        thread_data[i].next_chunk_idx = &next_chunk_idx;
-        
-        pthread_create(&threads[i], NULL, eval_thread, &thread_data[i]);
+    // Wait for all work to be completed
+    pthread_mutex_lock(&pool->work_mutex);
+    while (pool->completed_elements < pool->total_elements) {
+        pthread_cond_wait(&pool->all_done, &pool->work_mutex);
     }
-    
-    // Wait for all threads to complete
-    for (int i = 0; i < NUM_THREADS; i++) {
-        pthread_join(threads[i], NULL);
-    }
-    
-    pthread_mutex_destroy(&work_mutex);
+    pthread_mutex_unlock(&pool->work_mutex);
 
     clock_gettime(CLOCK_MONOTONIC, &end);
 
@@ -136,25 +187,50 @@ static double benchmark_chunksize(size_t chunk_bytes) {
     double throughput = (total_elements / elapsed) / 1e6;  // Melems/sec
 
     me_free(expr);
-    free(a);
-    free(b);
-    free(result);
 
     return throughput;
 }
 
 int main() {
     printf("═══════════════════════════════════════════════════════════════════\n");
-    printf("  Chunk Size Optimization Benchmark\n");
+    printf("  Chunk Size Optimization Benchmark (Single Persistent Pool)\n");
     printf("═══════════════════════════════════════════════════════════════════\n");
     printf("Configuration:\n");
     printf("  - Expression: sqrt(a*a + b*b)\n");
-    printf("  - Threads: %d\n", NUM_THREADS);
+    printf("  - Threads: %d (single pool reused for all tests)\n", NUM_THREADS);
     printf("  - Total dataset: %d MB (%.1f M elements)\n",
            TOTAL_SIZE_MB, (TOTAL_SIZE_MB * 1024.0 * 1024.0) / sizeof(double) / 1e6);
     printf("  - Data type: float64\n");
-    printf("  - Testing 15 chunk sizes from 1 KB to 128 MB\n");
+    printf("  - Testing 18 chunk sizes from 1 KB to 128 MB\n");
     printf("═══════════════════════════════════════════════════════════════════\n\n");
+
+    const size_t total_elements = (TOTAL_SIZE_MB * 1024 * 1024) / sizeof(double);
+
+    // Allocate arrays once
+    double *a = malloc(total_elements * sizeof(double));
+    double *b = malloc(total_elements * sizeof(double));
+    double *result = malloc(total_elements * sizeof(double));
+
+    if (!a || !b || !result) {
+        fprintf(stderr, "Failed to allocate arrays\n");
+        free(a); free(b); free(result);
+        return 1;
+    }
+
+    // Initialize data once
+    for (size_t i = 0; i < total_elements; i++) {
+        a[i] = (double)(i % 1000) / 100.0;
+        b[i] = (double)((i + 500) % 1000) / 100.0;
+    }
+
+    // Create thread pool once
+    pthread_t *threads;
+    thread_pool_t *pool = create_thread_pool(NUM_THREADS, &threads);
+    if (!pool) {
+        fprintf(stderr, "Failed to create thread pool\n");
+        free(a); free(b); free(result);
+        return 1;
+    }
 
     printf("Chunk (KB)  Throughput (Melems/s)  Bandwidth (GB/s)  GFLOP/s\n");
     printf("---------------------------------------------------------------\n");
@@ -162,7 +238,7 @@ int main() {
     double best_throughput = 0.0;
     size_t best_chunk_kb = 0;
 
-    // Test 15 representative chunk sizes with exponential-like distribution
+    // Test representative chunk sizes
     size_t test_sizes_kb[] = {
         1, 2, 4, 8, 16, 32, 64, 128, 256, 512,
         1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072
@@ -172,7 +248,7 @@ int main() {
     for (int i = 0; i < num_sizes; i++) {
         size_t chunk_kb = test_sizes_kb[i];
         size_t chunk_bytes = chunk_kb * 1024;
-        double throughput = benchmark_chunksize(chunk_bytes);
+        double throughput = benchmark_chunksize(pool, chunk_bytes, a, b, result, total_elements);
 
         if (throughput == 0.0) {
             fprintf(stderr, "Benchmark failed for chunk size %zu KB\n", chunk_kb);
@@ -199,6 +275,12 @@ int main() {
     printf("  Bandwidth:  %.2f GB/s\n", (best_throughput * 3 * sizeof(double)) / 1000.0);
     printf("  GFLOP/s:    %.2f\n", best_throughput * 4.0 / 1000.0);
     printf("═══════════════════════════════════════════════════════════════════\n");
+
+    // Cleanup
+    destroy_thread_pool(pool, threads, NUM_THREADS);
+    free(a);
+    free(b);
+    free(result);
 
     return 0;
 }
