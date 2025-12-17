@@ -1,6 +1,6 @@
 # Processing Large Datasets with Chunks Tutorial
 
-This tutorial demonstrates how to use `me_eval_chunk()` to process large datasets efficiently by breaking them into smaller chunks.
+This tutorial demonstrates how to use `me_eval_chunk_threadsafe()` to process large datasets efficiently by breaking them into smaller chunks.
 
 ## Why Use Chunks?
 
@@ -71,7 +71,7 @@ int main() {
         void *output_chunk = &fahrenheit[offset];
 
         // Evaluate this chunk
-        me_eval_chunk(expr, vars_chunk, 1, output_chunk, current_chunk_size);
+        me_eval_chunk_threadsafe(expr, vars_chunk, 1, output_chunk, current_chunk_size);
 
         if ((chunk + 1) % 10 == 0) {
             printf("Processed chunk %d/%d (%.1f%%)\n",

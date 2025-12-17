@@ -20,24 +20,23 @@ int main() {
     // Output array
     double result[4];
 
-    // Define variables that will be used in the expression
-    me_variable vars[] = {
-        {"a", ME_AUTO, a},
-        {"b", ME_AUTO, b}
-    };
+    // Define variables (just names needed for simple case)
+    me_variable vars[] = {{"a"}, {"b"}};
 
     // Compile the expression
     int error;
-    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2,
-                                result, n, ME_FLOAT64, &error);
+    me_expr *expr = me_compile_chunk("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error);
 
     if (!expr) {
         printf("Parse error at position %d\n", error);
         return 1;
     }
 
-    // Evaluate the expression
-    me_eval(expr);
+    // Prepare variable pointers
+    const void *var_ptrs[] = {a, b};
+
+    // Evaluate the expression (thread-safe)
+    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, n);
 
     // Print results
     printf("Computing sqrt(a*a + b*b):\n");
@@ -67,23 +66,24 @@ a=1.0, b=1.0 -> distance=1.41
 
 1. **Define your data**: Create arrays for input variables (`a` and `b`) and output (`result`).
 
-2. **Set up variables**: Create an array of `me_variable` structures that bind variable names to memory addresses. The simplest form only requires:
+2. **Set up variables**: Create an array of `me_variable` structures. The simplest form only requires the variable name:
    - `name`: The identifier used in the expression
-   - `dtype`: Set to `ME_AUTO` to use the output dtype
-   - `address`: Pointer to the data array
 
-   For mixed types, specify explicit dtypes and use `ME_AUTO` as the output dtype (see data-types.md).
+   For mixed types, also specify the dtype (see data-types.md).
 
-3. **Compile the expression**: Call `me_compile()` with:
+3. **Compile the expression**: Call `me_compile_chunk()` with:
    - The expression string
-   - The variables array
+   - The variables array (names only)
+   - Number of variables
+   - Output data type (or `ME_AUTO` to infer from mixed types)
+   - Error position pointer
+
+4. **Evaluate**: Call `me_eval_chunk_threadsafe()` to compute results. This function is thread-safe and can be used for both serial and parallel processing. You provide:
+   - The compiled expression
+   - Array of pointers to variable data
    - Number of variables
    - Output buffer pointer
    - Number of items to process
-   - Output data type
-   - Error position pointer
-
-4. **Evaluate**: Call `me_eval()` to compute results for all elements in the arrays. The evaluation is vectorized, processing all elements efficiently.
 
 5. **Clean up**: Always call `me_free()` to release the compiled expression.
 
@@ -102,5 +102,5 @@ The `-lm` flag links the math library for functions like `sqrt()`.
 
 - Explore more complex expressions with multiple operations
 - Try different data types (`ME_FLOAT32`, `ME_INT32`, etc.)
-- Use `me_eval_chunk()` for processing large datasets in segments
-- Use `me_eval_chunk_threadsafe()` for parallel processing across multiple threads
+- Process large datasets by calling `me_eval_chunk_threadsafe()` multiple times with different chunks
+- Use parallel processing by calling `me_eval_chunk_threadsafe()` from multiple threads (see parallel-processing.md)

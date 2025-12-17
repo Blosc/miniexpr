@@ -109,8 +109,8 @@ cdef extern from "miniexpr.h":
     ctypedef struct me_expr:
         pass
 
-    me_expr* me_compile(const char *expr, ...)
-    void me_eval(me_expr *expr)
+    me_expr* me_compile_chunk(const char *expr, ...)
+    void me_eval_chunk_threadsafe(me_expr *expr, ...)
     void me_free(me_expr *expr)
 
 def evaluate_expression(str expression, np.ndarray[double] a, np.ndarray[double] b):

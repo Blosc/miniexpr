@@ -42,7 +42,7 @@ int main() {
 
     // Evaluate monolithically for reference (using temporary full arrays)
     const void *vars_full[2] = {a_full, b_full};
-    me_eval_chunk(expr, vars_full, 2, result_monolithic, TOTAL_SIZE);
+    me_eval_chunk_threadsafe(expr, vars_full, 2, result_monolithic, TOTAL_SIZE);
 
     // Now evaluate in chunks using new API
     int num_chunks = TOTAL_SIZE / CHUNK_SIZE;
@@ -52,7 +52,7 @@ int main() {
             a_full + offset,
             b_full + offset
         };
-        me_eval_chunk(expr, vars_chunk, 2, result_chunked + offset, CHUNK_SIZE);
+        me_eval_chunk_threadsafe(expr, vars_chunk, 2, result_chunked + offset, CHUNK_SIZE);
     }
 
     // Compare results
@@ -87,7 +87,7 @@ int main() {
     }
 
     // Evaluate monolithically
-    me_eval_chunk(expr, vars_full, 2, result_monolithic, TOTAL_SIZE);
+    me_eval_chunk_threadsafe(expr, vars_full, 2, result_monolithic, TOTAL_SIZE);
 
     // Evaluate in chunks
     for (int chunk = 0; chunk < num_chunks; chunk++) {
@@ -96,7 +96,7 @@ int main() {
             a_full + offset,
             b_full + offset
         };
-        me_eval_chunk(expr, vars_chunk, 2, result_chunked + offset, CHUNK_SIZE);
+        me_eval_chunk_threadsafe(expr, vars_chunk, 2, result_chunked + offset, CHUNK_SIZE);
     }
 
     // Compare results
@@ -147,7 +147,7 @@ int main() {
 
     // Monolithic
     const void *vars_int_full[2] = {a_int, b_int};
-    me_eval_chunk(expr, vars_int_full, 2, result_int_mono, TOTAL_SIZE);
+    me_eval_chunk_threadsafe(expr, vars_int_full, 2, result_int_mono, TOTAL_SIZE);
 
     // Chunked
     for (int chunk = 0; chunk < num_chunks; chunk++) {
@@ -156,7 +156,7 @@ int main() {
             a_int + offset,
             b_int + offset
         };
-        me_eval_chunk(expr, vars_chunk, 2, result_int_chunk + offset, CHUNK_SIZE);
+        me_eval_chunk_threadsafe(expr, vars_chunk, 2, result_int_chunk + offset, CHUNK_SIZE);
     }
 
     // Compare

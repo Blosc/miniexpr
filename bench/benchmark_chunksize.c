@@ -1,15 +1,8 @@
 /*
- * Benchmark to find optimal chunk size for mixed-type evaluation
- * Tests expression: (a + b) * c where:
- *   - a: float64 (double)
- *   - b: float32 (float)
- *   - c: int16 (short)
- *   - result: float64 (double)
- *
- * This benchmark explores performance with different input types,
- * which is important for real-world heterogeneous data scenarios.
- *
- * Usage: ./benchmark_mixed_types
+ * Benchmark with single persistent thread pool across all tests
+ * Tests various chunk sizes from 1 KB to 130 MB with 4 threads
+ * 
+ * Usage: ./benchmark_chunksize
  *
  * Output: CSV-style results showing performance for each chunk size
  */
@@ -23,7 +16,7 @@
 #include "miniexpr.h"
 
 #define NUM_THREADS 4
-#define TOTAL_SIZE_MB 1024  // 1 GB total dataset (for result array)
+#define TOTAL_SIZE_MB 1024  // 1 GB total dataset
 
 typedef struct {
     // Work parameters (reset for each test)
@@ -75,17 +68,7 @@ static void *worker_thread(void *arg) {
             // Do the work (outside mutex)
             const void *adjusted_inputs[10];
             for (int i = 0; i < pool->num_inputs; i++) {
-                // Adjust pointers based on input type sizes
-                if (i == 0) {
-                    // a: double (8 bytes)
-                    adjusted_inputs[i] = (const double *)pool->inputs[i] + my_chunk_idx;
-                } else if (i == 1) {
-                    // b: float (4 bytes)
-                    adjusted_inputs[i] = (const float *)pool->inputs[i] + my_chunk_idx;
-                } else if (i == 2) {
-                    // c: int16 (2 bytes)
-                    adjusted_inputs[i] = (const int16_t *)pool->inputs[i] + my_chunk_idx;
-                }
+                adjusted_inputs[i] = (const double *)pool->inputs[i] + my_chunk_idx;
             }
             double *output = (double *)pool->output + my_chunk_idx;
             
@@ -159,24 +142,16 @@ static void destroy_thread_pool(thread_pool_t *pool, pthread_t *threads, int num
 }
 
 static double benchmark_chunksize(thread_pool_t *pool, size_t chunk_bytes,
-                                   double *a, float *b, int16_t *c, double *result,
+                                   double *a, double *b, double *c, double *result,
                                    size_t total_elements) {
     const size_t chunk_elements = chunk_bytes / sizeof(double);
     if (chunk_elements == 0) return 0.0;
 
-    // Compile expression with mixed types
-    // When using ME_AUTO for output, we specify input types in variables
-    me_variable vars[] = {
-        {"a", ME_FLOAT64},
-        {"b", ME_FLOAT32},
-        {"c", ME_INT16}
-    };
+    // Compile expression
+    me_variable vars[] = {{"a"}, {"b"}, {"c"}};
     int error;
-    me_expr *expr = me_compile_chunk("(a + b) * c", vars, 3, ME_AUTO, &error);
-    if (!expr) {
-        fprintf(stderr, "Failed to compile expression, error: %d\n", error);
-        return 0.0;
-    }
+    me_expr *expr = me_compile_chunk("(a + b) * c", vars, 3, ME_FLOAT64, &error);
+    if (!expr) return 0.0;
 
     const void *inputs[] = {a, b, c};
 
@@ -218,16 +193,15 @@ static double benchmark_chunksize(thread_pool_t *pool, size_t chunk_bytes,
 
 int main() {
     printf("═══════════════════════════════════════════════════════════════════\n");
-    printf("  Mixed-Type Chunk Size Optimization Benchmark\n");
+    printf("  Chunk Size Optimization Benchmark (Single Persistent Pool)\n");
     printf("═══════════════════════════════════════════════════════════════════\n");
     printf("Configuration:\n");
     printf("  - Expression: (a + b) * c\n");
-    printf("  - Input types: a=float64, b=float32, c=int16\n");
-    printf("  - Output type: float64 (auto-promoted)\n");
     printf("  - Threads: %d (single pool reused for all tests)\n", NUM_THREADS);
     printf("  - Total dataset: %d MB (%.1f M elements)\n",
            TOTAL_SIZE_MB, (TOTAL_SIZE_MB * 1024.0 * 1024.0) / sizeof(double) / 1e6);
-    printf("  - Memory per element: 8+4+2=14 bytes input, 8 bytes output (22 total)\n");
+    printf("  - Data type: float64 (all operands)\n");
+    printf("  - Memory per element: 3×8=24 bytes input, 8 bytes output (32 total)\n");
     printf("  - Testing 18 chunk sizes from 1 KB to 128 MB\n");
     printf("═══════════════════════════════════════════════════════════════════\n\n");
 
@@ -235,8 +209,8 @@ int main() {
 
     // Allocate arrays once
     double *a = malloc(total_elements * sizeof(double));
-    float *b = malloc(total_elements * sizeof(float));
-    int16_t *c = malloc(total_elements * sizeof(int16_t));
+    double *b = malloc(total_elements * sizeof(double));
+    double *c = malloc(total_elements * sizeof(double));
     double *result = malloc(total_elements * sizeof(double));
 
     if (!a || !b || !c || !result) {
@@ -248,8 +222,8 @@ int main() {
     // Initialize data once
     for (size_t i = 0; i < total_elements; i++) {
         a[i] = (double)(i % 1000) / 100.0;
-        b[i] = (float)((i + 333) % 1000) / 100.0f;
-        c[i] = (int16_t)((i % 100) - 50);  // Range: -50 to 49
+        b[i] = (double)((i + 333) % 1000) / 100.0;
+        c[i] = (double)((i % 100) - 50);
     }
 
     // Create thread pool once
@@ -284,8 +258,7 @@ int main() {
             continue;
         }
 
-        // Bandwidth calculation: 8+4+2 bytes read + 8 bytes write = 22 bytes per element
-        double bandwidth = (throughput * 22.0) / 1000.0;  // Melems/s * 22 bytes / 1000 = GB/s
+        double bandwidth = (throughput * 4 * sizeof(double)) / 1000.0;  // MB/s to GB/s, 3 inputs + 1 output
         double gflops = throughput * 2.0 / 1000.0;  // 2 FLOP per element (1 add, 1 mul)
 
         printf("%10zu  %21.2f  %16.2f  %8.2f\n",
@@ -302,7 +275,7 @@ int main() {
     printf("Best Performance:\n");
     printf("  Chunk Size: %zu KB (%.2f MB)\n", best_chunk_kb, best_chunk_kb / 1024.0);
     printf("  Throughput: %.2f Melems/sec\n", best_throughput);
-    printf("  Bandwidth:  %.2f GB/s\n", (best_throughput * 22.0) / 1000.0);
+    printf("  Bandwidth:  %.2f GB/s\n", (best_throughput * 4 * sizeof(double)) / 1000.0);
     printf("  GFLOP/s:    %.2f\n", best_throughput * 2.0 / 1000.0);
     printf("═══════════════════════════════════════════════════════════════════\n");
 

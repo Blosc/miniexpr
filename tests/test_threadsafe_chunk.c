@@ -18,7 +18,6 @@ typedef struct {
     double *result;
     int chunk_id;
     int chunk_size;
-    int use_threadsafe;
 } thread_data_t;
 
 void *worker_thread(void *arg) {
@@ -30,20 +29,14 @@ void *worker_thread(void *arg) {
         data->b_data + offset
     };
 
-    if (data->use_threadsafe) {
-        me_eval_chunk_threadsafe(data->expr, vars_chunk, 2,
-                                 data->result + offset, data->chunk_size);
-    } else {
-        me_eval_chunk(data->expr, vars_chunk, 2,
-                      data->result + offset, data->chunk_size);
-    }
+    me_eval_chunk_threadsafe(data->expr, vars_chunk, 2,
+                             data->result + offset, data->chunk_size);
 
     return NULL;
 }
 
-int test_parallel_evaluation(int use_threadsafe) {
-    printf("\n=== Test: %s ===\n",
-           use_threadsafe ? "Thread-safe version" : "Non-thread-safe version");
+int test_parallel_evaluation(void) {
+    printf("\n=== Testing Thread-safe Evaluation ===\n");
 
     // Allocate data
     double *a = malloc(TOTAL_SIZE * sizeof(double));
@@ -68,7 +61,7 @@ int test_parallel_evaluation(int use_threadsafe) {
 
     // Serial evaluation for reference
     const void *vars_serial[2] = {a, b};
-    me_eval_chunk(expr, vars_serial, 2, result_serial, TOTAL_SIZE);
+    me_eval_chunk_threadsafe(expr, vars_serial, 2, result_serial, TOTAL_SIZE);
 
     // Parallel evaluation
     pthread_t threads[NUM_THREADS];
@@ -81,7 +74,6 @@ int test_parallel_evaluation(int use_threadsafe) {
         thread_data[i].result = result_parallel;
         thread_data[i].chunk_id = i;
         thread_data[i].chunk_size = CHUNK_SIZE;
-        thread_data[i].use_threadsafe = use_threadsafe;
 
         pthread_create(&threads[i], NULL, worker_thread, &thread_data[i]);
     }
@@ -123,20 +115,15 @@ int test_parallel_evaluation(int use_threadsafe) {
 }
 
 int main() {
-    printf("=== Thread Safety Test for Chunked Evaluation ===\n");
+    printf("=== Thread-Safe Evaluation Test ===\n");
     printf("Testing with %d threads, %d elements per chunk\n", NUM_THREADS, CHUNK_SIZE);
 
-    // Only test thread-safe version
-    // (non-thread-safe version will crash with race conditions)
-    printf("\nTesting THREAD-SAFE version:\n");
-    int result = test_parallel_evaluation(1);
+    int result = test_parallel_evaluation();
 
     if (result == 0) {
-        printf("\n✅ Thread-safe chunked evaluation works correctly!\n");
-        printf("\nNOTE: me_eval_chunk() is NOT thread-safe.\n");
-        printf("      Use me_eval_chunk_threadsafe() for parallel evaluation.\n");
+        printf("\n✅ Thread-safe evaluation works correctly!\n");
     } else {
-        printf("\n❌ Thread-safe version failed!\n");
+        printf("\n❌ Thread-safe evaluation failed!\n");
     }
 
     return result;

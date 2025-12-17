@@ -71,7 +71,7 @@ void benchmark_threads(const char *expr_str, int total_size, int num_threads) {
     double serial_start = get_time();
     for (int iter = 0; iter < iterations; iter++) {
         const void *vars_full[2] = {a, b};
-        me_eval_chunk(expr, vars_full, 2, result, total_size);
+        me_eval_chunk_threadsafe(expr, vars_full, 2, result, total_size);
     }
     double serial_time = (get_time() - serial_start) / iterations;
 

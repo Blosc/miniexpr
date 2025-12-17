@@ -42,12 +42,12 @@ void benchmark_expression(const char *expr_str, int total_size, int chunk_size) 
         return;
     }
 
-    // Benchmark 1: Monolithic evaluation (using me_eval_chunk with full array)
+    // Benchmark 1: Monolithic evaluation (using me_eval_chunk_threadsafe with full array)
     const int iterations = 10;
     double start = get_time();
     for (int iter = 0; iter < iterations; iter++) {
         const void *vars_full[2] = {a, b};
-        me_eval_chunk(expr, vars_full, 2, result, total_size);
+        me_eval_chunk_threadsafe(expr, vars_full, 2, result, total_size);
     }
     double monolithic_time = (get_time() - start) / iterations;
 
@@ -61,7 +61,7 @@ void benchmark_expression(const char *expr_str, int total_size, int chunk_size) 
                 a + offset,
                 b + offset
             };
-            me_eval_chunk(expr, vars_chunk, 2, result + offset, chunk_size);
+            me_eval_chunk_threadsafe(expr, vars_chunk, 2, result + offset, chunk_size);
         }
     }
     double chunked_time = (get_time() - start) / iterations;

@@ -34,11 +34,11 @@ int main() {
 
     // Define variables
     me_variable vars[] = {
-        {"h", ME_AUTO, h},
-        {"x", ME_AUTO, x},
-        {"angle", ME_AUTO, angle},
-        {"g", ME_AUTO, g},
-        {"v", ME_AUTO, v}
+        {"h"},
+        {"x"},
+        {"angle"},
+        {"g"},
+        {"v"}
     };
 
     // Complex expression for projectile motion
@@ -47,15 +47,18 @@ int main() {
 
     // Compile the expression
     int error;
-    me_expr *expr = me_compile(expression, vars, 5, y, n, ME_FLOAT64, &error);
+    me_expr *expr = me_compile_chunk(expression, vars, 5, ME_FLOAT64, &error);
 
     if (!expr) {
         printf("Parse error at position %d\n", error);
         return 1;
     }
 
-    // Evaluate the expression
-    me_eval(expr);
+    // Prepare variable pointers
+    const void *var_ptrs[] = {h, x, angle, g, v};
+
+    // Evaluate the expression (thread-safe)
+    me_eval_chunk_threadsafe(expr, var_ptrs, 5, y, n);
 
     // Print results
     printf("Projectile Trajectory (v=20 m/s, angle=45°):\n");

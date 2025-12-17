@@ -24,12 +24,12 @@ int main() {
     /* Test 1: Valid - All variables ME_AUTO, specific output dtype */
     printf("Test 1: All vars ME_AUTO, output dtype = ME_INT32\n");
     {
-        me_variable vars[] = {{"a", ME_AUTO, a}, {"b", ME_AUTO, b}};
-        me_expr *expr = me_compile("a + b", vars, 2, result, VECTOR_SIZE, ME_INT32, &err);
+        me_variable vars[] = {{"a", ME_AUTO}, {"b", ME_AUTO}};
+        me_expr *expr = me_compile_chunk("a + b", vars, 2, ME_INT32, &err);
 
         if (expr) {
             printf("  ✅ PASS: Compilation succeeded\n");
-            printf("  Result dtype: %d\n", expr->dtype);
+            printf("  Result dtype: %d\n", me_get_dtype(expr));
             me_free(expr);
         } else {
             printf("  ❌ FAIL: Should have succeeded\n");
@@ -39,12 +39,12 @@ int main() {
     /* Test 2: Valid - All variables have explicit dtypes, output dtype = ME_AUTO */
     printf("\nTest 2: All vars have dtypes, output dtype = ME_AUTO\n");
     {
-        me_variable vars[] = {{"a", ME_INT32, a}, {"b", ME_INT32, b}};
-        me_expr *expr = me_compile("a + b", vars, 2, result, VECTOR_SIZE, ME_AUTO, &err);
+        me_variable vars[] = {{"a", ME_INT32}, {"b", ME_INT32}};
+        me_expr *expr = me_compile_chunk("a + b", vars, 2, ME_AUTO, &err);
 
         if (expr) {
             printf("  ✅ PASS: Compilation succeeded\n");
-            printf("  Inferred result dtype: %d (ME_INT32=%d)\n", expr->dtype, ME_INT32);
+            printf("  Inferred result dtype: %d (ME_INT32=%d)\n", me_get_dtype(expr), ME_INT32);
             me_free(expr);
         } else {
             printf("  ❌ FAIL: Should have succeeded\n");
@@ -54,8 +54,8 @@ int main() {
     /* Test 3: Invalid - Mix of ME_AUTO and explicit dtypes with specific output */
     printf("\nTest 3: INVALID - Mixed var dtypes with specific output\n");
     {
-        me_variable vars[] = {{"a", ME_INT32, a}, {"b", ME_AUTO, b}};
-        me_expr *expr = me_compile("a + b", vars, 2, result, VECTOR_SIZE, ME_INT32, &err);
+        me_variable vars[] = {{"a", ME_INT32}, {"b", ME_AUTO}};
+        me_expr *expr = me_compile_chunk("a + b", vars, 2, ME_INT32, &err);
 
         if (!expr) {
             printf("  ✅ PASS: Correctly rejected (error=%d)\n", err);
@@ -68,8 +68,8 @@ int main() {
     /* Test 4: Invalid - All explicit dtypes but non-ME_AUTO output */
     printf("\nTest 4: INVALID - Explicit var dtypes with specific output\n");
     {
-        me_variable vars[] = {{"a", ME_INT32, a}, {"b", ME_INT32, b}};
-        me_expr *expr = me_compile("a + b", vars, 2, result, VECTOR_SIZE, ME_INT32, &err);
+        me_variable vars[] = {{"a", ME_INT32}, {"b", ME_INT32}};
+        me_expr *expr = me_compile_chunk("a + b", vars, 2, ME_INT32, &err);
 
         if (!expr) {
             printf("  ✅ PASS: Correctly rejected (error=%d)\n", err);
@@ -82,8 +82,8 @@ int main() {
     /* Test 5: Invalid - All ME_AUTO variables with ME_AUTO output */
     printf("\nTest 5: INVALID - All ME_AUTO vars with ME_AUTO output\n");
     {
-        me_variable vars[] = {{"a", ME_AUTO, a}, {"b", ME_AUTO, b}};
-        me_expr *expr = me_compile("a + b", vars, 2, result, VECTOR_SIZE, ME_AUTO, &err);
+        me_variable vars[] = {{"a", ME_AUTO}, {"b", ME_AUTO}};
+        me_expr *expr = me_compile_chunk("a + b", vars, 2, ME_AUTO, &err);
 
         if (!expr) {
             printf("  ✅ PASS: Correctly rejected (error=%d)\n", err);

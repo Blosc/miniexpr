@@ -10,6 +10,7 @@ LDFLAGS = -lm
 SRCDIR = src
 BENCHDIR = bench
 TESTDIR = tests
+EXAMPLEDIR = examples
 BUILDDIR = build
 
 # Source files
@@ -25,7 +26,11 @@ BENCH_BINS = $(patsubst $(BENCHDIR)/%.c,$(BUILDDIR)/%,$(BENCH_SRCS))
 TEST_SRCS = $(wildcard $(TESTDIR)/*.c)
 TEST_BINS = $(patsubst $(TESTDIR)/%.c,$(BUILDDIR)/%,$(TEST_SRCS))
 
-.PHONY: all lib bench test clean help debug debug-test
+# Example sources
+EXAMPLE_SRCS = $(wildcard $(EXAMPLEDIR)/*.c)
+EXAMPLE_BINS = $(patsubst $(EXAMPLEDIR)/%.c,$(BUILDDIR)/%,$(EXAMPLE_SRCS))
+
+.PHONY: all lib bench test examples clean help debug debug-test
 
 # Default target
 all: lib bench
@@ -39,6 +44,7 @@ help:
 	@echo "  make lib          - Build library object file (release mode)"
 	@echo "  make bench        - Build all benchmarks"
 	@echo "  make test         - Build and run all tests"
+	@echo "  make examples     - Build all examples"
 	@echo "  make debug        - Build library in debug mode (-g -O0, asserts enabled)"
 	@echo "  make debug-test   - Build and run tests in debug mode"
 	@echo "  make clean        - Remove all build artifacts"
@@ -99,6 +105,14 @@ test: $(TEST_BINS)
 $(BUILDDIR)/%: $(TESTDIR)/%.c $(LIB_OBJ) | $(BUILDDIR)
 	@echo "Building test: $@"
 	$(CC) $(CFLAGS) -I$(SRCDIR) $< $(LIB_OBJ) -o $@ $(LDFLAGS)
+	@echo "✓ Built: $@"
+
+# Build all examples
+examples: $(EXAMPLE_BINS)
+
+$(BUILDDIR)/%: $(EXAMPLEDIR)/%.c $(LIB_OBJ) | $(BUILDDIR)
+	@echo "Building example: $@"
+	$(CC) $(CFLAGS) -I$(SRCDIR) $< $(LIB_OBJ) -o $@ $(LDFLAGS) -lpthread
 	@echo "✓ Built: $@"
 
 # Clean build artifacts
