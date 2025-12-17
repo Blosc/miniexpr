@@ -14,7 +14,7 @@ void compile_and_print(const char *expression, me_variable *vars, int nvars, me_
     printf("Tree structure:\n");
 
     int error;
-    me_expr *expr = me_compile_chunk(expression, vars, nvars, dtype, &error);
+    me_expr *expr = me_compile(expression, vars, nvars, dtype, &error);
 
     if (!expr) {
         printf("  ERROR: Failed to compile at position %d\n", error);

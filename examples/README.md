@@ -132,7 +132,7 @@ Results:
 ```
 
 **Key features:**
-- `me_eval_chunk_threadsafe()` allows concurrent evaluation
+- `me_eval()` allows concurrent evaluation
 - Same compiled expression used by multiple threads
 - Linear speedup with number of cores
 - No locks needed - expression is read-only
@@ -246,13 +246,13 @@ me_variable vars[] = {{"x"}, {"y"}};
 
 // 2. Compile expression
 int error;
-me_expr *expr = me_compile_chunk("x + y", vars, 2, ME_FLOAT64, &error);
+me_expr *expr = me_compile("x + y", vars, 2, ME_FLOAT64, &error);
 
 // 3. Prepare data pointers
 const void *var_ptrs[] = {x_data, y_data};
 
 // 4. Evaluate
-me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, n);
+me_eval(expr, var_ptrs, 2, result, n);
 
 // 5. Cleanup
 me_free(expr);
@@ -275,7 +275,7 @@ for (int chunk = 0; chunk < num_chunks; chunk++) {
     int size = min(CHUNK_SIZE, TOTAL_SIZE - offset);
 
     const void *var_ptrs[] = {&data[offset]};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 1, &result[offset], size);
+    me_eval(expr, var_ptrs, 1, &result[offset], size);
 }
 ```
 
@@ -295,7 +295,7 @@ From the examples, you can learn:
    - Reduces memory footprint
 
 3. **Parallelize for performance** (Example 05)
-   - `me_eval_chunk_threadsafe()` enables safe parallelism
+   - `me_eval()` enables safe parallelism
    - Linear speedup with number of cores
    - No synchronization overhead
 

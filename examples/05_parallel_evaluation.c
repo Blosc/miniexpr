@@ -1,7 +1,7 @@
 /*
  * Example 5: Parallel Evaluation with Multiple Threads
  *
- * Demonstrates thread-safe parallel evaluation using me_eval_chunk_threadsafe().
+ * Demonstrates thread-safe parallel evaluation using me_eval().
  * Multiple threads can safely evaluate the same compiled expression on
  * different data chunks simultaneously.
  *
@@ -50,8 +50,8 @@ void *worker_thread(void *arg) {
         };
 
         // Evaluate this chunk (thread-safe!)
-        me_eval_chunk_threadsafe(data->expr, var_ptrs, 2,
-                                 &data->result[pos], count);
+        me_eval(data->expr, var_ptrs, 2,
+                &data->result[pos], count);
     }
 
     return NULL;
@@ -87,7 +87,7 @@ int main() {
     // Compile expression once
     me_variable vars[] = {{"a"}, {"b"}};
     int error;
-    me_expr *expr = me_compile_chunk("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error);
+    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error);
 
     if (!expr) {
         printf("ERROR: Failed to compile at position %d\n", error);

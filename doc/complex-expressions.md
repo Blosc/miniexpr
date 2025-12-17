@@ -47,7 +47,7 @@ int main() {
 
     // Compile the expression
     int error;
-    me_expr *expr = me_compile_chunk(expression, vars, 5, ME_FLOAT64, &error);
+    me_expr *expr = me_compile(expression, vars, 5, ME_FLOAT64, &error);
 
     if (!expr) {
         printf("Parse error at position %d\n", error);
@@ -58,7 +58,7 @@ int main() {
     const void *var_ptrs[] = {h, x, angle, g, v};
 
     // Evaluate the expression (thread-safe)
-    me_eval_chunk_threadsafe(expr, var_ptrs, 5, y, n);
+    me_eval(expr, var_ptrs, 5, y, n);
 
     // Print results
     printf("Projectile Trajectory (v=20 m/s, angle=45°):\n");

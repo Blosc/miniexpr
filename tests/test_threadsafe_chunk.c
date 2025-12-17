@@ -29,8 +29,8 @@ void *worker_thread(void *arg) {
         data->b_data + offset
     };
 
-    me_eval_chunk_threadsafe(data->expr, vars_chunk, 2,
-                             data->result + offset, data->chunk_size);
+    me_eval(data->expr, vars_chunk, 2,
+            data->result + offset, data->chunk_size);
 
     return NULL;
 }
@@ -53,7 +53,7 @@ int test_parallel_evaluation(void) {
     // Variables for compilation (just the names)
     me_variable vars[] = {{"a"}, {"b"}};
     int err;
-    me_expr *expr = me_compile_chunk("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &err);
     if (!expr) {
         printf("  ❌ Compilation failed\n");
         return 1;
@@ -61,7 +61,7 @@ int test_parallel_evaluation(void) {
 
     // Serial evaluation for reference
     const void *vars_serial[2] = {a, b};
-    me_eval_chunk_threadsafe(expr, vars_serial, 2, result_serial, TOTAL_SIZE);
+    me_eval(expr, vars_serial, 2, result_serial, TOTAL_SIZE);
 
     // Parallel evaluation
     pthread_t threads[NUM_THREADS];

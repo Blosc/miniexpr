@@ -13,7 +13,7 @@ int main() {
     printf("   Expression tree:\n");
     me_variable vars1[] = {{"x"}};
     int err;
-    me_expr *expr1 = me_compile_chunk("x + 5", vars1, 1, ME_FLOAT64, &err);
+    me_expr *expr1 = me_compile("x + 5", vars1, 1, ME_FLOAT64, &err);
     if (expr1) {
         me_print(expr1);
         me_free(expr1);
@@ -24,7 +24,7 @@ int main() {
     printf("2. Complex expression: (a + b) * (c - d)\n");
     printf("   Expression tree:\n");
     me_variable vars2[] = {{"a"}, {"b"}, {"c"}, {"d"}};
-    me_expr *expr2 = me_compile_chunk("(a + b) * (c - d)", vars2, 4, ME_FLOAT64, &err);
+    me_expr *expr2 = me_compile("(a + b) * (c - d)", vars2, 4, ME_FLOAT64, &err);
     if (expr2) {
         me_print(expr2);
         me_free(expr2);
@@ -35,7 +35,7 @@ int main() {
     printf("3. Expression with functions: sqrt(x*x + y*y)\n");
     printf("   Expression tree:\n");
     me_variable vars3[] = {{"x"}, {"y"}};
-    me_expr *expr3 = me_compile_chunk("sqrt(x*x + y*y)", vars3, 2, ME_FLOAT64, &err);
+    me_expr *expr3 = me_compile("sqrt(x*x + y*y)", vars3, 2, ME_FLOAT64, &err);
     if (expr3) {
         me_print(expr3);
         me_free(expr3);
@@ -49,13 +49,13 @@ int main() {
     double result[3];
 
     me_variable vars4[] = {{"x"}, {"y"}};
-    me_expr *expr4 = me_compile_chunk("x + y", vars4, 2, ME_FLOAT64, &err);
+    me_expr *expr4 = me_compile("x + y", vars4, 2, ME_FLOAT64, &err);
     if (expr4) {
         printf("   Tree structure:\n");
         me_print(expr4);
 
         const void *var_ptrs[] = {x, y};
-        me_eval_chunk_threadsafe(expr4, var_ptrs, 2, result, 3);
+        me_eval(expr4, var_ptrs, 2, result, 3);
 
         printf("   Evaluation results:\n");
         for (int i = 0; i < 3; i++) {

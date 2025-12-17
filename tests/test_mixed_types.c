@@ -27,7 +27,7 @@ int main() {
     };
 
     int err;
-    me_expr *expr1 = me_compile_chunk("a + b", vars1, 2, ME_AUTO, &err);
+    me_expr *expr1 = me_compile("a + b", vars1, 2, ME_AUTO, &err);
 
     if (!expr1) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
@@ -35,7 +35,7 @@ int main() {
     } else {
         printf("  ✓ Compilation succeeded\n");
         const void *var_ptrs1[] = {a_int32, b_int64};
-        me_eval_chunk_threadsafe(expr1, var_ptrs1, 2, result_int64, VECTOR_SIZE);
+        me_eval(expr1, var_ptrs1, 2, result_int64, VECTOR_SIZE);
 
         printf("  Results: ");
         for (int i = 0; i < 5; i++) {
@@ -61,7 +61,7 @@ int main() {
         {"b", ME_FLOAT32}
     };
 
-    me_expr *expr2 = me_compile_chunk("a + b", vars2, 2, ME_AUTO, &err);
+    me_expr *expr2 = me_compile("a + b", vars2, 2, ME_AUTO, &err);
 
     if (!expr2) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
@@ -69,7 +69,7 @@ int main() {
     } else {
         printf("  ✓ Compilation succeeded\n");
         const void *var_ptrs2[] = {a_int32, b_float};
-        me_eval_chunk_threadsafe(expr2, var_ptrs2, 2, result_float, VECTOR_SIZE);
+        me_eval(expr2, var_ptrs2, 2, result_float, VECTOR_SIZE);
 
         printf("  Results: ");
         for (int i = 0; i < 5; i++) {
@@ -95,7 +95,7 @@ int main() {
         {"b", ME_FLOAT64}
     };
 
-    me_expr *expr3 = me_compile_chunk("a + b", vars3, 2, ME_AUTO, &err);
+    me_expr *expr3 = me_compile("a + b", vars3, 2, ME_AUTO, &err);
 
     if (!expr3) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
@@ -103,7 +103,7 @@ int main() {
     } else {
         printf("  ✓ Compilation succeeded\n");
         const void *var_ptrs3[] = {b_float, b_double};
-        me_eval_chunk_threadsafe(expr3, var_ptrs3, 2, result_double, VECTOR_SIZE);
+        me_eval(expr3, var_ptrs3, 2, result_double, VECTOR_SIZE);
 
         printf("  Results: ");
         for (int i = 0; i < 5; i++) {

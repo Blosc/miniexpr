@@ -34,8 +34,8 @@ void *eval_thread_chunked(void *arg) {
         var_ptrs[0] = &data->a[pos];
         var_ptrs[1] = &data->b[pos];
 
-        me_eval_chunk_threadsafe(data->expr, var_ptrs, 2,
-                                &data->result[pos], count);
+        me_eval(data->expr, var_ptrs, 2,
+                &data->result[pos], count);
     }
 
     return NULL;
@@ -111,8 +111,8 @@ int main() {
     // Compile expression
     me_variable vars[] = {{"a"}, {"b"}};
     int error;
-    me_expr *expr = me_compile_chunk("sqrt(a*a + b*b)", vars, 2,
-                                     ME_FLOAT64, &error);
+    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2,
+                               ME_FLOAT64, &error);
     if (!expr) {
         printf("ERROR: Failed to compile\n");
         return 1;

@@ -72,8 +72,8 @@ static void *worker_thread(void *arg) {
             }
             double *output = (double *)pool->output + my_chunk_idx;
             
-            me_eval_chunk_threadsafe(pool->expr, adjusted_inputs, pool->num_inputs,
-                                    output, chunk_size);
+            me_eval(pool->expr, adjusted_inputs, pool->num_inputs,
+                    output, chunk_size);
             
             // Update completion status
             pthread_mutex_lock(&pool->work_mutex);
@@ -150,7 +150,7 @@ static double benchmark_chunksize(thread_pool_t *pool, size_t chunk_bytes,
     // Compile expression
     me_variable vars[] = {{"a"}, {"b"}, {"c"}};
     int error;
-    me_expr *expr = me_compile_chunk("(a + b) * c", vars, 3, ME_FLOAT64, &error);
+    me_expr *expr = me_compile("(a + b) * c", vars, 3, ME_FLOAT64, &error);
     if (!expr) return 0.0;
 
     const void *inputs[] = {a, b, c};

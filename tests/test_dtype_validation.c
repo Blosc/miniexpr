@@ -25,7 +25,7 @@ int main() {
     printf("Test 1: All vars ME_AUTO, output dtype = ME_INT32\n");
     {
         me_variable vars[] = {{"a", ME_AUTO}, {"b", ME_AUTO}};
-        me_expr *expr = me_compile_chunk("a + b", vars, 2, ME_INT32, &err);
+        me_expr *expr = me_compile("a + b", vars, 2, ME_INT32, &err);
 
         if (expr) {
             printf("  ✅ PASS: Compilation succeeded\n");
@@ -40,7 +40,7 @@ int main() {
     printf("\nTest 2: All vars have dtypes, output dtype = ME_AUTO\n");
     {
         me_variable vars[] = {{"a", ME_INT32}, {"b", ME_INT32}};
-        me_expr *expr = me_compile_chunk("a + b", vars, 2, ME_AUTO, &err);
+        me_expr *expr = me_compile("a + b", vars, 2, ME_AUTO, &err);
 
         if (expr) {
             printf("  ✅ PASS: Compilation succeeded\n");
@@ -55,7 +55,7 @@ int main() {
     printf("\nTest 3: INVALID - Mixed var dtypes with specific output\n");
     {
         me_variable vars[] = {{"a", ME_INT32}, {"b", ME_AUTO}};
-        me_expr *expr = me_compile_chunk("a + b", vars, 2, ME_INT32, &err);
+        me_expr *expr = me_compile("a + b", vars, 2, ME_INT32, &err);
 
         if (!expr) {
             printf("  ✅ PASS: Correctly rejected (error=%d)\n", err);
@@ -69,7 +69,7 @@ int main() {
     printf("\nTest 4: INVALID - Explicit var dtypes with specific output\n");
     {
         me_variable vars[] = {{"a", ME_INT32}, {"b", ME_INT32}};
-        me_expr *expr = me_compile_chunk("a + b", vars, 2, ME_INT32, &err);
+        me_expr *expr = me_compile("a + b", vars, 2, ME_INT32, &err);
 
         if (!expr) {
             printf("  ✅ PASS: Correctly rejected (error=%d)\n", err);
@@ -83,7 +83,7 @@ int main() {
     printf("\nTest 5: INVALID - All ME_AUTO vars with ME_AUTO output\n");
     {
         me_variable vars[] = {{"a", ME_AUTO}, {"b", ME_AUTO}};
-        me_expr *expr = me_compile_chunk("a + b", vars, 2, ME_AUTO, &err);
+        me_expr *expr = me_compile("a + b", vars, 2, ME_AUTO, &err);
 
         if (!expr) {
             printf("  ✅ PASS: Correctly rejected (error=%d)\n", err);

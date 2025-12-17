@@ -33,7 +33,7 @@ void benchmark_expression(const char *expr_str, int total_size, int chunk_size) 
     int err;
 
     // Compile expression for chunked evaluation
-    me_expr *expr = me_compile_chunk(expr_str, vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = me_compile(expr_str, vars, 2, ME_FLOAT64, &err);
     if (!expr) {
         printf("Failed to compile expression\n");
         free(a);
@@ -42,12 +42,12 @@ void benchmark_expression(const char *expr_str, int total_size, int chunk_size) 
         return;
     }
 
-    // Benchmark 1: Monolithic evaluation (using me_eval_chunk_threadsafe with full array)
+    // Benchmark 1: Monolithic evaluation (using me_eval with full array)
     const int iterations = 10;
     double start = get_time();
     for (int iter = 0; iter < iterations; iter++) {
         const void *vars_full[2] = {a, b};
-        me_eval_chunk_threadsafe(expr, vars_full, 2, result, total_size);
+        me_eval(expr, vars_full, 2, result, total_size);
     }
     double monolithic_time = (get_time() - start) / iterations;
 
@@ -61,7 +61,7 @@ void benchmark_expression(const char *expr_str, int total_size, int chunk_size) 
                 a + offset,
                 b + offset
             };
-            me_eval_chunk_threadsafe(expr, vars_chunk, 2, result + offset, chunk_size);
+            me_eval(expr, vars_chunk, 2, result + offset, chunk_size);
         }
     }
     double chunked_time = (get_time() - start) / iterations;

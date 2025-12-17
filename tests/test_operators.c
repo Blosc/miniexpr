@@ -40,7 +40,7 @@ void test_bitwise_and_int() {
     me_variable vars[] = {{"a"}, {"b"}};
 
     int err;
-    me_expr *expr = me_compile_chunk("a & b", vars, 2, ME_INT32, &err);
+    me_expr *expr = me_compile("a & b", vars, 2, ME_INT32, &err);
 
     if (!expr) {
         printf("  FAIL: compilation error at position %d\n", err);
@@ -49,7 +49,7 @@ void test_bitwise_and_int() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         int32_t expected = a[i] & b[i];
@@ -70,7 +70,7 @@ void test_bitwise_or_int() {
     me_variable vars[] = {{"a"}, {"b"}};
 
     int err;
-    me_expr *expr = me_compile_chunk("a | b", vars, 2, ME_INT32, &err);
+    me_expr *expr = me_compile("a | b", vars, 2, ME_INT32, &err);
 
     if (!expr) {
         printf("  FAIL: compilation error at position %d\n", err);
@@ -79,7 +79,7 @@ void test_bitwise_or_int() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         int32_t expected = a[i] | b[i];
@@ -100,7 +100,7 @@ void test_bitwise_xor_int() {
     me_variable vars[] = {{"a"}, {"b"}};
 
     int err;
-    me_expr *expr = me_compile_chunk("a ^ b", vars, 2, ME_INT32, &err);
+    me_expr *expr = me_compile("a ^ b", vars, 2, ME_INT32, &err);
 
     if (!expr) {
         printf("  FAIL: compilation error at position %d\n", err);
@@ -109,7 +109,7 @@ void test_bitwise_xor_int() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         int32_t expected = a[i] ^ b[i];
@@ -130,7 +130,7 @@ void test_bit_shift_left() {
     me_variable vars[] = {{"a"}, {"b"}};
 
     int err;
-    me_expr *expr = me_compile_chunk("a << b", vars, 2, ME_INT32, &err);
+    me_expr *expr = me_compile("a << b", vars, 2, ME_INT32, &err);
 
     if (!expr) {
         printf("  FAIL: compilation error at position %d\n", err);
@@ -139,7 +139,7 @@ void test_bit_shift_left() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         int32_t expected = a[i] << b[i];
@@ -160,7 +160,7 @@ void test_bit_shift_right() {
     me_variable vars[] = {{"a"}, {"b"}};
 
     int err;
-    me_expr *expr = me_compile_chunk("a >> b", vars, 2, ME_INT32, &err);
+    me_expr *expr = me_compile("a >> b", vars, 2, ME_INT32, &err);
 
     if (!expr) {
         printf("  FAIL: compilation error at position %d\n", err);
@@ -169,7 +169,7 @@ void test_bit_shift_right() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         int32_t expected = a[i] >> b[i];
@@ -190,7 +190,7 @@ void test_comparison_eq_float() {
     me_variable vars[] = {{"a"}, {"b"}};
 
     int err;
-    me_expr *expr = me_compile_chunk("a == b", vars, 2, ME_FLOAT32, &err);
+    me_expr *expr = me_compile("a == b", vars, 2, ME_FLOAT32, &err);
 
     if (!expr) {
         printf("  FAIL: compilation error at position %d\n", err);
@@ -199,7 +199,7 @@ void test_comparison_eq_float() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         float expected = (a[i] == b[i]) ? 1.0f : 0.0f;
@@ -220,7 +220,7 @@ void test_comparison_lt_int() {
     me_variable vars[] = {{"a"}, {"b"}};
 
     int err;
-    me_expr *expr = me_compile_chunk("a < b", vars, 2, ME_INT32, &err);
+    me_expr *expr = me_compile("a < b", vars, 2, ME_INT32, &err);
 
     if (!expr) {
         printf("  FAIL: compilation error at position %d\n", err);
@@ -229,7 +229,7 @@ void test_comparison_lt_int() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         int32_t expected = (a[i] < b[i]) ? 1 : 0;
@@ -251,7 +251,7 @@ void test_logical_bool() {
 
     // Test AND
     int err;
-    me_expr *expr = me_compile_chunk("a & b", vars, 2, ME_BOOL, &err);
+    me_expr *expr = me_compile("a & b", vars, 2, ME_BOOL, &err);
 
     if (!expr) {
         printf("  FAIL: AND compilation error at position %d\n", err);
@@ -260,7 +260,7 @@ void test_logical_bool() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         bool expected = a[i] && b[i];

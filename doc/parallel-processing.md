@@ -1,6 +1,6 @@
 # Parallel Processing with Thread-Safe Evaluation Tutorial
 
-This tutorial demonstrates how to use `me_eval_chunk_threadsafe()` to process data in parallel across multiple threads, maximizing performance on multi-core systems.
+This tutorial demonstrates how to use `me_eval()` to process data in parallel across multiple threads, maximizing performance on multi-core systems.
 
 ## Why Parallel Processing?
 
@@ -50,8 +50,8 @@ void* worker_thread(void *arg) {
            data->thread_id, data->start_idx, data->end_idx - 1, chunk_size);
 
     // Thread-safe evaluation
-    me_eval_chunk_threadsafe(data->expr, vars_chunk, 2,
-                             output_chunk, chunk_size);
+    me_eval(data->expr, vars_chunk, 2,
+            output_chunk, chunk_size);
 
     printf("Thread %d: Completed\n", data->thread_id);
 
@@ -82,8 +82,8 @@ int main() {
     me_variable vars[] = {{"x"}, {"y"}};
 
     int error;
-    me_expr *expr = me_compile_chunk("sin(x) * cos(y) + sqrt(x*x + y*y)",
-                                      vars, 2, ME_FLOAT64, &error);
+    me_expr *expr = me_compile("sin(x) * cos(y) + sqrt(x*x + y*y)",
+                               vars, 2, ME_FLOAT64, &error);
 
     if (!expr) {
         printf("Parse error at position %d\n", error);
@@ -220,8 +220,8 @@ void* worker_dynamic(void *arg) {
         const void *vars_chunk[] = {&queue->input[start]};
         void *output_chunk = &queue->output[start];
 
-        me_eval_chunk_threadsafe(queue->expr, vars_chunk, 1,
-                                 output_chunk, size);
+        me_eval(queue->expr, vars_chunk, 1,
+                output_chunk, size);
 
         chunks_processed++;
     }
@@ -244,7 +244,7 @@ int main() {
     me_variable vars[] = {{"x"}};
 
     int error;
-    me_expr *expr = me_compile_chunk("x*x + 2*x + 1", vars, 1, ME_FLOAT64, &error);
+    me_expr *expr = me_compile("x*x + 2*x + 1", vars, 1, ME_FLOAT64, &error);
 
     if (!expr) {
         printf("Parse error\n");
@@ -315,7 +315,7 @@ int main() {
     me_variable vars[] = {{"a"}, {"b"}};
 
     int error;
-    me_expr *expr = me_compile_chunk("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error);
+    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error);
 
     if (!expr) {
         printf("Parse error\n");
@@ -332,7 +332,7 @@ int main() {
 
         const void *vars_chunk[] = {&a[chunk], &b[chunk]};
 
-        me_eval_chunk_threadsafe(expr, vars_chunk, 2, &c[chunk], size);
+        me_eval(expr, vars_chunk, 2, &c[chunk], size);
 
         #pragma omp critical
         {
@@ -369,10 +369,10 @@ gcc -o parallel_omp parallel_omp.c miniexpr.c -lm -fopenmp
 
 ## Thread Safety Notes
 
-- `me_eval_chunk_threadsafe()` is safe for concurrent calls
+- `me_eval()` is safe for concurrent calls
 - Each call creates a temporary expression clone internally
 - The original compiled expression remains unchanged
-- Slight overhead compared to `me_eval_chunk()` but enables parallelism
+- This enables safe parallel processing without data races
 
 ## When to Use Parallel Processing
 

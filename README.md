@@ -17,10 +17,10 @@ miniexpr is designed to be embedded directly into larger projects, not distribut
 
 miniexpr provides a simple, focused API with just two main functions:
 
-### `me_compile_chunk()`
+### `me_compile()`
 ```c
-me_expr *me_compile_chunk(const char *expression, const me_variable *variables,
-                          int var_count, me_dtype dtype, int *error);
+me_expr *me_compile(const char *expression, const me_variable *variables,
+                    int var_count, me_dtype dtype, int *error);
 ```
 Compiles an expression for evaluation. Variable and output pointers are provided during evaluation rather than compilation.
 
@@ -28,17 +28,17 @@ Compiles an expression for evaluation. Variable and output pointers are provided
 
 ```c
 me_variable vars[] = {{"x"}, {"y"}};  // Just the names!
-me_expr *expr = me_compile_chunk("x + y", vars, 2, ME_FLOAT64, &err);
+me_expr *expr = me_compile("x + y", vars, 2, ME_FLOAT64, &err);
 
 // Later, provide data in the same order as vars array
 const void *data[] = {x_array, y_array};  // x first, y second
-me_eval_chunk_threadsafe(expr, data, 2, output, nitems);
+me_eval(expr, data, 2, output, nitems);
 ```
 
 For mixed types (use `ME_AUTO` for output dtype to infer from variables):
 ```c
 me_variable vars[] = {{"temp", ME_FLOAT64}, {"count", ME_INT32}};
-me_expr *expr = me_compile_chunk("temp * count", vars, 2, ME_AUTO, &err);
+me_expr *expr = me_compile("temp * count", vars, 2, ME_AUTO, &err);
 // Result type will be inferred (ME_FLOAT64 in this case)
 ```
 
@@ -59,17 +59,17 @@ The `dtype` parameter has two mutually exclusive modes:
 
 Mixing modes (some vars with types, some `ME_AUTO`) will cause compilation to fail.
 
-### `me_eval_chunk_threadsafe()`
+### `me_eval()`
 ```c
-void me_eval_chunk_threadsafe(const me_expr *expr, const void **vars_chunk,
-                               int n_vars, void *output_chunk, int chunk_nitems);
+void me_eval(const me_expr *expr, const void **vars_chunk,
+             int n_vars, void *output_chunk, int chunk_nitems);
 ```
 Evaluates the compiled expression with new variable and output pointers. This allows processing arrays in chunks without recompilation, and is thread-safe for parallel evaluation across multiple threads.
 
 **Parameters:**
-- `expr`: Compiled expression (from `me_compile_chunk`)
-- `vars_chunk`: Array of pointers to variable data chunks (same order as in `me_compile_chunk`)
-- `n_vars`: Number of variables (must match the number used in `me_compile_chunk`)
+- `expr`: Compiled expression (from `me_compile`)
+- `vars_chunk`: Array of pointers to variable data chunks (same order as in `me_compile`)
+- `n_vars`: Number of variables (must match the number used in `me_compile`)
 - `output_chunk`: Pointer to output buffer for this chunk
 - `chunk_nitems`: Number of elements in this chunk
 
@@ -102,7 +102,7 @@ me_variable vars[] = {{"x"}, {"y"}};
 int err;
 
 // Compile expression
-me_expr *expr = me_compile_chunk("x + y", vars, 2, ME_FLOAT64, &err);
+me_expr *expr = me_compile("x + y", vars, 2, ME_FLOAT64, &err);
 
 // Prepare data
 double x_data[] = {1.0, 2.0, 3.0};
@@ -112,7 +112,7 @@ double result[3];
 const void *var_ptrs[] = {x_data, y_data};
 
 // Evaluate (thread-safe)
-me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, 3);
+me_eval(expr, var_ptrs, 2, result, 3);
 
 // Clean up
 me_free(expr);

@@ -46,7 +46,7 @@ int main() {
     // Compile expression once
     me_variable vars[] = {{"a"}, {"b"}};
     int error;
-    me_expr *expr = me_compile_chunk("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error);
+    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error);
 
     if (!expr) {
         printf("ERROR: Failed to compile at position %d\n", error);
@@ -73,7 +73,7 @@ int main() {
         const void *var_ptrs[] = {&a[offset], &b[offset]};
 
         // Evaluate this chunk
-        me_eval_chunk_threadsafe(expr, var_ptrs, 2, &result[offset], current_size);
+        me_eval(expr, var_ptrs, 2, &result[offset], current_size);
     }
 
     clock_t end = clock();

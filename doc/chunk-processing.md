@@ -1,6 +1,6 @@
 # Processing Large Datasets with Chunks Tutorial
 
-This tutorial demonstrates how to use `me_eval_chunk_threadsafe()` to process large datasets efficiently by breaking them into smaller chunks.
+This tutorial demonstrates how to use `me_eval()` to process large datasets efficiently by breaking them into smaller chunks.
 
 ## Why Use Chunks?
 
@@ -42,7 +42,7 @@ int main() {
     // Compile the expression once for chunked evaluation
     // All variables will use ME_FLOAT64 since output dtype is specified
     int error;
-    me_expr *expr = me_compile_chunk("c * 9/5 + 32", vars, 1, ME_FLOAT64, &error);
+    me_expr *expr = me_compile("c * 9/5 + 32", vars, 1, ME_FLOAT64, &error);
 
     if (!expr) {
         printf("Parse error at position %d\n", error);
@@ -71,7 +71,7 @@ int main() {
         void *output_chunk = &fahrenheit[offset];
 
         // Evaluate this chunk
-        me_eval_chunk_threadsafe(expr, vars_chunk, 1, output_chunk, current_chunk_size);
+        me_eval(expr, vars_chunk, 1, output_chunk, current_chunk_size);
 
         if ((chunk + 1) % 10 == 0) {
             printf("Processed chunk %d/%d (%.1f%%)\n",
@@ -150,7 +150,7 @@ int main() {
     me_variable vars[] = {{"x"}, {"y"}};
 
     int error;
-    me_expr *expr = me_compile_chunk("sqrt(x*x + y*y)", vars, 2, ME_FLOAT64, &error);
+    me_expr *expr = me_compile("sqrt(x*x + y*y)", vars, 2, ME_FLOAT64, &error);
 
     if (!expr) {
         printf("Parse error\n");
@@ -170,7 +170,7 @@ int main() {
 
         // Process this chunk
         const void *vars_chunk[] = {x_chunk, y_chunk};
-        me_eval_chunk(expr, vars_chunk, 2, result_chunk, elements_read);
+        me_eval(expr, vars_chunk, 2, result_chunk, elements_read);
 
         // Write results
         fwrite(result_chunk, sizeof(double), elements_read, output);
@@ -227,7 +227,7 @@ int main() {
     me_variable vars[] = {{"P"}, {"V"}, {"n"}};
 
     int error;
-    me_expr *expr = me_compile_chunk("(P * V) / (n * 8.314)", vars, 3, ME_FLOAT32, &error);
+    me_expr *expr = me_compile("(P * V) / (n * 8.314)", vars, 3, ME_FLOAT32, &error);
 
     if (!expr) {
         printf("Parse error\n");
@@ -244,7 +244,7 @@ int main() {
             &moles[offset]
         };
 
-        me_eval_chunk(expr, vars_chunk, 3, &temperature[offset], size);
+        me_eval(expr, vars_chunk, 3, &temperature[offset], size);
     }
 
     printf("Computed temperatures for %d samples\n", TOTAL);
@@ -267,7 +267,7 @@ int main() {
 2. **Manage chunk boundaries** - Handle the last chunk which might be smaller
 3. **Use const void* arrays** - Pass pointers to chunk starts via `vars_chunk`
 4. **Update pointers** - For each chunk, point to the correct offset in your arrays
-5. **Not thread-safe** - Use `me_eval_chunk_threadsafe()` if processing chunks in parallel
+5. **Thread-safe** - `me_eval()` is safe for parallel processing from multiple threads
 
 ## Benefits of Chunk Processing
 

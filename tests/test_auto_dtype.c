@@ -36,13 +36,13 @@ int main() {
         };
 
         int err;
-        me_expr *expr = me_compile_chunk("a + b", vars, 2, ME_INT32, &err);
+        me_expr *expr = me_compile("a + b", vars, 2, ME_INT32, &err);
 
         if (!expr) {
             printf("  ❌ FAIL: Compilation error at position %d\n", err);
         } else {
             const void *var_ptrs[] = {a, b};
-            me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
+            me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
             bool passed = true;
             for (int i = 0; i < VECTOR_SIZE && passed; i++) {
@@ -77,13 +77,13 @@ int main() {
         };
 
         int err;
-        me_expr *expr = me_compile_chunk("a & b", vars, 2, ME_BOOL, &err);
+        me_expr *expr = me_compile("a & b", vars, 2, ME_BOOL, &err);
 
         if (!expr) {
             printf("  ❌ FAIL: Compilation error at position %d\n", err);
         } else {
             const void *var_ptrs[] = {a, b};
-            me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
+            me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
             bool passed = true;
             for (int i = 0; i < VECTOR_SIZE && passed; i++) {
@@ -151,13 +151,13 @@ int main() {
 
         int err;
         // Simple expression: cast bool to int and add - use ME_AUTO to infer result
-        me_expr *expr = me_compile_chunk("a + b", vars, 2, ME_AUTO, &err);
+        me_expr *expr = me_compile("a + b", vars, 2, ME_AUTO, &err);
 
         if (!expr) {
             printf("  ❌ FAIL: Compilation error at position %d\n", err);
         } else {
             const void *var_ptrs[] = {a, b};
-            me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
+            me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
             bool passed = true;
             for (int i = 0; i < VECTOR_SIZE && passed; i++) {

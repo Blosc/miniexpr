@@ -2387,7 +2387,7 @@ static bool all_variables_match_type(const me_expr *n, me_dtype target_type) {
     return true;
 }
 
-static void me_eval(const me_expr *n) {
+static void private_eval(const me_expr *n) {
     if (!n) return;
 
     // Infer the result type from the expression tree
@@ -2786,8 +2786,8 @@ static me_expr *clone_expr(const me_expr *src) {
  * This function is safe to call from multiple threads simultaneously,
  * even on the same expression object. Each call creates a temporary
  * clone of the expression tree to avoid race conditions. */
-void me_eval_chunk_threadsafe(const me_expr *expr, const void **vars_chunk,
-                              int n_vars, void *output_chunk, int chunk_nitems) {
+void me_eval(const me_expr *expr, const void **vars_chunk,
+             int n_vars, void *output_chunk, int chunk_nitems) {
     if (!expr) return;
 
     // Verify variable count matches
@@ -2814,7 +2814,7 @@ void me_eval_chunk_threadsafe(const me_expr *expr, const void **vars_chunk,
     clone->output = output_chunk;
 
     // Evaluate the clone
-    me_eval(clone);
+    private_eval(clone);
 
     // Free the clone (including any intermediate buffers it allocated)
     me_free(clone);
@@ -2848,8 +2848,8 @@ static void optimize(me_expr *n) {
 }
 
 
-static me_expr *me_compile(const char *expression, const me_variable *variables, int var_count,
-                    void *output, int nitems, me_dtype dtype, int *error) {
+static me_expr *private_compile(const char *expression, const me_variable *variables, int var_count,
+                                void *output, int nitems, me_dtype dtype, int *error) {
     // Validate dtype usage: either all vars are ME_AUTO (use dtype), or dtype is ME_AUTO (use var dtypes)
     if (variables && var_count > 0) {
         int auto_count = 0;
@@ -2942,8 +2942,8 @@ static me_expr *me_compile(const char *expression, const me_variable *variables,
 // Synthetic addresses for ordinal matching (when user provides NULL addresses)
 static char synthetic_var_addresses[100];
 
-me_expr *me_compile_chunk(const char *expression, const me_variable *variables,
-                          int var_count, me_dtype dtype, int *error) {
+me_expr *me_compile(const char *expression, const me_variable *variables,
+                    int var_count, me_dtype dtype, int *error) {
     // For chunked evaluation, we compile without specific output/nitems
     // If variables have NULL addresses, assign synthetic unique addresses for ordinal matching
     me_variable *vars_copy = NULL;
@@ -2974,14 +2974,14 @@ me_expr *me_compile_chunk(const char *expression, const me_variable *variables,
                 }
             }
 
-            me_expr *result = me_compile(expression, vars_copy, var_count, NULL, 0, dtype, error);
+            me_expr *result = private_compile(expression, vars_copy, var_count, NULL, 0, dtype, error);
             free(vars_copy);
             return result;
         }
     }
 
     // No NULL addresses, use variables as-is
-    return me_compile(expression, variables, var_count, NULL, 0, dtype, error);
+    return private_compile(expression, variables, var_count, NULL, 0, dtype, error);
 }
 
 static void pn(const me_expr *n, int depth) {

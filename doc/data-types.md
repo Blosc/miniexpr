@@ -32,7 +32,7 @@ int main() {
 
     // Compile the expression
     int error;
-    me_expr *expr = me_compile_chunk("width * height", vars, 2, ME_INT32, &error);
+    me_expr *expr = me_compile("width * height", vars, 2, ME_INT32, &error);
 
     if (!expr) {
         printf("Parse error at position %d\n", error);
@@ -41,7 +41,7 @@ int main() {
 
     // Evaluate
     const void *var_ptrs[] = {width, height};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, area, n);
+    me_eval(expr, var_ptrs, 2, area, n);
 
     // Print results
     printf("Rectangle Areas (INT32):\n");
@@ -85,7 +85,7 @@ int main() {
     // Circle area: π * r²
     // Using an approximation of π
     int error;
-    me_expr *expr = me_compile_chunk("3.14159265 * r * r", vars, 1, ME_FLOAT32, &error);
+    me_expr *expr = me_compile("3.14159265 * r * r", vars, 1, ME_FLOAT32, &error);
 
     if (!expr) {
         printf("Parse error at position %d\n", error);
@@ -93,7 +93,7 @@ int main() {
     }
 
     const void *var_ptrs[] = {radius};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 1, area, n);
+    me_eval(expr, var_ptrs, 1, area, n);
 
     printf("Circle Areas (FLOAT32):\n");
     for (int i = 0; i < n; i++) {
@@ -145,7 +145,7 @@ int main() {
     // Calculate total cost with 8% tax
     // Using ME_AUTO lets the library infer the result type (ME_FLOAT64)
     int error;
-    me_expr *expr = me_compile_chunk("items * price * 1.08", vars, 2, ME_AUTO, &error);
+    me_expr *expr = me_compile("items * price * 1.08", vars, 2, ME_AUTO, &error);
 
     if (!expr) {
         printf("Parse error at position %d\n", error);
@@ -153,7 +153,7 @@ int main() {
     }
 
     const void *var_ptrs[] = {items, price};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, total, n);
+    me_eval(expr, var_ptrs, 2, total, n);
 
     printf("Shopping Cart (Mixed Types):\n");
     for (int i = 0; i < n; i++) {
@@ -198,7 +198,7 @@ int main() {
     me_variable vars[] = {{"r"}, {"g"}, {"b"}};
 
     int error;
-    me_expr *expr = me_compile_chunk("0.299*r + 0.587*g + 0.114*b", vars, 3, ME_UINT8, &error);
+    me_expr *expr = me_compile("0.299*r + 0.587*g + 0.114*b", vars, 3, ME_UINT8, &error);
 
     if (!expr) {
         printf("Parse error at position %d\n", error);
@@ -206,7 +206,7 @@ int main() {
     }
 
     const void *var_ptrs[] = {red, green, blue};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 3, gray, n);
+    me_eval(expr, var_ptrs, 3, gray, n);
 
     printf("RGB to Grayscale (UINT8):\n");
     for (int i = 0; i < n; i++) {

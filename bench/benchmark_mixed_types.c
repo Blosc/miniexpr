@@ -89,8 +89,8 @@ static void *worker_thread(void *arg) {
             }
             double *output = (double *)pool->output + my_chunk_idx;
             
-            me_eval_chunk_threadsafe(pool->expr, adjusted_inputs, pool->num_inputs,
-                                    output, chunk_size);
+            me_eval(pool->expr, adjusted_inputs, pool->num_inputs,
+                    output, chunk_size);
             
             // Update completion status
             pthread_mutex_lock(&pool->work_mutex);
@@ -172,7 +172,7 @@ static double benchmark_chunksize(thread_pool_t *pool, size_t chunk_bytes,
         {"c", ME_INT16}
     };
     int error;
-    me_expr *expr = me_compile_chunk("(a + b) * c", vars, 3, ME_AUTO, &error);
+    me_expr *expr = me_compile("(a + b) * c", vars, 3, ME_AUTO, &error);
     if (!expr) {
         fprintf(stderr, "Failed to compile expression, error: %d\n", error);
         return 0.0;

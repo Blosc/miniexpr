@@ -31,8 +31,8 @@ void *eval_worker(void *arg) {
         args->b_data + args->start_idx
     };
 
-    me_eval_chunk_threadsafe(args->expr, vars_chunk, 2,
-                             args->result + args->start_idx, args->chunk_size);
+    me_eval(args->expr, vars_chunk, 2,
+            args->result + args->start_idx, args->chunk_size);
 
     return NULL;
 }
@@ -56,7 +56,7 @@ void benchmark_threads(const char *expr_str, int total_size, int num_threads) {
     // Variables for compilation (just the names)
     me_variable vars[] = {{"a"}, {"b"}};
     int err;
-    me_expr *expr = me_compile_chunk(expr_str, vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = me_compile(expr_str, vars, 2, ME_FLOAT64, &err);
     if (!expr) {
         printf("Failed to compile\n");
         free(a);
@@ -71,7 +71,7 @@ void benchmark_threads(const char *expr_str, int total_size, int num_threads) {
     double serial_start = get_time();
     for (int iter = 0; iter < iterations; iter++) {
         const void *vars_full[2] = {a, b};
-        me_eval_chunk_threadsafe(expr, vars_full, 2, result, total_size);
+        me_eval(expr, vars_full, 2, result, total_size);
     }
     double serial_time = (get_time() - serial_start) / iterations;
 

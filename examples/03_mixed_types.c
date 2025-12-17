@@ -29,7 +29,7 @@ int main() {
 
     // Compile with ME_AUTO to infer output type from inputs
     int error;
-    me_expr *expr = me_compile_chunk("a + b", vars, 2, ME_AUTO, &error);
+    me_expr *expr = me_compile("a + b", vars, 2, ME_AUTO, &error);
 
     if (!expr) {
         printf("ERROR: Failed to compile at position %d\n", error);
@@ -49,7 +49,7 @@ int main() {
     const void *var_ptrs[] = {a, b};
 
     // Evaluate (integers will be promoted to float64)
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, n);
+    me_eval(expr, var_ptrs, 2, result, n);
 
     // Display results
     printf("Results (int32 promoted to float64):\n");

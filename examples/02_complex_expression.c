@@ -31,7 +31,7 @@ int main() {
 
     // Compile complex expression
     int error;
-    me_expr *expr = me_compile_chunk(
+    me_expr *expr = me_compile(
         "v*t*cos(angle) - 0.5*g*t*t",
         vars, 4, ME_FLOAT64, &error
     );
@@ -45,7 +45,7 @@ int main() {
     const void *var_ptrs[] = {v, t, angle, g};
 
     // Evaluate
-    me_eval_chunk_threadsafe(expr, var_ptrs, 4, distance, n);
+    me_eval(expr, var_ptrs, 4, distance, n);
 
     // Display results
     printf("Projectile motion (v=20 m/s, angle=45°):\n");

@@ -33,7 +33,7 @@ void test_atan2() {
     me_variable vars[] = {{"y"}, {"x"}};
 
     int err;
-    me_expr *expr = me_compile_chunk("atan2(y, x)", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = me_compile("atan2(y, x)", vars, 2, ME_FLOAT64, &err);
 
     if (!expr) {
         printf("  FAIL: compilation error at position %d\n", err);
@@ -42,7 +42,7 @@ void test_atan2() {
     }
 
     const void *var_ptrs[] = {y, x};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = atan2(y[i], x[i]);
@@ -63,7 +63,7 @@ void test_pow() {
     me_variable vars[] = {{"base"}, {"exp"}};
 
     int err;
-    me_expr *expr = me_compile_chunk("pow(base, exp)", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = me_compile("pow(base, exp)", vars, 2, ME_FLOAT64, &err);
 
     if (!expr) {
         printf("  FAIL: compilation error at position %d\n", err);
@@ -72,7 +72,7 @@ void test_pow() {
     }
 
     const void *var_ptrs[] = {base, exp};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = pow(base[i], exp[i]);
@@ -93,7 +93,7 @@ void test_ncr() {
     me_variable vars[] = {{"n"}, {"r"}};
 
     int err;
-    me_expr *expr = me_compile_chunk("ncr(n, r)", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = me_compile("ncr(n, r)", vars, 2, ME_FLOAT64, &err);
 
     if (!expr) {
         printf("  FAIL: compilation error at position %d\n", err);
@@ -102,7 +102,7 @@ void test_ncr() {
     }
 
     const void *var_ptrs[] = {n, r};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     /* Expected values calculated manually:
      * ncr(5,2) = 10, ncr(10,3) = 120, ncr(8,3) = 56, ncr(6,2) = 15,
@@ -129,7 +129,7 @@ void test_npr() {
     me_variable vars[] = {{"n"}, {"r"}};
 
     int err;
-    me_expr *expr = me_compile_chunk("npr(n, r)", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = me_compile("npr(n, r)", vars, 2, ME_FLOAT64, &err);
 
     if (!expr) {
         printf("  FAIL: compilation error at position %d\n", err);
@@ -138,7 +138,7 @@ void test_npr() {
     }
 
     const void *var_ptrs[] = {n, r};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     /* Expected values calculated manually:
      * npr(5,2) = 20, npr(10,3) = 720, npr(8,3) = 336, npr(6,2) = 30,
@@ -165,7 +165,7 @@ void test_mixed_expression() {
     me_variable vars[] = {{"x"}, {"y"}};
 
     int err;
-    me_expr *expr = me_compile_chunk("pow(x, 2) + atan2(y, x)", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = me_compile("pow(x, 2) + atan2(y, x)", vars, 2, ME_FLOAT64, &err);
 
     if (!expr) {
         printf("  FAIL: compilation error at position %d\n", err);
@@ -174,7 +174,7 @@ void test_mixed_expression() {
     }
 
     const void *var_ptrs[] = {x, y};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = pow(x[i], 2.0) + atan2(y[i], x[i]);
@@ -195,7 +195,7 @@ void test_nested_two_param() {
     me_variable vars[] = {{"x"}, {"y"}};
 
     int err;
-    me_expr *expr = me_compile_chunk("pow(2, pow(x, y))", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = me_compile("pow(2, pow(x, y))", vars, 2, ME_FLOAT64, &err);
 
     if (!expr) {
         printf("  FAIL: compilation error at position %d\n", err);
@@ -204,7 +204,7 @@ void test_nested_two_param() {
     }
 
     const void *var_ptrs[] = {x, y};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = pow(2.0, pow(x[i], y[i]));
@@ -225,7 +225,7 @@ void test_two_param_with_mixed_types() {
     me_variable vars[] = {{"base", ME_INT32}, {"exp", ME_FLOAT64}};
 
     int err;
-    me_expr *expr = me_compile_chunk("pow(base, exp)", vars, 2, ME_AUTO, &err);
+    me_expr *expr = me_compile("pow(base, exp)", vars, 2, ME_AUTO, &err);
 
     if (!expr) {
         printf("  FAIL: compilation error at position %d\n", err);
@@ -234,7 +234,7 @@ void test_two_param_with_mixed_types() {
     }
 
     const void *var_ptrs[] = {base, exp};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = pow((double)base[i], exp[i]);

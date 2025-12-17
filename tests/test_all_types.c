@@ -24,7 +24,7 @@
     \
     me_variable vars[] = {{"a"}}; \
     int err; \
-    me_expr *expr = me_compile_chunk(test_expr, vars, 1, type_enum, &err); \
+    me_expr *expr = me_compile(test_expr, vars, 1, type_enum, &err); \
     \
     if (!expr) { \
         printf("Failed to compile '%s' for %s (error at %d)\n", test_expr, name, err); \
@@ -33,7 +33,7 @@
     } \
     \
     const void *var_ptrs[] = {a}; \
-    me_eval_chunk_threadsafe(expr, var_ptrs, 1, result, n); \
+    me_eval(expr, var_ptrs, 1, result, n); \
     \
     int passed = 1; \
     for (int i = 0; i < n && passed; i++) { \
@@ -70,7 +70,7 @@
     \
     me_variable vars[] = {{"a"}, {"b"}}; \
     int err; \
-    me_expr *expr = me_compile_chunk(test_expr, vars, 2, type_enum, &err); \
+    me_expr *expr = me_compile(test_expr, vars, 2, type_enum, &err); \
     \
     if (!expr) { \
         printf("Failed to compile '%s' for %s (error at %d)\n", test_expr, name, err); \
@@ -79,7 +79,7 @@
     } \
     \
     const void *var_ptrs[] = {a, b}; \
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, n); \
+    me_eval(expr, var_ptrs, 2, result, n); \
     \
     int passed = 1; \
     for (int i = 0; i < n && passed; i++) { \
@@ -135,13 +135,13 @@ int main() {
 
         me_variable vars[] = {{"a"}};
         int err;
-        me_expr *expr = me_compile_chunk("a+5", vars, 1, ME_COMPLEX64, &err);
+        me_expr *expr = me_compile("a+5", vars, 1, ME_COMPLEX64, &err);
 
         if (!expr) {
             printf("❌ complex64: Failed to compile\n");
         } else {
             const void *var_ptrs[] = {a};
-            me_eval_chunk_threadsafe(expr, var_ptrs, 1, result, n);
+            me_eval(expr, var_ptrs, 1, result, n);
 
             int passed = 1;
             for (int i = 0; i < n && passed; i++) {
@@ -173,13 +173,13 @@ int main() {
 
         me_variable vars[] = {{"a"}};
         int err;
-        me_expr *expr = me_compile_chunk("a*2", vars, 1, ME_COMPLEX128, &err);
+        me_expr *expr = me_compile("a*2", vars, 1, ME_COMPLEX128, &err);
 
         if (!expr) {
             printf("❌ complex128: Failed to compile\n");
         } else {
             const void *var_ptrs[] = {a};
-            me_eval_chunk_threadsafe(expr, var_ptrs, 1, result, n);
+            me_eval(expr, var_ptrs, 1, result, n);
 
             int passed = 1;
             for (int i = 0; i < n && passed; i++) {

@@ -25,7 +25,7 @@ int main() {
 
     // Compile the expression
     int error;
-    me_expr *expr = me_compile_chunk("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error);
+    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error);
 
     if (!expr) {
         printf("Parse error at position %d\n", error);
@@ -36,7 +36,7 @@ int main() {
     const void *var_ptrs[] = {a, b};
 
     // Evaluate the expression (thread-safe)
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, n);
+    me_eval(expr, var_ptrs, 2, result, n);
 
     // Print results
     printf("Computing sqrt(a*a + b*b):\n");
@@ -71,14 +71,14 @@ a=1.0, b=1.0 -> distance=1.41
 
    For mixed types, also specify the dtype (see data-types.md).
 
-3. **Compile the expression**: Call `me_compile_chunk()` with:
+3. **Compile the expression**: Call `me_compile()` with:
    - The expression string
    - The variables array (names only)
    - Number of variables
    - Output data type (or `ME_AUTO` to infer from mixed types)
    - Error position pointer
 
-4. **Evaluate**: Call `me_eval_chunk_threadsafe()` to compute results. This function is thread-safe and can be used for both serial and parallel processing. You provide:
+4. **Evaluate**: Call `me_eval()` to compute results. This function is thread-safe and can be used for both serial and parallel processing. You provide:
    - The compiled expression
    - Array of pointers to variable data
    - Number of variables
@@ -102,5 +102,5 @@ The `-lm` flag links the math library for functions like `sqrt()`.
 
 - Explore more complex expressions with multiple operations
 - Try different data types (`ME_FLOAT32`, `ME_INT32`, etc.)
-- Process large datasets by calling `me_eval_chunk_threadsafe()` multiple times with different chunks
-- Use parallel processing by calling `me_eval_chunk_threadsafe()` from multiple threads (see parallel-processing.md)
+- Process large datasets by calling `me_eval()` multiple times with different chunks
+- Use parallel processing by calling `me_eval()` from multiple threads (see parallel-processing.md)

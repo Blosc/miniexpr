@@ -24,7 +24,7 @@ int main() {
 
     // Compile the expression
     int error;
-    me_expr *expr = me_compile_chunk("(x + y) * 2", vars, 2, ME_FLOAT64, &error);
+    me_expr *expr = me_compile("(x + y) * 2", vars, 2, ME_FLOAT64, &error);
 
     if (!expr) {
         printf("ERROR: Failed to compile expression at position %d\n", error);
@@ -35,7 +35,7 @@ int main() {
     const void *var_ptrs[] = {x, y};
 
     // Evaluate
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, n);
+    me_eval(expr, var_ptrs, 2, result, n);
 
     // Display results
     printf("Results:\n");

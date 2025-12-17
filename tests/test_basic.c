@@ -38,7 +38,7 @@ int test_simple_expression() {
 
     me_variable vars[] = {{"a"}, {"b"}};
     int err;
-    me_expr *expr = me_compile_chunk("a + b", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = me_compile("a + b", vars, 2, ME_FLOAT64, &err);
 
     if (!expr) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
@@ -47,7 +47,7 @@ int test_simple_expression() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, TEST_SIZE);
+    me_eval(expr, var_ptrs, 2, result, TEST_SIZE);
 
     int passed = 1;
     for (int i = 0; i < TEST_SIZE; i++) {
@@ -82,7 +82,7 @@ int test_complex_expression() {
 
     me_variable vars[] = {{"a"}, {"b"}};
     int err;
-    me_expr *expr = me_compile_chunk("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &err);
 
     if (!expr) {
         printf("  ❌ FAILED: Compilation error\n");
@@ -91,7 +91,7 @@ int test_complex_expression() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, TEST_SIZE);
+    me_eval(expr, var_ptrs, 2, result, TEST_SIZE);
 
     int passed = 1;
     for (int i = 0; i < TEST_SIZE; i++) {
@@ -126,7 +126,7 @@ int test_integer_types() {
 
     me_variable vars[] = {{"a"}, {"b"}};
     int err;
-    me_expr *expr = me_compile_chunk("a + b", vars, 2, ME_INT32, &err);
+    me_expr *expr = me_compile("a + b", vars, 2, ME_INT32, &err);
 
     if (!expr) {
         printf("  ❌ FAILED: Compilation error\n");
@@ -135,7 +135,7 @@ int test_integer_types() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, TEST_SIZE);
+    me_eval(expr, var_ptrs, 2, result, TEST_SIZE);
 
     int passed = 1;
     for (int i = 0; i < TEST_SIZE; i++) {
@@ -170,7 +170,7 @@ int test_mixed_types() {
 
     me_variable vars[] = {{"a", ME_INT32}, {"b", ME_FLOAT64}};
     int err;
-    me_expr *expr = me_compile_chunk("a + b", vars, 2, ME_AUTO, &err);
+    me_expr *expr = me_compile("a + b", vars, 2, ME_AUTO, &err);
 
     if (!expr) {
         printf("  ❌ FAILED: Compilation error\n");
@@ -179,7 +179,7 @@ int test_mixed_types() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval_chunk_threadsafe(expr, var_ptrs, 2, result, TEST_SIZE);
+    me_eval(expr, var_ptrs, 2, result, TEST_SIZE);
 
     int passed = 1;
     for (int i = 0; i < TEST_SIZE; i++) {
