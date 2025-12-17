@@ -42,7 +42,9 @@ int test_simple_expression() {
 
     if (!expr) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
-        free(a); free(b); free(result);
+        free(a);
+        free(b);
+        free(result);
         return 1;
     }
 
@@ -64,7 +66,9 @@ int test_simple_expression() {
     }
 
     me_free(expr);
-    free(a); free(b); free(result);
+    free(a);
+    free(b);
+    free(result);
     return passed ? 0 : 1;
 }
 
@@ -86,7 +90,9 @@ int test_complex_expression() {
 
     if (!expr) {
         printf("  ❌ FAILED: Compilation error\n");
-        free(a); free(b); free(result);
+        free(a);
+        free(b);
+        free(result);
         return 1;
     }
 
@@ -108,7 +114,9 @@ int test_complex_expression() {
     }
 
     me_free(expr);
-    free(a); free(b); free(result);
+    free(a);
+    free(b);
+    free(result);
     return passed ? 0 : 1;
 }
 
@@ -130,7 +138,9 @@ int test_integer_types() {
 
     if (!expr) {
         printf("  ❌ FAILED: Compilation error\n");
-        free(a); free(b); free(result);
+        free(a);
+        free(b);
+        free(result);
         return 1;
     }
 
@@ -152,7 +162,9 @@ int test_integer_types() {
     }
 
     me_free(expr);
-    free(a); free(b); free(result);
+    free(a);
+    free(b);
+    free(result);
     return passed ? 0 : 1;
 }
 
@@ -174,7 +186,9 @@ int test_mixed_types() {
 
     if (!expr) {
         printf("  ❌ FAILED: Compilation error\n");
-        free(a); free(b); free(result);
+        free(a);
+        free(b);
+        free(result);
         return 1;
     }
 
@@ -196,7 +210,9 @@ int test_mixed_types() {
     }
 
     me_free(expr);
-    free(a); free(b); free(result);
+    free(a);
+    free(b);
+    free(result);
     return passed ? 0 : 1;
 }
 

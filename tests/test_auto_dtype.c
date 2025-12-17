@@ -31,7 +31,7 @@ int main() {
 
         /* Use ME_AUTO (0) to let the compiler infer the type from variables */
         me_variable vars[] = {
-            {"a", ME_AUTO},  // Explicitly use ME_AUTO
+            {"a", ME_AUTO}, // Explicitly use ME_AUTO
             {"b", ME_AUTO}
         };
 
@@ -145,8 +145,8 @@ int main() {
         }
 
         me_variable vars[] = {
-            {"a", ME_BOOL, a},    // Explicit ME_BOOL
-            {"b", ME_INT32, b}    // Explicit ME_INT32
+            {"a", ME_BOOL, a}, // Explicit ME_BOOL
+            {"b", ME_INT32, b} // Explicit ME_INT32
         };
 
         int err;

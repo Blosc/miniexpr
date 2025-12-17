@@ -20,10 +20,10 @@ int main() {
 
     // Simulation parameters
     const int n = 6;
-    double v[] = {20.0, 20.0, 20.0, 20.0, 20.0, 20.0};  // velocity (m/s)
-    double t[] = {0.0, 0.5, 1.0, 1.5, 2.0, 2.5};        // time (seconds)
-    double angle[] = {0.785, 0.785, 0.785, 0.785, 0.785, 0.785};  // 45° in radians
-    double g[] = {9.81, 9.81, 9.81, 9.81, 9.81, 9.81};  // gravity (m/s²)
+    double v[] = {20.0, 20.0, 20.0, 20.0, 20.0, 20.0}; // velocity (m/s)
+    double t[] = {0.0, 0.5, 1.0, 1.5, 2.0, 2.5}; // time (seconds)
+    double angle[] = {0.785, 0.785, 0.785, 0.785, 0.785, 0.785}; // 45° in radians
+    double g[] = {9.81, 9.81, 9.81, 9.81, 9.81, 9.81}; // gravity (m/s²)
     double distance[6];
 
     // Define variables

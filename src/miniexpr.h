@@ -41,6 +41,7 @@
 #ifdef __cplusplus
 extern "C" {
 
+
 #endif
 
 
@@ -91,10 +92,10 @@ enum {
 
 typedef struct me_variable {
     const char *name;
-    me_dtype dtype;      // Data type of this variable (ME_AUTO = use output dtype)
+    me_dtype dtype; // Data type of this variable (ME_AUTO = use output dtype)
     const void *address; // Pointer to data (NULL for me_compile)
-    int type;            // ME_VARIABLE for user variables (0 = auto-set to ME_VARIABLE)
-    void *context;       // For closures/functions (NULL for normal variables)
+    int type; // ME_VARIABLE for user variables (0 = auto-set to ME_VARIABLE)
+    void *context; // For closures/functions (NULL for normal variables)
 } me_variable;
 
 /* Note: When initializing variables, only name/dtype/address are typically needed.

@@ -23,13 +23,12 @@ typedef struct {
 } thread_data_t;
 
 void *eval_thread_chunked(void *arg) {
-    thread_data_t *data = (thread_data_t *)arg;
+    thread_data_t *data = (thread_data_t *) arg;
     const void *var_ptrs[2];
 
     // Process in chunks
     for (int pos = data->start; pos < data->end; pos += data->chunk_size) {
-        int count = (pos + data->chunk_size <= data->end) ?
-                    data->chunk_size : (data->end - pos);
+        int count = (pos + data->chunk_size <= data->end) ? data->chunk_size : (data->end - pos);
 
         var_ptrs[0] = &data->a[pos];
         var_ptrs[1] = &data->b[pos];
@@ -42,7 +41,7 @@ void *eval_thread_chunked(void *arg) {
 }
 
 double benchmark_chunk_size(int chunk_size, double *a, double *b,
-                           double *result, me_expr *expr) {
+                            double *result, me_expr *expr) {
     double total_time = 0.0;
 
     for (int run = 0; run < NUM_RUNS; run++) {
@@ -60,12 +59,11 @@ double benchmark_chunk_size(int chunk_size, double *a, double *b,
             thread_data[i].b = b;
             thread_data[i].result = result;
             thread_data[i].start = i * chunk_per_thread;
-            thread_data[i].end = (i == NUM_THREADS - 1) ?
-                                 TOTAL_SIZE : (i + 1) * chunk_per_thread;
+            thread_data[i].end = (i == NUM_THREADS - 1) ? TOTAL_SIZE : (i + 1) * chunk_per_thread;
             thread_data[i].chunk_size = chunk_size;
 
             pthread_create(&threads[i], NULL, eval_thread_chunked,
-                          &thread_data[i]);
+                           &thread_data[i]);
         }
 
         for (int i = 0; i < NUM_THREADS; i++) {
@@ -74,7 +72,7 @@ double benchmark_chunk_size(int chunk_size, double *a, double *b,
 
         gettimeofday(&end_tv, NULL);
         double elapsed = (end_tv.tv_sec - start_tv.tv_sec) +
-                        (end_tv.tv_usec - start_tv.tv_usec) / 1e6;
+                         (end_tv.tv_usec - start_tv.tv_usec) / 1e6;
         total_time += elapsed;
     }
 
@@ -120,16 +118,16 @@ int main() {
 
     // Test different chunk sizes
     int chunk_sizes[] = {
-        4096,      // 4K   = 96 KB
-        8192,      // 8K   = 192 KB
-        16384,     // 16K  = 384 KB
-        32768,     // 32K  = 768 KB
-        65536,     // 64K  = 1.5 MB
-        131072,    // 128K = 3 MB
-        262144,    // 256K = 6 MB
-        524288,    // 512K = 12 MB
-        1048576,   // 1M   = 24 MB
-        2097152    // 2M   = 48 MB
+        4096, // 4K   = 96 KB
+        8192, // 8K   = 192 KB
+        16384, // 16K  = 384 KB
+        32768, // 32K  = 768 KB
+        65536, // 64K  = 1.5 MB
+        131072, // 128K = 3 MB
+        262144, // 256K = 6 MB
+        524288, // 512K = 12 MB
+        1048576, // 1M   = 24 MB
+        2097152 // 2M   = 48 MB
     };
 
     int num_tests = sizeof(chunk_sizes) / sizeof(chunk_sizes[0]);

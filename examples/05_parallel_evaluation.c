@@ -21,7 +21,7 @@
 #define NUM_THREADS 4
 #define CHUNK_SIZE 32768     // 32K elements = 768 KB (optimal for cache)
 #define FLOPS_PER_ELEM 4     // sqrt(a*a + b*b): 2 muls + 1 add + 1 sqrt (convention)
-                             // Note: Actual hardware cost ~23 FLOPs (sqrt ≈ 20 FLOPs in reality)
+// Note: Actual hardware cost ~23 FLOPs (sqrt ≈ 20 FLOPs in reality)
 
 typedef struct {
     me_expr *expr;
@@ -34,15 +34,14 @@ typedef struct {
 } thread_data_t;
 
 void *worker_thread(void *arg) {
-    thread_data_t *data = (thread_data_t *)arg;
+    thread_data_t *data = (thread_data_t *) arg;
 
     printf("  Thread %d: Processing elements %d to %d\n",
            data->thread_id, data->start, data->end - 1);
 
     // Process assigned range in cache-friendly chunks
     for (int pos = data->start; pos < data->end; pos += CHUNK_SIZE) {
-        int count = (pos + CHUNK_SIZE <= data->end) ?
-                    CHUNK_SIZE : (data->end - pos);
+        int count = (pos + CHUNK_SIZE <= data->end) ? CHUNK_SIZE : (data->end - pos);
 
         const void *var_ptrs[] = {
             &data->a[pos],
@@ -91,7 +90,9 @@ int main() {
 
     if (!expr) {
         printf("ERROR: Failed to compile at position %d\n", error);
-        free(a); free(b); free(result);
+        free(a);
+        free(b);
+        free(result);
         return 1;
     }
 
@@ -113,8 +114,7 @@ int main() {
         thread_data[i].b = b;
         thread_data[i].result = result;
         thread_data[i].start = i * elements_per_thread;
-        thread_data[i].end = (i == NUM_THREADS - 1) ?
-                            TOTAL_SIZE : (i + 1) * elements_per_thread;
+        thread_data[i].end = (i == NUM_THREADS - 1) ? TOTAL_SIZE : (i + 1) * elements_per_thread;
         thread_data[i].thread_id = i + 1;
 
         pthread_create(&threads[i], NULL, worker_thread, &thread_data[i]);
@@ -131,7 +131,7 @@ int main() {
 
     // Calculate throughput metrics
     double melems_per_sec = (TOTAL_SIZE / 1e6) / elapsed;
-    double gflops = (TOTAL_SIZE * (double)FLOPS_PER_ELEM / 1e9) / elapsed;
+    double gflops = (TOTAL_SIZE * (double) FLOPS_PER_ELEM / 1e9) / elapsed;
     double bandwidth_gb = (TOTAL_SIZE * 3 * sizeof(double) / 1e9) / elapsed;
 
     // Verify results

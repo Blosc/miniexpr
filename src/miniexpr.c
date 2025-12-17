@@ -605,7 +605,7 @@ static void read_identifier_token(state *s) {
         case ME_CLOSURE6:
         case ME_CLOSURE7:
             s->context = var->context;
-            /* Falls through. */
+        /* Falls through. */
         case ME_FUNCTION0:
         case ME_FUNCTION1:
         case ME_FUNCTION2:
@@ -653,21 +653,47 @@ static bool handle_multi_char_operator(state *s) {
 static void handle_single_char_operator(state *s, char c) {
     s->next++;
     switch (c) {
-        case '+': s->type = TOK_INFIX; s->function = add; break;
-        case '-': s->type = TOK_INFIX; s->function = sub; break;
-        case '*': s->type = TOK_INFIX; s->function = mul; break;
-        case '/': s->type = TOK_INFIX; s->function = divide; break;
-        case '%': s->type = TOK_INFIX; s->function = fmod; break;
-        case '&': s->type = TOK_BITWISE; s->function = bit_and; break;
-        case '|': s->type = TOK_BITWISE; s->function = bit_or; break;
-        case '^': s->type = TOK_BITWISE; s->function = bit_xor; break;
-        case '~': s->type = TOK_BITWISE; s->function = bit_not; break;
-        case '<': s->type = TOK_COMPARE; s->function = cmp_lt; break;
-        case '>': s->type = TOK_COMPARE; s->function = cmp_gt; break;
-        case '(': s->type = TOK_OPEN; break;
-        case ')': s->type = TOK_CLOSE; break;
-        case ',': s->type = TOK_SEP; break;
-        default: s->type = TOK_ERROR; break;
+        case '+': s->type = TOK_INFIX;
+            s->function = add;
+            break;
+        case '-': s->type = TOK_INFIX;
+            s->function = sub;
+            break;
+        case '*': s->type = TOK_INFIX;
+            s->function = mul;
+            break;
+        case '/': s->type = TOK_INFIX;
+            s->function = divide;
+            break;
+        case '%': s->type = TOK_INFIX;
+            s->function = fmod;
+            break;
+        case '&': s->type = TOK_BITWISE;
+            s->function = bit_and;
+            break;
+        case '|': s->type = TOK_BITWISE;
+            s->function = bit_or;
+            break;
+        case '^': s->type = TOK_BITWISE;
+            s->function = bit_xor;
+            break;
+        case '~': s->type = TOK_BITWISE;
+            s->function = bit_not;
+            break;
+        case '<': s->type = TOK_COMPARE;
+            s->function = cmp_lt;
+            break;
+        case '>': s->type = TOK_COMPARE;
+            s->function = cmp_gt;
+            break;
+        case '(': s->type = TOK_OPEN;
+            break;
+        case ')': s->type = TOK_CLOSE;
+            break;
+        case ',': s->type = TOK_SEP;
+            break;
+        default: s->type = TOK_ERROR;
+            break;
     }
 }
 
@@ -1110,7 +1136,7 @@ static double me_eval_scalar(const me_expr *n) {
 
     switch (TYPE_MASK(n->type)) {
         case ME_CONSTANT: return n->value;
-        case ME_VARIABLE: return *(const double *)n->bound;
+        case ME_VARIABLE: return *(const double *) n->bound;
 
         case ME_FUNCTION0:
         case ME_FUNCTION1:
@@ -2867,7 +2893,9 @@ static me_expr *private_compile(const char *expression, const me_variable *varia
         if (dtype == ME_AUTO) {
             // Mode 1: Output dtype is ME_AUTO, all variables must have explicit dtypes
             if (auto_count > 0) {
-                fprintf(stderr, "Error: When output dtype is ME_AUTO, all variable dtypes must be specified (not ME_AUTO)\n");
+                fprintf(
+                    stderr,
+                    "Error: When output dtype is ME_AUTO, all variable dtypes must be specified (not ME_AUTO)\n");
                 if (error) *error = -1;
                 return NULL;
             }

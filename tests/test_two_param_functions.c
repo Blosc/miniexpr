@@ -57,7 +57,7 @@ void test_pow() {
     TEST("pow(base, exponent) - power function");
 
     double base[VECTOR_SIZE] = {2.0, 3.0, 4.0, 5.0, 2.5, 1.5, 10.0, 0.5, 8.0, 3.5};
-    double exp[VECTOR_SIZE] = {3.0, 2.0, 0.5, 3.0, 2.0, 3.0, -1.0, 2.0, 1.0/3.0, 2.5};
+    double exp[VECTOR_SIZE] = {3.0, 2.0, 0.5, 3.0, 2.0, 3.0, -1.0, 2.0, 1.0 / 3.0, 2.5};
     double result[VECTOR_SIZE] = {0};
 
     me_variable vars[] = {{"base"}, {"exp"}};
@@ -219,7 +219,7 @@ void test_two_param_with_mixed_types() {
     TEST("pow() with mixed types (int32 and float64)");
 
     int32_t base[VECTOR_SIZE] = {2, 3, 4, 5, 2, 3, 10, 2, 8, 3};
-    double exp[VECTOR_SIZE] = {3.0, 2.0, 0.5, 3.0, 2.5, 3.5, -1.0, 4.0, 1.0/3.0, 2.2};
+    double exp[VECTOR_SIZE] = {3.0, 2.0, 0.5, 3.0, 2.5, 3.5, -1.0, 4.0, 1.0 / 3.0, 2.2};
     double result[VECTOR_SIZE] = {0};
 
     me_variable vars[] = {{"base", ME_INT32}, {"exp", ME_FLOAT64}};
@@ -237,7 +237,7 @@ void test_two_param_with_mixed_types() {
     me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
-        double expected = pow((double)base[i], exp[i]);
+        double expected = pow((double) base[i], exp[i]);
         ASSERT_NEAR(expected, result[i], i);
     }
 

@@ -17,8 +17,8 @@ int main() {
 
     // Input arrays with different types
     const int n = 5;
-    int32_t a[] = {1, 2, 3, 4, 5};           // Integer
-    double b[] = {0.1, 0.2, 0.3, 0.4, 0.5};  // Float
+    int32_t a[] = {1, 2, 3, 4, 5}; // Integer
+    double b[] = {0.1, 0.2, 0.3, 0.4, 0.5}; // Float
     double result[5];
 
     // Define variables with explicit types
@@ -39,8 +39,10 @@ int main() {
     printf("Inferred result type: ");
     me_dtype result_dtype = me_get_dtype(expr);
     switch (result_dtype) {
-        case ME_INT32: printf("ME_INT32\n"); break;
-        case ME_FLOAT64: printf("ME_FLOAT64\n"); break;
+        case ME_INT32: printf("ME_INT32\n");
+            break;
+        case ME_FLOAT64: printf("ME_FLOAT64\n");
+            break;
         default: printf("%d\n", result_dtype);
     }
     printf("\n");

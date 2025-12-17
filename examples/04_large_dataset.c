@@ -14,7 +14,7 @@
 #define TOTAL_SIZE 44739242   // ~44M elements = ~1GB working set
 #define CHUNK_SIZE 32768     // 32K elements = 768 KB (optimal for cache)
 #define FLOPS_PER_ELEM 4     // sqrt(a*a + b*b): 2 muls + 1 add + 1 sqrt (convention)
-                             // Note: Actual hardware cost ~23 FLOPs (sqrt ≈ 20 FLOPs in reality)
+// Note: Actual hardware cost ~23 FLOPs (sqrt ≈ 20 FLOPs in reality)
 
 int main() {
     printf("=== Large Dataset Processing Example ===\n");
@@ -50,7 +50,9 @@ int main() {
 
     if (!expr) {
         printf("ERROR: Failed to compile at position %d\n", error);
-        free(a); free(b); free(result);
+        free(a);
+        free(b);
+        free(result);
         return 1;
     }
 
@@ -77,11 +79,11 @@ int main() {
     }
 
     clock_t end = clock();
-    double elapsed = ((double)(end - start)) / CLOCKS_PER_SEC;
+    double elapsed = ((double) (end - start)) / CLOCKS_PER_SEC;
 
     // Calculate throughput metrics
     double melems_per_sec = (TOTAL_SIZE / 1e6) / elapsed;
-    double gflops = (TOTAL_SIZE * (double)FLOPS_PER_ELEM / 1e9) / elapsed;
+    double gflops = (TOTAL_SIZE * (double) FLOPS_PER_ELEM / 1e9) / elapsed;
     double bandwidth_gb = (TOTAL_SIZE * 3 * sizeof(double) / 1e9) / elapsed;
 
     // Verify some results

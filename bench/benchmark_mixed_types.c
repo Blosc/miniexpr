@@ -33,7 +33,7 @@ typedef struct {
     void *output;
     size_t total_elements;
     size_t chunk_elements;
-    
+
     // Shared work queue
     pthread_mutex_t work_mutex;
     pthread_cond_t work_available;
@@ -45,21 +45,21 @@ typedef struct {
 } thread_pool_t;
 
 static void *worker_thread(void *arg) {
-    thread_pool_t *pool = (thread_pool_t *)arg;
-    
+    thread_pool_t *pool = (thread_pool_t *) arg;
+
     while (1) {
         pthread_mutex_lock(&pool->work_mutex);
-        
+
         // Wait for work or exit signal
         while (!pool->work_ready && !pool->should_exit) {
             pthread_cond_wait(&pool->work_available, &pool->work_mutex);
         }
-        
+
         if (pool->should_exit) {
             pthread_mutex_unlock(&pool->work_mutex);
             break;
         }
-        
+
         // Process chunks until all work is done
         while (pool->next_chunk_idx < pool->total_elements) {
             // Get next chunk
@@ -68,30 +68,30 @@ static void *worker_thread(void *arg) {
             if (my_chunk_idx + chunk_size > pool->total_elements) {
                 chunk_size = pool->total_elements - my_chunk_idx;
             }
-            
+
             pool->next_chunk_idx += chunk_size;
             pthread_mutex_unlock(&pool->work_mutex);
-            
+
             // Do the work (outside mutex)
             const void *adjusted_inputs[10];
             for (int i = 0; i < pool->num_inputs; i++) {
                 // Adjust pointers based on input type sizes
                 if (i == 0) {
                     // a: double (8 bytes)
-                    adjusted_inputs[i] = (const double *)pool->inputs[i] + my_chunk_idx;
+                    adjusted_inputs[i] = (const double *) pool->inputs[i] + my_chunk_idx;
                 } else if (i == 1) {
                     // b: float (4 bytes)
-                    adjusted_inputs[i] = (const float *)pool->inputs[i] + my_chunk_idx;
+                    adjusted_inputs[i] = (const float *) pool->inputs[i] + my_chunk_idx;
                 } else if (i == 2) {
                     // c: int16 (2 bytes)
-                    adjusted_inputs[i] = (const int16_t *)pool->inputs[i] + my_chunk_idx;
+                    adjusted_inputs[i] = (const int16_t *) pool->inputs[i] + my_chunk_idx;
                 }
             }
-            double *output = (double *)pool->output + my_chunk_idx;
-            
+            double *output = (double *) pool->output + my_chunk_idx;
+
             me_eval(pool->expr, adjusted_inputs, pool->num_inputs,
                     output, chunk_size);
-            
+
             // Update completion status
             pthread_mutex_lock(&pool->work_mutex);
             pool->completed_elements += chunk_size;
@@ -100,17 +100,17 @@ static void *worker_thread(void *arg) {
                 pthread_cond_signal(&pool->all_done);
             }
         }
-        
+
         pthread_mutex_unlock(&pool->work_mutex);
     }
-    
+
     return NULL;
 }
 
-static thread_pool_t* create_thread_pool(int num_threads, pthread_t **threads_out) {
+static thread_pool_t *create_thread_pool(int num_threads, pthread_t **threads_out) {
     thread_pool_t *pool = malloc(sizeof(thread_pool_t));
     if (!pool) return NULL;
-    
+
     pool->expr = NULL;
     pool->inputs = NULL;
     pool->num_inputs = 0;
@@ -121,21 +121,21 @@ static thread_pool_t* create_thread_pool(int num_threads, pthread_t **threads_ou
     pool->completed_elements = 0;
     pool->work_ready = false;
     pool->should_exit = false;
-    
+
     pthread_mutex_init(&pool->work_mutex, NULL);
     pthread_cond_init(&pool->work_available, NULL);
     pthread_cond_init(&pool->all_done, NULL);
-    
+
     pthread_t *threads = malloc(num_threads * sizeof(pthread_t));
     if (!threads) {
         free(pool);
         return NULL;
     }
-    
+
     for (int i = 0; i < num_threads; i++) {
         pthread_create(&threads[i], NULL, worker_thread, pool);
     }
-    
+
     *threads_out = threads;
     return pool;
 }
@@ -145,22 +145,22 @@ static void destroy_thread_pool(thread_pool_t *pool, pthread_t *threads, int num
     pool->should_exit = true;
     pthread_cond_broadcast(&pool->work_available);
     pthread_mutex_unlock(&pool->work_mutex);
-    
+
     for (int i = 0; i < num_threads; i++) {
         pthread_join(threads[i], NULL);
     }
-    
+
     pthread_mutex_destroy(&pool->work_mutex);
     pthread_cond_destroy(&pool->work_available);
     pthread_cond_destroy(&pool->all_done);
-    
+
     free(threads);
     free(pool);
 }
 
 static double benchmark_chunksize(thread_pool_t *pool, size_t chunk_bytes,
-                                   double *a, float *b, int16_t *c, double *result,
-                                   size_t total_elements) {
+                                  double *a, float *b, int16_t *c, double *result,
+                                  size_t total_elements) {
     const size_t chunk_elements = chunk_bytes / sizeof(double);
     if (chunk_elements == 0) return 0.0;
 
@@ -192,13 +192,13 @@ static double benchmark_chunksize(thread_pool_t *pool, size_t chunk_bytes,
     pool->completed_elements = 0;
     pool->work_ready = true;
     pthread_mutex_unlock(&pool->work_mutex);
-    
+
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
 
     // Signal threads that work is available
     pthread_cond_broadcast(&pool->work_available);
-    
+
     // Wait for all work to be completed
     pthread_mutex_lock(&pool->work_mutex);
     while (pool->completed_elements < pool->total_elements) {
@@ -209,7 +209,7 @@ static double benchmark_chunksize(thread_pool_t *pool, size_t chunk_bytes,
     clock_gettime(CLOCK_MONOTONIC, &end);
 
     double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
-    double throughput = (total_elements / elapsed) / 1e6;  // Melems/sec
+    double throughput = (total_elements / elapsed) / 1e6; // Melems/sec
 
     me_free(expr);
 
@@ -241,15 +241,18 @@ int main() {
 
     if (!a || !b || !c || !result) {
         fprintf(stderr, "Failed to allocate arrays\n");
-        free(a); free(b); free(c); free(result);
+        free(a);
+        free(b);
+        free(c);
+        free(result);
         return 1;
     }
 
     // Initialize data once
     for (size_t i = 0; i < total_elements; i++) {
-        a[i] = (double)(i % 1000) / 100.0;
-        b[i] = (float)((i + 333) % 1000) / 100.0f;
-        c[i] = (int16_t)((i % 100) - 50);  // Range: -50 to 49
+        a[i] = (double) (i % 1000) / 100.0;
+        b[i] = (float) ((i + 333) % 1000) / 100.0f;
+        c[i] = (int16_t) ((i % 100) - 50); // Range: -50 to 49
     }
 
     // Create thread pool once
@@ -257,7 +260,10 @@ int main() {
     thread_pool_t *pool = create_thread_pool(NUM_THREADS, &threads);
     if (!pool) {
         fprintf(stderr, "Failed to create thread pool\n");
-        free(a); free(b); free(c); free(result);
+        free(a);
+        free(b);
+        free(c);
+        free(result);
         return 1;
     }
 
@@ -285,8 +291,8 @@ int main() {
         }
 
         // Bandwidth calculation: 8+4+2 bytes read + 8 bytes write = 22 bytes per element
-        double bandwidth = (throughput * 22.0) / 1000.0;  // Melems/s * 22 bytes / 1000 = GB/s
-        double gflops = throughput * 2.0 / 1000.0;  // 2 FLOP per element (1 add, 1 mul)
+        double bandwidth = (throughput * 22.0) / 1000.0; // Melems/s * 22 bytes / 1000 = GB/s
+        double gflops = throughput * 2.0 / 1000.0; // 2 FLOP per element (1 add, 1 mul)
 
         printf("%10zu  %21.2f  %16.2f  %8.2f\n",
                chunk_kb, throughput, bandwidth, gflops);
