@@ -139,7 +139,7 @@ const char *damped_sine = "A * exp(-decay*t) * sin(2*3.14159265359*f*t)";
 ## Available Functions
 
 miniexpr supports many standard mathematical functions:
-- Trigonometric: `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`
+- Trigonometric: `sin`, `cos`, `tan`, `asin`/`arcsin`, `acos`/`arccos`, `atan`/`arctan`, `atan2`/`arctan2`
 - Hyperbolic: `sinh`, `cosh`, `tanh`
 - Exponential/Logarithmic: `exp`, `log`, `log10`, `pow`
 - Power/Root: `sqrt`, `pow`, `abs`
