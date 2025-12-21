@@ -199,6 +199,33 @@ Chunk size matters enormously for parallel performance:
 
 ---
 
+### 07_comparison_bool_output.c
+**Comparison operators with boolean array output**
+
+- **What it demonstrates**: Getting bool arrays from comparison expressions
+- **Expressions**: `a**2 == (a+b)`, `x < y`, Pythagorean theorem checks
+- **Concepts**: ME_BOOL output, type conversion, comparison operators
+- **Best for**: Filtering, masking, conditional operations
+
+**Run it:**
+```bash
+./build/07_comparison_bool_output
+```
+
+**Key features:**
+- Explicit variable dtypes with ME_BOOL output
+- ME_AUTO that auto-infers ME_BOOL for comparisons
+- All comparison operators: `==`, `!=`, `<`, `<=`, `>`, `>=`
+- Complex expressions with power operations
+
+**Use cases:**
+- Creating boolean masks for filtering
+- Validating mathematical relationships
+- Implementing conditional logic on arrays
+- Data validation and quality checks
+
+---
+
 ## Building Examples
 
 ### Using the Makefile
@@ -334,5 +361,6 @@ After trying these examples:
 | 04 | ⭐⭐⭐ Advanced | Large data | ~110 | ~1s |
 | 05 | ⭐⭐⭐ Advanced | Parallelism | ~140 | ~1s |
 | 06 | ⭐ Simple | Debugging | ~70 | <1s |
+| 07 | ⭐⭐ Moderate | Bool output | ~180 | <1s |
 
 **Start with Example 01, then explore based on your needs!** 🚀

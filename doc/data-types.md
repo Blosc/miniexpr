@@ -229,10 +229,87 @@ RGB( 64,128, 64) -> Gray=100
 RGB( 32,192,128) -> Gray=136
 ```
 
+## Example 5: Boolean Output from Comparisons
+
+Comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`) can output boolean arrays. This is useful for filtering, masking, or conditional operations.
+
+```c
+#include <stdio.h>
+#include <stdbool.h>
+#include "miniexpr.h"
+
+int main() {
+    // Sample data where a² = a + b for all elements
+    double a[] = {2.0, 3.0, 4.0, 5.0, 6.0};
+    double b[] = {2.0, 6.0, 12.0, 20.0, 30.0};
+    int n = 5;
+
+    // Boolean output array
+    bool is_equal[5];
+
+    // Method 1: Explicit variable dtypes with ME_BOOL output
+    // Use this when input types differ from output type
+    me_variable vars[] = {
+        {"a", ME_FLOAT64},
+        {"b", ME_FLOAT64}
+    };
+
+    int error;
+    me_expr *expr = me_compile("a ** 2 == (a + b)", vars, 2, ME_BOOL, &error);
+
+    if (!expr) {
+        printf("Parse error at position %d\n", error);
+        return 1;
+    }
+
+    const void *var_ptrs[] = {a, b};
+    me_eval(expr, var_ptrs, 2, is_equal, n);
+
+    printf("Comparison Results (BOOL):\n");
+    for (int i = 0; i < n; i++) {
+        printf("a=%.1f: a² (%.1f) == a+b (%.1f) -> %s\n",
+               a[i], a[i]*a[i], a[i]+b[i],
+               is_equal[i] ? "true" : "false");
+    }
+
+    me_free(expr);
+    return 0;
+}
+```
+
+### Expected Output
+
+```
+Comparison Results (BOOL):
+a=2.0: a² (4.0) == a+b (4.0) -> true
+a=3.0: a² (9.0) == a+b (9.0) -> true
+a=4.0: a² (16.0) == a+b (16.0) -> true
+a=5.0: a² (25.0) == a+b (25.0) -> true
+a=6.0: a² (36.0) == a+b (36.0) -> true
+```
+
+### Two Ways to Get Boolean Output
+
+**Method 1: Explicit variable dtypes with ME_BOOL output**
+```c
+me_variable vars[] = {{"x", ME_FLOAT64}, {"y", ME_FLOAT64}};
+me_expr *expr = me_compile("x < y", vars, 2, ME_BOOL, &error);
+```
+
+**Method 2: ME_AUTO output (auto-infers ME_BOOL for comparisons)**
+```c
+me_variable vars[] = {{"x", ME_FLOAT64}, {"y", ME_FLOAT64}};
+me_expr *expr = me_compile("x < y", vars, 2, ME_AUTO, &error);
+// me_get_dtype(expr) == ME_BOOL  (automatically inferred)
+```
+
+Both methods require explicit variable dtypes when the computation type differs from the output type.
+
 ## Choosing the Right Data Type
 
 | Type | Use When | Memory per Element |
 |------|----------|-------------------|
+| `ME_BOOL` | Comparison results, flags, masks | 1 byte |
 | `ME_INT8` / `ME_UINT8` | Small integers, flags, pixel values | 1 byte |
 | `ME_INT16` / `ME_UINT16` | Medium-range integers | 2 bytes |
 | `ME_INT32` / `ME_UINT32` | Standard integers | 4 bytes |
@@ -245,3 +322,4 @@ RGB( 32,192,128) -> Gray=136
 - Use unsigned types when values are always non-negative
 - Use FLOAT64 for scientific computing requiring high precision
 - Use FLOAT32 for graphics or when processing large arrays
+- Use ME_BOOL for comparison expressions to get proper boolean output

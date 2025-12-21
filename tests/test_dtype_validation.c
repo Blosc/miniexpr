@@ -62,16 +62,17 @@ int main() {
         }
     }
 
-    /* Test 4: Invalid - All explicit dtypes but non-ME_AUTO output */
-    printf("\nTest 4: INVALID - Explicit var dtypes with specific output\n"); {
+    /* Test 4: Valid - All explicit dtypes with specific output (for type conversion) */
+    printf("\nTest 4: VALID - Explicit var dtypes with specific output (enables type conversion)\n"); {
         me_variable vars[] = {{"a", ME_INT32}, {"b", ME_INT32}};
         me_expr *expr = me_compile("a + b", vars, 2, ME_INT32, &err);
 
-        if (!expr) {
-            printf("  ✅ PASS: Correctly rejected (error=%d)\n", err);
-        } else {
-            printf("  ❌ FAIL: Should have been rejected\n");
+        if (expr) {
+            printf("  ✅ PASS: Compilation succeeded (allows input/output type conversion)\n");
+            printf("  Result dtype: %d\n", me_get_dtype(expr));
             me_free(expr);
+        } else {
+            printf("  ❌ FAIL: Should have succeeded\n");
         }
     }
 
@@ -91,8 +92,8 @@ int main() {
     printf("\n===============================\n");
     printf("Validation Rules Summary:\n");
     printf("1. output=ME_AUTO    → all vars must have explicit dtypes\n");
-    printf("2. output=<specific> → all vars must be ME_AUTO\n");
-    printf("3. No mixing allowed!\n");
+    printf("2. output=<specific> → vars can be all ME_AUTO or all explicit\n");
+    printf("3. No mixing of ME_AUTO and explicit var dtypes!\n");
     printf("===============================\n");
 
     return 0;
