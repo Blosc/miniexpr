@@ -42,9 +42,9 @@ For a**b**c = a**(b**c) and -a**b = -(a**b) uncomment the next line.*/
 /* #define ME_POW_FROM_RIGHT */
 
 /* Logarithms
-For log = base 10 log do nothing
-For log = natural log uncomment the next line. */
-/* #define ME_NAT_LOG */
+For log = natural log do nothing (NumPy compatible)
+For log = base 10 log comment the next line. */
+#define ME_NAT_LOG
 
 #include "miniexpr.h"
 #include <stdlib.h>
