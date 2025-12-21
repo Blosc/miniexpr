@@ -28,6 +28,9 @@ int main() {
     };
 
     // Compile with ME_AUTO to infer output type from inputs
+    // NOTE: With ME_AUTO, any constants in the expression would
+    // be inferred from the first variable's type (ME_INT32 here)
+    // But this expression has no constants, only variables
     int error;
     me_expr *expr = me_compile("a + b", vars, 2, ME_AUTO, &error);
 

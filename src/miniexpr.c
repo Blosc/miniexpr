@@ -3038,7 +3038,16 @@ static me_expr *private_compile(const char *expression, const me_variable *varia
     s.start = s.next = expression;
     s.lookup = vars_copy ? vars_copy : variables;
     s.lookup_len = var_count;
-    s.target_dtype = (dtype != ME_AUTO) ? dtype : ME_FLOAT64; // Set target dtype for constants
+    // When dtype is ME_AUTO, infer target dtype from variables to avoid type mismatch
+    if (dtype != ME_AUTO) {
+        s.target_dtype = dtype;
+    } else if (variables && var_count > 0) {
+        // Use the first variable's dtype as the target for constants
+        // This prevents type promotion issues when mixing float32 vars with float64 constants
+        s.target_dtype = variables[0].dtype;
+    } else {
+        s.target_dtype = ME_FLOAT64; // Fallback to double
+    }
 
     next_token(&s);
     me_expr *root = list(&s);
