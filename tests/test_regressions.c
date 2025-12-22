@@ -417,6 +417,150 @@ float sub_2_f32(float x) { return x - 2.0f; }
 float div_4_f32(float x) { return x / 4.0f; }
 
 // ============================================================================
+// LARGE INT64 + FLOAT CONSTANT TEST
+// ============================================================================
+
+int test_int64_large_constant(const char *description, int size) {
+    printf("\n%s\n", description);
+    printf("======================================================================\n");
+
+    // Create an int64 array of the requested size and fill with small increasing values.
+    // Using small integers ensures integer -> floating conversions are not lossy for the
+    // integer operand itself; the potential issue comes from the large floating constant.
+    long long *input = malloc(size * sizeof(long long));
+    if (!input) {
+        printf("  ❌ FAILED: malloc failed\n");
+        return 0;
+    }
+    for (int i = 0; i < size; i++) {
+        input[i] = (long long)i;
+    }
+
+    // Compile expression. We use ME_AUTO so mixed-type rules are applied and the
+    // compiler decides the result dtype.
+    me_variable vars[] = {{"a", ME_INT64}};
+    int err;
+    const char *expr_str = "(a + 90000.00001) + 1";
+    me_expr *expr = me_compile(expr_str, vars, 1, ME_AUTO, &err);
+
+    if (!expr) {
+        printf("  ❌ COMPILATION FAILED (error %d)\n", err);
+        free(input);
+        return 0;
+    }
+
+    me_dtype out_dtype = me_get_dtype(expr);
+    printf("  Compiled expression: %s\n", expr_str);
+    printf("  Inferred output dtype: %d\n", out_dtype);
+
+    int passed = 1;
+    double max_diff = 0.0;
+
+    // Evaluate depending on inferred output dtype. The expression contains a
+    // floating-point constant, so a floating output dtype is expected.
+    const void *var_ptrs[] = {input};
+
+    if (out_dtype == ME_FLOAT64) {
+        double *result = malloc(size * sizeof(double));
+        if (!result) {
+            printf("  ❌ FAILED: malloc for result failed\n");
+            me_free(expr);
+            free(input);
+            return 0;
+        }
+        me_eval(expr, var_ptrs, 1, result, size);
+
+        // Compute expected values using double arithmetic.
+        for (int i = 0; i < size; i++) {
+            double expected = ((double)input[i] + 90000.00001) + 1.0;
+            double diff = fabs(result[i] - expected);
+            if (diff > max_diff) max_diff = diff;
+            if (diff > 1e-9) passed = 0; // tight tolerance for this check
+        }
+
+        printf("  Result (first 5):   ");
+        for (int i = 0; i < 5 && i < size; i++) printf("%.9f ", result[i]);
+        printf("...\n");
+
+        printf("  Expected (first 5): ");
+        for (int i = 0; i < 5 && i < size; i++) {
+            double expected = ((double)input[i] + 90000.00001) + 1.0;
+            printf("%.9f ", expected);
+        }
+        printf("...\n");
+
+        free(result);
+
+    } else if (out_dtype == ME_FLOAT32) {
+        float *result = malloc(size * sizeof(float));
+        if (!result) {
+            printf("  ❌ FAILED: malloc for result failed\n");
+            me_free(expr);
+            free(input);
+            return 0;
+        }
+        me_eval(expr, var_ptrs, 1, result, size);
+
+        for (int i = 0; i < size; i++) {
+            float expected = (float)(((double)input[i] + 90000.00001) + 1.0);
+            float diff = fabsf(result[i] - expected);
+            if (diff > max_diff) max_diff = diff;
+            if (diff > 1e-5f) passed = 0; // looser tolerance for float32
+        }
+
+        printf("  Result (first 5):   ");
+        for (int i = 0; i < 5 && i < size; i++) printf("%.7f ", result[i]);
+        printf("...\n");
+
+        printf("  Expected (first 5): ");
+        for (int i = 0; i < 5 && i < size; i++) {
+            float expected = (float)(((double)input[i] + 90000.00001) + 1.0);
+            printf("%.7f ", expected);
+        }
+        printf("...\n");
+
+        free(result);
+
+    } else {
+        // Unexpected output dtype: try to evaluate into a double buffer and compare
+        // raw integer or other outputs as a conservative fallback.
+        printf("  ⚠️  Unexpected output dtype (%d). Attempting double evaluation for comparison.\n", out_dtype);
+        double *result = malloc(size * sizeof(double));
+        if (!result) {
+            printf("  ❌ FAILED: malloc for fallback result failed\n");
+            me_free(expr);
+            free(input);
+            return 0;
+        }
+        me_eval(expr, var_ptrs, 1, result, size);
+
+        for (int i = 0; i < size; i++) {
+            double expected = ((double)input[i] + 90000.00001) + 1.0;
+            double diff = fabs(result[i] - expected);
+            if (diff > max_diff) max_diff = diff;
+            if (diff > 1e-9) passed = 0;
+        }
+
+        free(result);
+    }
+
+    me_free(expr);
+    free(input);
+
+    if (passed) {
+        printf("  ✅ PASS\n");
+    } else {
+        printf("  ❌ FAIL (max diff: %.12f)\n", max_diff);
+    }
+
+    // The caller expects this test to surface the reported problem; return the
+    // actual pass/fail so it shows up in the overall summary. The external app
+    // that reported the issue used this expression and observed incorrect
+    // behaviour, so a failure here indicates the bug is present.
+    return passed;
+}
+
+// ============================================================================
 // MAIN TEST RUNNER
 // ============================================================================
 
@@ -555,6 +699,17 @@ int main() {
 
     total++;
     if (test_scalar_constant("Test 5.6: a / 4", "a / 4", div_4_f32)) passed++;
+
+    // ========================================================================
+    // SECTION 6: LARGE INT64 + FLOAT CONSTANT (expected to fail)
+    // ========================================================================
+    printf("\n\n========================================================================\n");
+    printf("SECTION 6: LARGE INT64 + FLOAT CONSTANT\n");
+    printf("========================================================================\n");
+
+    total++;
+    if (test_int64_large_constant("Test 6.1: (a + 90000.00001) + 1 where a is int64[1000]",
+                                  1000)) passed++;
 
     // ========================================================================
     // FINAL SUMMARY
