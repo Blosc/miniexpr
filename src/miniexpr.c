@@ -162,6 +162,26 @@ static inline double me_cabs(double _Complex a) {
     ua.c = a;
     return cabs(ua.m);
 }
+static inline float me_cimagf(float _Complex a) {
+    union { float _Complex c; _Fcomplex m; } ua;
+    ua.c = a;
+    return cimagf(ua.m);
+}
+static inline double me_cimag(double _Complex a) {
+    union { double _Complex c; _Dcomplex m; } ua;
+    ua.c = a;
+    return cimag(ua.m);
+}
+static inline float me_crealf(float _Complex a) {
+    union { float _Complex c; _Fcomplex m; } ua;
+    ua.c = a;
+    return crealf(ua.m);
+}
+static inline double me_creal(double _Complex a) {
+    union { double _Complex c; _Dcomplex m; } ua;
+    ua.c = a;
+    return creal(ua.m);
+}
 static inline float _Complex me_conjf(float _Complex a) {
     union { float _Complex c; _Fcomplex m; } ua, ur;
     ua.c = a;
@@ -185,6 +205,10 @@ static inline double _Complex me_conj(double _Complex a) {
 #define me_clog clog
 #define me_cabsf cabsf
 #define me_cabs cabs
+#define me_cimagf cimagf
+#define me_cimag cimag
+#define me_crealf crealf
+#define me_creal creal
 #define me_conjf conjf
 #define me_conj conj
 #endif
@@ -240,10 +264,10 @@ static inline double _Complex me_conj(double _Complex a) {
 #else
 #define TO_TYPE_c64(x) (float_complex)(x)
 #define TO_TYPE_c128(x) (double_complex)(x)
-#define FROM_TYPE_c64(x) (double)(x)
-#define FROM_TYPE_c128(x) (double)(x)
-#define IS_NONZERO_c64(x) ((x) != 0)
-#define IS_NONZERO_c128(x) ((x) != 0)
+#define FROM_TYPE_c64(x) (double)me_crealf(x)
+#define FROM_TYPE_c128(x) (double)me_creal(x)
+#define IS_NONZERO_c64(x) (me_crealf(x) != 0.0f || me_cimagf(x) != 0.0f)
+#define IS_NONZERO_c128(x) (me_creal(x) != 0.0 || me_cimag(x) != 0.0)
 #define TO_TYPE_c128_from_c64(x) (double_complex)(x)
 #endif
 
@@ -2063,7 +2087,7 @@ static void vec_conj_c64(const float _Complex *a, float _Complex *out, int n) {
 static void vec_imag_c64(const float _Complex *a, float *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = cimagf(a[i]);
+    for (i = 0; i < n; i++) out[i] = me_cimagf(a[i]);
 }
 
 static void vec_add_c128(const double _Complex *a, const double _Complex *b, double _Complex *out, int n) {
@@ -2135,7 +2159,7 @@ static void vec_conj_c128(const double _Complex *a, double _Complex *out, int n)
 static void vec_imag_c128(const double _Complex *a, double *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = cimag(a[i]);
+    for (i = 0; i < n; i++) out[i] = me_cimag(a[i]);
 }
 
 /* ============================================================================
@@ -2660,8 +2684,8 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sqrt_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = csqrtf((a)[_i]); } while(0)
 #define vec_negame_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = neg_c64((a)[_i]); } while(0)
 #define vec_conj_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = conjf((a)[_i]); } while(0)
-#define vec_imag_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cimagf((a)[_i]); } while(0)
-#define vec_real_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = crealf((a)[_i]); } while(0)
+#define vec_imag_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cimagf((a)[_i]); } while(0)
+#define vec_real_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_crealf((a)[_i]); } while(0)
 #define vec_conj_noop(a, out, n) do { (void)(a); (void)(out); (void)(n); } while(0)
 
 #define vec_add_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = add_c128((a)[_i], (b)[_i]); } while(0)
@@ -2675,8 +2699,8 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sqrt_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = csqrt((a)[_i]); } while(0)
 #define vec_negame_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = neg_c128((a)[_i]); } while(0)
 #define vec_conj_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = conj((a)[_i]); } while(0)
-#define vec_imag_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cimag((a)[_i]); } while(0)
-#define vec_real_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = creal((a)[_i]); } while(0)
+#define vec_imag_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cimag((a)[_i]); } while(0)
+#define vec_real_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_creal((a)[_i]); } while(0)
 #else
 #define vec_add_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
 #define vec_sub_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
