@@ -480,6 +480,25 @@ void me_free(me_expr *n) {
 static double pi(void) { return 3.14159265358979323846; }
 static double e(void) { return 2.71828182845904523536; }
 
+/* Wrapper for expm1: exp(x) - 1, more accurate for small x */
+static double expm1_wrapper(double x) { return expm1(x); }
+
+/* Wrapper for log1p: log(1 + x), more accurate for small x */
+static double log1p_wrapper(double x) { return log1p(x); }
+
+/* Wrapper for log2: base-2 logarithm */
+static double log2_wrapper(double x) { return log2(x); }
+
+/* logaddexp: log(exp(a) + exp(b)), numerically stable */
+static double logaddexp(double a, double b) {
+    if (a == b) {
+        return a + log1p(1.0);  // log(2*exp(a)) = a + log(2)
+    }
+    double max_val = (a > b) ? a : b;
+    double min_val = (a > b) ? b : a;
+    return max_val + log1p(exp(min_val - max_val));
+}
+
 static double fac(double a) {
     /* simplest version of fac */
     if (a < 0.0)
@@ -541,6 +560,7 @@ static const me_variable functions[] = {
     {"cosh", 0, cosh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"e", 0, e, ME_FUNCTION0 | ME_FLAG_PURE, 0},
     {"exp", 0, exp, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"expm1", 0, expm1_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"fac", 0, fac, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"floor", 0, floor, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"ln", 0, log, ME_FUNCTION1 | ME_FLAG_PURE, 0},
@@ -550,6 +570,9 @@ static const me_variable functions[] = {
     {"log", 0, log10, ME_FUNCTION1 | ME_FLAG_PURE, 0},
 #endif
     {"log10", 0, log10, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"log1p", 0, log1p_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"log2", 0, log2_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"logaddexp", 0, logaddexp, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"ncr", 0, ncr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"npr", 0, npr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"pi", 0, pi, ME_FUNCTION0 | ME_FLAG_PURE, 0},
