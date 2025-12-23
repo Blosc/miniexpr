@@ -226,6 +226,33 @@ Chunk size matters enormously for parallel performance:
 
 ---
 
+### 08_explicit_output_dtype.c
+**Explicit variable types with explicit output dtype**
+
+- **What it demonstrates**: Specifying both variable types and output dtype simultaneously
+- **Expressions**: `a + b`, `x * 2.5 + y`, `a > b`
+- **Concepts**: Heterogeneous types, type casting, explicit output control
+- **Best for**: Memory efficiency, type safety, mixed-type inputs with specific output requirements
+
+**Run it:**
+```bash
+./build/08_explicit_output_dtype
+```
+
+**Key features:**
+- Mixed types (INT32 + FLOAT64) with FLOAT32 output
+- FLOAT32 variables with FLOAT64 output
+- Comparison with explicit BOOL output
+- Variables keep their types during computation, result is cast to output type
+
+**Use cases:**
+- Computing in lower precision (FLOAT32) but outputting in higher precision (FLOAT64)
+- Mixed-type inputs with specific output type requirements
+- Type-safe operations with explicit control over output
+- Memory-efficient computation with flexible output types
+
+---
+
 ## Building Examples
 
 ### Using the Makefile

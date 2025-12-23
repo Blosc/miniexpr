@@ -305,6 +305,66 @@ me_expr *expr = me_compile("x < y", vars, 2, ME_AUTO, &error);
 
 Both methods require explicit variable dtypes when the computation type differs from the output type.
 
+## Example 6: Explicit Variable Types with Explicit Output Dtype
+
+You can specify both explicit variable types AND an explicit output dtype. This is useful when you want variables to keep their types during computation, but cast the final result to a specific output type.
+
+```c
+#include <stdio.h>
+#include <stdint.h>
+#include "miniexpr.h"
+
+int main() {
+    // Mixed input types
+    int32_t a[] = {10, 20, 30, 40, 50};
+    double b[] = {1.5, 2.5, 3.5, 4.5, 5.5};
+
+    // Output as FLOAT32 (even though computation uses FLOAT64)
+    float result[5];
+
+    me_variable vars[] = {
+        {"a", ME_INT32},
+        {"b", ME_FLOAT64}
+    };
+
+    // Explicit variable types + explicit output dtype
+    int error;
+    me_expr *expr = me_compile("a + b", vars, 2, ME_FLOAT32, &error);
+
+    if (!expr) {
+        printf("Parse error at position %d\n", error);
+        return 1;
+    }
+
+    const void *var_ptrs[] = {a, b};
+    me_eval(expr, var_ptrs, 2, result, 5);
+
+    printf("Mixed Types with FLOAT32 Output:\n");
+    for (int i = 0; i < 5; i++) {
+        printf("a=%d + b=%.1f = %.2f (FLOAT32)\n", a[i], b[i], result[i]);
+    }
+
+    me_free(expr);
+    return 0;
+}
+```
+
+### When to Use This Pattern
+
+**Use explicit variable types + explicit output dtype when:**
+- You have heterogeneous input types but need a specific output type
+- You want to compute in one precision but output in another (e.g., FLOAT32 computation, FLOAT64 output)
+- You need explicit control over type casting for memory efficiency or compatibility
+
+**Key behavior:**
+- Variables keep their explicit types during computation
+- Type promotion happens as needed (e.g., INT32 + FLOAT64 → FLOAT64)
+- Final result is cast to your specified output dtype
+
+**Comparison with ME_AUTO:**
+- `ME_AUTO`: Output type is inferred from the expression computation
+- Explicit output: Output type is forced to your specification (with casting)
+
 ## Choosing the Right Data Type
 
 | Type | Use When | Memory per Element |

@@ -117,16 +117,18 @@ int main() {
 
     // Test atan2 vs arctan2
     tests_total++;
-    printf("\nTest 4: atan2(x, x) vs arctan2(x, x)\n");
-    me_expr *expr_atan2 = me_compile("atan2(x, x)", vars, 1, ME_FLOAT64, &err);
-    me_expr *expr_arctan2 = me_compile("arctan2(x, x)", vars, 1, ME_FLOAT64, &err);
+    printf("\nTest 4: atan2(y, x) vs arctan2(y, x)\n");
+    double y[VECTOR_SIZE] = {1.0, 0.5, 0.707, 0.866, 0.0};
+    me_variable vars2[] = {{"y"}, {"x"}};
+    me_expr *expr_atan2 = me_compile("atan2(y, x)", vars2, 2, ME_FLOAT64, &err);
+    me_expr *expr_arctan2 = me_compile("arctan2(y, x)", vars2, 2, ME_FLOAT64, &err);
 
     if (!expr_atan2 || !expr_arctan2) {
         printf("  FAIL: Compilation failed\n");
     } else {
-        const void *var_ptrs[] = {x};
-        me_eval(expr_atan2, var_ptrs, 1, result_a, VECTOR_SIZE);
-        me_eval(expr_arctan2, var_ptrs, 1, result_arc, VECTOR_SIZE);
+        const void *var_ptrs[] = {y, x};
+        me_eval(expr_atan2, var_ptrs, 2, result_a, VECTOR_SIZE);
+        me_eval(expr_arctan2, var_ptrs, 2, result_arc, VECTOR_SIZE);
 
         int match = 1;
         for (int i = 0; i < VECTOR_SIZE; i++) {
