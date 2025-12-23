@@ -102,7 +102,7 @@ static inline _Dcomplex div_c128(_Dcomplex a, _Dcomplex b) {
 #define div_c128(a, b) ((a) / (b))
 #endif
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) && !defined(__clang__)
 /* Wrappers for complex functions to handle MSVC's _Fcomplex/_Dcomplex */
 static inline float _Complex me_cpowf(float _Complex a, float _Complex b) {
     union { float _Complex c; _Fcomplex m; } ua, ub, ur;
@@ -195,6 +195,24 @@ static inline double _Complex me_conj(double _Complex a) {
     return ur.c;
 }
 #else
+#if defined(_MSC_VER) && defined(__clang__)
+#define me_cimagf __builtin_cimagf
+#define me_cimag __builtin_cimag
+#define me_crealf __builtin_crealf
+#define me_creal __builtin_creal
+#define me_conjf __builtin_conjf
+#define me_conj __builtin_conj
+#define me_cpowf __builtin_cpowf
+#define me_cpow __builtin_cpow
+#define me_csqrtf __builtin_csqrtf
+#define me_csqrt __builtin_csqrt
+#define me_cexpf __builtin_cexpf
+#define me_cexp __builtin_cexp
+#define me_clogf __builtin_clogf
+#define me_clog __builtin_clog
+#define me_cabsf __builtin_cabsf
+#define me_cabs __builtin_cabs
+#else
 #define me_cpowf cpowf
 #define me_cpow cpow
 #define me_csqrtf csqrtf
@@ -205,14 +223,6 @@ static inline double _Complex me_conj(double _Complex a) {
 #define me_clog clog
 #define me_cabsf cabsf
 #define me_cabs cabs
-#if defined(_MSC_VER) && defined(__clang__)
-#define me_cimagf __builtin_cimagf
-#define me_cimag __builtin_cimag
-#define me_crealf __builtin_crealf
-#define me_creal __builtin_creal
-#define me_conjf __builtin_conjf
-#define me_conj __builtin_conj
-#else
 #define me_cimagf cimagf
 #define me_cimag cimag
 #define me_crealf crealf
