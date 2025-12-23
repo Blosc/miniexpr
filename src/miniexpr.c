@@ -77,6 +77,7 @@ For log = base 10 log comment the next line. */
 // And it doesn't support standard operators for them in C
 static inline _Fcomplex add_c64(_Fcomplex a, _Fcomplex b) { return _FCbuild(crealf(a) + crealf(b), cimagf(a) + cimagf(b)); }
 static inline _Fcomplex sub_c64(_Fcomplex a, _Fcomplex b) { return _FCbuild(crealf(a) - crealf(b), cimagf(a) - cimagf(b)); }
+static inline _Fcomplex neg_c64(_Fcomplex a) { return _FCbuild(-crealf(a), -cimagf(a)); }
 static inline _Fcomplex mul_c64(_Fcomplex a, _Fcomplex b) {
     return _FCbuild(crealf(a) * crealf(b) - cimagf(a) * cimagf(b), crealf(a) * cimagf(b) + cimagf(a) * crealf(b));
 }
@@ -86,6 +87,7 @@ static inline _Fcomplex div_c64(_Fcomplex a, _Fcomplex b) {
 }
 static inline _Dcomplex add_c128(_Dcomplex a, _Dcomplex b) { return _Cbuild(creal(a) + creal(b), cimag(a) + cimag(b)); }
 static inline _Dcomplex sub_c128(_Dcomplex a, _Dcomplex b) { return _Cbuild(creal(a) - creal(b), cimag(a) - cimag(b)); }
+static inline _Dcomplex neg_c128(_Dcomplex a) { return _Cbuild(-creal(a), -cimag(a)); }
 static inline _Dcomplex mul_c128(_Dcomplex a, _Dcomplex b) {
     return _Cbuild(creal(a) * creal(b) - cimag(a) * cimag(b), creal(a) * cimag(b) + cimag(a) * creal(b));
 }
@@ -98,12 +100,67 @@ static inline _Dcomplex div_c128(_Dcomplex a, _Dcomplex b) {
 #define double_complex double complex
 #define add_c64(a, b) ((a) + (b))
 #define sub_c64(a, b) ((a) - (b))
+#define neg_c64(a) (-(a))
 #define mul_c64(a, b) ((a) * (b))
 #define div_c64(a, b) ((a) / (b))
 #define add_c128(a, b) ((a) + (b))
 #define sub_c128(a, b) ((a) - (b))
+#define neg_c128(a) (-(a))
 #define mul_c128(a, b) ((a) * (b))
 #define div_c128(a, b) ((a) / (b))
+#endif
+
+/* Type-specific cast and comparison macros to handle MSVC complex structs */
+#define TO_TYPE_bool(x) (bool)(x)
+#define TO_TYPE_i8(x) (int8_t)(x)
+#define TO_TYPE_i16(x) (int16_t)(x)
+#define TO_TYPE_i32(x) (int32_t)(x)
+#define TO_TYPE_i64(x) (int64_t)(x)
+#define TO_TYPE_u8(x) (uint8_t)(x)
+#define TO_TYPE_u16(x) (uint16_t)(x)
+#define TO_TYPE_u32(x) (uint32_t)(x)
+#define TO_TYPE_u64(x) (uint64_t)(x)
+#define TO_TYPE_f32(x) (float)(x)
+#define TO_TYPE_f64(x) (double)(x)
+
+#define FROM_TYPE_bool(x) (double)(x)
+#define FROM_TYPE_i8(x) (double)(x)
+#define FROM_TYPE_i16(x) (double)(x)
+#define FROM_TYPE_i32(x) (double)(x)
+#define FROM_TYPE_i64(x) (double)(x)
+#define FROM_TYPE_u8(x) (double)(x)
+#define FROM_TYPE_u16(x) (double)(x)
+#define FROM_TYPE_u32(x) (double)(x)
+#define FROM_TYPE_u64(x) (double)(x)
+#define FROM_TYPE_f32(x) (double)(x)
+#define FROM_TYPE_f64(x) (double)(x)
+
+#define IS_NONZERO_bool(x) (x)
+#define IS_NONZERO_i8(x) ((x) != 0)
+#define IS_NONZERO_i16(x) ((x) != 0)
+#define IS_NONZERO_i32(x) ((x) != 0)
+#define IS_NONZERO_i64(x) ((x) != 0)
+#define IS_NONZERO_u8(x) ((x) != 0)
+#define IS_NONZERO_u16(x) ((x) != 0)
+#define IS_NONZERO_u32(x) ((x) != 0)
+#define IS_NONZERO_u64(x) ((x) != 0)
+#define IS_NONZERO_f32(x) ((x) != 0.0f)
+#define IS_NONZERO_f64(x) ((x) != 0.0)
+
+#if defined(_MSC_VER) && !defined(__clang__)
+#define TO_TYPE_c64(x) _FCbuild((float)(x), 0.0f)
+#define TO_TYPE_c128(x) _Cbuild((double)(x), 0.0)
+#define FROM_TYPE_c64(x) (double)crealf(x)
+#define FROM_TYPE_c128(x) (double)creal(x)
+#define IS_NONZERO_c64(x) (crealf(x) != 0.0f || cimagf(x) != 0.0f)
+#define IS_NONZERO_c128(x) (creal(x) != 0.0 || cimag(x) != 0.0)
+#else
+#define TO_TYPE_c64(x) (float complex)(x)
+#define TO_TYPE_c128(x) (double complex)(x)
+#define FROM_TYPE_c64(x) (double)(x)
+#define FROM_TYPE_c128(x) (double)(x)
+#define IS_NONZERO_c64(x) ((x) != 0)
+#define IS_NONZERO_c128(x) ((x) != 0)
 #endif
 
 #include <assert.h>
@@ -1784,25 +1841,25 @@ DEFINE_INT_VEC_OPS(u64, uint64_t)
 /* Boolean logical operations */
 static void vec_and_bool(const bool *a, const bool *b, bool *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = a[i] && b[i];
 }
 
 static void vec_or_bool(const bool *a, const bool *b, bool *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = a[i] || b[i];
 }
 
 static void vec_xor_bool(const bool *a, const bool *b, bool *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = a[i] != b[i];
 }
 
 static void vec_not_bool(const bool *a, bool *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = !a[i];
 }
 
@@ -1811,32 +1868,32 @@ static void vec_not_bool(const bool *a, bool *out, int n) {
 #define DEFINE_COMPARE_OPS(SUFFIX, TYPE) \
 static void vec_cmp_eq_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
     int i; \
-    _Pragma("GCC ivdep") \
+    IVDEP \
     for (i = 0; i < n; i++) out[i] = (a[i] == b[i]) ? 1 : 0; \
 } \
 static void vec_cmp_ne_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
     int i; \
-    _Pragma("GCC ivdep") \
+    IVDEP \
     for (i = 0; i < n; i++) out[i] = (a[i] != b[i]) ? 1 : 0; \
 } \
 static void vec_cmp_lt_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
     int i; \
-    _Pragma("GCC ivdep") \
+    IVDEP \
     for (i = 0; i < n; i++) out[i] = (a[i] < b[i]) ? 1 : 0; \
 } \
 static void vec_cmp_le_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
     int i; \
-    _Pragma("GCC ivdep") \
+    IVDEP \
     for (i = 0; i < n; i++) out[i] = (a[i] <= b[i]) ? 1 : 0; \
 } \
 static void vec_cmp_gt_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
     int i; \
-    _Pragma("GCC ivdep") \
+    IVDEP \
     for (i = 0; i < n; i++) out[i] = (a[i] > b[i]) ? 1 : 0; \
 } \
 static void vec_cmp_ge_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
     int i; \
-    _Pragma("GCC ivdep") \
+    IVDEP \
     for (i = 0; i < n; i++) out[i] = (a[i] >= b[i]) ? 1 : 0; \
 }
 
@@ -1910,7 +1967,7 @@ static void vec_sqrt_c64(const float_complex *a, float_complex *out, int n) {
 static void vec_negame_c64(const float_complex *a, float_complex *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = -a[i];
+    for (i = 0; i < n; i++) out[i] = neg_c64(a[i]);
 }
 
 static void vec_conj_c64(const float_complex *a, float_complex *out, int n) {
@@ -1982,7 +2039,7 @@ static void vec_sqrt_c128(const double_complex *a, double_complex *out, int n) {
 static void vec_negame_c128(const double_complex *a, double_complex *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = -a[i];
+    for (i = 0; i < n; i++) out[i] = neg_c128(a[i]);
 }
 
 static void vec_conj_c128(const double_complex *a, double_complex *out, int n) {
@@ -2006,8 +2063,8 @@ static void vec_imag_c128(const double_complex *a, double *out, int n) {
 #define DEFINE_VEC_CONVERT(FROM_SUFFIX, TO_SUFFIX, FROM_TYPE, TO_TYPE) \
 static void vec_convert_##FROM_SUFFIX##_to_##TO_SUFFIX(const FROM_TYPE *in, TO_TYPE *out, int n) { \
     int i; \
-    _Pragma("GCC ivdep") \
-    for (i = 0; i < n; i++) out[i] = (TO_TYPE)in[i]; \
+    IVDEP \
+    for (i = 0; i < n; i++) out[i] = TO_TYPE_##TO_SUFFIX(in[i]); \
 }
 
 /* Generate all conversion functions */
@@ -2076,12 +2133,12 @@ DEFINE_VEC_CONVERT(u32, f64, uint32_t, double)
 DEFINE_VEC_CONVERT(u64, f64, uint64_t, double)
 
 DEFINE_VEC_CONVERT(f32, f64, float, double)
-DEFINE_VEC_CONVERT(f32, c64, float, float complex)
-DEFINE_VEC_CONVERT(f32, c128, float, double complex)
+DEFINE_VEC_CONVERT(f32, c64, float, float_complex)
+DEFINE_VEC_CONVERT(f32, c128, float, double_complex)
 
-DEFINE_VEC_CONVERT(f64, c128, double, double complex)
+DEFINE_VEC_CONVERT(f64, c128, double, double_complex)
 
-DEFINE_VEC_CONVERT(c64, c128, float complex, double complex)
+DEFINE_VEC_CONVERT(c64, c128, float_complex, double_complex)
 
 /* Function to get conversion function pointer */
 typedef void (*convert_func_t)(const void *, void *, int);
@@ -2609,14 +2666,14 @@ DEFINE_ME_EVAL(u64, uint64_t,
                vec_conj_noop)
 
 /* Generate complex evaluators */
-DEFINE_ME_EVAL(c64, float complex,
+DEFINE_ME_EVAL(c64, float_complex,
                vec_add_c64, vec_sub_c64, vec_mul_c64, vec_div_c64, vec_pow_c64,
                vec_add_scalar_c64, vec_mul_scalar_c64, vec_pow_scalar_c64,
                vec_sqrt_c64, vec_sqrt_c64, vec_sqrt_c64, vec_negame_c64,
                csqrtf, csqrtf, csqrtf, cexpf, clogf, cabsf, cpowf,
                vec_conj_c64)
 
-DEFINE_ME_EVAL(c128, double complex,
+DEFINE_ME_EVAL(c128, double_complex,
                vec_add_c128, vec_sub_c128, vec_mul_c128, vec_div_c128, vec_pow_c128,
                vec_add_scalar_c128, vec_mul_scalar_c128, vec_pow_scalar_c128,
                vec_sqrt_c128, vec_sqrt_c128, vec_sqrt_c128, vec_negame_c128,
@@ -2822,14 +2879,14 @@ static void private_eval(const me_expr *n) {
             if (arg_type == ME_COMPLEX64) {
                 // Evaluate argument as complex64
                 if (!arg->output) {
-                    arg->output = malloc(n->nitems * sizeof(float complex));
+                    arg->output = malloc(n->nitems * sizeof(float_complex));
                     arg->nitems = n->nitems;
                     ((me_expr*)arg)->dtype = ME_COMPLEX64;
                 }
                 me_eval_c64(arg);
 
                 // Extract real/imaginary part to float32 output
-                const float complex *cdata = (const float complex*)arg->output;
+                const float_complex *cdata = (const float_complex*)arg->output;
                 float *output = (float*)n->output;
                 if (n->function == (void*)imag_wrapper) {
                     for (int i = 0; i < n->nitems; i++) {
@@ -2844,14 +2901,14 @@ static void private_eval(const me_expr *n) {
             } else if (arg_type == ME_COMPLEX128) {
                 // Evaluate argument as complex128
                 if (!arg->output) {
-                    arg->output = malloc(n->nitems * sizeof(double complex));
+                    arg->output = malloc(n->nitems * sizeof(double_complex));
                     arg->nitems = n->nitems;
                     ((me_expr*)arg)->dtype = ME_COMPLEX128;
                 }
                 me_eval_c128(arg);
 
                 // Extract real/imaginary part to float64 output
-                const double complex *cdata = (const double complex*)arg->output;
+                const double_complex *cdata = (const double_complex*)arg->output;
                 double *output = (double*)n->output;
                 if (n->function == (void*)imag_wrapper) {
                     for (int i = 0; i < n->nitems; i++) {
