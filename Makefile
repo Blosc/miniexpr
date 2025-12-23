@@ -43,6 +43,10 @@ BENCH_BINS = $(patsubst $(BENCHDIR)/%.c,$(BUILDDIR)/%$(EXE),$(BENCH_SRCS))
 
 # Test sources
 TEST_SRCS = $(wildcard $(TESTDIR)/*.c)
+# Exclude pthread test on Windows
+ifeq ($(OS),Windows_NT)
+  TEST_SRCS := $(filter-out $(TESTDIR)/test_threadsafe_chunk.c,$(TEST_SRCS))
+endif
 TEST_BINS = $(patsubst $(TESTDIR)/%.c,$(BUILDDIR)/%$(EXE),$(TEST_SRCS))
 
 # Example sources
