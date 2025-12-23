@@ -209,8 +209,13 @@ static inline double _Complex me_conj(double _Complex a) {
 #define me_cimag cimag
 #define me_crealf crealf
 #define me_creal creal
+#if defined(_MSC_VER) && defined(__clang__)
+#define me_conjf __builtin_conjf
+#define me_conj __builtin_conj
+#else
 #define me_conjf conjf
 #define me_conj conj
+#endif
 #endif
 
 /* Type-specific cast and comparison macros to handle MSVC complex structs */
