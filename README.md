@@ -161,7 +161,7 @@ See [CODE_QUALITY.md](CODE_QUALITY.md) for more details on code quality tools.
 
 BSD 3-Clause License. See [LICENSE](LICENSE) for details.
 
-Copyright (c) 2021-2025, The Blosc Development Team
+Copyright (c) 2025-2025, The Blosc Development Team
 
 ## Acknowledgments
 
