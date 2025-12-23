@@ -772,16 +772,11 @@ static double logaddexp(double a, double b) {
 
 /* Wrapper functions for complex operations (for function pointer compatibility) */
 /* These are placeholders - actual implementation is in vector functions */
-static double conj_wrapper(double x) {
-    /* This should never be called for real numbers */
-    (void)x;
-    return NAN;
-}
+static double conj_wrapper(double x) { return x; }
 
 static double imag_wrapper(double x) {
-    /* This should never be called for real numbers */
     (void)x;
-    return NAN;
+    return 0.0;
 }
 
 /* Wrapper for round: round to nearest integer */
@@ -805,11 +800,7 @@ static double where_scalar(double c, double x, double y) {
     return (c != 0.0) ? x : y;
 }
 
-static double real_wrapper(double x) {
-    /* This should never be called for real numbers */
-    (void)x;
-    return NAN;
-}
+static double real_wrapper(double x) { return x; }
 
 static double fac(double a) {
     /* simplest version of fac */
