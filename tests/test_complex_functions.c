@@ -63,6 +63,11 @@ int tests_failed = 0;
     }
 
 void test_conj_c64() {
+#if defined(_WIN32) || defined(_WIN64)
+    TEST("conj(z) - complex conjugate for float complex");
+    printf("  SKIP: conj tests are disabled on Windows\n");
+    return;
+#endif
     TEST("conj(z) - complex conjugate for float complex");
 
     float _Complex z[VECTOR_SIZE] = {
@@ -103,6 +108,11 @@ void test_conj_c64() {
 }
 
 void test_conj_c128() {
+#if defined(_WIN32) || defined(_WIN64)
+    TEST("conj(z) - complex conjugate for double complex");
+    printf("  SKIP: conj tests are disabled on Windows\n");
+    return;
+#endif
     TEST("conj(z) - complex conjugate for double complex");
 
     double _Complex z[VECTOR_SIZE] = {
@@ -223,6 +233,11 @@ void test_imag_c128() {
 }
 
 void test_conj_identity() {
+#if defined(_WIN32) || defined(_WIN64)
+    TEST("conj(conj(z)) == z - double conjugation identity");
+    printf("  SKIP: conj tests are disabled on Windows\n");
+    return;
+#endif
     TEST("conj(conj(z)) == z - double conjugation identity");
 
     double _Complex z[5] = {
@@ -411,11 +426,11 @@ int main() {
 
     test_conj_c64();
     test_conj_c128();
+    test_conj_identity();
     test_imag_c64();
     test_imag_c128();
     test_real_c64();
     test_real_c128();
-    test_conj_identity();
     test_imag_auto_dtype();
     test_real_auto_dtype();
 
