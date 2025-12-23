@@ -533,6 +533,35 @@ void test_real_imag_on_real_inputs() {
     printf("  PASS\n");
 }
 
+void test_where_basic() {
+    TEST("where(cond, x, y) - basic NumPy-like behavior");
+
+    double x[VECTOR_SIZE]  = {0.0, 1.0, 2.0, 3.0, -1.0, -2.0, 10.0, 20.0, -5.0, 7.0};
+    double y[VECTOR_SIZE]  = {10.0, 9.0, 8.0, 7.0, -10.0, -9.0, 0.0, -1.0, 5.0, -7.0};
+    double c[VECTOR_SIZE]  = {0.0, 1.0, 0.0, 1.0,  0.0,  1.0,  1.0,  0.0, 0.0, 1.0};
+    double result[VECTOR_SIZE] = {0};
+
+    me_variable vars[] = {{"c"}, {"x"}, {"y"}};
+    int err;
+    me_expr *expr = me_compile("where(c, x, y)", vars, 3, ME_FLOAT64, &err);
+    if (!expr) {
+        printf("  FAIL: compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs[] = {c, x, y};
+    me_eval(expr, var_ptrs, 3, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        double expected = (c[i] != 0.0) ? x[i] : y[i];
+        ASSERT_NEAR(expected, result[i], i);
+    }
+
+    me_free(expr);
+    printf("  PASS\n");
+}
+
 int main() {
     printf("=== Testing NumPy-Compatible Functions ===\n\n");
 
@@ -549,6 +578,8 @@ int main() {
     test_square();
     test_trunc_func();
     test_square_vs_pow();
+    test_where_basic();
+    test_real_imag_on_real_inputs();
     test_real_imag_on_real_inputs();
 
     printf("\n=== Test Summary ===\n");
