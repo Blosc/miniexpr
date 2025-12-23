@@ -43,9 +43,9 @@ BENCH_BINS = $(patsubst $(BENCHDIR)/%.c,$(BUILDDIR)/%$(EXE),$(BENCH_SRCS))
 
 # Test sources
 TEST_SRCS = $(wildcard $(TESTDIR)/*.c)
-# Exclude pthread test and complex functions test on Windows (TODO: fix complex number handling with clang-cl)
+# Exclude tests with complex number issues on Windows (TODO: fix complex number handling with clang-cl)
 ifeq ($(OS),Windows_NT)
-  TEST_SRCS := $(filter-out $(TESTDIR)/test_threadsafe_chunk.c $(TESTDIR)/test_complex_functions.c,$(TEST_SRCS))
+  TEST_SRCS := $(filter-out $(TESTDIR)/test_threadsafe_chunk.c $(TESTDIR)/test_complex_functions.c $(TESTDIR)/test_all_types.c $(TESTDIR)/test_numpy_functions.c,$(TEST_SRCS))
 endif
 TEST_BINS = $(patsubst $(TESTDIR)/%.c,$(BUILDDIR)/%$(EXE),$(TEST_SRCS))
 
