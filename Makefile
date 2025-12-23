@@ -7,7 +7,7 @@ ifeq ($(OS),Windows_NT)
   ifneq (,$(findstring clang-cl,$(CC)))
     CFLAGS = -O2 -DNDEBUG
     DEBUG_CFLAGS = -O0 -g
-    LDFLAGS =
+    LDFLAGS = clang_rt.builtins-x86_64.lib
   else
     CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG
     DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g
