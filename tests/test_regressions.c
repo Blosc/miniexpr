@@ -661,6 +661,49 @@ int test_float32_array_float64_constants(const char *description, int size) {
 }
 
 // ============================================================================
+// CONJ WITH REAL INPUT SHOULD PRESERVE FLOAT32
+// ============================================================================
+int test_conj_real_preserves_dtype() {
+    printf("\nTest: conj(a) with float32 input returns float32 output\n");
+    printf("======================================================================\n");
+
+    float a[SMALL_SIZE] = {1.0f, -2.5f, 3.75f, -4.125f, 0.0f, 5.5f, -6.25f, 7.0f, -8.5f, 9.0f};
+    float result[SMALL_SIZE] = {0};
+
+    me_variable vars[] = {{"a", ME_FLOAT32}};
+
+    int err;
+    me_expr *expr = me_compile("conj(a)", vars, 1, ME_AUTO, &err);
+    if (!expr) {
+        printf("  ❌ COMPILATION FAILED at position %d\n", err);
+        return 0;
+    }
+
+    const void *var_ptrs[] = {a};
+    me_eval(expr, var_ptrs, 1, result, SMALL_SIZE);
+
+    int passed = 1;
+    float max_diff = 0.0f;
+    for (int i = 0; i < SMALL_SIZE; i++) {
+        float expected = a[i]; // conj on real input is identity; stays float32
+        float diff = fabsf(expected - result[i]);
+        if (diff > max_diff) max_diff = diff;
+        if (diff > 1e-6f) {
+            passed = 0;
+        }
+    }
+
+    if (passed) {
+        printf("  ✅ PASS\n");
+    } else {
+        printf("  ❌ FAIL (max diff: %.9f)\n", max_diff);
+    }
+
+    me_free(expr);
+    return passed;
+}
+
+// ============================================================================
 // MAIN TEST RUNNER
 // ============================================================================
 
@@ -673,6 +716,7 @@ int main() {
     printf("  - arctan2 with complex expressions\n");
     printf("  - constant type inference\n");
     printf("  - scalar constant operations\n");
+    printf("  - conj on real inputs preserves dtype\n");
     printf("========================================================================\n");
 
     int total = 0;
@@ -821,6 +865,16 @@ int main() {
     total++;
     if (test_float32_array_float64_constants("Test 7.1: ((o0 + 1067.3366832990887) + 0.2901221513748169) where o0 is float32 array",
                                              SMALL_SIZE)) passed++;
+
+    // ========================================================================
+    // SECTION 8: CONJ ON REAL INPUTS (FLOAT32)
+    // ========================================================================
+    printf("\n\n========================================================================\n");
+    printf("SECTION 8: CONJ ON REAL INPUTS (FLOAT32)\n");
+    printf("========================================================================\n");
+
+    total++;
+    if (test_conj_real_preserves_dtype()) passed++;
 
     // ========================================================================
     // FINAL SUMMARY

@@ -454,6 +454,85 @@ void test_square_vs_pow() {
     printf("  PASS\n");
 }
 
+void test_real_imag_on_real_inputs() {
+    TEST("real/imag(x) on real inputs follow NumPy semantics");
+
+    double x[VECTOR_SIZE] = {-3.0, -1.5, -0.0, 0.0, 0.5, 1.0, 2.5, 10.0, -10.0, 3.14159};
+    double real_result[VECTOR_SIZE] = {0};
+    double imag_result[VECTOR_SIZE] = {0};
+
+    me_variable vars64[] = {{"x"}};
+    int err;
+
+    /* real(x) with float64 input -> float64 output, identity */
+    me_expr *expr_real64 = me_compile("real(x)", vars64, 1, ME_FLOAT64, &err);
+    if (!expr_real64) {
+        printf("  FAIL: compilation error for real(x) float64 at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs64[] = {x};
+    me_eval(expr_real64, var_ptrs64, 1, real_result, VECTOR_SIZE);
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        ASSERT_NEAR(x[i], real_result[i], i);
+    }
+    me_free(expr_real64);
+
+    /* imag(x) with float64 input -> float64 output, all zeros */
+    me_expr *expr_imag64 = me_compile("imag(x)", vars64, 1, ME_FLOAT64, &err);
+    if (!expr_imag64) {
+        printf("  FAIL: compilation error for imag(x) float64 at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    me_eval(expr_imag64, var_ptrs64, 1, imag_result, VECTOR_SIZE);
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        ASSERT_NEAR(0.0, imag_result[i], i);
+    }
+    me_free(expr_imag64);
+
+    /* Now test float32 inputs */
+    float xf[VECTOR_SIZE];
+    float real_result_f[VECTOR_SIZE] = {0};
+    float imag_result_f[VECTOR_SIZE] = {0};
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        xf[i] = (float)x[i];
+    }
+
+    me_variable vars32[] = {{"x", ME_FLOAT32}};
+
+    me_expr *expr_real32 = me_compile("real(x)", vars32, 1, ME_FLOAT32, &err);
+    if (!expr_real32) {
+        printf("  FAIL: compilation error for real(x) float32 at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs32[] = {xf};
+    me_eval(expr_real32, var_ptrs32, 1, real_result_f, VECTOR_SIZE);
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        ASSERT_NEAR(xf[i], real_result_f[i], i);
+    }
+    me_free(expr_real32);
+
+    me_expr *expr_imag32 = me_compile("imag(x)", vars32, 1, ME_FLOAT32, &err);
+    if (!expr_imag32) {
+        printf("  FAIL: compilation error for imag(x) float32 at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    me_eval(expr_imag32, var_ptrs32, 1, imag_result_f, VECTOR_SIZE);
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        ASSERT_NEAR(0.0, imag_result_f[i], i);
+    }
+    me_free(expr_imag32);
+
+    printf("  PASS\n");
+}
+
 int main() {
     printf("=== Testing NumPy-Compatible Functions ===\n\n");
 
@@ -470,6 +549,7 @@ int main() {
     test_square();
     test_trunc_func();
     test_square_vs_pow();
+    test_real_imag_on_real_inputs();
 
     printf("\n=== Test Summary ===\n");
     printf("Tests run: %d\n", tests_run);

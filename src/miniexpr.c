@@ -2234,6 +2234,20 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                     if (adata) VEC_COS(adata, output, n->nitems); \
                 } else if (func_ptr == (void*)negate) { \
                     if (adata) VEC_NEGATE(adata, output, n->nitems); \
+                } else if (func_ptr == (void*)imag_wrapper) { \
+                    /* NumPy semantics: imag(real) == 0 with same dtype */ \
+                    if (adata) { \
+                        for (i = 0; i < n->nitems; i++) { \
+                            output[i] = (TYPE)0; \
+                        } \
+                    } \
+                } else if (func_ptr == (void*)real_wrapper) { \
+                    /* NumPy semantics: real(real) == real with same dtype */ \
+                    if (adata) { \
+                        for (i = 0; i < n->nitems; i++) { \
+                            output[i] = adata[i]; \
+                        } \
+                    } \
                 } else if (func_ptr == (void*)conj_wrapper) { \
                     if (adata) VEC_CONJ(adata, output, n->nitems); \
                 } else { \
@@ -2311,6 +2325,7 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sin(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = sin((a)[_i]); } while(0)
 #define vec_cos(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cos((a)[_i]); } while(0)
 #define vec_negate(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
+#define vec_copy(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i]; } while(0)
 
 #define vec_add_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
 #define vec_sub_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
@@ -2448,7 +2463,7 @@ DEFINE_ME_EVAL(f32, float,
                vec_add_scalar_f32, vec_mul_scalar_f32, vec_pow_scalar_f32,
                vec_sqrt_f32, vec_sin_f32, vec_cos_f32, vec_negame_f32,
                sqrtf, sinf, cosf, expf, logf, fabsf, powf,
-               vec_conj_noop)
+               vec_copy)
 
 /* Generate float64 (double) evaluator */
 DEFINE_ME_EVAL(f64, double,
@@ -2456,7 +2471,7 @@ DEFINE_ME_EVAL(f64, double,
                vec_add_scalar, vec_mul_scalar, vec_pow_scalar,
                vec_sqrt, vec_sin, vec_cos, vec_negate,
                sqrt, sin, cos, exp, log, fabs, pow,
-               vec_conj_noop)
+               vec_copy)
 
 /* Generate integer evaluators - sin/cos cast to double and back */
 DEFINE_ME_EVAL(i8, int8_t,
