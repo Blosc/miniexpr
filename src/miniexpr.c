@@ -64,7 +64,6 @@ For log = base 10 log comment the next line. */
 #include <complex.h>
 
 #if defined(_MSC_VER) && !defined(__clang__)
-// MSVC uses different names for complex types in C
 #define float_complex _Fcomplex
 #define double_complex _Dcomplex
 // And it doesn't support standard operators for them in C
@@ -101,6 +100,93 @@ static inline _Dcomplex div_c128(_Dcomplex a, _Dcomplex b) {
 #define neg_c128(a) (-(a))
 #define mul_c128(a, b) ((a) * (b))
 #define div_c128(a, b) ((a) / (b))
+#endif
+
+#if defined(_MSC_VER)
+/* Wrappers for complex functions to handle MSVC's _Fcomplex/_Dcomplex */
+static inline float _Complex me_cpowf(float _Complex a, float _Complex b) {
+    union { float _Complex c; _Fcomplex m; } ua, ub, ur;
+    ua.c = a; ub.c = b;
+    ur.m = cpowf(ua.m, ub.m);
+    return ur.c;
+}
+static inline double _Complex me_cpow(double _Complex a, double _Complex b) {
+    union { double _Complex c; _Dcomplex m; } ua, ub, ur;
+    ua.c = a; ub.c = b;
+    ur.m = cpow(ua.m, ub.m);
+    return ur.c;
+}
+static inline float _Complex me_csqrtf(float _Complex a) {
+    union { float _Complex c; _Fcomplex m; } ua, ur;
+    ua.c = a;
+    ur.m = csqrtf(ua.m);
+    return ur.c;
+}
+static inline double _Complex me_csqrt(double _Complex a) {
+    union { double _Complex c; _Dcomplex m; } ua, ur;
+    ua.c = a;
+    ur.m = csqrt(ua.m);
+    return ur.c;
+}
+static inline float _Complex me_cexpf(float _Complex a) {
+    union { float _Complex c; _Fcomplex m; } ua, ur;
+    ua.c = a;
+    ur.m = cexpf(ua.m);
+    return ur.c;
+}
+static inline double _Complex me_cexp(double _Complex a) {
+    union { double _Complex c; _Dcomplex m; } ua, ur;
+    ua.c = a;
+    ur.m = cexp(ua.m);
+    return ur.c;
+}
+static inline float _Complex me_clogf(float _Complex a) {
+    union { float _Complex c; _Fcomplex m; } ua, ur;
+    ua.c = a;
+    ur.m = clogf(ua.m);
+    return ur.c;
+}
+static inline double _Complex me_clog(double _Complex a) {
+    union { double _Complex c; _Dcomplex m; } ua, ur;
+    ua.c = a;
+    ur.m = clog(ua.m);
+    return ur.c;
+}
+static inline float me_cabsf(float _Complex a) {
+    union { float _Complex c; _Fcomplex m; } ua;
+    ua.c = a;
+    return cabsf(ua.m);
+}
+static inline double me_cabs(double _Complex a) {
+    union { double _Complex c; _Dcomplex m; } ua;
+    ua.c = a;
+    return cabs(ua.m);
+}
+static inline float _Complex me_conjf(float _Complex a) {
+    union { float _Complex c; _Fcomplex m; } ua, ur;
+    ua.c = a;
+    ur.m = conjf(ua.m);
+    return ur.c;
+}
+static inline double _Complex me_conj(double _Complex a) {
+    union { double _Complex c; _Dcomplex m; } ua, ur;
+    ua.c = a;
+    ur.m = conj(ua.m);
+    return ur.c;
+}
+#else
+#define me_cpowf cpowf
+#define me_cpow cpow
+#define me_csqrtf csqrtf
+#define me_csqrt csqrt
+#define me_cexpf cexpf
+#define me_cexp cexp
+#define me_clogf clogf
+#define me_clog clog
+#define me_cabsf cabsf
+#define me_cabs cabs
+#define me_conjf conjf
+#define me_conj conj
 #endif
 
 /* Type-specific cast and comparison macros to handle MSVC complex structs */
@@ -1947,19 +2033,19 @@ static void vec_mul_scalar_c64(const float _Complex *a, float _Complex b, float 
 static void vec_pow_c64(const float _Complex *a, const float _Complex *b, float _Complex *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = cpowf(a[i], b[i]);
+    for (i = 0; i < n; i++) out[i] = me_cpowf(a[i], b[i]);
 }
 
 static void vec_pow_scalar_c64(const float _Complex *a, float _Complex b, float _Complex *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = cpowf(a[i], b);
+    for (i = 0; i < n; i++) out[i] = me_cpowf(a[i], b);
 }
 
 static void vec_sqrt_c64(const float _Complex *a, float _Complex *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = csqrtf(a[i]);
+    for (i = 0; i < n; i++) out[i] = me_csqrtf(a[i]);
 }
 
 static void vec_negame_c64(const float _Complex *a, float _Complex *out, int n) {
@@ -1971,7 +2057,7 @@ static void vec_negame_c64(const float _Complex *a, float _Complex *out, int n) 
 static void vec_conj_c64(const float _Complex *a, float _Complex *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = conjf(a[i]);
+    for (i = 0; i < n; i++) out[i] = me_conjf(a[i]);
 }
 
 static void vec_imag_c64(const float _Complex *a, float *out, int n) {
@@ -2019,19 +2105,19 @@ static void vec_mul_scalar_c128(const double _Complex *a, double _Complex b, dou
 static void vec_pow_c128(const double _Complex *a, const double _Complex *b, double _Complex *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = cpow(a[i], b[i]);
+    for (i = 0; i < n; i++) out[i] = me_cpow(a[i], b[i]);
 }
 
 static void vec_pow_scalar_c128(const double _Complex *a, double _Complex b, double _Complex *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = cpow(a[i], b);
+    for (i = 0; i < n; i++) out[i] = me_cpow(a[i], b);
 }
 
 static void vec_sqrt_c128(const double _Complex *a, double _Complex *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = csqrt(a[i]);
+    for (i = 0; i < n; i++) out[i] = me_csqrt(a[i]);
 }
 
 static void vec_negame_c128(const double _Complex *a, double _Complex *out, int n) {
@@ -2043,7 +2129,7 @@ static void vec_negame_c128(const double _Complex *a, double _Complex *out, int 
 static void vec_conj_c128(const double _Complex *a, double _Complex *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = conj(a[i]);
+    for (i = 0; i < n; i++) out[i] = me_conj(a[i]);
 }
 
 static void vec_imag_c128(const double _Complex *a, double *out, int n) {
@@ -2596,13 +2682,13 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sub_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
 #define vec_mul_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
 #define vec_div_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpowf((a)[_i], (b)[_i]); } while(0)
+#define vec_pow_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cpowf((a)[_i], (b)[_i]); } while(0)
 #define vec_add_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
 #define vec_mul_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpowf((a)[_i], (b)); } while(0)
-#define vec_sqrt_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = csqrtf((a)[_i]); } while(0)
+#define vec_pow_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cpowf((a)[_i], (b)); } while(0)
+#define vec_sqrt_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_csqrtf((a)[_i]); } while(0)
 #define vec_negame_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
-#define vec_conj_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = conjf((a)[_i]); } while(0)
+#define vec_conj_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_conjf((a)[_i]); } while(0)
 #define vec_imag_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cimagf((a)[_i]); } while(0)
 #define vec_real_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = crealf((a)[_i]); } while(0)
 #define vec_conj_noop(a, out, n) do { (void)(a); (void)(out); (void)(n); } while(0)
@@ -2611,13 +2697,13 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sub_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
 #define vec_mul_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
 #define vec_div_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpow((a)[_i], (b)[_i]); } while(0)
+#define vec_pow_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cpow((a)[_i], (b)[_i]); } while(0)
 #define vec_add_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
 #define vec_mul_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpow((a)[_i], (b)); } while(0)
-#define vec_sqrt_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = csqrt((a)[_i]); } while(0)
+#define vec_pow_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cpow((a)[_i], (b)); } while(0)
+#define vec_sqrt_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_csqrt((a)[_i]); } while(0)
 #define vec_negame_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
-#define vec_conj_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = conj((a)[_i]); } while(0)
+#define vec_conj_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_conj((a)[_i]); } while(0)
 #define vec_imag_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cimag((a)[_i]); } while(0)
 #define vec_real_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = creal((a)[_i]); } while(0)
 #endif
@@ -2700,14 +2786,14 @@ DEFINE_ME_EVAL(c64, float _Complex,
                vec_add_c64, vec_sub_c64, vec_mul_c64, vec_div_c64, vec_pow_c64,
                vec_add_scalar_c64, vec_mul_scalar_c64, vec_pow_scalar_c64,
                vec_sqrt_c64, vec_sqrt_c64, vec_sqrt_c64, vec_negame_c64,
-               csqrtf, csqrtf, csqrtf, cexpf, clogf, cabsf, cpowf,
+               me_csqrtf, me_csqrtf, me_csqrtf, me_cexpf, me_clogf, me_cabsf, me_cpowf,
                vec_conj_c64)
 
 DEFINE_ME_EVAL(c128, double _Complex,
                vec_add_c128, vec_sub_c128, vec_mul_c128, vec_div_c128, vec_pow_c128,
                vec_add_scalar_c128, vec_mul_scalar_c128, vec_pow_scalar_c128,
                vec_sqrt_c128, vec_sqrt_c128, vec_sqrt_c128, vec_negame_c128,
-               csqrt, csqrt, csqrt, cexp, clog, cabs, cpow,
+               me_csqrt, me_csqrt, me_csqrt, me_cexp, me_clog, me_cabs, me_cpow,
                vec_conj_c128)
 
 /* Public API - dispatches to correct type-specific evaluator */
