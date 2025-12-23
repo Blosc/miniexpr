@@ -653,7 +653,8 @@ static void read_number_token(state *s) {
     }
 
     if (is_float) {
-        // Only use FLOAT64 if we are not forcing a specific (smaller) float type
+        // Match NumPy conventions: float constants match target_dtype when it's a float type
+        // This ensures FLOAT32 arrays + float constants -> FLOAT32 (NumPy behavior)
         if (s->target_dtype == ME_FLOAT32) {
             s->dtype = ME_FLOAT32;
         } else {
@@ -876,14 +877,10 @@ static me_expr *base(state *s) {
                         ret->dtype = s->target_dtype;
                     }
                 } else {
-                    // For float/complex target types, we generally use them unless constant is "larger"
-                    if (s->target_dtype == ME_FLOAT32 && (s->dtype == ME_FLOAT64 || is_complex_dtype(s->dtype))) {
-                        // Note: To satisfy regressions that expect FLOAT32 for 3.0 even if it's naturally FLOAT64,
-                        // we stick to FLOAT32 here. If we wanted strictness, we'd use s->dtype.
-                        ret->dtype = s->target_dtype;
-                    } else {
-                        ret->dtype = s->target_dtype;
-                    }
+                    // For float/complex target types, use target_dtype to match NumPy conventions
+                    // Float constants are typed based on target_dtype (FLOAT32 or FLOAT64)
+                    // This ensures FLOAT32 arrays + float constants -> FLOAT32 (NumPy behavior)
+                    ret->dtype = s->target_dtype;
                 }
             }
             next_token(s);

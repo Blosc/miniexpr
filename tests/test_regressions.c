@@ -29,7 +29,8 @@ int test_arctan2_with_scalar_constant(const char *description, int size, float s
 
     me_variable vars[] = {{"x", ME_FLOAT32}};
     int err;
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_FLOAT32, &err);
+    // Use ME_AUTO - following NumPy conventions, float constants match variable type (FLOAT32)
+    me_expr *expr = me_compile(expr_str, vars, 1, ME_AUTO, &err);
 
     if (!expr) {
         printf("✗ COMPILATION FAILED with error code: %d\n", err);
@@ -37,9 +38,9 @@ int test_arctan2_with_scalar_constant(const char *description, int size, float s
         return 0;
     }
 
+    // Following NumPy conventions, float constants match variable type, so result is FLOAT32
     const void *var_ptrs[] = {input};
     float *result = malloc(size * sizeof(float));
-
     me_eval(expr, var_ptrs, 1, result, size);
 
     float *expected = malloc(size * sizeof(float));
@@ -303,6 +304,7 @@ int test_constant_type_f32(const char *description, const char *expr_str,
     printf("=================================================================\n");
     printf("Expression: %s\n", expr_str);
     printf("Variable dtype: ME_FLOAT32, Output dtype: ME_AUTO\n");
+    printf("Note: Following NumPy conventions, float constants match variable type, so result will be FLOAT32\n");
 
     me_variable vars[] = {{"a", ME_FLOAT32}};
     int err;
@@ -318,8 +320,9 @@ int test_constant_type_f32(const char *description, const char *expr_str,
            actual_dtype == ME_FLOAT32 ? "ME_FLOAT32" :
            actual_dtype == ME_FLOAT64 ? "ME_FLOAT64" : "OTHER");
 
+    // Following NumPy conventions, float constants match variable type, so result should be FLOAT32
     if (actual_dtype != ME_FLOAT32) {
-        printf("⚠️  Type mismatch! Expected ME_FLOAT32, got %d\n", actual_dtype);
+        printf("⚠️  Type mismatch! Expected ME_FLOAT32 (NumPy convention), got %d\n", actual_dtype);
         me_free(expr);
         return 0;
     }
@@ -328,7 +331,7 @@ int test_constant_type_f32(const char *description, const char *expr_str,
     for (int i = 0; i < SMALL_SIZE; i++) input[i] = (float)i;
 
     const void *var_ptrs[] = {input};
-    float result[SMALL_SIZE];
+    float result[SMALL_SIZE];  // Use float buffer for FLOAT32 result
 
     me_eval(expr, var_ptrs, 1, result, SMALL_SIZE);
 
@@ -340,7 +343,7 @@ int test_constant_type_f32(const char *description, const char *expr_str,
         float expected = expected_fn(input[i]);
         float diff = fabsf(result[i] - expected);
         char status = (diff < 1e-5f) ? 'Y' : 'N';
-        printf("%-6d %-10.2f %-10.2f %-10.2f %c\n", i, input[i], result[i], expected, status);
+        printf("%-6d %-10.2f %-10.6f %-10.6f %c\n", i, input[i], result[i], expected, status);
         if (diff >= 1e-5f) passed = 0;
     }
 
@@ -371,29 +374,31 @@ int test_scalar_constant(const char *description, const char *expr_str,
 
     me_variable vars[] = {{"a", ME_FLOAT32}};
     int err;
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_FLOAT32, &err);
+    // Use ME_AUTO - following NumPy conventions, float constants match variable type (FLOAT32)
+    me_expr *expr = me_compile(expr_str, vars, 1, ME_AUTO, &err);
 
     if (!expr) {
         printf("  ❌ COMPILATION FAILED (error %d)\n", err);
         return 0;
     }
 
+    // Following NumPy conventions, float constants match variable type, so result is FLOAT32
     float input[SMALL_SIZE];
     for (int i = 0; i < SMALL_SIZE; i++) input[i] = (float)i;
 
     const void *var_ptrs[] = {input};
     float result[SMALL_SIZE];
-
     me_eval(expr, var_ptrs, 1, result, SMALL_SIZE);
 
     int passed = 1;
     printf("  Input     Result    Expected  Status\n");
     for (int i = 0; i < SMALL_SIZE; i++) {
         float expected = expected_fn(input[i]);
-        float diff = fabsf(result[i] - expected);
+        float result_val = result[i];
+        float diff = fabsf(result_val - expected);
         char status = (diff < 1e-5f) ? 'Y' : 'N';
 
-        printf("  %8.3f  %8.3f  %8.3f  %c", input[i], result[i], expected, status);
+        printf("  %8.3f  %8.3f  %8.3f  %c", input[i], result_val, expected, status);
         if (diff >= 1e-5f) {
             printf(" (diff: %.6f)", diff);
             passed = 0;
@@ -561,6 +566,101 @@ int test_int64_large_constant(const char *description, int size) {
 }
 
 // ============================================================================
+// FLOAT32 ARRAY + FLOAT64 CONSTANTS TEST
+// ============================================================================
+
+int test_float32_array_float64_constants(const char *description, int size) {
+    printf("\n%s\n", description);
+    printf("======================================================================\n");
+
+    // Create a float32 array for o0
+    float *input = malloc(size * sizeof(float));
+    if (!input) {
+        printf("  ❌ FAILED: malloc failed\n");
+        return 0;
+    }
+    // Fill with some test values
+    for (int i = 0; i < size; i++) {
+        input[i] = (float)(i * 0.1f);
+    }
+
+    // Compile expression with ME_AUTO to let type inference work
+    me_variable vars[] = {{"o0", ME_FLOAT32}};
+    int err;
+    const char *expr_str = "((o0 + 1067.3366832990887) + 0.2901221513748169)";
+    me_expr *expr = me_compile(expr_str, vars, 1, ME_AUTO, &err);
+
+    if (!expr) {
+        printf("  ❌ COMPILATION FAILED (error %d)\n", err);
+        free(input);
+        return 0;
+    }
+
+    me_dtype out_dtype = me_get_dtype(expr);
+    printf("  Compiled expression: %s\n", expr_str);
+    printf("  Inferred output dtype: %s\n",
+           out_dtype == ME_FLOAT32 ? "ME_FLOAT32" :
+           out_dtype == ME_FLOAT64 ? "ME_FLOAT64" : "OTHER");
+    printf("  Expected output dtype: ME_FLOAT32 (NumPy convention - constants match variable type)\n");
+    printf("  Note: High-precision constants will be converted to FLOAT32, may lose precision\n");
+
+    int passed = 1;
+    float max_diff = 0.0f;
+
+    const void *var_ptrs[] = {input};
+
+    // Following NumPy conventions, float constants match variable type, so output should be ME_FLOAT32
+    if (out_dtype == ME_FLOAT32) {
+        float *result = malloc(size * sizeof(float));
+        if (!result) {
+            printf("  ❌ FAILED: malloc for result failed\n");
+            me_free(expr);
+            free(input);
+            return 0;
+        }
+        me_eval(expr, var_ptrs, 1, result, size);
+
+        // Compute expected values using float32 arithmetic (NumPy behavior - constants converted to float32)
+        for (int i = 0; i < size; i++) {
+            float expected = ((float)input[i] + (float)1067.3366832990887) + (float)0.2901221513748169;
+            float diff = fabsf(result[i] - expected);
+            if (diff > max_diff) max_diff = diff;
+            if (diff > 1e-5f) passed = 0; // tolerance for float32
+        }
+
+        printf("  Result (first 5):   ");
+        for (int i = 0; i < 5 && i < size; i++) printf("%.7f ", result[i]);
+        printf("...\n");
+
+        printf("  Expected (first 5): ");
+        for (int i = 0; i < 5 && i < size; i++) {
+            float expected = ((float)input[i] + (float)1067.3366832990887) + (float)0.2901221513748169;
+            printf("%.7f ", expected);
+        }
+        printf("...\n");
+
+        free(result);
+
+    } else {
+        printf("  ❌ FAILED: Expected output dtype ME_FLOAT32 (NumPy convention), got %d\n", out_dtype);
+        me_free(expr);
+        free(input);
+        return 0;
+    }
+
+    me_free(expr);
+    free(input);
+
+    if (passed) {
+        printf("  ✅ PASS\n");
+    } else {
+        printf("  ❌ FAIL (max diff: %.9f)\n", max_diff);
+    }
+
+    return passed;
+}
+
+// ============================================================================
 // MAIN TEST RUNNER
 // ============================================================================
 
@@ -710,6 +810,17 @@ int main() {
     total++;
     if (test_int64_large_constant("Test 6.1: (a + 90000.00001) + 1 where a is int64[1000]",
                                   1000)) passed++;
+
+    // ========================================================================
+    // SECTION 7: FLOAT32 ARRAY + FLOAT64 CONSTANTS
+    // ========================================================================
+    printf("\n\n========================================================================\n");
+    printf("SECTION 7: FLOAT32 ARRAY + FLOAT64 CONSTANTS\n");
+    printf("========================================================================\n");
+
+    total++;
+    if (test_float32_array_float64_constants("Test 7.1: ((o0 + 1067.3366832990887) + 0.2901221513748169) where o0 is float32 array",
+                                             SMALL_SIZE)) passed++;
 
     // ========================================================================
     // FINAL SUMMARY

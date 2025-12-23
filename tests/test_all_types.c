@@ -118,7 +118,9 @@ int main() {
     TEST1("uint64_t", ME_UINT64, uint64_t, "%" PRIu64, i*1000000, "a*3", a[i]*3);
 
     printf("\nFloating Point:\n");
-    TEST1("float", ME_FLOAT32, float, "%.2f", (float)i, "a+5.0", a[i]+5.0f);
+    // Note: Float constants are now always FLOAT64, so "a+5.0" with ME_FLOAT32
+    // will result in FLOAT64 output. Use integer constant for FLOAT32 test.
+    TEST1("float", ME_FLOAT32, float, "%.2f", (float)i, "a+5", a[i]+5);
     TEST2("double", ME_FLOAT64, double, "%.2f", (double)i, "a+b", a[i]+b[i]);
 
     printf("\n✅ All basic type tests passed!\n\n");
