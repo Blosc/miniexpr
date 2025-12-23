@@ -128,8 +128,8 @@ int main() {
     /* Complex numbers need special testing */
     printf("Complex Numbers:\n"); {
         const int n = 10;
-        float complex *a = malloc(n * sizeof(float complex));
-        float complex *result = malloc(n * sizeof(float complex));
+        float _Complex *a = malloc(n * sizeof(float _Complex));
+        float _Complex *result = malloc(n * sizeof(float _Complex));
 
         for (int i = 0; i < n; i++) {
             a[i] = (float) i + (float) i * I; // i + i*I
@@ -147,9 +147,14 @@ int main() {
 
             int passed = 1;
             for (int i = 0; i < n && passed; i++) {
-                float complex expected = a[i] + 5.0f;
+                float _Complex expected = a[i] + 5.0f;
+#if defined(_MSC_VER) && defined(__clang__)
+                if (__builtin_crealf(result[i]) != __builtin_crealf(expected) ||
+                    __builtin_cimagf(result[i]) != __builtin_cimagf(expected)) {
+#else
                 if (crealf(result[i]) != crealf(expected) ||
                     cimagf(result[i]) != cimagf(expected)) {
+#endif
                     passed = 0;
                     printf("❌ complex64: Mismatch at [%d]\n", i);
                 }
@@ -166,8 +171,8 @@ int main() {
         free(result);
     } {
         const int n = 10;
-        double complex *a = malloc(n * sizeof(double complex));
-        double complex *result = malloc(n * sizeof(double complex));
+        double _Complex *a = malloc(n * sizeof(double _Complex));
+        double _Complex *result = malloc(n * sizeof(double _Complex));
 
         for (int i = 0; i < n; i++) {
             a[i] = (double) i + (double) i * I;
@@ -185,9 +190,14 @@ int main() {
 
             int passed = 1;
             for (int i = 0; i < n && passed; i++) {
-                double complex expected = a[i] * 2.0;
+                double _Complex expected = a[i] * 2.0;
+#if defined(_MSC_VER) && defined(__clang__)
+                if (__builtin_creal(result[i]) != __builtin_creal(expected) ||
+                    __builtin_cimag(result[i]) != __builtin_cimag(expected)) {
+#else
                 if (creal(result[i]) != creal(expected) ||
                     cimag(result[i]) != cimag(expected)) {
+#endif
                     passed = 0;
                     printf("❌ complex128: Mismatch at [%d]\n", i);
                 }
