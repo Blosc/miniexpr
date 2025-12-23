@@ -10,6 +10,11 @@
 #include <math.h>
 #include "miniexpr.h"
 
+#if defined(_MSC_VER) && defined(__clang__)
+#undef I
+#define I _Complex_I
+#endif
+
 /* Macro for single-variable tests (expressions like "a+5") */
 #define TEST1(name, type_enum, type, fmt, init_expr, test_expr, expected_expr) do { \
     const int n = 10; \

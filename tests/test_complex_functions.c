@@ -6,6 +6,11 @@
 #include <complex.h>
 #include <stdint.h>
 
+#if defined(_MSC_VER) && defined(__clang__)
+#undef I
+#define I _Complex_I
+#endif
+
 #define VECTOR_SIZE 10
 #define TOLERANCE 1e-9
 
