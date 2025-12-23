@@ -16,10 +16,22 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
+    - name: Set up MSVC (Windows)
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@v1
+
     - name: Build library
       shell: bash
-      run: make lib
+      run: |
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          export CC=clang-cl
+        fi
+        make lib
     
     - name: Build and run tests
       shell: bash
-      run: make test
+      run: |
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          export CC=clang-cl
+        fi
+        make test
