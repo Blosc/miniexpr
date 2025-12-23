@@ -1,4 +1,4 @@
-/* Test NumPy-compatible functions: expm1, log1p, log2, logaddexp */
+/* Test NumPy-compatible functions: expm1, log1p, log2, logaddexp, round, sign, square, trunc */
 #include "../src/miniexpr.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -301,6 +301,159 @@ void test_mixed_expressions() {
     printf("  PASS\n");
 }
 
+void test_round_func() {
+    TEST("round(x) - round to nearest integer");
+
+    double x[VECTOR_SIZE] = {1.4, 1.5, 1.6, -1.4, -1.5, -1.6, 2.5, -2.5, 0.0, 3.14159};
+    double result[VECTOR_SIZE] = {0};
+
+    me_variable vars[] = {{"x"}};
+
+    int err;
+    me_expr *expr = me_compile("round(x)", vars, 1, ME_FLOAT64, &err);
+
+    if (!expr) {
+        printf("  FAIL: compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs[] = {x};
+    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        double expected = round(x[i]);
+        ASSERT_NEAR(expected, result[i], i);
+    }
+
+    me_free(expr);
+    printf("  PASS\n");
+}
+
+void test_sign() {
+    TEST("sign(x) - sign function (-1, 0, or 1)");
+
+    double x[VECTOR_SIZE] = {-5.0, -1.0, -0.5, -0.0, 0.0, 0.5, 1.0, 5.0, 100.0, -100.0};
+    double result[VECTOR_SIZE] = {0};
+
+    me_variable vars[] = {{"x"}};
+
+    int err;
+    me_expr *expr = me_compile("sign(x)", vars, 1, ME_FLOAT64, &err);
+
+    if (!expr) {
+        printf("  FAIL: compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs[] = {x};
+    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        double expected;
+        if (x[i] > 0.0) expected = 1.0;
+        else if (x[i] < 0.0) expected = -1.0;
+        else expected = 0.0;
+        ASSERT_NEAR(expected, result[i], i);
+    }
+
+    me_free(expr);
+    printf("  PASS\n");
+}
+
+void test_square() {
+    TEST("square(x) - x * x");
+
+    double x[VECTOR_SIZE] = {-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0, 5.0, 10.0, -10.0};
+    double result[VECTOR_SIZE] = {0};
+
+    me_variable vars[] = {{"x"}};
+
+    int err;
+    me_expr *expr = me_compile("square(x)", vars, 1, ME_FLOAT64, &err);
+
+    if (!expr) {
+        printf("  FAIL: compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs[] = {x};
+    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        double expected = x[i] * x[i];
+        ASSERT_NEAR(expected, result[i], i);
+    }
+
+    me_free(expr);
+    printf("  PASS\n");
+}
+
+void test_trunc_func() {
+    TEST("trunc(x) - truncate towards zero");
+
+    double x[VECTOR_SIZE] = {1.4, 1.5, 1.6, -1.4, -1.5, -1.6, 2.7, -2.7, 0.0, 3.14159};
+    double result[VECTOR_SIZE] = {0};
+
+    me_variable vars[] = {{"x"}};
+
+    int err;
+    me_expr *expr = me_compile("trunc(x)", vars, 1, ME_FLOAT64, &err);
+
+    if (!expr) {
+        printf("  FAIL: compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs[] = {x};
+    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        double expected = trunc(x[i]);
+        ASSERT_NEAR(expected, result[i], i);
+    }
+
+    me_free(expr);
+    printf("  PASS\n");
+}
+
+void test_square_vs_pow() {
+    TEST("square(x) == pow(x, 2)");
+
+    double x[5] = {-3.0, -1.0, 0.0, 1.0, 5.0};
+    double result1[5] = {0};
+    double result2[5] = {0};
+
+    me_variable vars[] = {{"x"}};
+
+    int err;
+    me_expr *expr1 = me_compile("square(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr2 = me_compile("pow(x, 2)", vars, 1, ME_FLOAT64, &err);
+
+    if (!expr1 || !expr2) {
+        printf("  FAIL: compilation error\n");
+        if (expr1) me_free(expr1);
+        if (expr2) me_free(expr2);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs[] = {x};
+    me_eval(expr1, var_ptrs, 1, result1, 5);
+    me_eval(expr2, var_ptrs, 1, result2, 5);
+
+    for (int i = 0; i < 5; i++) {
+        ASSERT_NEAR(result1[i], result2[i], i);
+    }
+
+    me_free(expr1);
+    me_free(expr2);
+    printf("  PASS\n");
+}
+
 int main() {
     printf("=== Testing NumPy-Compatible Functions ===\n\n");
 
@@ -312,6 +465,11 @@ int main() {
     test_log1p_small_values();
     test_logaddexp_extreme_values();
     test_mixed_expressions();
+    test_round_func();
+    test_sign();
+    test_square();
+    test_trunc_func();
+    test_square_vs_pow();
 
     printf("\n=== Test Summary ===\n");
     printf("Tests run: %d\n", tests_run);

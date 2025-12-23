@@ -1,4 +1,4 @@
-/* Test complex functions: conj and imag */
+/* Test complex functions: conj, imag, and real */
 #include "../src/miniexpr.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -266,15 +266,133 @@ void test_imag_auto_dtype() {
     printf("  PASS\n");
 }
 
+void test_real_c64() {
+    TEST("real(z) - real part for float complex");
+
+    float complex z[VECTOR_SIZE] = {
+        1.0f + 2.0f*I,
+        -1.0f + 2.0f*I,
+        1.0f - 2.0f*I,
+        -1.0f - 2.0f*I,
+        0.0f + 1.0f*I,
+        0.0f - 1.0f*I,
+        3.5f + 0.0f*I,
+        -3.5f + 0.0f*I,
+        0.0f + 0.0f*I,
+        2.5f + 3.7f*I
+    };
+    float result[VECTOR_SIZE] = {0};
+
+    me_variable vars[] = {{"z", ME_COMPLEX64}};
+
+    int err;
+    me_expr *expr = me_compile("real(z)", vars, 1, ME_FLOAT32, &err);
+
+    if (!expr) {
+        printf("  FAIL: compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs[] = {z};
+    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        float expected = crealf(z[i]);
+        ASSERT_NEAR(expected, result[i], i);
+    }
+
+    me_free(expr);
+    printf("  PASS\n");
+}
+
+void test_real_c128() {
+    TEST("real(z) - real part for double complex");
+
+    double complex z[VECTOR_SIZE] = {
+        1.0 + 2.0*I,
+        -1.0 + 2.0*I,
+        1.0 - 2.0*I,
+        -1.0 - 2.0*I,
+        0.0 + 1.0*I,
+        0.0 - 1.0*I,
+        3.5 + 0.0*I,
+        -3.5 + 0.0*I,
+        0.0 + 0.0*I,
+        2.5 + 3.7*I
+    };
+    double result[VECTOR_SIZE] = {0};
+
+    me_variable vars[] = {{"z", ME_COMPLEX128}};
+
+    int err;
+    me_expr *expr = me_compile("real(z)", vars, 1, ME_FLOAT64, &err);
+
+    if (!expr) {
+        printf("  FAIL: compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs[] = {z};
+    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        double expected = creal(z[i]);
+        ASSERT_NEAR(expected, result[i], i);
+    }
+
+    me_free(expr);
+    printf("  PASS\n");
+}
+
+void test_real_auto_dtype() {
+    TEST("real(z) with ME_AUTO output dtype");
+
+    double complex z[5] = {
+        1.0 + 2.0*I,
+        -1.0 + 2.0*I,
+        2.5 + 3.7*I,
+        -3.5 + 4.2*I,
+        0.0 + 0.0*I
+    };
+    double result[5] = {0};
+
+    me_variable vars[] = {{"z", ME_COMPLEX128}};
+
+    int err;
+    me_expr *expr = me_compile("real(z)", vars, 1, ME_AUTO, &err);
+
+    if (!expr) {
+        printf("  FAIL: compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs[] = {z};
+    me_eval(expr, var_ptrs, 1, result, 5);
+
+    for (int i = 0; i < 5; i++) {
+        double expected = creal(z[i]);
+        ASSERT_NEAR(expected, result[i], i);
+    }
+
+    me_free(expr);
+    printf("  PASS\n");
+}
+
 int main() {
-    printf("=== Testing Complex Functions (conj, imag) ===\n\n");
+    printf("=== Testing Complex Functions (conj, imag, real) ===\n\n");
 
     test_conj_c64();
     test_conj_c128();
     test_imag_c64();
     test_imag_c128();
+    test_real_c64();
+    test_real_c128();
     test_conj_identity();
     test_imag_auto_dtype();
+    test_real_auto_dtype();
 
     printf("\n=== Test Summary ===\n");
     printf("Tests run: %d\n", tests_run);
