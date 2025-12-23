@@ -38,11 +38,15 @@ int tests_failed = 0;
 #define CIMAG(x) __builtin_cimag(x)
 #define CREALF(x) __builtin_crealf(x)
 #define CIMAGF(x) __builtin_cimagf(x)
+#define CONJ(x) __builtin_conj(x)
+#define CONJF(x) __builtin_conjf(x)
 #else
 #define CREAL(x) creal(x)
 #define CIMAG(x) cimag(x)
 #define CREALF(x) crealf(x)
 #define CIMAGF(x) cimagf(x)
+#define CONJ(x) conj(x)
+#define CONJF(x) conjf(x)
 #endif
 
 #define ASSERT_COMPLEX_NEAR(expected, actual, idx) \
@@ -90,7 +94,7 @@ void test_conj_c64() {
     me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
-        float _Complex expected = conjf(z[i]);
+        float _Complex expected = CONJF(z[i]);
         ASSERT_COMPLEX_NEAR(expected, result[i], i);
     }
 
@@ -130,7 +134,7 @@ void test_conj_c128() {
     me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
-        double _Complex expected = conj(z[i]);
+        double _Complex expected = CONJ(z[i]);
         ASSERT_COMPLEX_NEAR(expected, result[i], i);
     }
 
