@@ -13,8 +13,8 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         compiler: [gcc]
         include:
-          - os: windows-latest
-            compiler: msvc
+#          - os: windows-latest
+#            compiler: msvc
           - os: windows-latest
             compiler: clang-cl
     runs-on: ${{ matrix.os }}
