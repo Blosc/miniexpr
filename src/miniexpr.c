@@ -55,7 +55,112 @@ For log = base 10 log comment the next line. */
 #include <limits.h>
 #include <stdint.h>
 #include <stdbool.h>
+#if defined(_MSC_VER) && !defined(__clang__)
+#define IVDEP
+#else
+#define IVDEP _Pragma("GCC ivdep")
+#endif
+
 #include <complex.h>
+
+#if defined(_MSC_VER) && !defined(__clang__)
+// MSVC uses different names for complex types in C
+#define float_complex _Fcomplex
+#define double_complex _Dcomplex
+// And it doesn't support standard operators for them in C
+static inline _Fcomplex add_c64(_Fcomplex a, _Fcomplex b) { return _FCbuild(crealf(a) + crealf(b), cimagf(a) + cimagf(b)); }
+static inline _Fcomplex sub_c64(_Fcomplex a, _Fcomplex b) { return _FCbuild(crealf(a) - crealf(b), cimagf(a) - cimagf(b)); }
+static inline _Fcomplex neg_c64(_Fcomplex a) { return _FCbuild(-crealf(a), -cimagf(a)); }
+static inline _Fcomplex mul_c64(_Fcomplex a, _Fcomplex b) {
+    return _FCbuild(crealf(a) * crealf(b) - cimagf(a) * cimagf(b), crealf(a) * cimagf(b) + cimagf(a) * crealf(b));
+}
+static inline _Fcomplex div_c64(_Fcomplex a, _Fcomplex b) {
+    float denom = crealf(b) * crealf(b) + cimagf(b) * cimagf(b);
+    return _FCbuild((crealf(a) * crealf(b) + cimagf(a) * cimagf(b)) / denom, (cimagf(a) * crealf(b) - crealf(a) * cimagf(b)) / denom);
+}
+static inline _Dcomplex add_c128(_Dcomplex a, _Dcomplex b) { return _Cbuild(creal(a) + creal(b), cimag(a) + cimag(b)); }
+static inline _Dcomplex sub_c128(_Dcomplex a, _Dcomplex b) { return _Cbuild(creal(a) - creal(b), cimag(a) - cimag(b)); }
+static inline _Dcomplex neg_c128(_Dcomplex a) { return _Cbuild(-creal(a), -cimag(a)); }
+static inline _Dcomplex mul_c128(_Dcomplex a, _Dcomplex b) {
+    return _Cbuild(creal(a) * creal(b) - cimag(a) * cimag(b), creal(a) * cimag(b) + cimag(a) * creal(b));
+}
+static inline _Dcomplex div_c128(_Dcomplex a, _Dcomplex b) {
+    double denom = creal(b) * creal(b) + cimag(b) * cimag(b);
+    return _Cbuild((creal(a) * creal(b) + cimag(a) * cimag(b)) / denom, (cimag(a) * creal(b) - creal(a) * cimag(b)) / denom);
+}
+#else
+#define float_complex float _Complex
+#define double_complex double _Complex
+#define add_c64(a, b) ((a) + (b))
+#define sub_c64(a, b) ((a) - (b))
+#define neg_c64(a) (-(a))
+#define mul_c64(a, b) ((a) * (b))
+#define div_c64(a, b) ((a) / (b))
+#define add_c128(a, b) ((a) + (b))
+#define sub_c128(a, b) ((a) - (b))
+#define neg_c128(a) (-(a))
+#define mul_c128(a, b) ((a) * (b))
+#define div_c128(a, b) ((a) / (b))
+#endif
+
+/* Type-specific cast and comparison macros to handle MSVC complex structs */
+#define TO_TYPE_bool(x) (bool)(x)
+#define TO_TYPE_i8(x) (int8_t)(x)
+#define TO_TYPE_i16(x) (int16_t)(x)
+#define TO_TYPE_i32(x) (int32_t)(x)
+#define TO_TYPE_i64(x) (int64_t)(x)
+#define TO_TYPE_u8(x) (uint8_t)(x)
+#define TO_TYPE_u16(x) (uint16_t)(x)
+#define TO_TYPE_u32(x) (uint32_t)(x)
+#define TO_TYPE_u64(x) (uint64_t)(x)
+#define TO_TYPE_f32(x) (float)(x)
+#define TO_TYPE_f64(x) (double)(x)
+
+#define FROM_TYPE_bool(x) (double)(x)
+#define FROM_TYPE_i8(x) (double)(x)
+#define FROM_TYPE_i16(x) (double)(x)
+#define FROM_TYPE_i32(x) (double)(x)
+#define FROM_TYPE_i64(x) (double)(x)
+#define FROM_TYPE_u8(x) (double)(x)
+#define FROM_TYPE_u16(x) (double)(x)
+#define FROM_TYPE_u32(x) (double)(x)
+#define FROM_TYPE_u64(x) (double)(x)
+#define FROM_TYPE_f32(x) (double)(x)
+#define FROM_TYPE_f64(x) (double)(x)
+
+#define IS_NONZERO_bool(x) (x)
+#define IS_NONZERO_i8(x) ((x) != 0)
+#define IS_NONZERO_i16(x) ((x) != 0)
+#define IS_NONZERO_i32(x) ((x) != 0)
+#define IS_NONZERO_i64(x) ((x) != 0)
+#define IS_NONZERO_u8(x) ((x) != 0)
+#define IS_NONZERO_u16(x) ((x) != 0)
+#define IS_NONZERO_u32(x) ((x) != 0)
+#define IS_NONZERO_u64(x) ((x) != 0)
+#define IS_NONZERO_f32(x) ((x) != 0.0f)
+#define IS_NONZERO_f64(x) ((x) != 0.0)
+
+#if defined(_MSC_VER) && !defined(__clang__)
+#define TO_TYPE_c64(x) _FCbuild((float)(x), 0.0f)
+#define TO_TYPE_c128(x) _Cbuild((double)(x), 0.0)
+#define FROM_TYPE_c64(x) (double)crealf(x)
+#define FROM_TYPE_c128(x) (double)creal(x)
+#define IS_NONZERO_c64(x) (crealf(x) != 0.0f || cimagf(x) != 0.0f)
+#define IS_NONZERO_c128(x) (creal(x) != 0.0 || cimag(x) != 0.0)
+
+/* Helper macros for complex-to-complex conversions */
+#define CONV_c64_to_c128(x) _Cbuild((double)crealf(x), (double)cimagf(x))
+#define TO_TYPE_c128_from_c64(x) CONV_c64_to_c128(x)
+#else
+#define TO_TYPE_c64(x) (float_complex)(x)
+#define TO_TYPE_c128(x) (double_complex)(x)
+#define FROM_TYPE_c64(x) (double)(x)
+#define FROM_TYPE_c128(x) (double)(x)
+#define IS_NONZERO_c64(x) ((x) != 0)
+#define IS_NONZERO_c128(x) ((x) != 0)
+#define TO_TYPE_c128_from_c64(x) (double_complex)(x)
+#endif
+
 #include <assert.h>
 
 #ifndef NAN
@@ -1173,7 +1278,7 @@ static me_expr *factor(state *s) {
     CHECK_NULL(ret);
 
     while (s->type == TOK_POW) {
-        me_fun2 t = s->function;
+        me_fun2 t = (me_fun2)s->function;
         next_token(s);
         me_expr *f = power(s);
         CHECK_NULL(f, me_free(ret));
@@ -1182,7 +1287,7 @@ static me_expr *factor(state *s) {
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, f);
         CHECK_NULL(ret, me_free(f), me_free(prev));
 
-        ret->function = t;
+        ret->function = (void *)t;
         apply_type_promotion(ret);
     }
 
@@ -1197,7 +1302,7 @@ static me_expr *term(state *s) {
     CHECK_NULL(ret);
 
     while (s->type == TOK_INFIX && (s->function == mul || s->function == divide || s->function == fmod)) {
-        me_fun2 t = s->function;
+        me_fun2 t = (me_fun2)s->function;
         next_token(s);
         me_expr *f = factor(s);
         CHECK_NULL(f, me_free(ret));
@@ -1206,7 +1311,7 @@ static me_expr *term(state *s) {
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, f);
         CHECK_NULL(ret, me_free(f), me_free(prev));
 
-        ret->function = t;
+        ret->function = (void *)t;
         apply_type_promotion(ret);
     }
 
@@ -1220,7 +1325,7 @@ static me_expr *expr(state *s) {
     CHECK_NULL(ret);
 
     while (s->type == TOK_INFIX && (s->function == add || s->function == sub)) {
-        me_fun2 t = s->function;
+        me_fun2 t = (me_fun2)s->function;
         next_token(s);
         me_expr *te = term(s);
         CHECK_NULL(te, me_free(ret));
@@ -1229,7 +1334,7 @@ static me_expr *expr(state *s) {
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, te);
         CHECK_NULL(ret, me_free(te), me_free(prev));
 
-        ret->function = t;
+        ret->function = (void *)t;
         apply_type_promotion(ret); // Apply type promotion
     }
 
@@ -1243,7 +1348,7 @@ static me_expr *shift_expr(state *s) {
     CHECK_NULL(ret);
 
     while (s->type == TOK_SHIFT) {
-        me_fun2 t = s->function;
+        me_fun2 t = (me_fun2)s->function;
         next_token(s);
         me_expr *e = expr(s);
         CHECK_NULL(e, me_free(ret));
@@ -1252,7 +1357,7 @@ static me_expr *shift_expr(state *s) {
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
         CHECK_NULL(ret, me_free(e), me_free(prev));
 
-        ret->function = t;
+        ret->function = (void *)t;
         apply_type_promotion(ret);
     }
 
@@ -1311,7 +1416,7 @@ static me_expr *bitwise_or(state *s) {
     CHECK_NULL(ret);
 
     while (s->type == TOK_BITWISE && (s->function == bit_or)) {
-        me_fun2 t = s->function;
+        me_fun2 t = (me_fun2)s->function;
         next_token(s);
         me_expr *e = bitwise_xor(s);
         CHECK_NULL(e, me_free(ret));
@@ -1320,7 +1425,7 @@ static me_expr *bitwise_or(state *s) {
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
         CHECK_NULL(ret, me_free(e), me_free(prev));
 
-        ret->function = t;
+        ret->function = (void *)t;
         apply_type_promotion(ret);
     }
 
@@ -1334,7 +1439,7 @@ static me_expr *comparison(state *s) {
     CHECK_NULL(ret);
 
     while (s->type == TOK_COMPARE) {
-        me_fun2 t = s->function;
+        me_fun2 t = (me_fun2)s->function;
         next_token(s);
         me_expr *e = bitwise_or(s);
         CHECK_NULL(e, me_free(ret));
@@ -1343,7 +1448,7 @@ static me_expr *comparison(state *s) {
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
         CHECK_NULL(ret, me_free(e), me_free(prev));
 
-        ret->function = t;
+        ret->function = (void *)t;
         apply_type_promotion(ret);
         /* Comparisons always return bool */
         ret->dtype = ME_BOOL;
@@ -1734,25 +1839,25 @@ DEFINE_INT_VEC_OPS(u64, uint64_t)
 /* Boolean logical operations */
 static void vec_and_bool(const bool *a, const bool *b, bool *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = a[i] && b[i];
 }
 
 static void vec_or_bool(const bool *a, const bool *b, bool *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = a[i] || b[i];
 }
 
 static void vec_xor_bool(const bool *a, const bool *b, bool *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = a[i] != b[i];
 }
 
 static void vec_not_bool(const bool *a, bool *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = !a[i];
 }
 
@@ -1761,32 +1866,32 @@ static void vec_not_bool(const bool *a, bool *out, int n) {
 #define DEFINE_COMPARE_OPS(SUFFIX, TYPE) \
 static void vec_cmp_eq_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
     int i; \
-    _Pragma("GCC ivdep") \
+    IVDEP \
     for (i = 0; i < n; i++) out[i] = (a[i] == b[i]) ? 1 : 0; \
 } \
 static void vec_cmp_ne_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
     int i; \
-    _Pragma("GCC ivdep") \
+    IVDEP \
     for (i = 0; i < n; i++) out[i] = (a[i] != b[i]) ? 1 : 0; \
 } \
 static void vec_cmp_lt_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
     int i; \
-    _Pragma("GCC ivdep") \
+    IVDEP \
     for (i = 0; i < n; i++) out[i] = (a[i] < b[i]) ? 1 : 0; \
 } \
 static void vec_cmp_le_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
     int i; \
-    _Pragma("GCC ivdep") \
+    IVDEP \
     for (i = 0; i < n; i++) out[i] = (a[i] <= b[i]) ? 1 : 0; \
 } \
 static void vec_cmp_gt_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
     int i; \
-    _Pragma("GCC ivdep") \
+    IVDEP \
     for (i = 0; i < n; i++) out[i] = (a[i] > b[i]) ? 1 : 0; \
 } \
 static void vec_cmp_ge_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
     int i; \
-    _Pragma("GCC ivdep") \
+    IVDEP \
     for (i = 0; i < n; i++) out[i] = (a[i] >= b[i]) ? 1 : 0; \
 }
 
@@ -1805,145 +1910,145 @@ DEFINE_COMPARE_OPS(f64, double)
 /* Complex operations */
 static void vec_add_c64(const float _Complex *a, const float _Complex *b, float _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] + b[i];
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = add_c64(a[i], b[i]);
 }
 
 static void vec_sub_c64(const float _Complex *a, const float _Complex *b, float _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] - b[i];
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = sub_c64(a[i], b[i]);
 }
 
 static void vec_mul_c64(const float _Complex *a, const float _Complex *b, float _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] * b[i];
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = mul_c64(a[i], b[i]);
 }
 
 static void vec_div_c64(const float _Complex *a, const float _Complex *b, float _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] / b[i];
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = div_c64(a[i], b[i]);
 }
 
 static void vec_add_scalar_c64(const float _Complex *a, float _Complex b, float _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] + b;
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = add_c64(a[i], b);
 }
 
 static void vec_mul_scalar_c64(const float _Complex *a, float _Complex b, float _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] * b;
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = mul_c64(a[i], b);
 }
 
 static void vec_pow_c64(const float _Complex *a, const float _Complex *b, float _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = cpowf(a[i], b[i]);
 }
 
 static void vec_pow_scalar_c64(const float _Complex *a, float _Complex b, float _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = cpowf(a[i], b);
 }
 
 static void vec_sqrt_c64(const float _Complex *a, float _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = csqrtf(a[i]);
 }
 
 static void vec_negame_c64(const float _Complex *a, float _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = -a[i];
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = neg_c64(a[i]);
 }
 
 static void vec_conj_c64(const float _Complex *a, float _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = conjf(a[i]);
 }
 
 static void vec_imag_c64(const float _Complex *a, float *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = cimagf(a[i]);
 }
 
 static void vec_add_c128(const double _Complex *a, const double _Complex *b, double _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] + b[i];
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = add_c128(a[i], b[i]);
 }
 
 static void vec_sub_c128(const double _Complex *a, const double _Complex *b, double _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] - b[i];
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = sub_c128(a[i], b[i]);
 }
 
 static void vec_mul_c128(const double _Complex *a, const double _Complex *b, double _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] * b[i];
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = mul_c128(a[i], b[i]);
 }
 
 static void vec_div_c128(const double _Complex *a, const double _Complex *b, double _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] / b[i];
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = div_c128(a[i], b[i]);
 }
 
 static void vec_add_scalar_c128(const double _Complex *a, double _Complex b, double _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] + b;
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = add_c128(a[i], b);
 }
 
 static void vec_mul_scalar_c128(const double _Complex *a, double _Complex b, double _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] * b;
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = mul_c128(a[i], b);
 }
 
 static void vec_pow_c128(const double _Complex *a, const double _Complex *b, double _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = cpow(a[i], b[i]);
 }
 
 static void vec_pow_scalar_c128(const double _Complex *a, double _Complex b, double _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = cpow(a[i], b);
 }
 
 static void vec_sqrt_c128(const double _Complex *a, double _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = csqrt(a[i]);
 }
 
 static void vec_negame_c128(const double _Complex *a, double _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = -a[i];
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = neg_c128(a[i]);
 }
 
 static void vec_conj_c128(const double _Complex *a, double _Complex *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = conj(a[i]);
 }
 
 static void vec_imag_c128(const double _Complex *a, double *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = cimag(a[i]);
 }
 
@@ -1956,9 +2061,10 @@ static void vec_imag_c128(const double _Complex *a, double *out, int n) {
 #define DEFINE_VEC_CONVERT(FROM_SUFFIX, TO_SUFFIX, FROM_TYPE, TO_TYPE) \
 static void vec_convert_##FROM_SUFFIX##_to_##TO_SUFFIX(const FROM_TYPE *in, TO_TYPE *out, int n) { \
     int i; \
-    _Pragma("GCC ivdep") \
-    for (i = 0; i < n; i++) out[i] = (TO_TYPE)in[i]; \
+    IVDEP \
+    for (i = 0; i < n; i++) out[i] = TO_TYPE_##TO_SUFFIX(in[i]); \
 }
+
 
 /* Generate all conversion functions */
 /* Conversions FROM bool TO other types */
@@ -2139,7 +2245,7 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
     switch(TYPE_MASK(n->type)) { \
         case ME_CONSTANT: \
             { \
-                TYPE val = (TYPE)n->value; \
+                TYPE val = TO_TYPE_##SUFFIX(n->value); \
                 for (i = 0; i < n->nitems; i++) { \
                     output[i] = val; \
                 } \
@@ -2186,9 +2292,9 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                     if (ldata && rdata) { \
                         VEC_ADD(ldata, rdata, output, n->nitems); \
                     } else if (ldata && right->type == ME_CONSTANT) { \
-                        VEC_ADD_SCALAR(ldata, (TYPE)right->value, output, n->nitems); \
+                        VEC_ADD_SCALAR(ldata, TO_TYPE_##SUFFIX(right->value), output, n->nitems); \
                     } else if (left->type == ME_CONSTANT && rdata) { \
-                        VEC_ADD_SCALAR(rdata, (TYPE)left->value, output, n->nitems); \
+                        VEC_ADD_SCALAR(rdata, TO_TYPE_##SUFFIX(left->value), output, n->nitems); \
                     } else { \
                         goto general_case_binary_##SUFFIX; \
                     } \
@@ -2202,9 +2308,9 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                     if (ldata && rdata) { \
                         VEC_MUL(ldata, rdata, output, n->nitems); \
                     } else if (ldata && right->type == ME_CONSTANT) { \
-                        VEC_MUL_SCALAR(ldata, (TYPE)right->value, output, n->nitems); \
+                        VEC_MUL_SCALAR(ldata, TO_TYPE_##SUFFIX(right->value), output, n->nitems); \
                     } else if (left->type == ME_CONSTANT && rdata) { \
-                        VEC_MUL_SCALAR(rdata, (TYPE)left->value, output, n->nitems); \
+                        VEC_MUL_SCALAR(rdata, TO_TYPE_##SUFFIX(left->value), output, n->nitems); \
                     } else { \
                         goto general_case_binary_##SUFFIX; \
                     } \
@@ -2218,7 +2324,7 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                     if (ldata && rdata) { \
                         VEC_POW(ldata, rdata, output, n->nitems); \
                     } else if (ldata && right->type == ME_CONSTANT) { \
-                        VEC_POW_SCALAR(ldata, (TYPE)right->value, output, n->nitems); \
+                        VEC_POW_SCALAR(ldata, TO_TYPE_##SUFFIX(right->value), output, n->nitems); \
                     } else { \
                         goto general_case_binary_##SUFFIX; \
                     } \
@@ -2226,10 +2332,10 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                     general_case_binary_##SUFFIX: \
                     for (i = 0; i < n->nitems; i++) { \
                         double a = (left->type == ME_CONSTANT) ? left->value : \
-                                  (left->type == ME_VARIABLE) ? (double)ldata[i] : (double)ldata[i]; \
+                                  FROM_TYPE_##SUFFIX(ldata[i]); \
                         double b = (right->type == ME_CONSTANT) ? right->value : \
-                                  (right->type == ME_VARIABLE) ? (double)rdata[i] : (double)rdata[i]; \
-                        output[i] = (TYPE)func(a, b); \
+                                  FROM_TYPE_##SUFFIX(rdata[i]); \
+                        output[i] = TO_TYPE_##SUFFIX(func(a, b)); \
                     } \
                 } \
             } else if (arity == 3 && IS_FUNCTION(n->type) && n->function == (void*)where_scalar) { \
@@ -2243,7 +2349,7 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                 const TYPE *ydata = (const TYPE*)((yexpr->type == ME_VARIABLE) ? yexpr->bound : yexpr->output); \
                 \
                 for (i = 0; i < n->nitems; i++) { \
-                    output[i] = (cdata[i] != (TYPE)0) ? xdata[i] : ydata[i]; \
+                    output[i] = (IS_NONZERO_##SUFFIX(cdata[i])) ? xdata[i] : ydata[i]; \
                 } \
             } \
             else if (arity == 1 && IS_FUNCTION(n->type)) { \
@@ -2266,7 +2372,7 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                     /* NumPy semantics: imag(real) == 0 with same dtype */ \
                     if (adata) { \
                         for (i = 0; i < n->nitems; i++) { \
-                            output[i] = (TYPE)0; \
+                            output[i] = TO_TYPE_##SUFFIX(0); \
                         } \
                     } \
                 } else if (func_ptr == (void*)real_wrapper) { \
@@ -2281,13 +2387,13 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                 } else { \
                     me_fun1 func = (me_fun1)func_ptr; \
                     if (arg->type == ME_CONSTANT) { \
-                        TYPE val = (TYPE)func(arg->value); \
+                        TYPE val = TO_TYPE_##SUFFIX(func(arg->value)); \
                         for (i = 0; i < n->nitems; i++) { \
                             output[i] = val; \
                         } \
                     } else { \
                         for (i = 0; i < n->nitems; i++) { \
-                            output[i] = (TYPE)func((double)adata[i]); \
+                            output[i] = TO_TYPE_##SUFFIX(func(FROM_TYPE_##SUFFIX(adata[i]))); \
                         } \
                     } \
                 } \
@@ -2302,30 +2408,30 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                         if (param->type == ME_CONSTANT) { \
                             args[j] = param->value; \
                         } else { \
-                            args[j] = (double)pdata[i]; \
+                            args[j] = FROM_TYPE_##SUFFIX(pdata[i]); \
                         } \
                     } \
                     \
                     if (IS_FUNCTION(n->type)) { \
                         switch(arity) { \
-                            case 0: output[i] = (TYPE)((double(*)(void))n->function)(); break; \
-                            case 3: output[i] = (TYPE)((double(*)(double,double,double))n->function)(args[0], args[1], args[2]); break; \
-                            case 4: output[i] = (TYPE)((double(*)(double,double,double,double))n->function)(args[0], args[1], args[2], args[3]); break; \
-                            case 5: output[i] = (TYPE)((double(*)(double,double,double,double,double))n->function)(args[0], args[1], args[2], args[3], args[4]); break; \
-                            case 6: output[i] = (TYPE)((double(*)(double,double,double,double,double,double))n->function)(args[0], args[1], args[2], args[3], args[4], args[5]); break; \
-                            case 7: output[i] = (TYPE)((double(*)(double,double,double,double,double,double,double))n->function)(args[0], args[1], args[2], args[3], args[4], args[5], args[6]); break; \
+                            case 0: output[i] = TO_TYPE_##SUFFIX(((double(*)(void))n->function)()); break; \
+                            case 3: output[i] = TO_TYPE_##SUFFIX(((double(*)(double,double,double))n->function)(args[0], args[1], args[2])); break; \
+                            case 4: output[i] = TO_TYPE_##SUFFIX(((double(*)(double,double,double,double))n->function)(args[0], args[1], args[2], args[3])); break; \
+                            case 5: output[i] = TO_TYPE_##SUFFIX(((double(*)(double,double,double,double,double))n->function)(args[0], args[1], args[2], args[3], args[4])); break; \
+                            case 6: output[i] = TO_TYPE_##SUFFIX(((double(*)(double,double,double,double,double,double))n->function)(args[0], args[1], args[2], args[3], args[4], args[5])); break; \
+                            case 7: output[i] = TO_TYPE_##SUFFIX(((double(*)(double,double,double,double,double,double,double))n->function)(args[0], args[1], args[2], args[3], args[4], args[5], args[6])); break; \
                         } \
                     } else if (IS_CLOSURE(n->type)) { \
                         void *context = n->parameters[arity]; \
                         switch(arity) { \
-                            case 0: output[i] = (TYPE)((double(*)(void*))n->function)(context); break; \
-                            case 1: output[i] = (TYPE)((double(*)(void*,double))n->function)(context, args[0]); break; \
-                            case 2: output[i] = (TYPE)((double(*)(void*,double,double))n->function)(context, args[0], args[1]); break; \
-                            case 3: output[i] = (TYPE)((double(*)(void*,double,double,double))n->function)(context, args[0], args[1], args[2]); break; \
-                            case 4: output[i] = (TYPE)((double(*)(void*,double,double,double,double))n->function)(context, args[0], args[1], args[2], args[3]); break; \
-                            case 5: output[i] = (TYPE)((double(*)(void*,double,double,double,double,double))n->function)(context, args[0], args[1], args[2], args[3], args[4]); break; \
-                            case 6: output[i] = (TYPE)((double(*)(void*,double,double,double,double,double,double))n->function)(context, args[0], args[1], args[2], args[3], args[4], args[5]); break; \
-                            case 7: output[i] = (TYPE)((double(*)(void*,double,double,double,double,double,double,double))n->function)(context, args[0], args[1], args[2], args[3], args[4], args[5], args[6]); break; \
+                            case 0: output[i] = TO_TYPE_##SUFFIX(((double(*)(void*))n->function)(context)); break; \
+                            case 1: output[i] = TO_TYPE_##SUFFIX(((double(*)(void*,double))n->function)(context, args[0])); break; \
+                            case 2: output[i] = TO_TYPE_##SUFFIX(((double(*)(void*,double,double))n->function)(context, args[0], args[1])); break; \
+                            case 3: output[i] = TO_TYPE_##SUFFIX(((double(*)(void*,double,double,double))n->function)(context, args[0], args[1], args[2])); break; \
+                            case 4: output[i] = TO_TYPE_##SUFFIX(((double(*)(void*,double,double,double,double))n->function)(context, args[0], args[1], args[2], args[3])); break; \
+                            case 5: output[i] = TO_TYPE_##SUFFIX(((double(*)(void*,double,double,double,double,double))n->function)(context, args[0], args[1], args[2], args[3], args[4])); break; \
+                            case 6: output[i] = TO_TYPE_##SUFFIX(((double(*)(void*,double,double,double,double,double,double))n->function)(context, args[0], args[1], args[2], args[3], args[4], args[5])); break; \
+                            case 7: output[i] = TO_TYPE_##SUFFIX(((double(*)(void*,double,double,double,double,double,double,double))n->function)(context, args[0], args[1], args[2], args[3], args[4], args[5], args[6])); break; \
                         } \
                     } \
                 } \
@@ -2334,7 +2440,7 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
         \
         default: \
             for (i = 0; i < n->nitems; i++) { \
-                output[i] = (TYPE)NAN; \
+                output[i] = TO_TYPE_##SUFFIX(NAN); \
             } \
             break; \
     } \
@@ -2456,6 +2562,36 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sqrt_u64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint64_t)sqrt((a)[_i]); } while(0)
 #define vec_negame_u64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
+#if defined(_MSC_VER) && !defined(__clang__)
+#define vec_add_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = add_c64((a)[_i], (b)[_i]); } while(0)
+#define vec_sub_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = sub_c64((a)[_i], (b)[_i]); } while(0)
+#define vec_mul_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c64((a)[_i], (b)[_i]); } while(0)
+#define vec_div_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = div_c64((a)[_i], (b)[_i]); } while(0)
+#define vec_pow_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpowf((a)[_i], (b)[_i]); } while(0)
+#define vec_add_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = add_c64((a)[_i], (b)); } while(0)
+#define vec_mul_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c64((a)[_i], (b)); } while(0)
+#define vec_pow_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpowf((a)[_i], (b)); } while(0)
+#define vec_sqrt_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = csqrtf((a)[_i]); } while(0)
+#define vec_negame_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = neg_c64((a)[_i]); } while(0)
+#define vec_conj_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = conjf((a)[_i]); } while(0)
+#define vec_imag_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cimagf((a)[_i]); } while(0)
+#define vec_real_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = crealf((a)[_i]); } while(0)
+#define vec_conj_noop(a, out, n) do { (void)(a); (void)(out); (void)(n); } while(0)
+
+#define vec_add_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = add_c128((a)[_i], (b)[_i]); } while(0)
+#define vec_sub_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = sub_c128((a)[_i], (b)[_i]); } while(0)
+#define vec_mul_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c128((a)[_i], (b)[_i]); } while(0)
+#define vec_div_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = div_c128((a)[_i], (b)[_i]); } while(0)
+#define vec_pow_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpow((a)[_i], (b)[_i]); } while(0)
+#define vec_add_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = add_c128((a)[_i], (b)); } while(0)
+#define vec_mul_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c128((a)[_i], (b)); } while(0)
+#define vec_pow_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpow((a)[_i], (b)); } while(0)
+#define vec_sqrt_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = csqrt((a)[_i]); } while(0)
+#define vec_negame_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = neg_c128((a)[_i]); } while(0)
+#define vec_conj_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = conj((a)[_i]); } while(0)
+#define vec_imag_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cimag((a)[_i]); } while(0)
+#define vec_real_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = creal((a)[_i]); } while(0)
+#else
 #define vec_add_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
 #define vec_sub_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
 #define vec_mul_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
@@ -2484,6 +2620,7 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_conj_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = conj((a)[_i]); } while(0)
 #define vec_imag_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cimag((a)[_i]); } while(0)
 #define vec_real_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = creal((a)[_i]); } while(0)
+#endif
 
 /* Generate float32 evaluator */
 DEFINE_ME_EVAL(f32, float,
