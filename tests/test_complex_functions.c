@@ -7,8 +7,12 @@
 #include <stdint.h>
 
 #if defined(_MSC_VER) && defined(__clang__)
+// On Windows with clang-cl, I is defined as _Fcomplex struct
+// We need the proper _Complex constant instead
+#ifdef I
 #undef I
-#define I _Complex_I
+#endif
+#define I (1.0fi)  // Use the imaginary constant literal
 #endif
 
 #define VECTOR_SIZE 10
