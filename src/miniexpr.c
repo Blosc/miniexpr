@@ -46,7 +46,7 @@ For log = natural log do nothing (NumPy compatible)
 For log = base 10 log comment the next line. */
 #define ME_NAT_LOG
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) && !defined(__clang__)
 // Enable C99 complex support on MSVC
 #ifndef _CRT_USE_C99_COMPLEX
 #define _CRT_USE_C99_COMPLEX
@@ -62,7 +62,50 @@ For log = base 10 log comment the next line. */
 #include <limits.h>
 #include <stdint.h>
 #include <stdbool.h>
+#if defined(_MSC_VER) && !defined(__clang__)
+#define IVDEP
+#else
+#define IVDEP _Pragma("GCC ivdep")
+#endif
+
 #include <complex.h>
+
+#if defined(_MSC_VER) && !defined(__clang__)
+// MSVC uses different names for complex types in C
+#define float_complex _Fcomplex
+#define double_complex _Dcomplex
+// And it doesn't support standard operators for them in C
+static inline _Fcomplex add_c64(_Fcomplex a, _Fcomplex b) { return _FCbuild(crealf(a) + crealf(b), cimagf(a) + cimagf(b)); }
+static inline _Fcomplex sub_c64(_Fcomplex a, _Fcomplex b) { return _FCbuild(crealf(a) - crealf(b), cimagf(a) - cimagf(b)); }
+static inline _Fcomplex mul_c64(_Fcomplex a, _Fcomplex b) {
+    return _FCbuild(crealf(a) * crealf(b) - cimagf(a) * cimagf(b), crealf(a) * cimagf(b) + cimagf(a) * crealf(b));
+}
+static inline _Fcomplex div_c64(_Fcomplex a, _Fcomplex b) {
+    float denom = crealf(b) * crealf(b) + cimagf(b) * cimagf(b);
+    return _FCbuild((crealf(a) * crealf(b) + cimagf(a) * cimagf(b)) / denom, (cimagf(a) * crealf(b) - crealf(a) * cimagf(b)) / denom);
+}
+static inline _Dcomplex add_c128(_Dcomplex a, _Dcomplex b) { return _Cbuild(creal(a) + creal(b), cimag(a) + cimag(b)); }
+static inline _Dcomplex sub_c128(_Dcomplex a, _Dcomplex b) { return _Cbuild(creal(a) - creal(b), cimag(a) - cimag(b)); }
+static inline _Dcomplex mul_c128(_Dcomplex a, _Dcomplex b) {
+    return _Cbuild(creal(a) * creal(b) - cimag(a) * cimag(b), creal(a) * cimag(b) + cimag(a) * creal(b));
+}
+static inline _Dcomplex div_c128(_Dcomplex a, _Dcomplex b) {
+    double denom = creal(b) * creal(b) + cimag(b) * cimag(b);
+    return _Cbuild((creal(a) * creal(b) + cimag(a) * cimag(b)) / denom, (cimag(a) * creal(b) - creal(a) * cimag(b)) / denom);
+}
+#else
+#define float_complex float complex
+#define double_complex double complex
+#define add_c64(a, b) ((a) + (b))
+#define sub_c64(a, b) ((a) - (b))
+#define mul_c64(a, b) ((a) * (b))
+#define div_c64(a, b) ((a) / (b))
+#define add_c128(a, b) ((a) + (b))
+#define sub_c128(a, b) ((a) - (b))
+#define mul_c128(a, b) ((a) * (b))
+#define div_c128(a, b) ((a) / (b))
+#endif
+
 #include <assert.h>
 
 #ifndef NAN
@@ -211,8 +254,8 @@ static size_t dtype_size(me_dtype dtype) {
         case ME_UINT64: return sizeof(uint64_t);
         case ME_FLOAT32: return sizeof(float);
         case ME_FLOAT64: return sizeof(double);
-        case ME_COMPLEX64: return sizeof(float complex);
-        case ME_COMPLEX128: return sizeof(double complex);
+        case ME_COMPLEX64: return sizeof(float_complex);
+        case ME_COMPLEX128: return sizeof(double_complex);
         default: return 0;
     }
 }
@@ -1180,7 +1223,7 @@ static me_expr *factor(state *s) {
     CHECK_NULL(ret);
 
     while (s->type == TOK_POW) {
-        me_fun2 t = s->function;
+        me_fun2 t = (me_fun2)s->function;
         next_token(s);
         me_expr *f = power(s);
         CHECK_NULL(f, me_free(ret));
@@ -1189,7 +1232,7 @@ static me_expr *factor(state *s) {
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, f);
         CHECK_NULL(ret, me_free(f), me_free(prev));
 
-        ret->function = t;
+        ret->function = (void *)t;
         apply_type_promotion(ret);
     }
 
@@ -1204,7 +1247,7 @@ static me_expr *term(state *s) {
     CHECK_NULL(ret);
 
     while (s->type == TOK_INFIX && (s->function == mul || s->function == divide || s->function == fmod)) {
-        me_fun2 t = s->function;
+        me_fun2 t = (me_fun2)s->function;
         next_token(s);
         me_expr *f = factor(s);
         CHECK_NULL(f, me_free(ret));
@@ -1213,7 +1256,7 @@ static me_expr *term(state *s) {
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, f);
         CHECK_NULL(ret, me_free(f), me_free(prev));
 
-        ret->function = t;
+        ret->function = (void *)t;
         apply_type_promotion(ret);
     }
 
@@ -1227,7 +1270,7 @@ static me_expr *expr(state *s) {
     CHECK_NULL(ret);
 
     while (s->type == TOK_INFIX && (s->function == add || s->function == sub)) {
-        me_fun2 t = s->function;
+        me_fun2 t = (me_fun2)s->function;
         next_token(s);
         me_expr *te = term(s);
         CHECK_NULL(te, me_free(ret));
@@ -1236,7 +1279,7 @@ static me_expr *expr(state *s) {
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, te);
         CHECK_NULL(ret, me_free(te), me_free(prev));
 
-        ret->function = t;
+        ret->function = (void *)t;
         apply_type_promotion(ret); // Apply type promotion
     }
 
@@ -1250,7 +1293,7 @@ static me_expr *shift_expr(state *s) {
     CHECK_NULL(ret);
 
     while (s->type == TOK_SHIFT) {
-        me_fun2 t = s->function;
+        me_fun2 t = (me_fun2)s->function;
         next_token(s);
         me_expr *e = expr(s);
         CHECK_NULL(e, me_free(ret));
@@ -1259,7 +1302,7 @@ static me_expr *shift_expr(state *s) {
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
         CHECK_NULL(ret, me_free(e), me_free(prev));
 
-        ret->function = t;
+        ret->function = (void *)t;
         apply_type_promotion(ret);
     }
 
@@ -1318,7 +1361,7 @@ static me_expr *bitwise_or(state *s) {
     CHECK_NULL(ret);
 
     while (s->type == TOK_BITWISE && (s->function == bit_or)) {
-        me_fun2 t = s->function;
+        me_fun2 t = (me_fun2)s->function;
         next_token(s);
         me_expr *e = bitwise_xor(s);
         CHECK_NULL(e, me_free(ret));
@@ -1327,7 +1370,7 @@ static me_expr *bitwise_or(state *s) {
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
         CHECK_NULL(ret, me_free(e), me_free(prev));
 
-        ret->function = t;
+        ret->function = (void *)t;
         apply_type_promotion(ret);
     }
 
@@ -1341,7 +1384,7 @@ static me_expr *comparison(state *s) {
     CHECK_NULL(ret);
 
     while (s->type == TOK_COMPARE) {
-        me_fun2 t = s->function;
+        me_fun2 t = (me_fun2)s->function;
         next_token(s);
         me_expr *e = bitwise_or(s);
         CHECK_NULL(e, me_free(ret));
@@ -1350,7 +1393,7 @@ static me_expr *comparison(state *s) {
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
         CHECK_NULL(ret, me_free(e), me_free(prev));
 
-        ret->function = t;
+        ret->function = (void *)t;
         apply_type_promotion(ret);
         /* Comparisons always return bool */
         ret->dtype = ME_BOOL;
@@ -1810,147 +1853,147 @@ DEFINE_COMPARE_OPS(f32, float)
 DEFINE_COMPARE_OPS(f64, double)
 
 /* Complex operations */
-static void vec_add_c64(const float complex *a, const float complex *b, float complex *out, int n) {
+static void vec_add_c64(const float_complex *a, const float_complex *b, float_complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] + b[i];
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = add_c64(a[i], b[i]);
 }
 
-static void vec_sub_c64(const float complex *a, const float complex *b, float complex *out, int n) {
+static void vec_sub_c64(const float_complex *a, const float_complex *b, float_complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] - b[i];
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = sub_c64(a[i], b[i]);
 }
 
-static void vec_mul_c64(const float complex *a, const float complex *b, float complex *out, int n) {
+static void vec_mul_c64(const float_complex *a, const float_complex *b, float_complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] * b[i];
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = mul_c64(a[i], b[i]);
 }
 
-static void vec_div_c64(const float complex *a, const float complex *b, float complex *out, int n) {
+static void vec_div_c64(const float_complex *a, const float_complex *b, float_complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] / b[i];
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = div_c64(a[i], b[i]);
 }
 
-static void vec_add_scalar_c64(const float complex *a, float complex b, float complex *out, int n) {
+static void vec_add_scalar_c64(const float_complex *a, float_complex b, float_complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] + b;
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = add_c64(a[i], b);
 }
 
-static void vec_mul_scalar_c64(const float complex *a, float complex b, float complex *out, int n) {
+static void vec_mul_scalar_c64(const float_complex *a, float_complex b, float_complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] * b;
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = mul_c64(a[i], b);
 }
 
-static void vec_pow_c64(const float complex *a, const float complex *b, float complex *out, int n) {
+static void vec_pow_c64(const float_complex *a, const float_complex *b, float_complex *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = cpowf(a[i], b[i]);
 }
 
-static void vec_pow_scalar_c64(const float complex *a, float complex b, float complex *out, int n) {
+static void vec_pow_scalar_c64(const float_complex *a, float_complex b, float_complex *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = cpowf(a[i], b);
 }
 
-static void vec_sqrt_c64(const float complex *a, float complex *out, int n) {
+static void vec_sqrt_c64(const float_complex *a, float_complex *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = csqrtf(a[i]);
 }
 
-static void vec_negame_c64(const float complex *a, float complex *out, int n) {
+static void vec_negame_c64(const float_complex *a, float_complex *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = -a[i];
 }
 
-static void vec_conj_c64(const float complex *a, float complex *out, int n) {
+static void vec_conj_c64(const float_complex *a, float_complex *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = conjf(a[i]);
 }
 
-static void vec_imag_c64(const float complex *a, float *out, int n) {
+static void vec_imag_c64(const float_complex *a, float *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = cimagf(a[i]);
 }
 
-static void vec_add_c128(const double complex *a, const double complex *b, double complex *out, int n) {
+static void vec_add_c128(const double_complex *a, const double_complex *b, double_complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] + b[i];
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = add_c128(a[i], b[i]);
 }
 
-static void vec_sub_c128(const double complex *a, const double complex *b, double complex *out, int n) {
+static void vec_sub_c128(const double_complex *a, const double_complex *b, double_complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] - b[i];
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = sub_c128(a[i], b[i]);
 }
 
-static void vec_mul_c128(const double complex *a, const double complex *b, double complex *out, int n) {
+static void vec_mul_c128(const double_complex *a, const double_complex *b, double_complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] * b[i];
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = mul_c128(a[i], b[i]);
 }
 
-static void vec_div_c128(const double complex *a, const double complex *b, double complex *out, int n) {
+static void vec_div_c128(const double_complex *a, const double_complex *b, double_complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] / b[i];
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = div_c128(a[i], b[i]);
 }
 
-static void vec_add_scalar_c128(const double complex *a, double complex b, double complex *out, int n) {
+static void vec_add_scalar_c128(const double_complex *a, double_complex b, double_complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] + b;
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = add_c128(a[i], b);
 }
 
-static void vec_mul_scalar_c128(const double complex *a, double complex b, double complex *out, int n) {
+static void vec_mul_scalar_c128(const double_complex *a, double_complex b, double_complex *out, int n) {
     int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) out[i] = a[i] * b;
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = mul_c128(a[i], b);
 }
 
-static void vec_pow_c128(const double complex *a, const double complex *b, double complex *out, int n) {
+static void vec_pow_c128(const double_complex *a, const double_complex *b, double_complex *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = cpow(a[i], b[i]);
 }
 
-static void vec_pow_scalar_c128(const double complex *a, double complex b, double complex *out, int n) {
+static void vec_pow_scalar_c128(const double_complex *a, double_complex b, double_complex *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = cpow(a[i], b);
 }
 
-static void vec_sqrt_c128(const double complex *a, double complex *out, int n) {
+static void vec_sqrt_c128(const double_complex *a, double_complex *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = csqrt(a[i]);
 }
 
-static void vec_negame_c128(const double complex *a, double complex *out, int n) {
+static void vec_negame_c128(const double_complex *a, double_complex *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = -a[i];
 }
 
-static void vec_conj_c128(const double complex *a, double complex *out, int n) {
+static void vec_conj_c128(const double_complex *a, double_complex *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = conj(a[i]);
 }
 
-static void vec_imag_c128(const double complex *a, double *out, int n) {
+static void vec_imag_c128(const double_complex *a, double *out, int n) {
     int i;
-#pragma GCC ivdep
+    IVDEP
     for (i = 0; i < n; i++) out[i] = cimag(a[i]);
 }
 
