@@ -3030,11 +3030,19 @@ static void private_eval(const me_expr *n) {
                 float *output = (float*)n->output;
                 if (n->function == (void*)imag_wrapper) {
                     for (int i = 0; i < n->nitems; i++) {
+#if defined(_MSC_VER) && defined(__clang__)
+                        output[i] = __builtin_cimagf(cdata[i]);
+#else
                         output[i] = cimagf(cdata[i]);
+#endif
                     }
                 } else { // real_wrapper
                     for (int i = 0; i < n->nitems; i++) {
+#if defined(_MSC_VER) && defined(__clang__)
+                        output[i] = __builtin_crealf(cdata[i]);
+#else
                         output[i] = crealf(cdata[i]);
+#endif
                     }
                 }
                 return;
@@ -3052,11 +3060,19 @@ static void private_eval(const me_expr *n) {
                 double *output = (double*)n->output;
                 if (n->function == (void*)imag_wrapper) {
                     for (int i = 0; i < n->nitems; i++) {
+#if defined(_MSC_VER) && defined(__clang__)
+                        output[i] = __builtin_cimag(cdata[i]);
+#else
                         output[i] = cimag(cdata[i]);
+#endif
                     }
                 } else { // real_wrapper
                     for (int i = 0; i < n->nitems; i++) {
+#if defined(_MSC_VER) && defined(__clang__)
+                        output[i] = __builtin_creal(cdata[i]);
+#else
                         output[i] = creal(cdata[i]);
+#endif
                     }
                 }
                 return;
