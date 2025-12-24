@@ -14,7 +14,7 @@ double get_time() {
 void benchmark_expression(const char *expr_str, int total_size, int chunk_size) {
     printf("\n=== Benchmarking: %s ===\n", expr_str);
     printf("Total size: %d elements (%.1f MB per array)\n",
-           total_size, total_size * sizeof(double) / (1024.0 * 1024.0));
+           total_size, total_size * sizeof(double) / 1e6);
     printf("Chunk size: %d elements\n", chunk_size);
 
     // Allocate arrays
@@ -67,7 +67,7 @@ void benchmark_expression(const char *expr_str, int total_size, int chunk_size) 
     double chunked_time = (get_time() - start) / iterations;
 
     // Calculate throughput
-    double data_processed_gb = (total_size * sizeof(double) * 3.0) / (1024.0 * 1024.0 * 1024.0); // a, b, result
+    double data_processed_gb = (total_size * sizeof(double) * 3.0) / 1e9; // a, b, result
     double mono_throughput = data_processed_gb / monolithic_time;
     double chunk_throughput = data_processed_gb / chunked_time;
 

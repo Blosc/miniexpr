@@ -40,7 +40,7 @@ void *eval_worker(void *arg) {
 void benchmark_threads(const char *expr_str, int total_size, int num_threads) {
     printf("\n=== Expression: %s ===\n", expr_str);
     printf("Total size: %d elements (%.1f MB)\n",
-           total_size, total_size * sizeof(double) * 3 / (1024.0 * 1024.0));
+           total_size, total_size * sizeof(double) * 3 / 1e6);
     printf("Number of threads: %d\n", num_threads);
 
     // Allocate data
@@ -100,7 +100,7 @@ void benchmark_threads(const char *expr_str, int total_size, int num_threads) {
     double parallel_time = (get_time() - parallel_start) / iterations;
 
     // Calculate metrics
-    double data_size_gb = (total_size * sizeof(double) * 3.0) / (1024.0 * 1024.0 * 1024.0);
+    double data_size_gb = (total_size * sizeof(double) * 3.0) / 1e9;
     double serial_throughput = data_size_gb / serial_time;
     double parallel_throughput = data_size_gb / parallel_time;
     double speedup = serial_time / parallel_time;
