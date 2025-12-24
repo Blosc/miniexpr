@@ -239,12 +239,12 @@ int main() {
     /* Memory bandwidth analysis */
     printf("\nMemory Analysis (for simple 'a < b'):\n");
     printf("  - Input:  2 × %.1f MB = %.1f MB read\n",
-           TOTAL_SIZE * sizeof(double) / (1024.0 * 1024.0),
-           2 * TOTAL_SIZE * sizeof(double) / (1024.0 * 1024.0));
+           TOTAL_SIZE * sizeof(double) / 1e6,
+           2 * TOTAL_SIZE * sizeof(double) / 1e6);
     printf("  - Output (bool): %.1f MB written\n",
-           TOTAL_SIZE * sizeof(bool) / (1024.0 * 1024.0));
+           TOTAL_SIZE * sizeof(bool) / 1e6);
     printf("  - Output (f64):  %.1f MB written\n",
-           TOTAL_SIZE * sizeof(double) / (1024.0 * 1024.0));
+           TOTAL_SIZE * sizeof(double) / 1e6);
 
     double bw_bool = results[0].throughput_bool * (2 * sizeof(double) + sizeof(bool)) / 1000.0;
     double bw_f64 = results[0].throughput_f64 * (3 * sizeof(double)) / 1000.0;
