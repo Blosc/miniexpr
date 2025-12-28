@@ -15,9 +15,19 @@ static inline float _Complex make_c64(float real, float imag) {
     u.m = _FCbuild(real, imag);
     return u.c;
 }
+static inline float crealf_compat(float _Complex z) {
+    union { float _Complex c; _Fcomplex m; } u;
+    u.c = z;
+    return u.m._Val[0];
+}
+static inline float cimagf_compat(float _Complex z) {
+    union { float _Complex c; _Fcomplex m; } u;
+    u.c = z;
+    return u.m._Val[1];
+}
 #define MAKE_C64(real, imag) make_c64((real), (imag))
-#define CREALF(z) ((float)(((_Fcomplex)(z))._Val[0]))
-#define CIMAGF(z) ((float)(((_Fcomplex)(z))._Val[1]))
+#define CREALF(z) crealf_compat((z))
+#define CIMAGF(z) cimagf_compat((z))
 #else
 #define MAKE_C64(real, imag) CMPLXF((real), (imag))
 #define CREALF(z) crealf(z)
