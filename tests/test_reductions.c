@@ -16,8 +16,12 @@ static inline float _Complex make_c64(float real, float imag) {
     return u.c;
 }
 #define MAKE_C64(real, imag) make_c64((real), (imag))
+#define CREALF(z) ((float)(((_Fcomplex)(z))._Val[0]))
+#define CIMAGF(z) ((float)(((_Fcomplex)(z))._Val[1]))
 #else
 #define MAKE_C64(real, imag) CMPLXF((real), (imag))
+#define CREALF(z) crealf(z)
+#define CIMAGF(z) cimagf(z)
 #endif
 
 static int test_sum_int64() {
@@ -146,10 +150,10 @@ static int test_prod_complex64() {
     me_eval(expr, var_ptrs, 1, &output, 2);
 
     float _Complex expected = MAKE_C64(1.0f, 2.0f) * MAKE_C64(3.0f, -1.0f);
-    if (fabsf(crealf(output) - crealf(expected)) > 1e-6f ||
-        fabsf(cimagf(output) - cimagf(expected)) > 1e-6f) {
+    if (fabsf(CREALF(output) - CREALF(expected)) > 1e-6f ||
+        fabsf(CIMAGF(output) - CIMAGF(expected)) > 1e-6f) {
         printf("  ❌ FAILED: expected (%.6f, %.6f), got (%.6f, %.6f)\n",
-               crealf(expected), cimagf(expected), crealf(output), cimagf(output));
+               CREALF(expected), CIMAGF(expected), CREALF(output), CIMAGF(output));
         me_free(expr);
         return 1;
     }
@@ -320,9 +324,9 @@ static int test_empty_inputs() {
         }
         const void *var_ptrs[] = {c64_data};
         me_eval(expr, var_ptrs, 1, &output, 0);
-        if (fabsf(crealf(output)) > 1e-6f || fabsf(cimagf(output)) > 1e-6f) {
+        if (fabsf(CREALF(output)) > 1e-6f || fabsf(CIMAGF(output)) > 1e-6f) {
             printf("  ❌ FAILED: sum(complex64) empty expected 0, got (%.6f, %.6f)\n",
-                   crealf(output), cimagf(output));
+                   CREALF(output), CIMAGF(output));
             failures++;
         }
         me_free(expr);
@@ -339,9 +343,9 @@ static int test_empty_inputs() {
         }
         const void *var_ptrs[] = {c64_data};
         me_eval(expr, var_ptrs, 1, &output, 0);
-        if (fabsf(crealf(output) - 1.0f) > 1e-6f || fabsf(cimagf(output)) > 1e-6f) {
+        if (fabsf(CREALF(output) - 1.0f) > 1e-6f || fabsf(CIMAGF(output)) > 1e-6f) {
             printf("  ❌ FAILED: prod(complex64) empty expected 1, got (%.6f, %.6f)\n",
-                   crealf(output), cimagf(output));
+                   CREALF(output), CIMAGF(output));
             failures++;
         }
         me_free(expr);
