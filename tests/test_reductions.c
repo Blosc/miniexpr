@@ -9,6 +9,12 @@
 #include <complex.h>
 #include "../src/miniexpr.h"
 
+#if defined(_MSC_VER)
+#define MAKE_C64(real, imag) _FCbuild((real), (imag))
+#else
+#define MAKE_C64(real, imag) CMPLXF((real), (imag))
+#endif
+
 static int test_sum_int64() {
     printf("\n=== sum(int32) -> int64 ===\n");
 
@@ -114,8 +120,8 @@ static int test_sum_float32() {
 static int test_prod_complex64() {
     printf("\n=== prod(complex64) -> complex64 ===\n");
 
-    float _Complex data[] = {1.0f + 2.0f * I, 3.0f - 1.0f * I};
-    float _Complex output = 0.0f + 0.0f * I;
+    float _Complex data[] = {MAKE_C64(1.0f, 2.0f), MAKE_C64(3.0f, -1.0f)};
+    float _Complex output = MAKE_C64(0.0f, 0.0f);
 
     me_variable vars[] = {{"x", ME_COMPLEX64, data}};
     int err = 0;
@@ -134,7 +140,7 @@ static int test_prod_complex64() {
     const void *var_ptrs[] = {data};
     me_eval(expr, var_ptrs, 1, &output, 2);
 
-    float _Complex expected = (1.0f + 2.0f * I) * (3.0f - 1.0f * I);
+    float _Complex expected = MAKE_C64(1.0f, 2.0f) * MAKE_C64(3.0f, -1.0f);
     if (fabsf(crealf(output) - crealf(expected)) > 1e-6f ||
         fabsf(cimagf(output) - cimagf(expected)) > 1e-6f) {
         printf("  ❌ FAILED: expected (%.6f, %.6f), got (%.6f, %.6f)\n",
@@ -188,7 +194,7 @@ static int test_empty_inputs() {
     int32_t i32_data[1] = {0};
     uint32_t u32_data[1] = {0};
     float f32_data[1] = {0.0f};
-    float _Complex c64_data[1] = {0.0f + 0.0f * I};
+    float _Complex c64_data[1] = {MAKE_C64(0.0f, 0.0f)};
 
     {
         int err = 0;
@@ -300,7 +306,7 @@ static int test_empty_inputs() {
 
     {
         int err = 0;
-        float _Complex output = -1.0f + 0.0f * I;
+        float _Complex output = MAKE_C64(-1.0f, 0.0f);
         me_variable vars[] = {{"x", ME_COMPLEX64, c64_data}};
         me_expr *expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err);
         if (!expr) {
@@ -319,7 +325,7 @@ static int test_empty_inputs() {
 
     {
         int err = 0;
-        float _Complex output = 0.0f + 0.0f * I;
+        float _Complex output = MAKE_C64(0.0f, 0.0f);
         me_variable vars[] = {{"x", ME_COMPLEX64, c64_data}};
         me_expr *expr = me_compile("prod(x)", vars, 1, ME_AUTO, &err);
         if (!expr) {
