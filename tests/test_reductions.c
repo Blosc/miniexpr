@@ -10,7 +10,12 @@
 #include "../src/miniexpr.h"
 
 #if defined(_MSC_VER)
-#define MAKE_C64(real, imag) _FCbuild((real), (imag))
+static inline float _Complex make_c64(float real, float imag) {
+    union { float _Complex c; _Fcomplex m; } u;
+    u.m = _FCbuild(real, imag);
+    return u.c;
+}
+#define MAKE_C64(real, imag) make_c64((real), (imag))
 #else
 #define MAKE_C64(real, imag) CMPLXF((real), (imag))
 #endif
