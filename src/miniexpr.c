@@ -424,6 +424,19 @@ static bool is_complex_dtype(me_dtype dt) {
     return dt == ME_COMPLEX64 || dt == ME_COMPLEX128;
 }
 
+static me_dtype reduction_output_dtype(me_dtype dt) {
+    if (dt == ME_BOOL) {
+        return ME_INT64;
+    }
+    if (dt >= ME_UINT8 && dt <= ME_UINT64) {
+        return ME_UINT64;
+    }
+    if (dt >= ME_INT8 && dt <= ME_INT64) {
+        return ME_INT64;
+    }
+    return dt;
+}
+
 /* Get size of a type in bytes */
 static size_t dtype_size(me_dtype dtype) {
     switch (dtype) {
@@ -483,10 +496,62 @@ static double conj_wrapper(double x);
 static double imag_wrapper(double x);
 static double real_wrapper(double x);
 static double round_wrapper(double x);
+static double sum_reduce(double x);
+static double prod_reduce(double x);
 static double sign(double x);
 static double square(double x);
 static double trunc_wrapper(double x);
 static double where_scalar(double c, double x, double y);
+
+static bool is_reduction_function(const void *func) {
+    return func == (void *)sum_reduce || func == (void *)prod_reduce;
+}
+
+static bool is_reduction_node(const me_expr *n) {
+    return n && IS_FUNCTION(n->type) && ARITY(n->type) == 1 &&
+           is_reduction_function(n->function);
+}
+
+static bool contains_reduction(const me_expr *n) {
+    if (!n) return false;
+    if (is_reduction_node(n)) return true;
+
+    switch (TYPE_MASK(n->type)) {
+        case ME_FUNCTION0:
+        case ME_FUNCTION1:
+        case ME_FUNCTION2:
+        case ME_FUNCTION3:
+        case ME_FUNCTION4:
+        case ME_FUNCTION5:
+        case ME_FUNCTION6:
+        case ME_FUNCTION7:
+        case ME_CLOSURE0:
+        case ME_CLOSURE1:
+        case ME_CLOSURE2:
+        case ME_CLOSURE3:
+        case ME_CLOSURE4:
+        case ME_CLOSURE5:
+        case ME_CLOSURE6:
+        case ME_CLOSURE7: {
+            const int arity = ARITY(n->type);
+            for (int i = 0; i < arity; i++) {
+                if (contains_reduction((const me_expr *) n->parameters[i])) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        default:
+            return false;
+    }
+}
+
+static bool reduction_usage_is_valid(const me_expr *n) {
+    if (!is_reduction_node(n)) return false;
+    me_expr *arg = (me_expr *) n->parameters[0];
+    if (!arg) return false;
+    return TYPE_MASK(arg->type) == ME_VARIABLE || TYPE_MASK(arg->type) == ME_CONSTANT;
+}
 
 /* Infer computation type from expression tree (for evaluation) */
 static me_dtype infer_result_type(const me_expr *n) {
@@ -515,6 +580,10 @@ static me_dtype infer_result_type(const me_expr *n) {
         case ME_CLOSURE5:
         case ME_CLOSURE6:
         case ME_CLOSURE7: {
+            if (is_reduction_node(n)) {
+                me_dtype param_type = infer_result_type((const me_expr *) n->parameters[0]);
+                return reduction_output_dtype(param_type);
+            }
             // Special case: imag() and real() return real type from complex input
             if (IS_FUNCTION(n->type) && ARITY(n->type) == 1) {
                 if (n->function == (void*)imag_wrapper || n->function == (void*)real_wrapper) {
@@ -576,6 +645,10 @@ static me_dtype infer_output_type(const me_expr *n) {
         case ME_CLOSURE5:
         case ME_CLOSURE6:
         case ME_CLOSURE7: {
+            if (is_reduction_node(n)) {
+                me_dtype param_type = infer_output_type((const me_expr *) n->parameters[0]);
+                return reduction_output_dtype(param_type);
+            }
             // Special case: imag() and real() return real type from complex input
             if (IS_FUNCTION(n->type) && ARITY(n->type) == 1) {
                 if (n->function == (void*)imag_wrapper || n->function == (void*)real_wrapper) {
@@ -892,6 +965,7 @@ static const me_variable functions[] = {
     {"npr", 0, npr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"pi", 0, pi, ME_FUNCTION0 | ME_FLAG_PURE, 0},
     {"pow", 0, pow, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"prod", 0, prod_reduce, ME_FUNCTION1, 0},
     {"real", 0, real_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"round", 0, round_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"sign", 0, sign, ME_FUNCTION1 | ME_FLAG_PURE, 0},
@@ -899,6 +973,7 @@ static const me_variable functions[] = {
     {"sinh", 0, sinh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"sqrt", 0, sqrt, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"square", 0, square, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"sum", 0, sum_reduce, ME_FUNCTION1, 0},
     {"tan", 0, tan, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"tanh", 0, tanh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"trunc", 0, trunc_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
@@ -946,6 +1021,8 @@ static double sub(double a, double b) { return a - b; }
 static double mul(double a, double b) { return a * b; }
 static double divide(double a, double b) { return a / b; }
 static double negate(double a) { return -a; }
+static double sum_reduce(double x) { return x; }
+static double prod_reduce(double x) { return x; }
 
 static double comma(double a, double b) {
     (void) a;
@@ -3017,8 +3094,308 @@ static bool all_variables_match_type(const me_expr *n, me_dtype target_type) {
     return true;
 }
 
+static void eval_reduction(const me_expr *n) {
+    if (!n || !n->output || !is_reduction_node(n)) return;
+
+    me_expr *arg = (me_expr *) n->parameters[0];
+    if (!arg) return;
+
+    const int nitems = n->nitems;
+    me_dtype arg_type = arg->dtype;
+    me_dtype result_type = reduction_output_dtype(arg_type);
+    me_dtype output_type = n->dtype;
+    bool is_prod = n->function == (void *)prod_reduce;
+
+    void *write_ptr = n->output;
+    void *temp_output = NULL;
+    if (output_type != result_type) {
+        temp_output = malloc(dtype_size(result_type));
+        if (!temp_output) return;
+        write_ptr = temp_output;
+    }
+
+    if (arg->type == ME_CONSTANT) {
+        double val = arg->value;
+        switch (arg_type) {
+            case ME_BOOL:
+            case ME_INT8:
+            case ME_INT16:
+            case ME_INT32:
+            case ME_INT64: {
+                int64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    int64_t v = (int64_t)val;
+                    for (int i = 0; i < nitems; i++) acc *= v;
+                } else {
+                    acc = (int64_t)val * (int64_t)nitems;
+                }
+                ((int64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_UINT8:
+            case ME_UINT16:
+            case ME_UINT32:
+            case ME_UINT64: {
+                uint64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    uint64_t v = (uint64_t)val;
+                    for (int i = 0; i < nitems; i++) acc *= v;
+                } else {
+                    acc = (uint64_t)val * (uint64_t)nitems;
+                }
+                ((uint64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_FLOAT32: {
+                float acc = is_prod ? 1.0f : 0.0f;
+                if (nitems == 0) {
+                    acc = is_prod ? 1.0f : 0.0f;
+                } else if (is_prod) {
+                    float v = (float)val;
+                    for (int i = 0; i < nitems; i++) acc *= v;
+                } else {
+                    acc = (float)val * (float)nitems;
+                }
+                ((float *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_FLOAT64: {
+                double acc = is_prod ? 1.0 : 0.0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1.0 : 0.0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= val;
+                } else {
+                    acc = val * (double)nitems;
+                }
+                ((double *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_COMPLEX64: {
+                float _Complex acc = is_prod ? (float _Complex)1.0f : (float _Complex)0.0f;
+                float _Complex v = (float _Complex)val;
+                if (nitems == 0) {
+                    acc = is_prod ? (float _Complex)1.0f : (float _Complex)0.0f;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= v;
+                } else {
+                    acc = v * (float)nitems;
+                }
+                ((float _Complex *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_COMPLEX128: {
+                double _Complex acc = is_prod ? (double _Complex)1.0 : (double _Complex)0.0;
+                double _Complex v = (double _Complex)val;
+                if (nitems == 0) {
+                    acc = is_prod ? (double _Complex)1.0 : (double _Complex)0.0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= v;
+                } else {
+                    acc = v * (double)nitems;
+                }
+                ((double _Complex *)write_ptr)[0] = acc;
+                break;
+            }
+            default:
+                break;
+        }
+    } else if (arg->type == ME_VARIABLE) {
+        switch (arg_type) {
+            case ME_BOOL: {
+                const bool *data = (const bool *)arg->bound;
+                int64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i] ? 1 : 0;
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i] ? 1 : 0;
+                }
+                ((int64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_INT8: {
+                const int8_t *data = (const int8_t *)arg->bound;
+                int64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((int64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_INT16: {
+                const int16_t *data = (const int16_t *)arg->bound;
+                int64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((int64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_INT32: {
+                const int32_t *data = (const int32_t *)arg->bound;
+                int64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((int64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_INT64: {
+                const int64_t *data = (const int64_t *)arg->bound;
+                int64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((int64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_UINT8: {
+                const uint8_t *data = (const uint8_t *)arg->bound;
+                uint64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((uint64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_UINT16: {
+                const uint16_t *data = (const uint16_t *)arg->bound;
+                uint64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((uint64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_UINT32: {
+                const uint32_t *data = (const uint32_t *)arg->bound;
+                uint64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((uint64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_UINT64: {
+                const uint64_t *data = (const uint64_t *)arg->bound;
+                uint64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((uint64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_FLOAT32: {
+                const float *data = (const float *)arg->bound;
+                float acc = is_prod ? 1.0f : 0.0f;
+                if (nitems == 0) {
+                    acc = is_prod ? 1.0f : 0.0f;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((float *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_FLOAT64: {
+                const double *data = (const double *)arg->bound;
+                double acc = is_prod ? 1.0 : 0.0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1.0 : 0.0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((double *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_COMPLEX64: {
+                const float _Complex *data = (const float _Complex *)arg->bound;
+                float _Complex acc = is_prod ? (float _Complex)1.0f : (float _Complex)0.0f;
+                if (nitems == 0) {
+                    acc = is_prod ? (float _Complex)1.0f : (float _Complex)0.0f;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((float _Complex *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_COMPLEX128: {
+                const double _Complex *data = (const double _Complex *)arg->bound;
+                double _Complex acc = is_prod ? (double _Complex)1.0 : (double _Complex)0.0;
+                if (nitems == 0) {
+                    acc = is_prod ? (double _Complex)1.0 : (double _Complex)0.0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((double _Complex *)write_ptr)[0] = acc;
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    if (temp_output) {
+        convert_func_t conv = get_convert_func(result_type, output_type);
+        if (conv) {
+            conv(temp_output, n->output, 1);
+        }
+        free(temp_output);
+    }
+}
+
 static void private_eval(const me_expr *n) {
     if (!n) return;
+
+    if (is_reduction_node(n)) {
+        eval_reduction(n);
+        return;
+    }
 
     // Special case: imag() and real() functions return real from complex input
     if (IS_FUNCTION(n->type) && ARITY(n->type) == 1) {
@@ -3626,6 +4003,15 @@ void me_eval(const me_expr *expr, const void **vars_chunk,
 
         // Evaluate the clone
         private_eval(clone);
+    } else if (is_reduction_node(clone)) {
+        // Reductions operate on the full chunk; avoid block processing.
+        update_vars_by_pointer(clone, original_var_pointers, vars_chunk, n_vars);
+
+        int update_idx = 0;
+        update_variable_bindings(clone, NULL, &update_idx, chunk_nitems);
+
+        clone->output = output_chunk;
+        private_eval(clone);
     } else {
         const size_t output_item_size = dtype_size(clone->dtype);
         const int max_var_nodes = count_variable_nodes(clone);
@@ -3786,6 +4172,12 @@ static me_expr *private_compile(const char *expression, const me_variable *varia
     if (vars_copy) free(vars_copy);
 
     if (root == NULL) {
+        if (error) *error = -1;
+        return NULL;
+    }
+
+    if (contains_reduction(root) && !reduction_usage_is_valid(root)) {
+        me_free(root);
         if (error) *error = -1;
         return NULL;
     }
