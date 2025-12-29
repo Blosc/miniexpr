@@ -55,11 +55,6 @@ int test_arctan2_with_scalar_constant(const char *description, int size, float s
 #else
     const float tolerance = 1e-5f;
 #endif
-#ifdef __FAST_MATH__
-    const float tolerance = 1e-4f;
-#else
-    const float tolerance = 1e-5f;
-#endif
     for (int i = 0; i < size; i++) {
         float diff = fabsf(result[i] - expected[i]);
         if (diff > max_diff) max_diff = diff;
@@ -621,6 +616,11 @@ int test_float32_array_float64_constants(const char *description, int size) {
 
     int passed = 1;
     float max_diff = 0.0f;
+#ifdef __FAST_MATH__
+    const float tolerance = 1e-4f;
+#else
+    const float tolerance = 1e-5f;
+#endif
 
     const void *var_ptrs[] = {input};
 
