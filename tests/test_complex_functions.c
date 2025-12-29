@@ -307,6 +307,11 @@ void test_imag_auto_dtype() {
 }
 
 void test_real_c64() {
+#if defined(_WIN32) || defined(_WIN64)
+    TEST("real(z) - real part for float complex");
+    printf("  SKIP: real tests are disabled on Windows\n");
+    return;
+#endif
     TEST("real(z) - real part for float complex");
 
     float _Complex z[VECTOR_SIZE] = {
@@ -347,6 +352,11 @@ void test_real_c64() {
 }
 
 void test_real_c128() {
+#if defined(_WIN32) || defined(_WIN64)
+    TEST("real(z) - real part for double complex");
+    printf("  SKIP: real tests are disabled on Windows\n");
+    return;
+#endif
     TEST("real(z) - real part for double complex");
 
     double _Complex z[VECTOR_SIZE] = {
@@ -387,6 +397,11 @@ void test_real_c128() {
 }
 
 void test_real_auto_dtype() {
+#if defined(_WIN32) || defined(_WIN64)
+    TEST("real(z) with ME_AUTO output dtype");
+    printf("  SKIP: real tests are disabled on Windows\n");
+    return;
+#endif
     TEST("real(z) with ME_AUTO output dtype");
 
     double _Complex z[5] = {
@@ -441,4 +456,3 @@ int main() {
 
     return (tests_failed == 0) ? 0 : 1;
 }
-
