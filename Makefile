@@ -5,17 +5,17 @@ CC ?= gcc
 ifeq ($(OS),Windows_NT)
   # Check if we are using clang-cl
   ifneq (,$(findstring clang-cl,$(CC)))
-    CFLAGS = -O2 -DNDEBUG
-    DEBUG_CFLAGS = -O0 -g
+    CFLAGS = -O2 -DNDEBUG -ffast-math
+    DEBUG_CFLAGS = -O0 -g -ffast-math
     LDFLAGS = clang_rt.builtins-x86_64.lib
   else
-    CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG
-    DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g
+    CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG -ffast-math
+    DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g -ffast-math
     LDFLAGS = -lm
   endif
 else
-  CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG
-  DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g
+  CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG -ffast-math
+  DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g -ffast-math
   LDFLAGS = -lm
 endif
 
