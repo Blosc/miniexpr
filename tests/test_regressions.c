@@ -58,7 +58,7 @@ int test_arctan2_with_scalar_constant(const char *description, int size, float s
     for (int i = 0; i < size; i++) {
         float diff = fabsf(result[i] - expected[i]);
         if (diff > max_diff) max_diff = diff;
-        if (diff > 1e-5f) {
+        if (diff > tolerance) {
             passed = 0;
         }
     }
@@ -128,6 +128,11 @@ int test_arctan2_with_two_arrays(const char *description, int size, float scalar
 
     int passed = 1;
     float max_diff = 0.0f;
+#ifdef __FAST_MATH__
+    const float tolerance = 1e-4f;
+#else
+    const float tolerance = 1e-5f;
+#endif
     for (int i = 0; i < size; i++) {
         float diff = fabsf(result[i] - expected[i]);
         if (diff > max_diff) max_diff = diff;
