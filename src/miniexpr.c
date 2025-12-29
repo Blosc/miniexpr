@@ -1021,8 +1021,10 @@ static double sub(double a, double b) { return a - b; }
 static double mul(double a, double b) { return a * b; }
 static double divide(double a, double b) { return a / b; }
 static double negate(double a) { return -a; }
-static double sum_reduce(double x) { return x; }
-static double prod_reduce(double x) { return x; }
+static volatile double sum_salt = 0.0;
+static volatile double prod_salt = 1.0;
+static double sum_reduce(double x) { return x + sum_salt; }
+static double prod_reduce(double x) { return x * prod_salt; }
 
 static double comma(double a, double b) {
     (void) a;
