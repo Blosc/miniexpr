@@ -3,41 +3,48 @@
 
 #include <complex.h>
 
-#if defined(_MSC_VER) && !defined(__clang__)
+#if defined(_WIN32) || defined(_WIN64)
+#include <string.h>
+
+typedef struct { float re; float im; } me_c64_pair;
+typedef struct { double re; double im; } me_c128_pair;
+
 static inline float _Complex me_c64_build(float real, float imag) {
-    union { float _Complex c; _Fcomplex m; } u;
-    u.m = _FCbuild(real, imag);
-    return u.c;
+    me_c64_pair p = {real, imag};
+    float _Complex z;
+    memcpy(&z, &p, sizeof(p));
+    return z;
 }
 
 static inline double _Complex me_c128_build(double real, double imag) {
-    union { double _Complex c; _Dcomplex m; } u;
-    u.m = _Cbuild(real, imag);
-    return u.c;
+    me_c128_pair p = {real, imag};
+    double _Complex z;
+    memcpy(&z, &p, sizeof(p));
+    return z;
 }
 
 static inline float me_crealf(float _Complex a) {
-    union { float _Complex c; _Fcomplex m; } u;
-    u.c = a;
-    return crealf(u.m);
+    me_c64_pair p;
+    memcpy(&p, &a, sizeof(p));
+    return p.re;
 }
 
 static inline double me_creal(double _Complex a) {
-    union { double _Complex c; _Dcomplex m; } u;
-    u.c = a;
-    return creal(u.m);
+    me_c128_pair p;
+    memcpy(&p, &a, sizeof(p));
+    return p.re;
 }
 
 static inline float me_cimagf(float _Complex a) {
-    union { float _Complex c; _Fcomplex m; } u;
-    u.c = a;
-    return cimagf(u.m);
+    me_c64_pair p;
+    memcpy(&p, &a, sizeof(p));
+    return p.im;
 }
 
 static inline double me_cimag(double _Complex a) {
-    union { double _Complex c; _Dcomplex m; } u;
-    u.c = a;
-    return cimag(u.m);
+    me_c128_pair p;
+    memcpy(&p, &a, sizeof(p));
+    return p.im;
 }
 
 static inline float _Complex me_conjf(float _Complex a) {
@@ -48,6 +55,7 @@ static inline double _Complex me_conj(double _Complex a) {
     return me_c128_build(me_creal(a), -me_cimag(a));
 }
 
+#if defined(_MSC_VER) && !defined(__clang__)
 static inline float _Complex me_cpowf(float _Complex a, float _Complex b) {
     union { float _Complex c; _Fcomplex m; } ua, ub, ur;
     ua.c = a;
@@ -118,6 +126,30 @@ static inline double me_cabs(double _Complex a) {
     return cabs(ua.m);
 }
 #elif defined(__clang__)
+#define me_cpowf __builtin_cpowf
+#define me_cpow __builtin_cpow
+#define me_csqrtf __builtin_csqrtf
+#define me_csqrt __builtin_csqrt
+#define me_cexpf __builtin_cexpf
+#define me_cexp __builtin_cexp
+#define me_clogf __builtin_clogf
+#define me_clog __builtin_clog
+#define me_cabsf __builtin_cabsf
+#define me_cabs __builtin_cabs
+#else
+#define me_cpowf cpowf
+#define me_cpow cpow
+#define me_csqrtf csqrtf
+#define me_csqrt csqrt
+#define me_cexpf cexpf
+#define me_cexp cexp
+#define me_clogf clogf
+#define me_clog clog
+#define me_cabsf cabsf
+#define me_cabs cabs
+#endif
+
+#elif defined(__clang__)
 #define me_c64_build(real, imag) __builtin_complex((float)(real), (float)(imag))
 #define me_c128_build(real, imag) __builtin_complex((double)(real), (double)(imag))
 #define me_crealf __builtin_crealf
@@ -152,8 +184,7 @@ static inline double me_cabs(double _Complex a) {
 #define me_cabsf cabsf
 #define me_cabs cabs
 #endif
-
-#if !defined(_MSC_VER) || defined(__clang__)
+#if !defined(_WIN32) && !defined(_WIN64)
 static inline float _Complex me_conjf(float _Complex a) {
     return me_c64_build(me_crealf(a), -me_cimagf(a));
 }
