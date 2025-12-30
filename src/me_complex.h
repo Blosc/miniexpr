@@ -9,6 +9,16 @@
 typedef struct { float re; float im; } me_c64_pair;
 typedef struct { double re; double im; } me_c128_pair;
 
+static inline void me_c64_store(float _Complex *dst, float real, float imag) {
+    me_c64_pair p = {real, imag};
+    memcpy(dst, &p, sizeof(p));
+}
+
+static inline void me_c128_store(double _Complex *dst, double real, double imag) {
+    me_c128_pair p = {real, imag};
+    memcpy(dst, &p, sizeof(p));
+}
+
 static inline float _Complex me_c64_build(float real, float imag) {
     me_c64_pair p = {real, imag};
     float _Complex z;
@@ -152,6 +162,8 @@ static inline double me_cabs(double _Complex a) {
 #elif defined(__clang__)
 #define me_c64_build(real, imag) __builtin_complex((float)(real), (float)(imag))
 #define me_c128_build(real, imag) __builtin_complex((double)(real), (double)(imag))
+#define me_c64_store(dst, real, imag) (*(dst) = me_c64_build((real), (imag)))
+#define me_c128_store(dst, real, imag) (*(dst) = me_c128_build((real), (imag)))
 #define me_crealf __builtin_crealf
 #define me_creal __builtin_creal
 #define me_cimagf __builtin_cimagf
@@ -169,6 +181,8 @@ static inline double me_cabs(double _Complex a) {
 #else
 #define me_c64_build(real, imag) CMPLXF((real), (imag))
 #define me_c128_build(real, imag) CMPLX((real), (imag))
+#define me_c64_store(dst, real, imag) (*(dst) = me_c64_build((real), (imag)))
+#define me_c128_store(dst, real, imag) (*(dst) = me_c128_build((real), (imag)))
 #define me_crealf crealf
 #define me_creal creal
 #define me_cimagf cimagf

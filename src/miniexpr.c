@@ -174,6 +174,34 @@ static inline _Dcomplex div_c128(_Dcomplex a, _Dcomplex b) {
 
 typedef double (*me_fun2)(double, double);
 
+#if defined(_WIN32) || defined(_WIN64)
+static void me_c64_unpack(const float _Complex *in, me_c64_pair *out, int n) {
+    for (int i = 0; i < n; i++) {
+        out[i].re = me_crealf(in[i]);
+        out[i].im = me_cimagf(in[i]);
+    }
+}
+
+static void me_c128_unpack(const double _Complex *in, me_c128_pair *out, int n) {
+    for (int i = 0; i < n; i++) {
+        out[i].re = me_creal(in[i]);
+        out[i].im = me_cimag(in[i]);
+    }
+}
+
+static void me_c64_pack(const me_c64_pair *in, float _Complex *out, int n) {
+    for (int i = 0; i < n; i++) {
+        me_c64_store(&out[i], in[i].re, in[i].im);
+    }
+}
+
+static void me_c128_pack(const me_c128_pair *in, double _Complex *out, int n) {
+    for (int i = 0; i < n; i++) {
+        me_c128_store(&out[i], in[i].re, in[i].im);
+    }
+}
+#endif
+
 enum {
     TOK_NULL = ME_CLOSURE7 + 1, TOK_ERROR, TOK_END, TOK_SEP,
     TOK_OPEN, TOK_CLOSE, TOK_NUMBER, TOK_VARIABLE, TOK_INFIX,
@@ -2646,7 +2674,7 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_conj_c64(a, out, n) do { \
     for (int _i = 0; _i < (n); _i++) { \
         float _Complex _z = (a)[_i]; \
-        (out)[_i] = me_c64_build(me_crealf(_z), -me_cimagf(_z)); \
+        me_c64_store(&(out)[_i], me_crealf(_z), -me_cimagf(_z)); \
     } \
 } while(0)
 #define vec_imag_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cimagf((a)[_i]); } while(0)
@@ -2666,7 +2694,7 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_conj_c128(a, out, n) do { \
     for (int _i = 0; _i < (n); _i++) { \
         double _Complex _z = (a)[_i]; \
-        (out)[_i] = me_c128_build(me_creal(_z), -me_cimag(_z)); \
+        me_c128_store(&(out)[_i], me_creal(_z), -me_cimag(_z)); \
     } \
 } while(0)
 #define vec_imag_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cimag((a)[_i]); } while(0)
@@ -2685,7 +2713,7 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_conj_c64(a, out, n) do { \
     for (int _i = 0; _i < (n); _i++) { \
         float _Complex _z = (a)[_i]; \
-        (out)[_i] = me_c64_build(me_crealf(_z), -me_cimagf(_z)); \
+        me_c64_store(&(out)[_i], me_crealf(_z), -me_cimagf(_z)); \
     } \
 } while(0)
 #define vec_imag_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cimagf((a)[_i]); } while(0)
@@ -2705,11 +2733,244 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_conj_c128(a, out, n) do { \
     for (int _i = 0; _i < (n); _i++) { \
         double _Complex _z = (a)[_i]; \
-        (out)[_i] = me_c128_build(me_creal(_z), -me_cimag(_z)); \
+        me_c128_store(&(out)[_i], me_creal(_z), -me_cimag(_z)); \
     } \
 } while(0)
 #define vec_imag_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cimag((a)[_i]); } while(0)
 #define vec_real_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_creal((a)[_i]); } while(0)
+#endif
+
+#if defined(_WIN32) || defined(_WIN64)
+#undef vec_add_c64
+#undef vec_sub_c64
+#undef vec_mul_c64
+#undef vec_div_c64
+#undef vec_pow_c64
+#undef vec_add_scalar_c64
+#undef vec_mul_scalar_c64
+#undef vec_pow_scalar_c64
+#undef vec_sqrt_c64
+#undef vec_negame_c64
+#undef vec_conj_c64
+#undef vec_imag_c64
+#undef vec_real_c64
+
+#define vec_add_c64(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = (a)[_i].re + (b)[_i].re; \
+        (out)[_i].im = (a)[_i].im + (b)[_i].im; \
+    } \
+} while(0)
+
+#define vec_sub_c64(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = (a)[_i].re - (b)[_i].re; \
+        (out)[_i].im = (a)[_i].im - (b)[_i].im; \
+    } \
+} while(0)
+
+#define vec_mul_c64(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        float ar = (a)[_i].re, ai = (a)[_i].im; \
+        float br = (b)[_i].re, bi = (b)[_i].im; \
+        (out)[_i].re = ar * br - ai * bi; \
+        (out)[_i].im = ar * bi + ai * br; \
+    } \
+} while(0)
+
+#define vec_div_c64(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        float ar = (a)[_i].re, ai = (a)[_i].im; \
+        float br = (b)[_i].re, bi = (b)[_i].im; \
+        float denom = br * br + bi * bi; \
+        (out)[_i].re = (ar * br + ai * bi) / denom; \
+        (out)[_i].im = (ai * br - ar * bi) / denom; \
+    } \
+} while(0)
+
+#define vec_pow_c64(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        float _Complex az = me_c64_build((a)[_i].re, (a)[_i].im); \
+        float _Complex bz = me_c64_build((b)[_i].re, (b)[_i].im); \
+        float _Complex rz = me_cpowf(az, bz); \
+        (out)[_i].re = me_crealf(rz); \
+        (out)[_i].im = me_cimagf(rz); \
+    } \
+} while(0)
+
+#define vec_add_scalar_c64(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = (a)[_i].re + (b).re; \
+        (out)[_i].im = (a)[_i].im + (b).im; \
+    } \
+} while(0)
+
+#define vec_mul_scalar_c64(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        float ar = (a)[_i].re, ai = (a)[_i].im; \
+        float br = (b).re, bi = (b).im; \
+        (out)[_i].re = ar * br - ai * bi; \
+        (out)[_i].im = ar * bi + ai * br; \
+    } \
+} while(0)
+
+#define vec_pow_scalar_c64(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        float _Complex az = me_c64_build((a)[_i].re, (a)[_i].im); \
+        float _Complex bz = me_c64_build((b).re, (b).im); \
+        float _Complex rz = me_cpowf(az, bz); \
+        (out)[_i].re = me_crealf(rz); \
+        (out)[_i].im = me_cimagf(rz); \
+    } \
+} while(0)
+
+#define vec_sqrt_c64(a, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        float _Complex az = me_c64_build((a)[_i].re, (a)[_i].im); \
+        float _Complex rz = me_csqrtf(az); \
+        (out)[_i].re = me_crealf(rz); \
+        (out)[_i].im = me_cimagf(rz); \
+    } \
+} while(0)
+
+#define vec_negame_c64(a, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = -(a)[_i].re; \
+        (out)[_i].im = -(a)[_i].im; \
+    } \
+} while(0)
+
+#define vec_conj_c64(a, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = (a)[_i].re; \
+        (out)[_i].im = -(a)[_i].im; \
+    } \
+} while(0)
+
+#define vec_imag_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i].im; } while(0)
+#define vec_real_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i].re; } while(0)
+
+#undef vec_add_c128
+#undef vec_sub_c128
+#undef vec_mul_c128
+#undef vec_div_c128
+#undef vec_pow_c128
+#undef vec_add_scalar_c128
+#undef vec_mul_scalar_c128
+#undef vec_pow_scalar_c128
+#undef vec_sqrt_c128
+#undef vec_negame_c128
+#undef vec_conj_c128
+#undef vec_imag_c128
+#undef vec_real_c128
+
+#define vec_add_c128(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = (a)[_i].re + (b)[_i].re; \
+        (out)[_i].im = (a)[_i].im + (b)[_i].im; \
+    } \
+} while(0)
+
+#define vec_sub_c128(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = (a)[_i].re - (b)[_i].re; \
+        (out)[_i].im = (a)[_i].im - (b)[_i].im; \
+    } \
+} while(0)
+
+#define vec_mul_c128(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        double ar = (a)[_i].re, ai = (a)[_i].im; \
+        double br = (b)[_i].re, bi = (b)[_i].im; \
+        (out)[_i].re = ar * br - ai * bi; \
+        (out)[_i].im = ar * bi + ai * br; \
+    } \
+} while(0)
+
+#define vec_div_c128(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        double ar = (a)[_i].re, ai = (a)[_i].im; \
+        double br = (b)[_i].re, bi = (b)[_i].im; \
+        double denom = br * br + bi * bi; \
+        (out)[_i].re = (ar * br + ai * bi) / denom; \
+        (out)[_i].im = (ai * br - ar * bi) / denom; \
+    } \
+} while(0)
+
+#define vec_pow_c128(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        double _Complex az = me_c128_build((a)[_i].re, (a)[_i].im); \
+        double _Complex bz = me_c128_build((b)[_i].re, (b)[_i].im); \
+        double _Complex rz = me_cpow(az, bz); \
+        (out)[_i].re = me_creal(rz); \
+        (out)[_i].im = me_cimag(rz); \
+    } \
+} while(0)
+
+#define vec_add_scalar_c128(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = (a)[_i].re + (b).re; \
+        (out)[_i].im = (a)[_i].im + (b).im; \
+    } \
+} while(0)
+
+#define vec_mul_scalar_c128(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        double ar = (a)[_i].re, ai = (a)[_i].im; \
+        double br = (b).re, bi = (b).im; \
+        (out)[_i].re = ar * br - ai * bi; \
+        (out)[_i].im = ar * bi + ai * br; \
+    } \
+} while(0)
+
+#define vec_pow_scalar_c128(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        double _Complex az = me_c128_build((a)[_i].re, (a)[_i].im); \
+        double _Complex bz = me_c128_build((b).re, (b).im); \
+        double _Complex rz = me_cpow(az, bz); \
+        (out)[_i].re = me_creal(rz); \
+        (out)[_i].im = me_cimag(rz); \
+    } \
+} while(0)
+
+#define vec_sqrt_c128(a, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        double _Complex az = me_c128_build((a)[_i].re, (a)[_i].im); \
+        double _Complex rz = me_csqrt(az); \
+        (out)[_i].re = me_creal(rz); \
+        (out)[_i].im = me_cimag(rz); \
+    } \
+} while(0)
+
+#define vec_negame_c128(a, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = -(a)[_i].re; \
+        (out)[_i].im = -(a)[_i].im; \
+    } \
+} while(0)
+
+#define vec_conj_c128(a, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = (a)[_i].re; \
+        (out)[_i].im = -(a)[_i].im; \
+    } \
+} while(0)
+
+#define vec_imag_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i].im; } while(0)
+#define vec_real_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i].re; } while(0)
+
+#undef TO_TYPE_c64
+#undef TO_TYPE_c128
+#undef FROM_TYPE_c64
+#undef FROM_TYPE_c128
+#undef IS_NONZERO_c64
+#undef IS_NONZERO_c128
+#define TO_TYPE_c64(x) ((me_c64_pair){(float)(x), 0.0f})
+#define TO_TYPE_c128(x) ((me_c128_pair){(double)(x), 0.0})
+#define FROM_TYPE_c64(x) (double)((x).re)
+#define FROM_TYPE_c128(x) (double)((x).re)
+#define IS_NONZERO_c64(x) ((x).re != 0.0f || (x).im != 0.0f)
+#define IS_NONZERO_c128(x) ((x).re != 0.0 || (x).im != 0.0)
 #endif
 
 /* Generate float32 evaluator */
@@ -2786,6 +3047,21 @@ DEFINE_ME_EVAL(u64, uint64_t,
                vec_conj_noop)
 
 /* Generate complex evaluators */
+#if defined(_WIN32) || defined(_WIN64)
+DEFINE_ME_EVAL(c64, me_c64_pair,
+               vec_add_c64, vec_sub_c64, vec_mul_c64, vec_div_c64, vec_pow_c64,
+               vec_add_scalar_c64, vec_mul_scalar_c64, vec_pow_scalar_c64,
+               vec_sqrt_c64, vec_sqrt_c64, vec_sqrt_c64, vec_negame_c64,
+               me_csqrtf, me_csqrtf, me_csqrtf, me_cexpf, me_clogf, me_cabsf, me_cpowf,
+               vec_conj_c64)
+
+DEFINE_ME_EVAL(c128, me_c128_pair,
+               vec_add_c128, vec_sub_c128, vec_mul_c128, vec_div_c128, vec_pow_c128,
+               vec_add_scalar_c128, vec_mul_scalar_c128, vec_pow_scalar_c128,
+               vec_sqrt_c128, vec_sqrt_c128, vec_sqrt_c128, vec_negame_c128,
+               me_csqrt, me_csqrt, me_csqrt, me_cexp, me_clog, me_cabs, me_cpow,
+               vec_conj_c128)
+#else
 DEFINE_ME_EVAL(c64, float _Complex,
                vec_add_c64, vec_sub_c64, vec_mul_c64, vec_div_c64, vec_pow_c64,
                vec_add_scalar_c64, vec_mul_scalar_c64, vec_pow_scalar_c64,
@@ -2799,6 +3075,7 @@ DEFINE_ME_EVAL(c128, double _Complex,
                vec_sqrt_c128, vec_sqrt_c128, vec_sqrt_c128, vec_negame_c128,
                me_csqrt, me_csqrt, me_csqrt, me_cexp, me_clog, me_cabs, me_cpow,
                vec_conj_c128)
+#endif
 
 /* Public API - dispatches to correct type-specific evaluator */
 /* Structure to track promoted variables */
@@ -3299,44 +3576,74 @@ static void private_eval(const me_expr *n) {
             if (arg_type == ME_COMPLEX64) {
                 // Evaluate argument as complex64
                 if (!arg->output) {
+#if defined(_WIN32) || defined(_WIN64)
+                    arg->output = malloc(n->nitems * sizeof(me_c64_pair));
+#else
                     arg->output = malloc(n->nitems * sizeof(float _Complex));
+#endif
                     arg->nitems = n->nitems;
                     ((me_expr*)arg)->dtype = ME_COMPLEX64;
                 }
                 me_eval_c64(arg);
 
                 // Extract real/imaginary part to float32 output
-                const float _Complex *cdata = (const float _Complex*)arg->output;
                 float *output = (float*)n->output;
                 if (n->function == (void*)imag_wrapper) {
                     for (int i = 0; i < n->nitems; i++) {
+#if defined(_WIN32) || defined(_WIN64)
+                        const me_c64_pair *cdata = (const me_c64_pair*)arg->output;
+                        output[i] = cdata[i].im;
+#else
+                        const float _Complex *cdata = (const float _Complex*)arg->output;
                         output[i] = me_cimagf(cdata[i]);
+#endif
                     }
                 } else { // real_wrapper
                     for (int i = 0; i < n->nitems; i++) {
+#if defined(_WIN32) || defined(_WIN64)
+                        const me_c64_pair *cdata = (const me_c64_pair*)arg->output;
+                        output[i] = cdata[i].re;
+#else
+                        const float _Complex *cdata = (const float _Complex*)arg->output;
                         output[i] = me_crealf(cdata[i]);
+#endif
                     }
                 }
                 return;
             } else if (arg_type == ME_COMPLEX128) {
                 // Evaluate argument as complex128
                 if (!arg->output) {
+#if defined(_WIN32) || defined(_WIN64)
+                    arg->output = malloc(n->nitems * sizeof(me_c128_pair));
+#else
                     arg->output = malloc(n->nitems * sizeof(double _Complex));
+#endif
                     arg->nitems = n->nitems;
                     ((me_expr*)arg)->dtype = ME_COMPLEX128;
                 }
                 me_eval_c128(arg);
 
                 // Extract real/imaginary part to float64 output
-                const double _Complex *cdata = (const double _Complex*)arg->output;
                 double *output = (double*)n->output;
                 if (n->function == (void*)imag_wrapper) {
                     for (int i = 0; i < n->nitems; i++) {
+#if defined(_WIN32) || defined(_WIN64)
+                        const me_c128_pair *cdata = (const me_c128_pair*)arg->output;
+                        output[i] = cdata[i].im;
+#else
+                        const double _Complex *cdata = (const double _Complex*)arg->output;
                         output[i] = me_cimag(cdata[i]);
+#endif
                     }
                 } else { // real_wrapper
                     for (int i = 0; i < n->nitems; i++) {
+#if defined(_WIN32) || defined(_WIN64)
+                        const me_c128_pair *cdata = (const me_c128_pair*)arg->output;
+                        output[i] = cdata[i].re;
+#else
+                        const double _Complex *cdata = (const double _Complex*)arg->output;
                         output[i] = me_creal(cdata[i]);
+#endif
                     }
                 }
                 return;
@@ -3867,6 +4174,102 @@ void me_eval(const me_expr *expr, const void **vars_chunk,
 
     const int block_nitems = ME_EVAL_BLOCK_NITEMS;
 
+#if defined(_WIN32) || defined(_WIN64)
+    if (!is_reduction_node(clone) && has_complex_node(clone)) {
+        update_vars_by_pointer(clone, original_var_pointers, vars_chunk, n_vars);
+
+        int update_idx = 0;
+        update_variable_bindings(clone, NULL, &update_idx, chunk_nitems);
+
+        const int max_var_nodes = count_variable_nodes(clone);
+        me_expr **var_nodes = NULL;
+        int *var_indices = NULL;
+        int var_node_count = 0;
+        void **pair_buffers = NULL;
+
+        if (max_var_nodes > 0) {
+            var_nodes = malloc((size_t)max_var_nodes * sizeof(*var_nodes));
+            var_indices = malloc((size_t)max_var_nodes * sizeof(*var_indices));
+            if (!var_nodes || !var_indices) {
+                free(var_nodes);
+                free(var_indices);
+                me_free(clone);
+                return;
+            }
+            collect_variable_nodes(clone, original_var_pointers, n_vars,
+                                   var_nodes, var_indices, &var_node_count);
+            pair_buffers = calloc((size_t)var_node_count, sizeof(*pair_buffers));
+            if (!pair_buffers) {
+                free(var_nodes);
+                free(var_indices);
+                me_free(clone);
+                return;
+            }
+        }
+
+        for (int i = 0; i < var_node_count; i++) {
+            me_expr *var = var_nodes[i];
+            if (var->dtype == ME_COMPLEX64) {
+                me_c64_pair *buf = malloc((size_t)chunk_nitems * sizeof(*buf));
+                if (!buf) continue;
+                me_c64_unpack((const float _Complex *)var->bound, buf, chunk_nitems);
+                var->bound = buf;
+                pair_buffers[i] = buf;
+            } else if (var->dtype == ME_COMPLEX128) {
+                me_c128_pair *buf = malloc((size_t)chunk_nitems * sizeof(*buf));
+                if (!buf) continue;
+                me_c128_unpack((const double _Complex *)var->bound, buf, chunk_nitems);
+                var->bound = buf;
+                pair_buffers[i] = buf;
+            }
+        }
+
+        void *pair_output = NULL;
+        if (clone->dtype == ME_COMPLEX64) {
+            pair_output = malloc((size_t)chunk_nitems * sizeof(me_c64_pair));
+            if (!pair_output) {
+                free(pair_buffers);
+                free(var_nodes);
+                free(var_indices);
+                me_free(clone);
+                return;
+            }
+            clone->output = pair_output;
+        } else if (clone->dtype == ME_COMPLEX128) {
+            pair_output = malloc((size_t)chunk_nitems * sizeof(me_c128_pair));
+            if (!pair_output) {
+                free(pair_buffers);
+                free(var_nodes);
+                free(var_indices);
+                me_free(clone);
+                return;
+            }
+            clone->output = pair_output;
+        } else {
+            clone->output = output_chunk;
+        }
+
+        private_eval(clone);
+
+        if (clone->dtype == ME_COMPLEX64 && pair_output) {
+            me_c64_pack((const me_c64_pair *)pair_output, (float _Complex *)output_chunk, chunk_nitems);
+            free(pair_output);
+        } else if (clone->dtype == ME_COMPLEX128 && pair_output) {
+            me_c128_pack((const me_c128_pair *)pair_output, (double _Complex *)output_chunk, chunk_nitems);
+            free(pair_output);
+        }
+
+        for (int i = 0; i < var_node_count; i++) {
+            free(pair_buffers[i]);
+        }
+        free(pair_buffers);
+        free(var_nodes);
+        free(var_indices);
+        me_free(clone);
+        return;
+    }
+#endif
+
     if (!ME_EVAL_ENABLE_BLOCKING || chunk_nitems <= block_nitems) {
         // Update clone's variable bindings
         update_vars_by_pointer(clone, original_var_pointers, vars_chunk, n_vars);
@@ -3971,6 +4374,18 @@ static void optimize(me_expr *n) {
         }
     }
 }
+
+#if defined(_WIN32) || defined(_WIN64)
+static bool has_complex_node(const me_expr *n) {
+    if (!n) return false;
+    if (n->dtype == ME_COMPLEX64 || n->dtype == ME_COMPLEX128) return true;
+    const int arity = ARITY(n->type);
+    for (int i = 0; i < arity; i++) {
+        if (has_complex_node((const me_expr *)n->parameters[i])) return true;
+    }
+    return false;
+}
+#endif
 
 
 static me_expr *private_compile(const char *expression, const me_variable *variables, int var_count,
