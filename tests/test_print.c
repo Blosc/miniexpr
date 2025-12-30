@@ -1,7 +1,11 @@
 /* Test and demonstration of me_print() debugging function */
 
+#include <stdlib.h>
 #include <stdio.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 int main() {
     printf("========================================\n");
@@ -55,7 +59,7 @@ int main() {
         me_print(expr4);
 
         const void *var_ptrs[] = {x, y};
-        me_eval(expr4, var_ptrs, 2, result, 3);
+        ME_EVAL_CHECK(expr4, var_ptrs, 2, result, 3);
 
         printf("   Evaluation results:\n");
         for (int i = 0; i < 3; i++) {

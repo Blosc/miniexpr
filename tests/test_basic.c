@@ -21,6 +21,9 @@
 #include <math.h>
 #include <stdint.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 #define TEST_SIZE 100
 
@@ -49,7 +52,7 @@ int test_simple_expression() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval(expr, var_ptrs, 2, result, TEST_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, TEST_SIZE);
 
     int passed = 1;
     for (int i = 0; i < TEST_SIZE; i++) {
@@ -97,7 +100,7 @@ int test_complex_expression() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval(expr, var_ptrs, 2, result, TEST_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, TEST_SIZE);
 
     int passed = 1;
     for (int i = 0; i < TEST_SIZE; i++) {
@@ -145,7 +148,7 @@ int test_integer_types() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval(expr, var_ptrs, 2, result, TEST_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, TEST_SIZE);
 
     int passed = 1;
     for (int i = 0; i < TEST_SIZE; i++) {
@@ -193,7 +196,7 @@ int test_mixed_types() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval(expr, var_ptrs, 2, result, TEST_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, TEST_SIZE);
 
     int passed = 1;
     for (int i = 0; i < TEST_SIZE; i++) {

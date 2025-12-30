@@ -1,8 +1,11 @@
 /* Test inverse hyperbolic functions (asinh, acosh, atanh) and their aliases */
 #include "../src/miniexpr.h"
+#include "minctest.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+
+
 
 #define VECTOR_SIZE 10
 #define TOLERANCE 1e-9
@@ -41,7 +44,7 @@ void test_asinh() {
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = asinh(x[i]);
@@ -74,8 +77,8 @@ void test_asinh_alias() {
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr_a, var_ptrs, 1, result_a, VECTOR_SIZE);
-    me_eval(expr_arc, var_ptrs, 1, result_arc, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr_a, var_ptrs, 1, result_a, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr_arc, var_ptrs, 1, result_arc, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         if (fabs(result_a[i] - result_arc[i]) > TOLERANCE) {
@@ -111,7 +114,7 @@ void test_acosh() {
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = acosh(x[i]);
@@ -144,8 +147,8 @@ void test_acosh_alias() {
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr_a, var_ptrs, 1, result_a, VECTOR_SIZE);
-    me_eval(expr_arc, var_ptrs, 1, result_arc, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr_a, var_ptrs, 1, result_a, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr_arc, var_ptrs, 1, result_arc, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         if (fabs(result_a[i] - result_arc[i]) > TOLERANCE) {
@@ -181,7 +184,7 @@ void test_atanh() {
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = atanh(x[i]);
@@ -214,8 +217,8 @@ void test_atanh_alias() {
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr_a, var_ptrs, 1, result_a, VECTOR_SIZE);
-    me_eval(expr_arc, var_ptrs, 1, result_arc, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr_a, var_ptrs, 1, result_a, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr_arc, var_ptrs, 1, result_arc, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         if (fabs(result_a[i] - result_arc[i]) > TOLERANCE) {
@@ -250,7 +253,7 @@ void test_inverse_hyperbolic_roundtrip() {
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         ASSERT_NEAR(x[i], result[i], i);

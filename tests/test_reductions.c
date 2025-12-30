@@ -8,6 +8,9 @@
 #include <math.h>
 #include <complex.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 #if defined(_MSC_VER)
 static inline float _Complex make_c64(float real, float imag) {
@@ -55,7 +58,7 @@ static int test_sum_int64() {
     }
 
     const void *var_ptrs[] = {data};
-    me_eval(expr, var_ptrs, 1, &output, 4);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 4);
 
     if (output != 10) {
         printf("  ❌ FAILED: expected 10, got %lld\n", (long long)output);
@@ -89,7 +92,7 @@ static int test_sum_uint64() {
     }
 
     const void *var_ptrs[] = {data};
-    me_eval(expr, var_ptrs, 1, &output, 4);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 4);
 
     if (output != 10) {
         printf("  ❌ FAILED: expected 10, got %llu\n", (unsigned long long)output);
@@ -123,7 +126,7 @@ static int test_sum_float32() {
     }
 
     const void *var_ptrs[] = {data};
-    me_eval(expr, var_ptrs, 1, &output, 3);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 3);
 
     if (fabsf(output - 6.0f) > 1e-6f) {
         printf("  ❌ FAILED: expected 6, got %.6f\n", output);
@@ -162,7 +165,7 @@ static int test_prod_complex64() {
     }
 
     const void *var_ptrs[] = {data};
-    me_eval(expr, var_ptrs, 1, &output, 2);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 2);
 
     float _Complex expected = MAKE_C64(1.0f, 2.0f) * MAKE_C64(3.0f, -1.0f);
     if (fabsf(CREALF(output) - CREALF(expected)) > 1e-6f ||
@@ -230,7 +233,7 @@ static int test_empty_inputs() {
             return 1;
         }
         const void *var_ptrs[] = {i32_data};
-        me_eval(expr, var_ptrs, 1, &output, 0);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);
         if (output != 0) {
             printf("  ❌ FAILED: sum(int32) empty expected 0, got %lld\n", (long long)output);
             failures++;
@@ -248,7 +251,7 @@ static int test_empty_inputs() {
             return 1;
         }
         const void *var_ptrs[] = {i32_data};
-        me_eval(expr, var_ptrs, 1, &output, 0);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);
         if (output != 1) {
             printf("  ❌ FAILED: prod(int32) empty expected 1, got %lld\n", (long long)output);
             failures++;
@@ -266,7 +269,7 @@ static int test_empty_inputs() {
             return 1;
         }
         const void *var_ptrs[] = {u32_data};
-        me_eval(expr, var_ptrs, 1, &output, 0);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);
         if (output != 0) {
             printf("  ❌ FAILED: sum(uint32) empty expected 0, got %llu\n", (unsigned long long)output);
             failures++;
@@ -284,7 +287,7 @@ static int test_empty_inputs() {
             return 1;
         }
         const void *var_ptrs[] = {u32_data};
-        me_eval(expr, var_ptrs, 1, &output, 0);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);
         if (output != 1) {
             printf("  ❌ FAILED: prod(uint32) empty expected 1, got %llu\n", (unsigned long long)output);
             failures++;
@@ -302,7 +305,7 @@ static int test_empty_inputs() {
             return 1;
         }
         const void *var_ptrs[] = {f32_data};
-        me_eval(expr, var_ptrs, 1, &output, 0);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);
         if (fabsf(output - 0.0f) > 1e-6f) {
             printf("  ❌ FAILED: sum(float32) empty expected 0, got %.6f\n", output);
             failures++;
@@ -320,7 +323,7 @@ static int test_empty_inputs() {
             return 1;
         }
         const void *var_ptrs[] = {f32_data};
-        me_eval(expr, var_ptrs, 1, &output, 0);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);
         if (fabsf(output - 1.0f) > 1e-6f) {
             printf("  ❌ FAILED: prod(float32) empty expected 1, got %.6f\n", output);
             failures++;
@@ -343,7 +346,7 @@ static int test_empty_inputs() {
 #endif
         }
         const void *var_ptrs[] = {c64_data};
-        me_eval(expr, var_ptrs, 1, &output, 0);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);
         if (fabsf(CREALF(output)) > 1e-6f || fabsf(CIMAGF(output)) > 1e-6f) {
             printf("  ❌ FAILED: sum(complex64) empty expected 0, got (%.6f, %.6f)\n",
                    CREALF(output), CIMAGF(output));
@@ -367,7 +370,7 @@ static int test_empty_inputs() {
 #endif
         }
         const void *var_ptrs[] = {c64_data};
-        me_eval(expr, var_ptrs, 1, &output, 0);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);
         if (fabsf(CREALF(output) - 1.0f) > 1e-6f || fabsf(CIMAGF(output)) > 1e-6f) {
             printf("  ❌ FAILED: prod(complex64) empty expected 1, got (%.6f, %.6f)\n",
                    CREALF(output), CIMAGF(output));

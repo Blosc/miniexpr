@@ -1,9 +1,12 @@
 /* Test two-parameter mathematical functions */
 #include "../src/miniexpr.h"
+#include "minctest.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <stdint.h>
+
+
 
 #define VECTOR_SIZE 10
 #define TOLERANCE 1e-9
@@ -42,7 +45,7 @@ void test_atan2() {
     }
 
     const void *var_ptrs[] = {y, x};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = atan2(y[i], x[i]);
@@ -72,7 +75,7 @@ void test_pow() {
     }
 
     const void *var_ptrs[] = {base, exp};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = pow(base[i], exp[i]);
@@ -102,7 +105,7 @@ void test_ncr() {
     }
 
     const void *var_ptrs[] = {n, r};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     /* Expected values calculated manually:
      * ncr(5,2) = 10, ncr(10,3) = 120, ncr(8,3) = 56, ncr(6,2) = 15,
@@ -138,7 +141,7 @@ void test_npr() {
     }
 
     const void *var_ptrs[] = {n, r};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     /* Expected values calculated manually:
      * npr(5,2) = 20, npr(10,3) = 720, npr(8,3) = 336, npr(6,2) = 30,
@@ -174,7 +177,7 @@ void test_mixed_expression() {
     }
 
     const void *var_ptrs[] = {x, y};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = pow(x[i], 2.0) + atan2(y[i], x[i]);
@@ -204,7 +207,7 @@ void test_nested_two_param() {
     }
 
     const void *var_ptrs[] = {x, y};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = pow(2.0, pow(x[i], y[i]));
@@ -234,7 +237,7 @@ void test_two_param_with_mixed_types() {
     }
 
     const void *var_ptrs[] = {base, exp};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = pow((double) base[i], exp[i]);

@@ -71,8 +71,7 @@ int main() {
         void *output_chunk = &fahrenheit[offset];
 
         // Evaluate this chunk
-        me_eval(expr, vars_chunk, 1, output_chunk, current_chunk_size);
-
+        if (me_eval(expr, vars_chunk, 1, output_chunk, current_chunk_size) != ME_EVAL_SUCCESS) { /* handle error */ }
         if ((chunk + 1) % 10 == 0) {
             printf("Processed chunk %d/%d (%.1f%%)\n",
                    chunk + 1, num_chunks,
@@ -170,8 +169,7 @@ int main() {
 
         // Process this chunk
         const void *vars_chunk[] = {x_chunk, y_chunk};
-        me_eval(expr, vars_chunk, 2, result_chunk, elements_read);
-
+        if (me_eval(expr, vars_chunk, 2, result_chunk, elements_read) != ME_EVAL_SUCCESS) { /* handle error */ }
         // Write results
         fwrite(result_chunk, sizeof(double), elements_read, output);
 
@@ -244,7 +242,7 @@ int main() {
             &moles[offset]
         };
 
-        me_eval(expr, vars_chunk, 3, &temperature[offset], size);
+        if (me_eval(expr, vars_chunk, 3, &temperature[offset], size) != ME_EVAL_SUCCESS) { /* handle error */ }
     }
 
     printf("Computed temperatures for %d samples\n", TOTAL);

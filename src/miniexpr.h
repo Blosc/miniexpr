@@ -159,6 +159,15 @@ typedef struct me_variable {
 me_expr *me_compile(const char *expression, const me_variable *variables,
                     int var_count, me_dtype dtype, int *error);
 
+/* Status codes for me_eval(). */
+typedef enum {
+    ME_EVAL_SUCCESS = 0,
+    ME_EVAL_ERR_OOM = -1,
+    ME_EVAL_ERR_NULL_EXPR = -2,
+    ME_EVAL_ERR_TOO_MANY_VARS = -3,
+    ME_EVAL_ERR_VAR_MISMATCH = -4
+} me_eval_status;
+
 /* Evaluates compiled expression with variable and output pointers.
  * This function can be safely called from multiple threads simultaneously on the
  * same compiled expression. It creates a temporary clone of the expression tree
@@ -171,11 +180,14 @@ me_expr *me_compile(const char *expression, const me_variable *variables,
  *   output_chunk: Pointer to output buffer for this chunk
  *   chunk_nitems: Number of elements in this chunk
  *
+ * Returns:
+ *   ME_EVAL_SUCCESS (0) on success, or a negative ME_EVAL_ERR_* code on failure.
+ *
  * Use this function for both serial and parallel evaluation. It is thread-safe
  * and can be used from multiple threads to process different chunks simultaneously.
  */
-void me_eval(const me_expr *expr, const void **vars_chunk,
-             int n_vars, void *output_chunk, int chunk_nitems);
+int me_eval(const me_expr *expr, const void **vars_chunk,
+            int n_vars, void *output_chunk, int chunk_nitems);
 
 /* Prints the expression tree for debugging purposes. */
 void me_print(const me_expr *n);

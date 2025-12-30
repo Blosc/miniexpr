@@ -1,7 +1,7 @@
 /*
  * Benchmark with single persistent thread pool across all tests
  * Tests various chunk sizes from 1 KB to 130 MB with 4 threads
- * 
+ *
  * Usage: ./benchmark_chunksize
  *
  * Output: CSV-style results showing performance for each chunk size
@@ -14,6 +14,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "miniexpr.h"
+#include "minctest.h"
+
+
 
 #define NUM_THREADS 4
 #define TOTAL_SIZE_MB 1024  // 1 GB total dataset
@@ -72,7 +75,7 @@ static void *worker_thread(void *arg) {
             }
             double *output = (double *) pool->output + my_chunk_idx;
 
-            me_eval(pool->expr, adjusted_inputs, pool->num_inputs,
+            ME_EVAL_CHECK(pool->expr, adjusted_inputs, pool->num_inputs,
                     output, chunk_size);
 
             // Update completion status

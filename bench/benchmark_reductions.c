@@ -8,6 +8,9 @@
 #include <stdint.h>
 #include <sys/time.h>
 #include "miniexpr.h"
+#include "minctest.h"
+
+
 
 typedef struct {
     double me_time;
@@ -49,11 +52,11 @@ static bench_result_t benchmark_sum_int32(size_t total_elems, int iterations) {
     const void *var_ptrs[] = {data};
     int64_t output = 0;
 
-    me_eval(expr, var_ptrs, 1, &output, (int)total_elems);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, &output, (int)total_elems);
 
     double start = get_time();
     for (int iter = 0; iter < iterations; iter++) {
-        me_eval(expr, var_ptrs, 1, &output, (int)total_elems);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, &output, (int)total_elems);
     }
     double me_time = (get_time() - start) / iterations;
 
@@ -112,11 +115,11 @@ static bench_result_t benchmark_sum_float32(size_t total_elems, int iterations) 
     const void *var_ptrs[] = {data};
     float output = 0.0f;
 
-    me_eval(expr, var_ptrs, 1, &output, (int)total_elems);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, &output, (int)total_elems);
 
     double start = get_time();
     for (int iter = 0; iter < iterations; iter++) {
-        me_eval(expr, var_ptrs, 1, &output, (int)total_elems);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, &output, (int)total_elems);
     }
     double me_time = (get_time() - start) / iterations;
 

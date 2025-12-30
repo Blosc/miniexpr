@@ -12,6 +12,9 @@
 #include <stdlib.h>
 #include <math.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 int main() {
     printf("=== Complex Expression Example ===\n");
@@ -45,7 +48,7 @@ int main() {
     const void *var_ptrs[] = {v, t, angle, g};
 
     // Evaluate
-    me_eval(expr, var_ptrs, 4, distance, n);
+    ME_EVAL_CHECK(expr, var_ptrs, 4, distance, n);
 
     // Display results
     printf("Projectile motion (v=20 m/s, angle=45°):\n");

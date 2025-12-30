@@ -21,6 +21,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "miniexpr.h"
+#include "minctest.h"
+
+
 
 #define NUM_THREADS 4
 #define TOTAL_SIZE_MB 1024  // 1 GB total dataset (for result array)
@@ -89,7 +92,7 @@ static void *worker_thread(void *arg) {
             }
             double *output = (double *) pool->output + my_chunk_idx;
 
-            me_eval(pool->expr, adjusted_inputs, pool->num_inputs,
+            ME_EVAL_CHECK(pool->expr, adjusted_inputs, pool->num_inputs,
                     output, chunk_size);
 
             // Update completion status

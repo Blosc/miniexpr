@@ -1,8 +1,11 @@
 /* Test comparisons with power operations */
 #include "../src/miniexpr.h"
+#include "minctest.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+
+
 
 #define VECTOR_SIZE 10
 #define TOLERANCE 1e-6
@@ -40,7 +43,7 @@ void test_power_equality_comparison() {
     }
 
     const void *var_ptrs[] = {a1, a2};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double left = a1[i] * a1[i];
@@ -74,7 +77,7 @@ void test_power_less_than_comparison() {
     }
 
     const void *var_ptrs[] = {a1, a2};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double left = a1[i] * a1[i];
@@ -107,7 +110,7 @@ void test_power_greater_equal_comparison() {
     }
 
     const void *var_ptrs[] = {a1, a2};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double left = a1[i] * a1[i] * a1[i];
@@ -141,7 +144,7 @@ void test_complex_power_comparison() {
     }
 
     const void *var_ptrs[] = {a1, a2, a3};
-    me_eval(expr, var_ptrs, 3, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 3, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double left = a1[i] * a1[i] + a2[i] * a2[i];

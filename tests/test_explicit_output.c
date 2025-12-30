@@ -12,6 +12,9 @@
 #include <stdbool.h>
 #include <math.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 #define VECTOR_SIZE 10
 
@@ -67,7 +70,7 @@ void test_mixed_types_float32_output() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     int passed = 1;
     for (int i = 0; i < VECTOR_SIZE; i++) {
@@ -126,7 +129,7 @@ void test_float32_vars_float64_output() {
     }
 
     const void *var_ptrs[] = {x, y};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     int passed = 1;
     for (int i = 0; i < VECTOR_SIZE; i++) {
@@ -181,7 +184,7 @@ void test_float32_with_constant_float64_output() {
     }
 
     const void *var_ptrs[] = {a};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     int passed = 1;
     for (int i = 0; i < VECTOR_SIZE; i++) {
@@ -239,7 +242,7 @@ void test_comparison_explicit_bool_output() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     int passed = 1;
     for (int i = 0; i < VECTOR_SIZE; i++) {

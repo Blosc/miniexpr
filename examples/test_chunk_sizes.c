@@ -7,6 +7,9 @@
 #include <pthread.h>
 #include <sys/time.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 #define TOTAL_SIZE 44739242
 #define NUM_THREADS 4
@@ -33,7 +36,7 @@ void *eval_thread_chunked(void *arg) {
         var_ptrs[0] = &data->a[pos];
         var_ptrs[1] = &data->b[pos];
 
-        me_eval(data->expr, var_ptrs, 2,
+        ME_EVAL_CHECK(data->expr, var_ptrs, 2,
                 &data->result[pos], count);
     }
 

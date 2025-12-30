@@ -3972,9 +3972,9 @@ static me_expr *clone_expr(const me_expr *src) {
  * This function is safe to call from multiple threads simultaneously,
  * even on the same expression object. Each call creates a temporary
  * clone of the expression tree to avoid race conditions. */
-void me_eval(const me_expr *expr, const void **vars_chunk,
-             int n_vars, void *output_chunk, int chunk_nitems) {
-    if (!expr) return;
+int me_eval(const me_expr *expr, const void **vars_chunk,
+            int n_vars, void *output_chunk, int chunk_nitems) {
+    if (!expr) return ME_EVAL_ERR_NULL_EXPR;
 
     // Verify variable count matches
     const void *original_var_pointers[ME_MAX_VARS];
@@ -3984,18 +3984,19 @@ void me_eval(const me_expr *expr, const void **vars_chunk,
     if (actual_var_count > ME_MAX_VARS) {
         fprintf(stderr, "Error: Expression uses %d variables, exceeds ME_MAX_VARS=%d\n",
                 actual_var_count, ME_MAX_VARS);
-        return;
+        return ME_EVAL_ERR_TOO_MANY_VARS;
     }
 
     if (actual_var_count != n_vars) {
-        return;
+        return ME_EVAL_ERR_VAR_MISMATCH;
     }
 
     // Clone the expression tree
     me_expr *clone = clone_expr(expr);
-    if (!clone) return;
+    if (!clone) return ME_EVAL_ERR_OOM;
 
     const int block_nitems = ME_EVAL_BLOCK_NITEMS;
+    int status = ME_EVAL_SUCCESS;
 
     if (!ME_EVAL_ENABLE_BLOCKING || chunk_nitems <= block_nitems) {
         // Update clone's variable bindings
@@ -4032,8 +4033,8 @@ void me_eval(const me_expr *expr, const void **vars_chunk,
             if (!var_nodes || !var_indices) {
                 free(var_nodes);
                 free(var_indices);
-                me_free(clone);
-                return;
+                status = ME_EVAL_ERR_OOM;
+                goto cleanup;
             }
             collect_variable_nodes(clone, original_var_pointers, n_vars,
                                    var_nodes, var_indices, &var_node_count);
@@ -4071,8 +4072,10 @@ void me_eval(const me_expr *expr, const void **vars_chunk,
         free(var_indices);
     }
 
+cleanup:
     // Free the clone (including any intermediate buffers it allocated)
     me_free(clone);
+    return status;
 }
 
 

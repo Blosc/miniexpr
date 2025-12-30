@@ -5,6 +5,9 @@
 #include <pthread.h>
 #include <sys/time.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 #define MAX_THREADS 8
 
@@ -31,7 +34,7 @@ void *eval_worker(void *arg) {
         args->b_data + args->start_idx
     };
 
-    me_eval(args->expr, vars_chunk, 2,
+    ME_EVAL_CHECK(args->expr, vars_chunk, 2,
             args->result + args->start_idx, args->chunk_size);
 
     return NULL;
@@ -71,7 +74,7 @@ void benchmark_threads(const char *expr_str, int total_size, int num_threads) {
     double serial_start = get_time();
     for (int iter = 0; iter < iterations; iter++) {
         const void *vars_full[2] = {a, b};
-        me_eval(expr, vars_full, 2, result, total_size);
+        ME_EVAL_CHECK(expr, vars_full, 2, result, total_size);
     }
     double serial_time = (get_time() - serial_start) / iterations;
 

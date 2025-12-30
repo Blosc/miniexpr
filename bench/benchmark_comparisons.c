@@ -19,6 +19,9 @@
 #include <time.h>
 #include <math.h>
 #include "miniexpr.h"
+#include "minctest.h"
+
+
 
 /* Configuration */
 #define TOTAL_SIZE (10 * 1024 * 1024)  /* 10M elements */
@@ -86,13 +89,13 @@ static void benchmark_comparison(const char *name, const char *expr_str,
 
     /* Warmup */
     for (int i = 0; i < WARMUP_ITERS; i++) {
-        me_eval(expr_bool, ptrs, num_vars, result_bool, n);
+        ME_EVAL_CHECK(expr_bool, ptrs, num_vars, result_bool, n);
     }
 
     /* Timed iterations */
     start = get_time_sec();
     for (int i = 0; i < BENCH_ITERS; i++) {
-        me_eval(expr_bool, ptrs, num_vars, result_bool, n);
+        ME_EVAL_CHECK(expr_bool, ptrs, num_vars, result_bool, n);
     }
     elapsed = get_time_sec() - start;
     result->throughput_bool = (n * BENCH_ITERS / elapsed) / 1e6;
@@ -112,13 +115,13 @@ static void benchmark_comparison(const char *name, const char *expr_str,
 
     /* Warmup */
     for (int i = 0; i < WARMUP_ITERS; i++) {
-        me_eval(expr_f64, ptrs, num_vars, result_f64, n);
+        ME_EVAL_CHECK(expr_f64, ptrs, num_vars, result_f64, n);
     }
 
     /* Timed iterations */
     start = get_time_sec();
     for (int i = 0; i < BENCH_ITERS; i++) {
-        me_eval(expr_f64, ptrs, num_vars, result_f64, n);
+        ME_EVAL_CHECK(expr_f64, ptrs, num_vars, result_f64, n);
     }
     elapsed = get_time_sec() - start;
     result->throughput_f64 = (n * BENCH_ITERS / elapsed) / 1e6;

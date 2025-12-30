@@ -8,6 +8,9 @@
 #include <pthread.h>
 #include <sys/time.h>
 #include "miniexpr.h"
+#include "minctest.h"
+
+
 
 #define MAX_THREADS 8
 
@@ -52,7 +55,7 @@ static void *sum_worker(void *arg) {
         (const unsigned char *)args->data + (size_t)args->start_idx * args->elem_size
     };
 
-    me_eval(args->expr, vars_chunk, 1, args->output, args->count);
+    ME_EVAL_CHECK(args->expr, vars_chunk, 1, args->output, args->count);
     return NULL;
 }
 

@@ -1,7 +1,7 @@
 /*
  * Example 5: Parallel Evaluation with Multiple Threads
  *
- * Demonstrates thread-safe parallel evaluation using me_eval().
+ * Demonstrates thread-safe parallel evaluation using ME_EVAL_CHECK().
  * Multiple threads can safely evaluate the same compiled expression on
  * different data chunks simultaneously.
  *
@@ -16,6 +16,9 @@
 #include <time.h>
 #include <sys/time.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 #define TOTAL_SIZE 44739242  // ~44M elements = ~1GB working set
 #define NUM_THREADS 4
@@ -49,7 +52,7 @@ void *worker_thread(void *arg) {
         };
 
         // Evaluate this chunk (thread-safe!)
-        me_eval(data->expr, var_ptrs, 2,
+        ME_EVAL_CHECK(data->expr, var_ptrs, 2,
                 &data->result[pos], count);
     }
 

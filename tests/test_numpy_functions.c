@@ -1,9 +1,12 @@
 /* Test NumPy-compatible functions: expm1, log1p, log2, logaddexp, round, sign, square, trunc */
 #include "../src/miniexpr.h"
+#include "minctest.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <stdint.h>
+
+
 
 #define VECTOR_SIZE 10
 #define TOLERANCE 1e-9
@@ -42,7 +45,7 @@ void test_expm1() {
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = expm1(x[i]);
@@ -72,7 +75,7 @@ void test_log1p() {
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = log1p(x[i]);
@@ -101,7 +104,7 @@ void test_log2() {
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = log2(x[i]);
@@ -131,7 +134,7 @@ void test_logaddexp() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         // Reference implementation (same as in miniexpr.c)
@@ -169,7 +172,7 @@ void test_expm1_small_values() {
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr, var_ptrs, 1, result, 5);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, 5);
 
     for (int i = 0; i < 5; i++) {
         double expected = expm1(x[i]);
@@ -199,7 +202,7 @@ void test_log1p_small_values() {
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr, var_ptrs, 1, result, 5);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, 5);
 
     for (int i = 0; i < 5; i++) {
         double expected = log1p(x[i]);
@@ -230,7 +233,7 @@ void test_logaddexp_extreme_values() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval(expr, var_ptrs, 2, result, 5);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, 5);
 
     for (int i = 0; i < 5; i++) {
         // Reference implementation
@@ -267,7 +270,7 @@ void test_mixed_expressions() {
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr1, var_ptrs, 1, result, 5);
+    ME_EVAL_CHECK(expr1, var_ptrs, 1, result, 5);
 
     for (int i = 0; i < 5; i++) {
         // log1p(expm1(x)) should equal x (within numerical precision)
@@ -289,8 +292,8 @@ void test_mixed_expressions() {
 
     double result2[5] = {0};
     double result3[5] = {0};
-    me_eval(expr2, var_ptrs, 1, result2, 5);
-    me_eval(expr3, var_ptrs, 1, result3, 5);
+    ME_EVAL_CHECK(expr2, var_ptrs, 1, result2, 5);
+    ME_EVAL_CHECK(expr3, var_ptrs, 1, result3, 5);
 
     for (int i = 0; i < 5; i++) {
         ASSERT_NEAR(result2[i], result3[i], i);
@@ -319,7 +322,7 @@ void test_round_func() {
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = round(x[i]);
@@ -348,7 +351,7 @@ void test_sign() {
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected;
@@ -380,7 +383,7 @@ void test_square() {
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = x[i] * x[i];
@@ -409,7 +412,7 @@ void test_trunc_func() {
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = trunc(x[i]);
@@ -442,8 +445,8 @@ void test_square_vs_pow() {
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr1, var_ptrs, 1, result1, 5);
-    me_eval(expr2, var_ptrs, 1, result2, 5);
+    ME_EVAL_CHECK(expr1, var_ptrs, 1, result1, 5);
+    ME_EVAL_CHECK(expr2, var_ptrs, 1, result2, 5);
 
     for (int i = 0; i < 5; i++) {
         ASSERT_NEAR(result1[i], result2[i], i);
@@ -478,7 +481,7 @@ void test_real_imag_on_real_inputs() {
     }
 
     const void *var_ptrs64[] = {x};
-    me_eval(expr_real64, var_ptrs64, 1, real_result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr_real64, var_ptrs64, 1, real_result, VECTOR_SIZE);
     for (int i = 0; i < VECTOR_SIZE; i++) {
         ASSERT_NEAR(x[i], real_result[i], i);
     }
@@ -492,7 +495,7 @@ void test_real_imag_on_real_inputs() {
         return;
     }
 
-    me_eval(expr_imag64, var_ptrs64, 1, imag_result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr_imag64, var_ptrs64, 1, imag_result, VECTOR_SIZE);
     for (int i = 0; i < VECTOR_SIZE; i++) {
         ASSERT_NEAR(0.0, imag_result[i], i);
     }
@@ -516,7 +519,7 @@ void test_real_imag_on_real_inputs() {
     }
 
     const void *var_ptrs32[] = {xf};
-    me_eval(expr_real32, var_ptrs32, 1, real_result_f, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr_real32, var_ptrs32, 1, real_result_f, VECTOR_SIZE);
     for (int i = 0; i < VECTOR_SIZE; i++) {
         ASSERT_NEAR(xf[i], real_result_f[i], i);
     }
@@ -529,7 +532,7 @@ void test_real_imag_on_real_inputs() {
         return;
     }
 
-    me_eval(expr_imag32, var_ptrs32, 1, imag_result_f, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr_imag32, var_ptrs32, 1, imag_result_f, VECTOR_SIZE);
     for (int i = 0; i < VECTOR_SIZE; i++) {
         ASSERT_NEAR(0.0, imag_result_f[i], i);
     }
@@ -556,7 +559,7 @@ void test_where_basic() {
     }
 
     const void *var_ptrs[] = {c, x, y};
-    me_eval(expr, var_ptrs, 3, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 3, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = (c[i] != 0.0) ? x[i] : y[i];

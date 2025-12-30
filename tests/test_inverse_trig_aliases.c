@@ -1,8 +1,11 @@
 /* Test that both acos/arccos naming conventions work */
 #include "../src/miniexpr.h"
+#include "minctest.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+
+
 
 #define VECTOR_SIZE 5
 #define TOLERANCE 1e-9
@@ -29,8 +32,8 @@ int main() {
         printf("  FAIL: Compilation failed\n");
     } else {
         const void *var_ptrs[] = {x};
-        me_eval(expr_acos, var_ptrs, 1, result_a, VECTOR_SIZE);
-        me_eval(expr_arccos, var_ptrs, 1, result_arc, VECTOR_SIZE);
+        ME_EVAL_CHECK(expr_acos, var_ptrs, 1, result_a, VECTOR_SIZE);
+        ME_EVAL_CHECK(expr_arccos, var_ptrs, 1, result_arc, VECTOR_SIZE);
 
         int match = 1;
         for (int i = 0; i < VECTOR_SIZE; i++) {
@@ -61,8 +64,8 @@ int main() {
         printf("  FAIL: Compilation failed\n");
     } else {
         const void *var_ptrs[] = {x};
-        me_eval(expr_asin, var_ptrs, 1, result_a, VECTOR_SIZE);
-        me_eval(expr_arcsin, var_ptrs, 1, result_arc, VECTOR_SIZE);
+        ME_EVAL_CHECK(expr_asin, var_ptrs, 1, result_a, VECTOR_SIZE);
+        ME_EVAL_CHECK(expr_arcsin, var_ptrs, 1, result_arc, VECTOR_SIZE);
 
         int match = 1;
         for (int i = 0; i < VECTOR_SIZE; i++) {
@@ -93,8 +96,8 @@ int main() {
         printf("  FAIL: Compilation failed\n");
     } else {
         const void *var_ptrs[] = {x};
-        me_eval(expr_atan, var_ptrs, 1, result_a, VECTOR_SIZE);
-        me_eval(expr_arctan, var_ptrs, 1, result_arc, VECTOR_SIZE);
+        ME_EVAL_CHECK(expr_atan, var_ptrs, 1, result_a, VECTOR_SIZE);
+        ME_EVAL_CHECK(expr_arctan, var_ptrs, 1, result_arc, VECTOR_SIZE);
 
         int match = 1;
         for (int i = 0; i < VECTOR_SIZE; i++) {
@@ -127,8 +130,8 @@ int main() {
         printf("  FAIL: Compilation failed\n");
     } else {
         const void *var_ptrs[] = {y, x};
-        me_eval(expr_atan2, var_ptrs, 2, result_a, VECTOR_SIZE);
-        me_eval(expr_arctan2, var_ptrs, 2, result_arc, VECTOR_SIZE);
+        ME_EVAL_CHECK(expr_atan2, var_ptrs, 2, result_a, VECTOR_SIZE);
+        ME_EVAL_CHECK(expr_arctan2, var_ptrs, 2, result_arc, VECTOR_SIZE);
 
         int match = 1;
         for (int i = 0; i < VECTOR_SIZE; i++) {

@@ -10,9 +10,13 @@
  * - Using ME_AUTO to infer ME_BOOL for comparison expressions
  */
 
+#include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include "miniexpr.h"
+#include "minctest.h"
+
+
 
 #define N 10
 
@@ -51,7 +55,7 @@ int main() {
         }
 
         const void *ptrs[] = {a, b};
-        me_eval(expr, ptrs, 2, result, N);
+        ME_EVAL_CHECK(expr, ptrs, 2, result, N);
 
         printf("  a     | a**2   | a+b    | a**2 == (a+b)\n");
         printf("  ------|--------|--------|---------------\n");
@@ -97,7 +101,7 @@ int main() {
                inferred == ME_BOOL ? "ME_BOOL" : "other");
 
         const void *ptrs[] = {x, y};
-        me_eval(expr, ptrs, 2, result, N);
+        ME_EVAL_CHECK(expr, ptrs, 2, result, N);
 
         printf("  x     | y     | x < y\n");
         printf("  ------|-------|-------\n");
@@ -138,7 +142,7 @@ int main() {
         }
 
         const void *ptrs[] = {side_a, side_b, side_c};
-        me_eval(expr, ptrs, 3, result, 5);
+        ME_EVAL_CHECK(expr, ptrs, 3, result, 5);
 
         printf("  a  | b   | c   | a²+b² | c²    | Is Pythagorean?\n");
         printf("  ---|-----|-----|-------|-------|----------------\n");
@@ -176,7 +180,7 @@ int main() {
         for (int op = 0; op < 6; op++) {
             me_expr *expr = me_compile(operators[op], vars, 1, ME_BOOL, &err);
             if (expr) {
-                me_eval(expr, ptrs, 1, result, 5);
+                ME_EVAL_CHECK(expr, ptrs, 1, result, 5);
                 printf("  %-10s | ", operators[op]);
                 for (int i = 0; i < 5; i++) {
                     printf("%s ", result[i] ? "T" : "F");

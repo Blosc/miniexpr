@@ -10,6 +10,9 @@
 #include <stdlib.h>
 #include <time.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 #define TOTAL_SIZE 44739242   // ~44M elements = ~1GB working set
 #define CHUNK_SIZE 32768     // 32K elements = 768 KB (optimal for cache)
@@ -75,7 +78,7 @@ int main() {
         const void *var_ptrs[] = {&a[offset], &b[offset]};
 
         // Evaluate this chunk
-        me_eval(expr, var_ptrs, 2, &result[offset], current_size);
+        ME_EVAL_CHECK(expr, var_ptrs, 2, &result[offset], current_size);
     }
 
     clock_t end = clock();

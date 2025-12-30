@@ -110,7 +110,7 @@ cdef extern from "miniexpr.h":
         pass
 
     me_expr* me_compile(const char *expr, ...)
-    void me_eval(me_expr *expr, ...)
+    int me_eval(me_expr *expr, ...)
     void me_free(me_expr *expr)
 
 def evaluate_expression(str expression, np.ndarray[double] a, np.ndarray[double] b):
@@ -123,7 +123,7 @@ def evaluate_expression(str expression, np.ndarray[double] a, np.ndarray[double]
     cdef me_expr *expr = me_compile(expression.encode(), ...)
 
     # Evaluate
-    me_eval(expr)
+    me_eval(expr)  // returns ME_EVAL_SUCCESS on success
 
     # Cleanup
     me_free(expr)

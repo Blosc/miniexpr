@@ -43,8 +43,7 @@ int main() {
 
     // Evaluate
     const void *var_ptrs[] = {width, height};
-    me_eval(expr, var_ptrs, 2, area, n);
-
+    if (me_eval(expr, var_ptrs, 2, area, n) != ME_EVAL_SUCCESS) { /* handle error */ }
     // Print results
     printf("Rectangle Areas (INT32):\n");
     for (int i = 0; i < n; i++) {
@@ -95,8 +94,7 @@ int main() {
     }
 
     const void *var_ptrs[] = {radius};
-    me_eval(expr, var_ptrs, 1, area, n);
-
+    if (me_eval(expr, var_ptrs, 1, area, n) != ME_EVAL_SUCCESS) { /* handle error */ }
     printf("Circle Areas (FLOAT32):\n");
     for (int i = 0; i < n; i++) {
         printf("Radius=%.2f -> Area=%.2f\n", radius[i], area[i]);
@@ -155,8 +153,7 @@ int main() {
     }
 
     const void *var_ptrs[] = {items, price};
-    me_eval(expr, var_ptrs, 2, total, n);
-
+    if (me_eval(expr, var_ptrs, 2, total, n) != ME_EVAL_SUCCESS) { /* handle error */ }
     printf("Shopping Cart (Mixed Types):\n");
     for (int i = 0; i < n; i++) {
         printf("Items=%d × $%.2f = $%.2f (with tax)\n",
@@ -208,8 +205,7 @@ int main() {
     }
 
     const void *var_ptrs[] = {red, green, blue};
-    me_eval(expr, var_ptrs, 3, gray, n);
-
+    if (me_eval(expr, var_ptrs, 3, gray, n) != ME_EVAL_SUCCESS) { /* handle error */ }
     printf("RGB to Grayscale (UINT8):\n");
     for (int i = 0; i < n; i++) {
         printf("RGB(%3d,%3d,%3d) -> Gray=%3d\n",
@@ -265,8 +261,7 @@ int main() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval(expr, var_ptrs, 2, is_equal, n);
-
+    if (me_eval(expr, var_ptrs, 2, is_equal, n) != ME_EVAL_SUCCESS) { /* handle error */ }
     printf("Comparison Results (BOOL):\n");
     for (int i = 0; i < n; i++) {
         printf("a=%.1f: a² (%.1f) == a+b (%.1f) -> %s\n",
@@ -339,8 +334,7 @@ int main() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval(expr, var_ptrs, 2, result, 5);
-
+    if (me_eval(expr, var_ptrs, 2, result, 5) != ME_EVAL_SUCCESS) { /* handle error */ }
     printf("Mixed Types with FLOAT32 Output:\n");
     for (int i = 0; i < 5; i++) {
         printf("a=%d + b=%.1f = %.2f (FLOAT32)\n", a[i], b[i], result[i]);

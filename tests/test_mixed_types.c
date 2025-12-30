@@ -1,9 +1,12 @@
 #include "../src/miniexpr.h"
+#include "minctest.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+
+
 
 #define VECTOR_SIZE 10
 
@@ -35,7 +38,7 @@ int main() {
     } else {
         printf("  ✓ Compilation succeeded\n");
         const void *var_ptrs1[] = {a_int32, b_int64};
-        me_eval(expr1, var_ptrs1, 2, result_int64, VECTOR_SIZE);
+        ME_EVAL_CHECK(expr1, var_ptrs1, 2, result_int64, VECTOR_SIZE);
 
         printf("  Results: ");
         for (int i = 0; i < 5; i++) {
@@ -69,7 +72,7 @@ int main() {
     } else {
         printf("  ✓ Compilation succeeded\n");
         const void *var_ptrs2[] = {a_int32, b_float};
-        me_eval(expr2, var_ptrs2, 2, result_float, VECTOR_SIZE);
+        ME_EVAL_CHECK(expr2, var_ptrs2, 2, result_float, VECTOR_SIZE);
 
         printf("  Results: ");
         for (int i = 0; i < 5; i++) {
@@ -103,7 +106,7 @@ int main() {
     } else {
         printf("  ✓ Compilation succeeded\n");
         const void *var_ptrs3[] = {b_float, b_double};
-        me_eval(expr3, var_ptrs3, 2, result_double, VECTOR_SIZE);
+        ME_EVAL_CHECK(expr3, var_ptrs3, 2, result_double, VECTOR_SIZE);
 
         printf("  Results: ");
         for (int i = 0; i < 5; i++) {

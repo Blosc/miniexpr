@@ -15,6 +15,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 int main() {
     printf("=== Example 8: Explicit Variable Types with Explicit Output Dtype ===\n\n");
@@ -52,7 +55,7 @@ int main() {
     printf("\n");
 
     const void *var_ptrs[] = {a, b};
-    me_eval(expr1, var_ptrs, 2, result_f32, n);
+    ME_EVAL_CHECK(expr1, var_ptrs, 2, result_f32, n);
 
     printf("Results (computed in FLOAT64, cast to FLOAT32):\n");
     printf("   a    b      a+b (float32)\n");
@@ -93,7 +96,7 @@ int main() {
     printf("\n");
 
     const void *var_ptrs2[] = {x, y};
-    me_eval(expr2, var_ptrs2, 2, result_f64, n);
+    ME_EVAL_CHECK(expr2, var_ptrs2, 2, result_f64, n);
 
     printf("Results (computed in FLOAT32, cast to FLOAT64):\n");
     printf("   x    y      x*2.5+y (float64)\n");
@@ -134,7 +137,7 @@ int main() {
     printf("\n");
 
     const void *var_ptrs3[] = {a2, b2};
-    me_eval(expr3, var_ptrs3, 2, result_bool, n);
+    ME_EVAL_CHECK(expr3, var_ptrs3, 2, result_bool, n);
 
     printf("Results:\n");
     printf("   a    b      a > b\n");

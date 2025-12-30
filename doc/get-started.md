@@ -36,8 +36,7 @@ int main() {
     const void *var_ptrs[] = {a, b};
 
     // Evaluate the expression (thread-safe)
-    me_eval(expr, var_ptrs, 2, result, n);
-
+    if (me_eval(expr, var_ptrs, 2, result, n) != ME_EVAL_SUCCESS) { /* handle error */ }
     // Print results
     printf("Computing sqrt(a*a + b*b):\n");
     for (int i = 0; i < n; i++) {

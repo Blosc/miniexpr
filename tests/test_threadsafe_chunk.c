@@ -6,6 +6,9 @@
 #include <pthread.h>
 #include <string.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 #define NUM_THREADS 4
 #define CHUNK_SIZE 10000
@@ -29,7 +32,7 @@ void *worker_thread(void *arg) {
         data->b_data + offset
     };
 
-    me_eval(data->expr, vars_chunk, 2,
+    ME_EVAL_CHECK(data->expr, vars_chunk, 2,
             data->result + offset, data->chunk_size);
 
     return NULL;
@@ -61,7 +64,7 @@ int test_parallel_evaluation(void) {
 
     // Serial evaluation for reference
     const void *vars_serial[2] = {a, b};
-    me_eval(expr, vars_serial, 2, result_serial, TOTAL_SIZE);
+    ME_EVAL_CHECK(expr, vars_serial, 2, result_serial, TOTAL_SIZE);
 
     // Parallel evaluation
     pthread_t threads[NUM_THREADS];

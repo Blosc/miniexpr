@@ -6,6 +6,9 @@
 #include <pthread.h>
 #include <sys/time.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 #define MAX_THREADS 8
 #define GIB_BYTES (1024ULL * 1024ULL * 1024ULL)
@@ -34,7 +37,7 @@ static void *eval_worker(void *arg) {
         args->c_data + args->start_idx
     };
 
-    me_eval(args->expr, vars_chunk, 3,
+    ME_EVAL_CHECK(args->expr, vars_chunk, 3,
             args->output + args->start_idx, args->count);
     return NULL;
 }

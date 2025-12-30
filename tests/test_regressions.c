@@ -3,6 +3,9 @@
 #include <math.h>
 #include <string.h>
 #include "miniexpr.h"
+#include "minctest.h"
+
+
 
 #define SMALL_SIZE 10
 #define LARGE_SIZE 100
@@ -41,7 +44,7 @@ int test_arctan2_with_scalar_constant(const char *description, int size, float s
     // Following NumPy conventions, float constants match variable type, so result is FLOAT32
     const void *var_ptrs[] = {input};
     float *result = malloc(size * sizeof(float));
-    me_eval(expr, var_ptrs, 1, result, size);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, size);
 
     float *expected = malloc(size * sizeof(float));
     for (int i = 0; i < size; i++) {
@@ -119,7 +122,7 @@ int test_arctan2_with_two_arrays(const char *description, int size, float scalar
     const void *var_ptrs[] = {input1, input2};
     float *result = malloc(size * sizeof(float));
 
-    me_eval(expr, var_ptrs, 2, result, size);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, size);
 
     float *expected = malloc(size * sizeof(float));
     for (int i = 0; i < size; i++) {
@@ -188,7 +191,7 @@ int test_arctan2_array_scalar_f64(const char *description, const char *expr_str,
     const void *var_ptrs[] = {data};
     double result[CHUNK_SIZE];
 
-    me_eval(expr, var_ptrs, 1, result, CHUNK_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, CHUNK_SIZE);
 
     printf("  Results:\n");
     int passed = 1;
@@ -229,7 +232,7 @@ int test_pow_array_scalar_f64(const char *description, const char *expr_str,
     const void *var_ptrs[] = {data};
     double result[CHUNK_SIZE];
 
-    me_eval(expr, var_ptrs, 1, result, CHUNK_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, CHUNK_SIZE);
 
     printf("  Results:\n");
     int passed = 1;
@@ -275,7 +278,7 @@ int test_arctan2_complex_expr(const char *description, const char *expr_str,
     const void *var_ptrs[] = {x_data, y_data};
     double result[CHUNK_SIZE];
 
-    me_eval(expr, var_ptrs, 2, result, CHUNK_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, CHUNK_SIZE);
 
     printf("  Results:\n");
     int passed = 1;
@@ -343,7 +346,7 @@ int test_constant_type_f32(const char *description, const char *expr_str,
     const void *var_ptrs[] = {input};
     float result[SMALL_SIZE];  // Use float buffer for FLOAT32 result
 
-    me_eval(expr, var_ptrs, 1, result, SMALL_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, SMALL_SIZE);
 
     int passed = 1;
     printf("\nFirst 5 results:\n");
@@ -398,7 +401,7 @@ int test_scalar_constant(const char *description, const char *expr_str,
 
     const void *var_ptrs[] = {input};
     float result[SMALL_SIZE];
-    me_eval(expr, var_ptrs, 1, result, SMALL_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, SMALL_SIZE);
 
     int passed = 1;
     printf("  Input     Result    Expected  Status\n");
@@ -483,7 +486,7 @@ int test_int64_large_constant(const char *description, int size) {
             free(input);
             return 0;
         }
-        me_eval(expr, var_ptrs, 1, result, size);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, result, size);
 
         // Compute expected values using double arithmetic.
         for (int i = 0; i < size; i++) {
@@ -514,7 +517,7 @@ int test_int64_large_constant(const char *description, int size) {
             free(input);
             return 0;
         }
-        me_eval(expr, var_ptrs, 1, result, size);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, result, size);
 
         for (int i = 0; i < size; i++) {
             float expected = (float)(((double)input[i] + 90000.00001) + 1.0);
@@ -547,7 +550,7 @@ int test_int64_large_constant(const char *description, int size) {
             free(input);
             return 0;
         }
-        me_eval(expr, var_ptrs, 1, result, size);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, result, size);
 
         for (int i = 0; i < size; i++) {
             double expected = ((double)input[i] + 90000.00001) + 1.0;
@@ -633,7 +636,7 @@ int test_float32_array_float64_constants(const char *description, int size) {
             free(input);
             return 0;
         }
-        me_eval(expr, var_ptrs, 1, result, size);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, result, size);
 
         // Compute expected values using float32 arithmetic (NumPy behavior - constants converted to float32)
         for (int i = 0; i < size; i++) {
@@ -695,7 +698,7 @@ int test_conj_real_preserves_dtype() {
     }
 
     const void *var_ptrs[] = {a};
-    me_eval(expr, var_ptrs, 1, result, SMALL_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, SMALL_SIZE);
 
     int passed = 1;
     float max_diff = 0.0f;

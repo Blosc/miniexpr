@@ -8,6 +8,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 int main() {
     printf("=== Simple Expression Example ===\n");
@@ -35,7 +38,7 @@ int main() {
     const void *var_ptrs[] = {x, y};
 
     // Evaluate
-    me_eval(expr, var_ptrs, 2, result, n);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, n);
 
     // Display results
     printf("Results:\n");

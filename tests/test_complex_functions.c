@@ -1,10 +1,13 @@
 /* Test complex functions: conj, imag, and real */
 #include "../src/miniexpr.h"
+#include "minctest.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <complex.h>
 #include <stdint.h>
+
+
 
 #if defined(_MSC_VER) && defined(__clang__)
 // On Windows with clang-cl, I is defined as _Fcomplex struct
@@ -96,7 +99,7 @@ void test_conj_c64() {
     }
 
     const void *var_ptrs[] = {z};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         float _Complex expected = CONJF(z[i]);
@@ -141,7 +144,7 @@ void test_conj_c128() {
     }
 
     const void *var_ptrs[] = {z};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double _Complex expected = CONJ(z[i]);
@@ -181,7 +184,7 @@ void test_imag_c64() {
     }
 
     const void *var_ptrs[] = {z};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         float expected = CIMAGF(z[i]);
@@ -221,7 +224,7 @@ void test_imag_c128() {
     }
 
     const void *var_ptrs[] = {z};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = CIMAG(z[i]);
@@ -261,7 +264,7 @@ void test_conj_identity() {
     }
 
     const void *var_ptrs[] = {z};
-    me_eval(expr, var_ptrs, 1, result, 5);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, 5);
 
     for (int i = 0; i < 5; i++) {
         ASSERT_COMPLEX_NEAR(z[i], result[i], i);
@@ -295,7 +298,7 @@ void test_imag_auto_dtype() {
     }
 
     const void *var_ptrs[] = {z};
-    me_eval(expr, var_ptrs, 1, result, 5);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, 5);
 
     for (int i = 0; i < 5; i++) {
         double expected = CIMAG(z[i]);
@@ -340,7 +343,7 @@ void test_real_c64() {
     }
 
     const void *var_ptrs[] = {z};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         float expected = CREALF(z[i]);
@@ -385,7 +388,7 @@ void test_real_c128() {
     }
 
     const void *var_ptrs[] = {z};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = CREAL(z[i]);
@@ -425,7 +428,7 @@ void test_real_auto_dtype() {
     }
 
     const void *var_ptrs[] = {z};
-    me_eval(expr, var_ptrs, 1, result, 5);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, 5);
 
     for (int i = 0; i < 5; i++) {
         double expected = CREAL(z[i]);

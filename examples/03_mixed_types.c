@@ -9,6 +9,9 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 int main() {
     printf("=== Mixed Types Example ===\n");
@@ -54,7 +57,7 @@ int main() {
     const void *var_ptrs[] = {a, b};
 
     // Evaluate (integers will be promoted to float64)
-    me_eval(expr, var_ptrs, 2, result, n);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, n);
 
     // Display results
     printf("Results (int32 promoted to float64):\n");

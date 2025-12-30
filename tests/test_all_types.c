@@ -9,6 +9,9 @@
 #include <complex.h>
 #include <math.h>
 #include "miniexpr.h"
+#include "minctest.h"
+
+
 
 #if defined(_MSC_VER) && defined(__clang__)
 // On Windows with clang-cl, I is defined as _Fcomplex struct
@@ -42,7 +45,7 @@
     } \
     \
     const void *var_ptrs[] = {a}; \
-    me_eval(expr, var_ptrs, 1, result, n); \
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, n); \
     \
     int passed = 1; \
     for (int i = 0; i < n && passed; i++) { \
@@ -88,7 +91,7 @@
     } \
     \
     const void *var_ptrs[] = {a, b}; \
-    me_eval(expr, var_ptrs, 2, result, n); \
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, n); \
     \
     int passed = 1; \
     for (int i = 0; i < n && passed; i++) { \
@@ -156,7 +159,7 @@ int main() {
             printf("❌ complex64: Failed to compile\n");
         } else {
             const void *var_ptrs[] = {a};
-            me_eval(expr, var_ptrs, 1, result, n);
+            ME_EVAL_CHECK(expr, var_ptrs, 1, result, n);
 
             int passed = 1;
             for (int i = 0; i < n && passed; i++) {
@@ -199,7 +202,7 @@ int main() {
             printf("❌ complex128: Failed to compile\n");
         } else {
             const void *var_ptrs[] = {a};
-            me_eval(expr, var_ptrs, 1, result, n);
+            ME_EVAL_CHECK(expr, var_ptrs, 1, result, n);
 
             int passed = 1;
             for (int i = 0; i < n && passed; i++) {

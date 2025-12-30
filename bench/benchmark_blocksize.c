@@ -9,6 +9,9 @@
 #include <limits.h>
 #include <sys/time.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 #define GIB_BYTES (1024ULL * 1024ULL * 1024ULL)
 
@@ -21,11 +24,11 @@ static double get_time(void) {
 static double run_benchmark(const me_expr *expr, const void **var_ptrs,
                             double *out, int total_elems, int iterations) {
     // Warm-up
-    me_eval(expr, var_ptrs, 3, out, total_elems);
+    ME_EVAL_CHECK(expr, var_ptrs, 3, out, total_elems);
 
     double start = get_time();
     for (int i = 0; i < iterations; i++) {
-        me_eval(expr, var_ptrs, 3, out, total_elems);
+        ME_EVAL_CHECK(expr, var_ptrs, 3, out, total_elems);
     }
     return (get_time() - start) / iterations;
 }

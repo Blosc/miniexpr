@@ -5,6 +5,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "miniexpr.h"
+#include "minctest.h"
+
+
 
 #define VECTOR_SIZE 10
 
@@ -42,7 +45,7 @@ int main() {
             printf("  ❌ FAIL: Compilation error at position %d\n", err);
         } else {
             const void *var_ptrs[] = {a, b};
-            me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+            ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
             bool passed = true;
             for (int i = 0; i < VECTOR_SIZE && passed; i++) {
@@ -83,7 +86,7 @@ int main() {
             printf("  ❌ FAIL: Compilation error at position %d\n", err);
         } else {
             const void *var_ptrs[] = {a, b};
-            me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+            ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
             bool passed = true;
             for (int i = 0; i < VECTOR_SIZE && passed; i++) {
@@ -157,7 +160,7 @@ int main() {
             printf("  ❌ FAIL: Compilation error at position %d\n", err);
         } else {
             const void *var_ptrs[] = {a, b};
-            me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+            ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
             bool passed = true;
             for (int i = 0; i < VECTOR_SIZE && passed; i++) {

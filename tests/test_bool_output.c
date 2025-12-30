@@ -1,8 +1,11 @@
 /* Test that comparison operations output bool arrays */
 #include "../src/miniexpr.h"
+#include "minctest.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+
+
 
 #define VECTOR_SIZE 10
 
@@ -50,7 +53,7 @@ void test_comparison_bool_output() {
     }
 
     const void *var_ptrs[] = {a1, a2};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double left = a1[i] * a1[i];
@@ -95,7 +98,7 @@ void test_auto_dtype_comparison() {
     }
 
     const void *var_ptrs[] = {a1, a2};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         bool expected = (a1[i] < a2[i]);

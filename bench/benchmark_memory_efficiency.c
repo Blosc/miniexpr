@@ -17,7 +17,7 @@
  * CHUNK SIZE, not the total array size. This means:
  * - Memory usage: O(chunk_size), not O(total_size)
  * - You can process billion-element arrays with small chunk buffers
- * - Each me_eval() call is independent and thread-safe
+ * - Each ME_EVAL_CHECK() call is independent and thread-safe
  *
  * Example Scenario:
  * ==================
@@ -35,6 +35,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 void demonstrate_memory_usage(int total_size, int chunk_size) {
     printf("\n");
@@ -129,12 +132,12 @@ void demonstrate_memory_usage(int total_size, int chunk_size) {
 
         const void *var_ptrs[] = {a + offset, b + offset};
 
-        // Each me_eval() call:
+        // Each ME_EVAL_CHECK() call:
         // 1. Allocates temp buffer: current_chunk_size * sizeof(double)
         // 2. Computes in FLOAT64
         // 3. Converts to FLOAT32
         // 4. Frees temp buffer
-        me_eval(expr, var_ptrs, 2, result + offset, current_chunk_size);
+        ME_EVAL_CHECK(expr, var_ptrs, 2, result + offset, current_chunk_size);
 
         chunks_processed++;
         if (chunks_processed % 10 == 0 || chunks_processed == num_chunks) {
@@ -173,7 +176,7 @@ void demonstrate_memory_usage(int total_size, int chunk_size) {
     printf("not for the entire array. This means:\n");
     printf("  • Memory usage: O(chunk_size), not O(total_size)\n");
     printf("  • You can process billion-element arrays with small buffers\n");
-    printf("  • Each me_eval() call is independent and thread-safe\n");
+    printf("  • Each ME_EVAL_CHECK() call is independent and thread-safe\n");
     printf("  • Memory footprint remains constant regardless of array size\n");
     printf("=================================================================\n");
 
