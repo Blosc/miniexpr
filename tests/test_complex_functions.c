@@ -382,9 +382,50 @@ void test_real_auto_dtype() {
     printf("  PASS\n");
 }
 
+void test_windows_complex_helpers() {
+#if defined(_WIN32) || defined(_WIN64)
+    TEST("Windows complex helper round-trip");
+
+    float _Complex zf = ME_C64_BUILD(1.0f, -2.5f);
+    if (fabsf(ME_CREALF(zf) - 1.0f) > TOLERANCE ||
+        fabsf(ME_CIMAGF(zf) + 2.5f) > TOLERANCE) {
+        printf("  FAIL: float helpers mismatch (real=%.6f imag=%.6f)\n",
+               (double)ME_CREALF(zf), (double)ME_CIMAGF(zf));
+        tests_failed++;
+        return;
+    }
+
+    double _Complex zd = ME_C128_BUILD(-3.25, 4.75);
+    if (fabs(ME_CREAL(zd) + 3.25) > TOLERANCE ||
+        fabs(ME_CIMAG(zd) - 4.75) > TOLERANCE) {
+        printf("  FAIL: double helpers mismatch (real=%.6f imag=%.6f)\n",
+               ME_CREAL(zd), ME_CIMAG(zd));
+        tests_failed++;
+        return;
+    }
+
+    float _Complex zf_conj = ME_CONJF(zf);
+    if (fabsf(ME_CIMAGF(zf_conj) - 2.5f) > TOLERANCE) {
+        printf("  FAIL: conj helper mismatch (imag=%.6f)\n", (double)ME_CIMAGF(zf_conj));
+        tests_failed++;
+        return;
+    }
+
+    double _Complex zd_conj = ME_CONJ(zd);
+    if (fabs(ME_CIMAG(zd_conj) + 4.75) > TOLERANCE) {
+        printf("  FAIL: conj helper mismatch (imag=%.6f)\n", ME_CIMAG(zd_conj));
+        tests_failed++;
+        return;
+    }
+
+    printf("  PASS\n");
+#endif
+}
+
 int main() {
     printf("=== Testing Complex Functions (conj, imag, real) ===\n\n");
 
+    test_windows_complex_helpers();
     test_conj_c64();
     test_conj_c128();
     test_conj_identity();
