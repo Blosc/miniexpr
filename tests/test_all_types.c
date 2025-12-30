@@ -135,6 +135,10 @@ int main() {
     printf("\n✅ All basic type tests passed!\n\n");
 
     /* Complex numbers need special testing */
+#if defined(_WIN32) || defined(_WIN64)
+    printf("Complex Numbers:\n");
+    printf("  SKIP: Complex types are disabled on Windows (no C99 complex ABI)\n\n");
+#else
     printf("Complex Numbers:\n"); {
         const int n = 10;
         float _Complex *a = malloc(n * sizeof(float _Complex));
@@ -222,13 +226,16 @@ int main() {
         free(a);
         free(result);
     }
+#endif
 
-    printf("\n🎉 All 13 C99 types working!\n\n");
+    printf("\n🎉 All basic types working!\n\n");
     printf("Supported types:\n");
     printf("  • int8_t, int16_t, int32_t, int64_t\n");
     printf("  • uint8_t, uint16_t, uint32_t, uint64_t\n");
     printf("  • float, double\n");
+#if !defined(_WIN32) && !defined(_WIN64)
     printf("  • float complex, double complex\n");
+#endif
     printf("  • bool (uses int8_t evaluator)\n");
 
     return 0;
