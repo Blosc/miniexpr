@@ -84,16 +84,9 @@ int main() {
     me_variable vars[] = {{"x"}, {"y"}};
 
     int error;
-    me_expr *expr = me_compile("sin(x) * cos(y) + sqrt(x*x + y*y)",
-                               vars, 2, ME_FLOAT64, &error);
-
-    if (!expr) {
-        printf("Parse error at position %d\n", error);
-        free(x);
-        free(y);
-        free(result);
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("sin(x) * cos(y) + sqrt(x*x + y*y)",
+                               vars, 2, ME_FLOAT64, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     printf("Expression compiled successfully\n");
     printf("Starting parallel processing with %d threads...\n\n", NUM_THREADS);
@@ -248,12 +241,8 @@ int main() {
     me_variable vars[] = {{"x"}};
 
     int error;
-    me_expr *expr = me_compile("x*x + 2*x + 1", vars, 1, ME_FLOAT64, &error);
-
-    if (!expr) {
-        printf("Parse error\n");
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("x*x + 2*x + 1", vars, 1, ME_FLOAT64, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     // Set up work queue
     work_queue_t queue;
@@ -319,12 +308,8 @@ int main() {
     me_variable vars[] = {{"a"}, {"b"}};
 
     int error;
-    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error);
-
-    if (!expr) {
-        printf("Parse error\n");
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     printf("Processing %d elements with OpenMP...\n", TOTAL_SIZE);
 

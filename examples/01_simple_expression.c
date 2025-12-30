@@ -11,7 +11,6 @@
 #include "minctest.h"
 
 
-
 int main() {
     printf("=== Simple Expression Example ===\n");
     printf("Expression: (x + y) * 2\n\n");
@@ -27,15 +26,16 @@ int main() {
 
     // Compile the expression
     int error;
-    me_expr *expr = me_compile("(x + y) * 2", vars, 2, ME_FLOAT64, &error);
+    me_expr* expr = NULL;
+    int rc_expr = me_compile("(x + y) * 2", vars, 2, ME_FLOAT64, &error, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("ERROR: Failed to compile expression at position %d\n", error);
         return 1;
     }
 
     // Prepare variable pointers
-    const void *var_ptrs[] = {x, y};
+    const void* var_ptrs[] = {x, y};
 
     // Evaluate
     ME_EVAL_CHECK(expr, var_ptrs, 2, result, n);

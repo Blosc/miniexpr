@@ -59,8 +59,9 @@ void benchmark_threads(const char *expr_str, int total_size, int num_threads) {
     // Variables for compilation (just the names)
     me_variable vars[] = {{"a"}, {"b"}};
     int err;
-    me_expr *expr = me_compile(expr_str, vars, 2, ME_FLOAT64, &err);
-    if (!expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 2, ME_FLOAT64, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("Failed to compile\n");
         free(a);
         free(b);

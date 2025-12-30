@@ -18,7 +18,6 @@
 #include "minctest.h"
 
 
-
 int main() {
     printf("=== Example 8: Explicit Variable Types with Explicit Output Dtype ===\n\n");
 
@@ -42,9 +41,10 @@ int main() {
 
     int error;
     // Explicit variable types + explicit output dtype
-    me_expr *expr1 = me_compile("a + b", vars, 2, ME_FLOAT32, &error);
+    me_expr* expr1 = NULL;
+    int rc_expr1 = me_compile("a + b", vars, 2, ME_FLOAT32, &error, &expr1);
 
-    if (!expr1) {
+    if (rc_expr1 != ME_COMPILE_SUCCESS) {
         printf("ERROR: Failed to compile at position %d\n", error);
         return 1;
     }
@@ -54,7 +54,7 @@ int main() {
            output_dtype == ME_FLOAT32 ? "ME_FLOAT32 ✓" : "OTHER ✗");
     printf("\n");
 
-    const void *var_ptrs[] = {a, b};
+    const void* var_ptrs[] = {a, b};
     ME_EVAL_CHECK(expr1, var_ptrs, 2, result_f32, n);
 
     printf("Results (computed in FLOAT64, cast to FLOAT32):\n");
@@ -83,9 +83,10 @@ int main() {
     };
 
     // FLOAT32 variables but FLOAT64 output
-    me_expr *expr2 = me_compile("x * 2.5 + y", vars2, 2, ME_FLOAT64, &error);
+    me_expr* expr2 = NULL;
+    int rc_expr2 = me_compile("x * 2.5 + y", vars2, 2, ME_FLOAT64, &error, &expr2);
 
-    if (!expr2) {
+    if (rc_expr2 != ME_COMPILE_SUCCESS) {
         printf("ERROR: Failed to compile at position %d\n", error);
         return 1;
     }
@@ -95,7 +96,7 @@ int main() {
            output_dtype == ME_FLOAT64 ? "ME_FLOAT64 ✓" : "OTHER ✗");
     printf("\n");
 
-    const void *var_ptrs2[] = {x, y};
+    const void* var_ptrs2[] = {x, y};
     ME_EVAL_CHECK(expr2, var_ptrs2, 2, result_f64, n);
 
     printf("Results (computed in FLOAT32, cast to FLOAT64):\n");
@@ -124,9 +125,10 @@ int main() {
     };
 
     // Explicit BOOL output for comparison
-    me_expr *expr3 = me_compile("a > b", vars3, 2, ME_BOOL, &error);
+    me_expr* expr3 = NULL;
+    int rc_expr3 = me_compile("a > b", vars3, 2, ME_BOOL, &error, &expr3);
 
-    if (!expr3) {
+    if (rc_expr3 != ME_COMPILE_SUCCESS) {
         printf("ERROR: Failed to compile at position %d\n", error);
         return 1;
     }
@@ -136,7 +138,7 @@ int main() {
            output_dtype == ME_BOOL ? "ME_BOOL ✓" : "OTHER ✗");
     printf("\n");
 
-    const void *var_ptrs3[] = {a2, b2};
+    const void* var_ptrs3[] = {a2, b2};
     ME_EVAL_CHECK(expr3, var_ptrs3, 2, result_bool, n);
 
     printf("Results:\n");
@@ -158,4 +160,3 @@ int main() {
 
     return 0;
 }
-

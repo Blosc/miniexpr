@@ -67,15 +67,20 @@ For log = base 10 log comment the next line. */
 #define float_complex _Fcomplex
 #define double_complex _Dcomplex
 // And it doesn't support standard operators for them in C
-static inline _Fcomplex add_c64(_Fcomplex a, _Fcomplex b) { return _FCbuild(crealf(a) + crealf(b), cimagf(a) + cimagf(b)); }
-static inline _Fcomplex sub_c64(_Fcomplex a, _Fcomplex b) { return _FCbuild(crealf(a) - crealf(b), cimagf(a) - cimagf(b)); }
+static inline _Fcomplex add_c64(_Fcomplex a, _Fcomplex b) {
+    return _FCbuild(crealf(a) + crealf(b), cimagf(a) + cimagf(b));
+}
+static inline _Fcomplex sub_c64(_Fcomplex a, _Fcomplex b) {
+    return _FCbuild(crealf(a) - crealf(b), cimagf(a) - cimagf(b));
+}
 static inline _Fcomplex neg_c64(_Fcomplex a) { return _FCbuild(-crealf(a), -cimagf(a)); }
 static inline _Fcomplex mul_c64(_Fcomplex a, _Fcomplex b) {
     return _FCbuild(crealf(a) * crealf(b) - cimagf(a) * cimagf(b), crealf(a) * cimagf(b) + cimagf(a) * crealf(b));
 }
 static inline _Fcomplex div_c64(_Fcomplex a, _Fcomplex b) {
     float denom = crealf(b) * crealf(b) + cimagf(b) * cimagf(b);
-    return _FCbuild((crealf(a) * crealf(b) + cimagf(a) * cimagf(b)) / denom, (cimagf(a) * crealf(b) - crealf(a) * cimagf(b)) / denom);
+    return _FCbuild((crealf(a) * crealf(b) + cimagf(a) * cimagf(b)) / denom,
+                    (cimagf(a) * crealf(b) - crealf(a) * cimagf(b)) / denom);
 }
 static inline _Dcomplex add_c128(_Dcomplex a, _Dcomplex b) { return _Cbuild(creal(a) + creal(b), cimag(a) + cimag(b)); }
 static inline _Dcomplex sub_c128(_Dcomplex a, _Dcomplex b) { return _Cbuild(creal(a) - creal(b), cimag(a) - cimag(b)); }
@@ -85,7 +90,8 @@ static inline _Dcomplex mul_c128(_Dcomplex a, _Dcomplex b) {
 }
 static inline _Dcomplex div_c128(_Dcomplex a, _Dcomplex b) {
     double denom = creal(b) * creal(b) + cimag(b) * cimag(b);
-    return _Cbuild((creal(a) * creal(b) + cimag(a) * cimag(b)) / denom, (cimag(a) * creal(b) - creal(a) * cimag(b)) / denom);
+    return _Cbuild((creal(a) * creal(b) + cimag(a) * cimag(b)) / denom,
+                   (cimag(a) * creal(b) - creal(a) * cimag(b)) / denom);
 }
 #else
 #define float_complex float _Complex
@@ -105,91 +111,157 @@ static inline _Dcomplex div_c128(_Dcomplex a, _Dcomplex b) {
 #if defined(_MSC_VER) && !defined(__clang__)
 /* Wrappers for complex functions to handle MSVC's _Fcomplex/_Dcomplex */
 static inline float _Complex me_cpowf(float _Complex a, float _Complex b) {
-    union { float _Complex c; _Fcomplex m; } ua, ub, ur;
-    ua.c = a; ub.c = b;
+    union
+    {
+        float _Complex c;
+        _Fcomplex m;
+    } ua, ub, ur;
+    ua.c = a;
+    ub.c = b;
     ur.m = cpowf(ua.m, ub.m);
     return ur.c;
 }
 static inline double _Complex me_cpow(double _Complex a, double _Complex b) {
-    union { double _Complex c; _Dcomplex m; } ua, ub, ur;
-    ua.c = a; ub.c = b;
+    union
+    {
+        double _Complex c;
+        _Dcomplex m;
+    } ua, ub, ur;
+    ua.c = a;
+    ub.c = b;
     ur.m = cpow(ua.m, ub.m);
     return ur.c;
 }
 static inline float _Complex me_csqrtf(float _Complex a) {
-    union { float _Complex c; _Fcomplex m; } ua, ur;
+    union
+    {
+        float _Complex c;
+        _Fcomplex m;
+    } ua, ur;
     ua.c = a;
     ur.m = csqrtf(ua.m);
     return ur.c;
 }
 static inline double _Complex me_csqrt(double _Complex a) {
-    union { double _Complex c; _Dcomplex m; } ua, ur;
+    union
+    {
+        double _Complex c;
+        _Dcomplex m;
+    } ua, ur;
     ua.c = a;
     ur.m = csqrt(ua.m);
     return ur.c;
 }
 static inline float _Complex me_cexpf(float _Complex a) {
-    union { float _Complex c; _Fcomplex m; } ua, ur;
+    union
+    {
+        float _Complex c;
+        _Fcomplex m;
+    } ua, ur;
     ua.c = a;
     ur.m = cexpf(ua.m);
     return ur.c;
 }
 static inline double _Complex me_cexp(double _Complex a) {
-    union { double _Complex c; _Dcomplex m; } ua, ur;
+    union
+    {
+        double _Complex c;
+        _Dcomplex m;
+    } ua, ur;
     ua.c = a;
     ur.m = cexp(ua.m);
     return ur.c;
 }
 static inline float _Complex me_clogf(float _Complex a) {
-    union { float _Complex c; _Fcomplex m; } ua, ur;
+    union
+    {
+        float _Complex c;
+        _Fcomplex m;
+    } ua, ur;
     ua.c = a;
     ur.m = clogf(ua.m);
     return ur.c;
 }
 static inline double _Complex me_clog(double _Complex a) {
-    union { double _Complex c; _Dcomplex m; } ua, ur;
+    union
+    {
+        double _Complex c;
+        _Dcomplex m;
+    } ua, ur;
     ua.c = a;
     ur.m = clog(ua.m);
     return ur.c;
 }
 static inline float me_cabsf(float _Complex a) {
-    union { float _Complex c; _Fcomplex m; } ua;
+    union
+    {
+        float _Complex c;
+        _Fcomplex m;
+    } ua;
     ua.c = a;
     return cabsf(ua.m);
 }
 static inline double me_cabs(double _Complex a) {
-    union { double _Complex c; _Dcomplex m; } ua;
+    union
+    {
+        double _Complex c;
+        _Dcomplex m;
+    } ua;
     ua.c = a;
     return cabs(ua.m);
 }
 static inline float me_cimagf(float _Complex a) {
-    union { float _Complex c; _Fcomplex m; } ua;
+    union
+    {
+        float _Complex c;
+        _Fcomplex m;
+    } ua;
     ua.c = a;
     return cimagf(ua.m);
 }
 static inline double me_cimag(double _Complex a) {
-    union { double _Complex c; _Dcomplex m; } ua;
+    union
+    {
+        double _Complex c;
+        _Dcomplex m;
+    } ua;
     ua.c = a;
     return cimag(ua.m);
 }
 static inline float me_crealf(float _Complex a) {
-    union { float _Complex c; _Fcomplex m; } ua;
+    union
+    {
+        float _Complex c;
+        _Fcomplex m;
+    } ua;
     ua.c = a;
     return crealf(ua.m);
 }
 static inline double me_creal(double _Complex a) {
-    union { double _Complex c; _Dcomplex m; } ua;
+    union
+    {
+        double _Complex c;
+        _Dcomplex m;
+    } ua;
     ua.c = a;
     return creal(ua.m);
 }
 static inline float _Complex me_conjf(float _Complex a) {
-    union { float _Complex c; _Fcomplex m; } ua, ur;
+    union
+    {
+        float _Complex c;
+        _Fcomplex m;
+    } ua, ur;
     ua.c = a;
     ur.m = conjf(ua.m);
     return ur.c;
 }
 static inline double _Complex me_conj(double _Complex a) {
-    union { double _Complex c; _Dcomplex m; } ua, ur;
+    union
+    {
+        double _Complex c;
+        _Dcomplex m;
+    } ua, ur;
     ua.c = a;
     ur.m = conj(ua.m);
     return ur.c;
@@ -304,35 +376,38 @@ static inline double _Complex me_conj(double _Complex a) {
 typedef double (*me_fun2)(double, double);
 
 #if defined(_WIN32) || defined(_WIN64)
-static bool has_complex_node(const me_expr *n);
-static bool has_complex_input(const me_expr *n);
+static bool has_complex_node(const me_expr* n);
+static bool has_complex_input(const me_expr* n);
 #endif
 
-enum {
+enum
+{
     TOK_NULL = ME_CLOSURE7 + 1, TOK_ERROR, TOK_END, TOK_SEP,
     TOK_OPEN, TOK_CLOSE, TOK_NUMBER, TOK_VARIABLE, TOK_INFIX,
     TOK_BITWISE, TOK_SHIFT, TOK_COMPARE, TOK_POW
 };
 
 /* Internal definition of me_expr (opaque to users) */
-struct me_expr {
+struct me_expr
+{
     int type;
 
-    union {
+    union
+    {
         double value;
-        const void *bound;
-        const void *function;
+        const void* bound;
+        const void* function;
     };
 
     /* Vector operation info */
-    void *output; // Generic pointer (can be float* or double*)
+    void* output; // Generic pointer (can be float* or double*)
     int nitems;
     me_dtype dtype; // Data type for this expression (result type after promotion)
     me_dtype input_dtype; // Original input type (for variables/constants)
     /* Bytecode info (for fused evaluation) */
-    void *bytecode; // Pointer to compiled bytecode
+    void* bytecode; // Pointer to compiled bytecode
     int ncode; // Number of instructions
-    void *parameters[1]; // Must be last (flexible array member)
+    void* parameters[1]; // Must be last (flexible array member)
 };
 
 
@@ -445,20 +520,20 @@ static me_dtype reduction_output_dtype(me_dtype dt) {
 /* Get size of a type in bytes */
 static size_t dtype_size(me_dtype dtype) {
     switch (dtype) {
-        case ME_BOOL: return sizeof(bool);
-        case ME_INT8: return sizeof(int8_t);
-        case ME_INT16: return sizeof(int16_t);
-        case ME_INT32: return sizeof(int32_t);
-        case ME_INT64: return sizeof(int64_t);
-        case ME_UINT8: return sizeof(uint8_t);
-        case ME_UINT16: return sizeof(uint16_t);
-        case ME_UINT32: return sizeof(uint32_t);
-        case ME_UINT64: return sizeof(uint64_t);
-        case ME_FLOAT32: return sizeof(float);
-        case ME_FLOAT64: return sizeof(double);
-        case ME_COMPLEX64: return sizeof(float _Complex);
-        case ME_COMPLEX128: return sizeof(double _Complex);
-        default: return 0;
+    case ME_BOOL: return sizeof(bool);
+    case ME_INT8: return sizeof(int8_t);
+    case ME_INT16: return sizeof(int16_t);
+    case ME_INT32: return sizeof(int32_t);
+    case ME_INT64: return sizeof(int64_t);
+    case ME_UINT8: return sizeof(uint8_t);
+    case ME_UINT16: return sizeof(uint16_t);
+    case ME_UINT32: return sizeof(uint32_t);
+    case ME_UINT64: return sizeof(uint64_t);
+    case ME_FLOAT32: return sizeof(float);
+    case ME_FLOAT64: return sizeof(double);
+    case ME_COMPLEX64: return sizeof(float _Complex);
+    case ME_COMPLEX128: return sizeof(double _Complex);
+    default: return 0;
     }
 }
 
@@ -466,22 +541,24 @@ static size_t dtype_size(me_dtype dtype) {
 enum { ME_CONSTANT = 1 };
 
 
-typedef struct state {
-    const char *start;
-    const char *next;
+typedef struct state
+{
+    const char* start;
+    const char* next;
     int type;
 
-    union {
+    union
+    {
         double value;
-        const double *bound;
-        const void *function;
+        const double* bound;
+        const void* function;
     };
 
-    void *context;
+    void* context;
     me_dtype dtype; // Type of current token
     me_dtype target_dtype; // Target dtype for the overall expression
 
-    const me_variable *lookup;
+    const me_variable* lookup;
     int lookup_len;
 } state;
 
@@ -496,7 +573,7 @@ typedef struct state {
 #define CHECK_NULL(ptr, ...) if ((ptr) == NULL) { __VA_ARGS__; return NULL; }
 
 /* Forward declarations */
-static me_expr *new_expr(const int type, const me_expr *parameters[]);
+static me_expr* new_expr(const int type, const me_expr* parameters[]);
 static double conj_wrapper(double x);
 static double imag_wrapper(double x);
 static double real_wrapper(double x);
@@ -508,94 +585,97 @@ static double square(double x);
 static double trunc_wrapper(double x);
 static double where_scalar(double c, double x, double y);
 
-static bool is_reduction_function(const void *func) {
-    return func == (void *)sum_reduce || func == (void *)prod_reduce;
+static bool is_reduction_function(const void* func) {
+    return func == (void*)sum_reduce || func == (void*)prod_reduce;
 }
 
-static bool is_reduction_node(const me_expr *n) {
+static bool is_reduction_node(const me_expr* n) {
     return n && IS_FUNCTION(n->type) && ARITY(n->type) == 1 &&
-           is_reduction_function(n->function);
+        is_reduction_function(n->function);
 }
 
-static bool contains_reduction(const me_expr *n) {
+static bool contains_reduction(const me_expr* n) {
     if (!n) return false;
     if (is_reduction_node(n)) return true;
 
     switch (TYPE_MASK(n->type)) {
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
             const int arity = ARITY(n->type);
             for (int i = 0; i < arity; i++) {
-                if (contains_reduction((const me_expr *) n->parameters[i])) {
+                if (contains_reduction((const me_expr*)n->parameters[i])) {
                     return true;
                 }
             }
             return false;
         }
-        default:
-            return false;
+    default:
+        return false;
     }
 }
 
-static bool reduction_usage_is_valid(const me_expr *n) {
+static bool reduction_usage_is_valid(const me_expr* n) {
     if (!is_reduction_node(n)) return false;
-    me_expr *arg = (me_expr *) n->parameters[0];
+    me_expr* arg = (me_expr*)n->parameters[0];
     if (!arg) return false;
     return TYPE_MASK(arg->type) == ME_VARIABLE || TYPE_MASK(arg->type) == ME_CONSTANT;
 }
 
 /* Infer computation type from expression tree (for evaluation) */
-static me_dtype infer_result_type(const me_expr *n) {
+static me_dtype infer_result_type(const me_expr* n) {
     if (!n) return ME_FLOAT64;
 
     switch (TYPE_MASK(n->type)) {
-        case ME_CONSTANT:
-            return n->dtype;
+    case ME_CONSTANT:
+        return n->dtype;
 
-        case ME_VARIABLE:
-            return n->dtype;
+    case ME_VARIABLE:
+        return n->dtype;
 
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
             if (is_reduction_node(n)) {
-                me_dtype param_type = infer_result_type((const me_expr *) n->parameters[0]);
+                me_dtype param_type = infer_result_type((const me_expr*)n->parameters[0]);
                 return reduction_output_dtype(param_type);
             }
             // Special case: imag() and real() return real type from complex input
             if (IS_FUNCTION(n->type) && ARITY(n->type) == 1) {
                 if (n->function == (void*)imag_wrapper || n->function == (void*)real_wrapper) {
-                    me_dtype param_type = infer_result_type((const me_expr *) n->parameters[0]);
+                    me_dtype param_type = infer_result_type((const me_expr*)n->parameters[0]);
                     if (param_type == ME_COMPLEX64) {
                         return ME_FLOAT32;
-                    } else if (param_type == ME_COMPLEX128) {
+                    }
+                    else if (param_type == ME_COMPLEX128) {
                         return ME_FLOAT64;
                     }
                     // If input is not complex, return as-is (shouldn't happen, but be safe)
@@ -612,7 +692,7 @@ static me_dtype infer_result_type(const me_expr *n) {
             me_dtype result = ME_BOOL;
 
             for (int i = 0; i < arity; i++) {
-                me_dtype param_type = infer_result_type((const me_expr *) n->parameters[i]);
+                me_dtype param_type = infer_result_type((const me_expr*)n->parameters[i]);
                 result = promote_types(result, param_type);
             }
 
@@ -624,43 +704,45 @@ static me_dtype infer_result_type(const me_expr *n) {
 }
 
 /* Infer logical output type from expression tree (for compilation with ME_AUTO) */
-static me_dtype infer_output_type(const me_expr *n) {
+static me_dtype infer_output_type(const me_expr* n) {
     if (!n) return ME_FLOAT64;
 
     switch (TYPE_MASK(n->type)) {
-        case ME_CONSTANT:
-            return n->dtype;
+    case ME_CONSTANT:
+        return n->dtype;
 
-        case ME_VARIABLE:
-            return n->dtype;
+    case ME_VARIABLE:
+        return n->dtype;
 
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
             if (is_reduction_node(n)) {
-                me_dtype param_type = infer_output_type((const me_expr *) n->parameters[0]);
+                me_dtype param_type = infer_output_type((const me_expr*)n->parameters[0]);
                 return reduction_output_dtype(param_type);
             }
             // Special case: imag() and real() return real type from complex input
             if (IS_FUNCTION(n->type) && ARITY(n->type) == 1) {
                 if (n->function == (void*)imag_wrapper || n->function == (void*)real_wrapper) {
-                    me_dtype param_type = infer_output_type((const me_expr *) n->parameters[0]);
+                    me_dtype param_type = infer_output_type((const me_expr*)n->parameters[0]);
                     if (param_type == ME_COMPLEX64) {
                         return ME_FLOAT32;
-                    } else if (param_type == ME_COMPLEX128) {
+                    }
+                    else if (param_type == ME_COMPLEX128) {
                         return ME_FLOAT64;
                     }
                     // If input is not complex, return as-is (shouldn't happen, but be safe)
@@ -671,8 +753,8 @@ static me_dtype infer_output_type(const me_expr *n) {
             // Special case: where(cond, x, y) -> promote(x, y), regardless of cond type.
             if (IS_FUNCTION(n->type) && ARITY(n->type) == 3 &&
                 n->function == (void*)where_scalar) {
-                me_dtype x_type = infer_output_type((const me_expr *) n->parameters[1]);
-                me_dtype y_type = infer_output_type((const me_expr *) n->parameters[2]);
+                me_dtype x_type = infer_output_type((const me_expr*)n->parameters[1]);
+                me_dtype y_type = infer_output_type((const me_expr*)n->parameters[2]);
                 return promote_types(x_type, y_type);
             }
 
@@ -687,7 +769,7 @@ static me_dtype infer_output_type(const me_expr *n) {
             me_dtype result = ME_BOOL;
 
             for (int i = 0; i < arity; i++) {
-                me_dtype param_type = infer_output_type((const me_expr *) n->parameters[i]);
+                me_dtype param_type = infer_output_type((const me_expr*)n->parameters[i]);
                 result = promote_types(result, param_type);
             }
 
@@ -699,9 +781,9 @@ static me_dtype infer_output_type(const me_expr *n) {
 }
 
 /* Apply type promotion to a binary operation node */
-static me_expr *create_conversion_node(me_expr *source, me_dtype target_dtype) {
+static me_expr* create_conversion_node(me_expr* source, me_dtype target_dtype) {
     /* Create a unary conversion node that converts source to target_dtype */
-    me_expr *conv = NEW_EXPR(ME_FUNCTION1 | ME_FLAG_PURE, source);
+    me_expr* conv = NEW_EXPR(ME_FUNCTION1 | ME_FLAG_PURE, source);
     if (conv) {
         conv->function = NULL; // Mark as conversion
         conv->dtype = target_dtype;
@@ -710,11 +792,11 @@ static me_expr *create_conversion_node(me_expr *source, me_dtype target_dtype) {
     return conv;
 }
 
-static void apply_type_promotion(me_expr *node) {
+static void apply_type_promotion(me_expr* node) {
     if (!node || ARITY(node->type) < 2) return;
 
-    me_expr *left = (me_expr *) node->parameters[0];
-    me_expr *right = (me_expr *) node->parameters[1];
+    me_expr* left = (me_expr*)node->parameters[0];
+    me_expr* right = (me_expr*)node->parameters[1];
 
     if (left && right) {
         me_dtype left_type = left->dtype;
@@ -745,11 +827,11 @@ static void apply_type_promotion(me_expr *node) {
     }
 }
 
-static me_expr *new_expr(const int type, const me_expr *parameters[]) {
+static me_expr* new_expr(const int type, const me_expr* parameters[]) {
     const int arity = ARITY(type);
-    const int psize = sizeof(void *) * arity;
-    const int size = (sizeof(me_expr) - sizeof(void *)) + psize + (IS_CLOSURE(type) ? sizeof(void *) : 0);
-    me_expr *ret = malloc(size);
+    const int psize = sizeof(void*) * arity;
+    const int size = (sizeof(me_expr) - sizeof(void*)) + psize + (IS_CLOSURE(type) ? sizeof(void*) : 0);
+    me_expr* ret = malloc(size);
     CHECK_NULL(ret);
 
     memset(ret, 0, size);
@@ -767,63 +849,63 @@ static me_expr *new_expr(const int type, const me_expr *parameters[]) {
 }
 
 
-void me_free_parameters(me_expr *n) {
+void me_free_parameters(me_expr* n) {
     if (!n) return;
     switch (TYPE_MASK(n->type)) {
-        case ME_FUNCTION7:
-        case ME_CLOSURE7:
-            if (n->parameters[6] && ((me_expr *) n->parameters[6])->output &&
-                ((me_expr *) n->parameters[6])->output != n->output) {
-                free(((me_expr *) n->parameters[6])->output);
-            }
-            me_free(n->parameters[6]);
-        case ME_FUNCTION6:
-        case ME_CLOSURE6:
-            if (n->parameters[5] && ((me_expr *) n->parameters[5])->output &&
-                ((me_expr *) n->parameters[5])->output != n->output) {
-                free(((me_expr *) n->parameters[5])->output);
-            }
-            me_free(n->parameters[5]);
-        case ME_FUNCTION5:
-        case ME_CLOSURE5:
-            if (n->parameters[4] && ((me_expr *) n->parameters[4])->output &&
-                ((me_expr *) n->parameters[4])->output != n->output) {
-                free(((me_expr *) n->parameters[4])->output);
-            }
-            me_free(n->parameters[4]);
-        case ME_FUNCTION4:
-        case ME_CLOSURE4:
-            if (n->parameters[3] && ((me_expr *) n->parameters[3])->output &&
-                ((me_expr *) n->parameters[3])->output != n->output) {
-                free(((me_expr *) n->parameters[3])->output);
-            }
-            me_free(n->parameters[3]);
-        case ME_FUNCTION3:
-        case ME_CLOSURE3:
-            if (n->parameters[2] && ((me_expr *) n->parameters[2])->output &&
-                ((me_expr *) n->parameters[2])->output != n->output) {
-                free(((me_expr *) n->parameters[2])->output);
-            }
-            me_free(n->parameters[2]);
-        case ME_FUNCTION2:
-        case ME_CLOSURE2:
-            if (n->parameters[1] && ((me_expr *) n->parameters[1])->output &&
-                ((me_expr *) n->parameters[1])->output != n->output) {
-                free(((me_expr *) n->parameters[1])->output);
-            }
-            me_free(n->parameters[1]);
-        case ME_FUNCTION1:
-        case ME_CLOSURE1:
-            if (n->parameters[0] && ((me_expr *) n->parameters[0])->output &&
-                ((me_expr *) n->parameters[0])->output != n->output) {
-                free(((me_expr *) n->parameters[0])->output);
-            }
-            me_free(n->parameters[0]);
+    case ME_FUNCTION7:
+    case ME_CLOSURE7:
+        if (n->parameters[6] && ((me_expr*)n->parameters[6])->output &&
+            ((me_expr*)n->parameters[6])->output != n->output) {
+            free(((me_expr*)n->parameters[6])->output);
+        }
+        me_free(n->parameters[6]);
+    case ME_FUNCTION6:
+    case ME_CLOSURE6:
+        if (n->parameters[5] && ((me_expr*)n->parameters[5])->output &&
+            ((me_expr*)n->parameters[5])->output != n->output) {
+            free(((me_expr*)n->parameters[5])->output);
+        }
+        me_free(n->parameters[5]);
+    case ME_FUNCTION5:
+    case ME_CLOSURE5:
+        if (n->parameters[4] && ((me_expr*)n->parameters[4])->output &&
+            ((me_expr*)n->parameters[4])->output != n->output) {
+            free(((me_expr*)n->parameters[4])->output);
+        }
+        me_free(n->parameters[4]);
+    case ME_FUNCTION4:
+    case ME_CLOSURE4:
+        if (n->parameters[3] && ((me_expr*)n->parameters[3])->output &&
+            ((me_expr*)n->parameters[3])->output != n->output) {
+            free(((me_expr*)n->parameters[3])->output);
+        }
+        me_free(n->parameters[3]);
+    case ME_FUNCTION3:
+    case ME_CLOSURE3:
+        if (n->parameters[2] && ((me_expr*)n->parameters[2])->output &&
+            ((me_expr*)n->parameters[2])->output != n->output) {
+            free(((me_expr*)n->parameters[2])->output);
+        }
+        me_free(n->parameters[2]);
+    case ME_FUNCTION2:
+    case ME_CLOSURE2:
+        if (n->parameters[1] && ((me_expr*)n->parameters[1])->output &&
+            ((me_expr*)n->parameters[1])->output != n->output) {
+            free(((me_expr*)n->parameters[1])->output);
+        }
+        me_free(n->parameters[1]);
+    case ME_FUNCTION1:
+    case ME_CLOSURE1:
+        if (n->parameters[0] && ((me_expr*)n->parameters[0])->output &&
+            ((me_expr*)n->parameters[0])->output != n->output) {
+            free(((me_expr*)n->parameters[0])->output);
+        }
+        me_free(n->parameters[0]);
     }
 }
 
 
-void me_free(me_expr *n) {
+void me_free(me_expr* n) {
     if (!n) return;
     me_free_parameters(n);
     if (n->bytecode) {
@@ -848,7 +930,7 @@ static double log2_wrapper(double x) { return log2(x); }
 /* logaddexp: log(exp(a) + exp(b)), numerically stable */
 static double logaddexp(double a, double b) {
     if (a == b) {
-        return a + log1p(1.0);  // log(2*exp(a)) = a + log(2)
+        return a + log1p(1.0); // log(2*exp(a)) = a + log(2)
     }
     double max_val = (a > b) ? a : b;
     double min_val = (a > b) ? b : a;
@@ -896,20 +978,20 @@ static double fac(double a) {
         return NAN;
     if (a > UINT_MAX)
         return INFINITY;
-    unsigned int ua = (unsigned int) (a);
+    unsigned int ua = (unsigned int)(a);
     unsigned long int result = 1, i;
     for (i = 1; i <= ua; i++) {
         if (i > ULONG_MAX / result)
             return INFINITY;
         result *= i;
     }
-    return (double) result;
+    return (double)result;
 }
 
 static double ncr(double n, double r) {
     if (n < 0.0 || r < 0.0 || n < r) return NAN;
     if (n > UINT_MAX || r > UINT_MAX) return INFINITY;
-    unsigned long int un = (unsigned int) (n), ur = (unsigned int) (r), i;
+    unsigned long int un = (unsigned int)(n), ur = (unsigned int)(r), i;
     unsigned long int result = 1;
     if (ur > un / 2) ur = un - ur;
     for (i = 1; i <= ur; i++) {
@@ -986,7 +1068,7 @@ static const me_variable functions[] = {
     {0, 0, 0, 0, 0}
 };
 
-static const me_variable *find_builtin(const char *name, int len) {
+static const me_variable* find_builtin(const char* name, int len) {
     int imin = 0;
     int imax = sizeof(functions) / sizeof(me_variable) - 2;
 
@@ -997,9 +1079,11 @@ static const me_variable *find_builtin(const char *name, int len) {
         if (!c) c = '\0' - functions[i].name[len];
         if (c == 0) {
             return functions + i;
-        } else if (c > 0) {
+        }
+        else if (c > 0) {
             imin = i + 1;
-        } else {
+        }
+        else {
             imax = i - 1;
         }
     }
@@ -1007,9 +1091,9 @@ static const me_variable *find_builtin(const char *name, int len) {
     return 0;
 }
 
-static const me_variable *find_lookup(const state *s, const char *name, int len) {
+static const me_variable* find_lookup(const state* s, const char* name, int len) {
     int iters;
-    const me_variable *var;
+    const me_variable* var;
     if (!s->lookup) return 0;
 
     for (var = s->lookup, iters = s->lookup_len; iters; ++var, --iters) {
@@ -1032,17 +1116,17 @@ static double sum_reduce(double x) { return x + sum_salt; }
 static double prod_reduce(double x) { return x * prod_salt; }
 
 static double comma(double a, double b) {
-    (void) a;
+    (void)a;
     return b;
 }
 
 /* Bitwise operators (for integer types) */
-static double bit_and(double a, double b) { return (double) ((int64_t) a & (int64_t) b); }
-static double bit_or(double a, double b) { return (double) ((int64_t) a | (int64_t) b); }
-static double bit_xor(double a, double b) { return (double) ((int64_t) a ^ (int64_t) b); }
-static double bit_not(double a) { return (double) (~(int64_t) a); }
-static double bit_shl(double a, double b) { return (double) ((int64_t) a << (int64_t) b); }
-static double bit_shr(double a, double b) { return (double) ((int64_t) a >> (int64_t) b); }
+static double bit_and(double a, double b) { return (double)((int64_t)a & (int64_t)b); }
+static double bit_or(double a, double b) { return (double)((int64_t)a | (int64_t)b); }
+static double bit_xor(double a, double b) { return (double)((int64_t)a ^ (int64_t)b); }
+static double bit_not(double a) { return (double)(~(int64_t)a); }
+static double bit_shl(double a, double b) { return (double)((int64_t)a << (int64_t)b); }
+static double bit_shr(double a, double b) { return (double)((int64_t)a >> (int64_t)b); }
 
 /* Comparison operators (return 1.0 for true, 0.0 for false) */
 static double cmp_eq(double a, double b) { return a == b ? 1.0 : 0.0; }
@@ -1053,33 +1137,33 @@ static double cmp_gt(double a, double b) { return a > b ? 1.0 : 0.0; }
 static double cmp_ge(double a, double b) { return a >= b ? 1.0 : 0.0; }
 
 /* Logical operators (for bool type) - short-circuit via OR/AND */
-static double logical_and(double a, double b) { return ((int) a) && ((int) b) ? 1.0 : 0.0; }
-static double logical_or(double a, double b) { return ((int) a) || ((int) b) ? 1.0 : 0.0; }
-static double logical_not(double a) { return !(int) a ? 1.0 : 0.0; }
-static double logical_xor(double a, double b) { return ((int) a) != ((int) b) ? 1.0 : 0.0; }
+static double logical_and(double a, double b) { return ((int)a) && ((int)b) ? 1.0 : 0.0; }
+static double logical_or(double a, double b) { return ((int)a) || ((int)b) ? 1.0 : 0.0; }
+static double logical_not(double a) { return !(int)a ? 1.0 : 0.0; }
+static double logical_xor(double a, double b) { return ((int)a) != ((int)b) ? 1.0 : 0.0; }
 
 static bool is_identifier_start(char c) {
-    return isalpha((unsigned char) c) || c == '_';
+    return isalpha((unsigned char)c) || c == '_';
 }
 
 static bool is_identifier_char(char c) {
-    return isalnum((unsigned char) c) || c == '_';
+    return isalnum((unsigned char)c) || c == '_';
 }
 
-static void skip_whitespace(state *s) {
-    while (*s->next && isspace((unsigned char) *s->next)) {
+static void skip_whitespace(state* s) {
+    while (*s->next && isspace((unsigned char)*s->next)) {
         s->next++;
     }
 }
 
-static void read_number_token(state *s) {
-    const char *start = s->next;
-    s->value = strtod(s->next, (char **) &s->next);
+static void read_number_token(state* s) {
+    const char* start = s->next;
+    s->value = strtod(s->next, (char**)&s->next);
     s->type = TOK_NUMBER;
 
     // Determine if it is a floating point or integer constant
     bool is_float = false;
-    for (const char *p = start; p < s->next; p++) {
+    for (const char* p = start; p < s->next; p++) {
         if (*p == '.' || *p == 'e' || *p == 'E') {
             is_float = true;
             break;
@@ -1091,31 +1175,35 @@ static void read_number_token(state *s) {
         // This ensures FLOAT32 arrays + float constants -> FLOAT32 (NumPy behavior)
         if (s->target_dtype == ME_FLOAT32) {
             s->dtype = ME_FLOAT32;
-        } else {
+        }
+        else {
             s->dtype = ME_FLOAT64;
         }
-    } else {
+    }
+    else {
         // For integers, we use a heuristic
         if (s->value > INT_MAX || s->value < INT_MIN) {
             s->dtype = ME_INT64;
-        } else {
+        }
+        else {
             // Use target_dtype if it's an integer type, otherwise default to INT32
             if (is_integer_dtype(s->target_dtype)) {
                 s->dtype = s->target_dtype;
-            } else {
+            }
+            else {
                 s->dtype = ME_INT32;
             }
         }
     }
 }
 
-static void read_identifier_token(state *s) {
-    const char *start = s->next;
+static void read_identifier_token(state* s) {
+    const char* start = s->next;
     while (is_identifier_char(*s->next)) {
         s->next++;
     }
 
-    const me_variable *var = find_lookup(s, start, s->next - start);
+    const me_variable* var = find_lookup(s, start, s->next - start);
     if (!var) {
         var = find_builtin(start, s->next - start);
     }
@@ -1126,43 +1214,44 @@ static void read_identifier_token(state *s) {
     }
 
     switch (TYPE_MASK(var->type)) {
-        case ME_VARIABLE:
-            s->type = TOK_VARIABLE;
-            s->bound = var->address;
-            s->dtype = var->dtype;
-            break;
+    case ME_VARIABLE:
+        s->type = TOK_VARIABLE;
+        s->bound = var->address;
+        s->dtype = var->dtype;
+        break;
 
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7:
-            s->context = var->context;
-        /* Falls through. */
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-            s->type = var->type;
-            s->function = var->address;
-            break;
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        s->context = var->context;
+    /* Falls through. */
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+        s->type = var->type;
+        s->function = var->address;
+        break;
     }
 }
 
-typedef struct {
-    const char *literal;
+typedef struct
+{
+    const char* literal;
     int token_type;
     me_fun2 function;
 } operator_spec;
 
-static bool handle_multi_char_operator(state *s) {
+static bool handle_multi_char_operator(state* s) {
     static const operator_spec multi_ops[] = {
         {"**", TOK_POW, pow},
         {"<<", TOK_SHIFT, bit_shl},
@@ -1174,7 +1263,7 @@ static bool handle_multi_char_operator(state *s) {
     };
 
     for (size_t i = 0; i < sizeof(multi_ops) / sizeof(multi_ops[0]); i++) {
-        const operator_spec *op = &multi_ops[i];
+        const operator_spec* op = &multi_ops[i];
         size_t len = strlen(op->literal);
         if (strncmp(s->next, op->literal, len) == 0) {
             s->type = op->token_type;
@@ -1186,54 +1275,54 @@ static bool handle_multi_char_operator(state *s) {
     return false;
 }
 
-static void handle_single_char_operator(state *s, char c) {
+static void handle_single_char_operator(state* s, char c) {
     s->next++;
     switch (c) {
-        case '+': s->type = TOK_INFIX;
-            s->function = add;
-            break;
-        case '-': s->type = TOK_INFIX;
-            s->function = sub;
-            break;
-        case '*': s->type = TOK_INFIX;
-            s->function = mul;
-            break;
-        case '/': s->type = TOK_INFIX;
-            s->function = divide;
-            break;
-        case '%': s->type = TOK_INFIX;
-            s->function = fmod;
-            break;
-        case '&': s->type = TOK_BITWISE;
-            s->function = bit_and;
-            break;
-        case '|': s->type = TOK_BITWISE;
-            s->function = bit_or;
-            break;
-        case '^': s->type = TOK_BITWISE;
-            s->function = bit_xor;
-            break;
-        case '~': s->type = TOK_BITWISE;
-            s->function = bit_not;
-            break;
-        case '<': s->type = TOK_COMPARE;
-            s->function = cmp_lt;
-            break;
-        case '>': s->type = TOK_COMPARE;
-            s->function = cmp_gt;
-            break;
-        case '(': s->type = TOK_OPEN;
-            break;
-        case ')': s->type = TOK_CLOSE;
-            break;
-        case ',': s->type = TOK_SEP;
-            break;
-        default: s->type = TOK_ERROR;
-            break;
+    case '+': s->type = TOK_INFIX;
+        s->function = add;
+        break;
+    case '-': s->type = TOK_INFIX;
+        s->function = sub;
+        break;
+    case '*': s->type = TOK_INFIX;
+        s->function = mul;
+        break;
+    case '/': s->type = TOK_INFIX;
+        s->function = divide;
+        break;
+    case '%': s->type = TOK_INFIX;
+        s->function = fmod;
+        break;
+    case '&': s->type = TOK_BITWISE;
+        s->function = bit_and;
+        break;
+    case '|': s->type = TOK_BITWISE;
+        s->function = bit_or;
+        break;
+    case '^': s->type = TOK_BITWISE;
+        s->function = bit_xor;
+        break;
+    case '~': s->type = TOK_BITWISE;
+        s->function = bit_not;
+        break;
+    case '<': s->type = TOK_COMPARE;
+        s->function = cmp_lt;
+        break;
+    case '>': s->type = TOK_COMPARE;
+        s->function = cmp_gt;
+        break;
+    case '(': s->type = TOK_OPEN;
+        break;
+    case ')': s->type = TOK_CLOSE;
+        break;
+    case ',': s->type = TOK_SEP;
+        break;
+    default: s->type = TOK_ERROR;
+        break;
     }
 }
 
-static void read_operator_token(state *s) {
+static void read_operator_token(state* s) {
     if (handle_multi_char_operator(s)) {
         return;
     }
@@ -1246,7 +1335,7 @@ static void read_operator_token(state *s) {
     handle_single_char_operator(s, *s->next);
 }
 
-void next_token(state *s) {
+void next_token(state* s) {
     s->type = TOK_NULL;
 
     do {
@@ -1259,176 +1348,187 @@ void next_token(state *s) {
 
         if ((s->next[0] >= '0' && s->next[0] <= '9') || s->next[0] == '.') {
             read_number_token(s);
-        } else if (is_identifier_start(s->next[0])) {
+        }
+        else if (is_identifier_start(s->next[0])) {
             read_identifier_token(s);
-        } else {
+        }
+        else {
             read_operator_token(s);
         }
-    } while (s->type == TOK_NULL);
+    }
+    while (s->type == TOK_NULL);
 }
 
 
-static me_expr *list(state *s);
+static me_expr* list(state* s);
 
-static me_expr *expr(state *s);
+static me_expr* expr(state* s);
 
-static me_expr *power(state *s);
+static me_expr* power(state* s);
 
-static me_expr *shift_expr(state *s);
+static me_expr* shift_expr(state* s);
 
-static me_expr *bitwise_and(state *s);
+static me_expr* bitwise_and(state* s);
 
-static me_expr *bitwise_xor(state *s);
+static me_expr* bitwise_xor(state* s);
 
-static me_expr *bitwise_or(state *s);
+static me_expr* bitwise_or(state* s);
 
-static me_expr *comparison(state *s);
+static me_expr* comparison(state* s);
 
 
-static me_expr *base(state *s) {
+static me_expr* base(state* s) {
     /* <base>      =    <constant> | <variable> | <function-0> {"(" ")"} | <function-1> <power> | <function-X> "(" <expr> {"," <expr>} ")" | "(" <list> ")" */
-    me_expr *ret;
+    me_expr* ret;
     int arity;
 
     switch (TYPE_MASK(s->type)) {
-        case TOK_NUMBER:
-            ret = new_expr(ME_CONSTANT, 0);
-            CHECK_NULL(ret);
+    case TOK_NUMBER:
+        ret = new_expr(ME_CONSTANT, 0);
+        CHECK_NULL(ret);
 
-            ret->value = s->value;
-            // Use inferred type for constants (floating point vs integer)
-            if (s->target_dtype == ME_AUTO) {
-                ret->dtype = s->dtype;
-            } else {
-                // If target_dtype is integer but constant is float/complex, we must use float/complex
-                if (is_integer_dtype(s->target_dtype)) {
-                    if (is_float_dtype(s->dtype) || is_complex_dtype(s->dtype)) {
-                        ret->dtype = s->dtype;
-                    } else if (is_integer_dtype(s->dtype) && dtype_size(s->dtype) > dtype_size(s->target_dtype)) {
-                        // Use larger integer type if needed
-                        ret->dtype = s->dtype;
-                    } else {
-                        ret->dtype = s->target_dtype;
-                    }
-                } else {
-                    // For float/complex target types, use target_dtype to match NumPy conventions
-                    // Float constants are typed based on target_dtype (FLOAT32 or FLOAT64)
-                    // This ensures FLOAT32 arrays + float constants -> FLOAT32 (NumPy behavior)
+        ret->value = s->value;
+        // Use inferred type for constants (floating point vs integer)
+        if (s->target_dtype == ME_AUTO) {
+            ret->dtype = s->dtype;
+        }
+        else {
+            // If target_dtype is integer but constant is float/complex, we must use float/complex
+            if (is_integer_dtype(s->target_dtype)) {
+                if (is_float_dtype(s->dtype) || is_complex_dtype(s->dtype)) {
+                    ret->dtype = s->dtype;
+                }
+                else if (is_integer_dtype(s->dtype) && dtype_size(s->dtype) > dtype_size(s->target_dtype)) {
+                    // Use larger integer type if needed
+                    ret->dtype = s->dtype;
+                }
+                else {
                     ret->dtype = s->target_dtype;
                 }
             }
-            next_token(s);
-            break;
-
-        case TOK_VARIABLE:
-            ret = new_expr(ME_VARIABLE, 0);
-            CHECK_NULL(ret);
-
-            ret->bound = s->bound;
-            ret->dtype = s->dtype; // Set the variable's type
-            ret->input_dtype = s->dtype;
-            next_token(s);
-            break;
-
-        case ME_FUNCTION0:
-        case ME_CLOSURE0:
-            ret = new_expr(s->type, 0);
-            CHECK_NULL(ret);
-
-            ret->function = s->function;
-            if (IS_CLOSURE(s->type)) ret->parameters[0] = s->context;
-            next_token(s);
-            if (s->type == TOK_OPEN) {
-                next_token(s);
-                if (s->type != TOK_CLOSE) {
-                    s->type = TOK_ERROR;
-                } else {
-                    next_token(s);
-                }
+            else {
+                // For float/complex target types, use target_dtype to match NumPy conventions
+                // Float constants are typed based on target_dtype (FLOAT32 or FLOAT64)
+                // This ensures FLOAT32 arrays + float constants -> FLOAT32 (NumPy behavior)
+                ret->dtype = s->target_dtype;
             }
-            break;
+        }
+        next_token(s);
+        break;
 
-        case ME_FUNCTION1:
-        case ME_CLOSURE1:
-            ret = new_expr(s->type, 0);
-            CHECK_NULL(ret);
+    case TOK_VARIABLE:
+        ret = new_expr(ME_VARIABLE, 0);
+        CHECK_NULL(ret);
 
-            ret->function = s->function;
-            if (IS_CLOSURE(s->type)) ret->parameters[1] = s->context;
+        ret->bound = s->bound;
+        ret->dtype = s->dtype; // Set the variable's type
+        ret->input_dtype = s->dtype;
+        next_token(s);
+        break;
+
+    case ME_FUNCTION0:
+    case ME_CLOSURE0:
+        ret = new_expr(s->type, 0);
+        CHECK_NULL(ret);
+
+        ret->function = s->function;
+        if (IS_CLOSURE(s->type)) ret->parameters[0] = s->context;
+        next_token(s);
+        if (s->type == TOK_OPEN) {
             next_token(s);
-            ret->parameters[0] = power(s);
-            CHECK_NULL(ret->parameters[0], me_free(ret));
-            break;
-
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7:
-            arity = ARITY(s->type);
-
-            ret = new_expr(s->type, 0);
-            CHECK_NULL(ret);
-
-            ret->function = s->function;
-            if (IS_CLOSURE(s->type)) ret->parameters[arity] = s->context;
-            next_token(s);
-
-            if (s->type != TOK_OPEN) {
-                s->type = TOK_ERROR;
-            } else {
-                int i;
-                for (i = 0; i < arity; i++) {
-                    next_token(s);
-                    ret->parameters[i] = expr(s);
-                    CHECK_NULL(ret->parameters[i], me_free(ret));
-
-                    if (s->type != TOK_SEP) {
-                        break;
-                    }
-                }
-                if (s->type != TOK_CLOSE || i != arity - 1) {
-                    s->type = TOK_ERROR;
-                } else {
-                    next_token(s);
-                }
-            }
-
-            break;
-
-        case TOK_OPEN:
-            next_token(s);
-            ret = list(s);
-            CHECK_NULL(ret);
-
             if (s->type != TOK_CLOSE) {
                 s->type = TOK_ERROR;
-            } else {
+            }
+            else {
                 next_token(s);
             }
-            break;
+        }
+        break;
 
-        default:
-            ret = new_expr(0, 0);
-            CHECK_NULL(ret);
+    case ME_FUNCTION1:
+    case ME_CLOSURE1:
+        ret = new_expr(s->type, 0);
+        CHECK_NULL(ret);
 
+        ret->function = s->function;
+        if (IS_CLOSURE(s->type)) ret->parameters[1] = s->context;
+        next_token(s);
+        ret->parameters[0] = power(s);
+        CHECK_NULL(ret->parameters[0], me_free(ret));
+        break;
+
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        arity = ARITY(s->type);
+
+        ret = new_expr(s->type, 0);
+        CHECK_NULL(ret);
+
+        ret->function = s->function;
+        if (IS_CLOSURE(s->type)) ret->parameters[arity] = s->context;
+        next_token(s);
+
+        if (s->type != TOK_OPEN) {
             s->type = TOK_ERROR;
-            ret->value = NAN;
-            break;
+        }
+        else {
+            int i;
+            for (i = 0; i < arity; i++) {
+                next_token(s);
+                ret->parameters[i] = expr(s);
+                CHECK_NULL(ret->parameters[i], me_free(ret));
+
+                if (s->type != TOK_SEP) {
+                    break;
+                }
+            }
+            if (s->type != TOK_CLOSE || i != arity - 1) {
+                s->type = TOK_ERROR;
+            }
+            else {
+                next_token(s);
+            }
+        }
+
+        break;
+
+    case TOK_OPEN:
+        next_token(s);
+        ret = list(s);
+        CHECK_NULL(ret);
+
+        if (s->type != TOK_CLOSE) {
+            s->type = TOK_ERROR;
+        }
+        else {
+            next_token(s);
+        }
+        break;
+
+    default:
+        ret = new_expr(0, 0);
+        CHECK_NULL(ret);
+
+        s->type = TOK_ERROR;
+        ret->value = NAN;
+        break;
     }
 
     return ret;
 }
 
 
-static me_expr *power(state *s) {
+static me_expr* power(state* s) {
     /* <power>     =    {("-" | "+")} <base> */
     int sign = 1;
     while (s->type == TOK_INFIX && (s->function == add || s->function == sub)) {
@@ -1436,12 +1536,13 @@ static me_expr *power(state *s) {
         next_token(s);
     }
 
-    me_expr *ret;
+    me_expr* ret;
 
     if (sign == 1) {
         ret = base(s);
-    } else {
-        me_expr *b = base(s);
+    }
+    else {
+        me_expr* b = base(s);
         CHECK_NULL(b);
 
         ret = NEW_EXPR(ME_FUNCTION1 | ME_FLAG_PURE, b);
@@ -1454,18 +1555,18 @@ static me_expr *power(state *s) {
 }
 
 #ifdef ME_POW_FROM_RIGHT
-static me_expr *factor(state *s) {
+static me_expr* factor(state* s) {
     /* <factor>    =    <power> {"**" <factor>}  (right associative) */
-    me_expr *ret = power(s);
+    me_expr* ret = power(s);
     CHECK_NULL(ret);
 
     if (s->type == TOK_POW) {
         me_fun2 t = s->function;
         next_token(s);
-        me_expr *f = factor(s); /* Right associative: recurse */
+        me_expr* f = factor(s); /* Right associative: recurse */
         CHECK_NULL(f, me_free(ret));
 
-        me_expr *prev = ret;
+        me_expr* prev = ret;
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, f);
         CHECK_NULL(ret, me_free(f), me_free(prev));
 
@@ -1476,22 +1577,22 @@ static me_expr *factor(state *s) {
     return ret;
 }
 #else
-static me_expr *factor(state *s) {
+static me_expr* factor(state* s) {
     /* <factor>    =    <power> {"**" <power>}  (left associative) */
-    me_expr *ret = power(s);
+    me_expr* ret = power(s);
     CHECK_NULL(ret);
 
     while (s->type == TOK_POW) {
         me_fun2 t = (me_fun2)s->function;
         next_token(s);
-        me_expr *f = power(s);
+        me_expr* f = power(s);
         CHECK_NULL(f, me_free(ret));
 
-        me_expr *prev = ret;
+        me_expr* prev = ret;
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, f);
         CHECK_NULL(ret, me_free(f), me_free(prev));
 
-        ret->function = (void *)t;
+        ret->function = (void*)t;
         apply_type_promotion(ret);
     }
 
@@ -1500,22 +1601,22 @@ static me_expr *factor(state *s) {
 #endif
 
 
-static me_expr *term(state *s) {
+static me_expr* term(state* s) {
     /* <term>      =    <factor> {("*" | "/" | "%") <factor>} */
-    me_expr *ret = factor(s);
+    me_expr* ret = factor(s);
     CHECK_NULL(ret);
 
     while (s->type == TOK_INFIX && (s->function == mul || s->function == divide || s->function == fmod)) {
         me_fun2 t = (me_fun2)s->function;
         next_token(s);
-        me_expr *f = factor(s);
+        me_expr* f = factor(s);
         CHECK_NULL(f, me_free(ret));
 
-        me_expr *prev = ret;
+        me_expr* prev = ret;
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, f);
         CHECK_NULL(ret, me_free(f), me_free(prev));
 
-        ret->function = (void *)t;
+        ret->function = (void*)t;
         apply_type_promotion(ret);
     }
 
@@ -1523,22 +1624,22 @@ static me_expr *term(state *s) {
 }
 
 
-static me_expr *expr(state *s) {
+static me_expr* expr(state* s) {
     /* <expr>      =    <term> {("+" | "-") <term>} */
-    me_expr *ret = term(s);
+    me_expr* ret = term(s);
     CHECK_NULL(ret);
 
     while (s->type == TOK_INFIX && (s->function == add || s->function == sub)) {
         me_fun2 t = (me_fun2)s->function;
         next_token(s);
-        me_expr *te = term(s);
+        me_expr* te = term(s);
         CHECK_NULL(te, me_free(ret));
 
-        me_expr *prev = ret;
+        me_expr* prev = ret;
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, te);
         CHECK_NULL(ret, me_free(te), me_free(prev));
 
-        ret->function = (void *)t;
+        ret->function = (void*)t;
         apply_type_promotion(ret); // Apply type promotion
     }
 
@@ -1546,22 +1647,22 @@ static me_expr *expr(state *s) {
 }
 
 
-static me_expr *shift_expr(state *s) {
+static me_expr* shift_expr(state* s) {
     /* <shift_expr> =    <expr> {("<<" | ">>") <expr>} */
-    me_expr *ret = expr(s);
+    me_expr* ret = expr(s);
     CHECK_NULL(ret);
 
     while (s->type == TOK_SHIFT) {
         me_fun2 t = (me_fun2)s->function;
         next_token(s);
-        me_expr *e = expr(s);
+        me_expr* e = expr(s);
         CHECK_NULL(e, me_free(ret));
 
-        me_expr *prev = ret;
+        me_expr* prev = ret;
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
         CHECK_NULL(ret, me_free(e), me_free(prev));
 
-        ret->function = (void *)t;
+        ret->function = (void*)t;
         apply_type_promotion(ret);
     }
 
@@ -1569,17 +1670,17 @@ static me_expr *shift_expr(state *s) {
 }
 
 
-static me_expr *bitwise_and(state *s) {
+static me_expr* bitwise_and(state* s) {
     /* <bitwise_and> =    <shift_expr> {"&" <shift_expr>} */
-    me_expr *ret = shift_expr(s);
+    me_expr* ret = shift_expr(s);
     CHECK_NULL(ret);
 
     while (s->type == TOK_BITWISE && s->function == bit_and) {
         next_token(s);
-        me_expr *e = shift_expr(s);
+        me_expr* e = shift_expr(s);
         CHECK_NULL(e, me_free(ret));
 
-        me_expr *prev = ret;
+        me_expr* prev = ret;
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
         CHECK_NULL(ret, me_free(e), me_free(prev));
 
@@ -1591,18 +1692,18 @@ static me_expr *bitwise_and(state *s) {
 }
 
 
-static me_expr *bitwise_xor(state *s) {
+static me_expr* bitwise_xor(state* s) {
     /* <bitwise_xor> =    <bitwise_and> {"^" <bitwise_and>} */
     /* Note: ^ is XOR for integers/bools. Use ** for power */
-    me_expr *ret = bitwise_and(s);
+    me_expr* ret = bitwise_and(s);
     CHECK_NULL(ret);
 
     while (s->type == TOK_BITWISE && s->function == bit_xor) {
         next_token(s);
-        me_expr *e = bitwise_and(s);
+        me_expr* e = bitwise_and(s);
         CHECK_NULL(e, me_free(ret));
 
-        me_expr *prev = ret;
+        me_expr* prev = ret;
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
         CHECK_NULL(ret, me_free(e), me_free(prev));
 
@@ -1614,22 +1715,22 @@ static me_expr *bitwise_xor(state *s) {
 }
 
 
-static me_expr *bitwise_or(state *s) {
+static me_expr* bitwise_or(state* s) {
     /* <bitwise_or> =    <bitwise_xor> {"|" <bitwise_xor>} */
-    me_expr *ret = bitwise_xor(s);
+    me_expr* ret = bitwise_xor(s);
     CHECK_NULL(ret);
 
     while (s->type == TOK_BITWISE && (s->function == bit_or)) {
         me_fun2 t = (me_fun2)s->function;
         next_token(s);
-        me_expr *e = bitwise_xor(s);
+        me_expr* e = bitwise_xor(s);
         CHECK_NULL(e, me_free(ret));
 
-        me_expr *prev = ret;
+        me_expr* prev = ret;
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
         CHECK_NULL(ret, me_free(e), me_free(prev));
 
-        ret->function = (void *)t;
+        ret->function = (void*)t;
         apply_type_promotion(ret);
     }
 
@@ -1637,22 +1738,22 @@ static me_expr *bitwise_or(state *s) {
 }
 
 
-static me_expr *comparison(state *s) {
+static me_expr* comparison(state* s) {
     /* <comparison> =    <bitwise_or> {("<" | ">" | "<=" | ">=" | "==" | "!=") <bitwise_or>} */
-    me_expr *ret = bitwise_or(s);
+    me_expr* ret = bitwise_or(s);
     CHECK_NULL(ret);
 
     while (s->type == TOK_COMPARE) {
         me_fun2 t = (me_fun2)s->function;
         next_token(s);
-        me_expr *e = bitwise_or(s);
+        me_expr* e = bitwise_or(s);
         CHECK_NULL(e, me_free(ret));
 
-        me_expr *prev = ret;
+        me_expr* prev = ret;
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
         CHECK_NULL(ret, me_free(e), me_free(prev));
 
-        ret->function = (void *)t;
+        ret->function = (void*)t;
         apply_type_promotion(ret);
         /* Comparisons always return bool */
         ret->dtype = ME_BOOL;
@@ -1662,17 +1763,17 @@ static me_expr *comparison(state *s) {
 }
 
 
-static me_expr *list(state *s) {
+static me_expr* list(state* s) {
     /* <list>      =    <comparison> {"," <comparison>} */
-    me_expr *ret = comparison(s);
+    me_expr* ret = comparison(s);
     CHECK_NULL(ret);
 
     while (s->type == TOK_SEP) {
         next_token(s);
-        me_expr *e = comparison(s);
+        me_expr* e = comparison(s);
         CHECK_NULL(e, me_free(ret));
 
-        me_expr *prev = ret;
+        me_expr* prev = ret;
         ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
         CHECK_NULL(ret, me_free(e), me_free(prev));
 
@@ -1687,59 +1788,59 @@ static me_expr *list(state *s) {
 #define ME_FUN(...) ((double(*)(__VA_ARGS__))n->function)
 #define M(e) me_eval_scalar(n->parameters[e])
 
-static double me_eval_scalar(const me_expr *n) {
+static double me_eval_scalar(const me_expr* n) {
     if (!n) return NAN;
 
     switch (TYPE_MASK(n->type)) {
-        case ME_CONSTANT: return n->value;
-        case ME_VARIABLE: return *(const double *) n->bound;
+    case ME_CONSTANT: return n->value;
+    case ME_VARIABLE: return *(const double*)n->bound;
 
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-            switch (ARITY(n->type)) {
-                case 0: return ME_FUN(void)();
-                case 1: return ME_FUN(double)(M(0));
-                case 2: return ME_FUN(double, double)(M(0), M(1));
-                case 3: return ME_FUN(double, double, double)(M(0), M(1), M(2));
-                case 4: return ME_FUN(double, double, double, double)(M(0), M(1), M(2), M(3));
-                case 5: return ME_FUN(double, double, double, double, double)(M(0), M(1), M(2), M(3), M(4));
-                case 6: return ME_FUN(double, double, double, double, double, double)(
-                        M(0), M(1), M(2), M(3), M(4), M(5));
-                case 7: return ME_FUN(double, double, double, double, double, double, double)(
-                        M(0), M(1), M(2), M(3), M(4), M(5), M(6));
-                default: return NAN;
-            }
-
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7:
-            switch (ARITY(n->type)) {
-                case 0: return ME_FUN(void*)(n->parameters[0]);
-                case 1: return ME_FUN(void*, double)(n->parameters[1], M(0));
-                case 2: return ME_FUN(void*, double, double)(n->parameters[2], M(0), M(1));
-                case 3: return ME_FUN(void*, double, double, double)(n->parameters[3], M(0), M(1), M(2));
-                case 4: return ME_FUN(void*, double, double, double, double)(n->parameters[4], M(0), M(1), M(2), M(3));
-                case 5: return ME_FUN(void*, double, double, double, double, double)(
-                        n->parameters[5], M(0), M(1), M(2), M(3), M(4));
-                case 6: return ME_FUN(void*, double, double, double, double, double, double)(
-                        n->parameters[6], M(0), M(1), M(2), M(3), M(4), M(5));
-                case 7: return ME_FUN(void*, double, double, double, double, double, double, double)(
-                        n->parameters[7], M(0), M(1), M(2), M(3), M(4), M(5), M(6));
-                default: return NAN;
-            }
-
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+        switch (ARITY(n->type)) {
+        case 0: return ME_FUN(void)();
+        case 1: return ME_FUN(double)(M(0));
+        case 2: return ME_FUN(double, double)(M(0), M(1));
+        case 3: return ME_FUN(double, double, double)(M(0), M(1), M(2));
+        case 4: return ME_FUN(double, double, double, double)(M(0), M(1), M(2), M(3));
+        case 5: return ME_FUN(double, double, double, double, double)(M(0), M(1), M(2), M(3), M(4));
+        case 6: return ME_FUN(double, double, double, double, double, double)(
+                M(0), M(1), M(2), M(3), M(4), M(5));
+        case 7: return ME_FUN(double, double, double, double, double, double, double)(
+                M(0), M(1), M(2), M(3), M(4), M(5), M(6));
         default: return NAN;
+        }
+
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        switch (ARITY(n->type)) {
+        case 0: return ME_FUN(void*)(n->parameters[0]);
+        case 1: return ME_FUN(void*, double)(n->parameters[1], M(0));
+        case 2: return ME_FUN(void*, double, double)(n->parameters[2], M(0), M(1));
+        case 3: return ME_FUN(void*, double, double, double)(n->parameters[3], M(0), M(1), M(2));
+        case 4: return ME_FUN(void*, double, double, double, double)(n->parameters[4], M(0), M(1), M(2), M(3));
+        case 5: return ME_FUN(void*, double, double, double, double, double)(
+                n->parameters[5], M(0), M(1), M(2), M(3), M(4));
+        case 6: return ME_FUN(void*, double, double, double, double, double, double)(
+                n->parameters[6], M(0), M(1), M(2), M(3), M(4), M(5));
+        case 7: return ME_FUN(void*, double, double, double, double, double, double, double)(
+                n->parameters[7], M(0), M(1), M(2), M(3), M(4), M(5), M(6));
+        default: return NAN;
+        }
+
+    default: return NAN;
     }
 }
 
@@ -1747,7 +1848,7 @@ static double me_eval_scalar(const me_expr *n) {
 #undef M
 
 /* Specialized vector operations for better performance */
-static void vec_add(const double *a, const double *b, double *out, int n) {
+static void vec_add(const double* a, const double* b, double* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1755,7 +1856,7 @@ static void vec_add(const double *a, const double *b, double *out, int n) {
     }
 }
 
-static void vec_sub(const double *a, const double *b, double *out, int n) {
+static void vec_sub(const double* a, const double* b, double* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1763,7 +1864,7 @@ static void vec_sub(const double *a, const double *b, double *out, int n) {
     }
 }
 
-static void vec_mul(const double *a, const double *b, double *out, int n) {
+static void vec_mul(const double* a, const double* b, double* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1771,7 +1872,7 @@ static void vec_mul(const double *a, const double *b, double *out, int n) {
     }
 }
 
-static void vec_div(const double *a, const double *b, double *out, int n) {
+static void vec_div(const double* a, const double* b, double* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1779,7 +1880,7 @@ static void vec_div(const double *a, const double *b, double *out, int n) {
     }
 }
 
-static void vec_add_scalar(const double *a, double b, double *out, int n) {
+static void vec_add_scalar(const double* a, double b, double* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1787,7 +1888,7 @@ static void vec_add_scalar(const double *a, double b, double *out, int n) {
     }
 }
 
-static void vec_mul_scalar(const double *a, double b, double *out, int n) {
+static void vec_mul_scalar(const double* a, double b, double* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1795,7 +1896,7 @@ static void vec_mul_scalar(const double *a, double b, double *out, int n) {
     }
 }
 
-static void vec_pow(const double *a, const double *b, double *out, int n) {
+static void vec_pow(const double* a, const double* b, double* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1803,7 +1904,7 @@ static void vec_pow(const double *a, const double *b, double *out, int n) {
     }
 }
 
-static void vec_pow_scalar(const double *a, double b, double *out, int n) {
+static void vec_pow_scalar(const double* a, double b, double* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1811,7 +1912,7 @@ static void vec_pow_scalar(const double *a, double b, double *out, int n) {
     }
 }
 
-static void vec_sqrt(const double *a, double *out, int n) {
+static void vec_sqrt(const double* a, double* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1819,7 +1920,7 @@ static void vec_sqrt(const double *a, double *out, int n) {
     }
 }
 
-static void vec_sin(const double *a, double *out, int n) {
+static void vec_sin(const double* a, double* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1827,7 +1928,7 @@ static void vec_sin(const double *a, double *out, int n) {
     }
 }
 
-static void vec_cos(const double *a, double *out, int n) {
+static void vec_cos(const double* a, double* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1835,7 +1936,7 @@ static void vec_cos(const double *a, double *out, int n) {
     }
 }
 
-static void vec_negate(const double *a, double *out, int n) {
+static void vec_negate(const double* a, double* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1847,7 +1948,7 @@ static void vec_negate(const double *a, double *out, int n) {
  * FLOAT32 VECTOR OPERATIONS
  * ============================================================================ */
 
-static void vec_add_f32(const float *a, const float *b, float *out, int n) {
+static void vec_add_f32(const float* a, const float* b, float* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1855,7 +1956,7 @@ static void vec_add_f32(const float *a, const float *b, float *out, int n) {
     }
 }
 
-static void vec_sub_f32(const float *a, const float *b, float *out, int n) {
+static void vec_sub_f32(const float* a, const float* b, float* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1863,7 +1964,7 @@ static void vec_sub_f32(const float *a, const float *b, float *out, int n) {
     }
 }
 
-static void vec_mul_f32(const float *a, const float *b, float *out, int n) {
+static void vec_mul_f32(const float* a, const float* b, float* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1871,7 +1972,7 @@ static void vec_mul_f32(const float *a, const float *b, float *out, int n) {
     }
 }
 
-static void vec_div_f32(const float *a, const float *b, float *out, int n) {
+static void vec_div_f32(const float* a, const float* b, float* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1879,7 +1980,7 @@ static void vec_div_f32(const float *a, const float *b, float *out, int n) {
     }
 }
 
-static void vec_add_scalar_f32(const float *a, float b, float *out, int n) {
+static void vec_add_scalar_f32(const float* a, float b, float* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1887,7 +1988,7 @@ static void vec_add_scalar_f32(const float *a, float b, float *out, int n) {
     }
 }
 
-static void vec_mul_scalar_f32(const float *a, float b, float *out, int n) {
+static void vec_mul_scalar_f32(const float* a, float b, float* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1895,7 +1996,7 @@ static void vec_mul_scalar_f32(const float *a, float b, float *out, int n) {
     }
 }
 
-static void vec_pow_f32(const float *a, const float *b, float *out, int n) {
+static void vec_pow_f32(const float* a, const float* b, float* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1903,7 +2004,7 @@ static void vec_pow_f32(const float *a, const float *b, float *out, int n) {
     }
 }
 
-static void vec_pow_scalar_f32(const float *a, float b, float *out, int n) {
+static void vec_pow_scalar_f32(const float* a, float b, float* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1911,7 +2012,7 @@ static void vec_pow_scalar_f32(const float *a, float b, float *out, int n) {
     }
 }
 
-static void vec_sqrt_f32(const float *a, float *out, int n) {
+static void vec_sqrt_f32(const float* a, float* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1919,7 +2020,7 @@ static void vec_sqrt_f32(const float *a, float *out, int n) {
     }
 }
 
-static void vec_sin_f32(const float *a, float *out, int n) {
+static void vec_sin_f32(const float* a, float* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1927,7 +2028,7 @@ static void vec_sin_f32(const float *a, float *out, int n) {
     }
 }
 
-static void vec_cos_f32(const float *a, float *out, int n) {
+static void vec_cos_f32(const float* a, float* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -1935,7 +2036,7 @@ static void vec_cos_f32(const float *a, float *out, int n) {
     }
 }
 
-static void vec_negame_f32(const float *a, float *out, int n) {
+static void vec_negame_f32(const float* a, float* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -2041,25 +2142,25 @@ DEFINE_INT_VEC_OPS(u32, uint32_t)
 DEFINE_INT_VEC_OPS(u64, uint64_t)
 
 /* Boolean logical operations */
-static void vec_and_bool(const bool *a, const bool *b, bool *out, int n) {
+static void vec_and_bool(const bool* a, const bool* b, bool* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = a[i] && b[i];
 }
 
-static void vec_or_bool(const bool *a, const bool *b, bool *out, int n) {
+static void vec_or_bool(const bool* a, const bool* b, bool* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = a[i] || b[i];
 }
 
-static void vec_xor_bool(const bool *a, const bool *b, bool *out, int n) {
+static void vec_xor_bool(const bool* a, const bool* b, bool* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = a[i] != b[i];
 }
 
-static void vec_not_bool(const bool *a, bool *out, int n) {
+static void vec_not_bool(const bool* a, bool* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = !a[i];
@@ -2112,145 +2213,145 @@ DEFINE_COMPARE_OPS(f32, float)
 DEFINE_COMPARE_OPS(f64, double)
 
 /* Complex operations */
-static void vec_add_c64(const float _Complex *a, const float _Complex *b, float _Complex *out, int n) {
+static void vec_add_c64(const float _Complex* a, const float _Complex* b, float _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = add_c64(a[i], b[i]);
 }
 
-static void vec_sub_c64(const float _Complex *a, const float _Complex *b, float _Complex *out, int n) {
+static void vec_sub_c64(const float _Complex* a, const float _Complex* b, float _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = sub_c64(a[i], b[i]);
 }
 
-static void vec_mul_c64(const float _Complex *a, const float _Complex *b, float _Complex *out, int n) {
+static void vec_mul_c64(const float _Complex* a, const float _Complex* b, float _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = mul_c64(a[i], b[i]);
 }
 
-static void vec_div_c64(const float _Complex *a, const float _Complex *b, float _Complex *out, int n) {
+static void vec_div_c64(const float _Complex* a, const float _Complex* b, float _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = div_c64(a[i], b[i]);
 }
 
-static void vec_add_scalar_c64(const float _Complex *a, float _Complex b, float _Complex *out, int n) {
+static void vec_add_scalar_c64(const float _Complex* a, float _Complex b, float _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = add_c64(a[i], b);
 }
 
-static void vec_mul_scalar_c64(const float _Complex *a, float _Complex b, float _Complex *out, int n) {
+static void vec_mul_scalar_c64(const float _Complex* a, float _Complex b, float _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = mul_c64(a[i], b);
 }
 
-static void vec_pow_c64(const float _Complex *a, const float _Complex *b, float _Complex *out, int n) {
+static void vec_pow_c64(const float _Complex* a, const float _Complex* b, float _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = me_cpowf(a[i], b[i]);
 }
 
-static void vec_pow_scalar_c64(const float _Complex *a, float _Complex b, float _Complex *out, int n) {
+static void vec_pow_scalar_c64(const float _Complex* a, float _Complex b, float _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = me_cpowf(a[i], b);
 }
 
-static void vec_sqrt_c64(const float _Complex *a, float _Complex *out, int n) {
+static void vec_sqrt_c64(const float _Complex* a, float _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = me_csqrtf(a[i]);
 }
 
-static void vec_negame_c64(const float _Complex *a, float _Complex *out, int n) {
+static void vec_negame_c64(const float _Complex* a, float _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = neg_c64(a[i]);
 }
 
-static void vec_conj_c64(const float _Complex *a, float _Complex *out, int n) {
+static void vec_conj_c64(const float _Complex* a, float _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = me_conjf(a[i]);
 }
 
-static void vec_imag_c64(const float _Complex *a, float *out, int n) {
+static void vec_imag_c64(const float _Complex* a, float* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = me_cimagf(a[i]);
 }
 
-static void vec_add_c128(const double _Complex *a, const double _Complex *b, double _Complex *out, int n) {
+static void vec_add_c128(const double _Complex* a, const double _Complex* b, double _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = add_c128(a[i], b[i]);
 }
 
-static void vec_sub_c128(const double _Complex *a, const double _Complex *b, double _Complex *out, int n) {
+static void vec_sub_c128(const double _Complex* a, const double _Complex* b, double _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = sub_c128(a[i], b[i]);
 }
 
-static void vec_mul_c128(const double _Complex *a, const double _Complex *b, double _Complex *out, int n) {
+static void vec_mul_c128(const double _Complex* a, const double _Complex* b, double _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = mul_c128(a[i], b[i]);
 }
 
-static void vec_div_c128(const double _Complex *a, const double _Complex *b, double _Complex *out, int n) {
+static void vec_div_c128(const double _Complex* a, const double _Complex* b, double _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = div_c128(a[i], b[i]);
 }
 
-static void vec_add_scalar_c128(const double _Complex *a, double _Complex b, double _Complex *out, int n) {
+static void vec_add_scalar_c128(const double _Complex* a, double _Complex b, double _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = add_c128(a[i], b);
 }
 
-static void vec_mul_scalar_c128(const double _Complex *a, double _Complex b, double _Complex *out, int n) {
+static void vec_mul_scalar_c128(const double _Complex* a, double _Complex b, double _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = mul_c128(a[i], b);
 }
 
-static void vec_pow_c128(const double _Complex *a, const double _Complex *b, double _Complex *out, int n) {
+static void vec_pow_c128(const double _Complex* a, const double _Complex* b, double _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = me_cpow(a[i], b[i]);
 }
 
-static void vec_pow_scalar_c128(const double _Complex *a, double _Complex b, double _Complex *out, int n) {
+static void vec_pow_scalar_c128(const double _Complex* a, double _Complex b, double _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = me_cpow(a[i], b);
 }
 
-static void vec_sqrt_c128(const double _Complex *a, double _Complex *out, int n) {
+static void vec_sqrt_c128(const double _Complex* a, double _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = me_csqrt(a[i]);
 }
 
-static void vec_negame_c128(const double _Complex *a, double _Complex *out, int n) {
+static void vec_negame_c128(const double _Complex* a, double _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = neg_c128(a[i]);
 }
 
-static void vec_conj_c128(const double _Complex *a, double _Complex *out, int n) {
+static void vec_conj_c128(const double _Complex* a, double _Complex* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = me_conj(a[i]);
 }
 
-static void vec_imag_c128(const double _Complex *a, double *out, int n) {
+static void vec_imag_c128(const double _Complex* a, double* out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = me_cimag(a[i]);
@@ -2344,7 +2445,7 @@ DEFINE_VEC_CONVERT(f64, c128, double, double _Complex)
 DEFINE_VEC_CONVERT(c64, c128, float _Complex, double _Complex)
 
 /* Function to get conversion function pointer */
-typedef void (*convert_func_t)(const void *, void *, int);
+typedef void (*convert_func_t)(const void*, void*, int);
 
 static convert_func_t get_convert_func(me_dtype from, me_dtype to) {
     /* Return conversion function for a specific type pair */
@@ -2916,43 +3017,45 @@ DEFINE_ME_EVAL(c128, double _Complex,
 
 /* Public API - dispatches to correct type-specific evaluator */
 /* Structure to track promoted variables */
-typedef struct {
-    void *promoted_data; // Temporary buffer for promoted data
+typedef struct
+{
+    void* promoted_data; // Temporary buffer for promoted data
     me_dtype original_type;
     bool needs_free;
 } promoted_var_t;
 
 /* Helper to save original variable bindings */
-static void save_variable_bindings(const me_expr *node,
-                                   const void **original_bounds,
-                                   me_dtype *original_types,
-                                   int *save_idx) {
+static void save_variable_bindings(const me_expr* node,
+                                   const void** original_bounds,
+                                   me_dtype* original_types,
+                                   int* save_idx) {
     if (!node) return;
     switch (TYPE_MASK(node->type)) {
-        case ME_VARIABLE:
-            original_bounds[*save_idx] = node->bound;
-            original_types[*save_idx] = node->dtype;
-            (*save_idx)++;
-            break;
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
+    case ME_VARIABLE:
+        original_bounds[*save_idx] = node->bound;
+        original_types[*save_idx] = node->dtype;
+        (*save_idx)++;
+        break;
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
             const int arity = ARITY(node->type);
             for (int i = 0; i < arity; i++) {
-                save_variable_bindings((const me_expr *) node->parameters[i],
+                save_variable_bindings((const me_expr*)node->parameters[i],
                                        original_bounds, original_types, save_idx);
             }
             break;
@@ -2961,60 +3064,62 @@ static void save_variable_bindings(const me_expr *node,
 }
 
 /* Recursively promote variables in expression tree */
-static void promote_variables_in_tree(me_expr *n, me_dtype target_type,
-                                      promoted_var_t *promotions, int *promo_count,
+static void promote_variables_in_tree(me_expr* n, me_dtype target_type,
+                                      promoted_var_t* promotions, int* promo_count,
                                       int nitems) {
     if (!n) return;
 
     switch (TYPE_MASK(n->type)) {
-        case ME_CONSTANT:
-            // Constants are promoted on-the-fly during evaluation
-            break;
+    case ME_CONSTANT:
+        // Constants are promoted on-the-fly during evaluation
+        break;
 
-        case ME_VARIABLE:
-            if (n->dtype != target_type) {
-                // Need to promote this variable
-                void *promoted = malloc(nitems * dtype_size(target_type));
-                if (promoted) {
-                    convert_func_t conv = get_convert_func(n->dtype, target_type);
-                    if (conv) {
-                        conv(n->bound, promoted, nitems);
+    case ME_VARIABLE:
+        if (n->dtype != target_type) {
+            // Need to promote this variable
+            void* promoted = malloc(nitems * dtype_size(target_type));
+            if (promoted) {
+                convert_func_t conv = get_convert_func(n->dtype, target_type);
+                if (conv) {
+                    conv(n->bound, promoted, nitems);
 
-                        // Track this promotion for later cleanup
-                        promotions[*promo_count].promoted_data = promoted;
-                        promotions[*promo_count].original_type = n->dtype;
-                        promotions[*promo_count].needs_free = true;
-                        (*promo_count)++;
+                    // Track this promotion for later cleanup
+                    promotions[*promo_count].promoted_data = promoted;
+                    promotions[*promo_count].original_type = n->dtype;
+                    promotions[*promo_count].needs_free = true;
+                    (*promo_count)++;
 
-                        // Temporarily replace bound pointer
-                        n->bound = promoted;
-                        n->dtype = target_type;
-                    } else {
-                        free(promoted);
-                    }
+                    // Temporarily replace bound pointer
+                    n->bound = promoted;
+                    n->dtype = target_type;
+                }
+                else {
+                    free(promoted);
                 }
             }
-            break;
+        }
+        break;
 
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
             const int arity = ARITY(n->type);
             for (int i = 0; i < arity; i++) {
-                promote_variables_in_tree((me_expr *) n->parameters[i], target_type,
+                promote_variables_in_tree((me_expr*)n->parameters[i], target_type,
                                           promotions, promo_count, nitems);
             }
             break;
@@ -3023,38 +3128,39 @@ static void promote_variables_in_tree(me_expr *n, me_dtype target_type,
 }
 
 /* Restore original variable bindings after promotion */
-static void restore_variables_in_tree(me_expr *n, const void **original_bounds,
-                                      const me_dtype *original_types, int *restore_idx) {
+static void restore_variables_in_tree(me_expr* n, const void** original_bounds,
+                                      const me_dtype* original_types, int* restore_idx) {
     if (!n) return;
 
     switch (TYPE_MASK(n->type)) {
-        case ME_VARIABLE:
-            if (original_bounds[*restore_idx] != NULL) {
-                n->bound = original_bounds[*restore_idx];
-                n->dtype = original_types[*restore_idx];
-                (*restore_idx)++;
-            }
-            break;
+    case ME_VARIABLE:
+        if (original_bounds[*restore_idx] != NULL) {
+            n->bound = original_bounds[*restore_idx];
+            n->dtype = original_types[*restore_idx];
+            (*restore_idx)++;
+        }
+        break;
 
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
             const int arity = ARITY(n->type);
             for (int i = 0; i < arity; i++) {
-                restore_variables_in_tree((me_expr *) n->parameters[i], original_bounds, original_types, restore_idx);
+                restore_variables_in_tree((me_expr*)n->parameters[i], original_bounds, original_types, restore_idx);
             }
             break;
         }
@@ -3062,35 +3168,36 @@ static void restore_variables_in_tree(me_expr *n, const void **original_bounds,
 }
 
 /* Check if all variables in tree match target type */
-static bool all_variables_match_type(const me_expr *n, me_dtype target_type) {
+static bool all_variables_match_type(const me_expr* n, me_dtype target_type) {
     if (!n) return true;
 
     switch (TYPE_MASK(n->type)) {
-        case ME_CONSTANT:
-            return true; // Constants are always OK
+    case ME_CONSTANT:
+        return true; // Constants are always OK
 
-        case ME_VARIABLE:
-            return n->dtype == target_type;
+    case ME_VARIABLE:
+        return n->dtype == target_type;
 
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
             const int arity = ARITY(n->type);
             for (int i = 0; i < arity; i++) {
-                if (!all_variables_match_type((const me_expr *) n->parameters[i], target_type)) {
+                if (!all_variables_match_type((const me_expr*)n->parameters[i], target_type)) {
                     return false;
                 }
             }
@@ -3101,20 +3208,20 @@ static bool all_variables_match_type(const me_expr *n, me_dtype target_type) {
     return true;
 }
 
-static void eval_reduction(const me_expr *n) {
+static void eval_reduction(const me_expr* n) {
     if (!n || !n->output || !is_reduction_node(n)) return;
 
-    me_expr *arg = (me_expr *) n->parameters[0];
+    me_expr* arg = (me_expr*)n->parameters[0];
     if (!arg) return;
 
     const int nitems = n->nitems;
     me_dtype arg_type = arg->dtype;
     me_dtype result_type = reduction_output_dtype(arg_type);
     me_dtype output_type = n->dtype;
-    bool is_prod = n->function == (void *)prod_reduce;
+    bool is_prod = n->function == (void*)prod_reduce;
 
-    void *write_ptr = n->output;
-    void *temp_output = NULL;
+    void* write_ptr = n->output;
+    void* temp_output = NULL;
     if (output_type != result_type) {
         temp_output = malloc(dtype_size(result_type));
         if (!temp_output) return;
@@ -3124,266 +3231,324 @@ static void eval_reduction(const me_expr *n) {
     if (arg->type == ME_CONSTANT) {
         double val = arg->value;
         switch (arg_type) {
-            case ME_BOOL:
-            case ME_INT8:
-            case ME_INT16:
-            case ME_INT32:
-            case ME_INT64: {
+        case ME_BOOL:
+        case ME_INT8:
+        case ME_INT16:
+        case ME_INT32:
+        case ME_INT64:
+            {
                 int64_t acc = is_prod ? 1 : 0;
                 if (nitems == 0) {
                     acc = is_prod ? 1 : 0;
-                } else if (is_prod) {
+                }
+                else if (is_prod) {
                     int64_t v = (int64_t)val;
                     for (int i = 0; i < nitems; i++) acc *= v;
-                } else {
+                }
+                else {
                     acc = (int64_t)val * (int64_t)nitems;
                 }
-                ((int64_t *)write_ptr)[0] = acc;
+                ((int64_t*)write_ptr)[0] = acc;
                 break;
             }
-            case ME_UINT8:
-            case ME_UINT16:
-            case ME_UINT32:
-            case ME_UINT64: {
+        case ME_UINT8:
+        case ME_UINT16:
+        case ME_UINT32:
+        case ME_UINT64:
+            {
                 uint64_t acc = is_prod ? 1 : 0;
                 if (nitems == 0) {
                     acc = is_prod ? 1 : 0;
-                } else if (is_prod) {
+                }
+                else if (is_prod) {
                     uint64_t v = (uint64_t)val;
                     for (int i = 0; i < nitems; i++) acc *= v;
-                } else {
+                }
+                else {
                     acc = (uint64_t)val * (uint64_t)nitems;
                 }
-                ((uint64_t *)write_ptr)[0] = acc;
+                ((uint64_t*)write_ptr)[0] = acc;
                 break;
             }
-            case ME_FLOAT32: {
+        case ME_FLOAT32:
+            {
                 float acc = is_prod ? 1.0f : 0.0f;
                 if (nitems == 0) {
                     acc = is_prod ? 1.0f : 0.0f;
-                } else if (is_prod) {
+                }
+                else if (is_prod) {
                     float v = (float)val;
                     for (int i = 0; i < nitems; i++) acc *= v;
-                } else {
+                }
+                else {
                     acc = (float)val * (float)nitems;
                 }
-                ((float *)write_ptr)[0] = acc;
+                ((float*)write_ptr)[0] = acc;
                 break;
             }
-            case ME_FLOAT64: {
+        case ME_FLOAT64:
+            {
                 double acc = is_prod ? 1.0 : 0.0;
                 if (nitems == 0) {
                     acc = is_prod ? 1.0 : 0.0;
-                } else if (is_prod) {
+                }
+                else if (is_prod) {
                     for (int i = 0; i < nitems; i++) acc *= val;
-                } else {
+                }
+                else {
                     acc = val * (double)nitems;
                 }
-                ((double *)write_ptr)[0] = acc;
+                ((double*)write_ptr)[0] = acc;
                 break;
             }
-            case ME_COMPLEX64: {
+        case ME_COMPLEX64:
+            {
                 float _Complex acc = is_prod ? (float _Complex)1.0f : (float _Complex)0.0f;
                 float _Complex v = (float _Complex)val;
                 if (nitems == 0) {
                     acc = is_prod ? (float _Complex)1.0f : (float _Complex)0.0f;
-                } else if (is_prod) {
+                }
+                else if (is_prod) {
                     for (int i = 0; i < nitems; i++) acc *= v;
-                } else {
+                }
+                else {
                     acc = v * (float)nitems;
                 }
-                ((float _Complex *)write_ptr)[0] = acc;
+                ((float _Complex*)write_ptr)[0] = acc;
                 break;
             }
-            case ME_COMPLEX128: {
+        case ME_COMPLEX128:
+            {
                 double _Complex acc = is_prod ? (double _Complex)1.0 : (double _Complex)0.0;
                 double _Complex v = (double _Complex)val;
                 if (nitems == 0) {
                     acc = is_prod ? (double _Complex)1.0 : (double _Complex)0.0;
-                } else if (is_prod) {
+                }
+                else if (is_prod) {
                     for (int i = 0; i < nitems; i++) acc *= v;
-                } else {
+                }
+                else {
                     acc = v * (double)nitems;
                 }
-                ((double _Complex *)write_ptr)[0] = acc;
+                ((double _Complex*)write_ptr)[0] = acc;
                 break;
             }
-            default:
-                break;
+        default:
+            break;
         }
-    } else if (arg->type == ME_VARIABLE) {
+    }
+    else if (arg->type == ME_VARIABLE) {
         switch (arg_type) {
-            case ME_BOOL: {
-                const bool *data = (const bool *)arg->bound;
+        case ME_BOOL:
+            {
+                const bool* data = (const bool*)arg->bound;
                 int64_t acc = is_prod ? 1 : 0;
                 if (nitems == 0) {
                     acc = is_prod ? 1 : 0;
-                } else if (is_prod) {
+                }
+                else if (is_prod) {
                     for (int i = 0; i < nitems; i++) acc *= data[i] ? 1 : 0;
-                } else {
+                }
+                else {
                     for (int i = 0; i < nitems; i++) acc += data[i] ? 1 : 0;
                 }
-                ((int64_t *)write_ptr)[0] = acc;
+                ((int64_t*)write_ptr)[0] = acc;
                 break;
             }
-            case ME_INT8: {
-                const int8_t *data = (const int8_t *)arg->bound;
+        case ME_INT8:
+            {
+                const int8_t* data = (const int8_t*)arg->bound;
                 int64_t acc = is_prod ? 1 : 0;
                 if (nitems == 0) {
                     acc = is_prod ? 1 : 0;
-                } else if (is_prod) {
+                }
+                else if (is_prod) {
                     for (int i = 0; i < nitems; i++) acc *= data[i];
-                } else {
+                }
+                else {
                     for (int i = 0; i < nitems; i++) acc += data[i];
                 }
-                ((int64_t *)write_ptr)[0] = acc;
+                ((int64_t*)write_ptr)[0] = acc;
                 break;
             }
-            case ME_INT16: {
-                const int16_t *data = (const int16_t *)arg->bound;
+        case ME_INT16:
+            {
+                const int16_t* data = (const int16_t*)arg->bound;
                 int64_t acc = is_prod ? 1 : 0;
                 if (nitems == 0) {
                     acc = is_prod ? 1 : 0;
-                } else if (is_prod) {
+                }
+                else if (is_prod) {
                     for (int i = 0; i < nitems; i++) acc *= data[i];
-                } else {
+                }
+                else {
                     for (int i = 0; i < nitems; i++) acc += data[i];
                 }
-                ((int64_t *)write_ptr)[0] = acc;
+                ((int64_t*)write_ptr)[0] = acc;
                 break;
             }
-            case ME_INT32: {
-                const int32_t *data = (const int32_t *)arg->bound;
+        case ME_INT32:
+            {
+                const int32_t* data = (const int32_t*)arg->bound;
                 int64_t acc = is_prod ? 1 : 0;
                 if (nitems == 0) {
                     acc = is_prod ? 1 : 0;
-                } else if (is_prod) {
+                }
+                else if (is_prod) {
                     for (int i = 0; i < nitems; i++) acc *= data[i];
-                } else {
+                }
+                else {
                     for (int i = 0; i < nitems; i++) acc += data[i];
                 }
-                ((int64_t *)write_ptr)[0] = acc;
+                ((int64_t*)write_ptr)[0] = acc;
                 break;
             }
-            case ME_INT64: {
-                const int64_t *data = (const int64_t *)arg->bound;
+        case ME_INT64:
+            {
+                const int64_t* data = (const int64_t*)arg->bound;
                 int64_t acc = is_prod ? 1 : 0;
                 if (nitems == 0) {
                     acc = is_prod ? 1 : 0;
-                } else if (is_prod) {
+                }
+                else if (is_prod) {
                     for (int i = 0; i < nitems; i++) acc *= data[i];
-                } else {
+                }
+                else {
                     for (int i = 0; i < nitems; i++) acc += data[i];
                 }
-                ((int64_t *)write_ptr)[0] = acc;
+                ((int64_t*)write_ptr)[0] = acc;
                 break;
             }
-            case ME_UINT8: {
-                const uint8_t *data = (const uint8_t *)arg->bound;
+        case ME_UINT8:
+            {
+                const uint8_t* data = (const uint8_t*)arg->bound;
                 uint64_t acc = is_prod ? 1 : 0;
                 if (nitems == 0) {
                     acc = is_prod ? 1 : 0;
-                } else if (is_prod) {
+                }
+                else if (is_prod) {
                     for (int i = 0; i < nitems; i++) acc *= data[i];
-                } else {
+                }
+                else {
                     for (int i = 0; i < nitems; i++) acc += data[i];
                 }
-                ((uint64_t *)write_ptr)[0] = acc;
+                ((uint64_t*)write_ptr)[0] = acc;
                 break;
             }
-            case ME_UINT16: {
-                const uint16_t *data = (const uint16_t *)arg->bound;
+        case ME_UINT16:
+            {
+                const uint16_t* data = (const uint16_t*)arg->bound;
                 uint64_t acc = is_prod ? 1 : 0;
                 if (nitems == 0) {
                     acc = is_prod ? 1 : 0;
-                } else if (is_prod) {
+                }
+                else if (is_prod) {
                     for (int i = 0; i < nitems; i++) acc *= data[i];
-                } else {
+                }
+                else {
                     for (int i = 0; i < nitems; i++) acc += data[i];
                 }
-                ((uint64_t *)write_ptr)[0] = acc;
+                ((uint64_t*)write_ptr)[0] = acc;
                 break;
             }
-            case ME_UINT32: {
-                const uint32_t *data = (const uint32_t *)arg->bound;
+        case ME_UINT32:
+            {
+                const uint32_t* data = (const uint32_t*)arg->bound;
                 uint64_t acc = is_prod ? 1 : 0;
                 if (nitems == 0) {
                     acc = is_prod ? 1 : 0;
-                } else if (is_prod) {
+                }
+                else if (is_prod) {
                     for (int i = 0; i < nitems; i++) acc *= data[i];
-                } else {
+                }
+                else {
                     for (int i = 0; i < nitems; i++) acc += data[i];
                 }
-                ((uint64_t *)write_ptr)[0] = acc;
+                ((uint64_t*)write_ptr)[0] = acc;
                 break;
             }
-            case ME_UINT64: {
-                const uint64_t *data = (const uint64_t *)arg->bound;
+        case ME_UINT64:
+            {
+                const uint64_t* data = (const uint64_t*)arg->bound;
                 uint64_t acc = is_prod ? 1 : 0;
                 if (nitems == 0) {
                     acc = is_prod ? 1 : 0;
-                } else if (is_prod) {
+                }
+                else if (is_prod) {
                     for (int i = 0; i < nitems; i++) acc *= data[i];
-                } else {
+                }
+                else {
                     for (int i = 0; i < nitems; i++) acc += data[i];
                 }
-                ((uint64_t *)write_ptr)[0] = acc;
+                ((uint64_t*)write_ptr)[0] = acc;
                 break;
             }
-            case ME_FLOAT32: {
-                const float *data = (const float *)arg->bound;
+        case ME_FLOAT32:
+            {
+                const float* data = (const float*)arg->bound;
                 float acc = is_prod ? 1.0f : 0.0f;
                 if (nitems == 0) {
                     acc = is_prod ? 1.0f : 0.0f;
-                } else if (is_prod) {
+                }
+                else if (is_prod) {
                     for (int i = 0; i < nitems; i++) acc *= data[i];
-                } else {
+                }
+                else {
                     for (int i = 0; i < nitems; i++) acc += data[i];
                 }
-                ((float *)write_ptr)[0] = acc;
+                ((float*)write_ptr)[0] = acc;
                 break;
             }
-            case ME_FLOAT64: {
-                const double *data = (const double *)arg->bound;
+        case ME_FLOAT64:
+            {
+                const double* data = (const double*)arg->bound;
                 double acc = is_prod ? 1.0 : 0.0;
                 if (nitems == 0) {
                     acc = is_prod ? 1.0 : 0.0;
-                } else if (is_prod) {
+                }
+                else if (is_prod) {
                     for (int i = 0; i < nitems; i++) acc *= data[i];
-                } else {
+                }
+                else {
                     for (int i = 0; i < nitems; i++) acc += data[i];
                 }
-                ((double *)write_ptr)[0] = acc;
+                ((double*)write_ptr)[0] = acc;
                 break;
             }
-            case ME_COMPLEX64: {
-                const float _Complex *data = (const float _Complex *)arg->bound;
+        case ME_COMPLEX64:
+            {
+                const float _Complex* data = (const float _Complex*)arg->bound;
                 float _Complex acc = is_prod ? (float _Complex)1.0f : (float _Complex)0.0f;
                 if (nitems == 0) {
                     acc = is_prod ? (float _Complex)1.0f : (float _Complex)0.0f;
-                } else if (is_prod) {
+                }
+                else if (is_prod) {
                     for (int i = 0; i < nitems; i++) acc *= data[i];
-                } else {
+                }
+                else {
                     for (int i = 0; i < nitems; i++) acc += data[i];
                 }
-                ((float _Complex *)write_ptr)[0] = acc;
+                ((float _Complex*)write_ptr)[0] = acc;
                 break;
             }
-            case ME_COMPLEX128: {
-                const double _Complex *data = (const double _Complex *)arg->bound;
+        case ME_COMPLEX128:
+            {
+                const double _Complex* data = (const double _Complex*)arg->bound;
                 double _Complex acc = is_prod ? (double _Complex)1.0 : (double _Complex)0.0;
                 if (nitems == 0) {
                     acc = is_prod ? (double _Complex)1.0 : (double _Complex)0.0;
-                } else if (is_prod) {
+                }
+                else if (is_prod) {
                     for (int i = 0; i < nitems; i++) acc *= data[i];
-                } else {
+                }
+                else {
                     for (int i = 0; i < nitems; i++) acc += data[i];
                 }
-                ((double _Complex *)write_ptr)[0] = acc;
+                ((double _Complex*)write_ptr)[0] = acc;
                 break;
             }
-            default:
-                break;
+        default:
+            break;
         }
     }
 
@@ -3396,7 +3561,7 @@ static void eval_reduction(const me_expr *n) {
     }
 }
 
-static void private_eval(const me_expr *n) {
+static void private_eval(const me_expr* n) {
     if (!n) return;
 
     if (is_reduction_node(n)) {
@@ -3407,7 +3572,7 @@ static void private_eval(const me_expr *n) {
     // Special case: imag() and real() functions return real from complex input
     if (IS_FUNCTION(n->type) && ARITY(n->type) == 1) {
         if (n->function == (void*)imag_wrapper || n->function == (void*)real_wrapper) {
-            me_expr *arg = (me_expr*)n->parameters[0];
+            me_expr* arg = (me_expr*)n->parameters[0];
             me_dtype arg_type = infer_result_type(arg);
 
             if (arg_type == ME_COMPLEX64) {
@@ -3420,8 +3585,8 @@ static void private_eval(const me_expr *n) {
                 me_eval_c64(arg);
 
                 // Extract real/imaginary part to float32 output
-                const float _Complex *cdata = (const float _Complex*)arg->output;
-                float *output = (float*)n->output;
+                const float _Complex* cdata = (const float _Complex*)arg->output;
+                float* output = (float*)n->output;
                 if (n->function == (void*)imag_wrapper) {
                     for (int i = 0; i < n->nitems; i++) {
 #if defined(_MSC_VER) && defined(__clang__)
@@ -3430,7 +3595,8 @@ static void private_eval(const me_expr *n) {
                         output[i] = cimagf(cdata[i]);
 #endif
                     }
-                } else { // real_wrapper
+                }
+                else { // real_wrapper
                     for (int i = 0; i < n->nitems; i++) {
 #if defined(_MSC_VER) && defined(__clang__)
                         output[i] = __builtin_crealf(cdata[i]);
@@ -3440,7 +3606,8 @@ static void private_eval(const me_expr *n) {
                     }
                 }
                 return;
-            } else if (arg_type == ME_COMPLEX128) {
+            }
+            else if (arg_type == ME_COMPLEX128) {
                 // Evaluate argument as complex128
                 if (!arg->output) {
                     arg->output = malloc(n->nitems * sizeof(double _Complex));
@@ -3450,8 +3617,8 @@ static void private_eval(const me_expr *n) {
                 me_eval_c128(arg);
 
                 // Extract real/imaginary part to float64 output
-                const double _Complex *cdata = (const double _Complex*)arg->output;
-                double *output = (double*)n->output;
+                const double _Complex* cdata = (const double _Complex*)arg->output;
+                double* output = (double*)n->output;
                 if (n->function == (void*)imag_wrapper) {
                     for (int i = 0; i < n->nitems; i++) {
 #if defined(_MSC_VER) && defined(__clang__)
@@ -3460,7 +3627,8 @@ static void private_eval(const me_expr *n) {
                         output[i] = cimag(cdata[i]);
 #endif
                     }
-                } else { // real_wrapper
+                }
+                else { // real_wrapper
                     for (int i = 0; i < n->nitems; i++) {
 #if defined(_MSC_VER) && defined(__clang__)
                         output[i] = __builtin_creal(cdata[i]);
@@ -3491,84 +3659,6 @@ static void private_eval(const me_expr *n) {
 #endif
         }
         switch (n->dtype) {
-            case ME_BOOL: me_eval_i8(n);
-                break;
-            case ME_INT8: me_eval_i8(n);
-                break;
-            case ME_INT16: me_eval_i16(n);
-                break;
-            case ME_INT32: me_eval_i32(n);
-                break;
-            case ME_INT64: me_eval_i64(n);
-                break;
-            case ME_UINT8: me_eval_u8(n);
-                break;
-            case ME_UINT16: me_eval_u16(n);
-                break;
-            case ME_UINT32: me_eval_u32(n);
-                break;
-            case ME_UINT64: me_eval_u64(n);
-                break;
-            case ME_FLOAT32: me_eval_f32(n);
-                break;
-            case ME_FLOAT64: me_eval_f64(n);
-                break;
-            case ME_COMPLEX64: me_eval_c64(n);
-                break;
-            case ME_COMPLEX128: me_eval_c128(n);
-                break;
-            default:
-                fprintf(stderr, "FATAL: Invalid dtype %d in evaluation.\n", n->dtype);
-#ifdef NDEBUG
-                abort(); // Release build: terminate immediately
-#else
-                assert(0 && "Invalid dtype"); // Debug: trigger debugger
-#endif
-        }
-        return;
-    }
-
-    // Slow path: need to promote variables
-    // Allocate tracking structures (max ME_MAX_VARS variables)
-    promoted_var_t promotions[ME_MAX_VARS];
-    int promo_count = 0;
-
-    // Save original variable bindings
-    const void *original_bounds[ME_MAX_VARS];
-    me_dtype original_types[ME_MAX_VARS];
-    int save_idx = 0;
-
-    save_variable_bindings(n, original_bounds, original_types, &save_idx);
-
-    // Promote variables
-    promote_variables_in_tree((me_expr *) n, result_type, promotions, &promo_count, n->nitems);
-
-    // Check if we need output type conversion (e.g., computation in float64, output in bool)
-    me_dtype saved_dtype = n->dtype;
-    void *original_output = n->output;
-    void *temp_output = NULL;
-
-    if (saved_dtype != result_type) {
-        // Allocate temp buffer for computation
-        temp_output = malloc(n->nitems * dtype_size(result_type));
-        if (temp_output) {
-            ((me_expr *) n)->output = temp_output;
-        }
-    }
-
-    // Update expression type for evaluation
-    ((me_expr *) n)->dtype = result_type;
-
-    // Evaluate with promoted types
-    if (result_type == ME_AUTO) {
-        fprintf(stderr, "FATAL: ME_AUTO result type in evaluation. This is a bug.\n");
-#ifdef NDEBUG
-        abort(); // Release build: terminate immediately
-#else
-        assert(0 && "ME_AUTO should be resolved during compilation"); // Debug: trigger debugger
-#endif
-    }
-    switch (result_type) {
         case ME_BOOL: me_eval_i8(n);
             break;
         case ME_INT8: me_eval_i8(n);
@@ -3596,11 +3686,89 @@ static void private_eval(const me_expr *n) {
         case ME_COMPLEX128: me_eval_c128(n);
             break;
         default:
-            fprintf(stderr, "FATAL: Invalid result type %d in evaluation.\n", result_type);
+            fprintf(stderr, "FATAL: Invalid dtype %d in evaluation.\n", n->dtype);
 #ifdef NDEBUG
             abort(); // Release build: terminate immediately
 #else
             assert(0 && "Invalid dtype"); // Debug: trigger debugger
+#endif
+        }
+        return;
+    }
+
+    // Slow path: need to promote variables
+    // Allocate tracking structures (max ME_MAX_VARS variables)
+    promoted_var_t promotions[ME_MAX_VARS];
+    int promo_count = 0;
+
+    // Save original variable bindings
+    const void* original_bounds[ME_MAX_VARS];
+    me_dtype original_types[ME_MAX_VARS];
+    int save_idx = 0;
+
+    save_variable_bindings(n, original_bounds, original_types, &save_idx);
+
+    // Promote variables
+    promote_variables_in_tree((me_expr*)n, result_type, promotions, &promo_count, n->nitems);
+
+    // Check if we need output type conversion (e.g., computation in float64, output in bool)
+    me_dtype saved_dtype = n->dtype;
+    void* original_output = n->output;
+    void* temp_output = NULL;
+
+    if (saved_dtype != result_type) {
+        // Allocate temp buffer for computation
+        temp_output = malloc(n->nitems * dtype_size(result_type));
+        if (temp_output) {
+            ((me_expr*)n)->output = temp_output;
+        }
+    }
+
+    // Update expression type for evaluation
+    ((me_expr*)n)->dtype = result_type;
+
+    // Evaluate with promoted types
+    if (result_type == ME_AUTO) {
+        fprintf(stderr, "FATAL: ME_AUTO result type in evaluation. This is a bug.\n");
+#ifdef NDEBUG
+        abort(); // Release build: terminate immediately
+#else
+        assert(0 && "ME_AUTO should be resolved during compilation"); // Debug: trigger debugger
+#endif
+    }
+    switch (result_type) {
+    case ME_BOOL: me_eval_i8(n);
+        break;
+    case ME_INT8: me_eval_i8(n);
+        break;
+    case ME_INT16: me_eval_i16(n);
+        break;
+    case ME_INT32: me_eval_i32(n);
+        break;
+    case ME_INT64: me_eval_i64(n);
+        break;
+    case ME_UINT8: me_eval_u8(n);
+        break;
+    case ME_UINT16: me_eval_u16(n);
+        break;
+    case ME_UINT32: me_eval_u32(n);
+        break;
+    case ME_UINT64: me_eval_u64(n);
+        break;
+    case ME_FLOAT32: me_eval_f32(n);
+        break;
+    case ME_FLOAT64: me_eval_f64(n);
+        break;
+    case ME_COMPLEX64: me_eval_c64(n);
+        break;
+    case ME_COMPLEX128: me_eval_c128(n);
+        break;
+    default:
+        fprintf(stderr, "FATAL: Invalid result type %d in evaluation.\n", result_type);
+#ifdef NDEBUG
+        abort(); // Release build: terminate immediately
+#else
+        assert(0 && "Invalid dtype"); // Debug: trigger debugger
 #endif
     }
 
@@ -3611,16 +3779,16 @@ static void private_eval(const me_expr *n) {
             conv(temp_output, original_output, n->nitems);
         }
         // Restore original output pointer
-        ((me_expr *) n)->output = original_output;
+        ((me_expr*)n)->output = original_output;
         free(temp_output);
     }
 
     // Restore original variable bindings
     int restore_idx = 0;
-    restore_variables_in_tree((me_expr *) n, original_bounds, original_types, &restore_idx);
+    restore_variables_in_tree((me_expr*)n, original_bounds, original_types, &restore_idx);
 
     // Restore expression type
-    ((me_expr *) n)->dtype = saved_dtype;
+    ((me_expr*)n)->dtype = saved_dtype;
 
     // Free promoted buffers
     for (int i = 0; i < promo_count; i++) {
@@ -3631,99 +3799,102 @@ static void private_eval(const me_expr *n) {
 }
 
 /* Helper to update variable bindings and nitems in tree */
-static void save_nitems_in_tree(const me_expr *node, int *nitems_array, int *idx) {
+static void save_nitems_in_tree(const me_expr* node, int* nitems_array, int* idx) {
     if (!node) return;
     nitems_array[(*idx)++] = node->nitems;
 
     switch (TYPE_MASK(node->type)) {
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
             const int arity = ARITY(node->type);
             for (int i = 0; i < arity; i++) {
-                save_nitems_in_tree((const me_expr *) node->parameters[i], nitems_array, idx);
+                save_nitems_in_tree((const me_expr*)node->parameters[i], nitems_array, idx);
             }
             break;
         }
-        default:
-            break;
+    default:
+        break;
     }
 }
 
-static void restore_nitems_in_tree(me_expr *node, const int *nitems_array, int *idx) {
+static void restore_nitems_in_tree(me_expr* node, const int* nitems_array, int* idx) {
     if (!node) return;
     node->nitems = nitems_array[(*idx)++];
 
     switch (TYPE_MASK(node->type)) {
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
             const int arity = ARITY(node->type);
             for (int i = 0; i < arity; i++) {
-                restore_nitems_in_tree((me_expr *) node->parameters[i], nitems_array, idx);
+                restore_nitems_in_tree((me_expr*)node->parameters[i], nitems_array, idx);
             }
             break;
         }
-        default:
-            break;
+    default:
+        break;
     }
 }
 
 /* Helper to free intermediate output buffers */
-static void free_intermediate_buffers(me_expr *node) {
+static void free_intermediate_buffers(me_expr* node) {
     if (!node) return;
 
     switch (TYPE_MASK(node->type)) {
-        case ME_CONSTANT:
-        case ME_VARIABLE:
-            // These don't have intermediate buffers
-            break;
+    case ME_CONSTANT:
+    case ME_VARIABLE:
+        // These don't have intermediate buffers
+        break;
 
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
             const int arity = ARITY(node->type);
             for (int i = 0; i < arity; i++) {
-                me_expr *param = (me_expr *) node->parameters[i];
+                me_expr* param = (me_expr*)node->parameters[i];
                 free_intermediate_buffers(param);
 
                 // Free intermediate buffer (but not for root or variables/constants)
@@ -3738,68 +3909,70 @@ static void free_intermediate_buffers(me_expr *node) {
 }
 
 /* Helper to save original variable bindings with their pointers */
-static void save_variable_metadata(const me_expr *node, const void **var_pointers, size_t *var_sizes, int *var_count) {
+static void save_variable_metadata(const me_expr* node, const void** var_pointers, size_t* var_sizes, int* var_count) {
     if (!node) return;
     switch (TYPE_MASK(node->type)) {
-        case ME_VARIABLE:
-            // Check if this pointer is already in the list
-            for (int i = 0; i < *var_count; i++) {
-                if (var_pointers[i] == node->bound) return; // Already saved
-            }
-            var_pointers[*var_count] = node->bound;
-            var_sizes[*var_count] = dtype_size(node->input_dtype);
-            (*var_count)++;
-            break;
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
+    case ME_VARIABLE:
+        // Check if this pointer is already in the list
+        for (int i = 0; i < *var_count; i++) {
+            if (var_pointers[i] == node->bound) return; // Already saved
+        }
+        var_pointers[*var_count] = node->bound;
+        var_sizes[*var_count] = dtype_size(node->input_dtype);
+        (*var_count)++;
+        break;
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
             const int arity = ARITY(node->type);
             for (int i = 0; i < arity; i++) {
-                save_variable_metadata((const me_expr *) node->parameters[i], var_pointers, var_sizes, var_count);
+                save_variable_metadata((const me_expr*)node->parameters[i], var_pointers, var_sizes, var_count);
             }
             break;
         }
     }
 }
 
-static int count_variable_nodes(const me_expr *node) {
+static int count_variable_nodes(const me_expr* node) {
     if (!node) return 0;
     switch (TYPE_MASK(node->type)) {
-        case ME_VARIABLE:
-            return 1;
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
+    case ME_VARIABLE:
+        return 1;
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
             int count = 0;
             const int arity = ARITY(node->type);
             for (int i = 0; i < arity; i++) {
-                count += count_variable_nodes((const me_expr *) node->parameters[i]);
+                count += count_variable_nodes((const me_expr*)node->parameters[i]);
             }
             return count;
         }
@@ -3807,11 +3980,12 @@ static int count_variable_nodes(const me_expr *node) {
     return 0;
 }
 
-static void collect_variable_nodes(me_expr *node, const void **var_pointers, int n_vars,
-                                   me_expr **var_nodes, int *var_indices, int *node_count) {
+static void collect_variable_nodes(me_expr* node, const void** var_pointers, int n_vars,
+                                   me_expr** var_nodes, int* var_indices, int* node_count) {
     if (!node) return;
     switch (TYPE_MASK(node->type)) {
-        case ME_VARIABLE: {
+    case ME_VARIABLE:
+        {
             int idx = -1;
             for (int i = 0; i < n_vars; i++) {
                 if (node->bound == var_pointers[i]) {
@@ -3826,25 +4000,26 @@ static void collect_variable_nodes(me_expr *node, const void **var_pointers, int
             }
             break;
         }
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
             const int arity = ARITY(node->type);
             for (int i = 0; i < arity; i++) {
-                collect_variable_nodes((me_expr *) node->parameters[i], var_pointers, n_vars,
+                collect_variable_nodes((me_expr*)node->parameters[i], var_pointers, n_vars,
                                        var_nodes, var_indices, node_count);
             }
             break;
@@ -3853,37 +4028,38 @@ static void collect_variable_nodes(me_expr *node, const void **var_pointers, int
 }
 
 /* Helper to update variable bindings by matching original pointers */
-static void update_vars_by_pointer(me_expr *node, const void **old_pointers, const void **new_pointers, int n_vars) {
+static void update_vars_by_pointer(me_expr* node, const void** old_pointers, const void** new_pointers, int n_vars) {
     if (!node) return;
     switch (TYPE_MASK(node->type)) {
-        case ME_VARIABLE:
-            // Find which variable this is and update to new pointer
-            for (int i = 0; i < n_vars; i++) {
-                if (node->bound == old_pointers[i]) {
-                    node->bound = new_pointers[i];
-                    break;
-                }
+    case ME_VARIABLE:
+        // Find which variable this is and update to new pointer
+        for (int i = 0; i < n_vars; i++) {
+            if (node->bound == old_pointers[i]) {
+                node->bound = new_pointers[i];
+                break;
             }
-            break;
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
+        }
+        break;
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
             const int arity = ARITY(node->type);
             for (int i = 0; i < arity; i++) {
-                update_vars_by_pointer((me_expr *) node->parameters[i], old_pointers, new_pointers, n_vars);
+                update_vars_by_pointer((me_expr*)node->parameters[i], old_pointers, new_pointers, n_vars);
             }
             break;
         }
@@ -3891,7 +4067,7 @@ static void update_vars_by_pointer(me_expr *node, const void **old_pointers, con
 }
 
 /* Helper to update variable bindings and nitems in tree */
-static void update_variable_bindings(me_expr *node, const void **new_bounds, int *var_idx, int new_nitems) {
+static void update_variable_bindings(me_expr* node, const void** new_bounds, int* var_idx, int new_nitems) {
     if (!node) return;
 
     // Update nitems for all nodes to handle intermediate buffers
@@ -3900,31 +4076,32 @@ static void update_variable_bindings(me_expr *node, const void **new_bounds, int
     }
 
     switch (TYPE_MASK(node->type)) {
-        case ME_VARIABLE:
-            if (new_bounds && *var_idx >= 0) {
-                node->bound = new_bounds[*var_idx];
-                (*var_idx)++;
-            }
-            break;
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
+    case ME_VARIABLE:
+        if (new_bounds && *var_idx >= 0) {
+            node->bound = new_bounds[*var_idx];
+            (*var_idx)++;
+        }
+        break;
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
             const int arity = ARITY(node->type);
             for (int i = 0; i < arity; i++) {
-                update_variable_bindings((me_expr *) node->parameters[i], new_bounds, var_idx, new_nitems);
+                update_variable_bindings((me_expr*)node->parameters[i], new_bounds, var_idx, new_nitems);
             }
             break;
         }
@@ -3932,13 +4109,13 @@ static void update_variable_bindings(me_expr *node, const void **new_bounds, int
 }
 
 /* Evaluate compiled expression with new variable and output pointers */
-static me_expr *clone_expr(const me_expr *src) {
+static me_expr* clone_expr(const me_expr* src) {
     if (!src) return NULL;
 
     const int arity = ARITY(src->type);
-    const int psize = sizeof(void *) * arity;
-    const int size = (sizeof(me_expr) - sizeof(void *)) + psize + (IS_CLOSURE(src->type) ? sizeof(void *) : 0);
-    me_expr *clone = malloc(size);
+    const int psize = sizeof(void*) * arity;
+    const int size = (sizeof(me_expr) - sizeof(void*)) + psize + (IS_CLOSURE(src->type) ? sizeof(void*) : 0);
+    me_expr* clone = malloc(size);
     if (!clone) return NULL;
 
     // Copy the entire structure
@@ -3947,11 +4124,11 @@ static me_expr *clone_expr(const me_expr *src) {
     // Clone children recursively
     if (arity > 0) {
         for (int i = 0; i < arity; i++) {
-            clone->parameters[i] = clone_expr((const me_expr *) src->parameters[i]);
+            clone->parameters[i] = clone_expr((const me_expr*)src->parameters[i]);
             if (src->parameters[i] && !clone->parameters[i]) {
                 // Clone failed, clean up
                 for (int j = 0; j < i; j++) {
-                    me_free((me_expr *) clone->parameters[j]);
+                    me_free((me_expr*)clone->parameters[j]);
                 }
                 free(clone);
                 return NULL;
@@ -3972,12 +4149,12 @@ static me_expr *clone_expr(const me_expr *src) {
  * This function is safe to call from multiple threads simultaneously,
  * even on the same expression object. Each call creates a temporary
  * clone of the expression tree to avoid race conditions. */
-int me_eval(const me_expr *expr, const void **vars_chunk,
-            int n_vars, void *output_chunk, int chunk_nitems) {
+int me_eval(const me_expr* expr, const void** vars_chunk,
+            int n_vars, void* output_chunk, int chunk_nitems) {
     if (!expr) return ME_EVAL_ERR_NULL_EXPR;
 
     // Verify variable count matches
-    const void *original_var_pointers[ME_MAX_VARS];
+    const void* original_var_pointers[ME_MAX_VARS];
     size_t var_sizes[ME_MAX_VARS];
     int actual_var_count = 0;
     save_variable_metadata(expr, original_var_pointers, var_sizes, &actual_var_count);
@@ -3992,7 +4169,7 @@ int me_eval(const me_expr *expr, const void **vars_chunk,
     }
 
     // Clone the expression tree
-    me_expr *clone = clone_expr(expr);
+    me_expr* clone = clone_expr(expr);
     if (!clone) return ME_EVAL_ERR_OOM;
 
     const int block_nitems = ME_EVAL_BLOCK_NITEMS;
@@ -4011,7 +4188,8 @@ int me_eval(const me_expr *expr, const void **vars_chunk,
 
         // Evaluate the clone
         private_eval(clone);
-    } else if (is_reduction_node(clone)) {
+    }
+    else if (is_reduction_node(clone)) {
         // Reductions operate on the full chunk; avoid block processing.
         update_vars_by_pointer(clone, original_var_pointers, vars_chunk, n_vars);
 
@@ -4020,11 +4198,12 @@ int me_eval(const me_expr *expr, const void **vars_chunk,
 
         clone->output = output_chunk;
         private_eval(clone);
-    } else {
+    }
+    else {
         const size_t output_item_size = dtype_size(clone->dtype);
         const int max_var_nodes = count_variable_nodes(clone);
-        me_expr **var_nodes = NULL;
-        int *var_indices = NULL;
+        me_expr** var_nodes = NULL;
+        int* var_indices = NULL;
         int var_node_count = 0;
 
         if (max_var_nodes > 0) {
@@ -4051,9 +4230,9 @@ int me_eval(const me_expr *expr, const void **vars_chunk,
                 current = chunk_nitems - offset;
             }
 
-            const void *block_vars[ME_MAX_VARS];
+            const void* block_vars[ME_MAX_VARS];
             for (int i = 0; i < n_vars; i++) {
-                const unsigned char *base = (const unsigned char *)vars_chunk[i];
+                const unsigned char* base = (const unsigned char*)vars_chunk[i];
                 block_vars[i] = base + (size_t)offset * var_sizes[i];
             }
 
@@ -4064,7 +4243,7 @@ int me_eval(const me_expr *expr, const void **vars_chunk,
             int update_idx = 0;
             update_variable_bindings(clone, NULL, &update_idx, current);
 
-            clone->output = (unsigned char *)output_chunk + (size_t)offset * output_item_size;
+            clone->output = (unsigned char*)output_chunk + (size_t)offset * output_item_size;
             private_eval(clone);
         }
 
@@ -4079,7 +4258,7 @@ cleanup:
 }
 
 
-static void optimize(me_expr *n) {
+static void optimize(me_expr* n) {
     /* Evaluates as much as possible. */
     if (!n) return;
     if (n->type == ME_CONSTANT) return;
@@ -4092,7 +4271,7 @@ static void optimize(me_expr *n) {
         int i;
         for (i = 0; i < arity; ++i) {
             optimize(n->parameters[i]);
-            if (((me_expr *) (n->parameters[i]))->type != ME_CONSTANT) {
+            if (((me_expr*)(n->parameters[i]))->type != ME_CONSTANT) {
                 known = 0;
             }
         }
@@ -4106,30 +4285,36 @@ static void optimize(me_expr *n) {
 }
 
 #if defined(_WIN32) || defined(_WIN64)
-static bool has_complex_node(const me_expr *n) {
+static bool has_complex_node(const me_expr* n) {
     if (!n) return false;
     if (n->dtype == ME_COMPLEX64 || n->dtype == ME_COMPLEX128) return true;
     const int arity = ARITY(n->type);
     for (int i = 0; i < arity; i++) {
-        if (has_complex_node((const me_expr *)n->parameters[i])) return true;
+        if (has_complex_node((const me_expr*)n->parameters[i])) return true;
     }
     return false;
 }
 
-static bool has_complex_input(const me_expr *n) {
+static bool has_complex_input(const me_expr* n) {
     if (!n) return false;
     if (n->input_dtype == ME_COMPLEX64 || n->input_dtype == ME_COMPLEX128) return true;
     const int arity = ARITY(n->type);
     for (int i = 0; i < arity; i++) {
-        if (has_complex_input((const me_expr *)n->parameters[i])) return true;
+        if (has_complex_input((const me_expr*)n->parameters[i])) return true;
     }
     return false;
 }
 #endif
 
 
-static me_expr *private_compile(const char *expression, const me_variable *variables, int var_count,
-                                void *output, int nitems, me_dtype dtype, int *error) {
+static int private_compile(const char* expression, const me_variable* variables, int var_count,
+                           void* output, int nitems, me_dtype dtype, int* error, me_expr** out) {
+    if (out) *out = NULL;
+    if (!expression || !out || var_count < 0) {
+        if (error) *error = -1;
+        return ME_COMPILE_ERR_INVALID_ARG;
+    }
+
     // Validate dtype usage: either all vars are ME_AUTO (use dtype), or dtype is ME_AUTO (use var dtypes)
     if (variables && var_count > 0) {
         int auto_count = 0;
@@ -4138,7 +4323,8 @@ static me_expr *private_compile(const char *expression, const me_variable *varia
         for (int i = 0; i < var_count; i++) {
             if (variables[i].dtype == ME_AUTO) {
                 auto_count++;
-            } else {
+            }
+            else {
                 specified_count++;
             }
         }
@@ -4151,27 +4337,28 @@ static me_expr *private_compile(const char *expression, const me_variable *varia
                     stderr,
                     "Error: When output dtype is ME_AUTO, all variable dtypes must be specified (not ME_AUTO)\n");
                 if (error) *error = -1;
-                return NULL;
+                return ME_COMPILE_ERR_VAR_UNSPECIFIED;
             }
-        } else {
+        }
+        else {
             // Mode 2: Output dtype is specified
             // Two sub-modes: all ME_AUTO (homogeneous), or all explicit (heterogeneous with conversion)
             if (auto_count > 0 && specified_count > 0) {
                 // Mixed mode not allowed
                 fprintf(stderr, "Error: Variable dtypes must be all ME_AUTO or all explicitly specified\n");
                 if (error) *error = -1;
-                return NULL;
+                return ME_COMPILE_ERR_VAR_MIXED;
             }
         }
     }
 
     // Create a copy of variables with dtype filled in (if not already set)
-    me_variable *vars_copy = NULL;
+    me_variable* vars_copy = NULL;
     if (variables && var_count > 0) {
         vars_copy = malloc(var_count * sizeof(me_variable));
         if (!vars_copy) {
             if (error) *error = -1;
-            return NULL;
+            return ME_COMPILE_ERR_OOM;
         }
         for (int i = 0; i < var_count; i++) {
             vars_copy[i] = variables[i];
@@ -4190,33 +4377,35 @@ static me_expr *private_compile(const char *expression, const me_variable *varia
     // When dtype is ME_AUTO, infer target dtype from variables to avoid type mismatch
     if (dtype != ME_AUTO) {
         s.target_dtype = dtype;
-    } else if (variables && var_count > 0) {
+    }
+    else if (variables && var_count > 0) {
         // Use the first variable's dtype as the target for constants
         // This prevents type promotion issues when mixing float32 vars with float64 constants
         s.target_dtype = variables[0].dtype;
-    } else {
+    }
+    else {
         s.target_dtype = ME_AUTO;
     }
 
     next_token(&s);
-    me_expr *root = list(&s);
-
-    if (vars_copy) free(vars_copy);
+    me_expr* root = list(&s);
 
     if (root == NULL) {
         if (error) *error = -1;
-        return NULL;
+        if (vars_copy) free(vars_copy);
+        return ME_COMPILE_ERR_OOM;
     }
 
     if (contains_reduction(root) && !reduction_usage_is_valid(root)) {
         me_free(root);
         if (error) *error = -1;
-        return NULL;
+        if (vars_copy) free(vars_copy);
+        return ME_COMPILE_ERR_REDUCTION_INVALID;
     }
 
 #if defined(_WIN32) || defined(_WIN64)
     {
-        const me_variable *vars_check = vars_copy ? vars_copy : variables;
+        const me_variable* vars_check = vars_copy ? vars_copy : variables;
         bool complex_vars = false;
         if (vars_check) {
             for (int i = 0; i < var_count; i++) {
@@ -4232,7 +4421,8 @@ static me_expr *private_compile(const char *expression, const me_variable *varia
             fprintf(stderr, "Error: Complex expressions are not supported on Windows (no C99 complex ABI)\n");
             me_free(root);
             if (error) *error = -1;
-            return NULL;
+            if (vars_copy) free(vars_copy);
+            return ME_COMPILE_ERR_COMPLEX_UNSUPPORTED;
         }
     }
 #endif
@@ -4243,8 +4433,10 @@ static me_expr *private_compile(const char *expression, const me_variable *varia
             *error = (s.next - s.start);
             if (*error == 0) *error = 1;
         }
-        return 0;
-    } else {
+        if (vars_copy) free(vars_copy);
+        return ME_COMPILE_ERR_PARSE;
+    }
+    else {
         optimize(root);
         root->output = output;
         root->nitems = nitems;
@@ -4252,24 +4444,33 @@ static me_expr *private_compile(const char *expression, const me_variable *varia
         // If dtype is ME_AUTO, infer from expression; otherwise use provided dtype
         if (dtype == ME_AUTO) {
             root->dtype = infer_output_type(root);
-        } else {
+        }
+        else {
             // User explicitly requested a dtype - use it (will cast if needed)
             root->dtype = dtype;
         }
 
         if (error) *error = 0;
-        return root;
+        if (vars_copy) free(vars_copy);
+        *out = root;
+        return ME_COMPILE_SUCCESS;
     }
 }
 
 // Synthetic addresses for ordinal matching (when user provides NULL addresses)
 static char synthetic_var_addresses[ME_MAX_VARS];
 
-me_expr *me_compile(const char *expression, const me_variable *variables,
-                    int var_count, me_dtype dtype, int *error) {
+int me_compile(const char* expression, const me_variable* variables,
+               int var_count, me_dtype dtype, int* error, me_expr** out) {
+    if (out) *out = NULL;
+    if (!out) {
+        if (error) *error = -1;
+        return ME_COMPILE_ERR_INVALID_ARG;
+    }
+
     // For chunked evaluation, we compile without specific output/nitems
     // If variables have NULL addresses, assign synthetic unique addresses for ordinal matching
-    me_variable *vars_copy = NULL;
+    me_variable* vars_copy = NULL;
     int needs_synthetic = 0;
 
     if (variables && var_count > 0) {
@@ -4286,7 +4487,7 @@ me_expr *me_compile(const char *expression, const me_variable *variables,
             vars_copy = malloc(var_count * sizeof(me_variable));
             if (!vars_copy) {
                 if (error) *error = -1;
-                return NULL;
+                return ME_COMPILE_ERR_OOM;
             }
 
             for (int i = 0; i < var_count; i++) {
@@ -4297,17 +4498,17 @@ me_expr *me_compile(const char *expression, const me_variable *variables,
                 }
             }
 
-            me_expr *result = private_compile(expression, vars_copy, var_count, NULL, 0, dtype, error);
+            int status = private_compile(expression, vars_copy, var_count, NULL, 0, dtype, error, out);
             free(vars_copy);
-            return result;
+            return status;
         }
     }
 
     // No NULL addresses, use variables as-is
-    return private_compile(expression, variables, var_count, NULL, 0, dtype, error);
+    return private_compile(expression, variables, var_count, NULL, 0, dtype, error, out);
 }
 
-static void pn(const me_expr *n, int depth) {
+static void pn(const me_expr* n, int depth) {
     int i, arity;
     printf("%*s", depth, "");
 
@@ -4317,44 +4518,44 @@ static void pn(const me_expr *n, int depth) {
     }
 
     switch (TYPE_MASK(n->type)) {
-        case ME_CONSTANT: printf("%f\n", n->value);
-            break;
-        case ME_VARIABLE: printf("bound %p\n", n->bound);
-            break;
+    case ME_CONSTANT: printf("%f\n", n->value);
+        break;
+    case ME_VARIABLE: printf("bound %p\n", n->bound);
+        break;
 
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7:
-            arity = ARITY(n->type);
-            printf("f%d", arity);
-            for (i = 0; i < arity; i++) {
-                printf(" %p", n->parameters[i]);
-            }
-            printf("\n");
-            for (i = 0; i < arity; i++) {
-                pn(n->parameters[i], depth + 1);
-            }
-            break;
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        arity = ARITY(n->type);
+        printf("f%d", arity);
+        for (i = 0; i < arity; i++) {
+            printf(" %p", n->parameters[i]);
+        }
+        printf("\n");
+        for (i = 0; i < arity; i++) {
+            pn(n->parameters[i], depth + 1);
+        }
+        break;
     }
 }
 
-void me_print(const me_expr *n) {
+void me_print(const me_expr* n) {
     pn(n, 0);
 }
 
-me_dtype me_get_dtype(const me_expr *expr) {
+me_dtype me_get_dtype(const me_expr* expr) {
     return expr ? expr->dtype : ME_AUTO;
 }

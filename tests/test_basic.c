@@ -41,9 +41,10 @@ int test_simple_expression() {
 
     me_variable vars[] = {{"a"}, {"b"}};
     int err;
-    me_expr *expr = me_compile("a + b", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a + b", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
         free(a);
         free(b);
@@ -89,9 +90,10 @@ int test_complex_expression() {
 
     me_variable vars[] = {{"a"}, {"b"}};
     int err;
-    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error\n");
         free(a);
         free(b);
@@ -137,9 +139,10 @@ int test_integer_types() {
 
     me_variable vars[] = {{"a"}, {"b"}};
     int err;
-    me_expr *expr = me_compile("a + b", vars, 2, ME_INT32, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a + b", vars, 2, ME_INT32, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error\n");
         free(a);
         free(b);
@@ -185,9 +188,10 @@ int test_mixed_types() {
 
     me_variable vars[] = {{"a", ME_INT32}, {"b", ME_FLOAT64}};
     int err;
-    me_expr *expr = me_compile("a + b", vars, 2, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a + b", vars, 2, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error\n");
         free(a);
         free(b);

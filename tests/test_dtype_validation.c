@@ -23,9 +23,10 @@ int main() {
     /* Test 1: Valid - All variables ME_AUTO, specific output dtype */
     printf("Test 1: All vars ME_AUTO, output dtype = ME_INT32\n"); {
         me_variable vars[] = {{"a", ME_AUTO}, {"b", ME_AUTO}};
-        me_expr *expr = me_compile("a + b", vars, 2, ME_INT32, &err);
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("a + b", vars, 2, ME_INT32, &err, &expr);
 
-        if (expr) {
+        if (rc_expr == ME_COMPILE_SUCCESS) {
             printf("  ✅ PASS: Compilation succeeded\n");
             printf("  Result dtype: %d\n", me_get_dtype(expr));
             me_free(expr);
@@ -37,9 +38,10 @@ int main() {
     /* Test 2: Valid - All variables have explicit dtypes, output dtype = ME_AUTO */
     printf("\nTest 2: All vars have dtypes, output dtype = ME_AUTO\n"); {
         me_variable vars[] = {{"a", ME_INT32}, {"b", ME_INT32}};
-        me_expr *expr = me_compile("a + b", vars, 2, ME_AUTO, &err);
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("a + b", vars, 2, ME_AUTO, &err, &expr);
 
-        if (expr) {
+        if (rc_expr == ME_COMPILE_SUCCESS) {
             printf("  ✅ PASS: Compilation succeeded\n");
             printf("  Inferred result dtype: %d (ME_INT32=%d)\n", me_get_dtype(expr), ME_INT32);
             me_free(expr);
@@ -51,9 +53,10 @@ int main() {
     /* Test 3: Invalid - Mix of ME_AUTO and explicit dtypes with specific output */
     printf("\nTest 3: INVALID - Mixed var dtypes with specific output\n"); {
         me_variable vars[] = {{"a", ME_INT32}, {"b", ME_AUTO}};
-        me_expr *expr = me_compile("a + b", vars, 2, ME_INT32, &err);
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("a + b", vars, 2, ME_INT32, &err, &expr);
 
-        if (!expr) {
+        if (rc_expr != ME_COMPILE_SUCCESS) {
             printf("  ✅ PASS: Correctly rejected (error=%d)\n", err);
         } else {
             printf("  ❌ FAIL: Should have been rejected\n");
@@ -64,9 +67,10 @@ int main() {
     /* Test 4: Valid - All explicit dtypes with specific output (for type conversion) */
     printf("\nTest 4: VALID - Explicit var dtypes with specific output (enables type conversion)\n"); {
         me_variable vars[] = {{"a", ME_INT32}, {"b", ME_INT32}};
-        me_expr *expr = me_compile("a + b", vars, 2, ME_INT32, &err);
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("a + b", vars, 2, ME_INT32, &err, &expr);
 
-        if (expr) {
+        if (rc_expr == ME_COMPILE_SUCCESS) {
             printf("  ✅ PASS: Compilation succeeded (allows input/output type conversion)\n");
             printf("  Result dtype: %d\n", me_get_dtype(expr));
             me_free(expr);
@@ -78,9 +82,10 @@ int main() {
     /* Test 5: Invalid - All ME_AUTO variables with ME_AUTO output */
     printf("\nTest 5: INVALID - All ME_AUTO vars with ME_AUTO output\n"); {
         me_variable vars[] = {{"a", ME_AUTO}, {"b", ME_AUTO}};
-        me_expr *expr = me_compile("a + b", vars, 2, ME_AUTO, &err);
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("a + b", vars, 2, ME_AUTO, &err, &expr);
 
-        if (!expr) {
+        if (rc_expr != ME_COMPILE_SUCCESS) {
             printf("  ✅ PASS: Correctly rejected (error=%d)\n", err);
         } else {
             printf("  ❌ FAIL: Should have been rejected\n");

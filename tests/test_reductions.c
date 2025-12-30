@@ -45,8 +45,9 @@ static int test_sum_int64() {
 
     me_variable vars[] = {{"x", ME_INT32, data}};
     int err = 0;
-    me_expr *expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err);
-    if (!expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: compilation error %d\n", err);
         return 1;
     }
@@ -79,8 +80,9 @@ static int test_sum_uint64() {
 
     me_variable vars[] = {{"x", ME_UINT32, data}};
     int err = 0;
-    me_expr *expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err);
-    if (!expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: compilation error %d\n", err);
         return 1;
     }
@@ -113,8 +115,9 @@ static int test_sum_float32() {
 
     me_variable vars[] = {{"x", ME_FLOAT32, data}};
     int err = 0;
-    me_expr *expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err);
-    if (!expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: compilation error %d\n", err);
         return 1;
     }
@@ -147,8 +150,9 @@ static int test_prod_complex64() {
 
     me_variable vars[] = {{"x", ME_COMPLEX64, data}};
     int err = 0;
-    me_expr *expr = me_compile("prod(x)", vars, 1, ME_AUTO, &err);
-    if (!expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("prod(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
 #if defined(_WIN32) || defined(_WIN64)
         printf("  ✅ PASSED (complex not supported on Windows)\n");
         return 0;
@@ -188,22 +192,23 @@ static int test_reduction_errors() {
     me_variable vars[] = {{"x", ME_FLOAT64, data}};
     int err = 0;
 
-    me_expr *expr = me_compile("sum(x + 1)", vars, 1, ME_AUTO, &err);
-    if (expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("sum(x + 1)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr == ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: expected sum(x + 1) to be rejected\n");
         me_free(expr);
         return 1;
     }
 
-    expr = me_compile("x + sum(x)", vars, 1, ME_AUTO, &err);
-    if (expr) {
+    rc_expr = me_compile("x + sum(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr == ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: expected x + sum(x) to be rejected\n");
         me_free(expr);
         return 1;
     }
 
-    expr = me_compile("sum(x, x)", vars, 1, ME_AUTO, &err);
-    if (expr) {
+    rc_expr = me_compile("sum(x, x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr == ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: expected sum(x, x) to be rejected\n");
         me_free(expr);
         return 1;
@@ -227,8 +232,9 @@ static int test_empty_inputs() {
         int err = 0;
         int64_t output = -1;
         me_variable vars[] = {{"x", ME_INT32, i32_data}};
-        me_expr *expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err);
-        if (!expr) {
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
             printf("  ❌ FAILED: sum(int32) compile error %d\n", err);
             return 1;
         }
@@ -245,8 +251,9 @@ static int test_empty_inputs() {
         int err = 0;
         int64_t output = -1;
         me_variable vars[] = {{"x", ME_INT32, i32_data}};
-        me_expr *expr = me_compile("prod(x)", vars, 1, ME_AUTO, &err);
-        if (!expr) {
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("prod(x)", vars, 1, ME_AUTO, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
             printf("  ❌ FAILED: prod(int32) compile error %d\n", err);
             return 1;
         }
@@ -263,8 +270,9 @@ static int test_empty_inputs() {
         int err = 0;
         uint64_t output = 0;
         me_variable vars[] = {{"x", ME_UINT32, u32_data}};
-        me_expr *expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err);
-        if (!expr) {
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
             printf("  ❌ FAILED: sum(uint32) compile error %d\n", err);
             return 1;
         }
@@ -281,8 +289,9 @@ static int test_empty_inputs() {
         int err = 0;
         uint64_t output = 0;
         me_variable vars[] = {{"x", ME_UINT32, u32_data}};
-        me_expr *expr = me_compile("prod(x)", vars, 1, ME_AUTO, &err);
-        if (!expr) {
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("prod(x)", vars, 1, ME_AUTO, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
             printf("  ❌ FAILED: prod(uint32) compile error %d\n", err);
             return 1;
         }
@@ -299,8 +308,9 @@ static int test_empty_inputs() {
         int err = 0;
         float output = -1.0f;
         me_variable vars[] = {{"x", ME_FLOAT32, f32_data}};
-        me_expr *expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err);
-        if (!expr) {
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
             printf("  ❌ FAILED: sum(float32) compile error %d\n", err);
             return 1;
         }
@@ -317,8 +327,9 @@ static int test_empty_inputs() {
         int err = 0;
         float output = -1.0f;
         me_variable vars[] = {{"x", ME_FLOAT32, f32_data}};
-        me_expr *expr = me_compile("prod(x)", vars, 1, ME_AUTO, &err);
-        if (!expr) {
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("prod(x)", vars, 1, ME_AUTO, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
             printf("  ❌ FAILED: prod(float32) compile error %d\n", err);
             return 1;
         }
@@ -335,8 +346,9 @@ static int test_empty_inputs() {
         int err = 0;
         float _Complex output = MAKE_C64(-1.0f, 0.0f);
         me_variable vars[] = {{"x", ME_COMPLEX64, c64_data}};
-        me_expr *expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err);
-        if (!expr) {
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
 #if defined(_WIN32) || defined(_WIN64)
             printf("  ✅ PASSED (complex not supported on Windows)\n");
             return 0;
@@ -359,8 +371,9 @@ static int test_empty_inputs() {
         int err = 0;
         float _Complex output = MAKE_C64(0.0f, 0.0f);
         me_variable vars[] = {{"x", ME_COMPLEX64, c64_data}};
-        me_expr *expr = me_compile("prod(x)", vars, 1, ME_AUTO, &err);
-        if (!expr) {
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("prod(x)", vars, 1, ME_AUTO, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
 #if defined(_WIN32) || defined(_WIN64)
             printf("  ✅ PASSED (complex not supported on Windows)\n");
             return 0;

@@ -36,8 +36,9 @@ void benchmark_expression(const char *expr_str, int total_size, int chunk_size) 
     int err;
 
     // Compile expression for chunked evaluation
-    me_expr *expr = me_compile(expr_str, vars, 2, ME_FLOAT64, &err);
-    if (!expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 2, ME_FLOAT64, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("Failed to compile expression\n");
         free(a);
         free(b);

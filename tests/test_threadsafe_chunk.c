@@ -56,8 +56,9 @@ int test_parallel_evaluation(void) {
     // Variables for compilation (just the names)
     me_variable vars[] = {{"a"}, {"b"}};
     int err;
-    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &err);
-    if (!expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ Compilation failed\n");
         return 1;
     }

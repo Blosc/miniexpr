@@ -39,9 +39,10 @@ int main() {
         };
 
         int err;
-        me_expr *expr = me_compile("a + b", vars, 2, ME_INT32, &err);
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("a + b", vars, 2, ME_INT32, &err, &expr);
 
-        if (!expr) {
+        if (rc_expr != ME_COMPILE_SUCCESS) {
             printf("  ❌ FAIL: Compilation error at position %d\n", err);
         } else {
             const void *var_ptrs[] = {a, b};
@@ -80,9 +81,10 @@ int main() {
         };
 
         int err;
-        me_expr *expr = me_compile("a & b", vars, 2, ME_BOOL, &err);
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("a & b", vars, 2, ME_BOOL, &err, &expr);
 
-        if (!expr) {
+        if (rc_expr != ME_COMPILE_SUCCESS) {
             printf("  ❌ FAIL: Compilation error at position %d\n", err);
         } else {
             const void *var_ptrs[] = {a, b};
@@ -154,9 +156,10 @@ int main() {
 
         int err;
         // Simple expression: cast bool to int and add - use ME_AUTO to infer result
-        me_expr *expr = me_compile("a + b", vars, 2, ME_AUTO, &err);
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("a + b", vars, 2, ME_AUTO, &err, &expr);
 
-        if (!expr) {
+        if (rc_expr != ME_COMPILE_SUCCESS) {
             printf("  ❌ FAIL: Compilation error at position %d\n", err);
         } else {
             const void *var_ptrs[] = {a, b};

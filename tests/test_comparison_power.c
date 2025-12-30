@@ -34,9 +34,10 @@ void test_power_equality_comparison() {
     me_variable vars[] = {{"a1"}, {"a2"}};
 
     int err;
-    me_expr *expr = me_compile("a1 ** 2 == (a1 + a2)", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a1 ** 2 == (a1 + a2)", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -68,9 +69,10 @@ void test_power_less_than_comparison() {
     me_variable vars[] = {{"a1"}, {"a2"}};
 
     int err;
-    me_expr *expr = me_compile("a1 ** 2 < a2", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a1 ** 2 < a2", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -101,9 +103,10 @@ void test_power_greater_equal_comparison() {
     me_variable vars[] = {{"a1"}, {"a2"}};
 
     int err;
-    me_expr *expr = me_compile("a1 ** 3 >= a2", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a1 ** 3 >= a2", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -135,9 +138,10 @@ void test_complex_power_comparison() {
     me_variable vars[] = {{"a1"}, {"a2"}, {"a3"}};
 
     int err;
-    me_expr *expr = me_compile("(a1 ** 2 + a2 ** 2) == a3", vars, 3, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("(a1 ** 2 + a2 ** 2) == a3", vars, 3, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;

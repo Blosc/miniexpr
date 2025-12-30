@@ -90,9 +90,10 @@ void test_conj_c64() {
     me_variable vars[] = {{"z", ME_COMPLEX64}};
 
     int err;
-    me_expr *expr = me_compile("conj(z)", vars, 1, ME_COMPLEX64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("conj(z)", vars, 1, ME_COMPLEX64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -135,9 +136,10 @@ void test_conj_c128() {
     me_variable vars[] = {{"z", ME_COMPLEX128}};
 
     int err;
-    me_expr *expr = me_compile("conj(z)", vars, 1, ME_COMPLEX128, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("conj(z)", vars, 1, ME_COMPLEX128, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -175,9 +177,10 @@ void test_imag_c64() {
     me_variable vars[] = {{"z", ME_COMPLEX64}};
 
     int err;
-    me_expr *expr = me_compile("imag(z)", vars, 1, ME_FLOAT32, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("imag(z)", vars, 1, ME_FLOAT32, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -215,9 +218,10 @@ void test_imag_c128() {
     me_variable vars[] = {{"z", ME_COMPLEX128}};
 
     int err;
-    me_expr *expr = me_compile("imag(z)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("imag(z)", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -255,9 +259,10 @@ void test_conj_identity() {
     me_variable vars[] = {{"z", ME_COMPLEX128}};
 
     int err;
-    me_expr *expr = me_compile("conj(conj(z))", vars, 1, ME_COMPLEX128, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("conj(conj(z))", vars, 1, ME_COMPLEX128, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -289,9 +294,10 @@ void test_imag_auto_dtype() {
     me_variable vars[] = {{"z", ME_COMPLEX128}};
 
     int err;
-    me_expr *expr = me_compile("imag(z)", vars, 1, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("imag(z)", vars, 1, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -334,9 +340,10 @@ void test_real_c64() {
     me_variable vars[] = {{"z", ME_COMPLEX64}};
 
     int err;
-    me_expr *expr = me_compile("real(z)", vars, 1, ME_FLOAT32, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("real(z)", vars, 1, ME_FLOAT32, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -379,9 +386,10 @@ void test_real_c128() {
     me_variable vars[] = {{"z", ME_COMPLEX128}};
 
     int err;
-    me_expr *expr = me_compile("real(z)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("real(z)", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -419,9 +427,10 @@ void test_real_auto_dtype() {
     me_variable vars[] = {{"z", ME_COMPLEX128}};
 
     int err;
-    me_expr *expr = me_compile("real(z)", vars, 1, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("real(z)", vars, 1, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;

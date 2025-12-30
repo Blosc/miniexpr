@@ -53,9 +53,10 @@ void test_mixed_types_float32_output() {
     };
 
     int err;
-    me_expr *expr = me_compile("a + b", vars, 2, ME_FLOAT32, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a + b", vars, 2, ME_FLOAT32, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -112,9 +113,10 @@ void test_float32_vars_float64_output() {
     };
 
     int err;
-    me_expr *expr = me_compile("x + y", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("x + y", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -167,9 +169,10 @@ void test_float32_with_constant_float64_output() {
     me_variable vars[] = {{"a", ME_FLOAT32}};
 
     int err;
-    me_expr *expr = me_compile("a + 3.0", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a + 3.0", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -225,9 +228,10 @@ void test_comparison_explicit_bool_output() {
     };
 
     int err;
-    me_expr *expr = me_compile("a > b", vars, 2, ME_BOOL, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a > b", vars, 2, ME_BOOL, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;

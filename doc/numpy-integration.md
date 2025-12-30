@@ -42,7 +42,9 @@ if (dtype < 0) {
 Converts a miniexpr dtype to a NumPy type number.
 
 ```c
-me_expr *expr = me_compile(...);
+me_expr *expr = NULL;
+int err = 0;
+if (me_compile(..., &err, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 int numpy_num = me_dtype_to_numpy(expr->dtype);
 // Use numpy_num to create output array
 ```
@@ -109,7 +111,7 @@ cdef extern from "miniexpr.h":
     ctypedef struct me_expr:
         pass
 
-    me_expr* me_compile(const char *expr, ...)
+    int me_compile(const char *expr, ..., int *error, me_expr **out)
     int me_eval(me_expr *expr, ...)
     void me_free(me_expr *expr)
 
@@ -120,7 +122,10 @@ def evaluate_expression(str expression, np.ndarray[double] a, np.ndarray[double]
     cdef int me_dtype = me_dtype_from_numpy(np.NPY_FLOAT64)
 
     # Setup and compile (simplified)
-    cdef me_expr *expr = me_compile(expression.encode(), ...)
+    cdef me_expr *expr = NULL
+    if me_compile(expression.encode(), ..., &expr) != 0:
+        # handle error
+        return result
 
     # Evaluate
     me_eval(expr)  // returns ME_EVAL_SUCCESS on success

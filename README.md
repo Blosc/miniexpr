@@ -20,8 +20,8 @@ miniexpr provides a simple, focused API with just two main functions:
 
 ### `me_compile()`
 ```c
-me_expr *me_compile(const char *expression, const me_variable *variables,
-                    int var_count, me_dtype dtype, int *error);
+int me_compile(const char *expression, const me_variable *variables,
+               int var_count, me_dtype dtype, int *error, me_expr **out);
 ```
 Compiles an expression for evaluation. Variable and output pointers are provided during evaluation rather than compilation.
 
@@ -29,8 +29,8 @@ Compiles an expression for evaluation. Variable and output pointers are provided
 
 ```c
 me_variable vars[] = {{"x"}, {"y"}};  // Just the names!
-me_expr *expr = me_compile("x + y", vars, 2, ME_FLOAT64, &err);
-
+me_expr *expr = NULL;
+if (me_compile("x + y", vars, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 // Later, provide data in the same order as vars array
 const void *data[] = {x_array, y_array};  // x first, y second
 if (me_eval(expr, data, 2, output, nitems) != ME_EVAL_SUCCESS) { /* handle error */ }
@@ -39,7 +39,8 @@ if (me_eval(expr, data, 2, output, nitems) != ME_EVAL_SUCCESS) { /* handle error
 For mixed types (use `ME_AUTO` for output dtype to infer from variables):
 ```c
 me_variable vars[] = {{"temp", ME_FLOAT64}, {"count", ME_INT32}};
-me_expr *expr = me_compile("temp * count", vars, 2, ME_AUTO, &err);
+me_expr *expr = NULL;
+if (me_compile("temp * count", vars, 2, ME_AUTO, &err, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 // Result type will be inferred (ME_FLOAT64 in this case)
 ```
 
@@ -104,8 +105,8 @@ me_variable vars[] = {{"x"}, {"y"}};
 int err;
 
 // Compile expression
-me_expr *expr = me_compile("x + y", vars, 2, ME_FLOAT64, &err);
-
+me_expr *expr = NULL;
+if (me_compile("x + y", vars, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 // Prepare data
 double x_data[] = {1.0, 2.0, 3.0};
 double y_data[] = {4.0, 5.0, 6.0};

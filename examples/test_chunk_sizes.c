@@ -112,9 +112,10 @@ int main() {
     // Compile expression
     me_variable vars[] = {{"a"}, {"b"}};
     int error;
-    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2,
-                               ME_FLOAT64, &error);
-    if (!expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("sqrt(a*a + b*b)", vars, 2,
+                               ME_FLOAT64, &error, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("ERROR: Failed to compile\n");
         return 1;
     }

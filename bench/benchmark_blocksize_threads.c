@@ -110,8 +110,9 @@ static void benchmark_block_sizes(size_t total_elems) {
 
     me_variable vars[] = {{"a"}, {"b"}, {"c"}};
     int err = 0;
-    me_expr *expr = me_compile("(a + b) * c", vars, 3, ME_FLOAT64, &err);
-    if (!expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("(a + b) * c", vars, 3, ME_FLOAT64, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("ERROR: Failed to compile expression (err=%d)\n", err);
         free(a);
         free(b);

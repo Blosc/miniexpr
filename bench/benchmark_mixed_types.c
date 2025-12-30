@@ -175,8 +175,9 @@ static double benchmark_chunksize(thread_pool_t *pool, size_t chunk_bytes,
         {"c", ME_INT16}
     };
     int error;
-    me_expr *expr = me_compile("(a + b) * c", vars, 3, ME_AUTO, &error);
-    if (!expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("(a + b) * c", vars, 3, ME_AUTO, &error, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         fprintf(stderr, "Failed to compile expression, error: %d\n", error);
         return 0.0;
     }

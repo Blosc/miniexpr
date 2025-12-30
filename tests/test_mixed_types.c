@@ -30,9 +30,10 @@ int main() {
     };
 
     int err;
-    me_expr *expr1 = me_compile("a + b", vars1, 2, ME_AUTO, &err);
+    me_expr *expr1 = NULL;
+    int rc_expr1 = me_compile("a + b", vars1, 2, ME_AUTO, &err, &expr1);
 
-    if (!expr1) {
+    if (rc_expr1 != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
         printf("  This shows runtime type mismatch detection is working!\n");
     } else {
@@ -64,9 +65,10 @@ int main() {
         {"b", ME_FLOAT32}
     };
 
-    me_expr *expr2 = me_compile("a + b", vars2, 2, ME_AUTO, &err);
+    me_expr *expr2 = NULL;
+    int rc_expr2 = me_compile("a + b", vars2, 2, ME_AUTO, &err, &expr2);
 
-    if (!expr2) {
+    if (rc_expr2 != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
         printf("  This shows runtime type mismatch detection is working!\n");
     } else {
@@ -98,9 +100,10 @@ int main() {
         {"b", ME_FLOAT64}
     };
 
-    me_expr *expr3 = me_compile("a + b", vars3, 2, ME_AUTO, &err);
+    me_expr *expr3 = NULL;
+    int rc_expr3 = me_compile("a + b", vars3, 2, ME_AUTO, &err, &expr3);
 
-    if (!expr3) {
+    if (rc_expr3 != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
         printf("  This shows runtime type mismatch detection is working!\n");
     } else {

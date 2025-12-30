@@ -12,7 +12,6 @@
 #include "minctest.h"
 
 
-
 int main() {
     printf("=== Mixed Types Example ===\n");
     printf("Expression: a + b\n");
@@ -35,9 +34,10 @@ int main() {
     // be inferred from the first variable's type (ME_INT32 here)
     // But this expression has no constants, only variables
     int error;
-    me_expr *expr = me_compile("a + b", vars, 2, ME_AUTO, &error);
+    me_expr* expr = NULL;
+    int rc_expr = me_compile("a + b", vars, 2, ME_AUTO, &error, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("ERROR: Failed to compile at position %d\n", error);
         return 1;
     }
@@ -45,16 +45,16 @@ int main() {
     printf("Inferred result type: ");
     me_dtype result_dtype = me_get_dtype(expr);
     switch (result_dtype) {
-        case ME_INT32: printf("ME_INT32\n");
-            break;
-        case ME_FLOAT64: printf("ME_FLOAT64\n");
-            break;
-        default: printf("%d\n", result_dtype);
+    case ME_INT32: printf("ME_INT32\n");
+        break;
+    case ME_FLOAT64: printf("ME_FLOAT64\n");
+        break;
+    default: printf("%d\n", result_dtype);
     }
     printf("\n");
 
     // Prepare variable pointers
-    const void *var_ptrs[] = {a, b};
+    const void* var_ptrs[] = {a, b};
 
     // Evaluate (integers will be promoted to float64)
     ME_EVAL_CHECK(expr, var_ptrs, 2, result, n);

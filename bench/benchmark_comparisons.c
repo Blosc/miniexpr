@@ -79,8 +79,9 @@ static void benchmark_comparison(const char *name, const char *expr_str,
     /*
      * Benchmark 1: ME_BOOL output
      */
-    me_expr *expr_bool = me_compile(expr_str, vars, num_vars, ME_BOOL, &err);
-    if (!expr_bool) {
+    me_expr *expr_bool = NULL;
+    int rc_expr_bool = me_compile(expr_str, vars, num_vars, ME_BOOL, &err, &expr_bool);
+    if (rc_expr_bool != ME_COMPILE_SUCCESS) {
         fprintf(stderr, "Failed to compile %s with ME_BOOL: error %d\n", name, err);
         free(result_bool);
         free(result_f64);
@@ -105,8 +106,9 @@ static void benchmark_comparison(const char *name, const char *expr_str,
     /*
      * Benchmark 2: ME_FLOAT64 output (for comparison)
      */
-    me_expr *expr_f64 = me_compile(expr_str, vars, num_vars, ME_FLOAT64, &err);
-    if (!expr_f64) {
+    me_expr *expr_f64 = NULL;
+    int rc_expr_f64 = me_compile(expr_str, vars, num_vars, ME_FLOAT64, &err, &expr_f64);
+    if (rc_expr_f64 != ME_COMPILE_SUCCESS) {
         fprintf(stderr, "Failed to compile %s with ME_FLOAT64: error %d\n", name, err);
         free(result_bool);
         free(result_f64);

@@ -34,9 +34,10 @@ void test_comparison_bool_output() {
     me_variable vars[] = {{"a1", ME_FLOAT64}, {"a2", ME_FLOAT64}};
 
     int err;
-    me_expr *expr = me_compile("a1 ** 2 == (a1 + a2)", vars, 2, ME_BOOL, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a1 ** 2 == (a1 + a2)", vars, 2, ME_BOOL, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -79,9 +80,10 @@ void test_auto_dtype_comparison() {
     me_variable vars[] = {{"a1", ME_FLOAT64}, {"a2", ME_FLOAT64}};
 
     int err;
-    me_expr *expr = me_compile("a1 < a2", vars, 2, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a1 < a2", vars, 2, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;

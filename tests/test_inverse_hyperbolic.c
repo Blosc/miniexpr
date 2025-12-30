@@ -35,9 +35,10 @@ void test_asinh() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr = me_compile("asinh(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("asinh(x)", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -65,14 +66,16 @@ void test_asinh_alias() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr_a = me_compile("asinh(x)", vars, 1, ME_FLOAT64, &err);
-    me_expr *expr_arc = me_compile("arcsinh(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr_a = NULL;
+    int rc_expr_a = me_compile("asinh(x)", vars, 1, ME_FLOAT64, &err, &expr_a);
+    me_expr *expr_arc = NULL;
+    int rc_expr_arc = me_compile("arcsinh(x)", vars, 1, ME_FLOAT64, &err, &expr_arc);
 
     if (!expr_a || !expr_arc) {
         printf("  FAIL: compilation error\n");
         tests_failed++;
-        if (expr_a) me_free(expr_a);
-        if (expr_arc) me_free(expr_arc);
+        if (rc_expr_a == ME_COMPILE_SUCCESS) me_free(expr_a);
+        if (rc_expr_arc == ME_COMPILE_SUCCESS) me_free(expr_arc);
         return;
     }
 
@@ -105,9 +108,10 @@ void test_acosh() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr = me_compile("acosh(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("acosh(x)", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -135,14 +139,16 @@ void test_acosh_alias() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr_a = me_compile("acosh(x)", vars, 1, ME_FLOAT64, &err);
-    me_expr *expr_arc = me_compile("arccosh(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr_a = NULL;
+    int rc_expr_a = me_compile("acosh(x)", vars, 1, ME_FLOAT64, &err, &expr_a);
+    me_expr *expr_arc = NULL;
+    int rc_expr_arc = me_compile("arccosh(x)", vars, 1, ME_FLOAT64, &err, &expr_arc);
 
     if (!expr_a || !expr_arc) {
         printf("  FAIL: compilation error\n");
         tests_failed++;
-        if (expr_a) me_free(expr_a);
-        if (expr_arc) me_free(expr_arc);
+        if (rc_expr_a == ME_COMPILE_SUCCESS) me_free(expr_a);
+        if (rc_expr_arc == ME_COMPILE_SUCCESS) me_free(expr_arc);
         return;
     }
 
@@ -175,9 +181,10 @@ void test_atanh() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr = me_compile("atanh(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("atanh(x)", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -205,14 +212,16 @@ void test_atanh_alias() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr_a = me_compile("atanh(x)", vars, 1, ME_FLOAT64, &err);
-    me_expr *expr_arc = me_compile("arctanh(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr_a = NULL;
+    int rc_expr_a = me_compile("atanh(x)", vars, 1, ME_FLOAT64, &err, &expr_a);
+    me_expr *expr_arc = NULL;
+    int rc_expr_arc = me_compile("arctanh(x)", vars, 1, ME_FLOAT64, &err, &expr_arc);
 
     if (!expr_a || !expr_arc) {
         printf("  FAIL: compilation error\n");
         tests_failed++;
-        if (expr_a) me_free(expr_a);
-        if (expr_arc) me_free(expr_arc);
+        if (rc_expr_a == ME_COMPILE_SUCCESS) me_free(expr_a);
+        if (rc_expr_arc == ME_COMPILE_SUCCESS) me_free(expr_arc);
         return;
     }
 
@@ -244,9 +253,10 @@ void test_inverse_hyperbolic_roundtrip() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr = me_compile("asinh(sinh(x))", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("asinh(sinh(x))", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;

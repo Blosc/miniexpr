@@ -25,8 +25,10 @@ int main() {
     // Test acos vs arccos
     tests_total++;
     printf("Test 1: acos(x) vs arccos(x)\n");
-    me_expr *expr_acos = me_compile("acos(x)", vars, 1, ME_FLOAT64, &err);
-    me_expr *expr_arccos = me_compile("arccos(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr_acos = NULL;
+    int rc_expr_acos = me_compile("acos(x)", vars, 1, ME_FLOAT64, &err, &expr_acos);
+    me_expr *expr_arccos = NULL;
+    int rc_expr_arccos = me_compile("arccos(x)", vars, 1, ME_FLOAT64, &err, &expr_arccos);
 
     if (!expr_acos || !expr_arccos) {
         printf("  FAIL: Compilation failed\n");
@@ -57,8 +59,10 @@ int main() {
     // Test asin vs arcsin
     tests_total++;
     printf("\nTest 2: asin(x) vs arcsin(x)\n");
-    me_expr *expr_asin = me_compile("asin(x)", vars, 1, ME_FLOAT64, &err);
-    me_expr *expr_arcsin = me_compile("arcsin(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr_asin = NULL;
+    int rc_expr_asin = me_compile("asin(x)", vars, 1, ME_FLOAT64, &err, &expr_asin);
+    me_expr *expr_arcsin = NULL;
+    int rc_expr_arcsin = me_compile("arcsin(x)", vars, 1, ME_FLOAT64, &err, &expr_arcsin);
 
     if (!expr_asin || !expr_arcsin) {
         printf("  FAIL: Compilation failed\n");
@@ -89,8 +93,10 @@ int main() {
     // Test atan vs arctan
     tests_total++;
     printf("\nTest 3: atan(x) vs arctan(x)\n");
-    me_expr *expr_atan = me_compile("atan(x)", vars, 1, ME_FLOAT64, &err);
-    me_expr *expr_arctan = me_compile("arctan(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr_atan = NULL;
+    int rc_expr_atan = me_compile("atan(x)", vars, 1, ME_FLOAT64, &err, &expr_atan);
+    me_expr *expr_arctan = NULL;
+    int rc_expr_arctan = me_compile("arctan(x)", vars, 1, ME_FLOAT64, &err, &expr_arctan);
 
     if (!expr_atan || !expr_arctan) {
         printf("  FAIL: Compilation failed\n");
@@ -123,8 +129,10 @@ int main() {
     printf("\nTest 4: atan2(y, x) vs arctan2(y, x)\n");
     double y[VECTOR_SIZE] = {1.0, 0.5, 0.707, 0.866, 0.0};
     me_variable vars2[] = {{"y"}, {"x"}};
-    me_expr *expr_atan2 = me_compile("atan2(y, x)", vars2, 2, ME_FLOAT64, &err);
-    me_expr *expr_arctan2 = me_compile("arctan2(y, x)", vars2, 2, ME_FLOAT64, &err);
+    me_expr *expr_atan2 = NULL;
+    int rc_expr_atan2 = me_compile("atan2(y, x)", vars2, 2, ME_FLOAT64, &err, &expr_atan2);
+    me_expr *expr_arctan2 = NULL;
+    int rc_expr_arctan2 = me_compile("arctan2(y, x)", vars2, 2, ME_FLOAT64, &err, &expr_arctan2);
 
     if (!expr_atan2 || !expr_arctan2) {
         printf("  FAIL: Compilation failed\n");

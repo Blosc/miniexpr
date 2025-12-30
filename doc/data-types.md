@@ -34,12 +34,8 @@ int main() {
 
     // Compile the expression
     int error;
-    me_expr *expr = me_compile("width * height", vars, 2, ME_INT32, &error);
-
-    if (!expr) {
-        printf("Parse error at position %d\n", error);
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("width * height", vars, 2, ME_INT32, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     // Evaluate
     const void *var_ptrs[] = {width, height};
@@ -86,12 +82,8 @@ int main() {
     // Circle area: π * r²
     // Using an approximation of π
     int error;
-    me_expr *expr = me_compile("3.14159265 * r * r", vars, 1, ME_FLOAT32, &error);
-
-    if (!expr) {
-        printf("Parse error at position %d\n", error);
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("3.14159265 * r * r", vars, 1, ME_FLOAT32, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     const void *var_ptrs[] = {radius};
     if (me_eval(expr, var_ptrs, 1, area, n) != ME_EVAL_SUCCESS) { /* handle error */ }
@@ -145,12 +137,8 @@ int main() {
     // Calculate total cost with 8% tax
     // Using ME_AUTO lets the library infer the result type (ME_FLOAT64)
     int error;
-    me_expr *expr = me_compile("items * price * 1.08", vars, 2, ME_AUTO, &error);
-
-    if (!expr) {
-        printf("Parse error at position %d\n", error);
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("items * price * 1.08", vars, 2, ME_AUTO, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     const void *var_ptrs[] = {items, price};
     if (me_eval(expr, var_ptrs, 2, total, n) != ME_EVAL_SUCCESS) { /* handle error */ }
@@ -197,12 +185,8 @@ int main() {
     me_variable vars[] = {{"r"}, {"g"}, {"b"}};
 
     int error;
-    me_expr *expr = me_compile("0.299*r + 0.587*g + 0.114*b", vars, 3, ME_UINT8, &error);
-
-    if (!expr) {
-        printf("Parse error at position %d\n", error);
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("0.299*r + 0.587*g + 0.114*b", vars, 3, ME_UINT8, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     const void *var_ptrs[] = {red, green, blue};
     if (me_eval(expr, var_ptrs, 3, gray, n) != ME_EVAL_SUCCESS) { /* handle error */ }
@@ -253,12 +237,8 @@ int main() {
     };
 
     int error;
-    me_expr *expr = me_compile("a ** 2 == (a + b)", vars, 2, ME_BOOL, &error);
-
-    if (!expr) {
-        printf("Parse error at position %d\n", error);
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("a ** 2 == (a + b)", vars, 2, ME_BOOL, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     const void *var_ptrs[] = {a, b};
     if (me_eval(expr, var_ptrs, 2, is_equal, n) != ME_EVAL_SUCCESS) { /* handle error */ }
@@ -290,13 +270,15 @@ a=6.0: a² (36.0) == a+b (36.0) -> true
 **Method 1: Explicit variable dtypes with ME_BOOL output**
 ```c
 me_variable vars[] = {{"x", ME_FLOAT64}, {"y", ME_FLOAT64}};
-me_expr *expr = me_compile("x < y", vars, 2, ME_BOOL, &error);
+me_expr *expr = NULL;
+if (me_compile("x < y", vars, 2, ME_BOOL, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 ```
 
 **Method 2: ME_AUTO output (auto-infers ME_BOOL for comparisons)**
 ```c
 me_variable vars[] = {{"x", ME_FLOAT64}, {"y", ME_FLOAT64}};
-me_expr *expr = me_compile("x < y", vars, 2, ME_AUTO, &error);
+me_expr *expr = NULL;
+if (me_compile("x < y", vars, 2, ME_AUTO, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 // me_get_dtype(expr) == ME_BOOL  (automatically inferred)
 ```
 
@@ -326,12 +308,8 @@ int main() {
 
     // Explicit variable types + explicit output dtype
     int error;
-    me_expr *expr = me_compile("a + b", vars, 2, ME_FLOAT32, &error);
-
-    if (!expr) {
-        printf("Parse error at position %d\n", error);
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("a + b", vars, 2, ME_FLOAT32, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     const void *var_ptrs[] = {a, b};
     if (me_eval(expr, var_ptrs, 2, result, 5) != ME_EVAL_SUCCESS) { /* handle error */ }

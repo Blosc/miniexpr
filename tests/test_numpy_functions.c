@@ -36,9 +36,10 @@ void test_expm1() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr = me_compile("expm1(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("expm1(x)", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -66,9 +67,10 @@ void test_log1p() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr = me_compile("log1p(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("log1p(x)", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -95,9 +97,10 @@ void test_log2() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr = me_compile("log2(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("log2(x)", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -125,9 +128,10 @@ void test_logaddexp() {
     me_variable vars[] = {{"a"}, {"b"}};
 
     int err;
-    me_expr *expr = me_compile("logaddexp(a, b)", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("logaddexp(a, b)", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -163,9 +167,10 @@ void test_expm1_small_values() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr = me_compile("expm1(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("expm1(x)", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -193,9 +198,10 @@ void test_log1p_small_values() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr = me_compile("log1p(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("log1p(x)", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -224,9 +230,10 @@ void test_logaddexp_extreme_values() {
     me_variable vars[] = {{"a"}, {"b"}};
 
     int err;
-    me_expr *expr = me_compile("logaddexp(a, b)", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("logaddexp(a, b)", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -262,8 +269,9 @@ void test_mixed_expressions() {
     int err;
 
     // Test: log1p(expm1(x)) should equal x (for x > -1)
-    me_expr *expr1 = me_compile("log1p(expm1(x))", vars, 1, ME_FLOAT64, &err);
-    if (!expr1) {
+    me_expr *expr1 = NULL;
+    int rc_expr1 = me_compile("log1p(expm1(x))", vars, 1, ME_FLOAT64, &err, &expr1);
+    if (rc_expr1 != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error for log1p(expm1(x)) at position %d\n", err);
         tests_failed++;
         return;
@@ -280,12 +288,14 @@ void test_mixed_expressions() {
     me_free(expr1);
 
     // Test: log2(x) = log(x) / log(2)
-    me_expr *expr2 = me_compile("log2(x)", vars, 1, ME_FLOAT64, &err);
-    me_expr *expr3 = me_compile("log(x) / log(2)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr2 = NULL;
+    int rc_expr2 = me_compile("log2(x)", vars, 1, ME_FLOAT64, &err, &expr2);
+    me_expr *expr3 = NULL;
+    int rc_expr3 = me_compile("log(x) / log(2)", vars, 1, ME_FLOAT64, &err, &expr3);
     if (!expr2 || !expr3) {
         printf("  FAIL: compilation error for log2 comparison\n");
-        if (expr2) me_free(expr2);
-        if (expr3) me_free(expr3);
+        if (rc_expr2 == ME_COMPILE_SUCCESS) me_free(expr2);
+        if (rc_expr3 == ME_COMPILE_SUCCESS) me_free(expr3);
         tests_failed++;
         return;
     }
@@ -313,9 +323,10 @@ void test_round_func() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr = me_compile("round(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("round(x)", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -342,9 +353,10 @@ void test_sign() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr = me_compile("sign(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("sign(x)", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -374,9 +386,10 @@ void test_square() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr = me_compile("square(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("square(x)", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -403,9 +416,10 @@ void test_trunc_func() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr = me_compile("trunc(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("trunc(x)", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -433,13 +447,15 @@ void test_square_vs_pow() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr1 = me_compile("square(x)", vars, 1, ME_FLOAT64, &err);
-    me_expr *expr2 = me_compile("pow(x, 2)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr1 = NULL;
+    int rc_expr1 = me_compile("square(x)", vars, 1, ME_FLOAT64, &err, &expr1);
+    me_expr *expr2 = NULL;
+    int rc_expr2 = me_compile("pow(x, 2)", vars, 1, ME_FLOAT64, &err, &expr2);
 
     if (!expr1 || !expr2) {
         printf("  FAIL: compilation error\n");
-        if (expr1) me_free(expr1);
-        if (expr2) me_free(expr2);
+        if (rc_expr1 == ME_COMPILE_SUCCESS) me_free(expr1);
+        if (rc_expr2 == ME_COMPILE_SUCCESS) me_free(expr2);
         tests_failed++;
         return;
     }
@@ -473,8 +489,9 @@ void test_real_imag_on_real_inputs() {
     int err;
 
     /* real(x) with float64 input -> float64 output, identity */
-    me_expr *expr_real64 = me_compile("real(x)", vars64, 1, ME_FLOAT64, &err);
-    if (!expr_real64) {
+    me_expr *expr_real64 = NULL;
+    int rc_expr_real64 = me_compile("real(x)", vars64, 1, ME_FLOAT64, &err, &expr_real64);
+    if (rc_expr_real64 != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error for real(x) float64 at position %d\n", err);
         tests_failed++;
         return;
@@ -488,8 +505,9 @@ void test_real_imag_on_real_inputs() {
     me_free(expr_real64);
 
     /* imag(x) with float64 input -> float64 output, all zeros */
-    me_expr *expr_imag64 = me_compile("imag(x)", vars64, 1, ME_FLOAT64, &err);
-    if (!expr_imag64) {
+    me_expr *expr_imag64 = NULL;
+    int rc_expr_imag64 = me_compile("imag(x)", vars64, 1, ME_FLOAT64, &err, &expr_imag64);
+    if (rc_expr_imag64 != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error for imag(x) float64 at position %d\n", err);
         tests_failed++;
         return;
@@ -511,8 +529,9 @@ void test_real_imag_on_real_inputs() {
 
     me_variable vars32[] = {{"x", ME_FLOAT32}};
 
-    me_expr *expr_real32 = me_compile("real(x)", vars32, 1, ME_FLOAT32, &err);
-    if (!expr_real32) {
+    me_expr *expr_real32 = NULL;
+    int rc_expr_real32 = me_compile("real(x)", vars32, 1, ME_FLOAT32, &err, &expr_real32);
+    if (rc_expr_real32 != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error for real(x) float32 at position %d\n", err);
         tests_failed++;
         return;
@@ -525,8 +544,9 @@ void test_real_imag_on_real_inputs() {
     }
     me_free(expr_real32);
 
-    me_expr *expr_imag32 = me_compile("imag(x)", vars32, 1, ME_FLOAT32, &err);
-    if (!expr_imag32) {
+    me_expr *expr_imag32 = NULL;
+    int rc_expr_imag32 = me_compile("imag(x)", vars32, 1, ME_FLOAT32, &err, &expr_imag32);
+    if (rc_expr_imag32 != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error for imag(x) float32 at position %d\n", err);
         tests_failed++;
         return;
@@ -551,8 +571,9 @@ void test_where_basic() {
 
     me_variable vars[] = {{"c"}, {"x"}, {"y"}};
     int err;
-    me_expr *expr = me_compile("where(c, x, y)", vars, 3, ME_FLOAT64, &err);
-    if (!expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("where(c, x, y)", vars, 3, ME_FLOAT64, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;

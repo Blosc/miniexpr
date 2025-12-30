@@ -117,8 +117,9 @@ static void benchmark_sum_threads_int32(size_t total_elems, int iterations) {
 
     me_variable vars[] = {{"x", ME_INT32, data}};
     int err = 0;
-    me_expr *expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err);
-    if (!expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("Failed to compile sum(x) for int32 (err=%d)\n", err);
         free(data);
         return;
@@ -180,8 +181,9 @@ static void benchmark_sum_threads_float32(size_t total_elems, int iterations) {
 
     me_variable vars[] = {{"x", ME_FLOAT32, data}};
     int err = 0;
-    me_expr *expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err);
-    if (!expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("Failed to compile sum(x) for float32 (err=%d)\n", err);
         free(data);
         return;

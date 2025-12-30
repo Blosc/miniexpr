@@ -43,9 +43,10 @@ void test_bitwise_and_int() {
     me_variable vars[] = {{"a"}, {"b"}};
 
     int err;
-    me_expr *expr = me_compile("a & b", vars, 2, ME_INT32, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a & b", vars, 2, ME_INT32, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -73,9 +74,10 @@ void test_bitwise_or_int() {
     me_variable vars[] = {{"a"}, {"b"}};
 
     int err;
-    me_expr *expr = me_compile("a | b", vars, 2, ME_INT32, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a | b", vars, 2, ME_INT32, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -103,9 +105,10 @@ void test_bitwise_xor_int() {
     me_variable vars[] = {{"a"}, {"b"}};
 
     int err;
-    me_expr *expr = me_compile("a ^ b", vars, 2, ME_INT32, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a ^ b", vars, 2, ME_INT32, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -133,9 +136,10 @@ void test_bit_shift_left() {
     me_variable vars[] = {{"a"}, {"b"}};
 
     int err;
-    me_expr *expr = me_compile("a << b", vars, 2, ME_INT32, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a << b", vars, 2, ME_INT32, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -163,9 +167,10 @@ void test_bit_shift_right() {
     me_variable vars[] = {{"a"}, {"b"}};
 
     int err;
-    me_expr *expr = me_compile("a >> b", vars, 2, ME_INT32, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a >> b", vars, 2, ME_INT32, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -193,9 +198,10 @@ void test_comparison_eq_float() {
     me_variable vars[] = {{"a"}, {"b"}};
 
     int err;
-    me_expr *expr = me_compile("a == b", vars, 2, ME_FLOAT32, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a == b", vars, 2, ME_FLOAT32, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -223,9 +229,10 @@ void test_comparison_lt_int() {
     me_variable vars[] = {{"a"}, {"b"}};
 
     int err;
-    me_expr *expr = me_compile("a < b", vars, 2, ME_INT32, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a < b", vars, 2, ME_INT32, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -254,9 +261,10 @@ void test_logical_bool() {
 
     // Test AND
     int err;
-    me_expr *expr = me_compile("a & b", vars, 2, ME_BOOL, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a & b", vars, 2, ME_BOOL, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: AND compilation error at position %d\n", err);
         tests_failed++;
         return;

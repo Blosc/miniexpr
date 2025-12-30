@@ -17,7 +17,6 @@
 #include "minctest.h"
 
 
-
 #define N 10
 
 int main() {
@@ -47,21 +46,22 @@ int main() {
         };
 
         /* Request ME_BOOL output */
-        me_expr *expr = me_compile("a ** 2 == (a + b)", vars, 2, ME_BOOL, &err);
+        me_expr* expr = NULL;
+        int rc_expr = me_compile("a ** 2 == (a + b)", vars, 2, ME_BOOL, &err, &expr);
 
-        if (!expr) {
+        if (rc_expr != ME_COMPILE_SUCCESS) {
             printf("Compilation error at position %d\n", err);
             return 1;
         }
 
-        const void *ptrs[] = {a, b};
+        const void* ptrs[] = {a, b};
         ME_EVAL_CHECK(expr, ptrs, 2, result, N);
 
         printf("  a     | a**2   | a+b    | a**2 == (a+b)\n");
         printf("  ------|--------|--------|---------------\n");
         for (int i = 0; i < N; i++) {
             printf("  %5.1f | %6.2f | %6.2f | %s\n",
-                   a[i], a[i]*a[i], a[i]+b[i],
+                   a[i], a[i] * a[i], a[i] + b[i],
                    result[i] ? "true" : "false");
         }
 
@@ -88,9 +88,10 @@ int main() {
         };
 
         /* Use ME_AUTO - will infer ME_BOOL for comparison */
-        me_expr *expr = me_compile("x < y", vars, 2, ME_AUTO, &err);
+        me_expr* expr = NULL;
+        int rc_expr = me_compile("x < y", vars, 2, ME_AUTO, &err, &expr);
 
-        if (!expr) {
+        if (rc_expr != ME_COMPILE_SUCCESS) {
             printf("Compilation error at position %d\n", err);
             return 1;
         }
@@ -100,7 +101,7 @@ int main() {
         printf("  Inferred output dtype: %s\n\n",
                inferred == ME_BOOL ? "ME_BOOL" : "other");
 
-        const void *ptrs[] = {x, y};
+        const void* ptrs[] = {x, y};
         ME_EVAL_CHECK(expr, ptrs, 2, result, N);
 
         printf("  x     | y     | x < y\n");
@@ -134,21 +135,22 @@ int main() {
             {"c", ME_FLOAT64}
         };
 
-        me_expr *expr = me_compile("a**2 + b**2 == c**2", vars, 3, ME_BOOL, &err);
+        me_expr* expr = NULL;
+        int rc_expr = me_compile("a**2 + b**2 == c**2", vars, 3, ME_BOOL, &err, &expr);
 
-        if (!expr) {
+        if (rc_expr != ME_COMPILE_SUCCESS) {
             printf("Compilation error at position %d\n", err);
             return 1;
         }
 
-        const void *ptrs[] = {side_a, side_b, side_c};
+        const void* ptrs[] = {side_a, side_b, side_c};
         ME_EVAL_CHECK(expr, ptrs, 3, result, 5);
 
         printf("  a  | b   | c   | a²+b² | c²    | Is Pythagorean?\n");
         printf("  ---|-----|-----|-------|-------|----------------\n");
         for (int i = 0; i < 5; i++) {
-            double a2_b2 = side_a[i]*side_a[i] + side_b[i]*side_b[i];
-            double c2 = side_c[i]*side_c[i];
+            double a2_b2 = side_a[i] * side_a[i] + side_b[i] * side_b[i];
+            double c2 = side_c[i] * side_c[i];
             printf("  %2.0f | %3.0f | %3.0f | %5.0f | %5.0f | %s\n",
                    side_a[i], side_b[i], side_c[i],
                    a2_b2, c2, result[i] ? "YES" : "no");
@@ -169,17 +171,18 @@ int main() {
         bool result[5];
 
         me_variable vars[] = {{"x", ME_FLOAT64}};
-        const void *ptrs[] = {vals};
+        const void* ptrs[] = {vals};
 
-        const char *operators[] = {"x < 3", "x <= 3", "x == 3", "x >= 3", "x > 3", "x != 3"};
+        const char* operators[] = {"x < 3", "x <= 3", "x == 3", "x >= 3", "x > 3", "x != 3"};
 
         printf("  Values: [1, 2, 3, 4, 5]\n\n");
         printf("  Expression | Results\n");
         printf("  -----------|--------------------\n");
 
         for (int op = 0; op < 6; op++) {
-            me_expr *expr = me_compile(operators[op], vars, 1, ME_BOOL, &err);
-            if (expr) {
+            me_expr* expr = NULL;
+            int rc_expr = me_compile(operators[op], vars, 1, ME_BOOL, &err, &expr);
+            if (rc_expr == ME_COMPILE_SUCCESS) {
                 ME_EVAL_CHECK(expr, ptrs, 1, result, 5);
                 printf("  %-10s | ", operators[op]);
                 for (int i = 0; i < 5; i++) {

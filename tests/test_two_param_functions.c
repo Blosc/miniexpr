@@ -36,9 +36,10 @@ void test_atan2() {
     me_variable vars[] = {{"y"}, {"x"}};
 
     int err;
-    me_expr *expr = me_compile("atan2(y, x)", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("atan2(y, x)", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -66,9 +67,10 @@ void test_pow() {
     me_variable vars[] = {{"base"}, {"exp"}};
 
     int err;
-    me_expr *expr = me_compile("pow(base, exp)", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("pow(base, exp)", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -96,9 +98,10 @@ void test_ncr() {
     me_variable vars[] = {{"n"}, {"r"}};
 
     int err;
-    me_expr *expr = me_compile("ncr(n, r)", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("ncr(n, r)", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -132,9 +135,10 @@ void test_npr() {
     me_variable vars[] = {{"n"}, {"r"}};
 
     int err;
-    me_expr *expr = me_compile("npr(n, r)", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("npr(n, r)", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -168,9 +172,10 @@ void test_mixed_expression() {
     me_variable vars[] = {{"x"}, {"y"}};
 
     int err;
-    me_expr *expr = me_compile("pow(x, 2) + atan2(y, x)", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("pow(x, 2) + atan2(y, x)", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -198,9 +203,10 @@ void test_nested_two_param() {
     me_variable vars[] = {{"x"}, {"y"}};
 
     int err;
-    me_expr *expr = me_compile("pow(2, pow(x, y))", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("pow(2, pow(x, y))", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -228,9 +234,10 @@ void test_two_param_with_mixed_types() {
     me_variable vars[] = {{"base", ME_INT32}, {"exp", ME_FLOAT64}};
 
     int err;
-    me_expr *expr = me_compile("pow(base, exp)", vars, 2, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("pow(base, exp)", vars, 2, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;

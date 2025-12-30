@@ -15,7 +15,6 @@
 #include "minctest.h"
 
 
-
 int main() {
     printf("=== Complex Expression Example ===\n");
     printf("Projectile distance formula:\n");
@@ -34,18 +33,18 @@ int main() {
 
     // Compile complex expression
     int error;
-    me_expr *expr = me_compile(
+    me_expr* expr = NULL;
+    int rc_expr = me_compile(
         "v*t*cos(angle) - 0.5*g*t*t",
-        vars, 4, ME_FLOAT64, &error
-    );
+        vars, 4, ME_FLOAT64, &error, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("ERROR: Failed to compile at position %d\n", error);
         return 1;
     }
 
     // Prepare variable pointers
-    const void *var_ptrs[] = {v, t, angle, g};
+    const void* var_ptrs[] = {v, t, angle, g};
 
     // Evaluate
     ME_EVAL_CHECK(expr, var_ptrs, 4, distance, n);

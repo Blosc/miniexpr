@@ -37,8 +37,9 @@ int main() {
     int err;
 
     // Compile once for chunked evaluation
-    me_expr *expr = me_compile("a + b", vars, 2, ME_FLOAT64, &err);
-    if (!expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a + b", vars, 2, ME_FLOAT64, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
         return 1;
     }
@@ -83,8 +84,8 @@ int main() {
     // Test 2: Complex expression
     printf("\nTest 2: Complex expression (sqrt(a*a + b*b))\n");
 
-    expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &err);
-    if (!expr) {
+    rc_expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
         return 1;
     }
@@ -142,8 +143,8 @@ int main() {
         {"b", ME_AUTO, b_int}
     };
 
-    expr = me_compile("a + b", vars_int, 2, ME_INT32, &err);
-    if (!expr) {
+    rc_expr = me_compile("a + b", vars_int, 2, ME_INT32, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error\n");
         return 1;
     }

@@ -102,9 +102,10 @@ void demonstrate_memory_usage(int total_size, int chunk_size) {
     };
 
     int err;
-    me_expr *expr = me_compile("a + b", vars, 2, ME_FLOAT32, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a + b", vars, 2, ME_FLOAT32, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("❌ Compilation failed: %d\n", err);
         free(a);
         free(b);

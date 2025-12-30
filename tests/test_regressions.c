@@ -33,9 +33,10 @@ int test_arctan2_with_scalar_constant(const char *description, int size, float s
     me_variable vars[] = {{"x", ME_FLOAT32}};
     int err;
     // Use ME_AUTO - following NumPy conventions, float constants match variable type (FLOAT32)
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 1, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("✗ COMPILATION FAILED with error code: %d\n", err);
         free(input);
         return 0;
@@ -110,9 +111,10 @@ int test_arctan2_with_two_arrays(const char *description, int size, float scalar
 
     me_variable vars[] = {{"x", ME_FLOAT32}, {"y", ME_FLOAT32}};
     int err;
-    me_expr *expr = me_compile("arctan2(x, y)", vars, 2, ME_FLOAT32, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("arctan2(x, y)", vars, 2, ME_FLOAT32, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("✗ COMPILATION FAILED with error code: %d\n", err);
         free(input1);
         free(input2);
@@ -181,9 +183,10 @@ int test_arctan2_array_scalar_f64(const char *description, const char *expr_str,
 
     me_variable vars[] = {{"y", ME_FLOAT64}, {"x", ME_FLOAT64}};
     int err;
-    me_expr *expr = me_compile(expr_str, invert ? vars + 1 : vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, invert ? vars + 1 : vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error %d\n", err);
         return 0;
     }
@@ -222,9 +225,10 @@ int test_pow_array_scalar_f64(const char *description, const char *expr_str,
 
     me_variable vars[] = {{"x", ME_FLOAT64}};
     int err;
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error %d\n", err);
         return 0;
     }
@@ -268,9 +272,10 @@ int test_arctan2_complex_expr(const char *description, const char *expr_str,
 
     me_variable vars[] = {{"x", ME_FLOAT64}, {"y", ME_FLOAT64}};
     int err;
-    me_expr *expr = me_compile(expr_str, vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error %d\n", err);
         return 0;
     }
@@ -321,9 +326,10 @@ int test_constant_type_f32(const char *description, const char *expr_str,
 
     me_variable vars[] = {{"a", ME_FLOAT32}};
     int err;
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 1, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("❌ COMPILATION FAILED (error %d)\n", err);
         return 0;
     }
@@ -388,9 +394,10 @@ int test_scalar_constant(const char *description, const char *expr_str,
     me_variable vars[] = {{"a", ME_FLOAT32}};
     int err;
     // Use ME_AUTO - following NumPy conventions, float constants match variable type (FLOAT32)
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 1, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ COMPILATION FAILED (error %d)\n", err);
         return 0;
     }
@@ -459,9 +466,10 @@ int test_int64_large_constant(const char *description, int size) {
     me_variable vars[] = {{"a", ME_INT64}};
     int err;
     const char *expr_str = "(a + 90000.00001) + 1";
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 1, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ COMPILATION FAILED (error %d)\n", err);
         free(input);
         return 0;
@@ -601,9 +609,10 @@ int test_float32_array_float64_constants(const char *description, int size) {
     me_variable vars[] = {{"o0", ME_FLOAT32}};
     int err;
     const char *expr_str = "((o0 + 1067.3366832990887) + 0.2901221513748169)";
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 1, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ COMPILATION FAILED (error %d)\n", err);
         free(input);
         return 0;
@@ -691,8 +700,9 @@ int test_conj_real_preserves_dtype() {
     me_variable vars[] = {{"a", ME_FLOAT32}};
 
     int err;
-    me_expr *expr = me_compile("conj(a)", vars, 1, ME_AUTO, &err);
-    if (!expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("conj(a)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ COMPILATION FAILED at position %d\n", err);
         return 0;
     }

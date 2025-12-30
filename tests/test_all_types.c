@@ -12,7 +12,6 @@
 #include "minctest.h"
 
 
-
 #if defined(_MSC_VER) && defined(__clang__)
 // On Windows with clang-cl, I is defined as _Fcomplex struct
 // We need the proper _Complex constant instead
@@ -36,9 +35,10 @@
     \
     me_variable vars[] = {{"a"}}; \
     int err; \
-    me_expr *expr = me_compile(test_expr, vars, 1, type_enum, &err); \
+    me_expr *expr = NULL; \
+    int rc_expr = me_compile(test_expr, vars, 1, type_enum, &err, &expr); \
     \
-    if (!expr) { \
+    if (rc_expr != ME_COMPILE_SUCCESS) { \
         printf("Failed to compile '%s' for %s (error at %d)\n", test_expr, name, err); \
         free(a); free(result); free(expected); \
         return 1; \
@@ -82,9 +82,10 @@
     \
     me_variable vars[] = {{"a"}, {"b"}}; \
     int err; \
-    me_expr *expr = me_compile(test_expr, vars, 2, type_enum, &err); \
+    me_expr *expr = NULL; \
+    int rc_expr = me_compile(test_expr, vars, 2, type_enum, &err, &expr); \
     \
-    if (!expr) { \
+    if (rc_expr != ME_COMPILE_SUCCESS) { \
         printf("Failed to compile '%s' for %s (error at %d)\n", test_expr, name, err); \
         free(a); free(b); free(result); free(expected); \
         return 1; \
@@ -142,23 +143,26 @@ int main() {
     printf("Complex Numbers:\n");
     printf("  SKIP: Complex types are disabled on Windows (no C99 complex ABI)\n\n");
 #else
-    printf("Complex Numbers:\n"); {
+    printf("Complex Numbers:\n");
+    {
         const int n = 10;
-        float _Complex *a = malloc(n * sizeof(float _Complex));
-        float _Complex *result = malloc(n * sizeof(float _Complex));
+        float _Complex* a = malloc(n * sizeof(float _Complex));
+        float _Complex* result = malloc(n * sizeof(float _Complex));
 
         for (int i = 0; i < n; i++) {
-            a[i] = (float) i + (float) i * I; // i + i*I
+            a[i] = (float)i + (float)i * I; // i + i*I
         }
 
         me_variable vars[] = {{"a"}};
         int err;
-        me_expr *expr = me_compile("a+5", vars, 1, ME_COMPLEX64, &err);
+        me_expr* expr = NULL;
+        int rc_expr = me_compile("a+5", vars, 1, ME_COMPLEX64, &err, &expr);
 
-        if (!expr) {
+        if (rc_expr != ME_COMPILE_SUCCESS) {
             printf("❌ complex64: Failed to compile\n");
-        } else {
-            const void *var_ptrs[] = {a};
+        }
+        else {
+            const void* var_ptrs[] = {a};
             ME_EVAL_CHECK(expr, var_ptrs, 1, result, n);
 
             int passed = 1;
@@ -185,23 +189,26 @@ int main() {
 
         free(a);
         free(result);
-    } {
+    }
+    {
         const int n = 10;
-        double _Complex *a = malloc(n * sizeof(double _Complex));
-        double _Complex *result = malloc(n * sizeof(double _Complex));
+        double _Complex* a = malloc(n * sizeof(double _Complex));
+        double _Complex* result = malloc(n * sizeof(double _Complex));
 
         for (int i = 0; i < n; i++) {
-            a[i] = (double) i + (double) i * I;
+            a[i] = (double)i + (double)i * I;
         }
 
         me_variable vars[] = {{"a"}};
         int err;
-        me_expr *expr = me_compile("a*2", vars, 1, ME_COMPLEX128, &err);
+        me_expr* expr = NULL;
+        int rc_expr = me_compile("a*2", vars, 1, ME_COMPLEX128, &err, &expr);
 
-        if (!expr) {
+        if (rc_expr != ME_COMPILE_SUCCESS) {
             printf("❌ complex128: Failed to compile\n");
-        } else {
-            const void *var_ptrs[] = {a};
+        }
+        else {
+            const void* var_ptrs[] = {a};
             ME_EVAL_CHECK(expr, var_ptrs, 1, result, n);
 
             int passed = 1;

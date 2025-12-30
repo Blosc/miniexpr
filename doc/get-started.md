@@ -25,12 +25,8 @@ int main() {
 
     // Compile the expression
     int error;
-    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error);
-
-    if (!expr) {
-        printf("Parse error at position %d\n", error);
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     // Prepare variable pointers
     const void *var_ptrs[] = {a, b};
