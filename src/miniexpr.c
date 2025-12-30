@@ -3669,9 +3669,9 @@ static void private_eval(const me_expr *n) {
             me_dtype arg_type = infer_result_type(arg);
 
             if (arg_type == ME_COMPLEX64) {
-                const me_c64_pair *adata = NULL;
+                const float _Complex *adata = NULL;
                 if (arg->type == ME_VARIABLE) {
-                    adata = (const me_c64_pair *)arg->bound;
+                    adata = (const float _Complex *)arg->bound;
                 } else {
                     if (!arg->output) {
                         arg->output = malloc(n->nitems * sizeof(me_c64_pair));
@@ -3679,21 +3679,20 @@ static void private_eval(const me_expr *n) {
                         ((me_expr*)arg)->dtype = ME_COMPLEX64;
                     }
                     me_eval_c64(arg);
-                    adata = (const me_c64_pair *)arg->output;
+                    adata = (const float _Complex *)arg->output;
                 }
 
                 if (adata && n->output) {
-                    me_c64_pair *output = (me_c64_pair *)n->output;
+                    float _Complex *output = (float _Complex *)n->output;
                     for (int i = 0; i < n->nitems; i++) {
-                        output[i].re = adata[i].re;
-                        output[i].im = -adata[i].im;
+                        me_c64_store(&output[i], me_crealf(adata[i]), -me_cimagf(adata[i]));
                     }
                 }
                 return;
             } else if (arg_type == ME_COMPLEX128) {
-                const me_c128_pair *adata = NULL;
+                const double _Complex *adata = NULL;
                 if (arg->type == ME_VARIABLE) {
-                    adata = (const me_c128_pair *)arg->bound;
+                    adata = (const double _Complex *)arg->bound;
                 } else {
                     if (!arg->output) {
                         arg->output = malloc(n->nitems * sizeof(me_c128_pair));
@@ -3701,14 +3700,13 @@ static void private_eval(const me_expr *n) {
                         ((me_expr*)arg)->dtype = ME_COMPLEX128;
                     }
                     me_eval_c128(arg);
-                    adata = (const me_c128_pair *)arg->output;
+                    adata = (const double _Complex *)arg->output;
                 }
 
                 if (adata && n->output) {
-                    me_c128_pair *output = (me_c128_pair *)n->output;
+                    double _Complex *output = (double _Complex *)n->output;
                     for (int i = 0; i < n->nitems; i++) {
-                        output[i].re = adata[i].re;
-                        output[i].im = -adata[i].im;
+                        me_c128_store(&output[i], me_creal(adata[i]), -me_cimag(adata[i]));
                     }
                 }
                 return;
