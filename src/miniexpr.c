@@ -176,6 +176,15 @@ typedef double (*me_fun2)(double, double);
 
 #if defined(_WIN32) || defined(_WIN64)
 static bool has_complex_node(const me_expr *n);
+static bool has_complex_input(const me_expr *n);
+
+typedef struct {
+    const void *orig;
+    void *buf;
+    me_dtype dtype;
+} me_pair_map;
+
+static void convert_complex_bindings(me_expr *node, me_pair_map *maps, int *map_count, int nitems);
 #endif
 
 #if defined(_WIN32) || defined(_WIN64)
