@@ -4417,12 +4417,6 @@ static bool has_complex_input(const me_expr *n) {
     return false;
 }
 
-typedef struct {
-    const void *orig;
-    void *buf;
-    me_dtype dtype;
-} me_pair_map;
-
 static void convert_complex_bindings(me_expr *node, me_pair_map *maps, int *map_count, int nitems) {
     if (!node) return;
     switch (TYPE_MASK(node->type)) {
