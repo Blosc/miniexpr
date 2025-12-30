@@ -439,6 +439,11 @@ void test_real_auto_dtype() {
 int main() {
     printf("=== Testing Complex Functions (conj, imag, real) ===\n\n");
 
+#if defined(_WIN32) || defined(_WIN64)
+    printf("  SKIP: Complex tests are disabled on Windows (no C99 complex ABI)\n");
+    return 0;
+#endif
+
     test_conj_c64();
     test_conj_c128();
     test_conj_identity();

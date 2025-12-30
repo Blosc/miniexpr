@@ -4184,6 +4184,29 @@ static me_expr *private_compile(const char *expression, const me_variable *varia
         return NULL;
     }
 
+#if defined(_WIN32) || defined(_WIN64)
+    {
+        const me_variable *vars_check = vars_copy ? vars_copy : variables;
+        bool complex_vars = false;
+        if (vars_check) {
+            for (int i = 0; i < var_count; i++) {
+                if (vars_check[i].dtype == ME_COMPLEX64 || vars_check[i].dtype == ME_COMPLEX128) {
+                    complex_vars = true;
+                    break;
+                }
+            }
+        }
+        if (complex_vars ||
+            dtype == ME_COMPLEX64 || dtype == ME_COMPLEX128 ||
+            has_complex_node(root) || has_complex_input(root)) {
+            fprintf(stderr, "Error: Complex expressions are not supported on Windows (no C99 complex ABI)\n");
+            me_free(root);
+            if (error) *error = -1;
+            return NULL;
+        }
+    }
+#endif
+
     if (s.type != TOK_END) {
         me_free(root);
         if (error) {
