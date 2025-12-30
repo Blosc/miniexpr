@@ -303,6 +303,11 @@ static inline double _Complex me_conj(double _Complex a) {
 
 typedef double (*me_fun2)(double, double);
 
+#if defined(_WIN32) || defined(_WIN64)
+static bool has_complex_node(const me_expr *n);
+static bool has_complex_input(const me_expr *n);
+#endif
+
 enum {
     TOK_NULL = ME_CLOSURE7 + 1, TOK_ERROR, TOK_END, TOK_SEP,
     TOK_OPEN, TOK_CLOSE, TOK_NUMBER, TOK_VARIABLE, TOK_INFIX,
@@ -4096,6 +4101,28 @@ static void optimize(me_expr *n) {
         }
     }
 }
+
+#if defined(_WIN32) || defined(_WIN64)
+static bool has_complex_node(const me_expr *n) {
+    if (!n) return false;
+    if (n->dtype == ME_COMPLEX64 || n->dtype == ME_COMPLEX128) return true;
+    const int arity = ARITY(n->type);
+    for (int i = 0; i < arity; i++) {
+        if (has_complex_node((const me_expr *)n->parameters[i])) return true;
+    }
+    return false;
+}
+
+static bool has_complex_input(const me_expr *n) {
+    if (!n) return false;
+    if (n->input_dtype == ME_COMPLEX64 || n->input_dtype == ME_COMPLEX128) return true;
+    const int arity = ARITY(n->type);
+    for (int i = 0; i < arity; i++) {
+        if (has_complex_input((const me_expr *)n->parameters[i])) return true;
+    }
+    return false;
+}
+#endif
 
 
 static me_expr *private_compile(const char *expression, const me_variable *variables, int var_count,
