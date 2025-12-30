@@ -175,6 +175,10 @@ static inline _Dcomplex div_c128(_Dcomplex a, _Dcomplex b) {
 typedef double (*me_fun2)(double, double);
 
 #if defined(_WIN32) || defined(_WIN64)
+static bool has_complex_node(const me_expr *n);
+#endif
+
+#if defined(_WIN32) || defined(_WIN64)
 static void me_c64_unpack(const float _Complex *in, me_c64_pair *out, int n) {
     for (int i = 0; i < n; i++) {
         out[i].re = me_crealf(in[i]);
