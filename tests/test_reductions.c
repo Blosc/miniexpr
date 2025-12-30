@@ -8,31 +8,11 @@
 #include <math.h>
 #include <complex.h>
 #include "../src/miniexpr.h"
+#include "me_complex.h"
 
-#if defined(_MSC_VER)
-static inline float _Complex make_c64(float real, float imag) {
-    union { float _Complex c; _Fcomplex m; } u;
-    u.m = _FCbuild(real, imag);
-    return u.c;
-}
-static inline float crealf_compat(float _Complex z) {
-    union { float _Complex c; _Fcomplex m; } u;
-    u.c = z;
-    return u.m._Val[0];
-}
-static inline float cimagf_compat(float _Complex z) {
-    union { float _Complex c; _Fcomplex m; } u;
-    u.c = z;
-    return u.m._Val[1];
-}
-#define MAKE_C64(real, imag) make_c64((real), (imag))
-#define CREALF(z) crealf_compat((z))
-#define CIMAGF(z) cimagf_compat((z))
-#else
-#define MAKE_C64(real, imag) CMPLXF((real), (imag))
-#define CREALF(z) crealf(z)
-#define CIMAGF(z) cimagf(z)
-#endif
+#define MAKE_C64(real, imag) ME_C64_BUILD((real), (imag))
+#define CREALF(z) ME_CREALF((z))
+#define CIMAGF(z) ME_CIMAGF((z))
 
 static int test_sum_int64() {
     printf("\n=== sum(int32) -> int64 ===\n");

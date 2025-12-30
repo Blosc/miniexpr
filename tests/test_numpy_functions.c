@@ -455,11 +455,6 @@ void test_square_vs_pow() {
 }
 
 void test_real_imag_on_real_inputs() {
-#if defined(_WIN32) || defined(_WIN64)
-    TEST("real/imag(x) on real inputs follow NumPy semantics");
-    printf("  SKIP: real/imag tests are disabled on Windows\n");
-    return;
-#endif
     TEST("real/imag(x) on real inputs follow NumPy semantics");
 
     double x[VECTOR_SIZE] = {-3.0, -1.5, -0.0, 0.0, 0.5, 1.0, 2.5, 10.0, -10.0, 3.14159};

@@ -1,0 +1,156 @@
+#ifndef ME_COMPLEX_H
+#define ME_COMPLEX_H
+
+#include <complex.h>
+
+#if defined(_MSC_VER)
+static inline float _Complex me_c64_build(float real, float imag) {
+    union { float _Complex c; _Fcomplex m; } u;
+    u.m = _FCbuild(real, imag);
+    return u.c;
+}
+
+static inline double _Complex me_c128_build(double real, double imag) {
+    union { double _Complex c; _Dcomplex m; } u;
+    u.m = _Cbuild(real, imag);
+    return u.c;
+}
+
+static inline float me_crealf(float _Complex a) {
+    union { float _Complex c; _Fcomplex m; } u;
+    u.c = a;
+    return crealf(u.m);
+}
+
+static inline double me_creal(double _Complex a) {
+    union { double _Complex c; _Dcomplex m; } u;
+    u.c = a;
+    return creal(u.m);
+}
+
+static inline float me_cimagf(float _Complex a) {
+    union { float _Complex c; _Fcomplex m; } u;
+    u.c = a;
+    return cimagf(u.m);
+}
+
+static inline double me_cimag(double _Complex a) {
+    union { double _Complex c; _Dcomplex m; } u;
+    u.c = a;
+    return cimag(u.m);
+}
+
+static inline float _Complex me_conjf(float _Complex a) {
+    union { float _Complex c; _Fcomplex m; } u;
+    u.c = a;
+    u.m = conjf(u.m);
+    return u.c;
+}
+
+static inline double _Complex me_conj(double _Complex a) {
+    union { double _Complex c; _Dcomplex m; } u;
+    u.c = a;
+    u.m = conj(u.m);
+    return u.c;
+}
+
+static inline float _Complex me_cpowf(float _Complex a, float _Complex b) {
+    union { float _Complex c; _Fcomplex m; } ua, ub, ur;
+    ua.c = a;
+    ub.c = b;
+    ur.m = cpowf(ua.m, ub.m);
+    return ur.c;
+}
+
+static inline double _Complex me_cpow(double _Complex a, double _Complex b) {
+    union { double _Complex c; _Dcomplex m; } ua, ub, ur;
+    ua.c = a;
+    ub.c = b;
+    ur.m = cpow(ua.m, ub.m);
+    return ur.c;
+}
+
+static inline float _Complex me_csqrtf(float _Complex a) {
+    union { float _Complex c; _Fcomplex m; } ua, ur;
+    ua.c = a;
+    ur.m = csqrtf(ua.m);
+    return ur.c;
+}
+
+static inline double _Complex me_csqrt(double _Complex a) {
+    union { double _Complex c; _Dcomplex m; } ua, ur;
+    ua.c = a;
+    ur.m = csqrt(ua.m);
+    return ur.c;
+}
+
+static inline float _Complex me_cexpf(float _Complex a) {
+    union { float _Complex c; _Fcomplex m; } ua, ur;
+    ua.c = a;
+    ur.m = cexpf(ua.m);
+    return ur.c;
+}
+
+static inline double _Complex me_cexp(double _Complex a) {
+    union { double _Complex c; _Dcomplex m; } ua, ur;
+    ua.c = a;
+    ur.m = cexp(ua.m);
+    return ur.c;
+}
+
+static inline float _Complex me_clogf(float _Complex a) {
+    union { float _Complex c; _Fcomplex m; } ua, ur;
+    ua.c = a;
+    ur.m = clogf(ua.m);
+    return ur.c;
+}
+
+static inline double _Complex me_clog(double _Complex a) {
+    union { double _Complex c; _Dcomplex m; } ua, ur;
+    ua.c = a;
+    ur.m = clog(ua.m);
+    return ur.c;
+}
+
+static inline float me_cabsf(float _Complex a) {
+    union { float _Complex c; _Fcomplex m; } ua;
+    ua.c = a;
+    return cabsf(ua.m);
+}
+
+static inline double me_cabs(double _Complex a) {
+    union { double _Complex c; _Dcomplex m; } ua;
+    ua.c = a;
+    return cabs(ua.m);
+}
+#else
+#define me_c64_build(real, imag) CMPLXF((real), (imag))
+#define me_c128_build(real, imag) CMPLX((real), (imag))
+#define me_crealf crealf
+#define me_creal creal
+#define me_cimagf cimagf
+#define me_cimag cimag
+#define me_conjf conjf
+#define me_conj conj
+#define me_cpowf cpowf
+#define me_cpow cpow
+#define me_csqrtf csqrtf
+#define me_csqrt csqrt
+#define me_cexpf cexpf
+#define me_cexp cexp
+#define me_clogf clogf
+#define me_clog clog
+#define me_cabsf cabsf
+#define me_cabs cabs
+#endif
+
+#define ME_C64_BUILD(real, imag) me_c64_build((real), (imag))
+#define ME_C128_BUILD(real, imag) me_c128_build((real), (imag))
+#define ME_CREALF(z) me_crealf((z))
+#define ME_CIMAGF(z) me_cimagf((z))
+#define ME_CREAL(z) me_creal((z))
+#define ME_CIMAG(z) me_cimag((z))
+#define ME_CONJF(z) me_conjf((z))
+#define ME_CONJ(z) me_conj((z))
+
+#endif

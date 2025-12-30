@@ -62,6 +62,7 @@ For log = base 10 log comment the next line. */
 #endif
 
 #include <complex.h>
+#include "me_complex.h"
 
 #if defined(_MSC_VER) && !defined(__clang__)
 #define float_complex _Fcomplex
@@ -100,136 +101,6 @@ static inline _Dcomplex div_c128(_Dcomplex a, _Dcomplex b) {
 #define neg_c128(a) (-(a))
 #define mul_c128(a, b) ((a) * (b))
 #define div_c128(a, b) ((a) / (b))
-#endif
-
-#if defined(_MSC_VER) && !defined(__clang__)
-/* Wrappers for complex functions to handle MSVC's _Fcomplex/_Dcomplex */
-static inline float _Complex me_cpowf(float _Complex a, float _Complex b) {
-    union { float _Complex c; _Fcomplex m; } ua, ub, ur;
-    ua.c = a; ub.c = b;
-    ur.m = cpowf(ua.m, ub.m);
-    return ur.c;
-}
-static inline double _Complex me_cpow(double _Complex a, double _Complex b) {
-    union { double _Complex c; _Dcomplex m; } ua, ub, ur;
-    ua.c = a; ub.c = b;
-    ur.m = cpow(ua.m, ub.m);
-    return ur.c;
-}
-static inline float _Complex me_csqrtf(float _Complex a) {
-    union { float _Complex c; _Fcomplex m; } ua, ur;
-    ua.c = a;
-    ur.m = csqrtf(ua.m);
-    return ur.c;
-}
-static inline double _Complex me_csqrt(double _Complex a) {
-    union { double _Complex c; _Dcomplex m; } ua, ur;
-    ua.c = a;
-    ur.m = csqrt(ua.m);
-    return ur.c;
-}
-static inline float _Complex me_cexpf(float _Complex a) {
-    union { float _Complex c; _Fcomplex m; } ua, ur;
-    ua.c = a;
-    ur.m = cexpf(ua.m);
-    return ur.c;
-}
-static inline double _Complex me_cexp(double _Complex a) {
-    union { double _Complex c; _Dcomplex m; } ua, ur;
-    ua.c = a;
-    ur.m = cexp(ua.m);
-    return ur.c;
-}
-static inline float _Complex me_clogf(float _Complex a) {
-    union { float _Complex c; _Fcomplex m; } ua, ur;
-    ua.c = a;
-    ur.m = clogf(ua.m);
-    return ur.c;
-}
-static inline double _Complex me_clog(double _Complex a) {
-    union { double _Complex c; _Dcomplex m; } ua, ur;
-    ua.c = a;
-    ur.m = clog(ua.m);
-    return ur.c;
-}
-static inline float me_cabsf(float _Complex a) {
-    union { float _Complex c; _Fcomplex m; } ua;
-    ua.c = a;
-    return cabsf(ua.m);
-}
-static inline double me_cabs(double _Complex a) {
-    union { double _Complex c; _Dcomplex m; } ua;
-    ua.c = a;
-    return cabs(ua.m);
-}
-static inline float me_cimagf(float _Complex a) {
-    union { float _Complex c; _Fcomplex m; } ua;
-    ua.c = a;
-    return cimagf(ua.m);
-}
-static inline double me_cimag(double _Complex a) {
-    union { double _Complex c; _Dcomplex m; } ua;
-    ua.c = a;
-    return cimag(ua.m);
-}
-static inline float me_crealf(float _Complex a) {
-    union { float _Complex c; _Fcomplex m; } ua;
-    ua.c = a;
-    return crealf(ua.m);
-}
-static inline double me_creal(double _Complex a) {
-    union { double _Complex c; _Dcomplex m; } ua;
-    ua.c = a;
-    return creal(ua.m);
-}
-static inline float _Complex me_conjf(float _Complex a) {
-    union { float _Complex c; _Fcomplex m; } ua, ur;
-    ua.c = a;
-    ur.m = conjf(ua.m);
-    return ur.c;
-}
-static inline double _Complex me_conj(double _Complex a) {
-    union { double _Complex c; _Dcomplex m; } ua, ur;
-    ua.c = a;
-    ur.m = conj(ua.m);
-    return ur.c;
-}
-#else
-#if defined(_MSC_VER) && defined(__clang__)
-#define me_cimagf __builtin_cimagf
-#define me_cimag __builtin_cimag
-#define me_crealf __builtin_crealf
-#define me_creal __builtin_creal
-#define me_conjf __builtin_conjf
-#define me_conj __builtin_conj
-#define me_cpowf __builtin_cpowf
-#define me_cpow __builtin_cpow
-#define me_csqrtf __builtin_csqrtf
-#define me_csqrt __builtin_csqrt
-#define me_cexpf __builtin_cexpf
-#define me_cexp __builtin_cexp
-#define me_clogf __builtin_clogf
-#define me_clog __builtin_clog
-#define me_cabsf __builtin_cabsf
-#define me_cabs __builtin_cabs
-#else
-#define me_cpowf cpowf
-#define me_cpow cpow
-#define me_csqrtf csqrtf
-#define me_csqrt csqrt
-#define me_cexpf cexpf
-#define me_cexp cexp
-#define me_clogf clogf
-#define me_clog clog
-#define me_cabsf cabsf
-#define me_cabs cabs
-#define me_cimagf cimagf
-#define me_cimag cimag
-#define me_crealf crealf
-#define me_creal creal
-#define me_conjf conjf
-#define me_conj conj
-#endif
 #endif
 
 /* Type-specific cast and comparison macros to handle MSVC complex structs */
@@ -3419,19 +3290,11 @@ static void private_eval(const me_expr *n) {
                 float *output = (float*)n->output;
                 if (n->function == (void*)imag_wrapper) {
                     for (int i = 0; i < n->nitems; i++) {
-#if defined(_MSC_VER) && defined(__clang__)
-                        output[i] = __builtin_cimagf(cdata[i]);
-#else
-                        output[i] = cimagf(cdata[i]);
-#endif
+                        output[i] = me_cimagf(cdata[i]);
                     }
                 } else { // real_wrapper
                     for (int i = 0; i < n->nitems; i++) {
-#if defined(_MSC_VER) && defined(__clang__)
-                        output[i] = __builtin_crealf(cdata[i]);
-#else
-                        output[i] = crealf(cdata[i]);
-#endif
+                        output[i] = me_crealf(cdata[i]);
                     }
                 }
                 return;
@@ -3449,19 +3312,11 @@ static void private_eval(const me_expr *n) {
                 double *output = (double*)n->output;
                 if (n->function == (void*)imag_wrapper) {
                     for (int i = 0; i < n->nitems; i++) {
-#if defined(_MSC_VER) && defined(__clang__)
-                        output[i] = __builtin_cimag(cdata[i]);
-#else
-                        output[i] = cimag(cdata[i]);
-#endif
+                        output[i] = me_cimag(cdata[i]);
                     }
                 } else { // real_wrapper
                     for (int i = 0; i < n->nitems; i++) {
-#if defined(_MSC_VER) && defined(__clang__)
-                        output[i] = __builtin_creal(cdata[i]);
-#else
-                        output[i] = creal(cdata[i]);
-#endif
+                        output[i] = me_creal(cdata[i]);
                     }
                 }
                 return;

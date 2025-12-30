@@ -7,16 +7,11 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <complex.h>
+#include "me_complex.h"
 #include <math.h>
 #include "miniexpr.h"
 
 #if defined(_MSC_VER) && defined(__clang__)
-// On Windows with clang-cl, I is defined as _Fcomplex struct
-// We need the proper _Complex constant instead
-#ifdef I
-#undef I
-#endif
-#define I (1.0fi)  // Use the imaginary constant literal
 #endif
 
 /* Macro for single-variable tests (expressions like "a+5") */
@@ -141,7 +136,7 @@ int main() {
         float _Complex *result = malloc(n * sizeof(float _Complex));
 
         for (int i = 0; i < n; i++) {
-            a[i] = (float) i + (float) i * I; // i + i*I
+            a[i] = ME_C64_BUILD((float)i, (float)i); // i + i*I
         }
 
         me_variable vars[] = {{"a"}};
@@ -158,8 +153,8 @@ int main() {
             for (int i = 0; i < n && passed; i++) {
                 float _Complex expected = a[i] + 5.0f;
 #if defined(_MSC_VER) && defined(__clang__)
-                if (__builtin_crealf(result[i]) != __builtin_crealf(expected) ||
-                    __builtin_cimagf(result[i]) != __builtin_cimagf(expected)) {
+                if (ME_CREALF(result[i]) != ME_CREALF(expected) ||
+                    ME_CIMAGF(result[i]) != ME_CIMAGF(expected)) {
 #else
                 if (crealf(result[i]) != crealf(expected) ||
                     cimagf(result[i]) != cimagf(expected)) {
@@ -184,7 +179,7 @@ int main() {
         double _Complex *result = malloc(n * sizeof(double _Complex));
 
         for (int i = 0; i < n; i++) {
-            a[i] = (double) i + (double) i * I;
+            a[i] = ME_C128_BUILD((double)i, (double)i);
         }
 
         me_variable vars[] = {{"a"}};
@@ -201,8 +196,8 @@ int main() {
             for (int i = 0; i < n && passed; i++) {
                 double _Complex expected = a[i] * 2.0;
 #if defined(_MSC_VER) && defined(__clang__)
-                if (__builtin_creal(result[i]) != __builtin_creal(expected) ||
-                    __builtin_cimag(result[i]) != __builtin_cimag(expected)) {
+                if (ME_CREAL(result[i]) != ME_CREAL(expected) ||
+                    ME_CIMAG(result[i]) != ME_CIMAG(expected)) {
 #else
                 if (creal(result[i]) != creal(expected) ||
                     cimag(result[i]) != cimag(expected)) {
