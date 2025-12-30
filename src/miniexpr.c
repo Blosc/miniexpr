@@ -3654,6 +3654,59 @@ static void private_eval(const me_expr *n) {
             }
             // If not complex, fall through to normal evaluation
         }
+#if defined(_WIN32) || defined(_WIN64)
+        if (n->function == (void*)conj_wrapper) {
+            me_expr *arg = (me_expr*)n->parameters[0];
+            me_dtype arg_type = infer_result_type(arg);
+
+            if (arg_type == ME_COMPLEX64) {
+                const me_c64_pair *adata = NULL;
+                if (arg->type == ME_VARIABLE) {
+                    adata = (const me_c64_pair *)arg->bound;
+                } else {
+                    if (!arg->output) {
+                        arg->output = malloc(n->nitems * sizeof(me_c64_pair));
+                        arg->nitems = n->nitems;
+                        ((me_expr*)arg)->dtype = ME_COMPLEX64;
+                    }
+                    me_eval_c64(arg);
+                    adata = (const me_c64_pair *)arg->output;
+                }
+
+                if (adata && n->output) {
+                    me_c64_pair *output = (me_c64_pair *)n->output;
+                    for (int i = 0; i < n->nitems; i++) {
+                        output[i].re = adata[i].re;
+                        output[i].im = -adata[i].im;
+                    }
+                }
+                return;
+            } else if (arg_type == ME_COMPLEX128) {
+                const me_c128_pair *adata = NULL;
+                if (arg->type == ME_VARIABLE) {
+                    adata = (const me_c128_pair *)arg->bound;
+                } else {
+                    if (!arg->output) {
+                        arg->output = malloc(n->nitems * sizeof(me_c128_pair));
+                        arg->nitems = n->nitems;
+                        ((me_expr*)arg)->dtype = ME_COMPLEX128;
+                    }
+                    me_eval_c128(arg);
+                    adata = (const me_c128_pair *)arg->output;
+                }
+
+                if (adata && n->output) {
+                    me_c128_pair *output = (me_c128_pair *)n->output;
+                    for (int i = 0; i < n->nitems; i++) {
+                        output[i].re = adata[i].re;
+                        output[i].im = -adata[i].im;
+                    }
+                }
+                return;
+            }
+            // If not complex, fall through to normal evaluation
+        }
+#endif
     }
 
     // Infer the result type from the expression tree
@@ -4179,62 +4232,22 @@ void me_eval(const me_expr *expr, const void **vars_chunk,
     const int block_nitems = ME_EVAL_BLOCK_NITEMS;
 
 #if defined(_WIN32) || defined(_WIN64)
-    if (!is_reduction_node(clone) && has_complex_node(clone)) {
+    if (!is_reduction_node(clone) && (has_complex_node(clone) || has_complex_input(clone))) {
         update_vars_by_pointer(clone, original_var_pointers, vars_chunk, n_vars);
 
         int update_idx = 0;
         update_variable_bindings(clone, NULL, &update_idx, chunk_nitems);
 
-        const int max_var_nodes = count_variable_nodes(clone);
-        me_expr **var_nodes = NULL;
-        int *var_indices = NULL;
-        int var_node_count = 0;
-        void **pair_buffers = NULL;
-
-        if (max_var_nodes > 0) {
-            var_nodes = malloc((size_t)max_var_nodes * sizeof(*var_nodes));
-            var_indices = malloc((size_t)max_var_nodes * sizeof(*var_indices));
-            if (!var_nodes || !var_indices) {
-                free(var_nodes);
-                free(var_indices);
-                me_free(clone);
-                return;
-            }
-            collect_variable_nodes(clone, original_var_pointers, n_vars,
-                                   var_nodes, var_indices, &var_node_count);
-            pair_buffers = calloc((size_t)var_node_count, sizeof(*pair_buffers));
-            if (!pair_buffers) {
-                free(var_nodes);
-                free(var_indices);
-                me_free(clone);
-                return;
-            }
-        }
-
-        for (int i = 0; i < var_node_count; i++) {
-            me_expr *var = var_nodes[i];
-            if (var->dtype == ME_COMPLEX64) {
-                me_c64_pair *buf = malloc((size_t)chunk_nitems * sizeof(*buf));
-                if (!buf) continue;
-                me_c64_unpack((const float _Complex *)var->bound, buf, chunk_nitems);
-                var->bound = buf;
-                pair_buffers[i] = buf;
-            } else if (var->dtype == ME_COMPLEX128) {
-                me_c128_pair *buf = malloc((size_t)chunk_nitems * sizeof(*buf));
-                if (!buf) continue;
-                me_c128_unpack((const double _Complex *)var->bound, buf, chunk_nitems);
-                var->bound = buf;
-                pair_buffers[i] = buf;
-            }
-        }
+        me_pair_map maps[ME_MAX_VARS];
+        int map_count = 0;
+        memset(maps, 0, sizeof(maps));
+        convert_complex_bindings(clone, maps, &map_count, chunk_nitems);
 
         void *pair_output = NULL;
         if (clone->dtype == ME_COMPLEX64) {
             pair_output = malloc((size_t)chunk_nitems * sizeof(me_c64_pair));
             if (!pair_output) {
-                free(pair_buffers);
-                free(var_nodes);
-                free(var_indices);
+                for (int i = 0; i < map_count; i++) free(maps[i].buf);
                 me_free(clone);
                 return;
             }
@@ -4242,9 +4255,7 @@ void me_eval(const me_expr *expr, const void **vars_chunk,
         } else if (clone->dtype == ME_COMPLEX128) {
             pair_output = malloc((size_t)chunk_nitems * sizeof(me_c128_pair));
             if (!pair_output) {
-                free(pair_buffers);
-                free(var_nodes);
-                free(var_indices);
+                for (int i = 0; i < map_count; i++) free(maps[i].buf);
                 me_free(clone);
                 return;
             }
@@ -4263,12 +4274,9 @@ void me_eval(const me_expr *expr, const void **vars_chunk,
             free(pair_output);
         }
 
-        for (int i = 0; i < var_node_count; i++) {
-            free(pair_buffers[i]);
+        for (int i = 0; i < map_count; i++) {
+            free(maps[i].buf);
         }
-        free(pair_buffers);
-        free(var_nodes);
-        free(var_indices);
         me_free(clone);
         return;
     }
@@ -4388,6 +4396,76 @@ static bool has_complex_node(const me_expr *n) {
         if (has_complex_node((const me_expr *)n->parameters[i])) return true;
     }
     return false;
+}
+
+static bool has_complex_input(const me_expr *n) {
+    if (!n) return false;
+    if (n->input_dtype == ME_COMPLEX64 || n->input_dtype == ME_COMPLEX128) return true;
+    const int arity = ARITY(n->type);
+    for (int i = 0; i < arity; i++) {
+        if (has_complex_input((const me_expr *)n->parameters[i])) return true;
+    }
+    return false;
+}
+
+typedef struct {
+    const void *orig;
+    void *buf;
+    me_dtype dtype;
+} me_pair_map;
+
+static void convert_complex_bindings(me_expr *node, me_pair_map *maps, int *map_count, int nitems) {
+    if (!node) return;
+    switch (TYPE_MASK(node->type)) {
+        case ME_VARIABLE:
+            if (node->dtype == ME_COMPLEX64 || node->dtype == ME_COMPLEX128) {
+                for (int i = 0; i < *map_count; i++) {
+                    if (maps[i].orig == node->bound) {
+                        node->bound = maps[i].buf;
+                        return;
+                    }
+                }
+                if (*map_count >= ME_MAX_VARS) return;
+                if (node->dtype == ME_COMPLEX64) {
+                    me_c64_pair *buf = malloc((size_t)nitems * sizeof(*buf));
+                    if (!buf) return;
+                    me_c64_unpack((const float _Complex *)node->bound, buf, nitems);
+                    maps[*map_count] = (me_pair_map){node->bound, buf, node->dtype};
+                    (*map_count)++;
+                    node->bound = buf;
+                } else {
+                    me_c128_pair *buf = malloc((size_t)nitems * sizeof(*buf));
+                    if (!buf) return;
+                    me_c128_unpack((const double _Complex *)node->bound, buf, nitems);
+                    maps[*map_count] = (me_pair_map){node->bound, buf, node->dtype};
+                    (*map_count)++;
+                    node->bound = buf;
+                }
+            }
+            break;
+        case ME_FUNCTION0:
+        case ME_FUNCTION1:
+        case ME_FUNCTION2:
+        case ME_FUNCTION3:
+        case ME_FUNCTION4:
+        case ME_FUNCTION5:
+        case ME_FUNCTION6:
+        case ME_FUNCTION7:
+        case ME_CLOSURE0:
+        case ME_CLOSURE1:
+        case ME_CLOSURE2:
+        case ME_CLOSURE3:
+        case ME_CLOSURE4:
+        case ME_CLOSURE5:
+        case ME_CLOSURE6:
+        case ME_CLOSURE7: {
+            const int arity = ARITY(node->type);
+            for (int i = 0; i < arity; i++) {
+                convert_complex_bindings((me_expr *)node->parameters[i], maps, map_count, nitems);
+            }
+            break;
+        }
+    }
 }
 #endif
 
