@@ -12,6 +12,7 @@ miniexpr is designed to be embedded directly into larger projects, not distribut
 - Thread-safe operations for parallel processing
 
 **Note**: This is a pre-alpha project.
+**Windows note**: Complex types are not supported on Windows because the C99 complex ABI is not stable across MSVC/clang-cl. `me_compile()` will reject expressions that involve complex variables or outputs.
 
 ## API Functions
 

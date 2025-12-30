@@ -13,7 +13,6 @@ int main() {
 
     int32_t a[VECTOR_SIZE];
     int32_t b[VECTOR_SIZE];
-    int32_t result[VECTOR_SIZE];
     int err;
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
