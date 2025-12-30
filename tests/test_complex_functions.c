@@ -5,6 +5,7 @@
 #include <math.h>
 #include <complex.h>
 #include <stdint.h>
+#include "me_complex.h"
 
 #define VECTOR_SIZE 10
 #define TOLERANCE 1e-9
@@ -26,11 +27,11 @@ int tests_failed = 0;
 
 #define ASSERT_COMPLEX_NEAR(expected, actual, idx) \
     { \
-        double diff_real = fabs(creal(expected) - creal(actual)); \
-        double diff_imag = fabs(cimag(expected) - cimag(actual)); \
+        double diff_real = fabs(ME_CREAL(expected) - ME_CREAL(actual)); \
+        double diff_imag = fabs(ME_CIMAG(expected) - ME_CIMAG(actual)); \
         if (diff_real > TOLERANCE || diff_imag > TOLERANCE) { \
             printf("  FAIL at [%d]: expected (%.10f%+.10fi), got (%.10f%+.10fi) (diff: %.2e)\n", \
-                   idx, creal(expected), cimag(expected), creal(actual), cimag(actual), \
+                   idx, ME_CREAL(expected), ME_CIMAG(expected), ME_CREAL(actual), ME_CIMAG(actual), \
                    (diff_real > diff_imag) ? diff_real : diff_imag); \
             tests_failed++; \
             return; \
@@ -40,19 +41,19 @@ int tests_failed = 0;
 void test_conj_c64() {
     TEST("conj(z) - complex conjugate for float complex");
 
-    float complex z[VECTOR_SIZE] = {
-        1.0f + 2.0f*I,
-        -1.0f + 2.0f*I,
-        1.0f - 2.0f*I,
-        -1.0f - 2.0f*I,
-        0.0f + 1.0f*I,
-        0.0f - 1.0f*I,
-        3.5f + 0.0f*I,
-        -3.5f + 0.0f*I,
-        0.0f + 0.0f*I,
-        2.5f + 3.7f*I
+    float _Complex z[VECTOR_SIZE] = {
+        ME_C64_BUILD(1.0f, 2.0f),
+        ME_C64_BUILD(-1.0f, 2.0f),
+        ME_C64_BUILD(1.0f, -2.0f),
+        ME_C64_BUILD(-1.0f, -2.0f),
+        ME_C64_BUILD(0.0f, 1.0f),
+        ME_C64_BUILD(0.0f, -1.0f),
+        ME_C64_BUILD(3.5f, 0.0f),
+        ME_C64_BUILD(-3.5f, 0.0f),
+        ME_C64_BUILD(0.0f, 0.0f),
+        ME_C64_BUILD(2.5f, 3.7f)
     };
-    float complex result[VECTOR_SIZE] = {0};
+    float _Complex result[VECTOR_SIZE] = {0};
 
     me_variable vars[] = {{"z", ME_COMPLEX64}};
 
@@ -69,7 +70,7 @@ void test_conj_c64() {
     me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
-        float complex expected = conjf(z[i]);
+        float _Complex expected = ME_CONJF(z[i]);
         ASSERT_COMPLEX_NEAR(expected, result[i], i);
     }
 
@@ -80,19 +81,19 @@ void test_conj_c64() {
 void test_conj_c128() {
     TEST("conj(z) - complex conjugate for double complex");
 
-    double complex z[VECTOR_SIZE] = {
-        1.0 + 2.0*I,
-        -1.0 + 2.0*I,
-        1.0 - 2.0*I,
-        -1.0 - 2.0*I,
-        0.0 + 1.0*I,
-        0.0 - 1.0*I,
-        3.5 + 0.0*I,
-        -3.5 + 0.0*I,
-        0.0 + 0.0*I,
-        2.5 + 3.7*I
+    double _Complex z[VECTOR_SIZE] = {
+        ME_C128_BUILD(1.0, 2.0),
+        ME_C128_BUILD(-1.0, 2.0),
+        ME_C128_BUILD(1.0, -2.0),
+        ME_C128_BUILD(-1.0, -2.0),
+        ME_C128_BUILD(0.0, 1.0),
+        ME_C128_BUILD(0.0, -1.0),
+        ME_C128_BUILD(3.5, 0.0),
+        ME_C128_BUILD(-3.5, 0.0),
+        ME_C128_BUILD(0.0, 0.0),
+        ME_C128_BUILD(2.5, 3.7)
     };
-    double complex result[VECTOR_SIZE] = {0};
+    double _Complex result[VECTOR_SIZE] = {0};
 
     me_variable vars[] = {{"z", ME_COMPLEX128}};
 
@@ -109,7 +110,7 @@ void test_conj_c128() {
     me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
-        double complex expected = conj(z[i]);
+        double _Complex expected = ME_CONJ(z[i]);
         ASSERT_COMPLEX_NEAR(expected, result[i], i);
     }
 
@@ -120,17 +121,17 @@ void test_conj_c128() {
 void test_imag_c64() {
     TEST("imag(z) - imaginary part for float complex");
 
-    float complex z[VECTOR_SIZE] = {
-        1.0f + 2.0f*I,
-        -1.0f + 2.0f*I,
-        1.0f - 2.0f*I,
-        -1.0f - 2.0f*I,
-        0.0f + 1.0f*I,
-        0.0f - 1.0f*I,
-        3.5f + 0.0f*I,
-        -3.5f + 0.0f*I,
-        0.0f + 0.0f*I,
-        2.5f + 3.7f*I
+    float _Complex z[VECTOR_SIZE] = {
+        ME_C64_BUILD(1.0f, 2.0f),
+        ME_C64_BUILD(-1.0f, 2.0f),
+        ME_C64_BUILD(1.0f, -2.0f),
+        ME_C64_BUILD(-1.0f, -2.0f),
+        ME_C64_BUILD(0.0f, 1.0f),
+        ME_C64_BUILD(0.0f, -1.0f),
+        ME_C64_BUILD(3.5f, 0.0f),
+        ME_C64_BUILD(-3.5f, 0.0f),
+        ME_C64_BUILD(0.0f, 0.0f),
+        ME_C64_BUILD(2.5f, 3.7f)
     };
     float result[VECTOR_SIZE] = {0};
 
@@ -149,7 +150,7 @@ void test_imag_c64() {
     me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
-        float expected = cimagf(z[i]);
+        float expected = ME_CIMAGF(z[i]);
         ASSERT_NEAR(expected, result[i], i);
     }
 
@@ -160,17 +161,17 @@ void test_imag_c64() {
 void test_imag_c128() {
     TEST("imag(z) - imaginary part for double complex");
 
-    double complex z[VECTOR_SIZE] = {
-        1.0 + 2.0*I,
-        -1.0 + 2.0*I,
-        1.0 - 2.0*I,
-        -1.0 - 2.0*I,
-        0.0 + 1.0*I,
-        0.0 - 1.0*I,
-        3.5 + 0.0*I,
-        -3.5 + 0.0*I,
-        0.0 + 0.0*I,
-        2.5 + 3.7*I
+    double _Complex z[VECTOR_SIZE] = {
+        ME_C128_BUILD(1.0, 2.0),
+        ME_C128_BUILD(-1.0, 2.0),
+        ME_C128_BUILD(1.0, -2.0),
+        ME_C128_BUILD(-1.0, -2.0),
+        ME_C128_BUILD(0.0, 1.0),
+        ME_C128_BUILD(0.0, -1.0),
+        ME_C128_BUILD(3.5, 0.0),
+        ME_C128_BUILD(-3.5, 0.0),
+        ME_C128_BUILD(0.0, 0.0),
+        ME_C128_BUILD(2.5, 3.7)
     };
     double result[VECTOR_SIZE] = {0};
 
@@ -189,7 +190,7 @@ void test_imag_c128() {
     me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
-        double expected = cimag(z[i]);
+        double expected = ME_CIMAG(z[i]);
         ASSERT_NEAR(expected, result[i], i);
     }
 
@@ -200,14 +201,14 @@ void test_imag_c128() {
 void test_conj_identity() {
     TEST("conj(conj(z)) == z - double conjugation identity");
 
-    double complex z[5] = {
-        1.0 + 2.0*I,
-        -1.0 + 2.0*I,
-        2.5 + 3.7*I,
-        -3.5 + 4.2*I,
-        0.0 + 0.0*I
+    double _Complex z[5] = {
+        ME_C128_BUILD(1.0, 2.0),
+        ME_C128_BUILD(-1.0, 2.0),
+        ME_C128_BUILD(2.5, 3.7),
+        ME_C128_BUILD(-3.5, 4.2),
+        ME_C128_BUILD(0.0, 0.0)
     };
-    double complex result[5] = {0};
+    double _Complex result[5] = {0};
 
     me_variable vars[] = {{"z", ME_COMPLEX128}};
 
@@ -234,12 +235,12 @@ void test_conj_identity() {
 void test_imag_auto_dtype() {
     TEST("imag(z) with ME_AUTO output dtype");
 
-    double complex z[5] = {
-        1.0 + 2.0*I,
-        -1.0 + 2.0*I,
-        2.5 + 3.7*I,
-        -3.5 + 4.2*I,
-        0.0 + 0.0*I
+    double _Complex z[5] = {
+        ME_C128_BUILD(1.0, 2.0),
+        ME_C128_BUILD(-1.0, 2.0),
+        ME_C128_BUILD(2.5, 3.7),
+        ME_C128_BUILD(-3.5, 4.2),
+        ME_C128_BUILD(0.0, 0.0)
     };
     double result[5] = {0};
 
@@ -258,7 +259,7 @@ void test_imag_auto_dtype() {
     me_eval(expr, var_ptrs, 1, result, 5);
 
     for (int i = 0; i < 5; i++) {
-        double expected = cimag(z[i]);
+        double expected = ME_CIMAG(z[i]);
         ASSERT_NEAR(expected, result[i], i);
     }
 
@@ -269,17 +270,17 @@ void test_imag_auto_dtype() {
 void test_real_c64() {
     TEST("real(z) - real part for float complex");
 
-    float complex z[VECTOR_SIZE] = {
-        1.0f + 2.0f*I,
-        -1.0f + 2.0f*I,
-        1.0f - 2.0f*I,
-        -1.0f - 2.0f*I,
-        0.0f + 1.0f*I,
-        0.0f - 1.0f*I,
-        3.5f + 0.0f*I,
-        -3.5f + 0.0f*I,
-        0.0f + 0.0f*I,
-        2.5f + 3.7f*I
+    float _Complex z[VECTOR_SIZE] = {
+        ME_C64_BUILD(1.0f, 2.0f),
+        ME_C64_BUILD(-1.0f, 2.0f),
+        ME_C64_BUILD(1.0f, -2.0f),
+        ME_C64_BUILD(-1.0f, -2.0f),
+        ME_C64_BUILD(0.0f, 1.0f),
+        ME_C64_BUILD(0.0f, -1.0f),
+        ME_C64_BUILD(3.5f, 0.0f),
+        ME_C64_BUILD(-3.5f, 0.0f),
+        ME_C64_BUILD(0.0f, 0.0f),
+        ME_C64_BUILD(2.5f, 3.7f)
     };
     float result[VECTOR_SIZE] = {0};
 
@@ -298,7 +299,7 @@ void test_real_c64() {
     me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
-        float expected = crealf(z[i]);
+        float expected = ME_CREALF(z[i]);
         ASSERT_NEAR(expected, result[i], i);
     }
 
@@ -309,17 +310,17 @@ void test_real_c64() {
 void test_real_c128() {
     TEST("real(z) - real part for double complex");
 
-    double complex z[VECTOR_SIZE] = {
-        1.0 + 2.0*I,
-        -1.0 + 2.0*I,
-        1.0 - 2.0*I,
-        -1.0 - 2.0*I,
-        0.0 + 1.0*I,
-        0.0 - 1.0*I,
-        3.5 + 0.0*I,
-        -3.5 + 0.0*I,
-        0.0 + 0.0*I,
-        2.5 + 3.7*I
+    double _Complex z[VECTOR_SIZE] = {
+        ME_C128_BUILD(1.0, 2.0),
+        ME_C128_BUILD(-1.0, 2.0),
+        ME_C128_BUILD(1.0, -2.0),
+        ME_C128_BUILD(-1.0, -2.0),
+        ME_C128_BUILD(0.0, 1.0),
+        ME_C128_BUILD(0.0, -1.0),
+        ME_C128_BUILD(3.5, 0.0),
+        ME_C128_BUILD(-3.5, 0.0),
+        ME_C128_BUILD(0.0, 0.0),
+        ME_C128_BUILD(2.5, 3.7)
     };
     double result[VECTOR_SIZE] = {0};
 
@@ -338,7 +339,7 @@ void test_real_c128() {
     me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
-        double expected = creal(z[i]);
+        double expected = ME_CREAL(z[i]);
         ASSERT_NEAR(expected, result[i], i);
     }
 
@@ -349,12 +350,12 @@ void test_real_c128() {
 void test_real_auto_dtype() {
     TEST("real(z) with ME_AUTO output dtype");
 
-    double complex z[5] = {
-        1.0 + 2.0*I,
-        -1.0 + 2.0*I,
-        2.5 + 3.7*I,
-        -3.5 + 4.2*I,
-        0.0 + 0.0*I
+    double _Complex z[5] = {
+        ME_C128_BUILD(1.0, 2.0),
+        ME_C128_BUILD(-1.0, 2.0),
+        ME_C128_BUILD(2.5, 3.7),
+        ME_C128_BUILD(-3.5, 4.2),
+        ME_C128_BUILD(0.0, 0.0)
     };
     double result[5] = {0};
 
@@ -373,7 +374,7 @@ void test_real_auto_dtype() {
     me_eval(expr, var_ptrs, 1, result, 5);
 
     for (int i = 0; i < 5; i++) {
-        double expected = creal(z[i]);
+        double expected = ME_CREAL(z[i]);
         ASSERT_NEAR(expected, result[i], i);
     }
 
@@ -381,16 +382,57 @@ void test_real_auto_dtype() {
     printf("  PASS\n");
 }
 
+void test_windows_complex_helpers() {
+#if defined(_WIN32) || defined(_WIN64)
+    TEST("Windows complex helper round-trip");
+
+    float _Complex zf = ME_C64_BUILD(1.0f, -2.5f);
+    if (fabsf(ME_CREALF(zf) - 1.0f) > TOLERANCE ||
+        fabsf(ME_CIMAGF(zf) + 2.5f) > TOLERANCE) {
+        printf("  FAIL: float helpers mismatch (real=%.6f imag=%.6f)\n",
+               (double)ME_CREALF(zf), (double)ME_CIMAGF(zf));
+        tests_failed++;
+        return;
+    }
+
+    double _Complex zd = ME_C128_BUILD(-3.25, 4.75);
+    if (fabs(ME_CREAL(zd) + 3.25) > TOLERANCE ||
+        fabs(ME_CIMAG(zd) - 4.75) > TOLERANCE) {
+        printf("  FAIL: double helpers mismatch (real=%.6f imag=%.6f)\n",
+               ME_CREAL(zd), ME_CIMAG(zd));
+        tests_failed++;
+        return;
+    }
+
+    float _Complex zf_conj = ME_CONJF(zf);
+    if (fabsf(ME_CIMAGF(zf_conj) - 2.5f) > TOLERANCE) {
+        printf("  FAIL: conj helper mismatch (imag=%.6f)\n", (double)ME_CIMAGF(zf_conj));
+        tests_failed++;
+        return;
+    }
+
+    double _Complex zd_conj = ME_CONJ(zd);
+    if (fabs(ME_CIMAG(zd_conj) + 4.75) > TOLERANCE) {
+        printf("  FAIL: conj helper mismatch (imag=%.6f)\n", ME_CIMAG(zd_conj));
+        tests_failed++;
+        return;
+    }
+
+    printf("  PASS\n");
+#endif
+}
+
 int main() {
     printf("=== Testing Complex Functions (conj, imag, real) ===\n\n");
 
+    test_windows_complex_helpers();
     test_conj_c64();
     test_conj_c128();
+    test_conj_identity();
     test_imag_c64();
     test_imag_c128();
     test_real_c64();
     test_real_c128();
-    test_conj_identity();
     test_imag_auto_dtype();
     test_real_auto_dtype();
 
@@ -401,4 +443,3 @@ int main() {
 
     return (tests_failed == 0) ? 0 : 1;
 }
-

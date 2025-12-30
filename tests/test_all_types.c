@@ -7,8 +7,12 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <complex.h>
+#include "me_complex.h"
 #include <math.h>
 #include "miniexpr.h"
+
+#if defined(_MSC_VER) && defined(__clang__)
+#endif
 
 /* Macro for single-variable tests (expressions like "a+5") */
 #define TEST1(name, type_enum, type, fmt, init_expr, test_expr, expected_expr) do { \
@@ -128,11 +132,11 @@ int main() {
     /* Complex numbers need special testing */
     printf("Complex Numbers:\n"); {
         const int n = 10;
-        float complex *a = malloc(n * sizeof(float complex));
-        float complex *result = malloc(n * sizeof(float complex));
+        float _Complex *a = malloc(n * sizeof(float _Complex));
+        float _Complex *result = malloc(n * sizeof(float _Complex));
 
         for (int i = 0; i < n; i++) {
-            a[i] = (float) i + (float) i * I; // i + i*I
+            a[i] = ME_C64_BUILD((float)i, (float)i); // i + i*I
         }
 
         me_variable vars[] = {{"a"}};
@@ -147,9 +151,14 @@ int main() {
 
             int passed = 1;
             for (int i = 0; i < n && passed; i++) {
-                float complex expected = a[i] + 5.0f;
+                float _Complex expected = a[i] + 5.0f;
+#if defined(_MSC_VER) && defined(__clang__)
+                if (ME_CREALF(result[i]) != ME_CREALF(expected) ||
+                    ME_CIMAGF(result[i]) != ME_CIMAGF(expected)) {
+#else
                 if (crealf(result[i]) != crealf(expected) ||
                     cimagf(result[i]) != cimagf(expected)) {
+#endif
                     passed = 0;
                     printf("❌ complex64: Mismatch at [%d]\n", i);
                 }
@@ -166,11 +175,11 @@ int main() {
         free(result);
     } {
         const int n = 10;
-        double complex *a = malloc(n * sizeof(double complex));
-        double complex *result = malloc(n * sizeof(double complex));
+        double _Complex *a = malloc(n * sizeof(double _Complex));
+        double _Complex *result = malloc(n * sizeof(double _Complex));
 
         for (int i = 0; i < n; i++) {
-            a[i] = (double) i + (double) i * I;
+            a[i] = ME_C128_BUILD((double)i, (double)i);
         }
 
         me_variable vars[] = {{"a"}};
@@ -185,9 +194,14 @@ int main() {
 
             int passed = 1;
             for (int i = 0; i < n && passed; i++) {
-                double complex expected = a[i] * 2.0;
+                double _Complex expected = a[i] * 2.0;
+#if defined(_MSC_VER) && defined(__clang__)
+                if (ME_CREAL(result[i]) != ME_CREAL(expected) ||
+                    ME_CIMAG(result[i]) != ME_CIMAG(expected)) {
+#else
                 if (creal(result[i]) != creal(expected) ||
                     cimag(result[i]) != cimag(expected)) {
+#endif
                     passed = 0;
                     printf("❌ complex128: Mismatch at [%d]\n", i);
                 }

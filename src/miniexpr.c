@@ -46,13 +46,6 @@ For log = natural log do nothing (NumPy compatible)
 For log = base 10 log comment the next line. */
 #define ME_NAT_LOG
 
-#if defined(_MSC_VER) && !defined(__clang__)
-// Enable C99 complex support on MSVC
-#ifndef _CRT_USE_C99_COMPLEX
-#define _CRT_USE_C99_COMPLEX
-#endif
-#endif
-
 #include "miniexpr.h"
 #include <stdlib.h>
 #include <math.h>
@@ -69,9 +62,9 @@ For log = base 10 log comment the next line. */
 #endif
 
 #include <complex.h>
+#include "me_complex.h"
 
 #if defined(_MSC_VER) && !defined(__clang__)
-// MSVC uses different names for complex types in C
 #define float_complex _Fcomplex
 #define double_complex _Dcomplex
 // And it doesn't support standard operators for them in C
@@ -96,8 +89,8 @@ static inline _Dcomplex div_c128(_Dcomplex a, _Dcomplex b) {
     return _Cbuild((creal(a) * creal(b) + cimag(a) * cimag(b)) / denom, (cimag(a) * creal(b) - creal(a) * cimag(b)) / denom);
 }
 #else
-#define float_complex float complex
-#define double_complex double complex
+#define float_complex float _Complex
+#define double_complex double _Complex
 #define add_c64(a, b) ((a) + (b))
 #define sub_c64(a, b) ((a) - (b))
 #define neg_c64(a) (-(a))
@@ -161,10 +154,10 @@ static inline _Dcomplex div_c128(_Dcomplex a, _Dcomplex b) {
 #else
 #define TO_TYPE_c64(x) (float_complex)(x)
 #define TO_TYPE_c128(x) (double_complex)(x)
-#define FROM_TYPE_c64(x) (double)(x)
-#define FROM_TYPE_c128(x) (double)(x)
-#define IS_NONZERO_c64(x) ((x) != 0)
-#define IS_NONZERO_c128(x) ((x) != 0)
+#define FROM_TYPE_c64(x) (double)me_crealf(x)
+#define FROM_TYPE_c128(x) (double)me_creal(x)
+#define IS_NONZERO_c64(x) (me_crealf(x) != 0.0f || me_cimagf(x) != 0.0f)
+#define IS_NONZERO_c128(x) (me_creal(x) != 0.0 || me_cimag(x) != 0.0)
 #define TO_TYPE_c128_from_c64(x) (double_complex)(x)
 #endif
 
@@ -180,6 +173,47 @@ static inline _Dcomplex div_c128(_Dcomplex a, _Dcomplex b) {
 
 
 typedef double (*me_fun2)(double, double);
+
+#if defined(_WIN32) || defined(_WIN64)
+static bool has_complex_node(const me_expr *n);
+static bool has_complex_input(const me_expr *n);
+
+typedef struct {
+    const void *orig;
+    void *buf;
+    me_dtype dtype;
+} me_pair_map;
+
+static void convert_complex_bindings(me_expr *node, me_pair_map *maps, int *map_count, int nitems);
+#endif
+
+#if defined(_WIN32) || defined(_WIN64)
+static void me_c64_unpack(const float _Complex *in, me_c64_pair *out, int n) {
+    for (int i = 0; i < n; i++) {
+        out[i].re = me_crealf(in[i]);
+        out[i].im = me_cimagf(in[i]);
+    }
+}
+
+static void me_c128_unpack(const double _Complex *in, me_c128_pair *out, int n) {
+    for (int i = 0; i < n; i++) {
+        out[i].re = me_creal(in[i]);
+        out[i].im = me_cimag(in[i]);
+    }
+}
+
+static void me_c64_pack(const me_c64_pair *in, float _Complex *out, int n) {
+    for (int i = 0; i < n; i++) {
+        me_c64_store(&out[i], in[i].re, in[i].im);
+    }
+}
+
+static void me_c128_pack(const me_c128_pair *in, double _Complex *out, int n) {
+    for (int i = 0; i < n; i++) {
+        me_c128_store(&out[i], in[i].re, in[i].im);
+    }
+}
+#endif
 
 enum {
     TOK_NULL = ME_CLOSURE7 + 1, TOK_ERROR, TOK_END, TOK_SEP,
@@ -302,6 +336,19 @@ static bool is_complex_dtype(me_dtype dt) {
     return dt == ME_COMPLEX64 || dt == ME_COMPLEX128;
 }
 
+static me_dtype reduction_output_dtype(me_dtype dt) {
+    if (dt == ME_BOOL) {
+        return ME_INT64;
+    }
+    if (dt >= ME_UINT8 && dt <= ME_UINT64) {
+        return ME_UINT64;
+    }
+    if (dt >= ME_INT8 && dt <= ME_INT64) {
+        return ME_INT64;
+    }
+    return dt;
+}
+
 /* Get size of a type in bytes */
 static size_t dtype_size(me_dtype dtype) {
     switch (dtype) {
@@ -316,8 +363,8 @@ static size_t dtype_size(me_dtype dtype) {
         case ME_UINT64: return sizeof(uint64_t);
         case ME_FLOAT32: return sizeof(float);
         case ME_FLOAT64: return sizeof(double);
-        case ME_COMPLEX64: return sizeof(float_complex);
-        case ME_COMPLEX128: return sizeof(double_complex);
+        case ME_COMPLEX64: return sizeof(float _Complex);
+        case ME_COMPLEX128: return sizeof(double _Complex);
         default: return 0;
     }
 }
@@ -361,10 +408,62 @@ static double conj_wrapper(double x);
 static double imag_wrapper(double x);
 static double real_wrapper(double x);
 static double round_wrapper(double x);
+static double sum_reduce(double x);
+static double prod_reduce(double x);
 static double sign(double x);
 static double square(double x);
 static double trunc_wrapper(double x);
 static double where_scalar(double c, double x, double y);
+
+static bool is_reduction_function(const void *func) {
+    return func == (void *)sum_reduce || func == (void *)prod_reduce;
+}
+
+static bool is_reduction_node(const me_expr *n) {
+    return n && IS_FUNCTION(n->type) && ARITY(n->type) == 1 &&
+           is_reduction_function(n->function);
+}
+
+static bool contains_reduction(const me_expr *n) {
+    if (!n) return false;
+    if (is_reduction_node(n)) return true;
+
+    switch (TYPE_MASK(n->type)) {
+        case ME_FUNCTION0:
+        case ME_FUNCTION1:
+        case ME_FUNCTION2:
+        case ME_FUNCTION3:
+        case ME_FUNCTION4:
+        case ME_FUNCTION5:
+        case ME_FUNCTION6:
+        case ME_FUNCTION7:
+        case ME_CLOSURE0:
+        case ME_CLOSURE1:
+        case ME_CLOSURE2:
+        case ME_CLOSURE3:
+        case ME_CLOSURE4:
+        case ME_CLOSURE5:
+        case ME_CLOSURE6:
+        case ME_CLOSURE7: {
+            const int arity = ARITY(n->type);
+            for (int i = 0; i < arity; i++) {
+                if (contains_reduction((const me_expr *) n->parameters[i])) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        default:
+            return false;
+    }
+}
+
+static bool reduction_usage_is_valid(const me_expr *n) {
+    if (!is_reduction_node(n)) return false;
+    me_expr *arg = (me_expr *) n->parameters[0];
+    if (!arg) return false;
+    return TYPE_MASK(arg->type) == ME_VARIABLE || TYPE_MASK(arg->type) == ME_CONSTANT;
+}
 
 /* Infer computation type from expression tree (for evaluation) */
 static me_dtype infer_result_type(const me_expr *n) {
@@ -393,6 +492,10 @@ static me_dtype infer_result_type(const me_expr *n) {
         case ME_CLOSURE5:
         case ME_CLOSURE6:
         case ME_CLOSURE7: {
+            if (is_reduction_node(n)) {
+                me_dtype param_type = infer_result_type((const me_expr *) n->parameters[0]);
+                return reduction_output_dtype(param_type);
+            }
             // Special case: imag() and real() return real type from complex input
             if (IS_FUNCTION(n->type) && ARITY(n->type) == 1) {
                 if (n->function == (void*)imag_wrapper || n->function == (void*)real_wrapper) {
@@ -454,6 +557,10 @@ static me_dtype infer_output_type(const me_expr *n) {
         case ME_CLOSURE5:
         case ME_CLOSURE6:
         case ME_CLOSURE7: {
+            if (is_reduction_node(n)) {
+                me_dtype param_type = infer_output_type((const me_expr *) n->parameters[0]);
+                return reduction_output_dtype(param_type);
+            }
             // Special case: imag() and real() return real type from complex input
             if (IS_FUNCTION(n->type) && ARITY(n->type) == 1) {
                 if (n->function == (void*)imag_wrapper || n->function == (void*)real_wrapper) {
@@ -660,16 +767,11 @@ static double logaddexp(double a, double b) {
 
 /* Wrapper functions for complex operations (for function pointer compatibility) */
 /* These are placeholders - actual implementation is in vector functions */
-static double conj_wrapper(double x) {
-    /* This should never be called for real numbers */
-    (void)x;
-    return NAN;
-}
+static double conj_wrapper(double x) { return x; }
 
 static double imag_wrapper(double x) {
-    /* This should never be called for real numbers */
     (void)x;
-    return NAN;
+    return 0.0;
 }
 
 /* Wrapper for round: round to nearest integer */
@@ -693,11 +795,7 @@ static double where_scalar(double c, double x, double y) {
     return (c != 0.0) ? x : y;
 }
 
-static double real_wrapper(double x) {
-    /* This should never be called for real numbers */
-    (void)x;
-    return NAN;
-}
+static double real_wrapper(double x) { return x; }
 
 static double fac(double a) {
     /* simplest version of fac */
@@ -779,6 +877,7 @@ static const me_variable functions[] = {
     {"npr", 0, npr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"pi", 0, pi, ME_FUNCTION0 | ME_FLAG_PURE, 0},
     {"pow", 0, pow, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"prod", 0, prod_reduce, ME_FUNCTION1, 0},
     {"real", 0, real_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"round", 0, round_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"sign", 0, sign, ME_FUNCTION1 | ME_FLAG_PURE, 0},
@@ -786,6 +885,7 @@ static const me_variable functions[] = {
     {"sinh", 0, sinh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"sqrt", 0, sqrt, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"square", 0, square, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"sum", 0, sum_reduce, ME_FUNCTION1, 0},
     {"tan", 0, tan, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"tanh", 0, tanh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"trunc", 0, trunc_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
@@ -833,6 +933,10 @@ static double sub(double a, double b) { return a - b; }
 static double mul(double a, double b) { return a * b; }
 static double divide(double a, double b) { return a / b; }
 static double negate(double a) { return -a; }
+static volatile double sum_salt = 0.0;
+static volatile double prod_salt = 1.0;
+static double sum_reduce(double x) { return x + sum_salt; }
+static double prod_reduce(double x) { return x * prod_salt; }
 
 static double comma(double a, double b) {
     (void) a;
@@ -1915,158 +2019,148 @@ DEFINE_COMPARE_OPS(f32, float)
 DEFINE_COMPARE_OPS(f64, double)
 
 /* Complex operations */
-static void vec_add_c64(const float_complex *a, const float_complex *b, float_complex *out, int n) {
+static void vec_add_c64(const float _Complex *a, const float _Complex *b, float _Complex *out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = add_c64(a[i], b[i]);
 }
 
-static void vec_sub_c64(const float_complex *a, const float_complex *b, float_complex *out, int n) {
+static void vec_sub_c64(const float _Complex *a, const float _Complex *b, float _Complex *out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = sub_c64(a[i], b[i]);
 }
 
-static void vec_mul_c64(const float_complex *a, const float_complex *b, float_complex *out, int n) {
+static void vec_mul_c64(const float _Complex *a, const float _Complex *b, float _Complex *out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = mul_c64(a[i], b[i]);
 }
 
-static void vec_div_c64(const float_complex *a, const float_complex *b, float_complex *out, int n) {
+static void vec_div_c64(const float _Complex *a, const float _Complex *b, float _Complex *out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = div_c64(a[i], b[i]);
 }
 
-static void vec_add_scalar_c64(const float_complex *a, float_complex b, float_complex *out, int n) {
+static void vec_add_scalar_c64(const float _Complex *a, float _Complex b, float _Complex *out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = add_c64(a[i], b);
 }
 
-static void vec_mul_scalar_c64(const float_complex *a, float_complex b, float_complex *out, int n) {
+static void vec_mul_scalar_c64(const float _Complex *a, float _Complex b, float _Complex *out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = mul_c64(a[i], b);
 }
 
-#if defined(_MSC_VER) && !defined(__clang__)
-// MSVC complex functions in C take struct by value and return struct by value,
-// but they might need specific headers or have different calling conventions.
-// The errors suggest 'too few arguments' which is weird for cpow(a, b).
-// Maybe it's because it's expecting _Dcomplex but getting something else?
-// Actually, MSVC's cpow is defined in complex.h as:
-// _Dcomplex cpow(_Dcomplex _Left, _Dcomplex _Right);
-// The error "too few arguments for call" often happens if it's misidentified.
-#endif
-
-static void vec_pow_c64(const float_complex *a, const float_complex *b, float_complex *out, int n) {
+static void vec_pow_c64(const float _Complex *a, const float _Complex *b, float _Complex *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = cpowf(a[i], b[i]);
+    for (i = 0; i < n; i++) out[i] = me_cpowf(a[i], b[i]);
 }
 
-static void vec_pow_scalar_c64(const float_complex *a, float_complex b, float_complex *out, int n) {
+static void vec_pow_scalar_c64(const float _Complex *a, float _Complex b, float _Complex *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = cpowf(a[i], b);
+    for (i = 0; i < n; i++) out[i] = me_cpowf(a[i], b);
 }
 
-static void vec_sqrt_c64(const float_complex *a, float_complex *out, int n) {
+static void vec_sqrt_c64(const float _Complex *a, float _Complex *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = csqrtf(a[i]);
+    for (i = 0; i < n; i++) out[i] = me_csqrtf(a[i]);
 }
 
-static void vec_negame_c64(const float_complex *a, float_complex *out, int n) {
+static void vec_negame_c64(const float _Complex *a, float _Complex *out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = neg_c64(a[i]);
 }
 
-static void vec_conj_c64(const float_complex *a, float_complex *out, int n) {
+static void vec_conj_c64(const float _Complex *a, float _Complex *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = conjf(a[i]);
+    for (i = 0; i < n; i++) out[i] = me_conjf(a[i]);
 }
 
-static void vec_imag_c64(const float_complex *a, float *out, int n) {
+static void vec_imag_c64(const float _Complex *a, float *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = cimagf(a[i]);
+    for (i = 0; i < n; i++) out[i] = me_cimagf(a[i]);
 }
 
-static void vec_add_c128(const double_complex *a, const double_complex *b, double_complex *out, int n) {
+static void vec_add_c128(const double _Complex *a, const double _Complex *b, double _Complex *out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = add_c128(a[i], b[i]);
 }
 
-static void vec_sub_c128(const double_complex *a, const double_complex *b, double_complex *out, int n) {
+static void vec_sub_c128(const double _Complex *a, const double _Complex *b, double _Complex *out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = sub_c128(a[i], b[i]);
 }
 
-static void vec_mul_c128(const double_complex *a, const double_complex *b, double_complex *out, int n) {
+static void vec_mul_c128(const double _Complex *a, const double _Complex *b, double _Complex *out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = mul_c128(a[i], b[i]);
 }
 
-static void vec_div_c128(const double_complex *a, const double_complex *b, double_complex *out, int n) {
+static void vec_div_c128(const double _Complex *a, const double _Complex *b, double _Complex *out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = div_c128(a[i], b[i]);
 }
 
-static void vec_add_scalar_c128(const double_complex *a, double_complex b, double_complex *out, int n) {
+static void vec_add_scalar_c128(const double _Complex *a, double _Complex b, double _Complex *out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = add_c128(a[i], b);
 }
 
-static void vec_mul_scalar_c128(const double_complex *a, double_complex b, double_complex *out, int n) {
+static void vec_mul_scalar_c128(const double _Complex *a, double _Complex b, double _Complex *out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = mul_c128(a[i], b);
 }
 
-static void vec_pow_c128(const double_complex *a, const double_complex *b, double_complex *out, int n) {
+static void vec_pow_c128(const double _Complex *a, const double _Complex *b, double _Complex *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = cpow(a[i], b[i]);
+    for (i = 0; i < n; i++) out[i] = me_cpow(a[i], b[i]);
 }
 
-static void vec_pow_scalar_c128(const double_complex *a, double_complex b, double_complex *out, int n) {
+static void vec_pow_scalar_c128(const double _Complex *a, double _Complex b, double _Complex *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = cpow(a[i], b);
+    for (i = 0; i < n; i++) out[i] = me_cpow(a[i], b);
 }
 
-static void vec_sqrt_c128(const double_complex *a, double_complex *out, int n) {
+static void vec_sqrt_c128(const double _Complex *a, double _Complex *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = csqrt(a[i]);
+    for (i = 0; i < n; i++) out[i] = me_csqrt(a[i]);
 }
 
-static void vec_negame_c128(const double_complex *a, double_complex *out, int n) {
+static void vec_negame_c128(const double _Complex *a, double _Complex *out, int n) {
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = neg_c128(a[i]);
 }
 
-static void vec_conj_c128(const double_complex *a, double_complex *out, int n) {
+static void vec_conj_c128(const double _Complex *a, double _Complex *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = conj(a[i]);
+    for (i = 0; i < n; i++) out[i] = me_conj(a[i]);
 }
 
-static void vec_imag_c128(const double_complex *a, double *out, int n) {
+static void vec_imag_c128(const double _Complex *a, double *out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = cimag(a[i]);
+    for (i = 0; i < n; i++) out[i] = me_cimag(a[i]);
 }
 
 /* ============================================================================
@@ -2082,11 +2176,6 @@ static void vec_convert_##FROM_SUFFIX##_to_##TO_SUFFIX(const FROM_TYPE *in, TO_T
     for (i = 0; i < n; i++) out[i] = TO_TYPE_##TO_SUFFIX(in[i]); \
 }
 
-static void vec_convert_c64_to_c128(const float_complex *in, double_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = TO_TYPE_c128_from_c64(in[i]);
-}
 
 /* Generate all conversion functions */
 /* Conversions FROM bool TO other types */
@@ -2154,13 +2243,12 @@ DEFINE_VEC_CONVERT(u32, f64, uint32_t, double)
 DEFINE_VEC_CONVERT(u64, f64, uint64_t, double)
 
 DEFINE_VEC_CONVERT(f32, f64, float, double)
-DEFINE_VEC_CONVERT(f32, c64, float, float_complex)
-DEFINE_VEC_CONVERT(f32, c128, float, double_complex)
+DEFINE_VEC_CONVERT(f32, c64, float, float _Complex)
+DEFINE_VEC_CONVERT(f32, c128, float, double _Complex)
 
-DEFINE_VEC_CONVERT(f64, c128, double, double_complex)
+DEFINE_VEC_CONVERT(f64, c128, double, double _Complex)
 
-/* Special case for complex to complex conversion to avoid cast to double on MSVC */
-// DEFINE_VEC_CONVERT(c64, c128, float_complex, double_complex) is handled above manually
+DEFINE_VEC_CONVERT(c64, c128, float _Complex, double _Complex)
 
 /* Function to get conversion function pointer */
 typedef void (*convert_func_t)(const void *, void *, int);
@@ -2590,59 +2678,312 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sub_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = sub_c64((a)[_i], (b)[_i]); } while(0)
 #define vec_mul_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c64((a)[_i], (b)[_i]); } while(0)
 #define vec_div_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = div_c64((a)[_i], (b)[_i]); } while(0)
-#define vec_pow_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpowf((a)[_i], (b)[_i]); } while(0)
+#define vec_pow_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cpowf((a)[_i], (b)[_i]); } while(0)
 #define vec_add_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = add_c64((a)[_i], (b)); } while(0)
 #define vec_mul_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c64((a)[_i], (b)); } while(0)
-#define vec_pow_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpowf((a)[_i], (b)); } while(0)
-#define vec_sqrt_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = csqrtf((a)[_i]); } while(0)
+#define vec_pow_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cpowf((a)[_i], (b)); } while(0)
+#define vec_sqrt_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_csqrtf((a)[_i]); } while(0)
 #define vec_negame_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = neg_c64((a)[_i]); } while(0)
-#define vec_conj_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = conjf((a)[_i]); } while(0)
-#define vec_imag_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cimagf((a)[_i]); } while(0)
-#define vec_real_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = crealf((a)[_i]); } while(0)
-#define vec_conj_noop(a, out, n) do { (void)(a); (void)(out); (void)(n); } while(0)
+#define vec_conj_c64(a, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        float _Complex _z = (a)[_i]; \
+        me_c64_store(&(out)[_i], me_crealf(_z), -me_cimagf(_z)); \
+    } \
+} while(0)
+#define vec_imag_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cimagf((a)[_i]); } while(0)
+#define vec_real_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_crealf((a)[_i]); } while(0)
+#define vec_conj_noop(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i]; } while(0)
 
 #define vec_add_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = add_c128((a)[_i], (b)[_i]); } while(0)
 #define vec_sub_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = sub_c128((a)[_i], (b)[_i]); } while(0)
 #define vec_mul_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c128((a)[_i], (b)[_i]); } while(0)
 #define vec_div_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = div_c128((a)[_i], (b)[_i]); } while(0)
-#define vec_pow_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpow((a)[_i], (b)[_i]); } while(0)
+#define vec_pow_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cpow((a)[_i], (b)[_i]); } while(0)
 #define vec_add_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = add_c128((a)[_i], (b)); } while(0)
 #define vec_mul_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c128((a)[_i], (b)); } while(0)
-#define vec_pow_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpow((a)[_i], (b)); } while(0)
-#define vec_sqrt_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = csqrt((a)[_i]); } while(0)
+#define vec_pow_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cpow((a)[_i], (b)); } while(0)
+#define vec_sqrt_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_csqrt((a)[_i]); } while(0)
 #define vec_negame_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = neg_c128((a)[_i]); } while(0)
-#define vec_conj_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = conj((a)[_i]); } while(0)
-#define vec_imag_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cimag((a)[_i]); } while(0)
-#define vec_real_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = creal((a)[_i]); } while(0)
+#define vec_conj_c128(a, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        double _Complex _z = (a)[_i]; \
+        me_c128_store(&(out)[_i], me_creal(_z), -me_cimag(_z)); \
+    } \
+} while(0)
+#define vec_imag_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cimag((a)[_i]); } while(0)
+#define vec_real_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_creal((a)[_i]); } while(0)
 #else
 #define vec_add_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
 #define vec_sub_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
 #define vec_mul_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
 #define vec_div_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpowf((a)[_i], (b)[_i]); } while(0)
+#define vec_pow_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cpowf((a)[_i], (b)[_i]); } while(0)
 #define vec_add_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
 #define vec_mul_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpowf((a)[_i], (b)); } while(0)
-#define vec_sqrt_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = csqrtf((a)[_i]); } while(0)
+#define vec_pow_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cpowf((a)[_i], (b)); } while(0)
+#define vec_sqrt_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_csqrtf((a)[_i]); } while(0)
 #define vec_negame_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
-#define vec_conj_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = conjf((a)[_i]); } while(0)
-#define vec_imag_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cimagf((a)[_i]); } while(0)
-#define vec_real_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = crealf((a)[_i]); } while(0)
-#define vec_conj_noop(a, out, n) do { (void)(a); (void)(out); (void)(n); } while(0)
+#define vec_conj_c64(a, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        float _Complex _z = (a)[_i]; \
+        me_c64_store(&(out)[_i], me_crealf(_z), -me_cimagf(_z)); \
+    } \
+} while(0)
+#define vec_imag_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cimagf((a)[_i]); } while(0)
+#define vec_real_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_crealf((a)[_i]); } while(0)
+#define vec_conj_noop(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i]; } while(0)
 
 #define vec_add_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
 #define vec_sub_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
 #define vec_mul_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
 #define vec_div_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpow((a)[_i], (b)[_i]); } while(0)
+#define vec_pow_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cpow((a)[_i], (b)[_i]); } while(0)
 #define vec_add_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
 #define vec_mul_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpow((a)[_i], (b)); } while(0)
-#define vec_sqrt_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = csqrt((a)[_i]); } while(0)
+#define vec_pow_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cpow((a)[_i], (b)); } while(0)
+#define vec_sqrt_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_csqrt((a)[_i]); } while(0)
 #define vec_negame_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
-#define vec_conj_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = conj((a)[_i]); } while(0)
-#define vec_imag_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cimag((a)[_i]); } while(0)
-#define vec_real_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = creal((a)[_i]); } while(0)
+#define vec_conj_c128(a, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        double _Complex _z = (a)[_i]; \
+        me_c128_store(&(out)[_i], me_creal(_z), -me_cimag(_z)); \
+    } \
+} while(0)
+#define vec_imag_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cimag((a)[_i]); } while(0)
+#define vec_real_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_creal((a)[_i]); } while(0)
+#endif
+
+#if defined(_WIN32) || defined(_WIN64)
+#undef vec_add_c64
+#undef vec_sub_c64
+#undef vec_mul_c64
+#undef vec_div_c64
+#undef vec_pow_c64
+#undef vec_add_scalar_c64
+#undef vec_mul_scalar_c64
+#undef vec_pow_scalar_c64
+#undef vec_sqrt_c64
+#undef vec_negame_c64
+#undef vec_conj_c64
+#undef vec_imag_c64
+#undef vec_real_c64
+
+#define vec_add_c64(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = (a)[_i].re + (b)[_i].re; \
+        (out)[_i].im = (a)[_i].im + (b)[_i].im; \
+    } \
+} while(0)
+
+#define vec_sub_c64(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = (a)[_i].re - (b)[_i].re; \
+        (out)[_i].im = (a)[_i].im - (b)[_i].im; \
+    } \
+} while(0)
+
+#define vec_mul_c64(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        float ar = (a)[_i].re, ai = (a)[_i].im; \
+        float br = (b)[_i].re, bi = (b)[_i].im; \
+        (out)[_i].re = ar * br - ai * bi; \
+        (out)[_i].im = ar * bi + ai * br; \
+    } \
+} while(0)
+
+#define vec_div_c64(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        float ar = (a)[_i].re, ai = (a)[_i].im; \
+        float br = (b)[_i].re, bi = (b)[_i].im; \
+        float denom = br * br + bi * bi; \
+        (out)[_i].re = (ar * br + ai * bi) / denom; \
+        (out)[_i].im = (ai * br - ar * bi) / denom; \
+    } \
+} while(0)
+
+#define vec_pow_c64(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        float _Complex az = me_c64_build((a)[_i].re, (a)[_i].im); \
+        float _Complex bz = me_c64_build((b)[_i].re, (b)[_i].im); \
+        float _Complex rz = me_cpowf(az, bz); \
+        (out)[_i].re = me_crealf(rz); \
+        (out)[_i].im = me_cimagf(rz); \
+    } \
+} while(0)
+
+#define vec_add_scalar_c64(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = (a)[_i].re + (b).re; \
+        (out)[_i].im = (a)[_i].im + (b).im; \
+    } \
+} while(0)
+
+#define vec_mul_scalar_c64(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        float ar = (a)[_i].re, ai = (a)[_i].im; \
+        float br = (b).re, bi = (b).im; \
+        (out)[_i].re = ar * br - ai * bi; \
+        (out)[_i].im = ar * bi + ai * br; \
+    } \
+} while(0)
+
+#define vec_pow_scalar_c64(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        float _Complex az = me_c64_build((a)[_i].re, (a)[_i].im); \
+        float _Complex bz = me_c64_build((b).re, (b).im); \
+        float _Complex rz = me_cpowf(az, bz); \
+        (out)[_i].re = me_crealf(rz); \
+        (out)[_i].im = me_cimagf(rz); \
+    } \
+} while(0)
+
+#define vec_sqrt_c64(a, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        float _Complex az = me_c64_build((a)[_i].re, (a)[_i].im); \
+        float _Complex rz = me_csqrtf(az); \
+        (out)[_i].re = me_crealf(rz); \
+        (out)[_i].im = me_cimagf(rz); \
+    } \
+} while(0)
+
+#define vec_negame_c64(a, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = -(a)[_i].re; \
+        (out)[_i].im = -(a)[_i].im; \
+    } \
+} while(0)
+
+#define vec_conj_c64(a, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = (a)[_i].re; \
+        (out)[_i].im = -(a)[_i].im; \
+    } \
+} while(0)
+
+#define vec_imag_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i].im; } while(0)
+#define vec_real_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i].re; } while(0)
+
+#undef vec_add_c128
+#undef vec_sub_c128
+#undef vec_mul_c128
+#undef vec_div_c128
+#undef vec_pow_c128
+#undef vec_add_scalar_c128
+#undef vec_mul_scalar_c128
+#undef vec_pow_scalar_c128
+#undef vec_sqrt_c128
+#undef vec_negame_c128
+#undef vec_conj_c128
+#undef vec_imag_c128
+#undef vec_real_c128
+
+#define vec_add_c128(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = (a)[_i].re + (b)[_i].re; \
+        (out)[_i].im = (a)[_i].im + (b)[_i].im; \
+    } \
+} while(0)
+
+#define vec_sub_c128(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = (a)[_i].re - (b)[_i].re; \
+        (out)[_i].im = (a)[_i].im - (b)[_i].im; \
+    } \
+} while(0)
+
+#define vec_mul_c128(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        double ar = (a)[_i].re, ai = (a)[_i].im; \
+        double br = (b)[_i].re, bi = (b)[_i].im; \
+        (out)[_i].re = ar * br - ai * bi; \
+        (out)[_i].im = ar * bi + ai * br; \
+    } \
+} while(0)
+
+#define vec_div_c128(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        double ar = (a)[_i].re, ai = (a)[_i].im; \
+        double br = (b)[_i].re, bi = (b)[_i].im; \
+        double denom = br * br + bi * bi; \
+        (out)[_i].re = (ar * br + ai * bi) / denom; \
+        (out)[_i].im = (ai * br - ar * bi) / denom; \
+    } \
+} while(0)
+
+#define vec_pow_c128(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        double _Complex az = me_c128_build((a)[_i].re, (a)[_i].im); \
+        double _Complex bz = me_c128_build((b)[_i].re, (b)[_i].im); \
+        double _Complex rz = me_cpow(az, bz); \
+        (out)[_i].re = me_creal(rz); \
+        (out)[_i].im = me_cimag(rz); \
+    } \
+} while(0)
+
+#define vec_add_scalar_c128(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = (a)[_i].re + (b).re; \
+        (out)[_i].im = (a)[_i].im + (b).im; \
+    } \
+} while(0)
+
+#define vec_mul_scalar_c128(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        double ar = (a)[_i].re, ai = (a)[_i].im; \
+        double br = (b).re, bi = (b).im; \
+        (out)[_i].re = ar * br - ai * bi; \
+        (out)[_i].im = ar * bi + ai * br; \
+    } \
+} while(0)
+
+#define vec_pow_scalar_c128(a, b, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        double _Complex az = me_c128_build((a)[_i].re, (a)[_i].im); \
+        double _Complex bz = me_c128_build((b).re, (b).im); \
+        double _Complex rz = me_cpow(az, bz); \
+        (out)[_i].re = me_creal(rz); \
+        (out)[_i].im = me_cimag(rz); \
+    } \
+} while(0)
+
+#define vec_sqrt_c128(a, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        double _Complex az = me_c128_build((a)[_i].re, (a)[_i].im); \
+        double _Complex rz = me_csqrt(az); \
+        (out)[_i].re = me_creal(rz); \
+        (out)[_i].im = me_cimag(rz); \
+    } \
+} while(0)
+
+#define vec_negame_c128(a, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = -(a)[_i].re; \
+        (out)[_i].im = -(a)[_i].im; \
+    } \
+} while(0)
+
+#define vec_conj_c128(a, out, n) do { \
+    for (int _i = 0; _i < (n); _i++) { \
+        (out)[_i].re = (a)[_i].re; \
+        (out)[_i].im = -(a)[_i].im; \
+    } \
+} while(0)
+
+#define vec_imag_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i].im; } while(0)
+#define vec_real_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i].re; } while(0)
+
+#undef TO_TYPE_c64
+#undef TO_TYPE_c128
+#undef FROM_TYPE_c64
+#undef FROM_TYPE_c128
+#undef IS_NONZERO_c64
+#undef IS_NONZERO_c128
+#define TO_TYPE_c64(x) ((me_c64_pair){(float)(x), 0.0f})
+#define TO_TYPE_c128(x) ((me_c128_pair){(double)(x), 0.0})
+#define FROM_TYPE_c64(x) (double)((x).re)
+#define FROM_TYPE_c128(x) (double)((x).re)
+#define IS_NONZERO_c64(x) ((x).re != 0.0f || (x).im != 0.0f)
+#define IS_NONZERO_c128(x) ((x).re != 0.0 || (x).im != 0.0)
 #endif
 
 /* Generate float32 evaluator */
@@ -2719,19 +3060,35 @@ DEFINE_ME_EVAL(u64, uint64_t,
                vec_conj_noop)
 
 /* Generate complex evaluators */
-DEFINE_ME_EVAL(c64, float_complex,
+#if defined(_WIN32) || defined(_WIN64)
+DEFINE_ME_EVAL(c64, me_c64_pair,
                vec_add_c64, vec_sub_c64, vec_mul_c64, vec_div_c64, vec_pow_c64,
                vec_add_scalar_c64, vec_mul_scalar_c64, vec_pow_scalar_c64,
                vec_sqrt_c64, vec_sqrt_c64, vec_sqrt_c64, vec_negame_c64,
-               csqrtf, csqrtf, csqrtf, cexpf, clogf, cabsf, cpowf,
+               me_csqrtf, me_csqrtf, me_csqrtf, me_cexpf, me_clogf, me_cabsf, me_cpowf,
                vec_conj_c64)
 
-DEFINE_ME_EVAL(c128, double_complex,
+DEFINE_ME_EVAL(c128, me_c128_pair,
                vec_add_c128, vec_sub_c128, vec_mul_c128, vec_div_c128, vec_pow_c128,
                vec_add_scalar_c128, vec_mul_scalar_c128, vec_pow_scalar_c128,
                vec_sqrt_c128, vec_sqrt_c128, vec_sqrt_c128, vec_negame_c128,
-               csqrt, csqrt, csqrt, cexp, clog, cabs, cpow,
+               me_csqrt, me_csqrt, me_csqrt, me_cexp, me_clog, me_cabs, me_cpow,
                vec_conj_c128)
+#else
+DEFINE_ME_EVAL(c64, float _Complex,
+               vec_add_c64, vec_sub_c64, vec_mul_c64, vec_div_c64, vec_pow_c64,
+               vec_add_scalar_c64, vec_mul_scalar_c64, vec_pow_scalar_c64,
+               vec_sqrt_c64, vec_sqrt_c64, vec_sqrt_c64, vec_negame_c64,
+               me_csqrtf, me_csqrtf, me_csqrtf, me_cexpf, me_clogf, me_cabsf, me_cpowf,
+               vec_conj_c64)
+
+DEFINE_ME_EVAL(c128, double _Complex,
+               vec_add_c128, vec_sub_c128, vec_mul_c128, vec_div_c128, vec_pow_c128,
+               vec_add_scalar_c128, vec_mul_scalar_c128, vec_pow_scalar_c128,
+               vec_sqrt_c128, vec_sqrt_c128, vec_sqrt_c128, vec_negame_c128,
+               me_csqrt, me_csqrt, me_csqrt, me_cexp, me_clog, me_cabs, me_cpow,
+               vec_conj_c128)
+#endif
 
 /* Public API - dispatches to correct type-specific evaluator */
 /* Structure to track promoted variables */
@@ -2920,8 +3277,308 @@ static bool all_variables_match_type(const me_expr *n, me_dtype target_type) {
     return true;
 }
 
+static void eval_reduction(const me_expr *n) {
+    if (!n || !n->output || !is_reduction_node(n)) return;
+
+    me_expr *arg = (me_expr *) n->parameters[0];
+    if (!arg) return;
+
+    const int nitems = n->nitems;
+    me_dtype arg_type = arg->dtype;
+    me_dtype result_type = reduction_output_dtype(arg_type);
+    me_dtype output_type = n->dtype;
+    bool is_prod = n->function == (void *)prod_reduce;
+
+    void *write_ptr = n->output;
+    void *temp_output = NULL;
+    if (output_type != result_type) {
+        temp_output = malloc(dtype_size(result_type));
+        if (!temp_output) return;
+        write_ptr = temp_output;
+    }
+
+    if (arg->type == ME_CONSTANT) {
+        double val = arg->value;
+        switch (arg_type) {
+            case ME_BOOL:
+            case ME_INT8:
+            case ME_INT16:
+            case ME_INT32:
+            case ME_INT64: {
+                int64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    int64_t v = (int64_t)val;
+                    for (int i = 0; i < nitems; i++) acc *= v;
+                } else {
+                    acc = (int64_t)val * (int64_t)nitems;
+                }
+                ((int64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_UINT8:
+            case ME_UINT16:
+            case ME_UINT32:
+            case ME_UINT64: {
+                uint64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    uint64_t v = (uint64_t)val;
+                    for (int i = 0; i < nitems; i++) acc *= v;
+                } else {
+                    acc = (uint64_t)val * (uint64_t)nitems;
+                }
+                ((uint64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_FLOAT32: {
+                float acc = is_prod ? 1.0f : 0.0f;
+                if (nitems == 0) {
+                    acc = is_prod ? 1.0f : 0.0f;
+                } else if (is_prod) {
+                    float v = (float)val;
+                    for (int i = 0; i < nitems; i++) acc *= v;
+                } else {
+                    acc = (float)val * (float)nitems;
+                }
+                ((float *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_FLOAT64: {
+                double acc = is_prod ? 1.0 : 0.0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1.0 : 0.0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= val;
+                } else {
+                    acc = val * (double)nitems;
+                }
+                ((double *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_COMPLEX64: {
+                float _Complex acc = is_prod ? (float _Complex)1.0f : (float _Complex)0.0f;
+                float _Complex v = (float _Complex)val;
+                if (nitems == 0) {
+                    acc = is_prod ? (float _Complex)1.0f : (float _Complex)0.0f;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= v;
+                } else {
+                    acc = v * (float)nitems;
+                }
+                ((float _Complex *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_COMPLEX128: {
+                double _Complex acc = is_prod ? (double _Complex)1.0 : (double _Complex)0.0;
+                double _Complex v = (double _Complex)val;
+                if (nitems == 0) {
+                    acc = is_prod ? (double _Complex)1.0 : (double _Complex)0.0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= v;
+                } else {
+                    acc = v * (double)nitems;
+                }
+                ((double _Complex *)write_ptr)[0] = acc;
+                break;
+            }
+            default:
+                break;
+        }
+    } else if (arg->type == ME_VARIABLE) {
+        switch (arg_type) {
+            case ME_BOOL: {
+                const bool *data = (const bool *)arg->bound;
+                int64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i] ? 1 : 0;
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i] ? 1 : 0;
+                }
+                ((int64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_INT8: {
+                const int8_t *data = (const int8_t *)arg->bound;
+                int64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((int64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_INT16: {
+                const int16_t *data = (const int16_t *)arg->bound;
+                int64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((int64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_INT32: {
+                const int32_t *data = (const int32_t *)arg->bound;
+                int64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((int64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_INT64: {
+                const int64_t *data = (const int64_t *)arg->bound;
+                int64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((int64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_UINT8: {
+                const uint8_t *data = (const uint8_t *)arg->bound;
+                uint64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((uint64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_UINT16: {
+                const uint16_t *data = (const uint16_t *)arg->bound;
+                uint64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((uint64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_UINT32: {
+                const uint32_t *data = (const uint32_t *)arg->bound;
+                uint64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((uint64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_UINT64: {
+                const uint64_t *data = (const uint64_t *)arg->bound;
+                uint64_t acc = is_prod ? 1 : 0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1 : 0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((uint64_t *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_FLOAT32: {
+                const float *data = (const float *)arg->bound;
+                float acc = is_prod ? 1.0f : 0.0f;
+                if (nitems == 0) {
+                    acc = is_prod ? 1.0f : 0.0f;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((float *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_FLOAT64: {
+                const double *data = (const double *)arg->bound;
+                double acc = is_prod ? 1.0 : 0.0;
+                if (nitems == 0) {
+                    acc = is_prod ? 1.0 : 0.0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((double *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_COMPLEX64: {
+                const float _Complex *data = (const float _Complex *)arg->bound;
+                float _Complex acc = is_prod ? (float _Complex)1.0f : (float _Complex)0.0f;
+                if (nitems == 0) {
+                    acc = is_prod ? (float _Complex)1.0f : (float _Complex)0.0f;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((float _Complex *)write_ptr)[0] = acc;
+                break;
+            }
+            case ME_COMPLEX128: {
+                const double _Complex *data = (const double _Complex *)arg->bound;
+                double _Complex acc = is_prod ? (double _Complex)1.0 : (double _Complex)0.0;
+                if (nitems == 0) {
+                    acc = is_prod ? (double _Complex)1.0 : (double _Complex)0.0;
+                } else if (is_prod) {
+                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                } else {
+                    for (int i = 0; i < nitems; i++) acc += data[i];
+                }
+                ((double _Complex *)write_ptr)[0] = acc;
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    if (temp_output) {
+        convert_func_t conv = get_convert_func(result_type, output_type);
+        if (conv) {
+            conv(temp_output, n->output, 1);
+        }
+        free(temp_output);
+    }
+}
+
 static void private_eval(const me_expr *n) {
     if (!n) return;
+
+    if (is_reduction_node(n)) {
+        eval_reduction(n);
+        return;
+    }
 
     // Special case: imag() and real() functions return real from complex input
     if (IS_FUNCTION(n->type) && ARITY(n->type) == 1) {
@@ -2932,50 +3589,131 @@ static void private_eval(const me_expr *n) {
             if (arg_type == ME_COMPLEX64) {
                 // Evaluate argument as complex64
                 if (!arg->output) {
-                    arg->output = malloc(n->nitems * sizeof(float_complex));
+#if defined(_WIN32) || defined(_WIN64)
+                    arg->output = malloc(n->nitems * sizeof(me_c64_pair));
+#else
+                    arg->output = malloc(n->nitems * sizeof(float _Complex));
+#endif
                     arg->nitems = n->nitems;
                     ((me_expr*)arg)->dtype = ME_COMPLEX64;
                 }
                 me_eval_c64(arg);
 
                 // Extract real/imaginary part to float32 output
-                const float_complex *cdata = (const float_complex*)arg->output;
                 float *output = (float*)n->output;
                 if (n->function == (void*)imag_wrapper) {
                     for (int i = 0; i < n->nitems; i++) {
-                        output[i] = cimagf(cdata[i]);
+#if defined(_WIN32) || defined(_WIN64)
+                        const me_c64_pair *cdata = (const me_c64_pair*)arg->output;
+                        output[i] = cdata[i].im;
+#else
+                        const float _Complex *cdata = (const float _Complex*)arg->output;
+                        output[i] = me_cimagf(cdata[i]);
+#endif
                     }
                 } else { // real_wrapper
                     for (int i = 0; i < n->nitems; i++) {
-                        output[i] = crealf(cdata[i]);
+#if defined(_WIN32) || defined(_WIN64)
+                        const me_c64_pair *cdata = (const me_c64_pair*)arg->output;
+                        output[i] = cdata[i].re;
+#else
+                        const float _Complex *cdata = (const float _Complex*)arg->output;
+                        output[i] = me_crealf(cdata[i]);
+#endif
                     }
                 }
                 return;
             } else if (arg_type == ME_COMPLEX128) {
                 // Evaluate argument as complex128
                 if (!arg->output) {
-                    arg->output = malloc(n->nitems * sizeof(double_complex));
+#if defined(_WIN32) || defined(_WIN64)
+                    arg->output = malloc(n->nitems * sizeof(me_c128_pair));
+#else
+                    arg->output = malloc(n->nitems * sizeof(double _Complex));
+#endif
                     arg->nitems = n->nitems;
                     ((me_expr*)arg)->dtype = ME_COMPLEX128;
                 }
                 me_eval_c128(arg);
 
                 // Extract real/imaginary part to float64 output
-                const double_complex *cdata = (const double_complex*)arg->output;
                 double *output = (double*)n->output;
                 if (n->function == (void*)imag_wrapper) {
                     for (int i = 0; i < n->nitems; i++) {
-                        output[i] = cimag(cdata[i]);
+#if defined(_WIN32) || defined(_WIN64)
+                        const me_c128_pair *cdata = (const me_c128_pair*)arg->output;
+                        output[i] = cdata[i].im;
+#else
+                        const double _Complex *cdata = (const double _Complex*)arg->output;
+                        output[i] = me_cimag(cdata[i]);
+#endif
                     }
                 } else { // real_wrapper
                     for (int i = 0; i < n->nitems; i++) {
-                        output[i] = creal(cdata[i]);
+#if defined(_WIN32) || defined(_WIN64)
+                        const me_c128_pair *cdata = (const me_c128_pair*)arg->output;
+                        output[i] = cdata[i].re;
+#else
+                        const double _Complex *cdata = (const double _Complex*)arg->output;
+                        output[i] = me_creal(cdata[i]);
+#endif
                     }
                 }
                 return;
             }
             // If not complex, fall through to normal evaluation
         }
+#if defined(_WIN32) || defined(_WIN64)
+        if (n->function == (void*)conj_wrapper) {
+            me_expr *arg = (me_expr*)n->parameters[0];
+            me_dtype arg_type = infer_result_type(arg);
+
+            if (arg_type == ME_COMPLEX64) {
+                const float _Complex *adata = NULL;
+                if (arg->type == ME_VARIABLE) {
+                    adata = (const float _Complex *)arg->bound;
+                } else {
+                    if (!arg->output) {
+                        arg->output = malloc(n->nitems * sizeof(me_c64_pair));
+                        arg->nitems = n->nitems;
+                        ((me_expr*)arg)->dtype = ME_COMPLEX64;
+                    }
+                    me_eval_c64(arg);
+                    adata = (const float _Complex *)arg->output;
+                }
+
+                if (adata && n->output) {
+                    float _Complex *output = (float _Complex *)n->output;
+                    for (int i = 0; i < n->nitems; i++) {
+                        me_c64_store(&output[i], me_crealf(adata[i]), -me_cimagf(adata[i]));
+                    }
+                }
+                return;
+            } else if (arg_type == ME_COMPLEX128) {
+                const double _Complex *adata = NULL;
+                if (arg->type == ME_VARIABLE) {
+                    adata = (const double _Complex *)arg->bound;
+                } else {
+                    if (!arg->output) {
+                        arg->output = malloc(n->nitems * sizeof(me_c128_pair));
+                        arg->nitems = n->nitems;
+                        ((me_expr*)arg)->dtype = ME_COMPLEX128;
+                    }
+                    me_eval_c128(arg);
+                    adata = (const double _Complex *)arg->output;
+                }
+
+                if (adata && n->output) {
+                    double _Complex *output = (double _Complex *)n->output;
+                    for (int i = 0; i < n->nitems; i++) {
+                        me_c128_store(&output[i], me_creal(adata[i]), -me_cimag(adata[i]));
+                    }
+                }
+                return;
+            }
+            // If not complex, fall through to normal evaluation
+        }
+#endif
     }
 
     // Infer the result type from the expression tree
@@ -3032,13 +3770,13 @@ static void private_eval(const me_expr *n) {
     }
 
     // Slow path: need to promote variables
-    // Allocate tracking structures (max 100 variables)
-    promoted_var_t promotions[100];
+    // Allocate tracking structures (max ME_MAX_VARS variables)
+    promoted_var_t promotions[ME_MAX_VARS];
     int promo_count = 0;
 
     // Save original variable bindings
-    const void *original_bounds[100];
-    me_dtype original_types[100];
+    const void *original_bounds[ME_MAX_VARS];
+    me_dtype original_types[ME_MAX_VARS];
     int save_idx = 0;
 
     save_variable_bindings(n, original_bounds, original_types, &save_idx);
@@ -3241,7 +3979,7 @@ static void free_intermediate_buffers(me_expr *node) {
 }
 
 /* Helper to save original variable bindings with their pointers */
-static void save_variable_pointers(const me_expr *node, const void **var_pointers, int *var_count) {
+static void save_variable_metadata(const me_expr *node, const void **var_pointers, size_t *var_sizes, int *var_count) {
     if (!node) return;
     switch (TYPE_MASK(node->type)) {
         case ME_VARIABLE:
@@ -3250,6 +3988,7 @@ static void save_variable_pointers(const me_expr *node, const void **var_pointer
                 if (var_pointers[i] == node->bound) return; // Already saved
             }
             var_pointers[*var_count] = node->bound;
+            var_sizes[*var_count] = dtype_size(node->input_dtype);
             (*var_count)++;
             break;
         case ME_FUNCTION0:
@@ -3270,7 +4009,84 @@ static void save_variable_pointers(const me_expr *node, const void **var_pointer
         case ME_CLOSURE7: {
             const int arity = ARITY(node->type);
             for (int i = 0; i < arity; i++) {
-                save_variable_pointers((const me_expr *) node->parameters[i], var_pointers, var_count);
+                save_variable_metadata((const me_expr *) node->parameters[i], var_pointers, var_sizes, var_count);
+            }
+            break;
+        }
+    }
+}
+
+static int count_variable_nodes(const me_expr *node) {
+    if (!node) return 0;
+    switch (TYPE_MASK(node->type)) {
+        case ME_VARIABLE:
+            return 1;
+        case ME_FUNCTION0:
+        case ME_FUNCTION1:
+        case ME_FUNCTION2:
+        case ME_FUNCTION3:
+        case ME_FUNCTION4:
+        case ME_FUNCTION5:
+        case ME_FUNCTION6:
+        case ME_FUNCTION7:
+        case ME_CLOSURE0:
+        case ME_CLOSURE1:
+        case ME_CLOSURE2:
+        case ME_CLOSURE3:
+        case ME_CLOSURE4:
+        case ME_CLOSURE5:
+        case ME_CLOSURE6:
+        case ME_CLOSURE7: {
+            int count = 0;
+            const int arity = ARITY(node->type);
+            for (int i = 0; i < arity; i++) {
+                count += count_variable_nodes((const me_expr *) node->parameters[i]);
+            }
+            return count;
+        }
+    }
+    return 0;
+}
+
+static void collect_variable_nodes(me_expr *node, const void **var_pointers, int n_vars,
+                                   me_expr **var_nodes, int *var_indices, int *node_count) {
+    if (!node) return;
+    switch (TYPE_MASK(node->type)) {
+        case ME_VARIABLE: {
+            int idx = -1;
+            for (int i = 0; i < n_vars; i++) {
+                if (node->bound == var_pointers[i]) {
+                    idx = i;
+                    break;
+                }
+            }
+            if (idx >= 0) {
+                var_nodes[*node_count] = node;
+                var_indices[*node_count] = idx;
+                (*node_count)++;
+            }
+            break;
+        }
+        case ME_FUNCTION0:
+        case ME_FUNCTION1:
+        case ME_FUNCTION2:
+        case ME_FUNCTION3:
+        case ME_FUNCTION4:
+        case ME_FUNCTION5:
+        case ME_FUNCTION6:
+        case ME_FUNCTION7:
+        case ME_CLOSURE0:
+        case ME_CLOSURE1:
+        case ME_CLOSURE2:
+        case ME_CLOSURE3:
+        case ME_CLOSURE4:
+        case ME_CLOSURE5:
+        case ME_CLOSURE6:
+        case ME_CLOSURE7: {
+            const int arity = ARITY(node->type);
+            for (int i = 0; i < arity; i++) {
+                collect_variable_nodes((me_expr *) node->parameters[i], var_pointers, n_vars,
+                                       var_nodes, var_indices, node_count);
             }
             break;
         }
@@ -3402,9 +4218,15 @@ void me_eval(const me_expr *expr, const void **vars_chunk,
     if (!expr) return;
 
     // Verify variable count matches
-    const void *original_var_pointers[100];
+    const void *original_var_pointers[ME_MAX_VARS];
+    size_t var_sizes[ME_MAX_VARS];
     int actual_var_count = 0;
-    save_variable_pointers(expr, original_var_pointers, &actual_var_count);
+    save_variable_metadata(expr, original_var_pointers, var_sizes, &actual_var_count);
+    if (actual_var_count > ME_MAX_VARS) {
+        fprintf(stderr, "Error: Expression uses %d variables, exceeds ME_MAX_VARS=%d\n",
+                actual_var_count, ME_MAX_VARS);
+        return;
+    }
 
     if (actual_var_count != n_vars) {
         return;
@@ -3414,18 +4236,132 @@ void me_eval(const me_expr *expr, const void **vars_chunk,
     me_expr *clone = clone_expr(expr);
     if (!clone) return;
 
-    // Update clone's variable bindings
-    update_vars_by_pointer(clone, original_var_pointers, vars_chunk, n_vars);
+    const int block_nitems = ME_EVAL_BLOCK_NITEMS;
 
-    // Update clone's nitems throughout the tree
-    int update_idx = 0;
-    update_variable_bindings(clone, NULL, &update_idx, chunk_nitems);
+#if defined(_WIN32) || defined(_WIN64)
+    if (!is_reduction_node(clone) && (has_complex_node(clone) || has_complex_input(clone))) {
+        update_vars_by_pointer(clone, original_var_pointers, vars_chunk, n_vars);
 
-    // Set output pointer
-    clone->output = output_chunk;
+        int update_idx = 0;
+        update_variable_bindings(clone, NULL, &update_idx, chunk_nitems);
 
-    // Evaluate the clone
-    private_eval(clone);
+        me_pair_map maps[ME_MAX_VARS];
+        int map_count = 0;
+        memset(maps, 0, sizeof(maps));
+        convert_complex_bindings(clone, maps, &map_count, chunk_nitems);
+
+        void *pair_output = NULL;
+        if (clone->dtype == ME_COMPLEX64) {
+            pair_output = malloc((size_t)chunk_nitems * sizeof(me_c64_pair));
+            if (!pair_output) {
+                for (int i = 0; i < map_count; i++) free(maps[i].buf);
+                me_free(clone);
+                return;
+            }
+            clone->output = pair_output;
+        } else if (clone->dtype == ME_COMPLEX128) {
+            pair_output = malloc((size_t)chunk_nitems * sizeof(me_c128_pair));
+            if (!pair_output) {
+                for (int i = 0; i < map_count; i++) free(maps[i].buf);
+                me_free(clone);
+                return;
+            }
+            clone->output = pair_output;
+        } else {
+            clone->output = output_chunk;
+        }
+
+        private_eval(clone);
+
+        if (clone->dtype == ME_COMPLEX64 && pair_output) {
+            me_c64_pack((const me_c64_pair *)pair_output, (float _Complex *)output_chunk, chunk_nitems);
+            free(pair_output);
+        } else if (clone->dtype == ME_COMPLEX128 && pair_output) {
+            me_c128_pack((const me_c128_pair *)pair_output, (double _Complex *)output_chunk, chunk_nitems);
+            free(pair_output);
+        }
+
+        for (int i = 0; i < map_count; i++) {
+            free(maps[i].buf);
+        }
+        me_free(clone);
+        return;
+    }
+#endif
+
+    if (!ME_EVAL_ENABLE_BLOCKING || chunk_nitems <= block_nitems) {
+        // Update clone's variable bindings
+        update_vars_by_pointer(clone, original_var_pointers, vars_chunk, n_vars);
+
+        // Update clone's nitems throughout the tree
+        int update_idx = 0;
+        update_variable_bindings(clone, NULL, &update_idx, chunk_nitems);
+
+        // Set output pointer
+        clone->output = output_chunk;
+
+        // Evaluate the clone
+        private_eval(clone);
+    } else if (is_reduction_node(clone)) {
+        // Reductions operate on the full chunk; avoid block processing.
+        update_vars_by_pointer(clone, original_var_pointers, vars_chunk, n_vars);
+
+        int update_idx = 0;
+        update_variable_bindings(clone, NULL, &update_idx, chunk_nitems);
+
+        clone->output = output_chunk;
+        private_eval(clone);
+    } else {
+        const size_t output_item_size = dtype_size(clone->dtype);
+        const int max_var_nodes = count_variable_nodes(clone);
+        me_expr **var_nodes = NULL;
+        int *var_indices = NULL;
+        int var_node_count = 0;
+
+        if (max_var_nodes > 0) {
+            var_nodes = malloc((size_t)max_var_nodes * sizeof(*var_nodes));
+            var_indices = malloc((size_t)max_var_nodes * sizeof(*var_indices));
+            if (!var_nodes || !var_indices) {
+                free(var_nodes);
+                free(var_indices);
+                me_free(clone);
+                return;
+            }
+            collect_variable_nodes(clone, original_var_pointers, n_vars,
+                                   var_nodes, var_indices, &var_node_count);
+        }
+
+#if defined(__clang__)
+#pragma clang loop unroll_count(4)
+#elif defined(__GNUC__) && !defined(__clang__)
+#pragma GCC unroll 4
+#endif
+        for (int offset = 0; offset < chunk_nitems; offset += block_nitems) {
+            int current = block_nitems;
+            if (offset + current > chunk_nitems) {
+                current = chunk_nitems - offset;
+            }
+
+            const void *block_vars[ME_MAX_VARS];
+            for (int i = 0; i < n_vars; i++) {
+                const unsigned char *base = (const unsigned char *)vars_chunk[i];
+                block_vars[i] = base + (size_t)offset * var_sizes[i];
+            }
+
+            for (int i = 0; i < var_node_count; i++) {
+                var_nodes[i]->bound = block_vars[var_indices[i]];
+            }
+
+            int update_idx = 0;
+            update_variable_bindings(clone, NULL, &update_idx, current);
+
+            clone->output = (unsigned char *)output_chunk + (size_t)offset * output_item_size;
+            private_eval(clone);
+        }
+
+        free(var_nodes);
+        free(var_indices);
+    }
 
     // Free the clone (including any intermediate buffers it allocated)
     me_free(clone);
@@ -3457,6 +4393,82 @@ static void optimize(me_expr *n) {
         }
     }
 }
+
+#if defined(_WIN32) || defined(_WIN64)
+static bool has_complex_node(const me_expr *n) {
+    if (!n) return false;
+    if (n->dtype == ME_COMPLEX64 || n->dtype == ME_COMPLEX128) return true;
+    const int arity = ARITY(n->type);
+    for (int i = 0; i < arity; i++) {
+        if (has_complex_node((const me_expr *)n->parameters[i])) return true;
+    }
+    return false;
+}
+
+static bool has_complex_input(const me_expr *n) {
+    if (!n) return false;
+    if (n->input_dtype == ME_COMPLEX64 || n->input_dtype == ME_COMPLEX128) return true;
+    const int arity = ARITY(n->type);
+    for (int i = 0; i < arity; i++) {
+        if (has_complex_input((const me_expr *)n->parameters[i])) return true;
+    }
+    return false;
+}
+
+static void convert_complex_bindings(me_expr *node, me_pair_map *maps, int *map_count, int nitems) {
+    if (!node) return;
+    switch (TYPE_MASK(node->type)) {
+        case ME_VARIABLE:
+            if (node->dtype == ME_COMPLEX64 || node->dtype == ME_COMPLEX128) {
+                for (int i = 0; i < *map_count; i++) {
+                    if (maps[i].orig == node->bound) {
+                        node->bound = maps[i].buf;
+                        return;
+                    }
+                }
+                if (*map_count >= ME_MAX_VARS) return;
+                if (node->dtype == ME_COMPLEX64) {
+                    me_c64_pair *buf = malloc((size_t)nitems * sizeof(*buf));
+                    if (!buf) return;
+                    me_c64_unpack((const float _Complex *)node->bound, buf, nitems);
+                    maps[*map_count] = (me_pair_map){node->bound, buf, node->dtype};
+                    (*map_count)++;
+                    node->bound = buf;
+                } else {
+                    me_c128_pair *buf = malloc((size_t)nitems * sizeof(*buf));
+                    if (!buf) return;
+                    me_c128_unpack((const double _Complex *)node->bound, buf, nitems);
+                    maps[*map_count] = (me_pair_map){node->bound, buf, node->dtype};
+                    (*map_count)++;
+                    node->bound = buf;
+                }
+            }
+            break;
+        case ME_FUNCTION0:
+        case ME_FUNCTION1:
+        case ME_FUNCTION2:
+        case ME_FUNCTION3:
+        case ME_FUNCTION4:
+        case ME_FUNCTION5:
+        case ME_FUNCTION6:
+        case ME_FUNCTION7:
+        case ME_CLOSURE0:
+        case ME_CLOSURE1:
+        case ME_CLOSURE2:
+        case ME_CLOSURE3:
+        case ME_CLOSURE4:
+        case ME_CLOSURE5:
+        case ME_CLOSURE6:
+        case ME_CLOSURE7: {
+            const int arity = ARITY(node->type);
+            for (int i = 0; i < arity; i++) {
+                convert_complex_bindings((me_expr *)node->parameters[i], maps, map_count, nitems);
+            }
+            break;
+        }
+    }
+}
+#endif
 
 
 static me_expr *private_compile(const char *expression, const me_variable *variables, int var_count,
@@ -3539,6 +4551,12 @@ static me_expr *private_compile(const char *expression, const me_variable *varia
         return NULL;
     }
 
+    if (contains_reduction(root) && !reduction_usage_is_valid(root)) {
+        me_free(root);
+        if (error) *error = -1;
+        return NULL;
+    }
+
     if (s.type != TOK_END) {
         me_free(root);
         if (error) {
@@ -3565,7 +4583,7 @@ static me_expr *private_compile(const char *expression, const me_variable *varia
 }
 
 // Synthetic addresses for ordinal matching (when user provides NULL addresses)
-static char synthetic_var_addresses[100];
+static char synthetic_var_addresses[ME_MAX_VARS];
 
 me_expr *me_compile(const char *expression, const me_variable *variables,
                     int var_count, me_dtype dtype, int *error) {
