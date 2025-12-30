@@ -9,14 +9,15 @@
 #include <stdlib.h>
 #include "../src/miniexpr.h"
 
-void compile_and_print(const char *expression, me_variable *vars, int nvars, me_dtype dtype) {
+void compile_and_print(const char* expression, me_variable* vars, int nvars, me_dtype dtype) {
     printf("\nExpression: %s\n", expression);
     printf("Tree structure:\n");
 
     int error;
-    me_expr *expr = me_compile(expression, vars, nvars, dtype, &error);
+    me_expr* expr = NULL;
+    int rc_expr = me_compile(expression, vars, nvars, dtype, &error, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ERROR: Failed to compile at position %d\n", error);
         return;
     }
