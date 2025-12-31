@@ -27,7 +27,9 @@ typedef enum {
     RED_SUM,
     RED_PROD,
     RED_MIN,
-    RED_MAX
+    RED_MAX,
+    RED_ANY,
+    RED_ALL
 } reduction_kind_t;
 
 typedef struct {
@@ -87,6 +89,9 @@ static bool parse_dtype(const char *name, dtype_info_t *info) {
 }
 
 static me_dtype output_dtype_for_kind(const dtype_info_t *info, reduction_kind_t kind) {
+    if (kind == RED_ANY || kind == RED_ALL) {
+        return ME_BOOL;
+    }
     if (kind == RED_MIN || kind == RED_MAX) {
         return info->dtype;
     }
@@ -136,56 +141,149 @@ static void *reduce_worker_c(void *arg) {
     if (info->is_float) {
         if (info->dtype == ME_FLOAT32) {
             const float *data = (const float *)args->data + args->start_idx;
-            float acc = 0.0f;
-            if (kind == RED_SUM) {
-                for (int i = 0; i < args->count; i++) acc += data[i];
-            } else if (kind == RED_PROD) {
-                acc = 1.0f;
-                for (int i = 0; i < args->count; i++) acc *= data[i];
-            } else if (kind == RED_MIN) {
-                acc = INFINITY;
-                for (int i = 0; i < args->count; i++) if (data[i] < acc) acc = data[i];
-            } else {
-                acc = -INFINITY;
-                for (int i = 0; i < args->count; i++) if (data[i] > acc) acc = data[i];
+            if (kind == RED_ANY || kind == RED_ALL) {
+                bool acc = (kind == RED_ALL);
+                for (int i = 0; i < args->count; i++) {
+                    if (kind == RED_ANY) {
+                        if (data[i] != 0.0f) { acc = true; break; }
+                    }
+                    else {
+                        if (data[i] == 0.0f) { acc = false; break; }
+                    }
+                }
+                ((bool *)args->output)[0] = acc;
             }
-            ((float *)args->output)[0] = acc;
+            else {
+                float acc = 0.0f;
+                if (kind == RED_SUM) {
+                    for (int i = 0; i < args->count; i++) acc += data[i];
+                } else if (kind == RED_PROD) {
+                    acc = 1.0f;
+                    for (int i = 0; i < args->count; i++) acc *= data[i];
+                } else if (kind == RED_MIN) {
+                    acc = INFINITY;
+                    for (int i = 0; i < args->count; i++) if (data[i] < acc) acc = data[i];
+                } else {
+                    acc = -INFINITY;
+                    for (int i = 0; i < args->count; i++) if (data[i] > acc) acc = data[i];
+                }
+                ((float *)args->output)[0] = acc;
+            }
         } else {
             const double *data = (const double *)args->data + args->start_idx;
-            double acc = 0.0;
-            if (kind == RED_SUM) {
-                for (int i = 0; i < args->count; i++) acc += data[i];
-            } else if (kind == RED_PROD) {
-                acc = 1.0;
-                for (int i = 0; i < args->count; i++) acc *= data[i];
-            } else if (kind == RED_MIN) {
-                acc = INFINITY;
-                for (int i = 0; i < args->count; i++) if (data[i] < acc) acc = data[i];
-            } else {
-                acc = -INFINITY;
-                for (int i = 0; i < args->count; i++) if (data[i] > acc) acc = data[i];
+            if (kind == RED_ANY || kind == RED_ALL) {
+                bool acc = (kind == RED_ALL);
+                for (int i = 0; i < args->count; i++) {
+                    if (kind == RED_ANY) {
+                        if (data[i] != 0.0) { acc = true; break; }
+                    }
+                    else {
+                        if (data[i] == 0.0) { acc = false; break; }
+                    }
+                }
+                ((bool *)args->output)[0] = acc;
             }
-            ((double *)args->output)[0] = acc;
+            else {
+                double acc = 0.0;
+                if (kind == RED_SUM) {
+                    for (int i = 0; i < args->count; i++) acc += data[i];
+                } else if (kind == RED_PROD) {
+                    acc = 1.0;
+                    for (int i = 0; i < args->count; i++) acc *= data[i];
+                } else if (kind == RED_MIN) {
+                    acc = INFINITY;
+                    for (int i = 0; i < args->count; i++) if (data[i] < acc) acc = data[i];
+                } else {
+                    acc = -INFINITY;
+                    for (int i = 0; i < args->count; i++) if (data[i] > acc) acc = data[i];
+                }
+                ((double *)args->output)[0] = acc;
+            }
         }
     } else if (info->is_signed) {
-        if (kind == RED_SUM || kind == RED_PROD) {
+        if (kind == RED_SUM || kind == RED_PROD || kind == RED_ANY || kind == RED_ALL) {
             int64_t acc = kind == RED_PROD ? 1 : 0;
             if (info->dtype == ME_BOOL) {
                 const bool *data = (const bool *)args->data + args->start_idx;
+                if (kind == RED_ANY || kind == RED_ALL) {
+                    bool bacc = (kind == RED_ALL);
+                    for (int i = 0; i < args->count; i++) {
+                        if (kind == RED_ANY) {
+                            if (data[i]) { bacc = true; break; }
+                        }
+                        else {
+                            if (!data[i]) { bacc = false; break; }
+                        }
+                    }
+                    ((bool *)args->output)[0] = bacc;
+                    return NULL;
+                }
                 for (int i = 0; i < args->count; i++) {
                     acc = kind == RED_PROD ? acc * (data[i] ? 1 : 0) : acc + (data[i] ? 1 : 0);
                 }
             } else if (info->dtype == ME_INT8) {
                 const int8_t *data = (const int8_t *)args->data + args->start_idx;
+                if (kind == RED_ANY || kind == RED_ALL) {
+                    bool bacc = (kind == RED_ALL);
+                    for (int i = 0; i < args->count; i++) {
+                        if (kind == RED_ANY) {
+                            if (data[i] != 0) { bacc = true; break; }
+                        }
+                        else {
+                            if (data[i] == 0) { bacc = false; break; }
+                        }
+                    }
+                    ((bool *)args->output)[0] = bacc;
+                    return NULL;
+                }
                 for (int i = 0; i < args->count; i++) acc = kind == RED_PROD ? acc * data[i] : acc + data[i];
             } else if (info->dtype == ME_INT16) {
                 const int16_t *data = (const int16_t *)args->data + args->start_idx;
+                if (kind == RED_ANY || kind == RED_ALL) {
+                    bool bacc = (kind == RED_ALL);
+                    for (int i = 0; i < args->count; i++) {
+                        if (kind == RED_ANY) {
+                            if (data[i] != 0) { bacc = true; break; }
+                        }
+                        else {
+                            if (data[i] == 0) { bacc = false; break; }
+                        }
+                    }
+                    ((bool *)args->output)[0] = bacc;
+                    return NULL;
+                }
                 for (int i = 0; i < args->count; i++) acc = kind == RED_PROD ? acc * data[i] : acc + data[i];
             } else if (info->dtype == ME_INT32) {
                 const int32_t *data = (const int32_t *)args->data + args->start_idx;
+                if (kind == RED_ANY || kind == RED_ALL) {
+                    bool bacc = (kind == RED_ALL);
+                    for (int i = 0; i < args->count; i++) {
+                        if (kind == RED_ANY) {
+                            if (data[i] != 0) { bacc = true; break; }
+                        }
+                        else {
+                            if (data[i] == 0) { bacc = false; break; }
+                        }
+                    }
+                    ((bool *)args->output)[0] = bacc;
+                    return NULL;
+                }
                 for (int i = 0; i < args->count; i++) acc = kind == RED_PROD ? acc * data[i] : acc + data[i];
             } else {
                 const int64_t *data = (const int64_t *)args->data + args->start_idx;
+                if (kind == RED_ANY || kind == RED_ALL) {
+                    bool bacc = (kind == RED_ALL);
+                    for (int i = 0; i < args->count; i++) {
+                        if (kind == RED_ANY) {
+                            if (data[i] != 0) { bacc = true; break; }
+                        }
+                        else {
+                            if (data[i] == 0) { bacc = false; break; }
+                        }
+                    }
+                    ((bool *)args->output)[0] = bacc;
+                    return NULL;
+                }
                 for (int i = 0; i < args->count; i++) acc = kind == RED_PROD ? acc * data[i] : acc + data[i];
             }
             ((int64_t *)args->output)[0] = acc;
@@ -218,19 +316,71 @@ static void *reduce_worker_c(void *arg) {
             }
         }
     } else {
-        if (kind == RED_SUM || kind == RED_PROD) {
+        if (kind == RED_SUM || kind == RED_PROD || kind == RED_ANY || kind == RED_ALL) {
             uint64_t acc = kind == RED_PROD ? 1 : 0;
             if (info->dtype == ME_UINT8) {
                 const uint8_t *data = (const uint8_t *)args->data + args->start_idx;
+                if (kind == RED_ANY || kind == RED_ALL) {
+                    bool bacc = (kind == RED_ALL);
+                    for (int i = 0; i < args->count; i++) {
+                        if (kind == RED_ANY) {
+                            if (data[i] != 0) { bacc = true; break; }
+                        }
+                        else {
+                            if (data[i] == 0) { bacc = false; break; }
+                        }
+                    }
+                    ((bool *)args->output)[0] = bacc;
+                    return NULL;
+                }
                 for (int i = 0; i < args->count; i++) acc = kind == RED_PROD ? acc * data[i] : acc + data[i];
             } else if (info->dtype == ME_UINT16) {
                 const uint16_t *data = (const uint16_t *)args->data + args->start_idx;
+                if (kind == RED_ANY || kind == RED_ALL) {
+                    bool bacc = (kind == RED_ALL);
+                    for (int i = 0; i < args->count; i++) {
+                        if (kind == RED_ANY) {
+                            if (data[i] != 0) { bacc = true; break; }
+                        }
+                        else {
+                            if (data[i] == 0) { bacc = false; break; }
+                        }
+                    }
+                    ((bool *)args->output)[0] = bacc;
+                    return NULL;
+                }
                 for (int i = 0; i < args->count; i++) acc = kind == RED_PROD ? acc * data[i] : acc + data[i];
             } else if (info->dtype == ME_UINT32) {
                 const uint32_t *data = (const uint32_t *)args->data + args->start_idx;
+                if (kind == RED_ANY || kind == RED_ALL) {
+                    bool bacc = (kind == RED_ALL);
+                    for (int i = 0; i < args->count; i++) {
+                        if (kind == RED_ANY) {
+                            if (data[i] != 0) { bacc = true; break; }
+                        }
+                        else {
+                            if (data[i] == 0) { bacc = false; break; }
+                        }
+                    }
+                    ((bool *)args->output)[0] = bacc;
+                    return NULL;
+                }
                 for (int i = 0; i < args->count; i++) acc = kind == RED_PROD ? acc * data[i] : acc + data[i];
             } else {
                 const uint64_t *data = (const uint64_t *)args->data + args->start_idx;
+                if (kind == RED_ANY || kind == RED_ALL) {
+                    bool bacc = (kind == RED_ALL);
+                    for (int i = 0; i < args->count; i++) {
+                        if (kind == RED_ANY) {
+                            if (data[i] != 0) { bacc = true; break; }
+                        }
+                        else {
+                            if (data[i] == 0) { bacc = false; break; }
+                        }
+                    }
+                    ((bool *)args->output)[0] = bacc;
+                    return NULL;
+                }
                 for (int i = 0; i < args->count; i++) acc = kind == RED_PROD ? acc * data[i] : acc + data[i];
             }
             ((uint64_t *)args->output)[0] = acc;
@@ -361,8 +511,9 @@ int main(int argc, char **argv) {
         type_name = argv[2];
     }
     if (strcmp(op, "sum") != 0 && strcmp(op, "prod") != 0 &&
-        strcmp(op, "min") != 0 && strcmp(op, "max") != 0) {
-        printf("Usage: %s [sum|prod|min|max] [dtype]\n", argv[0]);
+        strcmp(op, "min") != 0 && strcmp(op, "max") != 0 &&
+        strcmp(op, "any") != 0 && strcmp(op, "all") != 0) {
+        printf("Usage: %s [sum|prod|min|max|any|all] [dtype]\n", argv[0]);
         printf("Dtypes: bool int8 int16 int32 int64 uint8 uint16 uint32 uint64 float32 float64\n");
         return 1;
     }
@@ -370,6 +521,8 @@ int main(int argc, char **argv) {
     if (strcmp(op, "prod") == 0) kind = RED_PROD;
     else if (strcmp(op, "min") == 0) kind = RED_MIN;
     else if (strcmp(op, "max") == 0) kind = RED_MAX;
+    else if (strcmp(op, "any") == 0) kind = RED_ANY;
+    else if (strcmp(op, "all") == 0) kind = RED_ALL;
 
     dtype_info_t info;
     if (!parse_dtype(type_name, &info)) {

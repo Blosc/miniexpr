@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <limits.h>
 #include <math.h>
 #include <complex.h>
@@ -332,6 +333,116 @@ static int test_min_max_float32_nan() {
     return 0;
 }
 
+static int test_any_all_bool() {
+    printf("\n=== any/all(bool) -> bool ===\n");
+
+    bool data_any[] = {false, false, true};
+    bool data_all[] = {true, true, true};
+    bool output = false;
+
+    me_variable vars_any[] = {{"x", ME_BOOL, data_any}};
+    me_variable vars_all[] = {{"x", ME_BOOL, data_all}};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int rc_expr = me_compile("any(x)", vars_any, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 1;
+    }
+    if (me_get_dtype(expr) != ME_BOOL) {
+        printf("  ❌ FAILED: expected dtype ME_BOOL, got %d\n", me_get_dtype(expr));
+        me_free(expr);
+        return 1;
+    }
+    const void *var_ptrs_any[] = {data_any};
+    ME_EVAL_CHECK(expr, var_ptrs_any, 1, &output, 3);
+    if (!output) {
+        printf("  ❌ FAILED: any expected true, got false\n");
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+
+    output = false;
+    rc_expr = me_compile("all(x)", vars_all, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 1;
+    }
+    if (me_get_dtype(expr) != ME_BOOL) {
+        printf("  ❌ FAILED: expected dtype ME_BOOL, got %d\n", me_get_dtype(expr));
+        me_free(expr);
+        return 1;
+    }
+    const void *var_ptrs_all[] = {data_all};
+    ME_EVAL_CHECK(expr, var_ptrs_all, 1, &output, 3);
+    if (!output) {
+        printf("  ❌ FAILED: all expected true, got false\n");
+        me_free(expr);
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    me_free(expr);
+    return 0;
+}
+
+static int test_any_all_int32() {
+    printf("\n=== any/all(int32) -> bool ===\n");
+
+    int32_t data_any[] = {0, 0, 5};
+    int32_t data_all[] = {1, 2, 3};
+    bool output = false;
+
+    me_variable vars_any[] = {{"x", ME_INT32, data_any}};
+    me_variable vars_all[] = {{"x", ME_INT32, data_all}};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int rc_expr = me_compile("any(x)", vars_any, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 1;
+    }
+    if (me_get_dtype(expr) != ME_BOOL) {
+        printf("  ❌ FAILED: expected dtype ME_BOOL, got %d\n", me_get_dtype(expr));
+        me_free(expr);
+        return 1;
+    }
+    const void *var_ptrs_any[] = {data_any};
+    ME_EVAL_CHECK(expr, var_ptrs_any, 1, &output, 3);
+    if (!output) {
+        printf("  ❌ FAILED: any expected true, got false\n");
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+
+    output = false;
+    rc_expr = me_compile("all(x)", vars_all, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 1;
+    }
+    if (me_get_dtype(expr) != ME_BOOL) {
+        printf("  ❌ FAILED: expected dtype ME_BOOL, got %d\n", me_get_dtype(expr));
+        me_free(expr);
+        return 1;
+    }
+    const void *var_ptrs_all[] = {data_all};
+    ME_EVAL_CHECK(expr, var_ptrs_all, 1, &output, 3);
+    if (!output) {
+        printf("  ❌ FAILED: all expected true, got false\n");
+        me_free(expr);
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    me_free(expr);
+    return 0;
+}
+
 static int test_reduction_errors() {
     printf("\n=== Reduction validation errors ===\n");
 
@@ -408,6 +519,46 @@ static int test_empty_inputs() {
         ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);
         if (output != INT32_MAX) {
             printf("  ❌ FAILED: min(int32) empty expected %d, got %d\n", INT32_MAX, output);
+            failures++;
+        }
+        me_free(expr);
+    }
+
+    {
+        int err = 0;
+        bool output = false;
+        bool b_data[1] = {false};
+        me_variable vars[] = {{"x", ME_BOOL, b_data}};
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("any(x)", vars, 1, ME_AUTO, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
+            printf("  ❌ FAILED: any(bool) compile error %d\n", err);
+            return 1;
+        }
+        const void *var_ptrs[] = {b_data};
+        ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);
+        if (output) {
+            printf("  ❌ FAILED: any(bool) empty expected false, got true\n");
+            failures++;
+        }
+        me_free(expr);
+    }
+
+    {
+        int err = 0;
+        bool output = false;
+        bool b_data[1] = {false};
+        me_variable vars[] = {{"x", ME_BOOL, b_data}};
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("all(x)", vars, 1, ME_AUTO, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
+            printf("  ❌ FAILED: all(bool) compile error %d\n", err);
+            return 1;
+        }
+        const void *var_ptrs[] = {b_data};
+        ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);
+        if (!output) {
+            printf("  ❌ FAILED: all(bool) empty expected true, got false\n");
             failures++;
         }
         me_free(expr);
@@ -631,6 +782,8 @@ int main(void) {
     failures += test_min_max_int32();
     failures += test_min_max_float32();
     failures += test_min_max_float32_nan();
+    failures += test_any_all_bool();
+    failures += test_any_all_int32();
     failures += test_reduction_errors();
     failures += test_empty_inputs();
 

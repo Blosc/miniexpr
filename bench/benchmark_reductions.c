@@ -13,9 +13,6 @@
 #include <string.h>
 #include "miniexpr.h"
 #include "minctest.h"
-
-
-
 typedef struct {
     double me_time;
     double c_time;
@@ -33,7 +30,9 @@ typedef enum {
     RED_SUM,
     RED_PROD,
     RED_MIN,
-    RED_MAX
+    RED_MAX,
+    RED_ANY,
+    RED_ALL
 } reduction_kind_t;
 
 typedef struct {
@@ -74,6 +73,9 @@ static bool parse_dtype(const char *name, dtype_info_t *info) {
 }
 
 static me_dtype output_dtype_for_kind(const dtype_info_t *info, reduction_kind_t kind) {
+    if (kind == RED_ANY || kind == RED_ALL) {
+        return ME_BOOL;
+    }
     if (kind == RED_MIN || kind == RED_MAX) {
         return info->dtype;
     }
@@ -180,59 +182,147 @@ static bench_result_t benchmark_reduce(const char *op, reduction_kind_t kind,
         if (info->is_float) {
             if (info->dtype == ME_FLOAT32) {
                 float *f = (float *)data;
-                float acc = 0.0f;
-                if (kind == RED_SUM) {
-                    for (size_t i = 0; i < total_elems; i++) acc += f[i];
-                } else if (kind == RED_PROD) {
-                    acc = 1.0f;
-                    for (size_t i = 0; i < total_elems; i++) acc *= f[i];
-                } else if (kind == RED_MIN) {
-                    acc = INFINITY;
-                    for (size_t i = 0; i < total_elems; i++) if (f[i] < acc) acc = f[i];
+                if (kind == RED_ANY || kind == RED_ALL) {
+                    bool acc = (kind == RED_ALL);
+                    for (size_t i = 0; i < total_elems; i++) {
+                        if (kind == RED_ANY) {
+                            if (f[i] != 0.0f) { acc = true; break; }
+                        } else {
+                            if (f[i] == 0.0f) { acc = false; break; }
+                        }
+                    }
+                    sink.b = acc;
                 } else {
-                    acc = -INFINITY;
-                    for (size_t i = 0; i < total_elems; i++) if (f[i] > acc) acc = f[i];
+                    float acc = 0.0f;
+                    if (kind == RED_SUM) {
+                        for (size_t i = 0; i < total_elems; i++) acc += f[i];
+                    } else if (kind == RED_PROD) {
+                        acc = 1.0f;
+                        for (size_t i = 0; i < total_elems; i++) acc *= f[i];
+                    } else if (kind == RED_MIN) {
+                        acc = INFINITY;
+                        for (size_t i = 0; i < total_elems; i++) if (f[i] < acc) acc = f[i];
+                    } else {
+                        acc = -INFINITY;
+                        for (size_t i = 0; i < total_elems; i++) if (f[i] > acc) acc = f[i];
+                    }
+                    sink.f32 = acc;
                 }
-                sink.f32 = acc;
             } else {
                 double *d = (double *)data;
-                double acc = 0.0;
-                if (kind == RED_SUM) {
-                    for (size_t i = 0; i < total_elems; i++) acc += d[i];
-                } else if (kind == RED_PROD) {
-                    acc = 1.0;
-                    for (size_t i = 0; i < total_elems; i++) acc *= d[i];
-                } else if (kind == RED_MIN) {
-                    acc = INFINITY;
-                    for (size_t i = 0; i < total_elems; i++) if (d[i] < acc) acc = d[i];
+                if (kind == RED_ANY || kind == RED_ALL) {
+                    bool acc = (kind == RED_ALL);
+                    for (size_t i = 0; i < total_elems; i++) {
+                        if (kind == RED_ANY) {
+                            if (d[i] != 0.0) { acc = true; break; }
+                        } else {
+                            if (d[i] == 0.0) { acc = false; break; }
+                        }
+                    }
+                    sink.b = acc;
                 } else {
-                    acc = -INFINITY;
-                    for (size_t i = 0; i < total_elems; i++) if (d[i] > acc) acc = d[i];
+                    double acc = 0.0;
+                    if (kind == RED_SUM) {
+                        for (size_t i = 0; i < total_elems; i++) acc += d[i];
+                    } else if (kind == RED_PROD) {
+                        acc = 1.0;
+                        for (size_t i = 0; i < total_elems; i++) acc *= d[i];
+                    } else if (kind == RED_MIN) {
+                        acc = INFINITY;
+                        for (size_t i = 0; i < total_elems; i++) if (d[i] < acc) acc = d[i];
+                    } else {
+                        acc = -INFINITY;
+                        for (size_t i = 0; i < total_elems; i++) if (d[i] > acc) acc = d[i];
+                    }
+                    sink.f64 = acc;
                 }
-                sink.f64 = acc;
             }
         } else if (info->is_signed) {
-            if (kind == RED_SUM || kind == RED_PROD) {
+            if (kind == RED_SUM || kind == RED_PROD || kind == RED_ANY || kind == RED_ALL) {
                 int64_t acc = kind == RED_PROD ? 1 : 0;
                 if (info->dtype == ME_BOOL) {
                     bool *v = (bool *)data;
-                    for (size_t i = 0; i < total_elems; i++) {
-                        acc = kind == RED_PROD ? acc * (v[i] ? 1 : 0) : acc + (v[i] ? 1 : 0);
+                    if (kind == RED_ANY || kind == RED_ALL) {
+                        bool bacc = (kind == RED_ALL);
+                        for (size_t i = 0; i < total_elems; i++) {
+                            if (kind == RED_ANY) {
+                                if (v[i]) { bacc = true; break; }
+                            } else {
+                                if (!v[i]) { bacc = false; break; }
+                            }
+                        }
+                        sink.b = bacc;
+                    } else {
+                        for (size_t i = 0; i < total_elems; i++) {
+                            acc = kind == RED_PROD ? acc * (v[i] ? 1 : 0) : acc + (v[i] ? 1 : 0);
+                        }
+                        sink.i64 = acc;
                     }
                 } else if (info->dtype == ME_INT8) {
                     int8_t *v = (int8_t *)data;
-                    for (size_t i = 0; i < total_elems; i++) acc = kind == RED_PROD ? acc * v[i] : acc + v[i];
+                    if (kind == RED_ANY || kind == RED_ALL) {
+                        bool bacc = (kind == RED_ALL);
+                        for (size_t i = 0; i < total_elems; i++) {
+                            if (kind == RED_ANY) {
+                                if (v[i] != 0) { bacc = true; break; }
+                            } else {
+                                if (v[i] == 0) { bacc = false; break; }
+                            }
+                        }
+                        sink.b = bacc;
+                    } else {
+                        for (size_t i = 0; i < total_elems; i++) acc = kind == RED_PROD ? acc * v[i] : acc + v[i];
+                        sink.i64 = acc;
+                    }
                 } else if (info->dtype == ME_INT16) {
                     int16_t *v = (int16_t *)data;
-                    for (size_t i = 0; i < total_elems; i++) acc = kind == RED_PROD ? acc * v[i] : acc + v[i];
+                    if (kind == RED_ANY || kind == RED_ALL) {
+                        bool bacc = (kind == RED_ALL);
+                        for (size_t i = 0; i < total_elems; i++) {
+                            if (kind == RED_ANY) {
+                                if (v[i] != 0) { bacc = true; break; }
+                            } else {
+                                if (v[i] == 0) { bacc = false; break; }
+                            }
+                        }
+                        sink.b = bacc;
+                    } else {
+                        for (size_t i = 0; i < total_elems; i++) acc = kind == RED_PROD ? acc * v[i] : acc + v[i];
+                        sink.i64 = acc;
+                    }
                 } else if (info->dtype == ME_INT32) {
                     int32_t *v = (int32_t *)data;
-                    for (size_t i = 0; i < total_elems; i++) acc = kind == RED_PROD ? acc * v[i] : acc + v[i];
+                    if (kind == RED_ANY || kind == RED_ALL) {
+                        bool bacc = (kind == RED_ALL);
+                        for (size_t i = 0; i < total_elems; i++) {
+                            if (kind == RED_ANY) {
+                                if (v[i] != 0) { bacc = true; break; }
+                            } else {
+                                if (v[i] == 0) { bacc = false; break; }
+                            }
+                        }
+                        sink.b = bacc;
+                    } else {
+                        for (size_t i = 0; i < total_elems; i++) acc = kind == RED_PROD ? acc * v[i] : acc + v[i];
+                        sink.i64 = acc;
+                    }
                 } else {
                     int64_t *v = (int64_t *)data;
-                    for (size_t i = 0; i < total_elems; i++) acc = kind == RED_PROD ? acc * v[i] : acc + v[i];
+                    if (kind == RED_ANY || kind == RED_ALL) {
+                        bool bacc = (kind == RED_ALL);
+                        for (size_t i = 0; i < total_elems; i++) {
+                            if (kind == RED_ANY) {
+                                if (v[i] != 0) { bacc = true; break; }
+                            } else {
+                                if (v[i] == 0) { bacc = false; break; }
+                            }
+                        }
+                        sink.b = bacc;
+                    } else {
+                        for (size_t i = 0; i < total_elems; i++) acc = kind == RED_PROD ? acc * v[i] : acc + v[i];
+                        sink.i64 = acc;
+                    }
                 }
-                sink.i64 = acc;
             } else {
                 if (info->dtype == ME_BOOL) {
                     bool *v = (bool *)data;
@@ -244,62 +334,129 @@ static bench_result_t benchmark_reduce(const char *op, reduction_kind_t kind,
                 } else if (info->dtype == ME_INT8) {
                     int8_t *v = (int8_t *)data;
                     int8_t acc = kind == RED_MIN ? INT8_MAX : INT8_MIN;
-                    for (size_t i = 0; i < total_elems; i++) acc = (kind == RED_MIN) ? (v[i] < acc ? v[i] : acc) : (v[i] > acc ? v[i] : acc);
+                    for (size_t i = 0; i < total_elems; i++) {
+                        acc = (kind == RED_MIN) ? (v[i] < acc ? v[i] : acc) : (v[i] > acc ? v[i] : acc);
+                    }
                     sink.i8 = acc;
                 } else if (info->dtype == ME_INT16) {
                     int16_t *v = (int16_t *)data;
                     int16_t acc = kind == RED_MIN ? INT16_MAX : INT16_MIN;
-                    for (size_t i = 0; i < total_elems; i++) acc = (kind == RED_MIN) ? (v[i] < acc ? v[i] : acc) : (v[i] > acc ? v[i] : acc);
+                    for (size_t i = 0; i < total_elems; i++) {
+                        acc = (kind == RED_MIN) ? (v[i] < acc ? v[i] : acc) : (v[i] > acc ? v[i] : acc);
+                    }
                     sink.i16 = acc;
                 } else if (info->dtype == ME_INT32) {
                     int32_t *v = (int32_t *)data;
                     int32_t acc = kind == RED_MIN ? INT32_MAX : INT32_MIN;
-                    for (size_t i = 0; i < total_elems; i++) acc = (kind == RED_MIN) ? (v[i] < acc ? v[i] : acc) : (v[i] > acc ? v[i] : acc);
+                    for (size_t i = 0; i < total_elems; i++) {
+                        acc = (kind == RED_MIN) ? (v[i] < acc ? v[i] : acc) : (v[i] > acc ? v[i] : acc);
+                    }
                     sink.i32 = acc;
                 } else {
                     int64_t *v = (int64_t *)data;
                     int64_t acc = kind == RED_MIN ? INT64_MAX : INT64_MIN;
-                    for (size_t i = 0; i < total_elems; i++) acc = (kind == RED_MIN) ? (v[i] < acc ? v[i] : acc) : (v[i] > acc ? v[i] : acc);
+                    for (size_t i = 0; i < total_elems; i++) {
+                        acc = (kind == RED_MIN) ? (v[i] < acc ? v[i] : acc) : (v[i] > acc ? v[i] : acc);
+                    }
                     sink.i64 = acc;
                 }
             }
         } else {
-            if (kind == RED_SUM || kind == RED_PROD) {
+            if (kind == RED_SUM || kind == RED_PROD || kind == RED_ANY || kind == RED_ALL) {
                 uint64_t acc = kind == RED_PROD ? 1 : 0;
                 if (info->dtype == ME_UINT8) {
                     uint8_t *v = (uint8_t *)data;
-                    for (size_t i = 0; i < total_elems; i++) acc = kind == RED_PROD ? acc * v[i] : acc + v[i];
+                    if (kind == RED_ANY || kind == RED_ALL) {
+                        bool bacc = (kind == RED_ALL);
+                        for (size_t i = 0; i < total_elems; i++) {
+                            if (kind == RED_ANY) {
+                                if (v[i] != 0) { bacc = true; break; }
+                            } else {
+                                if (v[i] == 0) { bacc = false; break; }
+                            }
+                        }
+                        sink.b = bacc;
+                    } else {
+                        for (size_t i = 0; i < total_elems; i++) acc = kind == RED_PROD ? acc * v[i] : acc + v[i];
+                        sink.u64 = acc;
+                    }
                 } else if (info->dtype == ME_UINT16) {
                     uint16_t *v = (uint16_t *)data;
-                    for (size_t i = 0; i < total_elems; i++) acc = kind == RED_PROD ? acc * v[i] : acc + v[i];
+                    if (kind == RED_ANY || kind == RED_ALL) {
+                        bool bacc = (kind == RED_ALL);
+                        for (size_t i = 0; i < total_elems; i++) {
+                            if (kind == RED_ANY) {
+                                if (v[i] != 0) { bacc = true; break; }
+                            } else {
+                                if (v[i] == 0) { bacc = false; break; }
+                            }
+                        }
+                        sink.b = bacc;
+                    } else {
+                        for (size_t i = 0; i < total_elems; i++) acc = kind == RED_PROD ? acc * v[i] : acc + v[i];
+                        sink.u64 = acc;
+                    }
                 } else if (info->dtype == ME_UINT32) {
                     uint32_t *v = (uint32_t *)data;
-                    for (size_t i = 0; i < total_elems; i++) acc = kind == RED_PROD ? acc * v[i] : acc + v[i];
+                    if (kind == RED_ANY || kind == RED_ALL) {
+                        bool bacc = (kind == RED_ALL);
+                        for (size_t i = 0; i < total_elems; i++) {
+                            if (kind == RED_ANY) {
+                                if (v[i] != 0) { bacc = true; break; }
+                            } else {
+                                if (v[i] == 0) { bacc = false; break; }
+                            }
+                        }
+                        sink.b = bacc;
+                    } else {
+                        for (size_t i = 0; i < total_elems; i++) acc = kind == RED_PROD ? acc * v[i] : acc + v[i];
+                        sink.u64 = acc;
+                    }
                 } else {
                     uint64_t *v = (uint64_t *)data;
-                    for (size_t i = 0; i < total_elems; i++) acc = kind == RED_PROD ? acc * v[i] : acc + v[i];
+                    if (kind == RED_ANY || kind == RED_ALL) {
+                        bool bacc = (kind == RED_ALL);
+                        for (size_t i = 0; i < total_elems; i++) {
+                            if (kind == RED_ANY) {
+                                if (v[i] != 0) { bacc = true; break; }
+                            } else {
+                                if (v[i] == 0) { bacc = false; break; }
+                            }
+                        }
+                        sink.b = bacc;
+                    } else {
+                        for (size_t i = 0; i < total_elems; i++) acc = kind == RED_PROD ? acc * v[i] : acc + v[i];
+                        sink.u64 = acc;
+                    }
                 }
-                sink.u64 = acc;
             } else {
                 if (info->dtype == ME_UINT8) {
                     uint8_t *v = (uint8_t *)data;
                     uint8_t acc = kind == RED_MIN ? UINT8_MAX : 0;
-                    for (size_t i = 0; i < total_elems; i++) acc = (kind == RED_MIN) ? (v[i] < acc ? v[i] : acc) : (v[i] > acc ? v[i] : acc);
+                    for (size_t i = 0; i < total_elems; i++) {
+                        acc = (kind == RED_MIN) ? (v[i] < acc ? v[i] : acc) : (v[i] > acc ? v[i] : acc);
+                    }
                     sink.u8 = acc;
                 } else if (info->dtype == ME_UINT16) {
                     uint16_t *v = (uint16_t *)data;
                     uint16_t acc = kind == RED_MIN ? UINT16_MAX : 0;
-                    for (size_t i = 0; i < total_elems; i++) acc = (kind == RED_MIN) ? (v[i] < acc ? v[i] : acc) : (v[i] > acc ? v[i] : acc);
+                    for (size_t i = 0; i < total_elems; i++) {
+                        acc = (kind == RED_MIN) ? (v[i] < acc ? v[i] : acc) : (v[i] > acc ? v[i] : acc);
+                    }
                     sink.u16 = acc;
                 } else if (info->dtype == ME_UINT32) {
                     uint32_t *v = (uint32_t *)data;
                     uint32_t acc = kind == RED_MIN ? UINT32_MAX : 0;
-                    for (size_t i = 0; i < total_elems; i++) acc = (kind == RED_MIN) ? (v[i] < acc ? v[i] : acc) : (v[i] > acc ? v[i] : acc);
+                    for (size_t i = 0; i < total_elems; i++) {
+                        acc = (kind == RED_MIN) ? (v[i] < acc ? v[i] : acc) : (v[i] > acc ? v[i] : acc);
+                    }
                     sink.u32 = acc;
                 } else {
                     uint64_t *v = (uint64_t *)data;
                     uint64_t acc = kind == RED_MIN ? UINT64_MAX : 0;
-                    for (size_t i = 0; i < total_elems; i++) acc = (kind == RED_MIN) ? (v[i] < acc ? v[i] : acc) : (v[i] > acc ? v[i] : acc);
+                    for (size_t i = 0; i < total_elems; i++) {
+                        acc = (kind == RED_MIN) ? (v[i] < acc ? v[i] : acc) : (v[i] > acc ? v[i] : acc);
+                    }
                     sink.u64 = acc;
                 }
             }
@@ -307,7 +464,7 @@ static bench_result_t benchmark_reduce(const char *op, reduction_kind_t kind,
     }
     double c_time = (get_time() - start) / iterations;
 
-    double gb = (double)(total_elems * sizeof(int32_t)) / 1e9;
+    double gb = (double)(total_elems * info->elem_size) / 1e9;
     printf("MiniExpr: %.4f s (%.2f GB/s)\n", me_time, gb / me_time);
     printf("Pure C : %.4f s (%.2f GB/s)\n", c_time, gb / c_time);
     if (out_dtype == ME_INT64) {
@@ -370,8 +527,9 @@ int main(int argc, char **argv) {
         type_name = argv[2];
     }
     if (strcmp(op, "sum") != 0 && strcmp(op, "prod") != 0 &&
-        strcmp(op, "min") != 0 && strcmp(op, "max") != 0) {
-        printf("Usage: %s [sum|prod|min|max] [dtype]\n", argv[0]);
+        strcmp(op, "min") != 0 && strcmp(op, "max") != 0 &&
+        strcmp(op, "any") != 0 && strcmp(op, "all") != 0) {
+        printf("Usage: %s [sum|prod|min|max|any|all] [dtype]\n", argv[0]);
         printf("Dtypes: bool int8 int16 int32 int64 uint8 uint16 uint32 uint64 float32 float64\n");
         return 1;
     }
@@ -379,6 +537,8 @@ int main(int argc, char **argv) {
     if (strcmp(op, "prod") == 0) kind = RED_PROD;
     else if (strcmp(op, "min") == 0) kind = RED_MIN;
     else if (strcmp(op, "max") == 0) kind = RED_MAX;
+    else if (strcmp(op, "any") == 0) kind = RED_ANY;
+    else if (strcmp(op, "all") == 0) kind = RED_ALL;
 
     dtype_info_t info;
     if (!parse_dtype(type_name, &info)) {

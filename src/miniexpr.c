@@ -493,8 +493,13 @@ static bool is_complex_dtype(me_dtype dt) {
 
 static double sum_reduce(double x);
 static double prod_reduce(double x);
+static double any_reduce(double x);
+static double all_reduce(double x);
 
 static me_dtype reduction_output_dtype(me_dtype dt, const void* func) {
+    if (func == (void*)any_reduce || func == (void*)all_reduce) {
+        return ME_BOOL;
+    }
     if (func == (void*)sum_reduce || func == (void*)prod_reduce) {
         if (dt == ME_BOOL) {
             return ME_INT64;
@@ -570,6 +575,8 @@ static double real_wrapper(double x);
 static double round_wrapper(double x);
 static double sum_reduce(double x);
 static double prod_reduce(double x);
+static double any_reduce(double x);
+static double all_reduce(double x);
 static double min_reduce(double x);
 static double max_reduce(double x);
 static double sign(double x);
@@ -579,7 +586,8 @@ static double where_scalar(double c, double x, double y);
 
 static bool is_reduction_function(const void* func) {
     return func == (void*)sum_reduce || func == (void*)prod_reduce ||
-        func == (void*)min_reduce || func == (void*)max_reduce;
+        func == (void*)min_reduce || func == (void*)max_reduce ||
+        func == (void*)any_reduce || func == (void*)all_reduce;
 }
 
 static bool is_reduction_node(const me_expr* n) {
@@ -1014,6 +1022,8 @@ static const me_variable functions[] = {
     {"abs", 0, fabs, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"acos", 0, acos, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"acosh", 0, acosh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"all", 0, all_reduce, ME_FUNCTION1, 0},
+    {"any", 0, any_reduce, ME_FUNCTION1, 0},
     {"arccos", 0, acos, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"arccosh", 0, acosh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"arcsin", 0, asin, ME_FUNCTION1 | ME_FLAG_PURE, 0},
@@ -1114,6 +1124,8 @@ static volatile double sum_salt = 0.0;
 static volatile double prod_salt = 1.0;
 static double sum_reduce(double x) { return x + sum_salt; }
 static double prod_reduce(double x) { return x * prod_salt; }
+static double any_reduce(double x) { return x; }
+static double all_reduce(double x) { return x; }
 static double min_reduce(double x) { return x; }
 static double max_reduce(double x) { return x; }
 
@@ -4503,6 +4515,8 @@ static void eval_reduction(const me_expr* n) {
     bool is_prod = n->function == (void*)prod_reduce;
     bool is_min = n->function == (void*)min_reduce;
     bool is_max = n->function == (void*)max_reduce;
+    bool is_any = n->function == (void*)any_reduce;
+    bool is_all = n->function == (void*)all_reduce;
 
     void* write_ptr = n->output;
     void* temp_output = NULL;
@@ -4514,7 +4528,40 @@ static void eval_reduction(const me_expr* n) {
 
     if (arg->type == ME_CONSTANT) {
         double val = arg->value;
-        if (is_min || is_max) {
+        if (is_any || is_all) {
+            bool acc = is_all;
+            if (nitems == 0) {
+                acc = is_all;
+            }
+            else {
+                switch (arg_type) {
+                case ME_BOOL:
+                    acc = val != 0.0;
+                    break;
+                case ME_INT8:
+                case ME_INT16:
+                case ME_INT32:
+                case ME_INT64:
+                case ME_UINT8:
+                case ME_UINT16:
+                case ME_UINT32:
+                case ME_UINT64:
+                case ME_FLOAT32:
+                case ME_FLOAT64:
+                    acc = val != 0.0;
+                    break;
+                case ME_COMPLEX64:
+                case ME_COMPLEX128:
+                    acc = val != 0.0;
+                    break;
+                default:
+                    acc = false;
+                    break;
+                }
+            }
+            ((bool*)write_ptr)[0] = acc;
+        }
+        else if (is_min || is_max) {
             switch (arg_type) {
             case ME_BOOL:
                 {
@@ -4723,7 +4770,22 @@ static void eval_reduction(const me_expr* n) {
         case ME_BOOL:
             {
                 const bool* data = (const bool*)arg->bound;
-                if (is_min || is_max) {
+                if (is_any || is_all) {
+                    bool acc = is_all;
+                    if (nitems > 0) {
+                        acc = is_all;
+                        for (int i = 0; i < nitems; i++) {
+                            if (is_any) {
+                                if (data[i]) { acc = true; break; }
+                            }
+                            else {
+                                if (!data[i]) { acc = false; break; }
+                            }
+                        }
+                    }
+                    ((bool*)write_ptr)[0] = acc;
+                }
+                else if (is_min || is_max) {
                     bool acc = is_min;
                     if (nitems > 0) {
                         acc = data[0];
@@ -4751,7 +4813,22 @@ static void eval_reduction(const me_expr* n) {
         case ME_INT8:
             {
                 const int8_t* data = (const int8_t*)arg->bound;
-                if (is_min || is_max) {
+                if (is_any || is_all) {
+                    bool acc = is_all;
+                    if (nitems > 0) {
+                        acc = is_all;
+                        for (int i = 0; i < nitems; i++) {
+                            if (is_any) {
+                                if (data[i] != 0) { acc = true; break; }
+                            }
+                            else {
+                                if (data[i] == 0) { acc = false; break; }
+                            }
+                        }
+                    }
+                    ((bool*)write_ptr)[0] = acc;
+                }
+                else if (is_min || is_max) {
                     int8_t acc = is_min ? reduce_min_int8(data, nitems) :
                         reduce_max_int8(data, nitems);
                     ((int8_t*)write_ptr)[0] = acc;
@@ -4774,7 +4851,22 @@ static void eval_reduction(const me_expr* n) {
         case ME_INT16:
             {
                 const int16_t* data = (const int16_t*)arg->bound;
-                if (is_min || is_max) {
+                if (is_any || is_all) {
+                    bool acc = is_all;
+                    if (nitems > 0) {
+                        acc = is_all;
+                        for (int i = 0; i < nitems; i++) {
+                            if (is_any) {
+                                if (data[i] != 0) { acc = true; break; }
+                            }
+                            else {
+                                if (data[i] == 0) { acc = false; break; }
+                            }
+                        }
+                    }
+                    ((bool*)write_ptr)[0] = acc;
+                }
+                else if (is_min || is_max) {
                     int16_t acc = is_min ? reduce_min_int16(data, nitems) :
                         reduce_max_int16(data, nitems);
                     ((int16_t*)write_ptr)[0] = acc;
@@ -4797,7 +4889,22 @@ static void eval_reduction(const me_expr* n) {
         case ME_INT32:
             {
                 const int32_t* data = (const int32_t*)arg->bound;
-                if (is_min || is_max) {
+                if (is_any || is_all) {
+                    bool acc = is_all;
+                    if (nitems > 0) {
+                        acc = is_all;
+                        for (int i = 0; i < nitems; i++) {
+                            if (is_any) {
+                                if (data[i] != 0) { acc = true; break; }
+                            }
+                            else {
+                                if (data[i] == 0) { acc = false; break; }
+                            }
+                        }
+                    }
+                    ((bool*)write_ptr)[0] = acc;
+                }
+                else if (is_min || is_max) {
                     int32_t acc = is_min ? reduce_min_int32(data, nitems) :
                         reduce_max_int32(data, nitems);
                     ((int32_t*)write_ptr)[0] = acc;
@@ -4820,7 +4927,22 @@ static void eval_reduction(const me_expr* n) {
         case ME_INT64:
             {
                 const int64_t* data = (const int64_t*)arg->bound;
-                if (is_min || is_max) {
+                if (is_any || is_all) {
+                    bool acc = is_all;
+                    if (nitems > 0) {
+                        acc = is_all;
+                        for (int i = 0; i < nitems; i++) {
+                            if (is_any) {
+                                if (data[i] != 0) { acc = true; break; }
+                            }
+                            else {
+                                if (data[i] == 0) { acc = false; break; }
+                            }
+                        }
+                    }
+                    ((bool*)write_ptr)[0] = acc;
+                }
+                else if (is_min || is_max) {
                     int64_t acc = is_min ? reduce_min_int64(data, nitems) :
                         reduce_max_int64(data, nitems);
                     ((int64_t*)write_ptr)[0] = acc;
@@ -4843,7 +4965,22 @@ static void eval_reduction(const me_expr* n) {
         case ME_UINT8:
             {
                 const uint8_t* data = (const uint8_t*)arg->bound;
-                if (is_min || is_max) {
+                if (is_any || is_all) {
+                    bool acc = is_all;
+                    if (nitems > 0) {
+                        acc = is_all;
+                        for (int i = 0; i < nitems; i++) {
+                            if (is_any) {
+                                if (data[i] != 0) { acc = true; break; }
+                            }
+                            else {
+                                if (data[i] == 0) { acc = false; break; }
+                            }
+                        }
+                    }
+                    ((bool*)write_ptr)[0] = acc;
+                }
+                else if (is_min || is_max) {
                     uint8_t acc = is_min ? reduce_min_uint8(data, nitems) :
                         reduce_max_uint8(data, nitems);
                     ((uint8_t*)write_ptr)[0] = acc;
@@ -4866,7 +5003,22 @@ static void eval_reduction(const me_expr* n) {
         case ME_UINT16:
             {
                 const uint16_t* data = (const uint16_t*)arg->bound;
-                if (is_min || is_max) {
+                if (is_any || is_all) {
+                    bool acc = is_all;
+                    if (nitems > 0) {
+                        acc = is_all;
+                        for (int i = 0; i < nitems; i++) {
+                            if (is_any) {
+                                if (data[i] != 0) { acc = true; break; }
+                            }
+                            else {
+                                if (data[i] == 0) { acc = false; break; }
+                            }
+                        }
+                    }
+                    ((bool*)write_ptr)[0] = acc;
+                }
+                else if (is_min || is_max) {
                     uint16_t acc = is_min ? reduce_min_uint16(data, nitems) :
                         reduce_max_uint16(data, nitems);
                     ((uint16_t*)write_ptr)[0] = acc;
@@ -4889,7 +5041,22 @@ static void eval_reduction(const me_expr* n) {
         case ME_UINT32:
             {
                 const uint32_t* data = (const uint32_t*)arg->bound;
-                if (is_min || is_max) {
+                if (is_any || is_all) {
+                    bool acc = is_all;
+                    if (nitems > 0) {
+                        acc = is_all;
+                        for (int i = 0; i < nitems; i++) {
+                            if (is_any) {
+                                if (data[i] != 0) { acc = true; break; }
+                            }
+                            else {
+                                if (data[i] == 0) { acc = false; break; }
+                            }
+                        }
+                    }
+                    ((bool*)write_ptr)[0] = acc;
+                }
+                else if (is_min || is_max) {
                     uint32_t acc = is_min ? reduce_min_uint32(data, nitems) :
                         reduce_max_uint32(data, nitems);
                     ((uint32_t*)write_ptr)[0] = acc;
@@ -4912,7 +5079,22 @@ static void eval_reduction(const me_expr* n) {
         case ME_UINT64:
             {
                 const uint64_t* data = (const uint64_t*)arg->bound;
-                if (is_min || is_max) {
+                if (is_any || is_all) {
+                    bool acc = is_all;
+                    if (nitems > 0) {
+                        acc = is_all;
+                        for (int i = 0; i < nitems; i++) {
+                            if (is_any) {
+                                if (data[i] != 0) { acc = true; break; }
+                            }
+                            else {
+                                if (data[i] == 0) { acc = false; break; }
+                            }
+                        }
+                    }
+                    ((bool*)write_ptr)[0] = acc;
+                }
+                else if (is_min || is_max) {
                     uint64_t acc = is_min ? reduce_min_uint64(data, nitems) :
                         reduce_max_uint64(data, nitems);
                     ((uint64_t*)write_ptr)[0] = acc;
@@ -4935,54 +5117,105 @@ static void eval_reduction(const me_expr* n) {
         case ME_FLOAT32:
             {
                 const float* data = (const float*)arg->bound;
-                float acc = 0.0f;
-                if (nitems == 0) {
-                    if (is_min) acc = INFINITY;
-                    else if (is_max) acc = -INFINITY;
-                    else acc = is_prod ? 1.0f : 0.0f;
-                }
-                else if (is_min) {
-                    acc = reduce_min_float32_nan_safe(data, nitems);
-                }
-                else if (is_max) {
-                    acc = reduce_max_float32_nan_safe(data, nitems);
-                }
-                else if (is_prod) {
-                    acc = reduce_prod_float32_nan_safe(data, nitems);
+                if (is_any || is_all) {
+                    bool acc = is_all;
+                    if (nitems > 0) {
+                        acc = is_all;
+                        for (int i = 0; i < nitems; i++) {
+                            if (is_any) {
+                                if (data[i] != 0.0f) { acc = true; break; }
+                            }
+                            else {
+                                if (data[i] == 0.0f) { acc = false; break; }
+                            }
+                        }
+                    }
+                    ((bool*)write_ptr)[0] = acc;
                 }
                 else {
-                    acc = reduce_sum_float32_nan_safe(data, nitems);
+                    float acc = 0.0f;
+                    if (nitems == 0) {
+                        if (is_min) acc = INFINITY;
+                        else if (is_max) acc = -INFINITY;
+                        else acc = is_prod ? 1.0f : 0.0f;
+                    }
+                    else if (is_min) {
+                        acc = reduce_min_float32_nan_safe(data, nitems);
+                    }
+                    else if (is_max) {
+                        acc = reduce_max_float32_nan_safe(data, nitems);
+                    }
+                    else if (is_prod) {
+                        acc = reduce_prod_float32_nan_safe(data, nitems);
+                    }
+                    else {
+                        acc = reduce_sum_float32_nan_safe(data, nitems);
+                    }
+                    ((float*)write_ptr)[0] = acc;
                 }
-                ((float*)write_ptr)[0] = acc;
                 break;
             }
         case ME_FLOAT64:
             {
                 const double* data = (const double*)arg->bound;
-                double acc = 0.0;
-                if (nitems == 0) {
-                    if (is_min) acc = INFINITY;
-                    else if (is_max) acc = -INFINITY;
-                    else acc = is_prod ? 1.0 : 0.0;
-                }
-                else if (is_min) {
-                    acc = reduce_min_float64_nan_safe(data, nitems);
-                }
-                else if (is_max) {
-                    acc = reduce_max_float64_nan_safe(data, nitems);
-                }
-                else if (is_prod) {
-                    acc = reduce_prod_float64_nan_safe(data, nitems);
+                if (is_any || is_all) {
+                    bool acc = is_all;
+                    if (nitems > 0) {
+                        acc = is_all;
+                        for (int i = 0; i < nitems; i++) {
+                            if (is_any) {
+                                if (data[i] != 0.0) { acc = true; break; }
+                            }
+                            else {
+                                if (data[i] == 0.0) { acc = false; break; }
+                            }
+                        }
+                    }
+                    ((bool*)write_ptr)[0] = acc;
                 }
                 else {
-                    acc = reduce_sum_float64_nan_safe(data, nitems);
+                    double acc = 0.0;
+                    if (nitems == 0) {
+                        if (is_min) acc = INFINITY;
+                        else if (is_max) acc = -INFINITY;
+                        else acc = is_prod ? 1.0 : 0.0;
+                    }
+                    else if (is_min) {
+                        acc = reduce_min_float64_nan_safe(data, nitems);
+                    }
+                    else if (is_max) {
+                        acc = reduce_max_float64_nan_safe(data, nitems);
+                    }
+                    else if (is_prod) {
+                        acc = reduce_prod_float64_nan_safe(data, nitems);
+                    }
+                    else {
+                        acc = reduce_sum_float64_nan_safe(data, nitems);
+                    }
+                    ((double*)write_ptr)[0] = acc;
                 }
-                ((double*)write_ptr)[0] = acc;
                 break;
             }
         case ME_COMPLEX64:
             {
                 const float _Complex* data = (const float _Complex*)arg->bound;
+                if (is_any || is_all) {
+                    bool acc = is_all;
+                    if (nitems > 0) {
+                        acc = is_all;
+                        for (int i = 0; i < nitems; i++) {
+                            bool nonzero = IS_NONZERO_c64(data[i]);
+                            if (is_any) {
+                                if (nonzero) { acc = true; break; }
+                            }
+                            else {
+                                if (!nonzero) { acc = false; break; }
+                            }
+                        }
+                    }
+                    ((bool*)write_ptr)[0] = acc;
+                    break;
+                }
                 if (is_min || is_max) {
                     ((float _Complex*)write_ptr)[0] = (float _Complex)0.0f;
                     break;
@@ -5003,6 +5236,23 @@ static void eval_reduction(const me_expr* n) {
         case ME_COMPLEX128:
             {
                 const double _Complex* data = (const double _Complex*)arg->bound;
+                if (is_any || is_all) {
+                    bool acc = is_all;
+                    if (nitems > 0) {
+                        acc = is_all;
+                        for (int i = 0; i < nitems; i++) {
+                            bool nonzero = IS_NONZERO_c128(data[i]);
+                            if (is_any) {
+                                if (nonzero) { acc = true; break; }
+                            }
+                            else {
+                                if (!nonzero) { acc = false; break; }
+                            }
+                        }
+                    }
+                    ((bool*)write_ptr)[0] = acc;
+                    break;
+                }
                 if (is_min || is_max) {
                     ((double _Complex*)write_ptr)[0] = (double _Complex)0.0;
                     break;
