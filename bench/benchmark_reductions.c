@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <sys/time.h>
+#include <stdbool.h>
+#include <string.h>
 #include "miniexpr.h"
 #include "minctest.h"
 
@@ -25,8 +27,9 @@ static double get_time(void) {
     return tv.tv_sec + tv.tv_usec * 1e-6;
 }
 
-static bench_result_t benchmark_sum_int32(size_t total_elems, int iterations) {
-    printf("\n=== sum(int32) ===\n");
+static bench_result_t benchmark_reduce_int32(const char *op, bool is_prod,
+                                             size_t total_elems, int iterations) {
+    printf("\n=== %s(int32) ===\n", op);
 
     int32_t *data = malloc(total_elems * sizeof(int32_t));
     if (!data) {
@@ -42,9 +45,11 @@ static bench_result_t benchmark_sum_int32(size_t total_elems, int iterations) {
     me_variable vars[] = {{"x", ME_INT32, data}};
     int err = 0;
     me_expr *expr = NULL;
-    int rc_expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err, &expr);
+    char expr_buf[16];
+    snprintf(expr_buf, sizeof(expr_buf), "%s(x)", op);
+    int rc_expr = me_compile(expr_buf, vars, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("Failed to compile sum(x) for int32 (err=%d)\n", err);
+        printf("Failed to compile %s(x) for int32 (err=%d)\n", op, err);
         free(data);
         bench_result_t empty = {0};
         return empty;
@@ -64,9 +69,13 @@ static bench_result_t benchmark_sum_int32(size_t total_elems, int iterations) {
     volatile int64_t sink = 0;
     start = get_time();
     for (int iter = 0; iter < iterations; iter++) {
-        int64_t acc = 0;
+        int64_t acc = is_prod ? 1 : 0;
         for (size_t i = 0; i < total_elems; i++) {
-            acc += data[i];
+            if (is_prod) {
+                acc *= data[i];
+            } else {
+                acc += data[i];
+            }
         }
         sink = acc;
     }
@@ -89,8 +98,9 @@ static bench_result_t benchmark_sum_int32(size_t total_elems, int iterations) {
     return result;
 }
 
-static bench_result_t benchmark_sum_float32(size_t total_elems, int iterations) {
-    printf("\n=== sum(float32) ===\n");
+static bench_result_t benchmark_reduce_float32(const char *op, bool is_prod,
+                                               size_t total_elems, int iterations) {
+    printf("\n=== %s(float32) ===\n", op);
 
     float *data = malloc(total_elems * sizeof(float));
     if (!data) {
@@ -106,9 +116,11 @@ static bench_result_t benchmark_sum_float32(size_t total_elems, int iterations) 
     me_variable vars[] = {{"x", ME_FLOAT32, data}};
     int err = 0;
     me_expr *expr = NULL;
-    int rc_expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err, &expr);
+    char expr_buf[16];
+    snprintf(expr_buf, sizeof(expr_buf), "%s(x)", op);
+    int rc_expr = me_compile(expr_buf, vars, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("Failed to compile sum(x) for float32 (err=%d)\n", err);
+        printf("Failed to compile %s(x) for float32 (err=%d)\n", op, err);
         free(data);
         bench_result_t empty = {0};
         return empty;
@@ -128,9 +140,13 @@ static bench_result_t benchmark_sum_float32(size_t total_elems, int iterations) 
     volatile float sink = 0.0f;
     start = get_time();
     for (int iter = 0; iter < iterations; iter++) {
-        float acc = 0.0f;
+        float acc = is_prod ? 1.0f : 0.0f;
         for (size_t i = 0; i < total_elems; i++) {
-            acc += data[i];
+            if (is_prod) {
+                acc *= data[i];
+            } else {
+                acc += data[i];
+            }
         }
         sink = acc;
     }
@@ -153,10 +169,20 @@ static bench_result_t benchmark_sum_float32(size_t total_elems, int iterations) 
     return result;
 }
 
-int main(void) {
-    printf("========================================\n");
-    printf("MiniExpr Reduction Benchmark (sum)\n");
-    printf("========================================\n");
+int main(int argc, char **argv) {
+    printf("==========================================\n");
+    printf("MiniExpr Reduction Benchmark\n");
+    printf("==========================================\n");
+
+    const char *op = "sum";
+    if (argc > 1) {
+        op = argv[1];
+    }
+    if (strcmp(op, "sum") != 0 && strcmp(op, "prod") != 0) {
+        printf("Usage: %s [sum|prod]\n", argv[0]);
+        return 1;
+    }
+    bool is_prod = strcmp(op, "prod") == 0;
 
     const size_t sizes_mb[] = {1, 2, 4, 8, 16};
     const int iterations = 4;
@@ -172,16 +198,16 @@ int main(void) {
         size_t total_elems = bytes / sizeof(int32_t);
 
         printf("\n--- Working set: %zu MB (%zu elements) ---\n", sizes_mb[i], total_elems);
-        int_results[i] = benchmark_sum_int32(total_elems, iterations);
-        float_results[i] = benchmark_sum_float32(total_elems, iterations);
+        int_results[i] = benchmark_reduce_int32(op, is_prod, total_elems, iterations);
+        float_results[i] = benchmark_reduce_float32(op, is_prod, total_elems, iterations);
     }
 
-    printf("\n========================================\n");
-    printf("Summary (GB/s)\n");
-    printf("========================================\n");
-    printf("Size(MB)  Int32 ME   Int32 C    F32 ME     F32 C\n");
+    printf("\n==========================================\n");
+    printf("Summary (%s, GB/s)\n", op);
+    printf("==========================================\n");
+    printf("Size(MB)  Int32 ME Int32 C  F32 ME   F32 C\n");
     for (size_t i = 0; i < num_sizes; i++) {
-        printf("%7zu  %9.2f  %9.2f  %9.2f  %9.2f\n",
+        printf("%7zu  %9.2f %7.2f %7.2f %7.2f\n",
                sizes_mb[i],
                int_results[i].me_gbps,
                int_results[i].c_gbps,
@@ -189,9 +215,9 @@ int main(void) {
                float_results[i].c_gbps);
     }
 
-    printf("========================================\n");
+    printf("==========================================\n");
     printf("Benchmark complete!\n");
-    printf("========================================\n");
+    printf("==========================================\n");
 
     return 0;
 }

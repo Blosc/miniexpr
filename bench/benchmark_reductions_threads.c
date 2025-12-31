@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <pthread.h>
 #include <sys/time.h>
+#include <string.h>
 #include "miniexpr.h"
 #include "minctest.h"
 
@@ -88,6 +89,28 @@ static void *sum_worker_c_float32(void *arg) {
     return NULL;
 }
 
+static void *prod_worker_c_int32(void *arg) {
+    thread_args_c_t *args = (thread_args_c_t *)arg;
+    const int32_t *data = (const int32_t *)args->data + args->start_idx;
+    int64_t acc = 1;
+    for (int i = 0; i < args->count; i++) {
+        acc *= data[i];
+    }
+    ((int64_t *)args->output)[0] = acc;
+    return NULL;
+}
+
+static void *prod_worker_c_float32(void *arg) {
+    thread_args_c_t *args = (thread_args_c_t *)arg;
+    const float *data = (const float *)args->data + args->start_idx;
+    float acc = 1.0f;
+    for (int i = 0; i < args->count; i++) {
+        acc *= data[i];
+    }
+    ((float *)args->output)[0] = acc;
+    return NULL;
+}
+
 static int run_threads(const me_expr *expr, const void *data, size_t elem_size,
                        size_t output_stride, int total_elems, int num_threads,
                        void *partials) {
@@ -120,7 +143,7 @@ static int run_threads(const me_expr *expr, const void *data, size_t elem_size,
 }
 
 static int run_threads_c_int32(const int32_t *data, int total_elems, int num_threads,
-                               int64_t *partials) {
+                               int64_t *partials, void *(*worker)(void *)) {
     pthread_t threads[MAX_THREADS];
     thread_args_c_t thread_args[MAX_THREADS];
 
@@ -136,7 +159,7 @@ static int run_threads_c_int32(const int32_t *data, int total_elems, int num_thr
         thread_args[t].output = &partials[t];
         offset += count;
 
-        pthread_create(&threads[t], NULL, sum_worker_c_int32, &thread_args[t]);
+        pthread_create(&threads[t], NULL, worker, &thread_args[t]);
     }
 
     for (int t = 0; t < num_threads; t++) {
@@ -147,7 +170,7 @@ static int run_threads_c_int32(const int32_t *data, int total_elems, int num_thr
 }
 
 static int run_threads_c_float32(const float *data, int total_elems, int num_threads,
-                                 float *partials) {
+                                 float *partials, void *(*worker)(void *)) {
     pthread_t threads[MAX_THREADS];
     thread_args_c_t thread_args[MAX_THREADS];
 
@@ -163,7 +186,7 @@ static int run_threads_c_float32(const float *data, int total_elems, int num_thr
         thread_args[t].output = &partials[t];
         offset += count;
 
-        pthread_create(&threads[t], NULL, sum_worker_c_float32, &thread_args[t]);
+        pthread_create(&threads[t], NULL, worker, &thread_args[t]);
     }
 
     for (int t = 0; t < num_threads; t++) {
@@ -186,31 +209,43 @@ static double run_benchmark(const me_expr *expr, const void *data, size_t elem_s
 }
 
 static double run_benchmark_c_int32(const int32_t *data, int total_elems, int num_threads,
-                                    int iterations, int64_t *partials) {
-    run_threads_c_int32(data, total_elems, num_threads, partials);
+                                    int iterations, int64_t *partials, bool is_prod) {
+    void *(*worker)(void *) = is_prod ? prod_worker_c_int32 : sum_worker_c_int32;
+    run_threads_c_int32(data, total_elems, num_threads, partials, worker);
 
     double start = get_time();
     for (int i = 0; i < iterations; i++) {
-        run_threads_c_int32(data, total_elems, num_threads, partials);
+        run_threads_c_int32(data, total_elems, num_threads, partials, worker);
     }
     return (get_time() - start) / iterations;
 }
 
 static double run_benchmark_c_float32(const float *data, int total_elems, int num_threads,
-                                      int iterations, float *partials) {
-    run_threads_c_float32(data, total_elems, num_threads, partials);
+                                      int iterations, float *partials, bool is_prod) {
+    void *(*worker)(void *) = is_prod ? prod_worker_c_float32 : sum_worker_c_float32;
+    run_threads_c_float32(data, total_elems, num_threads, partials, worker);
 
     double start = get_time();
     for (int i = 0; i < iterations; i++) {
-        run_threads_c_float32(data, total_elems, num_threads, partials);
+        run_threads_c_float32(data, total_elems, num_threads, partials, worker);
     }
     return (get_time() - start) / iterations;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
     printf("===================================================\n");
     printf("MiniExpr Reduction Benchmark (Multi-threaded)\n");
     printf("===================================================\n");
+
+    const char *op = "sum";
+    if (argc > 1) {
+        op = argv[1];
+    }
+    if (strcmp(op, "sum") != 0 && strcmp(op, "prod") != 0) {
+        printf("Usage: %s [sum|prod]\n", argv[0]);
+        return 1;
+    }
+    bool is_prod = strcmp(op, "prod") == 0;
 
     const size_t total_elems = 16ULL * 1024ULL * 1024ULL;
     const int iterations = 4;
@@ -243,16 +278,18 @@ int main(void) {
     int err = 0;
     me_expr *expr_int32 = NULL;
     me_expr *expr_float32 = NULL;
-    int rc_expr = me_compile("sum(x)", vars_int32, 1, ME_AUTO, &err, &expr_int32);
+    char expr_buf[16];
+    snprintf(expr_buf, sizeof(expr_buf), "%s(x)", op);
+    int rc_expr = me_compile(expr_buf, vars_int32, 1, ME_AUTO, &err, &expr_int32);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("Failed to compile sum(x) for int32 (err=%d)\n", err);
+        printf("Failed to compile %s(x) for int32 (err=%d)\n", op, err);
         free(data_int32);
         free(data_float32);
         return 1;
     }
-    rc_expr = me_compile("sum(x)", vars_float32, 1, ME_AUTO, &err, &expr_float32);
+    rc_expr = me_compile(expr_buf, vars_float32, 1, ME_AUTO, &err, &expr_float32);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("Failed to compile sum(x) for float32 (err=%d)\n", err);
+        printf("Failed to compile %s(x) for float32 (err=%d)\n", op, err);
         me_free(expr_int32);
         free(data_int32);
         free(data_float32);
@@ -293,7 +330,7 @@ int main(void) {
     double data_gb = (double)(total_elems * sizeof(int32_t)) / 1e9;
 
     printf("\n========================================\n");
-    printf("Summary (GB/s)\n");
+    printf("Summary (%s, GB/s)\n", op);
     printf("========================================\n");
     printf("Threads Int32 ME Int32 C  F32 ME   F32 C\n");
 
@@ -302,12 +339,14 @@ int main(void) {
                                       stride_int32, (int)total_elems,
                                       num_threads, iterations, partials_int_me);
         double c_int = run_benchmark_c_int32(data_int32, (int)total_elems,
-                                             num_threads, iterations, partials_int_c);
+                                             num_threads, iterations, partials_int_c,
+                                             is_prod);
         double me_f32 = run_benchmark(expr_float32, data_float32, sizeof(float),
                                       stride_float32, (int)total_elems,
                                       num_threads, iterations, partials_float_me);
         double c_f32 = run_benchmark_c_float32(data_float32, (int)total_elems,
-                                               num_threads, iterations, partials_float_c);
+                                               num_threads, iterations, partials_float_c,
+                                               is_prod);
 
         printf("%6d  %8.2f %7.2f %7.2f %7.2f\n",
                num_threads,

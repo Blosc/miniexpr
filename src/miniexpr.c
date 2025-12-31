@@ -1121,6 +1121,161 @@ static volatile double prod_salt = 1.0;
 static double sum_reduce(double x) { return x + sum_salt; }
 static double prod_reduce(double x) { return x * prod_salt; }
 
+static float reduce_prod_float32_nan_safe(const float* data, int nitems) {
+    if (nitems <= 0) return 1.0f;
+#if defined(__AVX__) || defined(__AVX2__)
+    int i = 0;
+    __m256 vprod = _mm256_set1_ps(1.0f);
+    __m256 vnan = _mm256_setzero_ps();
+    const int limit = nitems & ~7;
+    for (; i < limit; i += 8) {
+        __m256 v = _mm256_loadu_ps(data + i);
+        vnan = _mm256_or_ps(vnan, _mm256_cmp_ps(v, v, _CMP_UNORD_Q));
+        vprod = _mm256_mul_ps(vprod, v);
+    }
+    __m128 low = _mm256_castps256_ps128(vprod);
+    __m128 high = _mm256_extractf128_ps(vprod, 1);
+    __m128 prod128 = _mm_mul_ps(low, high);
+    __m128 tmp = _mm_mul_ps(prod128, _mm_movehl_ps(prod128, prod128));
+    tmp = _mm_mul_ss(tmp, _mm_shuffle_ps(tmp, tmp, 1));
+    float acc = _mm_cvtss_f32(tmp);
+    if (_mm256_movemask_ps(vnan)) return NAN;
+    for (; i < nitems; i++) {
+        float v = data[i];
+        acc *= v;
+        if (v != v) return v;
+    }
+    return acc;
+#elif defined(__SSE__)
+    int i = 0;
+    __m128 vprod = _mm_set1_ps(1.0f);
+    __m128 vnan = _mm_setzero_ps();
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        __m128 v = _mm_loadu_ps(data + i);
+        vnan = _mm_or_ps(vnan, _mm_cmpunord_ps(v, v));
+        vprod = _mm_mul_ps(vprod, v);
+    }
+    __m128 tmp = _mm_mul_ps(vprod, _mm_movehl_ps(vprod, vprod));
+    tmp = _mm_mul_ss(tmp, _mm_shuffle_ps(tmp, tmp, 1));
+    float acc = _mm_cvtss_f32(tmp);
+    if (_mm_movemask_ps(vnan)) return NAN;
+    for (; i < nitems; i++) {
+        float v = data[i];
+        acc *= v;
+        if (v != v) return v;
+    }
+    return acc;
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    int i = 0;
+    float32x4_t vprod = vdupq_n_f32(1.0f);
+    uint32x4_t vnan = vdupq_n_u32(0);
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        float32x4_t v = vld1q_f32(data + i);
+        uint32x4_t eq = vceqq_f32(v, v);
+        vnan = vorrq_u32(vnan, vmvnq_u32(eq));
+        vprod = vmulq_f32(vprod, v);
+    }
+    float acc =
+        vgetq_lane_f32(vprod, 0) *
+        vgetq_lane_f32(vprod, 1) *
+        vgetq_lane_f32(vprod, 2) *
+        vgetq_lane_f32(vprod, 3);
+    uint32x2_t nan2 = vorr_u32(vget_low_u32(vnan), vget_high_u32(vnan));
+    nan2 = vpadd_u32(nan2, nan2);
+    if (vget_lane_u32(nan2, 0)) return NAN;
+    for (; i < nitems; i++) {
+        float v = data[i];
+        acc *= v;
+        if (v != v) return v;
+    }
+    return acc;
+#else
+    float acc = 1.0f;
+    for (int i = 0; i < nitems; i++) {
+        float v = data[i];
+        acc *= v;
+        if (v != v) return v;
+    }
+    return acc;
+#endif
+}
+
+static double reduce_prod_float64_nan_safe(const double* data, int nitems) {
+    if (nitems <= 0) return 1.0;
+#if defined(__AVX__) || defined(__AVX2__)
+    int i = 0;
+    __m256d vprod = _mm256_set1_pd(1.0);
+    __m256d vnan = _mm256_setzero_pd();
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        __m256d v = _mm256_loadu_pd(data + i);
+        vnan = _mm256_or_pd(vnan, _mm256_cmp_pd(v, v, _CMP_UNORD_Q));
+        vprod = _mm256_mul_pd(vprod, v);
+    }
+    __m128d low = _mm256_castpd256_pd128(vprod);
+    __m128d high = _mm256_extractf128_pd(vprod, 1);
+    __m128d prod128 = _mm_mul_pd(low, high);
+    prod128 = _mm_mul_sd(prod128, _mm_unpackhi_pd(prod128, prod128));
+    double acc = _mm_cvtsd_f64(prod128);
+    if (_mm256_movemask_pd(vnan)) return NAN;
+    for (; i < nitems; i++) {
+        double v = data[i];
+        acc *= v;
+        if (v != v) return v;
+    }
+    return acc;
+#elif defined(__SSE2__)
+    int i = 0;
+    __m128d vprod = _mm_set1_pd(1.0);
+    __m128d vnan = _mm_setzero_pd();
+    const int limit = nitems & ~1;
+    for (; i < limit; i += 2) {
+        __m128d v = _mm_loadu_pd(data + i);
+        vnan = _mm_or_pd(vnan, _mm_cmpunord_pd(v, v));
+        vprod = _mm_mul_pd(vprod, v);
+    }
+    vprod = _mm_mul_sd(vprod, _mm_unpackhi_pd(vprod, vprod));
+    double acc = _mm_cvtsd_f64(vprod);
+    if (_mm_movemask_pd(vnan)) return NAN;
+    for (; i < nitems; i++) {
+        double v = data[i];
+        acc *= v;
+        if (v != v) return v;
+    }
+    return acc;
+#elif (defined(__ARM_NEON) || defined(__ARM_NEON__)) && defined(__aarch64__)
+    int i = 0;
+    float64x2_t vprod = vdupq_n_f64(1.0);
+    uint64x2_t vnan = vdupq_n_u64(0);
+    const int limit = nitems & ~1;
+    for (; i < limit; i += 2) {
+        float64x2_t v = vld1q_f64(data + i);
+        uint64x2_t eq = vceqq_f64(v, v);
+        vnan = vorrq_u64(vnan, veorq_u64(eq, vdupq_n_u64(~0ULL)));
+        vprod = vmulq_f64(vprod, v);
+    }
+    double acc = vgetq_lane_f64(vprod, 0) * vgetq_lane_f64(vprod, 1);
+    uint64x2_t nan_or = vorrq_u64(vnan, vextq_u64(vnan, vnan, 1));
+    if (vgetq_lane_u64(nan_or, 0)) return NAN;
+    for (; i < nitems; i++) {
+        double v = data[i];
+        acc *= v;
+        if (v != v) return v;
+    }
+    return acc;
+#else
+    double acc = 1.0;
+    for (int i = 0; i < nitems; i++) {
+        double v = data[i];
+        acc *= v;
+        if (v != v) return v;
+    }
+    return acc;
+#endif
+}
+
 static float reduce_sum_float32_nan_safe(const float* data, int nitems) {
     if (nitems <= 0) return 0.0f;
 #if defined(__AVX__) || defined(__AVX2__)
@@ -3654,7 +3809,7 @@ static void eval_reduction(const me_expr* n) {
                     acc = is_prod ? 1.0f : 0.0f;
                 }
                 else if (is_prod) {
-                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                    acc = reduce_prod_float32_nan_safe(data, nitems);
                 }
                 else {
                     acc = reduce_sum_float32_nan_safe(data, nitems);
@@ -3670,7 +3825,7 @@ static void eval_reduction(const me_expr* n) {
                     acc = is_prod ? 1.0 : 0.0;
                 }
                 else if (is_prod) {
-                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                    acc = reduce_prod_float64_nan_safe(data, nitems);
                 }
                 else {
                     acc = reduce_sum_float64_nan_safe(data, nitems);
