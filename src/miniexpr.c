@@ -117,8 +117,7 @@ static inline _Dcomplex div_c128(_Dcomplex a, _Dcomplex b) {
 #if defined(_MSC_VER) && !defined(__clang__)
 /* Wrappers for complex functions to handle MSVC's _Fcomplex/_Dcomplex */
 static inline float _Complex me_cpowf(float _Complex a, float _Complex b) {
-    union
-    {
+    union {
         float _Complex c;
         _Fcomplex m;
     } ua, ub, ur;
@@ -128,8 +127,7 @@ static inline float _Complex me_cpowf(float _Complex a, float _Complex b) {
     return ur.c;
 }
 static inline double _Complex me_cpow(double _Complex a, double _Complex b) {
-    union
-    {
+    union {
         double _Complex c;
         _Dcomplex m;
     } ua, ub, ur;
@@ -139,8 +137,7 @@ static inline double _Complex me_cpow(double _Complex a, double _Complex b) {
     return ur.c;
 }
 static inline float _Complex me_csqrtf(float _Complex a) {
-    union
-    {
+    union {
         float _Complex c;
         _Fcomplex m;
     } ua, ur;
@@ -149,8 +146,7 @@ static inline float _Complex me_csqrtf(float _Complex a) {
     return ur.c;
 }
 static inline double _Complex me_csqrt(double _Complex a) {
-    union
-    {
+    union {
         double _Complex c;
         _Dcomplex m;
     } ua, ur;
@@ -159,8 +155,7 @@ static inline double _Complex me_csqrt(double _Complex a) {
     return ur.c;
 }
 static inline float _Complex me_cexpf(float _Complex a) {
-    union
-    {
+    union {
         float _Complex c;
         _Fcomplex m;
     } ua, ur;
@@ -169,8 +164,7 @@ static inline float _Complex me_cexpf(float _Complex a) {
     return ur.c;
 }
 static inline double _Complex me_cexp(double _Complex a) {
-    union
-    {
+    union {
         double _Complex c;
         _Dcomplex m;
     } ua, ur;
@@ -179,8 +173,7 @@ static inline double _Complex me_cexp(double _Complex a) {
     return ur.c;
 }
 static inline float _Complex me_clogf(float _Complex a) {
-    union
-    {
+    union {
         float _Complex c;
         _Fcomplex m;
     } ua, ur;
@@ -189,8 +182,7 @@ static inline float _Complex me_clogf(float _Complex a) {
     return ur.c;
 }
 static inline double _Complex me_clog(double _Complex a) {
-    union
-    {
+    union {
         double _Complex c;
         _Dcomplex m;
     } ua, ur;
@@ -199,8 +191,7 @@ static inline double _Complex me_clog(double _Complex a) {
     return ur.c;
 }
 static inline float me_cabsf(float _Complex a) {
-    union
-    {
+    union {
         float _Complex c;
         _Fcomplex m;
     } ua;
@@ -208,8 +199,7 @@ static inline float me_cabsf(float _Complex a) {
     return cabsf(ua.m);
 }
 static inline double me_cabs(double _Complex a) {
-    union
-    {
+    union {
         double _Complex c;
         _Dcomplex m;
     } ua;
@@ -217,8 +207,7 @@ static inline double me_cabs(double _Complex a) {
     return cabs(ua.m);
 }
 static inline float me_cimagf(float _Complex a) {
-    union
-    {
+    union {
         float _Complex c;
         _Fcomplex m;
     } ua;
@@ -226,8 +215,7 @@ static inline float me_cimagf(float _Complex a) {
     return cimagf(ua.m);
 }
 static inline double me_cimag(double _Complex a) {
-    union
-    {
+    union {
         double _Complex c;
         _Dcomplex m;
     } ua;
@@ -235,8 +223,7 @@ static inline double me_cimag(double _Complex a) {
     return cimag(ua.m);
 }
 static inline float me_crealf(float _Complex a) {
-    union
-    {
+    union {
         float _Complex c;
         _Fcomplex m;
     } ua;
@@ -244,8 +231,7 @@ static inline float me_crealf(float _Complex a) {
     return crealf(ua.m);
 }
 static inline double me_creal(double _Complex a) {
-    union
-    {
+    union {
         double _Complex c;
         _Dcomplex m;
     } ua;
@@ -253,8 +239,7 @@ static inline double me_creal(double _Complex a) {
     return creal(ua.m);
 }
 static inline float _Complex me_conjf(float _Complex a) {
-    union
-    {
+    union {
         float _Complex c;
         _Fcomplex m;
     } ua, ur;
@@ -263,8 +248,7 @@ static inline float _Complex me_conjf(float _Complex a) {
     return ur.c;
 }
 static inline double _Complex me_conj(double _Complex a) {
-    union
-    {
+    union {
         double _Complex c;
         _Dcomplex m;
     } ua, ur;
@@ -386,20 +370,17 @@ static bool has_complex_node(const me_expr* n);
 static bool has_complex_input(const me_expr* n);
 #endif
 
-enum
-{
+enum {
     TOK_NULL = ME_CLOSURE7 + 1, TOK_ERROR, TOK_END, TOK_SEP,
     TOK_OPEN, TOK_CLOSE, TOK_NUMBER, TOK_VARIABLE, TOK_INFIX,
     TOK_BITWISE, TOK_SHIFT, TOK_COMPARE, TOK_POW
 };
 
 /* Internal definition of me_expr (opaque to users) */
-struct me_expr
-{
+struct me_expr {
     int type;
 
-    union
-    {
+    union {
         double value;
         const void* bound;
         const void* function;
@@ -547,14 +528,12 @@ static size_t dtype_size(me_dtype dtype) {
 enum { ME_CONSTANT = 1 };
 
 
-typedef struct state
-{
+typedef struct state {
     const char* start;
     const char* next;
     int type;
 
-    union
-    {
+    union {
         double value;
         const double* bound;
         const void* function;
@@ -1562,8 +1541,7 @@ static void read_identifier_token(state* s) {
     }
 }
 
-typedef struct
-{
+typedef struct {
     const char* literal;
     int token_type;
     me_fun2 function;
@@ -3335,8 +3313,7 @@ DEFINE_ME_EVAL(c128, double _Complex,
 
 /* Public API - dispatches to correct type-specific evaluator */
 /* Structure to track promoted variables */
-typedef struct
-{
+typedef struct {
     void* promoted_data; // Temporary buffer for promoted data
     me_dtype original_type;
     bool needs_free;

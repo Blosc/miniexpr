@@ -25,8 +25,7 @@
 #define FLOPS_PER_ELEM 4     // sqrt(a*a + b*b): 2 muls + 1 add + 1 sqrt (convention)
 // Note: Actual hardware cost ~23 FLOPs (sqrt ≈ 20 FLOPs in reality)
 
-typedef struct
-{
+typedef struct {
     me_expr* expr;
     const double* a;
     const double* b;
