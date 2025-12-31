@@ -66,6 +66,8 @@ static bool parse_dtype(const char *name, dtype_info_t *info) {
         *info = (dtype_info_t){name, ME_INT32, sizeof(int32_t), false, true};
     } else if (strcmp(name, "int64") == 0) {
         *info = (dtype_info_t){name, ME_INT64, sizeof(int64_t), false, true};
+    } else if (strcmp(name, "bool") == 0) {
+        *info = (dtype_info_t){name, ME_BOOL, sizeof(bool), false, true};
     } else if (strcmp(name, "uint8") == 0) {
         *info = (dtype_info_t){name, ME_UINT8, sizeof(uint8_t), false, false};
     } else if (strcmp(name, "uint16") == 0) {
@@ -90,6 +92,9 @@ static me_dtype output_dtype_for_kind(const dtype_info_t *info, reduction_kind_t
     }
     if (info->is_float) {
         return info->dtype;
+    }
+    if (info->dtype == ME_BOOL) {
+        return ME_INT64;
     }
     return info->is_signed ? ME_INT64 : ME_UINT64;
 }
@@ -165,7 +170,12 @@ static void *reduce_worker_c(void *arg) {
     } else if (info->is_signed) {
         if (kind == RED_SUM || kind == RED_PROD) {
             int64_t acc = kind == RED_PROD ? 1 : 0;
-            if (info->dtype == ME_INT8) {
+            if (info->dtype == ME_BOOL) {
+                const bool *data = (const bool *)args->data + args->start_idx;
+                for (int i = 0; i < args->count; i++) {
+                    acc = kind == RED_PROD ? acc * (data[i] ? 1 : 0) : acc + (data[i] ? 1 : 0);
+                }
+            } else if (info->dtype == ME_INT8) {
                 const int8_t *data = (const int8_t *)args->data + args->start_idx;
                 for (int i = 0; i < args->count; i++) acc = kind == RED_PROD ? acc * data[i] : acc + data[i];
             } else if (info->dtype == ME_INT16) {
@@ -180,7 +190,12 @@ static void *reduce_worker_c(void *arg) {
             }
             ((int64_t *)args->output)[0] = acc;
         } else {
-            if (info->dtype == ME_INT8) {
+            if (info->dtype == ME_BOOL) {
+                const bool *data = (const bool *)args->data + args->start_idx;
+                bool acc = (kind == RED_MIN);
+                for (int i = 0; i < args->count; i++) acc = (kind == RED_MIN) ? (acc && data[i]) : (acc || data[i]);
+                ((bool *)args->output)[0] = acc;
+            } else if (info->dtype == ME_INT8) {
                 const int8_t *data = (const int8_t *)args->data + args->start_idx;
                 int8_t acc = kind == RED_MIN ? INT8_MAX : INT8_MIN;
                 for (int i = 0; i < args->count; i++) acc = (kind == RED_MIN) ? (data[i] < acc ? data[i] : acc) : (data[i] > acc ? data[i] : acc);
@@ -348,7 +363,7 @@ int main(int argc, char **argv) {
     if (strcmp(op, "sum") != 0 && strcmp(op, "prod") != 0 &&
         strcmp(op, "min") != 0 && strcmp(op, "max") != 0) {
         printf("Usage: %s [sum|prod|min|max] [dtype]\n", argv[0]);
-        printf("Dtypes: int8 int16 int32 int64 uint8 uint16 uint32 uint64 float32 float64\n");
+        printf("Dtypes: bool int8 int16 int32 int64 uint8 uint16 uint32 uint64 float32 float64\n");
         return 1;
     }
     reduction_kind_t kind = RED_SUM;
@@ -359,7 +374,7 @@ int main(int argc, char **argv) {
     dtype_info_t info;
     if (!parse_dtype(type_name, &info)) {
         printf("Unknown dtype: %s\n", type_name);
-        printf("Dtypes: int8 int16 int32 int64 uint8 uint16 uint32 uint64 float32 float64\n");
+        printf("Dtypes: bool int8 int16 int32 int64 uint8 uint16 uint32 uint64 float32 float64\n");
         return 1;
     }
 
@@ -389,6 +404,7 @@ int main(int argc, char **argv) {
             }
         } else if (info.is_signed) {
             switch (info.dtype) {
+            case ME_BOOL: ((bool *)data)[i] = (i % 2) != 0; break;
             case ME_INT8: ((int8_t *)data)[i] = (int8_t)(i % 97); break;
             case ME_INT16: ((int16_t *)data)[i] = (int16_t)(i % 97); break;
             case ME_INT32: ((int32_t *)data)[i] = (int32_t)(i % 97); break;
