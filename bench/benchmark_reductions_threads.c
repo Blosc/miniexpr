@@ -13,7 +13,7 @@
 
 
 
-#define MAX_THREADS 8
+#define MAX_THREADS 12
 
 static double get_time(void) {
     struct timeval tv;
