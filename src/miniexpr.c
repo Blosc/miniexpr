@@ -55,6 +55,12 @@ For log = base 10 log comment the next line. */
 #include <limits.h>
 #include <stdint.h>
 #include <stdbool.h>
+#if defined(__SSE2__) || defined(__SSE__) || defined(__AVX__) || defined(__AVX2__)
+#include <immintrin.h>
+#endif
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#endif
 #if defined(_MSC_VER) && !defined(__clang__)
 #define IVDEP
 #else
@@ -1114,6 +1120,163 @@ static volatile double sum_salt = 0.0;
 static volatile double prod_salt = 1.0;
 static double sum_reduce(double x) { return x + sum_salt; }
 static double prod_reduce(double x) { return x * prod_salt; }
+
+static float reduce_sum_float32_nan_safe(const float* data, int nitems) {
+    if (nitems <= 0) return 0.0f;
+#if defined(__AVX__) || defined(__AVX2__)
+    int i = 0;
+    __m256 vsum = _mm256_setzero_ps();
+    __m256 vnan = _mm256_setzero_ps();
+    const int limit = nitems & ~7;
+    for (; i < limit; i += 8) {
+        __m256 v = _mm256_loadu_ps(data + i);
+        vnan = _mm256_or_ps(vnan, _mm256_cmp_ps(v, v, _CMP_UNORD_Q));
+        vsum = _mm256_add_ps(vsum, v);
+    }
+    __m128 low = _mm256_castps256_ps128(vsum);
+    __m128 high = _mm256_extractf128_ps(vsum, 1);
+    __m128 sum128 = _mm_add_ps(low, high);
+    __m128 tmp = _mm_add_ps(sum128, _mm_movehl_ps(sum128, sum128));
+    tmp = _mm_add_ss(tmp, _mm_shuffle_ps(tmp, tmp, 1));
+    float acc = _mm_cvtss_f32(tmp);
+    if (_mm256_movemask_ps(vnan)) return NAN;
+    for (; i < nitems; i++) {
+        float v = data[i];
+        acc += v;
+        if (v != v) return v;
+    }
+    return acc;
+#elif defined(__SSE__)
+    int i = 0;
+    __m128 vsum = _mm_setzero_ps();
+    __m128 vnan = _mm_setzero_ps();
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        __m128 v = _mm_loadu_ps(data + i);
+        vnan = _mm_or_ps(vnan, _mm_cmpunord_ps(v, v));
+        vsum = _mm_add_ps(vsum, v);
+    }
+    __m128 tmp = _mm_add_ps(vsum, _mm_movehl_ps(vsum, vsum));
+    tmp = _mm_add_ss(tmp, _mm_shuffle_ps(tmp, tmp, 1));
+    float acc = _mm_cvtss_f32(tmp);
+    if (_mm_movemask_ps(vnan)) return NAN;
+    for (; i < nitems; i++) {
+        float v = data[i];
+        acc += v;
+        if (v != v) return v;
+    }
+    return acc;
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    int i = 0;
+    float32x4_t vsum = vdupq_n_f32(0.0f);
+    uint32x4_t vnan = vdupq_n_u32(0);
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        float32x4_t v = vld1q_f32(data + i);
+        uint32x4_t eq = vceqq_f32(v, v);
+        vnan = vorrq_u32(vnan, vmvnq_u32(eq));
+        vsum = vaddq_f32(vsum, v);
+    }
+#if defined(__aarch64__)
+    float acc = vaddvq_f32(vsum);
+#else
+    float32x2_t sum2 = vadd_f32(vget_low_f32(vsum), vget_high_f32(vsum));
+    sum2 = vpadd_f32(sum2, sum2);
+    float acc = vget_lane_f32(sum2, 0);
+#endif
+    uint32x2_t nan2 = vorr_u32(vget_low_u32(vnan), vget_high_u32(vnan));
+    nan2 = vpadd_u32(nan2, nan2);
+    if (vget_lane_u32(nan2, 0)) return NAN;
+    for (; i < nitems; i++) {
+        float v = data[i];
+        acc += v;
+        if (v != v) return v;
+    }
+    return acc;
+#else
+    float acc = 0.0f;
+    for (int i = 0; i < nitems; i++) {
+        float v = data[i];
+        acc += v;
+        if (v != v) return v;
+    }
+    return acc;
+#endif
+}
+
+static double reduce_sum_float64_nan_safe(const double* data, int nitems) {
+    if (nitems <= 0) return 0.0;
+#if defined(__AVX__) || defined(__AVX2__)
+    int i = 0;
+    __m256d vsum = _mm256_setzero_pd();
+    __m256d vnan = _mm256_setzero_pd();
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        __m256d v = _mm256_loadu_pd(data + i);
+        vnan = _mm256_or_pd(vnan, _mm256_cmp_pd(v, v, _CMP_UNORD_Q));
+        vsum = _mm256_add_pd(vsum, v);
+    }
+    __m128d low = _mm256_castpd256_pd128(vsum);
+    __m128d high = _mm256_extractf128_pd(vsum, 1);
+    __m128d sum128 = _mm_add_pd(low, high);
+    sum128 = _mm_add_sd(sum128, _mm_unpackhi_pd(sum128, sum128));
+    double acc = _mm_cvtsd_f64(sum128);
+    if (_mm256_movemask_pd(vnan)) return NAN;
+    for (; i < nitems; i++) {
+        double v = data[i];
+        acc += v;
+        if (v != v) return v;
+    }
+    return acc;
+#elif defined(__SSE2__)
+    int i = 0;
+    __m128d vsum = _mm_setzero_pd();
+    __m128d vnan = _mm_setzero_pd();
+    const int limit = nitems & ~1;
+    for (; i < limit; i += 2) {
+        __m128d v = _mm_loadu_pd(data + i);
+        vnan = _mm_or_pd(vnan, _mm_cmpunord_pd(v, v));
+        vsum = _mm_add_pd(vsum, v);
+    }
+    vsum = _mm_add_sd(vsum, _mm_unpackhi_pd(vsum, vsum));
+    double acc = _mm_cvtsd_f64(vsum);
+    if (_mm_movemask_pd(vnan)) return NAN;
+    for (; i < nitems; i++) {
+        double v = data[i];
+        acc += v;
+        if (v != v) return v;
+    }
+    return acc;
+#elif (defined(__ARM_NEON) || defined(__ARM_NEON__)) && defined(__aarch64__)
+    int i = 0;
+    float64x2_t vsum = vdupq_n_f64(0.0);
+    uint64x2_t vnan = vdupq_n_u64(0);
+    const int limit = nitems & ~1;
+    for (; i < limit; i += 2) {
+        float64x2_t v = vld1q_f64(data + i);
+        uint64x2_t eq = vceqq_f64(v, v);
+        vnan = vorrq_u64(vnan, veorq_u64(eq, vdupq_n_u64(~0ULL)));
+        vsum = vaddq_f64(vsum, v);
+    }
+    double acc = vaddvq_f64(vsum);
+    uint64x2_t nan_or = vorrq_u64(vnan, vextq_u64(vnan, vnan, 1));
+    if (vgetq_lane_u64(nan_or, 0)) return NAN;
+    for (; i < nitems; i++) {
+        double v = data[i];
+        acc += v;
+        if (v != v) return v;
+    }
+    return acc;
+#else
+    double acc = 0.0;
+    for (int i = 0; i < nitems; i++) {
+        double v = data[i];
+        acc += v;
+        if (v != v) return v;
+    }
+    return acc;
+#endif
+}
 
 static double comma(double a, double b) {
     (void)a;
@@ -3494,7 +3657,7 @@ static void eval_reduction(const me_expr* n) {
                     for (int i = 0; i < nitems; i++) acc *= data[i];
                 }
                 else {
-                    for (int i = 0; i < nitems; i++) acc += data[i];
+                    acc = reduce_sum_float32_nan_safe(data, nitems);
                 }
                 ((float*)write_ptr)[0] = acc;
                 break;
@@ -3510,7 +3673,7 @@ static void eval_reduction(const me_expr* n) {
                     for (int i = 0; i < nitems; i++) acc *= data[i];
                 }
                 else {
-                    for (int i = 0; i < nitems; i++) acc += data[i];
+                    acc = reduce_sum_float64_nan_safe(data, nitems);
                 }
                 ((double*)write_ptr)[0] = acc;
                 break;

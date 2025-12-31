@@ -5,20 +5,17 @@ CC ?= gcc
 ifeq ($(OS),Windows_NT)
   # Check if we are using clang-cl
   ifneq (,$(findstring clang-cl,$(CC)))
-    FAST_MATH_FLAG = /fp:fast
-    CFLAGS = -O2 -DNDEBUG $(FAST_MATH_FLAG)
-    DEBUG_CFLAGS = -O0 -g $(FAST_MATH_FLAG)
+    CFLAGS = -O2 -DNDEBUG
+    DEBUG_CFLAGS = -O0 -g
     LDFLAGS = clang_rt.builtins-x86_64.lib
   else
-    FAST_MATH_FLAG = -ffast-math
-    CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG $(FAST_MATH_FLAG)
-    DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g $(FAST_MATH_FLAG)
+    CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG
+    DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g
     LDFLAGS = -lm
   endif
 else
-  FAST_MATH_FLAG = -ffast-math
-  CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG $(FAST_MATH_FLAG)
-  DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g $(FAST_MATH_FLAG)
+  CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG
+  DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g
   LDFLAGS = -lm
 endif
 

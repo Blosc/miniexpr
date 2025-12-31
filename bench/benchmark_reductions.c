@@ -158,7 +158,7 @@ int main(void) {
     printf("MiniExpr Reduction Benchmark (sum)\n");
     printf("========================================\n");
 
-    const size_t sizes_mb[] = {1, 2, 4, 8, 16, 32, 64, 128, 256, 1024};
+    const size_t sizes_mb[] = {1, 2, 4, 8, 16};
     const int iterations = 4;
     const size_t num_sizes = sizeof(sizes_mb) / sizeof(sizes_mb[0]);
 

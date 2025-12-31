@@ -30,6 +30,13 @@ typedef struct {
     void *output;
 } thread_args_t;
 
+typedef struct {
+    const void *data;
+    int start_idx;
+    int count;
+    void *output;
+} thread_args_c_t;
+
 static size_t dtype_size_local(me_dtype dtype) {
     switch (dtype) {
         case ME_BOOL: return sizeof(bool);
@@ -56,6 +63,28 @@ static void *sum_worker(void *arg) {
     };
 
     ME_EVAL_CHECK(args->expr, vars_chunk, 1, args->output, args->count);
+    return NULL;
+}
+
+static void *sum_worker_c_int32(void *arg) {
+    thread_args_c_t *args = (thread_args_c_t *)arg;
+    const int32_t *data = (const int32_t *)args->data + args->start_idx;
+    int64_t acc = 0;
+    for (int i = 0; i < args->count; i++) {
+        acc += data[i];
+    }
+    ((int64_t *)args->output)[0] = acc;
+    return NULL;
+}
+
+static void *sum_worker_c_float32(void *arg) {
+    thread_args_c_t *args = (thread_args_c_t *)arg;
+    const float *data = (const float *)args->data + args->start_idx;
+    float acc = 0.0f;
+    for (int i = 0; i < args->count; i++) {
+        acc += data[i];
+    }
+    ((float *)args->output)[0] = acc;
     return NULL;
 }
 
@@ -90,6 +119,60 @@ static int run_threads(const me_expr *expr, const void *data, size_t elem_size,
     return 0;
 }
 
+static int run_threads_c_int32(const int32_t *data, int total_elems, int num_threads,
+                               int64_t *partials) {
+    pthread_t threads[MAX_THREADS];
+    thread_args_c_t thread_args[MAX_THREADS];
+
+    int base = total_elems / num_threads;
+    int rem = total_elems % num_threads;
+    int offset = 0;
+
+    for (int t = 0; t < num_threads; t++) {
+        int count = base + (t < rem);
+        thread_args[t].data = data;
+        thread_args[t].start_idx = offset;
+        thread_args[t].count = count;
+        thread_args[t].output = &partials[t];
+        offset += count;
+
+        pthread_create(&threads[t], NULL, sum_worker_c_int32, &thread_args[t]);
+    }
+
+    for (int t = 0; t < num_threads; t++) {
+        pthread_join(threads[t], NULL);
+    }
+
+    return 0;
+}
+
+static int run_threads_c_float32(const float *data, int total_elems, int num_threads,
+                                 float *partials) {
+    pthread_t threads[MAX_THREADS];
+    thread_args_c_t thread_args[MAX_THREADS];
+
+    int base = total_elems / num_threads;
+    int rem = total_elems % num_threads;
+    int offset = 0;
+
+    for (int t = 0; t < num_threads; t++) {
+        int count = base + (t < rem);
+        thread_args[t].data = data;
+        thread_args[t].start_idx = offset;
+        thread_args[t].count = count;
+        thread_args[t].output = &partials[t];
+        offset += count;
+
+        pthread_create(&threads[t], NULL, sum_worker_c_float32, &thread_args[t]);
+    }
+
+    for (int t = 0; t < num_threads; t++) {
+        pthread_join(threads[t], NULL);
+    }
+
+    return 0;
+}
+
 static double run_benchmark(const me_expr *expr, const void *data, size_t elem_size,
                             size_t output_stride, int total_elems, int num_threads,
                             int iterations, void *partials) {
@@ -102,132 +185,26 @@ static double run_benchmark(const me_expr *expr, const void *data, size_t elem_s
     return (get_time() - start) / iterations;
 }
 
-static void benchmark_sum_threads_int32(size_t total_elems, int iterations) {
-    printf("\n=== sum(int32) multi-threaded ===\n");
+static double run_benchmark_c_int32(const int32_t *data, int total_elems, int num_threads,
+                                    int iterations, int64_t *partials) {
+    run_threads_c_int32(data, total_elems, num_threads, partials);
 
-    int32_t *data = malloc(total_elems * sizeof(int32_t));
-    if (!data) {
-        printf("Allocation failed for int32 data\n");
-        return;
+    double start = get_time();
+    for (int i = 0; i < iterations; i++) {
+        run_threads_c_int32(data, total_elems, num_threads, partials);
     }
-
-    for (size_t i = 0; i < total_elems; i++) {
-        data[i] = (int32_t)(i % 97);
-    }
-
-    me_variable vars[] = {{"x", ME_INT32, data}};
-    int err = 0;
-    me_expr *expr = NULL;
-    int rc_expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err, &expr);
-    if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("Failed to compile sum(x) for int32 (err=%d)\n", err);
-        free(data);
-        return;
-    }
-
-    me_dtype output_dtype = me_get_dtype(expr);
-    size_t output_stride = dtype_size_local(output_dtype);
-    if (output_stride != sizeof(int64_t)) {
-        printf("Unexpected output dtype for int32 sum: %d\n", output_dtype);
-        me_free(expr);
-        free(data);
-        return;
-    }
-
-    int64_t *partials = malloc(MAX_THREADS * sizeof(int64_t));
-    if (!partials) {
-        printf("Allocation failed for int32 partials\n");
-        me_free(expr);
-        free(data);
-        return;
-    }
-
-    double data_gb = (double)(total_elems * sizeof(int32_t)) / 1e9;
-
-    printf("\nSummary (Int32)\n");
-    printf("Threads  Avg time (s)  Throughput (GB/s)\n");
-    for (int num_threads = 1; num_threads <= MAX_THREADS; num_threads++) {
-        double elapsed = run_benchmark(expr, data, sizeof(int32_t),
-                                       output_stride, (int)total_elems,
-                                       num_threads, iterations, partials);
-        double throughput = data_gb / elapsed;
-
-        int64_t total = 0;
-        for (int t = 0; t < num_threads; t++) {
-            total += partials[t];
-        }
-
-        printf("%7d  %12.4f  %17.2f\n", num_threads, elapsed, throughput);
-        printf("  Sum: %lld\n", (long long)total);
-    }
-
-    free(partials);
-    me_free(expr);
-    free(data);
+    return (get_time() - start) / iterations;
 }
 
-static void benchmark_sum_threads_float32(size_t total_elems, int iterations) {
-    printf("\n=== sum(float32) multi-threaded ===\n");
+static double run_benchmark_c_float32(const float *data, int total_elems, int num_threads,
+                                      int iterations, float *partials) {
+    run_threads_c_float32(data, total_elems, num_threads, partials);
 
-    float *data = malloc(total_elems * sizeof(float));
-    if (!data) {
-        printf("Allocation failed for float32 data\n");
-        return;
+    double start = get_time();
+    for (int i = 0; i < iterations; i++) {
+        run_threads_c_float32(data, total_elems, num_threads, partials);
     }
-
-    for (size_t i = 0; i < total_elems; i++) {
-        data[i] = (float)(i % 97) * 0.25f;
-    }
-
-    me_variable vars[] = {{"x", ME_FLOAT32, data}};
-    int err = 0;
-    me_expr *expr = NULL;
-    int rc_expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err, &expr);
-    if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("Failed to compile sum(x) for float32 (err=%d)\n", err);
-        free(data);
-        return;
-    }
-
-    me_dtype output_dtype = me_get_dtype(expr);
-    size_t output_stride = dtype_size_local(output_dtype);
-    if (output_stride != sizeof(float)) {
-        printf("Unexpected output dtype for float32 sum: %d\n", output_dtype);
-        me_free(expr);
-        free(data);
-        return;
-    }
-
-    float *partials = malloc(MAX_THREADS * sizeof(float));
-    if (!partials) {
-        printf("Allocation failed for float32 partials\n");
-        me_free(expr);
-        free(data);
-        return;
-    }
-
-    double data_gb = (double)(total_elems * sizeof(float)) / 1e9;
-
-    printf("\nSummary (Float32)\n");
-    printf("Threads  Avg time (s)  Throughput (GB/s)\n");
-    for (int num_threads = 1; num_threads <= MAX_THREADS; num_threads++) {
-        double elapsed = run_benchmark(expr, data, sizeof(float),
-                                       output_stride, (int)total_elems,
-                                       num_threads, iterations, partials);
-        double throughput = data_gb / elapsed;
-
-        float total = 0.0f;
-        for (int t = 0; t < num_threads; t++) {
-            total += partials[t];
-        }
-
-        printf("%7d  %12.4f  %17.2f\n", num_threads, elapsed, throughput);
-        printf("  Sum: %.6f\n", total);
-    }
-
-    free(partials);
-    me_free(expr);
-    free(data);
+    return (get_time() - start) / iterations;
 }
 
 int main(void) {
@@ -235,26 +212,123 @@ int main(void) {
     printf("MiniExpr Reduction Benchmark (Multi-threaded)\n");
     printf("===================================================\n");
 
-    const size_t total_bytes = 1024ULL * 1024ULL * 1024ULL;
+    const size_t total_elems = 16ULL * 1024ULL * 1024ULL;
     const int iterations = 4;
 
-    size_t elems_int32 = total_bytes / sizeof(int32_t);
-    size_t elems_float32 = total_bytes / sizeof(float);
-
-    if (elems_int32 > (size_t)INT_MAX || elems_float32 > (size_t)INT_MAX) {
+    if (total_elems > (size_t)INT_MAX) {
         printf("ERROR: Dataset too large for int-sized nitems\n");
         return 1;
     }
 
-    printf("Total working set: %.2f GB\n", (double)total_bytes / 1e9);
+    printf("Total elements per run: %zu\n", total_elems);
     printf("Iterations: %d\n", iterations);
 
-    benchmark_sum_threads_int32(elems_int32, iterations);
-    benchmark_sum_threads_float32(elems_float32, iterations);
+    int32_t *data_int32 = malloc(total_elems * sizeof(int32_t));
+    float *data_float32 = malloc(total_elems * sizeof(float));
+    if (!data_int32 || !data_float32) {
+        printf("Allocation failed for data arrays\n");
+        free(data_int32);
+        free(data_float32);
+        return 1;
+    }
 
-    printf("\n===================================================\n");
-    printf("Benchmark complete\n");
-    printf("===================================================\n");
+    for (size_t i = 0; i < total_elems; i++) {
+        data_int32[i] = (int32_t)(i % 97);
+        data_float32[i] = (float)(i % 97) * 0.25f;
+    }
+
+    me_variable vars_int32[] = {{"x", ME_INT32, data_int32}};
+    me_variable vars_float32[] = {{"x", ME_FLOAT32, data_float32}};
+
+    int err = 0;
+    me_expr *expr_int32 = NULL;
+    me_expr *expr_float32 = NULL;
+    int rc_expr = me_compile("sum(x)", vars_int32, 1, ME_AUTO, &err, &expr_int32);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("Failed to compile sum(x) for int32 (err=%d)\n", err);
+        free(data_int32);
+        free(data_float32);
+        return 1;
+    }
+    rc_expr = me_compile("sum(x)", vars_float32, 1, ME_AUTO, &err, &expr_float32);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("Failed to compile sum(x) for float32 (err=%d)\n", err);
+        me_free(expr_int32);
+        free(data_int32);
+        free(data_float32);
+        return 1;
+    }
+
+    me_dtype out_int32 = me_get_dtype(expr_int32);
+    me_dtype out_float32 = me_get_dtype(expr_float32);
+    size_t stride_int32 = dtype_size_local(out_int32);
+    size_t stride_float32 = dtype_size_local(out_float32);
+    if (stride_int32 != sizeof(int64_t) || stride_float32 != sizeof(float)) {
+        printf("Unexpected output dtype for sums: int32=%d float32=%d\n",
+               out_int32, out_float32);
+        me_free(expr_int32);
+        me_free(expr_float32);
+        free(data_int32);
+        free(data_float32);
+        return 1;
+    }
+
+    int64_t *partials_int_me = malloc(MAX_THREADS * sizeof(int64_t));
+    float *partials_float_me = malloc(MAX_THREADS * sizeof(float));
+    int64_t *partials_int_c = malloc(MAX_THREADS * sizeof(int64_t));
+    float *partials_float_c = malloc(MAX_THREADS * sizeof(float));
+    if (!partials_int_me || !partials_float_me || !partials_int_c || !partials_float_c) {
+        printf("Allocation failed for partials\n");
+        free(partials_int_me);
+        free(partials_float_me);
+        free(partials_int_c);
+        free(partials_float_c);
+        me_free(expr_int32);
+        me_free(expr_float32);
+        free(data_int32);
+        free(data_float32);
+        return 1;
+    }
+
+    double data_gb = (double)(total_elems * sizeof(int32_t)) / 1e9;
+
+    printf("\n========================================\n");
+    printf("Summary (GB/s)\n");
+    printf("========================================\n");
+    printf("Threads Int32 ME Int32 C  F32 ME   F32 C\n");
+
+    for (int num_threads = 1; num_threads <= MAX_THREADS; num_threads++) {
+        double me_int = run_benchmark(expr_int32, data_int32, sizeof(int32_t),
+                                      stride_int32, (int)total_elems,
+                                      num_threads, iterations, partials_int_me);
+        double c_int = run_benchmark_c_int32(data_int32, (int)total_elems,
+                                             num_threads, iterations, partials_int_c);
+        double me_f32 = run_benchmark(expr_float32, data_float32, sizeof(float),
+                                      stride_float32, (int)total_elems,
+                                      num_threads, iterations, partials_float_me);
+        double c_f32 = run_benchmark_c_float32(data_float32, (int)total_elems,
+                                               num_threads, iterations, partials_float_c);
+
+        printf("%6d  %8.2f %7.2f %7.2f %7.2f\n",
+               num_threads,
+               data_gb / me_int,
+               data_gb / c_int,
+               data_gb / me_f32,
+               data_gb / c_f32);
+    }
+
+    printf("========================================\n");
+    printf("Benchmark complete!\n");
+    printf("========================================\n");
+
+    free(partials_int_me);
+    free(partials_float_me);
+    free(partials_int_c);
+    free(partials_float_c);
+    me_free(expr_int32);
+    me_free(expr_float32);
+    free(data_int32);
+    free(data_float32);
 
     return 0;
 }
