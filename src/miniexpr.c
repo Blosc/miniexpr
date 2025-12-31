@@ -1122,12 +1122,16 @@ static double divide(double a, double b) { return a / b; }
 static double negate(double a) { return -a; }
 static volatile double sum_salt = 0.0;
 static volatile double prod_salt = 1.0;
+static volatile double min_salt = 0.0;
+static volatile double max_salt = 0.0;
+static volatile double any_salt = 0.0;
+static volatile double all_salt = 0.0;
 static double sum_reduce(double x) { return x + sum_salt; }
 static double prod_reduce(double x) { return x * prod_salt; }
-static double any_reduce(double x) { return x; }
-static double all_reduce(double x) { return x; }
-static double min_reduce(double x) { return x; }
-static double max_reduce(double x) { return x; }
+static double any_reduce(double x) { return x + any_salt; }
+static double all_reduce(double x) { return x * (1.0 + all_salt); }
+static double min_reduce(double x) { return x + min_salt; }
+static double max_reduce(double x) { return x - max_salt; }
 
 static float reduce_min_float32_nan_safe(const float* data, int nitems) {
     if (nitems <= 0) return INFINITY;
