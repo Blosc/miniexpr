@@ -91,6 +91,25 @@ miniexpr supports various data types through the `me_dtype` enumeration:
 - Floating point: `ME_FLOAT32`, `ME_FLOAT64`
 - Complex numbers: `ME_COMPLEX64`, `ME_COMPLEX128`
 
+## Reductions
+
+miniexpr provides scalar reductions over a single variable or constant:
+- `sum(x)`, `prod(x)` (sum/product)
+- `min(x)`, `max(x)`
+- `any(x)`, `all(x)` (truthiness over nonzero values)
+
+**Rules:**
+- The argument must be a single variable or constant (e.g., `sum(x)` is valid, `sum(x + 1)` is not).
+- Reductions must be the full expression (e.g., `sum(x)` is valid, `x + sum(x)` is not).
+
+**Result types:**
+- `sum`/`prod`: integer inputs promote to 64-bit (`int64`/`uint64`); floats keep their type.
+- `min`/`max`: same dtype as the input.
+- `any`/`all`: `bool` output for any input type (nonzero is true).
+
+**Floating-point NaNs:**
+- `min`/`max` propagate NaNs if any element is NaN.
+
 ## Usage
 
 To use miniexpr in your project, simply include the source files (`miniexpr.c` and `miniexpr.h`) directly in your build system.

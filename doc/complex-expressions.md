@@ -139,6 +139,7 @@ miniexpr supports many standard mathematical functions:
 - Exponential/Logarithmic: `exp`, `log`, `log10`, `pow`
 - Power/Root: `sqrt`, `pow`, `abs`
 - Rounding: `floor`, `ceil`
+- Reductions: `sum`, `prod`, `min`, `max`, `any`, `all`
 - And more...
 
 These can be combined freely to create sophisticated mathematical expressions.
