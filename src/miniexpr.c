@@ -491,15 +491,20 @@ static bool is_complex_dtype(me_dtype dt) {
     return dt == ME_COMPLEX64 || dt == ME_COMPLEX128;
 }
 
-static me_dtype reduction_output_dtype(me_dtype dt) {
-    if (dt == ME_BOOL) {
-        return ME_INT64;
-    }
-    if (dt >= ME_UINT8 && dt <= ME_UINT64) {
-        return ME_UINT64;
-    }
-    if (dt >= ME_INT8 && dt <= ME_INT64) {
-        return ME_INT64;
+static double sum_reduce(double x);
+static double prod_reduce(double x);
+
+static me_dtype reduction_output_dtype(me_dtype dt, const void* func) {
+    if (func == (void*)sum_reduce || func == (void*)prod_reduce) {
+        if (dt == ME_BOOL) {
+            return ME_INT64;
+        }
+        if (dt >= ME_UINT8 && dt <= ME_UINT64) {
+            return ME_UINT64;
+        }
+        if (dt >= ME_INT8 && dt <= ME_INT64) {
+            return ME_INT64;
+        }
     }
     return dt;
 }
@@ -565,13 +570,16 @@ static double real_wrapper(double x);
 static double round_wrapper(double x);
 static double sum_reduce(double x);
 static double prod_reduce(double x);
+static double min_reduce(double x);
+static double max_reduce(double x);
 static double sign(double x);
 static double square(double x);
 static double trunc_wrapper(double x);
 static double where_scalar(double c, double x, double y);
 
 static bool is_reduction_function(const void* func) {
-    return func == (void*)sum_reduce || func == (void*)prod_reduce;
+    return func == (void*)sum_reduce || func == (void*)prod_reduce ||
+        func == (void*)min_reduce || func == (void*)max_reduce;
 }
 
 static bool is_reduction_node(const me_expr* n) {
@@ -618,6 +626,11 @@ static bool reduction_usage_is_valid(const me_expr* n) {
     if (!is_reduction_node(n)) return false;
     me_expr* arg = (me_expr*)n->parameters[0];
     if (!arg) return false;
+    if (n->function == (void*)min_reduce || n->function == (void*)max_reduce) {
+        if (arg->dtype == ME_COMPLEX64 || arg->dtype == ME_COMPLEX128) {
+            return false;
+        }
+    }
     return TYPE_MASK(arg->type) == ME_VARIABLE || TYPE_MASK(arg->type) == ME_CONSTANT;
 }
 
@@ -651,7 +664,7 @@ static me_dtype infer_result_type(const me_expr* n) {
         {
             if (is_reduction_node(n)) {
                 me_dtype param_type = infer_result_type((const me_expr*)n->parameters[0]);
-                return reduction_output_dtype(param_type);
+                return reduction_output_dtype(param_type, n->function);
             }
             // Special case: imag() and real() return real type from complex input
             if (IS_FUNCTION(n->type) && ARITY(n->type) == 1) {
@@ -718,7 +731,7 @@ static me_dtype infer_output_type(const me_expr* n) {
         {
             if (is_reduction_node(n)) {
                 me_dtype param_type = infer_output_type((const me_expr*)n->parameters[0]);
-                return reduction_output_dtype(param_type);
+                return reduction_output_dtype(param_type, n->function);
             }
             // Special case: imag() and real() return real type from complex input
             if (IS_FUNCTION(n->type) && ARITY(n->type) == 1) {
@@ -1033,6 +1046,8 @@ static const me_variable functions[] = {
     {"log1p", 0, log1p_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"log2", 0, log2_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"logaddexp", 0, logaddexp, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"max", 0, max_reduce, ME_FUNCTION1, 0},
+    {"min", 0, min_reduce, ME_FUNCTION1, 0},
     {"ncr", 0, ncr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"npr", 0, npr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"pi", 0, pi, ME_FUNCTION0 | ME_FLAG_PURE, 0},
@@ -1099,6 +1114,454 @@ static volatile double sum_salt = 0.0;
 static volatile double prod_salt = 1.0;
 static double sum_reduce(double x) { return x + sum_salt; }
 static double prod_reduce(double x) { return x * prod_salt; }
+static double min_reduce(double x) { return x; }
+static double max_reduce(double x) { return x; }
+
+static float reduce_min_float32_nan_safe(const float* data, int nitems) {
+    if (nitems <= 0) return INFINITY;
+#if defined(__AVX__) || defined(__AVX2__)
+    int i = 0;
+    __m256 vmin = _mm256_set1_ps(INFINITY);
+    __m256 vnan = _mm256_setzero_ps();
+    const int limit = nitems & ~7;
+    for (; i < limit; i += 8) {
+        __m256 v = _mm256_loadu_ps(data + i);
+        vnan = _mm256_or_ps(vnan, _mm256_cmp_ps(v, v, _CMP_UNORD_Q));
+        vmin = _mm256_min_ps(vmin, v);
+    }
+    __m128 low = _mm256_castps256_ps128(vmin);
+    __m128 high = _mm256_extractf128_ps(vmin, 1);
+    __m128 min128 = _mm_min_ps(low, high);
+    __m128 tmp = _mm_min_ps(min128, _mm_movehl_ps(min128, min128));
+    tmp = _mm_min_ss(tmp, _mm_shuffle_ps(tmp, tmp, 1));
+    float acc = _mm_cvtss_f32(tmp);
+    if (_mm256_movemask_ps(vnan)) return NAN;
+    for (; i < nitems; i++) {
+        float v = data[i];
+        if (v != v) return v;
+        if (v < acc) acc = v;
+    }
+    return acc;
+#elif defined(__SSE__)
+    int i = 0;
+    __m128 vmin = _mm_set1_ps(INFINITY);
+    __m128 vnan = _mm_setzero_ps();
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        __m128 v = _mm_loadu_ps(data + i);
+        vnan = _mm_or_ps(vnan, _mm_cmpunord_ps(v, v));
+        vmin = _mm_min_ps(vmin, v);
+    }
+    __m128 tmp = _mm_min_ps(vmin, _mm_movehl_ps(vmin, vmin));
+    tmp = _mm_min_ss(tmp, _mm_shuffle_ps(tmp, tmp, 1));
+    float acc = _mm_cvtss_f32(tmp);
+    if (_mm_movemask_ps(vnan)) return NAN;
+    for (; i < nitems; i++) {
+        float v = data[i];
+        if (v != v) return v;
+        if (v < acc) acc = v;
+    }
+    return acc;
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    int i = 0;
+    float32x4_t vmin = vdupq_n_f32(INFINITY);
+    uint32x4_t vnan = vdupq_n_u32(0);
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        float32x4_t v = vld1q_f32(data + i);
+        uint32x4_t eq = vceqq_f32(v, v);
+        vnan = vorrq_u32(vnan, vmvnq_u32(eq));
+        vmin = vminq_f32(vmin, v);
+    }
+#if defined(__aarch64__)
+    float acc = vminvq_f32(vmin);
+#else
+    float32x2_t min2 = vmin_f32(vget_low_f32(vmin), vget_high_f32(vmin));
+    min2 = vpmin_f32(min2, min2);
+    float acc = vget_lane_f32(min2, 0);
+#endif
+    uint32x2_t nan2 = vorr_u32(vget_low_u32(vnan), vget_high_u32(vnan));
+    nan2 = vpadd_u32(nan2, nan2);
+    if (vget_lane_u32(nan2, 0)) return NAN;
+    for (; i < nitems; i++) {
+        float v = data[i];
+        if (v != v) return v;
+        if (v < acc) acc = v;
+    }
+    return acc;
+#else
+    float acc = data[0];
+    for (int i = 0; i < nitems; i++) {
+        float v = data[i];
+        if (v != v) return v;
+        if (v < acc) acc = v;
+    }
+    return acc;
+#endif
+}
+
+static float reduce_max_float32_nan_safe(const float* data, int nitems) {
+    if (nitems <= 0) return -INFINITY;
+#if defined(__AVX__) || defined(__AVX2__)
+    int i = 0;
+    __m256 vmax = _mm256_set1_ps(-INFINITY);
+    __m256 vnan = _mm256_setzero_ps();
+    const int limit = nitems & ~7;
+    for (; i < limit; i += 8) {
+        __m256 v = _mm256_loadu_ps(data + i);
+        vnan = _mm256_or_ps(vnan, _mm256_cmp_ps(v, v, _CMP_UNORD_Q));
+        vmax = _mm256_max_ps(vmax, v);
+    }
+    __m128 low = _mm256_castps256_ps128(vmax);
+    __m128 high = _mm256_extractf128_ps(vmax, 1);
+    __m128 max128 = _mm_max_ps(low, high);
+    __m128 tmp = _mm_max_ps(max128, _mm_movehl_ps(max128, max128));
+    tmp = _mm_max_ss(tmp, _mm_shuffle_ps(tmp, tmp, 1));
+    float acc = _mm_cvtss_f32(tmp);
+    if (_mm256_movemask_ps(vnan)) return NAN;
+    for (; i < nitems; i++) {
+        float v = data[i];
+        if (v != v) return v;
+        if (v > acc) acc = v;
+    }
+    return acc;
+#elif defined(__SSE__)
+    int i = 0;
+    __m128 vmax = _mm_set1_ps(-INFINITY);
+    __m128 vnan = _mm_setzero_ps();
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        __m128 v = _mm_loadu_ps(data + i);
+        vnan = _mm_or_ps(vnan, _mm_cmpunord_ps(v, v));
+        vmax = _mm_max_ps(vmax, v);
+    }
+    __m128 tmp = _mm_max_ps(vmax, _mm_movehl_ps(vmax, vmax));
+    tmp = _mm_max_ss(tmp, _mm_shuffle_ps(tmp, tmp, 1));
+    float acc = _mm_cvtss_f32(tmp);
+    if (_mm_movemask_ps(vnan)) return NAN;
+    for (; i < nitems; i++) {
+        float v = data[i];
+        if (v != v) return v;
+        if (v > acc) acc = v;
+    }
+    return acc;
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    int i = 0;
+    float32x4_t vmax = vdupq_n_f32(-INFINITY);
+    uint32x4_t vnan = vdupq_n_u32(0);
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        float32x4_t v = vld1q_f32(data + i);
+        uint32x4_t eq = vceqq_f32(v, v);
+        vnan = vorrq_u32(vnan, vmvnq_u32(eq));
+        vmax = vmaxq_f32(vmax, v);
+    }
+#if defined(__aarch64__)
+    float acc = vmaxvq_f32(vmax);
+#else
+    float32x2_t max2 = vmax_f32(vget_low_f32(vmax), vget_high_f32(vmax));
+    max2 = vpmax_f32(max2, max2);
+    float acc = vget_lane_f32(max2, 0);
+#endif
+    uint32x2_t nan2 = vorr_u32(vget_low_u32(vnan), vget_high_u32(vnan));
+    nan2 = vpadd_u32(nan2, nan2);
+    if (vget_lane_u32(nan2, 0)) return NAN;
+    for (; i < nitems; i++) {
+        float v = data[i];
+        if (v != v) return v;
+        if (v > acc) acc = v;
+    }
+    return acc;
+#else
+    float acc = data[0];
+    for (int i = 0; i < nitems; i++) {
+        float v = data[i];
+        if (v != v) return v;
+        if (v > acc) acc = v;
+    }
+    return acc;
+#endif
+}
+
+static double reduce_min_float64_nan_safe(const double* data, int nitems) {
+    if (nitems <= 0) return INFINITY;
+#if defined(__AVX__) || defined(__AVX2__)
+    int i = 0;
+    __m256d vmin = _mm256_set1_pd(INFINITY);
+    __m256d vnan = _mm256_setzero_pd();
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        __m256d v = _mm256_loadu_pd(data + i);
+        vnan = _mm256_or_pd(vnan, _mm256_cmp_pd(v, v, _CMP_UNORD_Q));
+        vmin = _mm256_min_pd(vmin, v);
+    }
+    __m128d low = _mm256_castpd256_pd128(vmin);
+    __m128d high = _mm256_extractf128_pd(vmin, 1);
+    __m128d min128 = _mm_min_pd(low, high);
+    min128 = _mm_min_sd(min128, _mm_unpackhi_pd(min128, min128));
+    double acc = _mm_cvtsd_f64(min128);
+    if (_mm256_movemask_pd(vnan)) return NAN;
+    for (; i < nitems; i++) {
+        double v = data[i];
+        if (v != v) return v;
+        if (v < acc) acc = v;
+    }
+    return acc;
+#elif defined(__SSE2__)
+    int i = 0;
+    __m128d vmin = _mm_set1_pd(INFINITY);
+    __m128d vnan = _mm_setzero_pd();
+    const int limit = nitems & ~1;
+    for (; i < limit; i += 2) {
+        __m128d v = _mm_loadu_pd(data + i);
+        vnan = _mm_or_pd(vnan, _mm_cmpunord_pd(v, v));
+        vmin = _mm_min_pd(vmin, v);
+    }
+    vmin = _mm_min_sd(vmin, _mm_unpackhi_pd(vmin, vmin));
+    double acc = _mm_cvtsd_f64(vmin);
+    if (_mm_movemask_pd(vnan)) return NAN;
+    for (; i < nitems; i++) {
+        double v = data[i];
+        if (v != v) return v;
+        if (v < acc) acc = v;
+    }
+    return acc;
+#elif (defined(__ARM_NEON) || defined(__ARM_NEON__)) && defined(__aarch64__)
+    int i = 0;
+    float64x2_t vmin = vdupq_n_f64(INFINITY);
+    uint64x2_t vnan = vdupq_n_u64(0);
+    const int limit = nitems & ~1;
+    for (; i < limit; i += 2) {
+        float64x2_t v = vld1q_f64(data + i);
+        uint64x2_t eq = vceqq_f64(v, v);
+        vnan = vorrq_u64(vnan, veorq_u64(eq, vdupq_n_u64(~0ULL)));
+        vmin = vminq_f64(vmin, v);
+    }
+    double acc = vminvq_f64(vmin);
+    uint64x2_t nan_or = vorrq_u64(vnan, vextq_u64(vnan, vnan, 1));
+    if (vgetq_lane_u64(nan_or, 0)) return NAN;
+    for (; i < nitems; i++) {
+        double v = data[i];
+        if (v != v) return v;
+        if (v < acc) acc = v;
+    }
+    return acc;
+#else
+    double acc = data[0];
+    for (int i = 0; i < nitems; i++) {
+        double v = data[i];
+        if (v != v) return v;
+        if (v < acc) acc = v;
+    }
+    return acc;
+#endif
+}
+
+static double reduce_max_float64_nan_safe(const double* data, int nitems) {
+    if (nitems <= 0) return -INFINITY;
+#if defined(__AVX__) || defined(__AVX2__)
+    int i = 0;
+    __m256d vmax = _mm256_set1_pd(-INFINITY);
+    __m256d vnan = _mm256_setzero_pd();
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        __m256d v = _mm256_loadu_pd(data + i);
+        vnan = _mm256_or_pd(vnan, _mm256_cmp_pd(v, v, _CMP_UNORD_Q));
+        vmax = _mm256_max_pd(vmax, v);
+    }
+    __m128d low = _mm256_castpd256_pd128(vmax);
+    __m128d high = _mm256_extractf128_pd(vmax, 1);
+    __m128d max128 = _mm_max_pd(low, high);
+    max128 = _mm_max_sd(max128, _mm_unpackhi_pd(max128, max128));
+    double acc = _mm_cvtsd_f64(max128);
+    if (_mm256_movemask_pd(vnan)) return NAN;
+    for (; i < nitems; i++) {
+        double v = data[i];
+        if (v != v) return v;
+        if (v > acc) acc = v;
+    }
+    return acc;
+#elif defined(__SSE2__)
+    int i = 0;
+    __m128d vmax = _mm_set1_pd(-INFINITY);
+    __m128d vnan = _mm_setzero_pd();
+    const int limit = nitems & ~1;
+    for (; i < limit; i += 2) {
+        __m128d v = _mm_loadu_pd(data + i);
+        vnan = _mm_or_pd(vnan, _mm_cmpunord_pd(v, v));
+        vmax = _mm_max_pd(vmax, v);
+    }
+    vmax = _mm_max_sd(vmax, _mm_unpackhi_pd(vmax, vmax));
+    double acc = _mm_cvtsd_f64(vmax);
+    if (_mm_movemask_pd(vnan)) return NAN;
+    for (; i < nitems; i++) {
+        double v = data[i];
+        if (v != v) return v;
+        if (v > acc) acc = v;
+    }
+    return acc;
+#elif (defined(__ARM_NEON) || defined(__ARM_NEON__)) && defined(__aarch64__)
+    int i = 0;
+    float64x2_t vmax = vdupq_n_f64(-INFINITY);
+    uint64x2_t vnan = vdupq_n_u64(0);
+    const int limit = nitems & ~1;
+    for (; i < limit; i += 2) {
+        float64x2_t v = vld1q_f64(data + i);
+        uint64x2_t eq = vceqq_f64(v, v);
+        vnan = vorrq_u64(vnan, veorq_u64(eq, vdupq_n_u64(~0ULL)));
+        vmax = vmaxq_f64(vmax, v);
+    }
+    double acc = vmaxvq_f64(vmax);
+    uint64x2_t nan_or = vorrq_u64(vnan, vextq_u64(vnan, vnan, 1));
+    if (vgetq_lane_u64(nan_or, 0)) return NAN;
+    for (; i < nitems; i++) {
+        double v = data[i];
+        if (v != v) return v;
+        if (v > acc) acc = v;
+    }
+    return acc;
+#else
+    double acc = data[0];
+    for (int i = 0; i < nitems; i++) {
+        double v = data[i];
+        if (v != v) return v;
+        if (v > acc) acc = v;
+    }
+    return acc;
+#endif
+}
+
+static int32_t reduce_min_int32(const int32_t* data, int nitems) {
+    if (nitems <= 0) return INT32_MAX;
+#if defined(__AVX2__)
+    int i = 0;
+    __m256i vmin = _mm256_set1_epi32(INT32_MAX);
+    const int limit = nitems & ~7;
+    for (; i < limit; i += 8) {
+        __m256i v = _mm256_loadu_si256((const __m256i*)(data + i));
+        vmin = _mm256_min_epi32(vmin, v);
+    }
+    int32_t tmp[8];
+    _mm256_storeu_si256((__m256i*)tmp, vmin);
+    int32_t acc = tmp[0];
+    for (int j = 1; j < 8; j++) {
+        if (tmp[j] < acc) acc = tmp[j];
+    }
+    for (; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+#elif defined(__SSE4_1__)
+    int i = 0;
+    __m128i vmin = _mm_set1_epi32(INT32_MAX);
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        __m128i v = _mm_loadu_si128((const __m128i*)(data + i));
+        vmin = _mm_min_epi32(vmin, v);
+    }
+    int32_t tmp[4];
+    _mm_storeu_si128((__m128i*)tmp, vmin);
+    int32_t acc = tmp[0];
+    for (int j = 1; j < 4; j++) {
+        if (tmp[j] < acc) acc = tmp[j];
+    }
+    for (; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    int i = 0;
+    int32x4_t vmin = vdupq_n_s32(INT32_MAX);
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        int32x4_t v = vld1q_s32(data + i);
+        vmin = vminq_s32(vmin, v);
+    }
+#if defined(__aarch64__)
+    int32_t acc = vminvq_s32(vmin);
+#else
+    int32x2_t min2 = vmin_s32(vget_low_s32(vmin), vget_high_s32(vmin));
+    min2 = vpmin_s32(min2, min2);
+    int32_t acc = vget_lane_s32(min2, 0);
+#endif
+    for (; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+#else
+    int32_t acc = data[0];
+    for (int i = 1; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+#endif
+}
+
+static int32_t reduce_max_int32(const int32_t* data, int nitems) {
+    if (nitems <= 0) return INT32_MIN;
+#if defined(__AVX2__)
+    int i = 0;
+    __m256i vmax = _mm256_set1_epi32(INT32_MIN);
+    const int limit = nitems & ~7;
+    for (; i < limit; i += 8) {
+        __m256i v = _mm256_loadu_si256((const __m256i*)(data + i));
+        vmax = _mm256_max_epi32(vmax, v);
+    }
+    int32_t tmp[8];
+    _mm256_storeu_si256((__m256i*)tmp, vmax);
+    int32_t acc = tmp[0];
+    for (int j = 1; j < 8; j++) {
+        if (tmp[j] > acc) acc = tmp[j];
+    }
+    for (; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+#elif defined(__SSE4_1__)
+    int i = 0;
+    __m128i vmax = _mm_set1_epi32(INT32_MIN);
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        __m128i v = _mm_loadu_si128((const __m128i*)(data + i));
+        vmax = _mm_max_epi32(vmax, v);
+    }
+    int32_t tmp[4];
+    _mm_storeu_si128((__m128i*)tmp, vmax);
+    int32_t acc = tmp[0];
+    for (int j = 1; j < 4; j++) {
+        if (tmp[j] > acc) acc = tmp[j];
+    }
+    for (; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    int i = 0;
+    int32x4_t vmax = vdupq_n_s32(INT32_MIN);
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        int32x4_t v = vld1q_s32(data + i);
+        vmax = vmaxq_s32(vmax, v);
+    }
+#if defined(__aarch64__)
+    int32_t acc = vmaxvq_s32(vmax);
+#else
+    int32x2_t max2 = vmax_s32(vget_low_s32(vmax), vget_high_s32(vmax));
+    max2 = vpmax_s32(max2, max2);
+    int32_t acc = vget_lane_s32(max2, 0);
+#endif
+    for (; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+#else
+    int32_t acc = data[0];
+    for (int i = 1; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+#endif
+}
 
 static float reduce_prod_float32_nan_safe(const float* data, int nitems) {
     if (nitems <= 0) return 1.0f;
@@ -3511,9 +3974,11 @@ static void eval_reduction(const me_expr* n) {
 
     const int nitems = n->nitems;
     me_dtype arg_type = arg->dtype;
-    me_dtype result_type = reduction_output_dtype(arg_type);
+    me_dtype result_type = reduction_output_dtype(arg_type, n->function);
     me_dtype output_type = n->dtype;
     bool is_prod = n->function == (void*)prod_reduce;
+    bool is_min = n->function == (void*)min_reduce;
+    bool is_max = n->function == (void*)max_reduce;
 
     void* write_ptr = n->output;
     void* temp_output = NULL;
@@ -3525,111 +3990,208 @@ static void eval_reduction(const me_expr* n) {
 
     if (arg->type == ME_CONSTANT) {
         double val = arg->value;
-        switch (arg_type) {
-        case ME_BOOL:
-        case ME_INT8:
-        case ME_INT16:
-        case ME_INT32:
-        case ME_INT64:
-            {
-                int64_t acc = is_prod ? 1 : 0;
-                if (nitems == 0) {
-                    acc = is_prod ? 1 : 0;
+        if (is_min || is_max) {
+            switch (arg_type) {
+            case ME_BOOL:
+                {
+                    bool acc = is_min;
+                    if (nitems > 0) {
+                        acc = (bool)val;
+                    }
+                    ((bool*)write_ptr)[0] = acc;
+                    break;
                 }
-                else if (is_prod) {
-                    int64_t v = (int64_t)val;
-                    for (int i = 0; i < nitems; i++) acc *= v;
+            case ME_INT8:
+                {
+                    int8_t acc = (int8_t)(is_min ? INT8_MAX : INT8_MIN);
+                    if (nitems > 0) acc = (int8_t)val;
+                    ((int8_t*)write_ptr)[0] = acc;
+                    break;
                 }
-                else {
-                    acc = (int64_t)val * (int64_t)nitems;
+            case ME_INT16:
+                {
+                    int16_t acc = (int16_t)(is_min ? INT16_MAX : INT16_MIN);
+                    if (nitems > 0) acc = (int16_t)val;
+                    ((int16_t*)write_ptr)[0] = acc;
+                    break;
                 }
-                ((int64_t*)write_ptr)[0] = acc;
+            case ME_INT32:
+                {
+                    int32_t acc = (int32_t)(is_min ? INT32_MAX : INT32_MIN);
+                    if (nitems > 0) acc = (int32_t)val;
+                    ((int32_t*)write_ptr)[0] = acc;
+                    break;
+                }
+            case ME_INT64:
+                {
+                    int64_t acc = is_min ? INT64_MAX : INT64_MIN;
+                    if (nitems > 0) acc = (int64_t)val;
+                    ((int64_t*)write_ptr)[0] = acc;
+                    break;
+                }
+            case ME_UINT8:
+                {
+                    uint8_t acc = is_min ? UINT8_MAX : 0;
+                    if (nitems > 0) acc = (uint8_t)val;
+                    ((uint8_t*)write_ptr)[0] = acc;
+                    break;
+                }
+            case ME_UINT16:
+                {
+                    uint16_t acc = is_min ? UINT16_MAX : 0;
+                    if (nitems > 0) acc = (uint16_t)val;
+                    ((uint16_t*)write_ptr)[0] = acc;
+                    break;
+                }
+            case ME_UINT32:
+                {
+                    uint32_t acc = is_min ? UINT32_MAX : 0;
+                    if (nitems > 0) acc = (uint32_t)val;
+                    ((uint32_t*)write_ptr)[0] = acc;
+                    break;
+                }
+            case ME_UINT64:
+                {
+                    uint64_t acc = is_min ? UINT64_MAX : 0;
+                    if (nitems > 0) acc = (uint64_t)val;
+                    ((uint64_t*)write_ptr)[0] = acc;
+                    break;
+                }
+            case ME_FLOAT32:
+                {
+                    float acc = is_min ? INFINITY : -INFINITY;
+                    if (nitems > 0) acc = (float)val;
+                    ((float*)write_ptr)[0] = acc;
+                    break;
+                }
+            case ME_FLOAT64:
+                {
+                    double acc = is_min ? INFINITY : -INFINITY;
+                    if (nitems > 0) acc = val;
+                    ((double*)write_ptr)[0] = acc;
+                    break;
+                }
+            case ME_COMPLEX64:
+                {
+                    ((float _Complex*)write_ptr)[0] = (float _Complex)0.0f;
+                    break;
+                }
+            case ME_COMPLEX128:
+                {
+                    ((double _Complex*)write_ptr)[0] = (double _Complex)0.0;
+                    break;
+                }
+            default:
                 break;
             }
-        case ME_UINT8:
-        case ME_UINT16:
-        case ME_UINT32:
-        case ME_UINT64:
-            {
-                uint64_t acc = is_prod ? 1 : 0;
-                if (nitems == 0) {
-                    acc = is_prod ? 1 : 0;
+        }
+        else {
+            switch (arg_type) {
+            case ME_BOOL:
+            case ME_INT8:
+            case ME_INT16:
+            case ME_INT32:
+            case ME_INT64:
+                {
+                    int64_t acc = is_prod ? 1 : 0;
+                    if (nitems == 0) {
+                        acc = is_prod ? 1 : 0;
+                    }
+                    else if (is_prod) {
+                        int64_t v = (int64_t)val;
+                        for (int i = 0; i < nitems; i++) acc *= v;
+                    }
+                    else {
+                        acc = (int64_t)val * (int64_t)nitems;
+                    }
+                    ((int64_t*)write_ptr)[0] = acc;
+                    break;
                 }
-                else if (is_prod) {
-                    uint64_t v = (uint64_t)val;
-                    for (int i = 0; i < nitems; i++) acc *= v;
+            case ME_UINT8:
+            case ME_UINT16:
+            case ME_UINT32:
+            case ME_UINT64:
+                {
+                    uint64_t acc = is_prod ? 1 : 0;
+                    if (nitems == 0) {
+                        acc = is_prod ? 1 : 0;
+                    }
+                    else if (is_prod) {
+                        uint64_t v = (uint64_t)val;
+                        for (int i = 0; i < nitems; i++) acc *= v;
+                    }
+                    else {
+                        acc = (uint64_t)val * (uint64_t)nitems;
+                    }
+                    ((uint64_t*)write_ptr)[0] = acc;
+                    break;
                 }
-                else {
-                    acc = (uint64_t)val * (uint64_t)nitems;
+            case ME_FLOAT32:
+                {
+                    float acc = is_prod ? 1.0f : 0.0f;
+                    if (nitems == 0) {
+                        acc = is_prod ? 1.0f : 0.0f;
+                    }
+                    else if (is_prod) {
+                        float v = (float)val;
+                        for (int i = 0; i < nitems; i++) acc *= v;
+                    }
+                    else {
+                        acc = (float)val * (float)nitems;
+                    }
+                    ((float*)write_ptr)[0] = acc;
+                    break;
                 }
-                ((uint64_t*)write_ptr)[0] = acc;
+            case ME_FLOAT64:
+                {
+                    double acc = is_prod ? 1.0 : 0.0;
+                    if (nitems == 0) {
+                        acc = is_prod ? 1.0 : 0.0;
+                    }
+                    else if (is_prod) {
+                        for (int i = 0; i < nitems; i++) acc *= val;
+                    }
+                    else {
+                        acc = val * (double)nitems;
+                    }
+                    ((double*)write_ptr)[0] = acc;
+                    break;
+                }
+            case ME_COMPLEX64:
+                {
+                    float _Complex acc = is_prod ? (float _Complex)1.0f : (float _Complex)0.0f;
+                    float _Complex v = (float _Complex)val;
+                    if (nitems == 0) {
+                        acc = is_prod ? (float _Complex)1.0f : (float _Complex)0.0f;
+                    }
+                    else if (is_prod) {
+                        for (int i = 0; i < nitems; i++) acc *= v;
+                    }
+                    else {
+                        acc = v * (float)nitems;
+                    }
+                    ((float _Complex*)write_ptr)[0] = acc;
+                    break;
+                }
+            case ME_COMPLEX128:
+                {
+                    double _Complex acc = is_prod ? (double _Complex)1.0 : (double _Complex)0.0;
+                    double _Complex v = (double _Complex)val;
+                    if (nitems == 0) {
+                        acc = is_prod ? (double _Complex)1.0 : (double _Complex)0.0;
+                    }
+                    else if (is_prod) {
+                        for (int i = 0; i < nitems; i++) acc *= v;
+                    }
+                    else {
+                        acc = v * (double)nitems;
+                    }
+                    ((double _Complex*)write_ptr)[0] = acc;
+                    break;
+                }
+            default:
                 break;
             }
-        case ME_FLOAT32:
-            {
-                float acc = is_prod ? 1.0f : 0.0f;
-                if (nitems == 0) {
-                    acc = is_prod ? 1.0f : 0.0f;
-                }
-                else if (is_prod) {
-                    float v = (float)val;
-                    for (int i = 0; i < nitems; i++) acc *= v;
-                }
-                else {
-                    acc = (float)val * (float)nitems;
-                }
-                ((float*)write_ptr)[0] = acc;
-                break;
-            }
-        case ME_FLOAT64:
-            {
-                double acc = is_prod ? 1.0 : 0.0;
-                if (nitems == 0) {
-                    acc = is_prod ? 1.0 : 0.0;
-                }
-                else if (is_prod) {
-                    for (int i = 0; i < nitems; i++) acc *= val;
-                }
-                else {
-                    acc = val * (double)nitems;
-                }
-                ((double*)write_ptr)[0] = acc;
-                break;
-            }
-        case ME_COMPLEX64:
-            {
-                float _Complex acc = is_prod ? (float _Complex)1.0f : (float _Complex)0.0f;
-                float _Complex v = (float _Complex)val;
-                if (nitems == 0) {
-                    acc = is_prod ? (float _Complex)1.0f : (float _Complex)0.0f;
-                }
-                else if (is_prod) {
-                    for (int i = 0; i < nitems; i++) acc *= v;
-                }
-                else {
-                    acc = v * (float)nitems;
-                }
-                ((float _Complex*)write_ptr)[0] = acc;
-                break;
-            }
-        case ME_COMPLEX128:
-            {
-                double _Complex acc = is_prod ? (double _Complex)1.0 : (double _Complex)0.0;
-                double _Complex v = (double _Complex)val;
-                if (nitems == 0) {
-                    acc = is_prod ? (double _Complex)1.0 : (double _Complex)0.0;
-                }
-                else if (is_prod) {
-                    for (int i = 0; i < nitems; i++) acc *= v;
-                }
-                else {
-                    acc = v * (double)nitems;
-                }
-                ((double _Complex*)write_ptr)[0] = acc;
-                break;
-            }
-        default:
-            break;
         }
     }
     else if (arg->type == ME_VARIABLE) {
@@ -3637,153 +4199,299 @@ static void eval_reduction(const me_expr* n) {
         case ME_BOOL:
             {
                 const bool* data = (const bool*)arg->bound;
-                int64_t acc = is_prod ? 1 : 0;
-                if (nitems == 0) {
-                    acc = is_prod ? 1 : 0;
-                }
-                else if (is_prod) {
-                    for (int i = 0; i < nitems; i++) acc *= data[i] ? 1 : 0;
+                if (is_min || is_max) {
+                    bool acc = is_min;
+                    if (nitems > 0) {
+                        acc = data[0];
+                        for (int i = 1; i < nitems; i++) {
+                            acc = is_min ? (acc && data[i]) : (acc || data[i]);
+                        }
+                    }
+                    ((bool*)write_ptr)[0] = acc;
                 }
                 else {
-                    for (int i = 0; i < nitems; i++) acc += data[i] ? 1 : 0;
+                    int64_t acc = is_prod ? 1 : 0;
+                    if (nitems == 0) {
+                        acc = is_prod ? 1 : 0;
+                    }
+                    else if (is_prod) {
+                        for (int i = 0; i < nitems; i++) acc *= data[i] ? 1 : 0;
+                    }
+                    else {
+                        for (int i = 0; i < nitems; i++) acc += data[i] ? 1 : 0;
+                    }
+                    ((int64_t*)write_ptr)[0] = acc;
                 }
-                ((int64_t*)write_ptr)[0] = acc;
                 break;
             }
         case ME_INT8:
             {
                 const int8_t* data = (const int8_t*)arg->bound;
-                int64_t acc = is_prod ? 1 : 0;
-                if (nitems == 0) {
-                    acc = is_prod ? 1 : 0;
-                }
-                else if (is_prod) {
-                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                if (is_min || is_max) {
+                    int8_t acc = is_min ? INT8_MAX : INT8_MIN;
+                    if (nitems > 0) {
+                        acc = data[0];
+                        for (int i = 1; i < nitems; i++) {
+                            if (is_min) {
+                                if (data[i] < acc) acc = data[i];
+                            }
+                            else {
+                                if (data[i] > acc) acc = data[i];
+                            }
+                        }
+                    }
+                    ((int8_t*)write_ptr)[0] = acc;
                 }
                 else {
-                    for (int i = 0; i < nitems; i++) acc += data[i];
+                    int64_t acc = is_prod ? 1 : 0;
+                    if (nitems == 0) {
+                        acc = is_prod ? 1 : 0;
+                    }
+                    else if (is_prod) {
+                        for (int i = 0; i < nitems; i++) acc *= data[i];
+                    }
+                    else {
+                        for (int i = 0; i < nitems; i++) acc += data[i];
+                    }
+                    ((int64_t*)write_ptr)[0] = acc;
                 }
-                ((int64_t*)write_ptr)[0] = acc;
                 break;
             }
         case ME_INT16:
             {
                 const int16_t* data = (const int16_t*)arg->bound;
-                int64_t acc = is_prod ? 1 : 0;
-                if (nitems == 0) {
-                    acc = is_prod ? 1 : 0;
-                }
-                else if (is_prod) {
-                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                if (is_min || is_max) {
+                    int16_t acc = is_min ? INT16_MAX : INT16_MIN;
+                    if (nitems > 0) {
+                        acc = data[0];
+                        for (int i = 1; i < nitems; i++) {
+                            if (is_min) {
+                                if (data[i] < acc) acc = data[i];
+                            }
+                            else {
+                                if (data[i] > acc) acc = data[i];
+                            }
+                        }
+                    }
+                    ((int16_t*)write_ptr)[0] = acc;
                 }
                 else {
-                    for (int i = 0; i < nitems; i++) acc += data[i];
+                    int64_t acc = is_prod ? 1 : 0;
+                    if (nitems == 0) {
+                        acc = is_prod ? 1 : 0;
+                    }
+                    else if (is_prod) {
+                        for (int i = 0; i < nitems; i++) acc *= data[i];
+                    }
+                    else {
+                        for (int i = 0; i < nitems; i++) acc += data[i];
+                    }
+                    ((int64_t*)write_ptr)[0] = acc;
                 }
-                ((int64_t*)write_ptr)[0] = acc;
                 break;
             }
         case ME_INT32:
             {
                 const int32_t* data = (const int32_t*)arg->bound;
-                int64_t acc = is_prod ? 1 : 0;
-                if (nitems == 0) {
-                    acc = is_prod ? 1 : 0;
-                }
-                else if (is_prod) {
-                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                if (is_min || is_max) {
+                    int32_t acc = is_min ? reduce_min_int32(data, nitems) :
+                        reduce_max_int32(data, nitems);
+                    ((int32_t*)write_ptr)[0] = acc;
                 }
                 else {
-                    for (int i = 0; i < nitems; i++) acc += data[i];
+                    int64_t acc = is_prod ? 1 : 0;
+                    if (nitems == 0) {
+                        acc = is_prod ? 1 : 0;
+                    }
+                    else if (is_prod) {
+                        for (int i = 0; i < nitems; i++) acc *= data[i];
+                    }
+                    else {
+                        for (int i = 0; i < nitems; i++) acc += data[i];
+                    }
+                    ((int64_t*)write_ptr)[0] = acc;
                 }
-                ((int64_t*)write_ptr)[0] = acc;
                 break;
             }
         case ME_INT64:
             {
                 const int64_t* data = (const int64_t*)arg->bound;
-                int64_t acc = is_prod ? 1 : 0;
-                if (nitems == 0) {
-                    acc = is_prod ? 1 : 0;
-                }
-                else if (is_prod) {
-                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                if (is_min || is_max) {
+                    int64_t acc = is_min ? INT64_MAX : INT64_MIN;
+                    if (nitems > 0) {
+                        acc = data[0];
+                        for (int i = 1; i < nitems; i++) {
+                            if (is_min) {
+                                if (data[i] < acc) acc = data[i];
+                            }
+                            else {
+                                if (data[i] > acc) acc = data[i];
+                            }
+                        }
+                    }
+                    ((int64_t*)write_ptr)[0] = acc;
                 }
                 else {
-                    for (int i = 0; i < nitems; i++) acc += data[i];
+                    int64_t acc = is_prod ? 1 : 0;
+                    if (nitems == 0) {
+                        acc = is_prod ? 1 : 0;
+                    }
+                    else if (is_prod) {
+                        for (int i = 0; i < nitems; i++) acc *= data[i];
+                    }
+                    else {
+                        for (int i = 0; i < nitems; i++) acc += data[i];
+                    }
+                    ((int64_t*)write_ptr)[0] = acc;
                 }
-                ((int64_t*)write_ptr)[0] = acc;
                 break;
             }
         case ME_UINT8:
             {
                 const uint8_t* data = (const uint8_t*)arg->bound;
-                uint64_t acc = is_prod ? 1 : 0;
-                if (nitems == 0) {
-                    acc = is_prod ? 1 : 0;
-                }
-                else if (is_prod) {
-                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                if (is_min || is_max) {
+                    uint8_t acc = is_min ? UINT8_MAX : 0;
+                    if (nitems > 0) {
+                        acc = data[0];
+                        for (int i = 1; i < nitems; i++) {
+                            if (is_min) {
+                                if (data[i] < acc) acc = data[i];
+                            }
+                            else {
+                                if (data[i] > acc) acc = data[i];
+                            }
+                        }
+                    }
+                    ((uint8_t*)write_ptr)[0] = acc;
                 }
                 else {
-                    for (int i = 0; i < nitems; i++) acc += data[i];
+                    uint64_t acc = is_prod ? 1 : 0;
+                    if (nitems == 0) {
+                        acc = is_prod ? 1 : 0;
+                    }
+                    else if (is_prod) {
+                        for (int i = 0; i < nitems; i++) acc *= data[i];
+                    }
+                    else {
+                        for (int i = 0; i < nitems; i++) acc += data[i];
+                    }
+                    ((uint64_t*)write_ptr)[0] = acc;
                 }
-                ((uint64_t*)write_ptr)[0] = acc;
                 break;
             }
         case ME_UINT16:
             {
                 const uint16_t* data = (const uint16_t*)arg->bound;
-                uint64_t acc = is_prod ? 1 : 0;
-                if (nitems == 0) {
-                    acc = is_prod ? 1 : 0;
-                }
-                else if (is_prod) {
-                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                if (is_min || is_max) {
+                    uint16_t acc = is_min ? UINT16_MAX : 0;
+                    if (nitems > 0) {
+                        acc = data[0];
+                        for (int i = 1; i < nitems; i++) {
+                            if (is_min) {
+                                if (data[i] < acc) acc = data[i];
+                            }
+                            else {
+                                if (data[i] > acc) acc = data[i];
+                            }
+                        }
+                    }
+                    ((uint16_t*)write_ptr)[0] = acc;
                 }
                 else {
-                    for (int i = 0; i < nitems; i++) acc += data[i];
+                    uint64_t acc = is_prod ? 1 : 0;
+                    if (nitems == 0) {
+                        acc = is_prod ? 1 : 0;
+                    }
+                    else if (is_prod) {
+                        for (int i = 0; i < nitems; i++) acc *= data[i];
+                    }
+                    else {
+                        for (int i = 0; i < nitems; i++) acc += data[i];
+                    }
+                    ((uint64_t*)write_ptr)[0] = acc;
                 }
-                ((uint64_t*)write_ptr)[0] = acc;
                 break;
             }
         case ME_UINT32:
             {
                 const uint32_t* data = (const uint32_t*)arg->bound;
-                uint64_t acc = is_prod ? 1 : 0;
-                if (nitems == 0) {
-                    acc = is_prod ? 1 : 0;
-                }
-                else if (is_prod) {
-                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                if (is_min || is_max) {
+                    uint32_t acc = is_min ? UINT32_MAX : 0;
+                    if (nitems > 0) {
+                        acc = data[0];
+                        for (int i = 1; i < nitems; i++) {
+                            if (is_min) {
+                                if (data[i] < acc) acc = data[i];
+                            }
+                            else {
+                                if (data[i] > acc) acc = data[i];
+                            }
+                        }
+                    }
+                    ((uint32_t*)write_ptr)[0] = acc;
                 }
                 else {
-                    for (int i = 0; i < nitems; i++) acc += data[i];
+                    uint64_t acc = is_prod ? 1 : 0;
+                    if (nitems == 0) {
+                        acc = is_prod ? 1 : 0;
+                    }
+                    else if (is_prod) {
+                        for (int i = 0; i < nitems; i++) acc *= data[i];
+                    }
+                    else {
+                        for (int i = 0; i < nitems; i++) acc += data[i];
+                    }
+                    ((uint64_t*)write_ptr)[0] = acc;
                 }
-                ((uint64_t*)write_ptr)[0] = acc;
                 break;
             }
         case ME_UINT64:
             {
                 const uint64_t* data = (const uint64_t*)arg->bound;
-                uint64_t acc = is_prod ? 1 : 0;
-                if (nitems == 0) {
-                    acc = is_prod ? 1 : 0;
-                }
-                else if (is_prod) {
-                    for (int i = 0; i < nitems; i++) acc *= data[i];
+                if (is_min || is_max) {
+                    uint64_t acc = is_min ? UINT64_MAX : 0;
+                    if (nitems > 0) {
+                        acc = data[0];
+                        for (int i = 1; i < nitems; i++) {
+                            if (is_min) {
+                                if (data[i] < acc) acc = data[i];
+                            }
+                            else {
+                                if (data[i] > acc) acc = data[i];
+                            }
+                        }
+                    }
+                    ((uint64_t*)write_ptr)[0] = acc;
                 }
                 else {
-                    for (int i = 0; i < nitems; i++) acc += data[i];
+                    uint64_t acc = is_prod ? 1 : 0;
+                    if (nitems == 0) {
+                        acc = is_prod ? 1 : 0;
+                    }
+                    else if (is_prod) {
+                        for (int i = 0; i < nitems; i++) acc *= data[i];
+                    }
+                    else {
+                        for (int i = 0; i < nitems; i++) acc += data[i];
+                    }
+                    ((uint64_t*)write_ptr)[0] = acc;
                 }
-                ((uint64_t*)write_ptr)[0] = acc;
                 break;
             }
         case ME_FLOAT32:
             {
                 const float* data = (const float*)arg->bound;
-                float acc = is_prod ? 1.0f : 0.0f;
+                float acc = 0.0f;
                 if (nitems == 0) {
-                    acc = is_prod ? 1.0f : 0.0f;
+                    if (is_min) acc = INFINITY;
+                    else if (is_max) acc = -INFINITY;
+                    else acc = is_prod ? 1.0f : 0.0f;
+                }
+                else if (is_min) {
+                    acc = reduce_min_float32_nan_safe(data, nitems);
+                }
+                else if (is_max) {
+                    acc = reduce_max_float32_nan_safe(data, nitems);
                 }
                 else if (is_prod) {
                     acc = reduce_prod_float32_nan_safe(data, nitems);
@@ -3797,9 +4505,17 @@ static void eval_reduction(const me_expr* n) {
         case ME_FLOAT64:
             {
                 const double* data = (const double*)arg->bound;
-                double acc = is_prod ? 1.0 : 0.0;
+                double acc = 0.0;
                 if (nitems == 0) {
-                    acc = is_prod ? 1.0 : 0.0;
+                    if (is_min) acc = INFINITY;
+                    else if (is_max) acc = -INFINITY;
+                    else acc = is_prod ? 1.0 : 0.0;
+                }
+                else if (is_min) {
+                    acc = reduce_min_float64_nan_safe(data, nitems);
+                }
+                else if (is_max) {
+                    acc = reduce_max_float64_nan_safe(data, nitems);
                 }
                 else if (is_prod) {
                     acc = reduce_prod_float64_nan_safe(data, nitems);
@@ -3813,6 +4529,10 @@ static void eval_reduction(const me_expr* n) {
         case ME_COMPLEX64:
             {
                 const float _Complex* data = (const float _Complex*)arg->bound;
+                if (is_min || is_max) {
+                    ((float _Complex*)write_ptr)[0] = (float _Complex)0.0f;
+                    break;
+                }
                 float _Complex acc = is_prod ? (float _Complex)1.0f : (float _Complex)0.0f;
                 if (nitems == 0) {
                     acc = is_prod ? (float _Complex)1.0f : (float _Complex)0.0f;
@@ -3829,6 +4549,10 @@ static void eval_reduction(const me_expr* n) {
         case ME_COMPLEX128:
             {
                 const double _Complex* data = (const double _Complex*)arg->bound;
+                if (is_min || is_max) {
+                    ((double _Complex*)write_ptr)[0] = (double _Complex)0.0;
+                    break;
+                }
                 double _Complex acc = is_prod ? (double _Complex)1.0 : (double _Complex)0.0;
                 if (nitems == 0) {
                     acc = is_prod ? (double _Complex)1.0 : (double _Complex)0.0;

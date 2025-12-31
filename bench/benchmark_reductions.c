@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <limits.h>
+#include <math.h>
 #include <sys/time.h>
 #include <stdbool.h>
 #include <string.h>
@@ -27,7 +29,14 @@ static double get_time(void) {
     return tv.tv_sec + tv.tv_usec * 1e-6;
 }
 
-static bench_result_t benchmark_reduce_int32(const char *op, bool is_prod,
+typedef enum {
+    RED_SUM,
+    RED_PROD,
+    RED_MIN,
+    RED_MAX
+} reduction_kind_t;
+
+static bench_result_t benchmark_reduce_int32(const char *op, reduction_kind_t kind,
                                              size_t total_elems, int iterations) {
     printf("\n=== %s(int32) ===\n", op);
 
@@ -56,36 +65,63 @@ static bench_result_t benchmark_reduce_int32(const char *op, bool is_prod,
     }
 
     const void *var_ptrs[] = {data};
-    int64_t output = 0;
+    int64_t output64 = 0;
+    int32_t output32 = 0;
 
-    ME_EVAL_CHECK(expr, var_ptrs, 1, &output, (int)total_elems);
+    if (kind == RED_SUM || kind == RED_PROD) {
+        ME_EVAL_CHECK(expr, var_ptrs, 1, &output64, (int)total_elems);
+    } else {
+        ME_EVAL_CHECK(expr, var_ptrs, 1, &output32, (int)total_elems);
+    }
 
     double start = get_time();
     for (int iter = 0; iter < iterations; iter++) {
-        ME_EVAL_CHECK(expr, var_ptrs, 1, &output, (int)total_elems);
+        if (kind == RED_SUM || kind == RED_PROD) {
+            ME_EVAL_CHECK(expr, var_ptrs, 1, &output64, (int)total_elems);
+        } else {
+            ME_EVAL_CHECK(expr, var_ptrs, 1, &output32, (int)total_elems);
+        }
     }
     double me_time = (get_time() - start) / iterations;
 
-    volatile int64_t sink = 0;
+    volatile int64_t sink64 = 0;
+    volatile int32_t sink32 = 0;
     start = get_time();
     for (int iter = 0; iter < iterations; iter++) {
-        int64_t acc = is_prod ? 1 : 0;
-        for (size_t i = 0; i < total_elems; i++) {
-            if (is_prod) {
-                acc *= data[i];
-            } else {
-                acc += data[i];
+        if (kind == RED_SUM || kind == RED_PROD) {
+            int64_t acc = kind == RED_PROD ? 1 : 0;
+            for (size_t i = 0; i < total_elems; i++) {
+                if (kind == RED_PROD) {
+                    acc *= data[i];
+                } else {
+                    acc += data[i];
+                }
             }
+            sink64 = acc;
+        } else {
+            int32_t acc = (kind == RED_MIN) ? INT32_MAX : INT32_MIN;
+            for (size_t i = 0; i < total_elems; i++) {
+                if (kind == RED_MIN) {
+                    if (data[i] < acc) acc = data[i];
+                } else {
+                    if (data[i] > acc) acc = data[i];
+                }
+            }
+            sink32 = acc;
         }
-        sink = acc;
     }
     double c_time = (get_time() - start) / iterations;
 
     double gb = (double)(total_elems * sizeof(int32_t)) / 1e9;
     printf("MiniExpr: %.4f s (%.2f GB/s)\n", me_time, gb / me_time);
     printf("Pure C : %.4f s (%.2f GB/s)\n", c_time, gb / c_time);
-    printf("Result check (MiniExpr): %lld\n", (long long)output);
-    printf("Result check (C):        %lld\n", (long long)sink);
+    if (kind == RED_SUM || kind == RED_PROD) {
+        printf("Result check (MiniExpr): %lld\n", (long long)output64);
+        printf("Result check (C):        %lld\n", (long long)sink64);
+    } else {
+        printf("Result check (MiniExpr): %d\n", output32);
+        printf("Result check (C):        %d\n", sink32);
+    }
 
     me_free(expr);
     free(data);
@@ -98,7 +134,7 @@ static bench_result_t benchmark_reduce_int32(const char *op, bool is_prod,
     return result;
 }
 
-static bench_result_t benchmark_reduce_float32(const char *op, bool is_prod,
+static bench_result_t benchmark_reduce_float32(const char *op, reduction_kind_t kind,
                                                size_t total_elems, int iterations) {
     printf("\n=== %s(float32) ===\n", op);
 
@@ -140,12 +176,21 @@ static bench_result_t benchmark_reduce_float32(const char *op, bool is_prod,
     volatile float sink = 0.0f;
     start = get_time();
     for (int iter = 0; iter < iterations; iter++) {
-        float acc = is_prod ? 1.0f : 0.0f;
-        for (size_t i = 0; i < total_elems; i++) {
-            if (is_prod) {
-                acc *= data[i];
-            } else {
-                acc += data[i];
+        float acc = 0.0f;
+        if (kind == RED_SUM) {
+            for (size_t i = 0; i < total_elems; i++) acc += data[i];
+        } else if (kind == RED_PROD) {
+            acc = 1.0f;
+            for (size_t i = 0; i < total_elems; i++) acc *= data[i];
+        } else if (kind == RED_MIN) {
+            acc = INFINITY;
+            for (size_t i = 0; i < total_elems; i++) {
+                if (data[i] < acc) acc = data[i];
+            }
+        } else {
+            acc = -INFINITY;
+            for (size_t i = 0; i < total_elems; i++) {
+                if (data[i] > acc) acc = data[i];
             }
         }
         sink = acc;
@@ -178,11 +223,15 @@ int main(int argc, char **argv) {
     if (argc > 1) {
         op = argv[1];
     }
-    if (strcmp(op, "sum") != 0 && strcmp(op, "prod") != 0) {
-        printf("Usage: %s [sum|prod]\n", argv[0]);
+    if (strcmp(op, "sum") != 0 && strcmp(op, "prod") != 0 &&
+        strcmp(op, "min") != 0 && strcmp(op, "max") != 0) {
+        printf("Usage: %s [sum|prod|min|max]\n", argv[0]);
         return 1;
     }
-    bool is_prod = strcmp(op, "prod") == 0;
+    reduction_kind_t kind = RED_SUM;
+    if (strcmp(op, "prod") == 0) kind = RED_PROD;
+    else if (strcmp(op, "min") == 0) kind = RED_MIN;
+    else if (strcmp(op, "max") == 0) kind = RED_MAX;
 
     const size_t sizes_mb[] = {1, 2, 4, 8, 16};
     const int iterations = 4;
@@ -198,8 +247,8 @@ int main(int argc, char **argv) {
         size_t total_elems = bytes / sizeof(int32_t);
 
         printf("\n--- Working set: %zu MB (%zu elements) ---\n", sizes_mb[i], total_elems);
-        int_results[i] = benchmark_reduce_int32(op, is_prod, total_elems, iterations);
-        float_results[i] = benchmark_reduce_float32(op, is_prod, total_elems, iterations);
+        int_results[i] = benchmark_reduce_int32(op, kind, total_elems, iterations);
+        float_results[i] = benchmark_reduce_float32(op, kind, total_elems, iterations);
     }
 
     printf("\n==========================================\n");

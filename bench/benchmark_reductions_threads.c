@@ -8,6 +8,8 @@
 #include <pthread.h>
 #include <sys/time.h>
 #include <string.h>
+#include <limits.h>
+#include <math.h>
 #include "miniexpr.h"
 #include "minctest.h"
 
@@ -37,6 +39,13 @@ typedef struct {
     int count;
     void *output;
 } thread_args_c_t;
+
+typedef enum {
+    RED_SUM,
+    RED_PROD,
+    RED_MIN,
+    RED_MAX
+} reduction_kind_t;
 
 static size_t dtype_size_local(me_dtype dtype) {
     switch (dtype) {
@@ -106,6 +115,50 @@ static void *prod_worker_c_float32(void *arg) {
     float acc = 1.0f;
     for (int i = 0; i < args->count; i++) {
         acc *= data[i];
+    }
+    ((float *)args->output)[0] = acc;
+    return NULL;
+}
+
+static void *min_worker_c_int32(void *arg) {
+    thread_args_c_t *args = (thread_args_c_t *)arg;
+    const int32_t *data = (const int32_t *)args->data + args->start_idx;
+    int32_t acc = INT32_MAX;
+    for (int i = 0; i < args->count; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    ((int32_t *)args->output)[0] = acc;
+    return NULL;
+}
+
+static void *max_worker_c_int32(void *arg) {
+    thread_args_c_t *args = (thread_args_c_t *)arg;
+    const int32_t *data = (const int32_t *)args->data + args->start_idx;
+    int32_t acc = INT32_MIN;
+    for (int i = 0; i < args->count; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    ((int32_t *)args->output)[0] = acc;
+    return NULL;
+}
+
+static void *min_worker_c_float32(void *arg) {
+    thread_args_c_t *args = (thread_args_c_t *)arg;
+    const float *data = (const float *)args->data + args->start_idx;
+    float acc = INFINITY;
+    for (int i = 0; i < args->count; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    ((float *)args->output)[0] = acc;
+    return NULL;
+}
+
+static void *max_worker_c_float32(void *arg) {
+    thread_args_c_t *args = (thread_args_c_t *)arg;
+    const float *data = (const float *)args->data + args->start_idx;
+    float acc = -INFINITY;
+    for (int i = 0; i < args->count; i++) {
+        if (data[i] > acc) acc = data[i];
     }
     ((float *)args->output)[0] = acc;
     return NULL;
@@ -209,8 +262,11 @@ static double run_benchmark(const me_expr *expr, const void *data, size_t elem_s
 }
 
 static double run_benchmark_c_int32(const int32_t *data, int total_elems, int num_threads,
-                                    int iterations, int64_t *partials, bool is_prod) {
-    void *(*worker)(void *) = is_prod ? prod_worker_c_int32 : sum_worker_c_int32;
+                                    int iterations, int64_t *partials, reduction_kind_t kind) {
+    void *(*worker)(void *) = sum_worker_c_int32;
+    if (kind == RED_PROD) worker = prod_worker_c_int32;
+    else if (kind == RED_MIN) worker = min_worker_c_int32;
+    else if (kind == RED_MAX) worker = max_worker_c_int32;
     run_threads_c_int32(data, total_elems, num_threads, partials, worker);
 
     double start = get_time();
@@ -221,8 +277,11 @@ static double run_benchmark_c_int32(const int32_t *data, int total_elems, int nu
 }
 
 static double run_benchmark_c_float32(const float *data, int total_elems, int num_threads,
-                                      int iterations, float *partials, bool is_prod) {
-    void *(*worker)(void *) = is_prod ? prod_worker_c_float32 : sum_worker_c_float32;
+                                      int iterations, float *partials, reduction_kind_t kind) {
+    void *(*worker)(void *) = sum_worker_c_float32;
+    if (kind == RED_PROD) worker = prod_worker_c_float32;
+    else if (kind == RED_MIN) worker = min_worker_c_float32;
+    else if (kind == RED_MAX) worker = max_worker_c_float32;
     run_threads_c_float32(data, total_elems, num_threads, partials, worker);
 
     double start = get_time();
@@ -241,11 +300,15 @@ int main(int argc, char **argv) {
     if (argc > 1) {
         op = argv[1];
     }
-    if (strcmp(op, "sum") != 0 && strcmp(op, "prod") != 0) {
-        printf("Usage: %s [sum|prod]\n", argv[0]);
+    if (strcmp(op, "sum") != 0 && strcmp(op, "prod") != 0 &&
+        strcmp(op, "min") != 0 && strcmp(op, "max") != 0) {
+        printf("Usage: %s [sum|prod|min|max]\n", argv[0]);
         return 1;
     }
-    bool is_prod = strcmp(op, "prod") == 0;
+    reduction_kind_t kind = RED_SUM;
+    if (strcmp(op, "prod") == 0) kind = RED_PROD;
+    else if (strcmp(op, "min") == 0) kind = RED_MIN;
+    else if (strcmp(op, "max") == 0) kind = RED_MAX;
 
     const size_t total_elems = 16ULL * 1024ULL * 1024ULL;
     const int iterations = 4;
@@ -300,8 +363,10 @@ int main(int argc, char **argv) {
     me_dtype out_float32 = me_get_dtype(expr_float32);
     size_t stride_int32 = dtype_size_local(out_int32);
     size_t stride_float32 = dtype_size_local(out_float32);
-    if (stride_int32 != sizeof(int64_t) || stride_float32 != sizeof(float)) {
-        printf("Unexpected output dtype for sums: int32=%d float32=%d\n",
+    size_t output_stride_int32 = sizeof(int64_t);
+    size_t expected_int32 = (kind == RED_SUM || kind == RED_PROD) ? sizeof(int64_t) : sizeof(int32_t);
+    if (stride_int32 != expected_int32 || stride_float32 != sizeof(float)) {
+        printf("Unexpected output dtype for reductions: int32=%d float32=%d\n",
                out_int32, out_float32);
         me_free(expr_int32);
         me_free(expr_float32);
@@ -336,17 +401,17 @@ int main(int argc, char **argv) {
 
     for (int num_threads = 1; num_threads <= MAX_THREADS; num_threads++) {
         double me_int = run_benchmark(expr_int32, data_int32, sizeof(int32_t),
-                                      stride_int32, (int)total_elems,
+                                      output_stride_int32, (int)total_elems,
                                       num_threads, iterations, partials_int_me);
         double c_int = run_benchmark_c_int32(data_int32, (int)total_elems,
                                              num_threads, iterations, partials_int_c,
-                                             is_prod);
+                                             kind);
         double me_f32 = run_benchmark(expr_float32, data_float32, sizeof(float),
                                       stride_float32, (int)total_elems,
                                       num_threads, iterations, partials_float_me);
         double c_f32 = run_benchmark_c_float32(data_float32, (int)total_elems,
                                                num_threads, iterations, partials_float_c,
-                                               is_prod);
+                                               kind);
 
         printf("%6d  %8.2f %7.2f %7.2f %7.2f\n",
                num_threads,

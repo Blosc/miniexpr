@@ -1,10 +1,11 @@
 /*
- * Tests for sum() and prod() reductions.
+ * Tests for sum(), prod(), min(), and max() reductions.
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <limits.h>
 #include <math.h>
 #include <complex.h>
 #include "../src/miniexpr.h"
@@ -185,6 +186,152 @@ static int test_prod_complex64() {
     return 0;
 }
 
+static int test_min_max_int32() {
+    printf("\n=== min/max(int32) -> int32 ===\n");
+
+    int32_t data[] = {3, 1, 4, 2};
+    int32_t output = 0;
+
+    me_variable vars[] = {{"x", ME_INT32, data}};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int rc_expr = me_compile("min(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 1;
+    }
+    if (me_get_dtype(expr) != ME_INT32) {
+        printf("  ❌ FAILED: expected dtype ME_INT32, got %d\n", me_get_dtype(expr));
+        me_free(expr);
+        return 1;
+    }
+    const void *var_ptrs[] = {data};
+    ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 4);
+    if (output != 1) {
+        printf("  ❌ FAILED: min expected 1, got %d\n", output);
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+
+    output = 0;
+    rc_expr = me_compile("max(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 1;
+    }
+    if (me_get_dtype(expr) != ME_INT32) {
+        printf("  ❌ FAILED: expected dtype ME_INT32, got %d\n", me_get_dtype(expr));
+        me_free(expr);
+        return 1;
+    }
+    ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 4);
+    if (output != 4) {
+        printf("  ❌ FAILED: max expected 4, got %d\n", output);
+        me_free(expr);
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    me_free(expr);
+    return 0;
+}
+
+static int test_min_max_float32() {
+    printf("\n=== min/max(float32) -> float32 ===\n");
+
+    float data[] = {3.5f, -1.0f, 2.0f};
+    float output = 0.0f;
+
+    me_variable vars[] = {{"x", ME_FLOAT32, data}};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int rc_expr = me_compile("min(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 1;
+    }
+    if (me_get_dtype(expr) != ME_FLOAT32) {
+        printf("  ❌ FAILED: expected dtype ME_FLOAT32, got %d\n", me_get_dtype(expr));
+        me_free(expr);
+        return 1;
+    }
+    const void *var_ptrs[] = {data};
+    ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 3);
+    if (fabsf(output - (-1.0f)) > 1e-6f) {
+        printf("  ❌ FAILED: min expected -1.0, got %.6f\n", output);
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+
+    output = 0.0f;
+    rc_expr = me_compile("max(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 1;
+    }
+    if (me_get_dtype(expr) != ME_FLOAT32) {
+        printf("  ❌ FAILED: expected dtype ME_FLOAT32, got %d\n", me_get_dtype(expr));
+        me_free(expr);
+        return 1;
+    }
+    ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 3);
+    if (fabsf(output - 3.5f) > 1e-6f) {
+        printf("  ❌ FAILED: max expected 3.5, got %.6f\n", output);
+        me_free(expr);
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    me_free(expr);
+    return 0;
+}
+
+static int test_min_max_float32_nan() {
+    printf("\n=== min/max(float32) NaN ===\n");
+
+    float data[] = {1.0f, NAN, 2.0f};
+    float output = 0.0f;
+
+    me_variable vars[] = {{"x", ME_FLOAT32, data}};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int rc_expr = me_compile("min(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 1;
+    }
+    const void *var_ptrs[] = {data};
+    ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 3);
+    if (!isnan(output)) {
+        printf("  ❌ FAILED: min expected NaN, got %.6f\n", output);
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+
+    output = 0.0f;
+    rc_expr = me_compile("max(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 1;
+    }
+    ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 3);
+    if (!isnan(output)) {
+        printf("  ❌ FAILED: max expected NaN, got %.6f\n", output);
+        me_free(expr);
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    me_free(expr);
+    return 0;
+}
+
 static int test_reduction_errors() {
     printf("\n=== Reduction validation errors ===\n");
 
@@ -242,6 +389,44 @@ static int test_empty_inputs() {
         ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);
         if (output != 0) {
             printf("  ❌ FAILED: sum(int32) empty expected 0, got %lld\n", (long long)output);
+            failures++;
+        }
+        me_free(expr);
+    }
+
+    {
+        int err = 0;
+        int32_t output = -1;
+        me_variable vars[] = {{"x", ME_INT32, i32_data}};
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("min(x)", vars, 1, ME_AUTO, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
+            printf("  ❌ FAILED: min(int32) compile error %d\n", err);
+            return 1;
+        }
+        const void *var_ptrs[] = {i32_data};
+        ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);
+        if (output != INT32_MAX) {
+            printf("  ❌ FAILED: min(int32) empty expected %d, got %d\n", INT32_MAX, output);
+            failures++;
+        }
+        me_free(expr);
+    }
+
+    {
+        int err = 0;
+        int32_t output = -1;
+        me_variable vars[] = {{"x", ME_INT32, i32_data}};
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("max(x)", vars, 1, ME_AUTO, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
+            printf("  ❌ FAILED: max(int32) compile error %d\n", err);
+            return 1;
+        }
+        const void *var_ptrs[] = {i32_data};
+        ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);
+        if (output != INT32_MIN) {
+            printf("  ❌ FAILED: max(int32) empty expected %d, got %d\n", INT32_MIN, output);
             failures++;
         }
         me_free(expr);
@@ -318,6 +503,44 @@ static int test_empty_inputs() {
         ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);
         if (fabsf(output - 0.0f) > 1e-6f) {
             printf("  ❌ FAILED: sum(float32) empty expected 0, got %.6f\n", output);
+            failures++;
+        }
+        me_free(expr);
+    }
+
+    {
+        int err = 0;
+        float output = -1.0f;
+        me_variable vars[] = {{"x", ME_FLOAT32, f32_data}};
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("min(x)", vars, 1, ME_AUTO, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
+            printf("  ❌ FAILED: min(float32) compile error %d\n", err);
+            return 1;
+        }
+        const void *var_ptrs[] = {f32_data};
+        ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);
+        if (!isinf(output) || output < 0.0f) {
+            printf("  ❌ FAILED: min(float32) empty expected +inf, got %.6f\n", output);
+            failures++;
+        }
+        me_free(expr);
+    }
+
+    {
+        int err = 0;
+        float output = -1.0f;
+        me_variable vars[] = {{"x", ME_FLOAT32, f32_data}};
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("max(x)", vars, 1, ME_AUTO, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
+            printf("  ❌ FAILED: max(float32) compile error %d\n", err);
+            return 1;
+        }
+        const void *var_ptrs[] = {f32_data};
+        ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);
+        if (!isinf(output) || output > 0.0f) {
+            printf("  ❌ FAILED: max(float32) empty expected -inf, got %.6f\n", output);
             failures++;
         }
         me_free(expr);
@@ -405,6 +628,9 @@ int main(void) {
     failures += test_sum_uint64();
     failures += test_sum_float32();
     failures += test_prod_complex64();
+    failures += test_min_max_int32();
+    failures += test_min_max_float32();
+    failures += test_min_max_float32_nan();
     failures += test_reduction_errors();
     failures += test_empty_inputs();
 
