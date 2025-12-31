@@ -1563,6 +1563,530 @@ static int32_t reduce_max_int32(const int32_t* data, int nitems) {
 #endif
 }
 
+static int8_t reduce_min_int8(const int8_t* data, int nitems) {
+    if (nitems <= 0) return INT8_MAX;
+#if defined(__AVX2__)
+    int i = 0;
+    __m256i vmin = _mm256_set1_epi8(INT8_MAX);
+    const int limit = nitems & ~31;
+    for (; i < limit; i += 32) {
+        __m256i v = _mm256_loadu_si256((const __m256i*)(data + i));
+        vmin = _mm256_min_epi8(vmin, v);
+    }
+    int8_t tmp[32];
+    _mm256_storeu_si256((__m256i*)tmp, vmin);
+    int8_t acc = tmp[0];
+    for (int j = 1; j < 32; j++) {
+        if (tmp[j] < acc) acc = tmp[j];
+    }
+    for (; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    int i = 0;
+    int8x16_t vmin = vdupq_n_s8(INT8_MAX);
+    const int limit = nitems & ~15;
+    for (; i < limit; i += 16) {
+        int8x16_t v = vld1q_s8(data + i);
+        vmin = vminq_s8(vmin, v);
+    }
+#if defined(__aarch64__)
+    int8_t acc = vminvq_s8(vmin);
+#else
+    int8x8_t min8 = vmin_s8(vget_low_s8(vmin), vget_high_s8(vmin));
+    min8 = vpmin_s8(min8, min8);
+    min8 = vpmin_s8(min8, min8);
+    int8_t acc = vget_lane_s8(min8, 0);
+#endif
+    for (; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+#else
+    int8_t acc = data[0];
+    for (int i = 1; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+#endif
+}
+
+static int8_t reduce_max_int8(const int8_t* data, int nitems) {
+    if (nitems <= 0) return INT8_MIN;
+#if defined(__AVX2__)
+    int i = 0;
+    __m256i vmax = _mm256_set1_epi8(INT8_MIN);
+    const int limit = nitems & ~31;
+    for (; i < limit; i += 32) {
+        __m256i v = _mm256_loadu_si256((const __m256i*)(data + i));
+        vmax = _mm256_max_epi8(vmax, v);
+    }
+    int8_t tmp[32];
+    _mm256_storeu_si256((__m256i*)tmp, vmax);
+    int8_t acc = tmp[0];
+    for (int j = 1; j < 32; j++) {
+        if (tmp[j] > acc) acc = tmp[j];
+    }
+    for (; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    int i = 0;
+    int8x16_t vmax = vdupq_n_s8(INT8_MIN);
+    const int limit = nitems & ~15;
+    for (; i < limit; i += 16) {
+        int8x16_t v = vld1q_s8(data + i);
+        vmax = vmaxq_s8(vmax, v);
+    }
+#if defined(__aarch64__)
+    int8_t acc = vmaxvq_s8(vmax);
+#else
+    int8x8_t max8 = vmax_s8(vget_low_s8(vmax), vget_high_s8(vmax));
+    max8 = vpmax_s8(max8, max8);
+    max8 = vpmax_s8(max8, max8);
+    int8_t acc = vget_lane_s8(max8, 0);
+#endif
+    for (; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+#else
+    int8_t acc = data[0];
+    for (int i = 1; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+#endif
+}
+
+static int16_t reduce_min_int16(const int16_t* data, int nitems) {
+    if (nitems <= 0) return INT16_MAX;
+#if defined(__AVX2__)
+    int i = 0;
+    __m256i vmin = _mm256_set1_epi16(INT16_MAX);
+    const int limit = nitems & ~15;
+    for (; i < limit; i += 16) {
+        __m256i v = _mm256_loadu_si256((const __m256i*)(data + i));
+        vmin = _mm256_min_epi16(vmin, v);
+    }
+    int16_t tmp[16];
+    _mm256_storeu_si256((__m256i*)tmp, vmin);
+    int16_t acc = tmp[0];
+    for (int j = 1; j < 16; j++) {
+        if (tmp[j] < acc) acc = tmp[j];
+    }
+    for (; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    int i = 0;
+    int16x8_t vmin = vdupq_n_s16(INT16_MAX);
+    const int limit = nitems & ~7;
+    for (; i < limit; i += 8) {
+        int16x8_t v = vld1q_s16(data + i);
+        vmin = vminq_s16(vmin, v);
+    }
+#if defined(__aarch64__)
+    int16_t acc = vminvq_s16(vmin);
+#else
+    int16x4_t min4 = vmin_s16(vget_low_s16(vmin), vget_high_s16(vmin));
+    min4 = vpmin_s16(min4, min4);
+    min4 = vpmin_s16(min4, min4);
+    int16_t acc = vget_lane_s16(min4, 0);
+#endif
+    for (; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+#else
+    int16_t acc = data[0];
+    for (int i = 1; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+#endif
+}
+
+static int16_t reduce_max_int16(const int16_t* data, int nitems) {
+    if (nitems <= 0) return INT16_MIN;
+#if defined(__AVX2__)
+    int i = 0;
+    __m256i vmax = _mm256_set1_epi16(INT16_MIN);
+    const int limit = nitems & ~15;
+    for (; i < limit; i += 16) {
+        __m256i v = _mm256_loadu_si256((const __m256i*)(data + i));
+        vmax = _mm256_max_epi16(vmax, v);
+    }
+    int16_t tmp[16];
+    _mm256_storeu_si256((__m256i*)tmp, vmax);
+    int16_t acc = tmp[0];
+    for (int j = 1; j < 16; j++) {
+        if (tmp[j] > acc) acc = tmp[j];
+    }
+    for (; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    int i = 0;
+    int16x8_t vmax = vdupq_n_s16(INT16_MIN);
+    const int limit = nitems & ~7;
+    for (; i < limit; i += 8) {
+        int16x8_t v = vld1q_s16(data + i);
+        vmax = vmaxq_s16(vmax, v);
+    }
+#if defined(__aarch64__)
+    int16_t acc = vmaxvq_s16(vmax);
+#else
+    int16x4_t max4 = vmax_s16(vget_low_s16(vmax), vget_high_s16(vmax));
+    max4 = vpmax_s16(max4, max4);
+    max4 = vpmax_s16(max4, max4);
+    int16_t acc = vget_lane_s16(max4, 0);
+#endif
+    for (; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+#else
+    int16_t acc = data[0];
+    for (int i = 1; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+#endif
+}
+
+static int64_t reduce_min_int64(const int64_t* data, int nitems) {
+    if (nitems <= 0) return INT64_MAX;
+    int64_t acc = data[0];
+    for (int i = 1; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+}
+
+static int64_t reduce_max_int64(const int64_t* data, int nitems) {
+    if (nitems <= 0) return INT64_MIN;
+    int64_t acc = data[0];
+    for (int i = 1; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+}
+
+static uint8_t reduce_min_uint8(const uint8_t* data, int nitems) {
+    if (nitems <= 0) return UINT8_MAX;
+#if defined(__AVX2__)
+    int i = 0;
+    __m256i vmin = _mm256_set1_epi8((char)UINT8_MAX);
+    const int limit = nitems & ~31;
+    for (; i < limit; i += 32) {
+        __m256i v = _mm256_loadu_si256((const __m256i*)(data + i));
+        vmin = _mm256_min_epu8(vmin, v);
+    }
+    uint8_t tmp[32];
+    _mm256_storeu_si256((__m256i*)tmp, vmin);
+    uint8_t acc = tmp[0];
+    for (int j = 1; j < 32; j++) {
+        if (tmp[j] < acc) acc = tmp[j];
+    }
+    for (; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    int i = 0;
+    uint8x16_t vmin = vdupq_n_u8(UINT8_MAX);
+    const int limit = nitems & ~15;
+    for (; i < limit; i += 16) {
+        uint8x16_t v = vld1q_u8(data + i);
+        vmin = vminq_u8(vmin, v);
+    }
+#if defined(__aarch64__)
+    uint8_t acc = vminvq_u8(vmin);
+#else
+    uint8x8_t min8 = vmin_u8(vget_low_u8(vmin), vget_high_u8(vmin));
+    min8 = vpmin_u8(min8, min8);
+    min8 = vpmin_u8(min8, min8);
+    uint8_t acc = vget_lane_u8(min8, 0);
+#endif
+    for (; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+#else
+    uint8_t acc = data[0];
+    for (int i = 1; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+#endif
+}
+
+static uint8_t reduce_max_uint8(const uint8_t* data, int nitems) {
+    if (nitems <= 0) return 0;
+#if defined(__AVX2__)
+    int i = 0;
+    __m256i vmax = _mm256_setzero_si256();
+    const int limit = nitems & ~31;
+    for (; i < limit; i += 32) {
+        __m256i v = _mm256_loadu_si256((const __m256i*)(data + i));
+        vmax = _mm256_max_epu8(vmax, v);
+    }
+    uint8_t tmp[32];
+    _mm256_storeu_si256((__m256i*)tmp, vmax);
+    uint8_t acc = tmp[0];
+    for (int j = 1; j < 32; j++) {
+        if (tmp[j] > acc) acc = tmp[j];
+    }
+    for (; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    int i = 0;
+    uint8x16_t vmax = vdupq_n_u8(0);
+    const int limit = nitems & ~15;
+    for (; i < limit; i += 16) {
+        uint8x16_t v = vld1q_u8(data + i);
+        vmax = vmaxq_u8(vmax, v);
+    }
+#if defined(__aarch64__)
+    uint8_t acc = vmaxvq_u8(vmax);
+#else
+    uint8x8_t max8 = vmax_u8(vget_low_u8(vmax), vget_high_u8(vmax));
+    max8 = vpmax_u8(max8, max8);
+    max8 = vpmax_u8(max8, max8);
+    uint8_t acc = vget_lane_u8(max8, 0);
+#endif
+    for (; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+#else
+    uint8_t acc = data[0];
+    for (int i = 1; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+#endif
+}
+
+static uint16_t reduce_min_uint16(const uint16_t* data, int nitems) {
+    if (nitems <= 0) return UINT16_MAX;
+#if defined(__AVX2__)
+    int i = 0;
+    __m256i vmin = _mm256_set1_epi16((short)UINT16_MAX);
+    const int limit = nitems & ~15;
+    for (; i < limit; i += 16) {
+        __m256i v = _mm256_loadu_si256((const __m256i*)(data + i));
+        vmin = _mm256_min_epu16(vmin, v);
+    }
+    uint16_t tmp[16];
+    _mm256_storeu_si256((__m256i*)tmp, vmin);
+    uint16_t acc = tmp[0];
+    for (int j = 1; j < 16; j++) {
+        if (tmp[j] < acc) acc = tmp[j];
+    }
+    for (; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    int i = 0;
+    uint16x8_t vmin = vdupq_n_u16(UINT16_MAX);
+    const int limit = nitems & ~7;
+    for (; i < limit; i += 8) {
+        uint16x8_t v = vld1q_u16(data + i);
+        vmin = vminq_u16(vmin, v);
+    }
+#if defined(__aarch64__)
+    uint16_t acc = vminvq_u16(vmin);
+#else
+    uint16x4_t min4 = vmin_u16(vget_low_u16(vmin), vget_high_u16(vmin));
+    min4 = vpmin_u16(min4, min4);
+    min4 = vpmin_u16(min4, min4);
+    uint16_t acc = vget_lane_u16(min4, 0);
+#endif
+    for (; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+#else
+    uint16_t acc = data[0];
+    for (int i = 1; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+#endif
+}
+
+static uint16_t reduce_max_uint16(const uint16_t* data, int nitems) {
+    if (nitems <= 0) return 0;
+#if defined(__AVX2__)
+    int i = 0;
+    __m256i vmax = _mm256_setzero_si256();
+    const int limit = nitems & ~15;
+    for (; i < limit; i += 16) {
+        __m256i v = _mm256_loadu_si256((const __m256i*)(data + i));
+        vmax = _mm256_max_epu16(vmax, v);
+    }
+    uint16_t tmp[16];
+    _mm256_storeu_si256((__m256i*)tmp, vmax);
+    uint16_t acc = tmp[0];
+    for (int j = 1; j < 16; j++) {
+        if (tmp[j] > acc) acc = tmp[j];
+    }
+    for (; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    int i = 0;
+    uint16x8_t vmax = vdupq_n_u16(0);
+    const int limit = nitems & ~7;
+    for (; i < limit; i += 8) {
+        uint16x8_t v = vld1q_u16(data + i);
+        vmax = vmaxq_u16(vmax, v);
+    }
+#if defined(__aarch64__)
+    uint16_t acc = vmaxvq_u16(vmax);
+#else
+    uint16x4_t max4 = vmax_u16(vget_low_u16(vmax), vget_high_u16(vmax));
+    max4 = vpmax_u16(max4, max4);
+    max4 = vpmax_u16(max4, max4);
+    uint16_t acc = vget_lane_u16(max4, 0);
+#endif
+    for (; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+#else
+    uint16_t acc = data[0];
+    for (int i = 1; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+#endif
+}
+
+static uint32_t reduce_min_uint32(const uint32_t* data, int nitems) {
+    if (nitems <= 0) return UINT32_MAX;
+#if defined(__AVX2__)
+    int i = 0;
+    __m256i vmin = _mm256_set1_epi32((int)UINT32_MAX);
+    const int limit = nitems & ~7;
+    for (; i < limit; i += 8) {
+        __m256i v = _mm256_loadu_si256((const __m256i*)(data + i));
+        vmin = _mm256_min_epu32(vmin, v);
+    }
+    uint32_t tmp[8];
+    _mm256_storeu_si256((__m256i*)tmp, vmin);
+    uint32_t acc = tmp[0];
+    for (int j = 1; j < 8; j++) {
+        if (tmp[j] < acc) acc = tmp[j];
+    }
+    for (; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    int i = 0;
+    uint32x4_t vmin = vdupq_n_u32(UINT32_MAX);
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        uint32x4_t v = vld1q_u32(data + i);
+        vmin = vminq_u32(vmin, v);
+    }
+#if defined(__aarch64__)
+    uint32_t acc = vminvq_u32(vmin);
+#else
+    uint32x2_t min2 = vmin_u32(vget_low_u32(vmin), vget_high_u32(vmin));
+    min2 = vpmin_u32(min2, min2);
+    uint32_t acc = vget_lane_u32(min2, 0);
+#endif
+    for (; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+#else
+    uint32_t acc = data[0];
+    for (int i = 1; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+#endif
+}
+
+static uint32_t reduce_max_uint32(const uint32_t* data, int nitems) {
+    if (nitems <= 0) return 0;
+#if defined(__AVX2__)
+    int i = 0;
+    __m256i vmax = _mm256_setzero_si256();
+    const int limit = nitems & ~7;
+    for (; i < limit; i += 8) {
+        __m256i v = _mm256_loadu_si256((const __m256i*)(data + i));
+        vmax = _mm256_max_epu32(vmax, v);
+    }
+    uint32_t tmp[8];
+    _mm256_storeu_si256((__m256i*)tmp, vmax);
+    uint32_t acc = tmp[0];
+    for (int j = 1; j < 8; j++) {
+        if (tmp[j] > acc) acc = tmp[j];
+    }
+    for (; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    int i = 0;
+    uint32x4_t vmax = vdupq_n_u32(0);
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        uint32x4_t v = vld1q_u32(data + i);
+        vmax = vmaxq_u32(vmax, v);
+    }
+#if defined(__aarch64__)
+    uint32_t acc = vmaxvq_u32(vmax);
+#else
+    uint32x2_t max2 = vmax_u32(vget_low_u32(vmax), vget_high_u32(vmax));
+    max2 = vpmax_u32(max2, max2);
+    uint32_t acc = vget_lane_u32(max2, 0);
+#endif
+    for (; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+#else
+    uint32_t acc = data[0];
+    for (int i = 1; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+#endif
+}
+
+static uint64_t reduce_min_uint64(const uint64_t* data, int nitems) {
+    if (nitems <= 0) return UINT64_MAX;
+    uint64_t acc = data[0];
+    for (int i = 1; i < nitems; i++) {
+        if (data[i] < acc) acc = data[i];
+    }
+    return acc;
+}
+
+static uint64_t reduce_max_uint64(const uint64_t* data, int nitems) {
+    if (nitems <= 0) return 0;
+    uint64_t acc = data[0];
+    for (int i = 1; i < nitems; i++) {
+        if (data[i] > acc) acc = data[i];
+    }
+    return acc;
+}
+
 static float reduce_prod_float32_nan_safe(const float* data, int nitems) {
     if (nitems <= 0) return 1.0f;
 #if defined(__AVX__) || defined(__AVX2__)
@@ -4228,18 +4752,8 @@ static void eval_reduction(const me_expr* n) {
             {
                 const int8_t* data = (const int8_t*)arg->bound;
                 if (is_min || is_max) {
-                    int8_t acc = is_min ? INT8_MAX : INT8_MIN;
-                    if (nitems > 0) {
-                        acc = data[0];
-                        for (int i = 1; i < nitems; i++) {
-                            if (is_min) {
-                                if (data[i] < acc) acc = data[i];
-                            }
-                            else {
-                                if (data[i] > acc) acc = data[i];
-                            }
-                        }
-                    }
+                    int8_t acc = is_min ? reduce_min_int8(data, nitems) :
+                        reduce_max_int8(data, nitems);
                     ((int8_t*)write_ptr)[0] = acc;
                 }
                 else {
@@ -4261,18 +4775,8 @@ static void eval_reduction(const me_expr* n) {
             {
                 const int16_t* data = (const int16_t*)arg->bound;
                 if (is_min || is_max) {
-                    int16_t acc = is_min ? INT16_MAX : INT16_MIN;
-                    if (nitems > 0) {
-                        acc = data[0];
-                        for (int i = 1; i < nitems; i++) {
-                            if (is_min) {
-                                if (data[i] < acc) acc = data[i];
-                            }
-                            else {
-                                if (data[i] > acc) acc = data[i];
-                            }
-                        }
-                    }
+                    int16_t acc = is_min ? reduce_min_int16(data, nitems) :
+                        reduce_max_int16(data, nitems);
                     ((int16_t*)write_ptr)[0] = acc;
                 }
                 else {
@@ -4317,18 +4821,8 @@ static void eval_reduction(const me_expr* n) {
             {
                 const int64_t* data = (const int64_t*)arg->bound;
                 if (is_min || is_max) {
-                    int64_t acc = is_min ? INT64_MAX : INT64_MIN;
-                    if (nitems > 0) {
-                        acc = data[0];
-                        for (int i = 1; i < nitems; i++) {
-                            if (is_min) {
-                                if (data[i] < acc) acc = data[i];
-                            }
-                            else {
-                                if (data[i] > acc) acc = data[i];
-                            }
-                        }
-                    }
+                    int64_t acc = is_min ? reduce_min_int64(data, nitems) :
+                        reduce_max_int64(data, nitems);
                     ((int64_t*)write_ptr)[0] = acc;
                 }
                 else {
@@ -4350,18 +4844,8 @@ static void eval_reduction(const me_expr* n) {
             {
                 const uint8_t* data = (const uint8_t*)arg->bound;
                 if (is_min || is_max) {
-                    uint8_t acc = is_min ? UINT8_MAX : 0;
-                    if (nitems > 0) {
-                        acc = data[0];
-                        for (int i = 1; i < nitems; i++) {
-                            if (is_min) {
-                                if (data[i] < acc) acc = data[i];
-                            }
-                            else {
-                                if (data[i] > acc) acc = data[i];
-                            }
-                        }
-                    }
+                    uint8_t acc = is_min ? reduce_min_uint8(data, nitems) :
+                        reduce_max_uint8(data, nitems);
                     ((uint8_t*)write_ptr)[0] = acc;
                 }
                 else {
@@ -4383,18 +4867,8 @@ static void eval_reduction(const me_expr* n) {
             {
                 const uint16_t* data = (const uint16_t*)arg->bound;
                 if (is_min || is_max) {
-                    uint16_t acc = is_min ? UINT16_MAX : 0;
-                    if (nitems > 0) {
-                        acc = data[0];
-                        for (int i = 1; i < nitems; i++) {
-                            if (is_min) {
-                                if (data[i] < acc) acc = data[i];
-                            }
-                            else {
-                                if (data[i] > acc) acc = data[i];
-                            }
-                        }
-                    }
+                    uint16_t acc = is_min ? reduce_min_uint16(data, nitems) :
+                        reduce_max_uint16(data, nitems);
                     ((uint16_t*)write_ptr)[0] = acc;
                 }
                 else {
@@ -4416,18 +4890,8 @@ static void eval_reduction(const me_expr* n) {
             {
                 const uint32_t* data = (const uint32_t*)arg->bound;
                 if (is_min || is_max) {
-                    uint32_t acc = is_min ? UINT32_MAX : 0;
-                    if (nitems > 0) {
-                        acc = data[0];
-                        for (int i = 1; i < nitems; i++) {
-                            if (is_min) {
-                                if (data[i] < acc) acc = data[i];
-                            }
-                            else {
-                                if (data[i] > acc) acc = data[i];
-                            }
-                        }
-                    }
+                    uint32_t acc = is_min ? reduce_min_uint32(data, nitems) :
+                        reduce_max_uint32(data, nitems);
                     ((uint32_t*)write_ptr)[0] = acc;
                 }
                 else {
@@ -4449,18 +4913,8 @@ static void eval_reduction(const me_expr* n) {
             {
                 const uint64_t* data = (const uint64_t*)arg->bound;
                 if (is_min || is_max) {
-                    uint64_t acc = is_min ? UINT64_MAX : 0;
-                    if (nitems > 0) {
-                        acc = data[0];
-                        for (int i = 1; i < nitems; i++) {
-                            if (is_min) {
-                                if (data[i] < acc) acc = data[i];
-                            }
-                            else {
-                                if (data[i] > acc) acc = data[i];
-                            }
-                        }
-                    }
+                    uint64_t acc = is_min ? reduce_min_uint64(data, nitems) :
+                        reduce_max_uint64(data, nitems);
                     ((uint64_t*)write_ptr)[0] = acc;
                 }
                 else {
