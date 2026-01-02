@@ -144,6 +144,44 @@ static int test_sum_float32() {
     return 0;
 }
 
+static int test_sum_single_output_chunk() {
+    printf("\n=== sum(int32) output chunk size 1 ===\n");
+
+    int32_t data[] = {1, 2, 3, 4};
+    struct {
+        int64_t output;
+        int64_t guard;
+    } buffer = {0, 0x1122334455667788LL};
+
+    me_variable vars[] = {{"x", ME_INT32, data}};
+    int err = 0;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 1;
+    }
+
+    const void *var_ptrs[] = {data};
+    ME_EVAL_CHECK(expr, var_ptrs, 1, &buffer.output, 4);
+
+    if (buffer.output != 10) {
+        printf("  ❌ FAILED: expected 10, got %lld\n", (long long)buffer.output);
+        me_free(expr);
+        return 1;
+    }
+
+    if (buffer.guard != 0x1122334455667788LL) {
+        printf("  ❌ FAILED: output chunk wrote past single element\n");
+        me_free(expr);
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    me_free(expr);
+    return 0;
+}
+
 static int test_prod_complex64() {
     printf("\n=== prod(complex64) -> complex64 ===\n");
 
@@ -778,6 +816,7 @@ int main(void) {
     failures += test_sum_int64();
     failures += test_sum_uint64();
     failures += test_sum_float32();
+    failures += test_sum_single_output_chunk();
     failures += test_prod_complex64();
     failures += test_min_max_int32();
     failures += test_min_max_float32();
