@@ -106,6 +106,7 @@ miniexpr provides scalar reductions over a single variable or constant:
 - `sum`/`prod`: integer inputs promote to 64-bit (`int64`/`uint64`); floats keep their type.
 - `min`/`max`: same dtype as the input.
 - `any`/`all`: `bool` output for any input type (nonzero is true).
+- Note: `sum`/`prod` on `float32` inputs accumulate in `float64` and cast back to `float32`.
 
 **Floating-point NaNs:**
 - `min`/`max` propagate NaNs if any element is NaN.
