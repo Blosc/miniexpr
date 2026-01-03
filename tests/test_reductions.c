@@ -574,6 +574,34 @@ static int test_reduction_expression_multi_vars() {
     return 0;
 }
 
+static int test_reduction_expression_comparison() {
+    printf("\n=== Reduction expressions (comparison) ===\n");
+
+    int32_t x[] = {1, 2, 3};
+    double y[] = {4.5, 5.5, 6.5};
+    me_variable vars[] = {{"x", ME_INT32, x}, {"y", ME_FLOAT64, y}};
+    const void *var_ptrs[] = {x, y};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int64_t sum_out = 0;
+    int rc_expr = me_compile("sum(x + y + 2.5 > 3.5)", vars, 2, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 1;
+    }
+    ME_EVAL_CHECK(expr, var_ptrs, 2, &sum_out, 3);
+    if (sum_out != 3) {
+        printf("  ❌ FAILED: expected sum(...) = 3, got %lld\n", (long long)sum_out);
+        me_free(expr);
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    me_free(expr);
+    return 0;
+}
+
 static int test_reduction_errors() {
     printf("\n=== Reduction validation errors ===\n");
 
@@ -911,6 +939,7 @@ int main(void) {
     failures += test_any_all_int32();
     failures += test_reduction_expression_args();
     failures += test_reduction_expression_multi_vars();
+    failures += test_reduction_expression_comparison();
     failures += test_reduction_errors();
     failures += test_empty_inputs();
 
