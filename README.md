@@ -99,8 +99,8 @@ miniexpr provides scalar reductions over a single variable or constant:
 - `any(x)`, `all(x)` (truthiness over nonzero values)
 
 **Rules:**
-- The argument must be a single variable or constant (e.g., `sum(x)` is valid, `sum(x + 1)` is not).
-- Reductions must be the full expression (e.g., `sum(x)` is valid, `x + sum(x)` is not).
+- The argument may be any expression that does not itself contain reductions (e.g., `sum(x + 1)` is valid, `sum(sum(x))` is not).
+- Reductions may appear inside larger expressions; their scalar result is broadcast (e.g., `x + sum(x)` is valid).
 
 **Result types:**
 - `sum`/`prod`: integer inputs promote to 64-bit (`int64`/`uint64`); floats keep their type.

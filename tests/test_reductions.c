@@ -481,6 +481,99 @@ static int test_any_all_int32() {
     return 0;
 }
 
+static int test_reduction_expression_args() {
+    printf("\n=== Reduction expressions ===\n");
+
+    double data[] = {1.0, 2.0, 3.0};
+    me_variable vars[] = {{"x", ME_FLOAT64, data}};
+    const void *var_ptrs[] = {data};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    double sum_out = 0.0;
+    int rc_expr = me_compile("sum(x + 1)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 1;
+    }
+    ME_EVAL_CHECK(expr, var_ptrs, 1, &sum_out, 3);
+    if (fabs(sum_out - 9.0) > 1e-12) {
+        printf("  ❌ FAILED: expected sum(x + 1) = 9, got %.6f\n", sum_out);
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+
+    double output[3] = {0.0, 0.0, 0.0};
+    rc_expr = me_compile("x + sum(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 1;
+    }
+    ME_EVAL_CHECK(expr, var_ptrs, 1, output, 3);
+
+    double expected_sum = 6.0;
+    for (int i = 0; i < 3; i++) {
+        double expected = data[i] + expected_sum;
+        if (fabs(output[i] - expected) > 1e-12) {
+            printf("  ❌ FAILED: expected %.6f, got %.6f\n", expected, output[i]);
+            me_free(expr);
+            return 1;
+        }
+    }
+
+    printf("  ✅ PASSED\n");
+    me_free(expr);
+    return 0;
+}
+
+static int test_reduction_expression_multi_vars() {
+    printf("\n=== Reduction expressions (multi-var) ===\n");
+
+    int32_t x[] = {1, 2, 3};
+    double y[] = {4.5, 5.5, 6.5};
+    me_variable vars[] = {{"x", ME_INT32, x}, {"y", ME_FLOAT64, y}};
+    const void *var_ptrs[] = {x, y};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    double sum_out = 0.0;
+    int rc_expr = me_compile("sum(x + y + 2.5)", vars, 2, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 1;
+    }
+    ME_EVAL_CHECK(expr, var_ptrs, 2, &sum_out, 3);
+    if (fabs(sum_out - 30.0) > 1e-12) {
+        printf("  ❌ FAILED: expected sum(x + y + 2.5) = 30, got %.6f\n", sum_out);
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+
+    double output[3] = {0.0, 0.0, 0.0};
+    rc_expr = me_compile("x + sum(x + y + 2.5) + 1.5", vars, 2, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 1;
+    }
+    ME_EVAL_CHECK(expr, var_ptrs, 2, output, 3);
+
+    double expected_sum = 30.0;
+    for (int i = 0; i < 3; i++) {
+        double expected = (double)x[i] + expected_sum + 1.5;
+        if (fabs(output[i] - expected) > 1e-12) {
+            printf("  ❌ FAILED: expected %.6f, got %.6f\n", expected, output[i]);
+            me_free(expr);
+            return 1;
+        }
+    }
+
+    printf("  ✅ PASSED\n");
+    me_free(expr);
+    return 0;
+}
+
 static int test_reduction_errors() {
     printf("\n=== Reduction validation errors ===\n");
 
@@ -489,23 +582,16 @@ static int test_reduction_errors() {
     int err = 0;
 
     me_expr *expr = NULL;
-    int rc_expr = me_compile("sum(x + 1)", vars, 1, ME_AUTO, &err, &expr);
+    int rc_expr = me_compile("sum(sum(x))", vars, 1, ME_AUTO, &err, &expr);
     if (rc_expr == ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: expected sum(x + 1) to be rejected\n");
+        printf("  ❌ FAILED: expected sum(sum(x)) to be rejected\n");
         me_free(expr);
         return 1;
     }
 
-    rc_expr = me_compile("x + sum(x)", vars, 1, ME_AUTO, &err, &expr);
+    rc_expr = me_compile("sum(x + sum(x))", vars, 1, ME_AUTO, &err, &expr);
     if (rc_expr == ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: expected x + sum(x) to be rejected\n");
-        me_free(expr);
-        return 1;
-    }
-
-    rc_expr = me_compile("sum(x, x)", vars, 1, ME_AUTO, &err, &expr);
-    if (rc_expr == ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: expected sum(x, x) to be rejected\n");
+        printf("  ❌ FAILED: expected sum(x + sum(x)) to be rejected\n");
         me_free(expr);
         return 1;
     }
@@ -823,6 +909,8 @@ int main(void) {
     failures += test_min_max_float32_nan();
     failures += test_any_all_bool();
     failures += test_any_all_int32();
+    failures += test_reduction_expression_args();
+    failures += test_reduction_expression_multi_vars();
     failures += test_reduction_errors();
     failures += test_empty_inputs();
 

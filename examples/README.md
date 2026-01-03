@@ -253,6 +253,21 @@ Chunk size matters enormously for parallel performance:
 
 ---
 
+### 09_reduction_expressions.c
+**Reductions inside larger expressions**
+
+- **What it demonstrates**: Reductions over expressions and reductions used inside larger expressions
+- **Expressions**: `sum(x + 1)`, `x + sum(x)`
+- **Concepts**: Reduction arguments, scalar broadcast
+- **Best for**: Mixing aggregate values with elementwise math
+
+**Run it:**
+```bash
+./build/09_reduction_expressions
+```
+
+---
+
 ## Building Examples
 
 ### Using the Makefile
