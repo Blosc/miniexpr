@@ -43,20 +43,24 @@ typedef struct {
 typedef struct {
     const me_expr *expr;
     const void *data;
+    const void *data_y;
     size_t elem_size;
     size_t output_stride;
     int start_idx;
     int count;
     void *output;
+    bool is_multi;
 } thread_args_t;
 
 typedef struct {
     const void *data;
+    const void *data_y;
     int start_idx;
     int count;
     void *output;
     const dtype_info_t *info;
     reduction_kind_t kind;
+    bool is_multi;
 } thread_args_c_t;
 
 static bool parse_dtype(const char *name, dtype_info_t *info) {
@@ -104,6 +108,24 @@ static me_dtype output_dtype_for_kind(const dtype_info_t *info, reduction_kind_t
     return info->is_signed ? ME_INT64 : ME_UINT64;
 }
 
+static double read_value_as_double(const void *data, me_dtype dtype, int idx) {
+    switch (dtype) {
+    case ME_BOOL: return ((const bool *)data)[idx] ? 1.0 : 0.0;
+    case ME_INT8: return (double)((const int8_t *)data)[idx];
+    case ME_INT16: return (double)((const int16_t *)data)[idx];
+    case ME_INT32: return (double)((const int32_t *)data)[idx];
+    case ME_INT64: return (double)((const int64_t *)data)[idx];
+    case ME_UINT8: return (double)((const uint8_t *)data)[idx];
+    case ME_UINT16: return (double)((const uint16_t *)data)[idx];
+    case ME_UINT32: return (double)((const uint32_t *)data)[idx];
+    case ME_UINT64: return (double)((const uint64_t *)data)[idx];
+    case ME_FLOAT32: return (double)((const float *)data)[idx];
+    case ME_FLOAT64: return ((const double *)data)[idx];
+    default:
+        return 0.0;
+    }
+}
+
 static size_t dtype_size_local(me_dtype dtype) {
     switch (dtype) {
         case ME_BOOL: return sizeof(bool);
@@ -125,11 +147,16 @@ static size_t dtype_size_local(me_dtype dtype) {
 
 static void *sum_worker(void *arg) {
     thread_args_t *args = (thread_args_t *)arg;
-    const void *vars_chunk[1] = {
+    const void *vars_chunk[2] = {
         (const unsigned char *)args->data + (size_t)args->start_idx * args->elem_size
     };
+    int var_count = 1;
+    if (args->is_multi) {
+        vars_chunk[1] = (const unsigned char *)args->data_y + (size_t)args->start_idx * args->elem_size;
+        var_count = 2;
+    }
 
-    ME_EVAL_CHECK(args->expr, vars_chunk, 1, args->output, args->count);
+    ME_EVAL_CHECK(args->expr, vars_chunk, var_count, args->output, args->count);
     return NULL;
 }
 
@@ -137,6 +164,53 @@ static void *reduce_worker_c(void *arg) {
     thread_args_c_t *args = (thread_args_c_t *)arg;
     const dtype_info_t *info = args->info;
     reduction_kind_t kind = args->kind;
+
+    if (args->is_multi) {
+        if (kind == RED_ANY || kind == RED_ALL) {
+            bool acc = (kind == RED_ALL);
+            for (int i = 0; i < args->count; i++) {
+                int idx = args->start_idx + i;
+                double xval = read_value_as_double(args->data, info->dtype, idx);
+                double yval = read_value_as_double(args->data_y, info->dtype, idx);
+                bool v = (xval + yval + 2.5) > 3.5;
+                if (kind == RED_ANY) {
+                    if (v) { acc = true; break; }
+                }
+                else {
+                    if (!v) { acc = false; break; }
+                }
+            }
+            ((bool *)args->output)[0] = acc;
+        }
+        else if (kind == RED_MIN || kind == RED_MAX) {
+            bool acc = (kind == RED_MIN);
+            for (int i = 0; i < args->count; i++) {
+                int idx = args->start_idx + i;
+                double xval = read_value_as_double(args->data, info->dtype, idx);
+                double yval = read_value_as_double(args->data_y, info->dtype, idx);
+                bool v = (xval + yval + 2.5) > 3.5;
+                acc = (kind == RED_MIN) ? (acc && v) : (acc || v);
+            }
+            ((bool *)args->output)[0] = acc;
+        }
+        else {
+            int64_t acc = kind == RED_PROD ? 1 : 0;
+            for (int i = 0; i < args->count; i++) {
+                int idx = args->start_idx + i;
+                double xval = read_value_as_double(args->data, info->dtype, idx);
+                double yval = read_value_as_double(args->data_y, info->dtype, idx);
+                bool v = (xval + yval + 2.5) > 3.5;
+                if (kind == RED_PROD) {
+                    acc *= v ? 1 : 0;
+                }
+                else {
+                    acc += v ? 1 : 0;
+                }
+            }
+            ((int64_t *)args->output)[0] = acc;
+        }
+        return NULL;
+    }
 
     if (info->is_float) {
         if (info->dtype == ME_FLOAT32) {
@@ -413,6 +487,7 @@ static void *reduce_worker_c(void *arg) {
 }
 
 static int run_threads(const me_expr *expr, const void *data, size_t elem_size,
+                       const void *data_y, bool is_multi,
                        size_t output_stride, int total_elems, int num_threads,
                        void *partials) {
     pthread_t threads[MAX_THREADS];
@@ -426,11 +501,13 @@ static int run_threads(const me_expr *expr, const void *data, size_t elem_size,
         int count = base + (t < rem);
         thread_args[t].expr = expr;
         thread_args[t].data = data;
+        thread_args[t].data_y = data_y;
         thread_args[t].elem_size = elem_size;
         thread_args[t].output_stride = output_stride;
         thread_args[t].start_idx = offset;
         thread_args[t].count = count;
         thread_args[t].output = (unsigned char *)partials + (size_t)t * output_stride;
+        thread_args[t].is_multi = is_multi;
         offset += count;
 
         pthread_create(&threads[t], NULL, sum_worker, &thread_args[t]);
@@ -444,6 +521,7 @@ static int run_threads(const me_expr *expr, const void *data, size_t elem_size,
 }
 
 static int run_threads_c(const void *data, int total_elems, int num_threads,
+                         const void *data_y, bool is_multi,
                          void *partials, size_t output_stride,
                          const dtype_info_t *info, reduction_kind_t kind) {
     pthread_t threads[MAX_THREADS];
@@ -456,11 +534,13 @@ static int run_threads_c(const void *data, int total_elems, int num_threads,
     for (int t = 0; t < num_threads; t++) {
         int count = base + (t < rem);
         thread_args[t].data = data;
+        thread_args[t].data_y = data_y;
         thread_args[t].start_idx = offset;
         thread_args[t].count = count;
         thread_args[t].output = (unsigned char *)partials + (size_t)t * output_stride;
         thread_args[t].info = info;
         thread_args[t].kind = kind;
+        thread_args[t].is_multi = is_multi;
         offset += count;
 
         pthread_create(&threads[t], NULL, reduce_worker_c, &thread_args[t]);
@@ -474,25 +554,31 @@ static int run_threads_c(const void *data, int total_elems, int num_threads,
 }
 
 static double run_benchmark(const me_expr *expr, const void *data, size_t elem_size,
+                            const void *data_y, bool is_multi,
                             size_t output_stride, int total_elems, int num_threads,
                             int iterations, void *partials) {
-    run_threads(expr, data, elem_size, output_stride, total_elems, num_threads, partials);
+    run_threads(expr, data, elem_size, data_y, is_multi,
+                output_stride, total_elems, num_threads, partials);
 
     double start = get_time();
     for (int i = 0; i < iterations; i++) {
-        run_threads(expr, data, elem_size, output_stride, total_elems, num_threads, partials);
+        run_threads(expr, data, elem_size, data_y, is_multi,
+                    output_stride, total_elems, num_threads, partials);
     }
     return (get_time() - start) / iterations;
 }
 
 static double run_benchmark_c(const void *data, int total_elems, int num_threads,
+                              const void *data_y, bool is_multi,
                               int iterations, void *partials, size_t output_stride,
                               const dtype_info_t *info, reduction_kind_t kind) {
-    run_threads_c(data, total_elems, num_threads, partials, output_stride, info, kind);
+    run_threads_c(data, total_elems, num_threads, data_y, is_multi,
+                  partials, output_stride, info, kind);
 
     double start = get_time();
     for (int i = 0; i < iterations; i++) {
-        run_threads_c(data, total_elems, num_threads, partials, output_stride, info, kind);
+        run_threads_c(data, total_elems, num_threads, data_y, is_multi,
+                      partials, output_stride, info, kind);
     }
     return (get_time() - start) / iterations;
 }
@@ -504,17 +590,26 @@ int main(int argc, char **argv) {
 
     const char *op = "sum";
     const char *type_name = "int32";
+    const char *expr_kind = "single";
     if (argc > 1) {
         op = argv[1];
     }
     if (argc > 2) {
         type_name = argv[2];
     }
+    if (argc > 3) {
+        expr_kind = argv[3];
+    }
     if (strcmp(op, "sum") != 0 && strcmp(op, "prod") != 0 &&
         strcmp(op, "min") != 0 && strcmp(op, "max") != 0 &&
         strcmp(op, "any") != 0 && strcmp(op, "all") != 0) {
-        printf("Usage: %s [sum|prod|min|max|any|all] [dtype]\n", argv[0]);
+        printf("Usage: %s [sum|prod|min|max|any|all] [dtype] [single|multi]\n", argv[0]);
         printf("Dtypes: bool int8 int16 int32 int64 uint8 uint16 uint32 uint64 float32 float64\n");
+        return 1;
+    }
+    if (strcmp(expr_kind, "single") != 0 && strcmp(expr_kind, "multi") != 0) {
+        printf("Unknown expression kind: %s\n", expr_kind);
+        printf("Expression kinds: single multi\n");
         return 1;
     }
     reduction_kind_t kind = RED_SUM;
@@ -542,9 +637,13 @@ int main(int argc, char **argv) {
     printf("Total elements per run: %zu\n", total_elems);
     printf("Iterations: %d\n", iterations);
 
+    bool is_multi = strcmp(expr_kind, "multi") == 0;
     void *data = malloc(total_elems * info.elem_size);
-    if (!data) {
+    void *data_y = NULL;
+    if (!data || (is_multi && !(data_y = malloc(total_elems * info.elem_size)))) {
         printf("Allocation failed for data arrays\n");
+        free(data);
+        free(data_y);
         return 1;
     }
 
@@ -575,27 +674,64 @@ int main(int argc, char **argv) {
         }
     }
 
-    me_variable vars[] = {{"x", info.dtype, data}};
+    if (is_multi) {
+        for (size_t i = 0; i < total_elems; i++) {
+            if (info.is_float) {
+                if (info.dtype == ME_FLOAT32) {
+                    ((float *)data_y)[i] = (float)(i % 83) * 0.5f;
+                } else {
+                    ((double *)data_y)[i] = (double)(i % 83) * 0.5;
+                }
+            } else if (info.is_signed) {
+                switch (info.dtype) {
+                case ME_BOOL: ((bool *)data_y)[i] = (i % 3) != 0; break;
+                case ME_INT8: ((int8_t *)data_y)[i] = (int8_t)(i % 83); break;
+                case ME_INT16: ((int16_t *)data_y)[i] = (int16_t)(i % 83); break;
+                case ME_INT32: ((int32_t *)data_y)[i] = (int32_t)(i % 83); break;
+                case ME_INT64: ((int64_t *)data_y)[i] = (int64_t)(i % 83); break;
+                default: break;
+                }
+            } else {
+                switch (info.dtype) {
+                case ME_UINT8: ((uint8_t *)data_y)[i] = (uint8_t)(i % 83); break;
+                case ME_UINT16: ((uint16_t *)data_y)[i] = (uint16_t)(i % 83); break;
+                case ME_UINT32: ((uint32_t *)data_y)[i] = (uint32_t)(i % 83); break;
+                case ME_UINT64: ((uint64_t *)data_y)[i] = (uint64_t)(i % 83); break;
+                default: break;
+                }
+            }
+        }
+    }
+
+    me_variable vars[] = {{"x", info.dtype, data}, {"y", info.dtype, data_y}};
 
     int err = 0;
     me_expr *expr = NULL;
-    char expr_buf[16];
-    snprintf(expr_buf, sizeof(expr_buf), "%s(x)", op);
-    int rc_expr = me_compile(expr_buf, vars, 1, ME_AUTO, &err, &expr);
+    char expr_buf[64];
+    if (is_multi) {
+        snprintf(expr_buf, sizeof(expr_buf), "%s(x + y + 2.5 > 3.5)", op);
+    } else {
+        snprintf(expr_buf, sizeof(expr_buf), "%s(x)", op);
+    }
+    int rc_expr = me_compile(expr_buf, vars, is_multi ? 2 : 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("Failed to compile %s(x) for %s (err=%d)\n", op, info.name, err);
+        printf("Failed to compile %s for %s (err=%d)\n", expr_buf, info.name, err);
         free(data);
+        free(data_y);
         return 1;
     }
 
     me_dtype out_dtype = me_get_dtype(expr);
     size_t output_stride = dtype_size_local(out_dtype);
-    me_dtype expected_dtype = output_dtype_for_kind(&info, kind);
+    dtype_info_t bool_info = {"bool", ME_BOOL, sizeof(bool), false, true};
+    const dtype_info_t *reduce_info = is_multi ? &bool_info : &info;
+    me_dtype expected_dtype = output_dtype_for_kind(reduce_info, kind);
     if (out_dtype != expected_dtype) {
         printf("Unexpected output dtype for reductions: got=%d expected=%d\n",
                out_dtype, expected_dtype);
         me_free(expr);
         free(data);
+        free(data_y);
         return 1;
     }
 
@@ -610,19 +746,22 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    double data_gb = (double)(total_elems * info.elem_size) / 1e9;
+    size_t elem_multiplier = is_multi ? 2 : 1;
+    double data_gb = (double)(total_elems * info.elem_size * elem_multiplier) / 1e9;
 
     printf("\n========================================\n");
-    printf("Summary (%s, %s, GB/s)\n", op, info.name);
+    printf("Summary (%s, %s, %s, GB/s)\n", op, info.name, expr_kind);
     printf("========================================\n");
     printf("Threads     ME       C\n");
 
     for (int num_threads = 1; num_threads <= MAX_THREADS; num_threads++) {
         double me_time = run_benchmark(expr, data, info.elem_size,
+                                       data_y, is_multi,
                                        output_stride, (int)total_elems,
                                        num_threads, iterations, partials_me);
         double c_time = run_benchmark_c(data, (int)total_elems,
-                                        num_threads, iterations, partials_c,
+                                        num_threads, data_y, is_multi,
+                                        iterations, partials_c,
                                         output_stride, &info, kind);
 
         printf("%7d  %7.2f  %7.2f\n",
@@ -639,6 +778,7 @@ int main(int argc, char **argv) {
     free(partials_c);
     me_free(expr);
     free(data);
+    free(data_y);
 
     return 0;
 }

@@ -88,14 +88,37 @@ static me_dtype output_dtype_for_kind(const dtype_info_t *info, reduction_kind_t
     return info->is_signed ? ME_INT64 : ME_UINT64;
 }
 
+static double read_value_as_double(const void *data, me_dtype dtype, size_t idx) {
+    switch (dtype) {
+    case ME_BOOL: return ((const bool *)data)[idx] ? 1.0 : 0.0;
+    case ME_INT8: return (double)((const int8_t *)data)[idx];
+    case ME_INT16: return (double)((const int16_t *)data)[idx];
+    case ME_INT32: return (double)((const int32_t *)data)[idx];
+    case ME_INT64: return (double)((const int64_t *)data)[idx];
+    case ME_UINT8: return (double)((const uint8_t *)data)[idx];
+    case ME_UINT16: return (double)((const uint16_t *)data)[idx];
+    case ME_UINT32: return (double)((const uint32_t *)data)[idx];
+    case ME_UINT64: return (double)((const uint64_t *)data)[idx];
+    case ME_FLOAT32: return (double)((const float *)data)[idx];
+    case ME_FLOAT64: return ((const double *)data)[idx];
+    default:
+        return 0.0;
+    }
+}
+
 static bench_result_t benchmark_reduce(const char *op, reduction_kind_t kind,
                                        const dtype_info_t *info,
-                                       size_t total_elems, int iterations) {
-    printf("\n=== %s(%s) ===\n", op, info->name);
+                                       size_t total_elems, int iterations,
+                                       const char *expr_kind) {
+    bool is_multi = strcmp(expr_kind, "multi") == 0;
+    printf("\n=== %s(%s, %s) ===\n", op, info->name, expr_kind);
 
     void *data = malloc(total_elems * info->elem_size);
-    if (!data) {
+    void *data_y = NULL;
+    if (!data || (is_multi && !(data_y = malloc(total_elems * info->elem_size)))) {
         printf("Allocation failed for %s data\n", info->name);
+        free(data);
+        free(data_y);
         bench_result_t empty = {0};
         return empty;
     }
@@ -127,20 +150,54 @@ static bench_result_t benchmark_reduce(const char *op, reduction_kind_t kind,
         }
     }
 
-    me_variable vars[] = {{"x", info->dtype, data}};
+    if (is_multi) {
+        for (size_t i = 0; i < total_elems; i++) {
+            if (info->is_float) {
+                if (info->dtype == ME_FLOAT32) {
+                    ((float *)data_y)[i] = (float)(i % 83) * 0.5f;
+                } else {
+                    ((double *)data_y)[i] = (double)(i % 83) * 0.5;
+                }
+            } else if (info->is_signed) {
+                switch (info->dtype) {
+                case ME_BOOL: ((bool *)data_y)[i] = (i % 3) != 0; break;
+                case ME_INT8: ((int8_t *)data_y)[i] = (int8_t)(i % 83); break;
+                case ME_INT16: ((int16_t *)data_y)[i] = (int16_t)(i % 83); break;
+                case ME_INT32: ((int32_t *)data_y)[i] = (int32_t)(i % 83); break;
+                case ME_INT64: ((int64_t *)data_y)[i] = (int64_t)(i % 83); break;
+                default: break;
+                }
+            } else {
+                switch (info->dtype) {
+                case ME_UINT8: ((uint8_t *)data_y)[i] = (uint8_t)(i % 83); break;
+                case ME_UINT16: ((uint16_t *)data_y)[i] = (uint16_t)(i % 83); break;
+                case ME_UINT32: ((uint32_t *)data_y)[i] = (uint32_t)(i % 83); break;
+                case ME_UINT64: ((uint64_t *)data_y)[i] = (uint64_t)(i % 83); break;
+                default: break;
+                }
+            }
+        }
+    }
+
+    me_variable vars[] = {{"x", info->dtype, data}, {"y", info->dtype, data_y}};
     int err = 0;
     me_expr *expr = NULL;
-    char expr_buf[16];
-    snprintf(expr_buf, sizeof(expr_buf), "%s(x)", op);
-    int rc_expr = me_compile(expr_buf, vars, 1, ME_AUTO, &err, &expr);
+    char expr_buf[64];
+    if (is_multi) {
+        snprintf(expr_buf, sizeof(expr_buf), "%s(x + y + 2.5 > 3.5)", op);
+    } else {
+        snprintf(expr_buf, sizeof(expr_buf), "%s(x)", op);
+    }
+    int rc_expr = me_compile(expr_buf, vars, is_multi ? 2 : 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("Failed to compile %s(x) for %s (err=%d)\n", op, info->name, err);
+        printf("Failed to compile %s for %s (err=%d)\n", expr_buf, info->name, err);
         free(data);
+        free(data_y);
         bench_result_t empty = {0};
         return empty;
     }
 
-    const void *var_ptrs[] = {data};
+    const void *var_ptrs[] = {data, data_y};
     union {
         int8_t i8;
         int16_t i16;
@@ -155,12 +212,14 @@ static bench_result_t benchmark_reduce(const char *op, reduction_kind_t kind,
         double f64;
     } output;
 
-    me_dtype out_dtype = output_dtype_for_kind(info, kind);
-    ME_EVAL_CHECK(expr, var_ptrs, 1, &output, (int)total_elems);
+    dtype_info_t bool_info = {"bool", ME_BOOL, sizeof(bool), false, true};
+    const dtype_info_t *reduce_info = is_multi ? &bool_info : info;
+    me_dtype out_dtype = output_dtype_for_kind(reduce_info, kind);
+    ME_EVAL_CHECK(expr, var_ptrs, is_multi ? 2 : 1, &output, (int)total_elems);
 
     double start = get_time();
     for (int iter = 0; iter < iterations; iter++) {
-        ME_EVAL_CHECK(expr, var_ptrs, 1, &output, (int)total_elems);
+        ME_EVAL_CHECK(expr, var_ptrs, is_multi ? 2 : 1, &output, (int)total_elems);
     }
     double me_time = (get_time() - start) / iterations;
 
@@ -179,7 +238,44 @@ static bench_result_t benchmark_reduce(const char *op, reduction_kind_t kind,
     } sink;
     start = get_time();
     for (int iter = 0; iter < iterations; iter++) {
-        if (info->is_float) {
+        if (is_multi) {
+            if (kind == RED_ANY || kind == RED_ALL) {
+                bool acc = (kind == RED_ALL);
+                for (size_t i = 0; i < total_elems; i++) {
+                    double xval = read_value_as_double(data, info->dtype, i);
+                    double yval = read_value_as_double(data_y, info->dtype, i);
+                    bool v = (xval + yval + 2.5) > 3.5;
+                    if (kind == RED_ANY) {
+                        if (v) { acc = true; break; }
+                    } else {
+                        if (!v) { acc = false; break; }
+                    }
+                }
+                sink.b = acc;
+            } else if (kind == RED_MIN || kind == RED_MAX) {
+                bool acc = (kind == RED_MIN);
+                for (size_t i = 0; i < total_elems; i++) {
+                    double xval = read_value_as_double(data, info->dtype, i);
+                    double yval = read_value_as_double(data_y, info->dtype, i);
+                    bool v = (xval + yval + 2.5) > 3.5;
+                    acc = (kind == RED_MIN) ? (acc && v) : (acc || v);
+                }
+                sink.b = acc;
+            } else {
+                int64_t acc = kind == RED_PROD ? 1 : 0;
+                for (size_t i = 0; i < total_elems; i++) {
+                    double xval = read_value_as_double(data, info->dtype, i);
+                    double yval = read_value_as_double(data_y, info->dtype, i);
+                    bool v = (xval + yval + 2.5) > 3.5;
+                    if (kind == RED_PROD) {
+                        acc *= v ? 1 : 0;
+                    } else {
+                        acc += v ? 1 : 0;
+                    }
+                }
+                sink.i64 = acc;
+            }
+        } else if (info->is_float) {
             if (info->dtype == ME_FLOAT32) {
                 float *f = (float *)data;
                 if (kind == RED_ANY || kind == RED_ALL) {
@@ -464,7 +560,8 @@ static bench_result_t benchmark_reduce(const char *op, reduction_kind_t kind,
     }
     double c_time = (get_time() - start) / iterations;
 
-    double gb = (double)(total_elems * info->elem_size) / 1e9;
+    size_t elem_multiplier = is_multi ? 2 : 1;
+    double gb = (double)(total_elems * info->elem_size * elem_multiplier) / 1e9;
     printf("MiniExpr: %.4f s (%.2f GB/s)\n", me_time, gb / me_time);
     printf("Pure C : %.4f s (%.2f GB/s)\n", c_time, gb / c_time);
     if (out_dtype == ME_INT64) {
@@ -504,6 +601,7 @@ static bench_result_t benchmark_reduce(const char *op, reduction_kind_t kind,
 
     me_free(expr);
     free(data);
+    free(data_y);
     bench_result_t result = {
         .me_time = me_time,
         .c_time = c_time,
@@ -520,17 +618,26 @@ int main(int argc, char **argv) {
 
     const char *op = "sum";
     const char *type_name = "int32";
+    const char *expr_kind = "single";
     if (argc > 1) {
         op = argv[1];
     }
     if (argc > 2) {
         type_name = argv[2];
     }
+    if (argc > 3) {
+        expr_kind = argv[3];
+    }
     if (strcmp(op, "sum") != 0 && strcmp(op, "prod") != 0 &&
         strcmp(op, "min") != 0 && strcmp(op, "max") != 0 &&
         strcmp(op, "any") != 0 && strcmp(op, "all") != 0) {
-        printf("Usage: %s [sum|prod|min|max|any|all] [dtype]\n", argv[0]);
+        printf("Usage: %s [sum|prod|min|max|any|all] [dtype] [single|multi]\n", argv[0]);
         printf("Dtypes: bool int8 int16 int32 int64 uint8 uint16 uint32 uint64 float32 float64\n");
+        return 1;
+    }
+    if (strcmp(expr_kind, "single") != 0 && strcmp(expr_kind, "multi") != 0) {
+        printf("Unknown expression kind: %s\n", expr_kind);
+        printf("Expression kinds: single multi\n");
         return 1;
     }
     reduction_kind_t kind = RED_SUM;
@@ -560,11 +667,11 @@ int main(int argc, char **argv) {
         size_t total_elems = bytes / info.elem_size;
 
         printf("\n--- Working set: %zu MB (%zu elements) ---\n", sizes_mb[i], total_elems);
-        results[i] = benchmark_reduce(op, kind, &info, total_elems, iterations);
+        results[i] = benchmark_reduce(op, kind, &info, total_elems, iterations, expr_kind);
     }
 
     printf("\n==========================================\n");
-    printf("Summary (%s, %s, GB/s)\n", op, info.name);
+    printf("Summary (%s, %s, %s, GB/s)\n", op, info.name, expr_kind);
     printf("==========================================\n");
     printf("Size(MB)     ME       C\n");
     for (size_t i = 0; i < num_sizes; i++) {
