@@ -1,7 +1,7 @@
 /*
  * Example 5: Parallel Evaluation with Multiple Threads
  *
- * Demonstrates thread-safe parallel evaluation using me_eval().
+ * Demonstrates thread-safe parallel evaluation using ME_EVAL_CHECK().
  * Multiple threads can safely evaluate the same compiled expression on
  * different data chunks simultaneously.
  *
@@ -16,6 +16,8 @@
 #include <time.h>
 #include <sys/time.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
 
 #define TOTAL_SIZE 44739242  // ~44M elements = ~1GB working set
 #define NUM_THREADS 4
@@ -24,17 +26,17 @@
 // Note: Actual hardware cost ~23 FLOPs (sqrt ≈ 20 FLOPs in reality)
 
 typedef struct {
-    me_expr *expr;
-    const double *a;
-    const double *b;
-    double *result;
+    me_expr* expr;
+    const double* a;
+    const double* b;
+    double* result;
     int start;
     int end;
     int thread_id;
 } thread_data_t;
 
-void *worker_thread(void *arg) {
-    thread_data_t *data = (thread_data_t *) arg;
+void* worker_thread(void* arg) {
+    thread_data_t* data = (thread_data_t*)arg;
 
     printf("  Thread %d: Processing elements %d to %d\n",
            data->thread_id, data->start, data->end - 1);
@@ -43,14 +45,14 @@ void *worker_thread(void *arg) {
     for (int pos = data->start; pos < data->end; pos += CHUNK_SIZE) {
         int count = (pos + CHUNK_SIZE <= data->end) ? CHUNK_SIZE : (data->end - pos);
 
-        const void *var_ptrs[] = {
+        const void* var_ptrs[] = {
             &data->a[pos],
             &data->b[pos]
         };
 
         // Evaluate this chunk (thread-safe!)
-        me_eval(data->expr, var_ptrs, 2,
-                &data->result[pos], count);
+        ME_EVAL_CHECK(data->expr, var_ptrs, 2,
+                      &data->result[pos], count);
     }
 
     return NULL;
@@ -68,9 +70,9 @@ int main() {
     printf("FLOPs per element: %d (convention) / ~23 (actual hardware cost)\n\n", FLOPS_PER_ELEM);
 
     // Allocate arrays
-    double *a = malloc(TOTAL_SIZE * sizeof(double));
-    double *b = malloc(TOTAL_SIZE * sizeof(double));
-    double *result = malloc(TOTAL_SIZE * sizeof(double));
+    double* a = malloc(TOTAL_SIZE * sizeof(double));
+    double* b = malloc(TOTAL_SIZE * sizeof(double));
+    double* result = malloc(TOTAL_SIZE * sizeof(double));
 
     if (!a || !b || !result) {
         printf("ERROR: Memory allocation failed\n");
@@ -86,9 +88,10 @@ int main() {
     // Compile expression once
     me_variable vars[] = {{"a"}, {"b"}};
     int error;
-    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error);
+    me_expr* expr = NULL;
+    int rc_expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("ERROR: Failed to compile at position %d\n", error);
         free(a);
         free(b);
@@ -127,11 +130,11 @@ int main() {
 
     gettimeofday(&end_tv, NULL);
     double elapsed = (end_tv.tv_sec - start_tv.tv_sec) +
-                     (end_tv.tv_usec - start_tv.tv_usec) / 1e6;
+        (end_tv.tv_usec - start_tv.tv_usec) / 1e6;
 
     // Calculate throughput metrics
     double melems_per_sec = (TOTAL_SIZE / 1e6) / elapsed;
-    double gflops = (TOTAL_SIZE * (double) FLOPS_PER_ELEM / 1e9) / elapsed;
+    double gflops = (TOTAL_SIZE * (double)FLOPS_PER_ELEM / 1e9) / elapsed;
     double bandwidth_gb = (TOTAL_SIZE * 3 * sizeof(double) / 1e9) / elapsed;
 
     // Verify results

@@ -1,8 +1,11 @@
 /* Test inverse hyperbolic functions (asinh, acosh, atanh) and their aliases */
 #include "../src/miniexpr.h"
+#include "minctest.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+
+
 
 #define VECTOR_SIZE 10
 #define TOLERANCE 1e-9
@@ -32,16 +35,17 @@ void test_asinh() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr = me_compile("asinh(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("asinh(x)", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = asinh(x[i]);
@@ -62,20 +66,22 @@ void test_asinh_alias() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr_a = me_compile("asinh(x)", vars, 1, ME_FLOAT64, &err);
-    me_expr *expr_arc = me_compile("arcsinh(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr_a = NULL;
+    int rc_expr_a = me_compile("asinh(x)", vars, 1, ME_FLOAT64, &err, &expr_a);
+    me_expr *expr_arc = NULL;
+    int rc_expr_arc = me_compile("arcsinh(x)", vars, 1, ME_FLOAT64, &err, &expr_arc);
 
     if (!expr_a || !expr_arc) {
         printf("  FAIL: compilation error\n");
         tests_failed++;
-        if (expr_a) me_free(expr_a);
-        if (expr_arc) me_free(expr_arc);
+        if (rc_expr_a == ME_COMPILE_SUCCESS) me_free(expr_a);
+        if (rc_expr_arc == ME_COMPILE_SUCCESS) me_free(expr_arc);
         return;
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr_a, var_ptrs, 1, result_a, VECTOR_SIZE);
-    me_eval(expr_arc, var_ptrs, 1, result_arc, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr_a, var_ptrs, 1, result_a, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr_arc, var_ptrs, 1, result_arc, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         if (fabs(result_a[i] - result_arc[i]) > TOLERANCE) {
@@ -102,16 +108,17 @@ void test_acosh() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr = me_compile("acosh(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("acosh(x)", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = acosh(x[i]);
@@ -132,20 +139,22 @@ void test_acosh_alias() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr_a = me_compile("acosh(x)", vars, 1, ME_FLOAT64, &err);
-    me_expr *expr_arc = me_compile("arccosh(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr_a = NULL;
+    int rc_expr_a = me_compile("acosh(x)", vars, 1, ME_FLOAT64, &err, &expr_a);
+    me_expr *expr_arc = NULL;
+    int rc_expr_arc = me_compile("arccosh(x)", vars, 1, ME_FLOAT64, &err, &expr_arc);
 
     if (!expr_a || !expr_arc) {
         printf("  FAIL: compilation error\n");
         tests_failed++;
-        if (expr_a) me_free(expr_a);
-        if (expr_arc) me_free(expr_arc);
+        if (rc_expr_a == ME_COMPILE_SUCCESS) me_free(expr_a);
+        if (rc_expr_arc == ME_COMPILE_SUCCESS) me_free(expr_arc);
         return;
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr_a, var_ptrs, 1, result_a, VECTOR_SIZE);
-    me_eval(expr_arc, var_ptrs, 1, result_arc, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr_a, var_ptrs, 1, result_a, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr_arc, var_ptrs, 1, result_arc, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         if (fabs(result_a[i] - result_arc[i]) > TOLERANCE) {
@@ -172,16 +181,17 @@ void test_atanh() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr = me_compile("atanh(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("atanh(x)", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double expected = atanh(x[i]);
@@ -202,20 +212,22 @@ void test_atanh_alias() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr_a = me_compile("atanh(x)", vars, 1, ME_FLOAT64, &err);
-    me_expr *expr_arc = me_compile("arctanh(x)", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr_a = NULL;
+    int rc_expr_a = me_compile("atanh(x)", vars, 1, ME_FLOAT64, &err, &expr_a);
+    me_expr *expr_arc = NULL;
+    int rc_expr_arc = me_compile("arctanh(x)", vars, 1, ME_FLOAT64, &err, &expr_arc);
 
     if (!expr_a || !expr_arc) {
         printf("  FAIL: compilation error\n");
         tests_failed++;
-        if (expr_a) me_free(expr_a);
-        if (expr_arc) me_free(expr_arc);
+        if (rc_expr_a == ME_COMPILE_SUCCESS) me_free(expr_a);
+        if (rc_expr_arc == ME_COMPILE_SUCCESS) me_free(expr_arc);
         return;
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr_a, var_ptrs, 1, result_a, VECTOR_SIZE);
-    me_eval(expr_arc, var_ptrs, 1, result_arc, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr_a, var_ptrs, 1, result_a, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr_arc, var_ptrs, 1, result_arc, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         if (fabs(result_a[i] - result_arc[i]) > TOLERANCE) {
@@ -241,16 +253,17 @@ void test_inverse_hyperbolic_roundtrip() {
     me_variable vars[] = {{"x"}};
 
     int err;
-    me_expr *expr = me_compile("asinh(sinh(x))", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("asinh(sinh(x))", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
     }
 
     const void *var_ptrs[] = {x};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         ASSERT_NEAR(x[i], result[i], i);

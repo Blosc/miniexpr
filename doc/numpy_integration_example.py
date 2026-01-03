@@ -90,7 +90,8 @@ def example_usage():
     # miniexpr.me_eval(expr)
     
     print("In real usage:")
-    print("  expr = me_compile('sqrt(a*a + b*b)', variables, ...)")
+    print("  expr = NULL")
+    print("  me_compile('sqrt(a*a + b*b)', variables, ..., &err, &expr)")
     print("  me_eval(expr)")
     print("  # result array now contains computed values")
 

@@ -1,10 +1,23 @@
 # MiniExpr Makefile
 # Organized structure: src/, bench/, tests/
 
-CC = gcc
-CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG
-DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g
-LDFLAGS = -lm
+CC ?= gcc
+ifeq ($(OS),Windows_NT)
+  # Check if we are using clang-cl
+  ifneq (,$(findstring clang-cl,$(CC)))
+    CFLAGS = -O2 -DNDEBUG
+    DEBUG_CFLAGS = -O0 -g
+    LDFLAGS = clang_rt.builtins-x86_64.lib
+  else
+    CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG
+    DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g
+    LDFLAGS = -lm
+  endif
+else
+  CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG
+  DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g
+  LDFLAGS = -lm
+endif
 
 # Directories
 SRCDIR = src
@@ -18,17 +31,27 @@ LIB_SRC = $(SRCDIR)/miniexpr.c
 LIB_OBJ = $(BUILDDIR)/miniexpr.o
 LIB_HDR = $(SRCDIR)/miniexpr.h
 
+ifeq ($(OS),Windows_NT)
+  EXE = .exe
+else
+  EXE =
+endif
+
 # Benchmark sources
 BENCH_SRCS = $(wildcard $(BENCHDIR)/*.c)
-BENCH_BINS = $(patsubst $(BENCHDIR)/%.c,$(BUILDDIR)/%,$(BENCH_SRCS))
+BENCH_BINS = $(patsubst $(BENCHDIR)/%.c,$(BUILDDIR)/%$(EXE),$(BENCH_SRCS))
 
 # Test sources
 TEST_SRCS = $(wildcard $(TESTDIR)/*.c)
-TEST_BINS = $(patsubst $(TESTDIR)/%.c,$(BUILDDIR)/%,$(TEST_SRCS))
+# Exclude tests with pthreads on windows
+ifeq ($(OS),Windows_NT)
+  TEST_SRCS := $(filter-out $(TESTDIR)/test_threadsafe_chunk.c,$(TEST_SRCS))
+endif
+TEST_BINS = $(patsubst $(TESTDIR)/%.c,$(BUILDDIR)/%$(EXE),$(TEST_SRCS))
 
 # Example sources
 EXAMPLE_SRCS = $(wildcard $(EXAMPLEDIR)/*.c)
-EXAMPLE_BINS = $(patsubst $(EXAMPLEDIR)/%.c,$(BUILDDIR)/%,$(EXAMPLE_SRCS))
+EXAMPLE_BINS = $(patsubst $(EXAMPLEDIR)/%.c,$(BUILDDIR)/%$(EXE),$(EXAMPLE_SRCS))
 
 .PHONY: all lib bench test examples clean help debug debug-test
 
@@ -83,7 +106,7 @@ debug-test: clean test
 # Build all benchmarks
 bench: $(BENCH_BINS)
 
-$(BUILDDIR)/%: $(BENCHDIR)/%.c $(LIB_OBJ) | $(BUILDDIR)
+$(BUILDDIR)/%$(EXE): $(BENCHDIR)/%.c $(LIB_OBJ) | $(BUILDDIR)
 	@echo "Building benchmark: $@"
 	$(CC) $(CFLAGS) -I$(SRCDIR) $< $(LIB_OBJ) -o $@ $(LDFLAGS)
 	@echo "✓ Built: $@"
@@ -102,7 +125,7 @@ test: $(TEST_BINS)
 	@echo ""
 	@echo "✅ All tests passed!"
 
-$(BUILDDIR)/%: $(TESTDIR)/%.c $(LIB_OBJ) | $(BUILDDIR)
+$(BUILDDIR)/%$(EXE): $(TESTDIR)/%.c $(LIB_OBJ) | $(BUILDDIR)
 	@echo "Building test: $@"
 	$(CC) $(CFLAGS) -I$(SRCDIR) $< $(LIB_OBJ) -o $@ $(LDFLAGS)
 	@echo "✓ Built: $@"
@@ -110,7 +133,7 @@ $(BUILDDIR)/%: $(TESTDIR)/%.c $(LIB_OBJ) | $(BUILDDIR)
 # Build all examples
 examples: $(EXAMPLE_BINS)
 
-$(BUILDDIR)/%: $(EXAMPLEDIR)/%.c $(LIB_OBJ) | $(BUILDDIR)
+$(BUILDDIR)/%$(EXE): $(EXAMPLEDIR)/%.c $(LIB_OBJ) | $(BUILDDIR)
 	@echo "Building example: $@"
 	$(CC) $(CFLAGS) -I$(SRCDIR) $< $(LIB_OBJ) -o $@ $(LDFLAGS) -lpthread
 	@echo "✓ Built: $@"

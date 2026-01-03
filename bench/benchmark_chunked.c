@@ -4,6 +4,9 @@
 #include <stdlib.h>
 #include <sys/time.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 double get_time() {
     struct timeval tv;
@@ -14,7 +17,7 @@ double get_time() {
 void benchmark_expression(const char *expr_str, int total_size, int chunk_size) {
     printf("\n=== Benchmarking: %s ===\n", expr_str);
     printf("Total size: %d elements (%.1f MB per array)\n",
-           total_size, total_size * sizeof(double) / (1024.0 * 1024.0));
+           total_size, total_size * sizeof(double) / 1e6);
     printf("Chunk size: %d elements\n", chunk_size);
 
     // Allocate arrays
@@ -33,8 +36,9 @@ void benchmark_expression(const char *expr_str, int total_size, int chunk_size) 
     int err;
 
     // Compile expression for chunked evaluation
-    me_expr *expr = me_compile(expr_str, vars, 2, ME_FLOAT64, &err);
-    if (!expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 2, ME_FLOAT64, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("Failed to compile expression\n");
         free(a);
         free(b);
@@ -47,7 +51,7 @@ void benchmark_expression(const char *expr_str, int total_size, int chunk_size) 
     double start = get_time();
     for (int iter = 0; iter < iterations; iter++) {
         const void *vars_full[2] = {a, b};
-        me_eval(expr, vars_full, 2, result, total_size);
+        ME_EVAL_CHECK(expr, vars_full, 2, result, total_size);
     }
     double monolithic_time = (get_time() - start) / iterations;
 
@@ -61,13 +65,13 @@ void benchmark_expression(const char *expr_str, int total_size, int chunk_size) 
                 a + offset,
                 b + offset
             };
-            me_eval(expr, vars_chunk, 2, result + offset, chunk_size);
+            ME_EVAL_CHECK(expr, vars_chunk, 2, result + offset, chunk_size);
         }
     }
     double chunked_time = (get_time() - start) / iterations;
 
     // Calculate throughput
-    double data_processed_gb = (total_size * sizeof(double) * 3.0) / (1024.0 * 1024.0 * 1024.0); // a, b, result
+    double data_processed_gb = (total_size * sizeof(double) * 3.0) / 1e9; // a, b, result
     double mono_throughput = data_processed_gb / monolithic_time;
     double chunk_throughput = data_processed_gb / chunked_time;
 

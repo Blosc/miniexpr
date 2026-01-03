@@ -3,6 +3,9 @@
 #include <math.h>
 #include <string.h>
 #include "miniexpr.h"
+#include "minctest.h"
+
+
 
 #define SMALL_SIZE 10
 #define LARGE_SIZE 100
@@ -30,9 +33,10 @@ int test_arctan2_with_scalar_constant(const char *description, int size, float s
     me_variable vars[] = {{"x", ME_FLOAT32}};
     int err;
     // Use ME_AUTO - following NumPy conventions, float constants match variable type (FLOAT32)
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 1, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("✗ COMPILATION FAILED with error code: %d\n", err);
         free(input);
         return 0;
@@ -41,7 +45,7 @@ int test_arctan2_with_scalar_constant(const char *description, int size, float s
     // Following NumPy conventions, float constants match variable type, so result is FLOAT32
     const void *var_ptrs[] = {input};
     float *result = malloc(size * sizeof(float));
-    me_eval(expr, var_ptrs, 1, result, size);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, size);
 
     float *expected = malloc(size * sizeof(float));
     for (int i = 0; i < size; i++) {
@@ -50,10 +54,15 @@ int test_arctan2_with_scalar_constant(const char *description, int size, float s
 
     int passed = 1;
     float max_diff = 0.0f;
+#ifdef __FAST_MATH__
+    const float tolerance = 1e-4f;
+#else
+    const float tolerance = 1e-5f;
+#endif
     for (int i = 0; i < size; i++) {
         float diff = fabsf(result[i] - expected[i]);
         if (diff > max_diff) max_diff = diff;
-        if (diff > 1e-5f) {
+        if (diff > tolerance) {
             passed = 0;
         }
     }
@@ -102,9 +111,10 @@ int test_arctan2_with_two_arrays(const char *description, int size, float scalar
 
     me_variable vars[] = {{"x", ME_FLOAT32}, {"y", ME_FLOAT32}};
     int err;
-    me_expr *expr = me_compile("arctan2(x, y)", vars, 2, ME_FLOAT32, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("arctan2(x, y)", vars, 2, ME_FLOAT32, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("✗ COMPILATION FAILED with error code: %d\n", err);
         free(input1);
         free(input2);
@@ -114,7 +124,7 @@ int test_arctan2_with_two_arrays(const char *description, int size, float scalar
     const void *var_ptrs[] = {input1, input2};
     float *result = malloc(size * sizeof(float));
 
-    me_eval(expr, var_ptrs, 2, result, size);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, size);
 
     float *expected = malloc(size * sizeof(float));
     for (int i = 0; i < size; i++) {
@@ -123,10 +133,15 @@ int test_arctan2_with_two_arrays(const char *description, int size, float scalar
 
     int passed = 1;
     float max_diff = 0.0f;
+#ifdef __FAST_MATH__
+    const float tolerance = 1e-4f;
+#else
+    const float tolerance = 1e-5f;
+#endif
     for (int i = 0; i < size; i++) {
         float diff = fabsf(result[i] - expected[i]);
         if (diff > max_diff) max_diff = diff;
-        if (diff > 1e-5f) {
+        if (diff > tolerance) {
             passed = 0;
         }
     }
@@ -168,9 +183,10 @@ int test_arctan2_array_scalar_f64(const char *description, const char *expr_str,
 
     me_variable vars[] = {{"y", ME_FLOAT64}, {"x", ME_FLOAT64}};
     int err;
-    me_expr *expr = me_compile(expr_str, invert ? vars + 1 : vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, invert ? vars + 1 : vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error %d\n", err);
         return 0;
     }
@@ -178,7 +194,7 @@ int test_arctan2_array_scalar_f64(const char *description, const char *expr_str,
     const void *var_ptrs[] = {data};
     double result[CHUNK_SIZE];
 
-    me_eval(expr, var_ptrs, 1, result, CHUNK_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, CHUNK_SIZE);
 
     printf("  Results:\n");
     int passed = 1;
@@ -209,9 +225,10 @@ int test_pow_array_scalar_f64(const char *description, const char *expr_str,
 
     me_variable vars[] = {{"x", ME_FLOAT64}};
     int err;
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error %d\n", err);
         return 0;
     }
@@ -219,7 +236,7 @@ int test_pow_array_scalar_f64(const char *description, const char *expr_str,
     const void *var_ptrs[] = {data};
     double result[CHUNK_SIZE];
 
-    me_eval(expr, var_ptrs, 1, result, CHUNK_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, CHUNK_SIZE);
 
     printf("  Results:\n");
     int passed = 1;
@@ -255,9 +272,10 @@ int test_arctan2_complex_expr(const char *description, const char *expr_str,
 
     me_variable vars[] = {{"x", ME_FLOAT64}, {"y", ME_FLOAT64}};
     int err;
-    me_expr *expr = me_compile(expr_str, vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error %d\n", err);
         return 0;
     }
@@ -265,7 +283,7 @@ int test_arctan2_complex_expr(const char *description, const char *expr_str,
     const void *var_ptrs[] = {x_data, y_data};
     double result[CHUNK_SIZE];
 
-    me_eval(expr, var_ptrs, 2, result, CHUNK_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, CHUNK_SIZE);
 
     printf("  Results:\n");
     int passed = 1;
@@ -308,9 +326,10 @@ int test_constant_type_f32(const char *description, const char *expr_str,
 
     me_variable vars[] = {{"a", ME_FLOAT32}};
     int err;
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 1, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("❌ COMPILATION FAILED (error %d)\n", err);
         return 0;
     }
@@ -333,7 +352,7 @@ int test_constant_type_f32(const char *description, const char *expr_str,
     const void *var_ptrs[] = {input};
     float result[SMALL_SIZE];  // Use float buffer for FLOAT32 result
 
-    me_eval(expr, var_ptrs, 1, result, SMALL_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, SMALL_SIZE);
 
     int passed = 1;
     printf("\nFirst 5 results:\n");
@@ -375,9 +394,10 @@ int test_scalar_constant(const char *description, const char *expr_str,
     me_variable vars[] = {{"a", ME_FLOAT32}};
     int err;
     // Use ME_AUTO - following NumPy conventions, float constants match variable type (FLOAT32)
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 1, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ COMPILATION FAILED (error %d)\n", err);
         return 0;
     }
@@ -388,7 +408,7 @@ int test_scalar_constant(const char *description, const char *expr_str,
 
     const void *var_ptrs[] = {input};
     float result[SMALL_SIZE];
-    me_eval(expr, var_ptrs, 1, result, SMALL_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, SMALL_SIZE);
 
     int passed = 1;
     printf("  Input     Result    Expected  Status\n");
@@ -446,9 +466,10 @@ int test_int64_large_constant(const char *description, int size) {
     me_variable vars[] = {{"a", ME_INT64}};
     int err;
     const char *expr_str = "(a + 90000.00001) + 1";
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 1, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ COMPILATION FAILED (error %d)\n", err);
         free(input);
         return 0;
@@ -473,7 +494,7 @@ int test_int64_large_constant(const char *description, int size) {
             free(input);
             return 0;
         }
-        me_eval(expr, var_ptrs, 1, result, size);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, result, size);
 
         // Compute expected values using double arithmetic.
         for (int i = 0; i < size; i++) {
@@ -504,7 +525,7 @@ int test_int64_large_constant(const char *description, int size) {
             free(input);
             return 0;
         }
-        me_eval(expr, var_ptrs, 1, result, size);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, result, size);
 
         for (int i = 0; i < size; i++) {
             float expected = (float)(((double)input[i] + 90000.00001) + 1.0);
@@ -537,7 +558,7 @@ int test_int64_large_constant(const char *description, int size) {
             free(input);
             return 0;
         }
-        me_eval(expr, var_ptrs, 1, result, size);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, result, size);
 
         for (int i = 0; i < size; i++) {
             double expected = ((double)input[i] + 90000.00001) + 1.0;
@@ -588,9 +609,10 @@ int test_float32_array_float64_constants(const char *description, int size) {
     me_variable vars[] = {{"o0", ME_FLOAT32}};
     int err;
     const char *expr_str = "((o0 + 1067.3366832990887) + 0.2901221513748169)";
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 1, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ COMPILATION FAILED (error %d)\n", err);
         free(input);
         return 0;
@@ -606,6 +628,11 @@ int test_float32_array_float64_constants(const char *description, int size) {
 
     int passed = 1;
     float max_diff = 0.0f;
+#ifdef __FAST_MATH__
+    const float tolerance = 1e-4f;
+#else
+    const float tolerance = 1e-5f;
+#endif
 
     const void *var_ptrs[] = {input};
 
@@ -618,14 +645,14 @@ int test_float32_array_float64_constants(const char *description, int size) {
             free(input);
             return 0;
         }
-        me_eval(expr, var_ptrs, 1, result, size);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, result, size);
 
         // Compute expected values using float32 arithmetic (NumPy behavior - constants converted to float32)
         for (int i = 0; i < size; i++) {
             float expected = ((float)input[i] + (float)1067.3366832990887) + (float)0.2901221513748169;
             float diff = fabsf(result[i] - expected);
             if (diff > max_diff) max_diff = diff;
-            if (diff > 1e-5f) passed = 0; // tolerance for float32
+            if (diff > tolerance) passed = 0; // tolerance for float32
         }
 
         printf("  Result (first 5):   ");
@@ -673,14 +700,15 @@ int test_conj_real_preserves_dtype() {
     me_variable vars[] = {{"a", ME_FLOAT32}};
 
     int err;
-    me_expr *expr = me_compile("conj(a)", vars, 1, ME_AUTO, &err);
-    if (!expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("conj(a)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ COMPILATION FAILED at position %d\n", err);
         return 0;
     }
 
     const void *var_ptrs[] = {a};
-    me_eval(expr, var_ptrs, 1, result, SMALL_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, SMALL_SIZE);
 
     int passed = 1;
     float max_diff = 0.0f;
