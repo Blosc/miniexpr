@@ -253,6 +253,21 @@ Chunk size matters enormously for parallel performance:
 
 ---
 
+### 09_reduction_expressions.c
+**Reductions inside larger expressions**
+
+- **What it demonstrates**: Reductions over expressions and reductions used inside larger expressions
+- **Expressions**: `sum(x + 1)`, `x + sum(x)`
+- **Concepts**: Reduction arguments, scalar broadcast
+- **Best for**: Mixing aggregate values with elementwise math
+
+**Run it:**
+```bash
+./build/09_reduction_expressions
+```
+
+---
+
 ## Building Examples
 
 ### Using the Makefile
@@ -300,14 +315,13 @@ me_variable vars[] = {{"x"}, {"y"}};
 
 // 2. Compile expression
 int error;
-me_expr *expr = me_compile("x + y", vars, 2, ME_FLOAT64, &error);
-
+me_expr *expr = NULL;
+if (me_compile("x + y", vars, 2, ME_FLOAT64, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 // 3. Prepare data pointers
 const void *var_ptrs[] = {x_data, y_data};
 
 // 4. Evaluate
-me_eval(expr, var_ptrs, 2, result, n);
-
+if (me_eval(expr, var_ptrs, 2, result, n) != ME_EVAL_SUCCESS) { /* handle error */ }
 // 5. Cleanup
 me_free(expr);
 ```
@@ -315,8 +329,8 @@ me_free(expr);
 ### Error Handling Pattern
 
 ```c
-if (!expr) {
-    printf("Parse error at position %d\n", error);
+if (me_compile(expression, vars, var_count, dtype, &error, &expr) != ME_COMPILE_SUCCESS) {
+    printf("Compile error (pos=%d)\n", error);
     return 1;
 }
 ```
@@ -329,7 +343,7 @@ for (int chunk = 0; chunk < num_chunks; chunk++) {
     int size = min(CHUNK_SIZE, TOTAL_SIZE - offset);
 
     const void *var_ptrs[] = {&data[offset]};
-    me_eval(expr, var_ptrs, 1, &result[offset], size);
+    if (me_eval(expr, var_ptrs, 1, &result[offset], size) != ME_EVAL_SUCCESS) { /* handle error */ }
 }
 ```
 

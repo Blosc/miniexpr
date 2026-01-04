@@ -47,19 +47,14 @@ int main() {
 
     // Compile the expression
     int error;
-    me_expr *expr = me_compile(expression, vars, 5, ME_FLOAT64, &error);
-
-    if (!expr) {
-        printf("Parse error at position %d\n", error);
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile(expression, vars, 5, ME_FLOAT64, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     // Prepare variable pointers
     const void *var_ptrs[] = {h, x, angle, g, v};
 
     // Evaluate the expression (thread-safe)
-    me_eval(expr, var_ptrs, 5, y, n);
-
+    if (me_eval(expr, var_ptrs, 5, y, n) != ME_EVAL_SUCCESS) { /* handle error */ }
     // Print results
     printf("Projectile Trajectory (v=20 m/s, angle=45°):\n");
     printf("Distance (m) | Height (m)\n");
@@ -144,6 +139,7 @@ miniexpr supports many standard mathematical functions:
 - Exponential/Logarithmic: `exp`, `log`, `log10`, `pow`
 - Power/Root: `sqrt`, `pow`, `abs`
 - Rounding: `floor`, `ceil`
+- Reductions: `sum`, `prod`, `min`, `max`, `any`, `all`
 - And more...
 
 These can be combined freely to create sophisticated mathematical expressions.

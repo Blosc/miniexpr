@@ -5,6 +5,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "miniexpr.h"
+#include "minctest.h"
+
+
 
 #define VECTOR_SIZE 10
 
@@ -36,13 +39,14 @@ int main() {
         };
 
         int err;
-        me_expr *expr = me_compile("a + b", vars, 2, ME_INT32, &err);
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("a + b", vars, 2, ME_INT32, &err, &expr);
 
-        if (!expr) {
+        if (rc_expr != ME_COMPILE_SUCCESS) {
             printf("  ❌ FAIL: Compilation error at position %d\n", err);
         } else {
             const void *var_ptrs[] = {a, b};
-            me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+            ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
             bool passed = true;
             for (int i = 0; i < VECTOR_SIZE && passed; i++) {
@@ -77,13 +81,14 @@ int main() {
         };
 
         int err;
-        me_expr *expr = me_compile("a & b", vars, 2, ME_BOOL, &err);
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("a & b", vars, 2, ME_BOOL, &err, &expr);
 
-        if (!expr) {
+        if (rc_expr != ME_COMPILE_SUCCESS) {
             printf("  ❌ FAIL: Compilation error at position %d\n", err);
         } else {
             const void *var_ptrs[] = {a, b};
-            me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+            ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
             bool passed = true;
             for (int i = 0; i < VECTOR_SIZE && passed; i++) {
@@ -151,13 +156,14 @@ int main() {
 
         int err;
         // Simple expression: cast bool to int and add - use ME_AUTO to infer result
-        me_expr *expr = me_compile("a + b", vars, 2, ME_AUTO, &err);
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("a + b", vars, 2, ME_AUTO, &err, &expr);
 
-        if (!expr) {
+        if (rc_expr != ME_COMPILE_SUCCESS) {
             printf("  ❌ FAIL: Compilation error at position %d\n", err);
         } else {
             const void *var_ptrs[] = {a, b};
-            me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+            ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
             bool passed = true;
             for (int i = 0; i < VECTOR_SIZE && passed; i++) {

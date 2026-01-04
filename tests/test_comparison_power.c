@@ -1,8 +1,11 @@
 /* Test comparisons with power operations */
 #include "../src/miniexpr.h"
+#include "minctest.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+
+
 
 #define VECTOR_SIZE 10
 #define TOLERANCE 1e-6
@@ -31,16 +34,17 @@ void test_power_equality_comparison() {
     me_variable vars[] = {{"a1"}, {"a2"}};
 
     int err;
-    me_expr *expr = me_compile("a1 ** 2 == (a1 + a2)", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a1 ** 2 == (a1 + a2)", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
     }
 
     const void *var_ptrs[] = {a1, a2};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double left = a1[i] * a1[i];
@@ -65,16 +69,17 @@ void test_power_less_than_comparison() {
     me_variable vars[] = {{"a1"}, {"a2"}};
 
     int err;
-    me_expr *expr = me_compile("a1 ** 2 < a2", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a1 ** 2 < a2", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
     }
 
     const void *var_ptrs[] = {a1, a2};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double left = a1[i] * a1[i];
@@ -98,16 +103,17 @@ void test_power_greater_equal_comparison() {
     me_variable vars[] = {{"a1"}, {"a2"}};
 
     int err;
-    me_expr *expr = me_compile("a1 ** 3 >= a2", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a1 ** 3 >= a2", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
     }
 
     const void *var_ptrs[] = {a1, a2};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double left = a1[i] * a1[i] * a1[i];
@@ -132,16 +138,17 @@ void test_complex_power_comparison() {
     me_variable vars[] = {{"a1"}, {"a2"}, {"a3"}};
 
     int err;
-    me_expr *expr = me_compile("(a1 ** 2 + a2 ** 2) == a3", vars, 3, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("(a1 ** 2 + a2 ** 2) == a3", vars, 3, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
     }
 
     const void *var_ptrs[] = {a1, a2, a3};
-    me_eval(expr, var_ptrs, 3, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 3, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double left = a1[i] * a1[i] + a2[i] * a2[i];
