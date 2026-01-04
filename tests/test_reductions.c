@@ -633,7 +633,7 @@ static int test_reduction_all_types() {
         me_expr *expr_local = NULL; \
         int rc_local = me_compile((expr_str), (vars), 1, ME_AUTO, &err_local, &expr_local); \
         if (rc_local != ME_COMPILE_SUCCESS) { \
-            printf("  ❌ FAILED: compile %s error %d\n", (expr_str), err_local); \
+            printf("  ❌ FAILED: compile %s rc=%d err=%d\n", (expr_str), rc_local, err_local); \
             failures++; \
         } \
         else { \
@@ -884,6 +884,9 @@ static int test_reduction_all_types() {
     }
 
     {
+#if defined(_WIN32) || defined(_WIN64)
+        printf("  ✅ PASSED (complex not supported on Windows)\n");
+#else
         float _Complex data[] = {MAKE_C64(1.0f, 1.0f), MAKE_C64(2.0f, -1.0f), MAKE_C64(0.5f, 0.0f)};
         me_variable vars[] = {{"x", ME_COMPLEX64, data}};
         const void *var_ptrs[] = {data};
@@ -923,9 +926,13 @@ static int test_reduction_all_types() {
 
         RUN_REDUCE_EXPECT_FAIL("min(x)", vars);
         RUN_REDUCE_EXPECT_FAIL("max(x)", vars);
+#endif
     }
 
     {
+#if defined(_WIN32) || defined(_WIN64)
+        printf("  ✅ PASSED (complex not supported on Windows)\n");
+#else
         double _Complex data[] = {MAKE_C128(1.0, 1.0), MAKE_C128(2.0, -1.0), MAKE_C128(0.5, 0.0)};
         me_variable vars[] = {{"x", ME_COMPLEX128, data}};
         const void *var_ptrs[] = {data};
@@ -965,6 +972,7 @@ static int test_reduction_all_types() {
 
         RUN_REDUCE_EXPECT_FAIL("min(x)", vars);
         RUN_REDUCE_EXPECT_FAIL("max(x)", vars);
+#endif
     }
 
 #undef RUN_REDUCE
