@@ -20,6 +20,11 @@ static inline float _Complex make_c64(float real, float imag) {
     u.m = _FCbuild(real, imag);
     return u.c;
 }
+static inline double _Complex make_c128(double real, double imag) {
+    union { double _Complex c; _Dcomplex m; } u;
+    u.m = _Cbuild(real, imag);
+    return u.c;
+}
 static inline float crealf_compat(float _Complex z) {
     union { float _Complex c; _Fcomplex m; } u;
     u.c = z;
@@ -30,13 +35,29 @@ static inline float cimagf_compat(float _Complex z) {
     u.c = z;
     return u.m._Val[1];
 }
+static inline double creal_compat(double _Complex z) {
+    union { double _Complex c; _Dcomplex m; } u;
+    u.c = z;
+    return u.m._Val[0];
+}
+static inline double cimag_compat(double _Complex z) {
+    union { double _Complex c; _Dcomplex m; } u;
+    u.c = z;
+    return u.m._Val[1];
+}
 #define MAKE_C64(real, imag) make_c64((real), (imag))
 #define CREALF(z) crealf_compat((z))
 #define CIMAGF(z) cimagf_compat((z))
+#define MAKE_C128(real, imag) make_c128((real), (imag))
+#define CREAL(z) creal_compat((z))
+#define CIMAG(z) cimag_compat((z))
 #else
 #define MAKE_C64(real, imag) CMPLXF((real), (imag))
 #define CREALF(z) crealf(z)
 #define CIMAGF(z) cimagf(z)
+#define MAKE_C128(real, imag) CMPLX((real), (imag))
+#define CREAL(z) creal((z))
+#define CIMAG(z) cimag((z))
 #endif
 
 static int test_sum_int64() {
@@ -905,26 +926,26 @@ static int test_reduction_all_types() {
     }
 
     {
-        double _Complex data[] = {1.0 + 1.0 * I, 2.0 - 1.0 * I, 0.5 + 0.0 * I};
+        double _Complex data[] = {MAKE_C128(1.0, 1.0), MAKE_C128(2.0, -1.0), MAKE_C128(0.5, 0.0)};
         me_variable vars[] = {{"x", ME_COMPLEX128, data}};
         const void *var_ptrs[] = {data};
-        double _Complex out_sum = 0.0 + 0.0 * I;
-        double _Complex out_prod = 0.0 + 0.0 * I;
+        double _Complex out_sum = MAKE_C128(0.0, 0.0);
+        double _Complex out_prod = MAKE_C128(0.0, 0.0);
         bool out_any = false;
         bool out_all = false;
 
         RUN_REDUCE("sum(x)", vars, var_ptrs, &out_sum, 3, ME_COMPLEX128, { \
             double _Complex expected = data[0] + data[1] + data[2]; \
-            if (fabs(creal(out_sum) - creal(expected)) > 1e-12 || \
-                fabs(cimag(out_sum) - cimag(expected)) > 1e-12) { \
+            if (fabs(CREAL(out_sum) - CREAL(expected)) > 1e-12 || \
+                fabs(CIMAG(out_sum) - CIMAG(expected)) > 1e-12) { \
                 printf("  ❌ FAILED: complex128 sum mismatch\n"); \
                 failures++; \
             } \
         });
         RUN_REDUCE("prod(x)", vars, var_ptrs, &out_prod, 3, ME_COMPLEX128, { \
             double _Complex expected = data[0] * data[1] * data[2]; \
-            if (fabs(creal(out_prod) - creal(expected)) > 1e-12 || \
-                fabs(cimag(out_prod) - cimag(expected)) > 1e-12) { \
+            if (fabs(CREAL(out_prod) - CREAL(expected)) > 1e-12 || \
+                fabs(CIMAG(out_prod) - CIMAG(expected)) > 1e-12) { \
                 printf("  ❌ FAILED: complex128 prod mismatch\n"); \
                 failures++; \
             } \
