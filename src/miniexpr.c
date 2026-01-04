@@ -2334,24 +2334,6 @@ static int64_t reduce_sum_int32(const int32_t* data, int nitems) {
         acc += data[i];
     }
     return acc;
-#elif (defined(__ARM_NEON) || defined(__ARM_NEON__)) && defined(__aarch64__)
-    int i = 0;
-    int64x2_t acc0 = vdupq_n_s64(0);
-    int64x2_t acc1 = vdupq_n_s64(0);
-    const int limit = nitems & ~3;
-    for (; i < limit; i += 4) {
-        int32x4_t v = vld1q_s32(data + i);
-        int64x2_t lo = vmovl_s32(vget_low_s32(v));
-        int64x2_t hi = vmovl_s32(vget_high_s32(v));
-        acc0 = vaddq_s64(acc0, lo);
-        acc1 = vaddq_s64(acc1, hi);
-    }
-    int64x2_t accv = vaddq_s64(acc0, acc1);
-    int64_t acc = vgetq_lane_s64(accv, 0) + vgetq_lane_s64(accv, 1);
-    for (; i < nitems; i++) {
-        acc += data[i];
-    }
-    return acc;
 #else
     int64_t acc = 0;
     for (int i = 0; i < nitems; i++) {
@@ -4979,7 +4961,7 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
                         for (int i = 0; i < nitems; i++) acc *= data[i];
                     }
                     else {
-                        acc = reduce_sum_int32(data, nitems);
+                        for (int i = 0; i < nitems; i++) acc += data[i];
                     }
                     ((int64_t*)write_ptr)[0] = acc;
                 }
@@ -5055,7 +5037,7 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
                         for (int i = 0; i < nitems; i++) acc *= data[i];
                     }
                     else {
-                        for (int i = 0; i < nitems; i++) acc += data[i];
+                        acc = reduce_sum_int32(data, nitems);
                     }
                     ((int64_t*)write_ptr)[0] = acc;
                 }
@@ -5131,7 +5113,7 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
                         for (int i = 0; i < nitems; i++) acc *= data[i];
                     }
                     else {
-                        acc = reduce_sum_uint32(data, nitems);
+                        for (int i = 0; i < nitems; i++) acc += data[i];
                     }
                     ((uint64_t*)write_ptr)[0] = acc;
                 }
@@ -5207,7 +5189,7 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
                         for (int i = 0; i < nitems; i++) acc *= data[i];
                     }
                     else {
-                        for (int i = 0; i < nitems; i++) acc += data[i];
+                        acc = reduce_sum_uint32(data, nitems);
                     }
                     ((uint64_t*)write_ptr)[0] = acc;
                 }

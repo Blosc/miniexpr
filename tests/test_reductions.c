@@ -602,6 +602,360 @@ static int test_reduction_expression_comparison() {
     return 0;
 }
 
+static int test_reduction_all_types() {
+    printf("\n=== Reduction all types ===\n");
+
+    int failures = 0;
+
+#define RUN_REDUCE(expr_str, vars, var_ptrs, out_ptr, nitems, expected_dtype, check_block) do { \
+        int err_local = 0; \
+        me_expr *expr_local = NULL; \
+        int rc_local = me_compile((expr_str), (vars), 1, ME_AUTO, &err_local, &expr_local); \
+        if (rc_local != ME_COMPILE_SUCCESS) { \
+            printf("  ❌ FAILED: compile %s error %d\n", (expr_str), err_local); \
+            failures++; \
+        } \
+        else { \
+            if (me_get_dtype(expr_local) != (expected_dtype)) { \
+                printf("  ❌ FAILED: %s dtype expected %d got %d\n", \
+                       (expr_str), (expected_dtype), me_get_dtype(expr_local)); \
+                failures++; \
+            } \
+            ME_EVAL_CHECK(expr_local, (var_ptrs), 1, (out_ptr), (nitems)); \
+            check_block \
+            me_free(expr_local); \
+        } \
+    } while (0)
+
+#define RUN_REDUCE_EXPECT_FAIL(expr_str, vars) do { \
+        int err_local = 0; \
+        me_expr *expr_local = NULL; \
+        int rc_local = me_compile((expr_str), (vars), 1, ME_AUTO, &err_local, &expr_local); \
+        if (rc_local == ME_COMPILE_SUCCESS) { \
+            printf("  ❌ FAILED: expected %s to be rejected\n", (expr_str)); \
+            me_free(expr_local); \
+            failures++; \
+        } \
+    } while (0)
+
+#define TEST_INT_TYPE(TYPE, DTYPE, NAME, IS_SIGNED) do { \
+        TYPE data[] = {(TYPE)1, (TYPE)2, (TYPE)3, (TYPE)4}; \
+        me_variable vars[] = {{"x", DTYPE, data}}; \
+        const void *var_ptrs[] = {data}; \
+        \
+        TYPE out_min = 0; \
+        TYPE out_max = 0; \
+        bool out_any = false; \
+        bool out_all = false; \
+        \
+        if (IS_SIGNED) { \
+            int64_t out_sum = 0; \
+            int64_t out_prod = 0; \
+            RUN_REDUCE("sum(x)", vars, var_ptrs, &out_sum, 4, ME_INT64, { \
+                if (out_sum != 10) { \
+                    printf("  ❌ FAILED: %s sum expected 10 got %lld\n", NAME, (long long)out_sum); \
+                    failures++; \
+                } \
+            }); \
+            RUN_REDUCE("prod(x)", vars, var_ptrs, &out_prod, 4, ME_INT64, { \
+                if (out_prod != 24) { \
+                    printf("  ❌ FAILED: %s prod expected 24 got %lld\n", NAME, (long long)out_prod); \
+                    failures++; \
+                } \
+            }); \
+        } else { \
+            uint64_t out_sum = 0; \
+            uint64_t out_prod = 0; \
+            RUN_REDUCE("sum(x)", vars, var_ptrs, &out_sum, 4, ME_UINT64, { \
+                if (out_sum != 10) { \
+                    printf("  ❌ FAILED: %s sum expected 10 got %llu\n", NAME, (unsigned long long)out_sum); \
+                    failures++; \
+                } \
+            }); \
+            RUN_REDUCE("prod(x)", vars, var_ptrs, &out_prod, 4, ME_UINT64, { \
+                if (out_prod != 24) { \
+                    printf("  ❌ FAILED: %s prod expected 24 got %llu\n", NAME, (unsigned long long)out_prod); \
+                    failures++; \
+                } \
+            }); \
+        } \
+        \
+        RUN_REDUCE("min(x)", vars, var_ptrs, &out_min, 4, DTYPE, { \
+            if (out_min != (TYPE)1) { \
+                printf("  ❌ FAILED: %s min expected 1\n", NAME); \
+                failures++; \
+            } \
+        }); \
+        RUN_REDUCE("max(x)", vars, var_ptrs, &out_max, 4, DTYPE, { \
+            if (out_max != (TYPE)4) { \
+                printf("  ❌ FAILED: %s max expected 4\n", NAME); \
+                failures++; \
+            } \
+        }); \
+        RUN_REDUCE("any(x)", vars, var_ptrs, &out_any, 4, ME_BOOL, { \
+            if (!out_any) { \
+                printf("  ❌ FAILED: %s any expected true\n", NAME); \
+                failures++; \
+            } \
+        }); \
+        RUN_REDUCE("all(x)", vars, var_ptrs, &out_all, 4, ME_BOOL, { \
+            if (!out_all) { \
+                printf("  ❌ FAILED: %s all expected true\n", NAME); \
+                failures++; \
+            } \
+        }); \
+    } while (0)
+
+    TEST_INT_TYPE(int8_t, ME_INT8, "int8", true);
+    TEST_INT_TYPE(int16_t, ME_INT16, "int16", true);
+    TEST_INT_TYPE(int32_t, ME_INT32, "int32", true);
+    TEST_INT_TYPE(int64_t, ME_INT64, "int64", true);
+    TEST_INT_TYPE(uint8_t, ME_UINT8, "uint8", false);
+    TEST_INT_TYPE(uint16_t, ME_UINT16, "uint16", false);
+    TEST_INT_TYPE(uint32_t, ME_UINT32, "uint32", false);
+    TEST_INT_TYPE(uint64_t, ME_UINT64, "uint64", false);
+
+    {
+        bool data[] = {true, false, true, true};
+        me_variable vars[] = {{"x", ME_BOOL, data}};
+        const void *var_ptrs[] = {data};
+        int64_t out_sum = 0;
+        int64_t out_prod = 0;
+        bool out_min = false;
+        bool out_max = false;
+        bool out_any = false;
+        bool out_all = false;
+
+        RUN_REDUCE("sum(x)", vars, var_ptrs, &out_sum, 4, ME_INT64, { \
+            if (out_sum != 3) { \
+                printf("  ❌ FAILED: bool sum expected 3 got %lld\n", (long long)out_sum); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("prod(x)", vars, var_ptrs, &out_prod, 4, ME_INT64, { \
+            if (out_prod != 0) { \
+                printf("  ❌ FAILED: bool prod expected 0 got %lld\n", (long long)out_prod); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("min(x)", vars, var_ptrs, &out_min, 4, ME_BOOL, { \
+            if (out_min) { \
+                printf("  ❌ FAILED: bool min expected false\n"); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("max(x)", vars, var_ptrs, &out_max, 4, ME_BOOL, { \
+            if (!out_max) { \
+                printf("  ❌ FAILED: bool max expected true\n"); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("any(x)", vars, var_ptrs, &out_any, 4, ME_BOOL, { \
+            if (!out_any) { \
+                printf("  ❌ FAILED: bool any expected true\n"); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("all(x)", vars, var_ptrs, &out_all, 4, ME_BOOL, { \
+            if (out_all) { \
+                printf("  ❌ FAILED: bool all expected false\n"); \
+                failures++; \
+            } \
+        });
+    }
+
+    {
+        float data[] = {1.0f, 2.0f, 3.0f, 4.0f};
+        me_variable vars[] = {{"x", ME_FLOAT32, data}};
+        const void *var_ptrs[] = {data};
+        float out_min = 0.0f;
+        float out_max = 0.0f;
+        float out_sum = 0.0f;
+        float out_prod = 0.0f;
+        bool out_any = false;
+        bool out_all = false;
+
+        RUN_REDUCE("sum(x)", vars, var_ptrs, &out_sum, 4, ME_FLOAT32, { \
+            if (fabsf(out_sum - 10.0f) > 1e-5f) { \
+                printf("  ❌ FAILED: float32 sum expected 10\n"); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("prod(x)", vars, var_ptrs, &out_prod, 4, ME_FLOAT32, { \
+            if (fabsf(out_prod - 24.0f) > 1e-5f) { \
+                printf("  ❌ FAILED: float32 prod expected 24\n"); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("min(x)", vars, var_ptrs, &out_min, 4, ME_FLOAT32, { \
+            if (fabsf(out_min - 1.0f) > 1e-5f) { \
+                printf("  ❌ FAILED: float32 min expected 1\n"); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("max(x)", vars, var_ptrs, &out_max, 4, ME_FLOAT32, { \
+            if (fabsf(out_max - 4.0f) > 1e-5f) { \
+                printf("  ❌ FAILED: float32 max expected 4\n"); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("any(x)", vars, var_ptrs, &out_any, 4, ME_BOOL, { \
+            if (!out_any) { \
+                printf("  ❌ FAILED: float32 any expected true\n"); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("all(x)", vars, var_ptrs, &out_all, 4, ME_BOOL, { \
+            if (!out_all) { \
+                printf("  ❌ FAILED: float32 all expected true\n"); \
+                failures++; \
+            } \
+        });
+    }
+
+    {
+        double data[] = {1.0, 2.0, 3.0, 4.0};
+        me_variable vars[] = {{"x", ME_FLOAT64, data}};
+        const void *var_ptrs[] = {data};
+        double out_min = 0.0;
+        double out_max = 0.0;
+        double out_sum = 0.0;
+        double out_prod = 0.0;
+        bool out_any = false;
+        bool out_all = false;
+
+        RUN_REDUCE("sum(x)", vars, var_ptrs, &out_sum, 4, ME_FLOAT64, { \
+            if (fabs(out_sum - 10.0) > 1e-12) { \
+                printf("  ❌ FAILED: float64 sum expected 10\n"); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("prod(x)", vars, var_ptrs, &out_prod, 4, ME_FLOAT64, { \
+            if (fabs(out_prod - 24.0) > 1e-12) { \
+                printf("  ❌ FAILED: float64 prod expected 24\n"); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("min(x)", vars, var_ptrs, &out_min, 4, ME_FLOAT64, { \
+            if (fabs(out_min - 1.0) > 1e-12) { \
+                printf("  ❌ FAILED: float64 min expected 1\n"); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("max(x)", vars, var_ptrs, &out_max, 4, ME_FLOAT64, { \
+            if (fabs(out_max - 4.0) > 1e-12) { \
+                printf("  ❌ FAILED: float64 max expected 4\n"); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("any(x)", vars, var_ptrs, &out_any, 4, ME_BOOL, { \
+            if (!out_any) { \
+                printf("  ❌ FAILED: float64 any expected true\n"); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("all(x)", vars, var_ptrs, &out_all, 4, ME_BOOL, { \
+            if (!out_all) { \
+                printf("  ❌ FAILED: float64 all expected true\n"); \
+                failures++; \
+            } \
+        });
+    }
+
+    {
+        float _Complex data[] = {MAKE_C64(1.0f, 1.0f), MAKE_C64(2.0f, -1.0f), MAKE_C64(0.5f, 0.0f)};
+        me_variable vars[] = {{"x", ME_COMPLEX64, data}};
+        const void *var_ptrs[] = {data};
+        float _Complex out_sum = MAKE_C64(0.0f, 0.0f);
+        float _Complex out_prod = MAKE_C64(0.0f, 0.0f);
+        bool out_any = false;
+        bool out_all = false;
+
+        RUN_REDUCE("sum(x)", vars, var_ptrs, &out_sum, 3, ME_COMPLEX64, { \
+            float _Complex expected = data[0] + data[1] + data[2]; \
+            if (fabsf(CREALF(out_sum) - CREALF(expected)) > 1e-5f || \
+                fabsf(CIMAGF(out_sum) - CIMAGF(expected)) > 1e-5f) { \
+                printf("  ❌ FAILED: complex64 sum mismatch\n"); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("prod(x)", vars, var_ptrs, &out_prod, 3, ME_COMPLEX64, { \
+            float _Complex expected = data[0] * data[1] * data[2]; \
+            if (fabsf(CREALF(out_prod) - CREALF(expected)) > 1e-5f || \
+                fabsf(CIMAGF(out_prod) - CIMAGF(expected)) > 1e-5f) { \
+                printf("  ❌ FAILED: complex64 prod mismatch\n"); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("any(x)", vars, var_ptrs, &out_any, 3, ME_BOOL, { \
+            if (!out_any) { \
+                printf("  ❌ FAILED: complex64 any expected true\n"); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("all(x)", vars, var_ptrs, &out_all, 3, ME_BOOL, { \
+            if (!out_all) { \
+                printf("  ❌ FAILED: complex64 all expected true\n"); \
+                failures++; \
+            } \
+        });
+
+        RUN_REDUCE_EXPECT_FAIL("min(x)", vars);
+        RUN_REDUCE_EXPECT_FAIL("max(x)", vars);
+    }
+
+    {
+        double _Complex data[] = {1.0 + 1.0 * I, 2.0 - 1.0 * I, 0.5 + 0.0 * I};
+        me_variable vars[] = {{"x", ME_COMPLEX128, data}};
+        const void *var_ptrs[] = {data};
+        double _Complex out_sum = 0.0 + 0.0 * I;
+        double _Complex out_prod = 0.0 + 0.0 * I;
+        bool out_any = false;
+        bool out_all = false;
+
+        RUN_REDUCE("sum(x)", vars, var_ptrs, &out_sum, 3, ME_COMPLEX128, { \
+            double _Complex expected = data[0] + data[1] + data[2]; \
+            if (fabs(creal(out_sum) - creal(expected)) > 1e-12 || \
+                fabs(cimag(out_sum) - cimag(expected)) > 1e-12) { \
+                printf("  ❌ FAILED: complex128 sum mismatch\n"); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("prod(x)", vars, var_ptrs, &out_prod, 3, ME_COMPLEX128, { \
+            double _Complex expected = data[0] * data[1] * data[2]; \
+            if (fabs(creal(out_prod) - creal(expected)) > 1e-12 || \
+                fabs(cimag(out_prod) - cimag(expected)) > 1e-12) { \
+                printf("  ❌ FAILED: complex128 prod mismatch\n"); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("any(x)", vars, var_ptrs, &out_any, 3, ME_BOOL, { \
+            if (!out_any) { \
+                printf("  ❌ FAILED: complex128 any expected true\n"); \
+                failures++; \
+            } \
+        });
+        RUN_REDUCE("all(x)", vars, var_ptrs, &out_all, 3, ME_BOOL, { \
+            if (!out_all) { \
+                printf("  ❌ FAILED: complex128 all expected true\n"); \
+                failures++; \
+            } \
+        });
+
+        RUN_REDUCE_EXPECT_FAIL("min(x)", vars);
+        RUN_REDUCE_EXPECT_FAIL("max(x)", vars);
+    }
+
+#undef RUN_REDUCE
+#undef RUN_REDUCE_EXPECT_FAIL
+#undef TEST_INT_TYPE
+
+    if (failures == 0) {
+        printf("  ✅ PASSED\n");
+    }
+    return failures == 0 ? 0 : 1;
+}
+
 static int test_reduction_errors() {
     printf("\n=== Reduction validation errors ===\n");
 
@@ -940,6 +1294,7 @@ int main(void) {
     failures += test_reduction_expression_args();
     failures += test_reduction_expression_multi_vars();
     failures += test_reduction_expression_comparison();
+    failures += test_reduction_all_types();
     failures += test_reduction_errors();
     failures += test_empty_inputs();
 
