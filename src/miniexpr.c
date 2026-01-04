@@ -2310,6 +2310,108 @@ static double reduce_sum_float64_nan_safe(const double* data, int nitems) {
 #endif
 }
 
+static int64_t reduce_sum_int32(const int32_t* data, int nitems) {
+    if (nitems <= 0) return 0;
+#if defined(__AVX2__)
+    int i = 0;
+    __m256i acc0 = _mm256_setzero_si256();
+    __m256i acc1 = _mm256_setzero_si256();
+    const int limit = nitems & ~7;
+    for (; i < limit; i += 8) {
+        __m256i v = _mm256_loadu_si256((const __m256i *)(data + i));
+        __m128i vlow = _mm256_castsi256_si128(v);
+        __m128i vhigh = _mm256_extracti128_si256(v, 1);
+        __m256i vlow64 = _mm256_cvtepi32_epi64(vlow);
+        __m256i vhigh64 = _mm256_cvtepi32_epi64(vhigh);
+        acc0 = _mm256_add_epi64(acc0, vlow64);
+        acc1 = _mm256_add_epi64(acc1, vhigh64);
+    }
+    acc0 = _mm256_add_epi64(acc0, acc1);
+    int64_t tmp[4];
+    _mm256_storeu_si256((__m256i *)tmp, acc0);
+    int64_t acc = tmp[0] + tmp[1] + tmp[2] + tmp[3];
+    for (; i < nitems; i++) {
+        acc += data[i];
+    }
+    return acc;
+#elif (defined(__ARM_NEON) || defined(__ARM_NEON__)) && defined(__aarch64__)
+    int i = 0;
+    int64x2_t acc0 = vdupq_n_s64(0);
+    int64x2_t acc1 = vdupq_n_s64(0);
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        int32x4_t v = vld1q_s32(data + i);
+        int64x2_t lo = vmovl_s32(vget_low_s32(v));
+        int64x2_t hi = vmovl_s32(vget_high_s32(v));
+        acc0 = vaddq_s64(acc0, lo);
+        acc1 = vaddq_s64(acc1, hi);
+    }
+    int64x2_t accv = vaddq_s64(acc0, acc1);
+    int64_t acc = vgetq_lane_s64(accv, 0) + vgetq_lane_s64(accv, 1);
+    for (; i < nitems; i++) {
+        acc += data[i];
+    }
+    return acc;
+#else
+    int64_t acc = 0;
+    for (int i = 0; i < nitems; i++) {
+        acc += data[i];
+    }
+    return acc;
+#endif
+}
+
+static uint64_t reduce_sum_uint32(const uint32_t* data, int nitems) {
+    if (nitems <= 0) return 0;
+#if defined(__AVX2__)
+    int i = 0;
+    __m256i acc0 = _mm256_setzero_si256();
+    __m256i acc1 = _mm256_setzero_si256();
+    const int limit = nitems & ~7;
+    for (; i < limit; i += 8) {
+        __m256i v = _mm256_loadu_si256((const __m256i *)(data + i));
+        __m128i vlow = _mm256_castsi256_si128(v);
+        __m128i vhigh = _mm256_extracti128_si256(v, 1);
+        __m256i vlow64 = _mm256_cvtepu32_epi64(vlow);
+        __m256i vhigh64 = _mm256_cvtepu32_epi64(vhigh);
+        acc0 = _mm256_add_epi64(acc0, vlow64);
+        acc1 = _mm256_add_epi64(acc1, vhigh64);
+    }
+    acc0 = _mm256_add_epi64(acc0, acc1);
+    uint64_t tmp[4];
+    _mm256_storeu_si256((__m256i *)tmp, acc0);
+    uint64_t acc = tmp[0] + tmp[1] + tmp[2] + tmp[3];
+    for (; i < nitems; i++) {
+        acc += data[i];
+    }
+    return acc;
+#elif (defined(__ARM_NEON) || defined(__ARM_NEON__)) && defined(__aarch64__)
+    int i = 0;
+    uint64x2_t acc0 = vdupq_n_u64(0);
+    uint64x2_t acc1 = vdupq_n_u64(0);
+    const int limit = nitems & ~3;
+    for (; i < limit; i += 4) {
+        uint32x4_t v = vld1q_u32(data + i);
+        uint64x2_t lo = vmovl_u32(vget_low_u32(v));
+        uint64x2_t hi = vmovl_u32(vget_high_u32(v));
+        acc0 = vaddq_u64(acc0, lo);
+        acc1 = vaddq_u64(acc1, hi);
+    }
+    uint64x2_t accv = vaddq_u64(acc0, acc1);
+    uint64_t acc = vgetq_lane_u64(accv, 0) + vgetq_lane_u64(accv, 1);
+    for (; i < nitems; i++) {
+        acc += data[i];
+    }
+    return acc;
+#else
+    uint64_t acc = 0;
+    for (int i = 0; i < nitems; i++) {
+        acc += data[i];
+    }
+    return acc;
+#endif
+}
+
 static double comma(double a, double b) {
     (void)a;
     return b;
@@ -4877,7 +4979,7 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
                         for (int i = 0; i < nitems; i++) acc *= data[i];
                     }
                     else {
-                        for (int i = 0; i < nitems; i++) acc += data[i];
+                        acc = reduce_sum_int32(data, nitems);
                     }
                     ((int64_t*)write_ptr)[0] = acc;
                 }
@@ -5029,7 +5131,7 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
                         for (int i = 0; i < nitems; i++) acc *= data[i];
                     }
                     else {
-                        for (int i = 0; i < nitems; i++) acc += data[i];
+                        acc = reduce_sum_uint32(data, nitems);
                     }
                     ((uint64_t*)write_ptr)[0] = acc;
                 }
