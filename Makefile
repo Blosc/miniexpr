@@ -2,20 +2,21 @@
 # Organized structure: src/, bench/, tests/
 
 CC ?= gcc
+SLEEF_CFLAGS = -Isrc -I../sleef/src/common -I../sleef/src/arch -I../sleef/src/libm
 ifeq ($(OS),Windows_NT)
   # Check if we are using clang-cl
   ifneq (,$(findstring clang-cl,$(CC)))
-    CFLAGS = -O2 -DNDEBUG
-    DEBUG_CFLAGS = -O0 -g
+    CFLAGS = -O2 -DNDEBUG $(SLEEF_CFLAGS)
+    DEBUG_CFLAGS = -O0 -g $(SLEEF_CFLAGS)
     LDFLAGS = clang_rt.builtins-x86_64.lib
   else
-    CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG
-    DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g
+    CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG $(SLEEF_CFLAGS)
+    DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g $(SLEEF_CFLAGS)
     LDFLAGS = -lm
   endif
 else
-  CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG
-  DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g
+  CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG $(SLEEF_CFLAGS)
+  DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g $(SLEEF_CFLAGS)
   LDFLAGS = -lm
 endif
 

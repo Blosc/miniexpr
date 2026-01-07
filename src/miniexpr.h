@@ -217,6 +217,15 @@ void me_free(me_expr *n);
  */
 me_dtype me_get_dtype(const me_expr *expr);
 
+/* Toggle SIMD sin/cos fast paths (1 = enable, 0 = force scalar). */
+void me_set_sincos_simd(int enabled);
+
+/* Select SLEEF sin/cos precision in ULP (10 or 35). */
+void me_set_sincos_ulp(int ulp);
+
+/* Returns the active sin/cos backend label (e.g., "advsimd-u10", "scalar"). */
+const char *me_get_sincos_backend(void);
+
 
 #ifdef __cplusplus
 }
