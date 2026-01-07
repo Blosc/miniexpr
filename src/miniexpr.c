@@ -3458,6 +3458,8 @@ static void vec_sqrt(const double* a, double* out, int n) {
 
 typedef void (*me_vec_unary_f64)(const double* a, double* out, int n);
 typedef void (*me_vec_unary_f32)(const float* a, float* out, int n);
+typedef void (*me_vec_binary_f64)(const double* a, const double* b, double* out, int n);
+typedef void (*me_vec_binary_f32)(const float* a, const float* b, float* out, int n);
 typedef void (*me_vec_sincos_f64)(const double* a, double* sin_out, double* cos_out, int n);
 typedef void (*me_vec_sincos_f32)(const float* a, float* sin_out, float* cos_out, int n);
 
@@ -3514,6 +3516,70 @@ static void vec_cos_f32_scalar(const float* a, float* out, int n) {
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
         out[i] = cosf(a[i]);
+    }
+}
+
+static void vec_asin_scalar(const double* a, double* out, int n) {
+    int i;
+#pragma GCC ivdep
+    for (i = 0; i < n; i++) {
+        out[i] = asin(a[i]);
+    }
+}
+
+static void vec_acos_scalar(const double* a, double* out, int n) {
+    int i;
+#pragma GCC ivdep
+    for (i = 0; i < n; i++) {
+        out[i] = acos(a[i]);
+    }
+}
+
+static void vec_atan_scalar(const double* a, double* out, int n) {
+    int i;
+#pragma GCC ivdep
+    for (i = 0; i < n; i++) {
+        out[i] = atan(a[i]);
+    }
+}
+
+static void vec_atan2_scalar(const double* a, const double* b, double* out, int n) {
+    int i;
+#pragma GCC ivdep
+    for (i = 0; i < n; i++) {
+        out[i] = atan2(a[i], b[i]);
+    }
+}
+
+static void vec_asin_f32_scalar(const float* a, float* out, int n) {
+    int i;
+#pragma GCC ivdep
+    for (i = 0; i < n; i++) {
+        out[i] = asinf(a[i]);
+    }
+}
+
+static void vec_acos_f32_scalar(const float* a, float* out, int n) {
+    int i;
+#pragma GCC ivdep
+    for (i = 0; i < n; i++) {
+        out[i] = acosf(a[i]);
+    }
+}
+
+static void vec_atan_f32_scalar(const float* a, float* out, int n) {
+    int i;
+#pragma GCC ivdep
+    for (i = 0; i < n; i++) {
+        out[i] = atanf(a[i]);
+    }
+}
+
+static void vec_atan2_f32_scalar(const float* a, const float* b, float* out, int n) {
+    int i;
+#pragma GCC ivdep
+    for (i = 0; i < n; i++) {
+        out[i] = atan2f(a[i], b[i]);
     }
 }
 
@@ -3634,6 +3700,112 @@ static ME_AVX2_TARGET void vec_cos_f32_avx2(const float* a, float* out, int n) {
     }
 }
 
+static ME_AVX2_TARGET void vec_asin_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = me_simd_use_u35 ? xasin(v) : xasin_u1(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = asin(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_acos_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = me_simd_use_u35 ? xacos(v) : xacos_u1(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = acos(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_atan_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = me_simd_use_u35 ? xatan(v) : xatan_u1(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = atan(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_atan2_avx2(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble vy = vloadu_vd_p(a + i);
+        vdouble vx = vloadu_vd_p(b + i);
+        vdouble r = me_simd_use_u35 ? xatan2(vy, vx) : xatan2_u1(vy, vx);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = atan2(a[i], b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_asin_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = me_simd_use_u35 ? xasinf(v) : xasinf_u1(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = asinf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_acos_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = me_simd_use_u35 ? xacosf(v) : xacosf_u1(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = acosf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_atan_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = me_simd_use_u35 ? xatanf(v) : xatanf_u1(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = atanf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_atan2_f32_avx2(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat vy = vloadu_vf_p(a + i);
+        vfloat vx = vloadu_vf_p(b + i);
+        vfloat r = me_simd_use_u35 ? xatan2f(vy, vx) : xatan2f_u1(vy, vx);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = atan2f(a[i], b[i]);
+    }
+}
+
 static ME_AVX2_TARGET void vec_tan_avx2(const double* a, double* out, int n) {
     int i = 0;
     const int limit = n & ~3;
@@ -3744,6 +3916,112 @@ static void vec_cos_f32_advsimd(const float* a, float* out, int n) {
     }
 }
 
+static void vec_asin_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = me_simd_use_u35 ? xasin(v) : xasin_u1(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = asin(a[i]);
+    }
+}
+
+static void vec_acos_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = me_simd_use_u35 ? xacos(v) : xacos_u1(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = acos(a[i]);
+    }
+}
+
+static void vec_atan_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = me_simd_use_u35 ? xatan(v) : xatan_u1(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = atan(a[i]);
+    }
+}
+
+static void vec_atan2_advsimd(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble vy = vloadu_vd_p(a + i);
+        vdouble vx = vloadu_vd_p(b + i);
+        vdouble r = me_simd_use_u35 ? xatan2(vy, vx) : xatan2_u1(vy, vx);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = atan2(a[i], b[i]);
+    }
+}
+
+static void vec_asin_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = me_simd_use_u35 ? xasinf(v) : xasinf_u1(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = asinf(a[i]);
+    }
+}
+
+static void vec_acos_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = me_simd_use_u35 ? xacosf(v) : xacosf_u1(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = acosf(a[i]);
+    }
+}
+
+static void vec_atan_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = me_simd_use_u35 ? xatanf(v) : xatanf_u1(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = atanf(a[i]);
+    }
+}
+
+static void vec_atan2_f32_advsimd(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat vy = vloadu_vf_p(a + i);
+        vfloat vx = vloadu_vf_p(b + i);
+        vfloat r = me_simd_use_u35 ? xatan2f(vy, vx) : xatan2f_u1(vy, vx);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = atan2f(a[i], b[i]);
+    }
+}
+
 static void vec_tan_advsimd(const double* a, double* out, int n) {
     int i = 0;
     const int limit = n & ~1;
@@ -3774,9 +4052,17 @@ static void vec_tan_f32_advsimd(const float* a, float* out, int n) {
 static me_vec_unary_f64 vec_sin_impl = vec_sin_scalar;
 static me_vec_unary_f64 vec_cos_impl = vec_cos_scalar;
 static me_vec_unary_f64 vec_tan_impl = vec_tan_scalar;
+static me_vec_unary_f64 vec_asin_impl = vec_asin_scalar;
+static me_vec_unary_f64 vec_acos_impl = vec_acos_scalar;
+static me_vec_unary_f64 vec_atan_impl = vec_atan_scalar;
+static me_vec_binary_f64 vec_atan2_impl = vec_atan2_scalar;
 static me_vec_unary_f32 vec_sin_f32_impl = vec_sin_f32_scalar;
 static me_vec_unary_f32 vec_cos_f32_impl = vec_cos_f32_scalar;
 static me_vec_unary_f32 vec_tan_f32_impl = vec_tan_f32_scalar;
+static me_vec_unary_f32 vec_asin_f32_impl = vec_asin_f32_scalar;
+static me_vec_unary_f32 vec_acos_f32_impl = vec_acos_f32_scalar;
+static me_vec_unary_f32 vec_atan_f32_impl = vec_atan_f32_scalar;
+static me_vec_binary_f32 vec_atan2_f32_impl = vec_atan2_f32_scalar;
 static me_vec_sincos_f64 vec_sincos_impl = vec_sincos_scalar;
 static me_vec_sincos_f32 vec_sincos_f32_impl = vec_sincos_f32_scalar;
 static int me_simd_initialized = 0;
@@ -3976,9 +4262,17 @@ static void me_init_simd(void) {
         vec_sin_impl = vec_sin_scalar;
         vec_cos_impl = vec_cos_scalar;
         vec_tan_impl = vec_tan_scalar;
+        vec_asin_impl = vec_asin_scalar;
+        vec_acos_impl = vec_acos_scalar;
+        vec_atan_impl = vec_atan_scalar;
+        vec_atan2_impl = vec_atan2_scalar;
         vec_sin_f32_impl = vec_sin_f32_scalar;
         vec_cos_f32_impl = vec_cos_f32_scalar;
         vec_tan_f32_impl = vec_tan_f32_scalar;
+        vec_asin_f32_impl = vec_asin_f32_scalar;
+        vec_acos_f32_impl = vec_acos_f32_scalar;
+        vec_atan_f32_impl = vec_atan_f32_scalar;
+        vec_atan2_f32_impl = vec_atan2_f32_scalar;
         vec_sincos_impl = vec_sincos_scalar;
         vec_sincos_f32_impl = vec_sincos_f32_scalar;
         me_simd_backend = "scalar";
@@ -3991,9 +4285,17 @@ static void me_init_simd(void) {
         vec_sin_impl = vec_sin_avx2;
         vec_cos_impl = vec_cos_avx2;
         vec_tan_impl = vec_tan_avx2;
+        vec_asin_impl = vec_asin_avx2;
+        vec_acos_impl = vec_acos_avx2;
+        vec_atan_impl = vec_atan_avx2;
+        vec_atan2_impl = vec_atan2_avx2;
         vec_sin_f32_impl = vec_sin_f32_avx2;
         vec_cos_f32_impl = vec_cos_f32_avx2;
         vec_tan_f32_impl = vec_tan_f32_avx2;
+        vec_asin_f32_impl = vec_asin_f32_avx2;
+        vec_acos_f32_impl = vec_acos_f32_avx2;
+        vec_atan_f32_impl = vec_atan_f32_avx2;
+        vec_atan2_f32_impl = vec_atan2_f32_avx2;
         vec_sincos_impl = vec_sincos_avx2;
         vec_sincos_f32_impl = vec_sincos_f32_avx2;
         me_simd_backend = me_simd_use_u35 ? "avx2-u35" : "avx2-u10";
@@ -4006,9 +4308,17 @@ static void me_init_simd(void) {
         vec_sin_impl = vec_sin_advsimd;
         vec_cos_impl = vec_cos_advsimd;
         vec_tan_impl = vec_tan_advsimd;
+        vec_asin_impl = vec_asin_advsimd;
+        vec_acos_impl = vec_acos_advsimd;
+        vec_atan_impl = vec_atan_advsimd;
+        vec_atan2_impl = vec_atan2_advsimd;
         vec_sin_f32_impl = vec_sin_f32_advsimd;
         vec_cos_f32_impl = vec_cos_f32_advsimd;
         vec_tan_f32_impl = vec_tan_f32_advsimd;
+        vec_asin_f32_impl = vec_asin_f32_advsimd;
+        vec_acos_f32_impl = vec_acos_f32_advsimd;
+        vec_atan_f32_impl = vec_atan_f32_advsimd;
+        vec_atan2_f32_impl = vec_atan2_f32_advsimd;
         vec_sincos_impl = vec_sincos_advsimd;
         vec_sincos_f32_impl = vec_sincos_f32_advsimd;
         me_simd_backend = me_simd_use_u35 ? "advsimd-u35" : "advsimd-u10";
@@ -4030,9 +4340,29 @@ static void vec_cos_dispatch(const double* a, double* out, int n) {
     vec_cos_impl(a, out, n);
 }
 
+static void vec_asin_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_asin_impl(a, out, n);
+}
+
+static void vec_acos_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_acos_impl(a, out, n);
+}
+
+static void vec_atan_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_atan_impl(a, out, n);
+}
+
 static void vec_tan_dispatch(const double* a, double* out, int n) {
     me_init_simd();
     vec_tan_impl(a, out, n);
+}
+
+static void vec_atan2_dispatch(const double* a, const double* b, double* out, int n) {
+    me_init_simd();
+    vec_atan2_impl(a, b, out, n);
 }
 
 static void vec_sin_f32_dispatch(const float* a, float* out, int n) {
@@ -4045,9 +4375,29 @@ static void vec_cos_f32_dispatch(const float* a, float* out, int n) {
     vec_cos_f32_impl(a, out, n);
 }
 
+static void vec_asin_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_asin_f32_impl(a, out, n);
+}
+
+static void vec_acos_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_acos_f32_impl(a, out, n);
+}
+
+static void vec_atan_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_atan_f32_impl(a, out, n);
+}
+
 static void vec_tan_f32_dispatch(const float* a, float* out, int n) {
     me_init_simd();
     vec_tan_f32_impl(a, out, n);
+}
+
+static void vec_atan2_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    me_init_simd();
+    vec_atan2_f32_impl(a, b, out, n);
 }
 
 static void vec_negate(const double* a, double* out, int n) {
@@ -4635,9 +4985,10 @@ typedef float (*me_fun1_f32)(float);
 /* Template for type-specific evaluator */
 #define DEFINE_ME_EVAL(SUFFIX, TYPE, VEC_ADD, VEC_SUB, VEC_MUL, VEC_DIV, VEC_POW, \
     VEC_ADD_SCALAR, VEC_MUL_SCALAR, VEC_POW_SCALAR, \
-    VEC_SQRT, VEC_SIN, VEC_COS, VEC_TAN, VEC_NEGATE, \
-    SQRT_FUNC, SIN_FUNC, COS_FUNC, TAN_FUNC, EXP_FUNC, LOG_FUNC, FABS_FUNC, POW_FUNC, \
-    VEC_CONJ, HAS_VEC_TAN) \
+    VEC_SQRT, VEC_SIN, VEC_COS, VEC_TAN, VEC_ASIN, VEC_ACOS, VEC_ATAN, VEC_NEGATE, \
+    SQRT_FUNC, SIN_FUNC, COS_FUNC, TAN_FUNC, ASIN_FUNC, ACOS_FUNC, ATAN_FUNC, EXP_FUNC, LOG_FUNC, FABS_FUNC, POW_FUNC, \
+    VEC_CONJ, HAS_VEC_TAN, HAS_VEC_ASIN, HAS_VEC_ACOS, HAS_VEC_ATAN, \
+    VEC_ATAN2, ATAN2_FUNC, HAS_VEC_ATAN2) \
 static void me_eval_##SUFFIX(const me_expr *n) { \
     if (!n || !n->output) return; \
     if (is_reduction_node(n)) { \
@@ -4736,6 +5087,12 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                     } else { \
                         goto general_case_binary_##SUFFIX; \
                     } \
+                } else if (func == (me_fun2)ATAN2_FUNC) { \
+                    if (ldata && rdata && HAS_VEC_ATAN2) { \
+                        VEC_ATAN2(ldata, rdata, output, n->nitems); \
+                    } else { \
+                        goto general_case_binary_##SUFFIX; \
+                    } \
                 } else { \
                     general_case_binary_##SUFFIX: \
                     for (i = 0; i < n->nitems; i++) { \
@@ -4781,6 +5138,36 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                         } else { \
                             for (i = 0; i < n->nitems; i++) { \
                                 output[i] = TO_TYPE_##SUFFIX(TAN_FUNC(FROM_TYPE_##SUFFIX(adata[i]))); \
+                            } \
+                        } \
+                    } \
+                } else if (func_ptr == (void*)ASIN_FUNC) { \
+                    if (adata) { \
+                        if (HAS_VEC_ASIN) { \
+                            VEC_ASIN(adata, output, n->nitems); \
+                        } else { \
+                            for (i = 0; i < n->nitems; i++) { \
+                                output[i] = TO_TYPE_##SUFFIX(ASIN_FUNC(FROM_TYPE_##SUFFIX(adata[i]))); \
+                            } \
+                        } \
+                    } \
+                } else if (func_ptr == (void*)ACOS_FUNC) { \
+                    if (adata) { \
+                        if (HAS_VEC_ACOS) { \
+                            VEC_ACOS(adata, output, n->nitems); \
+                        } else { \
+                            for (i = 0; i < n->nitems; i++) { \
+                                output[i] = TO_TYPE_##SUFFIX(ACOS_FUNC(FROM_TYPE_##SUFFIX(adata[i]))); \
+                            } \
+                        } \
+                    } \
+                } else if (func_ptr == (void*)ATAN_FUNC) { \
+                    if (adata) { \
+                        if (HAS_VEC_ATAN) { \
+                            VEC_ATAN(adata, output, n->nitems); \
+                        } else { \
+                            for (i = 0; i < n->nitems; i++) { \
+                                output[i] = TO_TYPE_##SUFFIX(ATAN_FUNC(FROM_TYPE_##SUFFIX(adata[i]))); \
                             } \
                         } \
                     } \
@@ -4876,6 +5263,9 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sqrt(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = sqrt((a)[_i]); } while(0)
 #define vec_sin(a, out, n) vec_sin_dispatch((a), (out), (n))
 #define vec_cos(a, out, n) vec_cos_dispatch((a), (out), (n))
+#define vec_asin(a, out, n) vec_asin_dispatch((a), (out), (n))
+#define vec_acos(a, out, n) vec_acos_dispatch((a), (out), (n))
+#define vec_atan(a, out, n) vec_atan_dispatch((a), (out), (n))
 #define vec_tan(a, out, n) vec_tan_dispatch((a), (out), (n))
 #define vec_negate(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 #define vec_copy(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i]; } while(0)
@@ -4891,8 +5281,14 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sqrt_f32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = sqrtf((a)[_i]); } while(0)
 #define vec_sin_f32(a, out, n) vec_sin_f32_dispatch((a), (out), (n))
 #define vec_cos_f32(a, out, n) vec_cos_f32_dispatch((a), (out), (n))
+#define vec_asin_f32(a, out, n) vec_asin_f32_dispatch((a), (out), (n))
+#define vec_acos_f32(a, out, n) vec_acos_f32_dispatch((a), (out), (n))
+#define vec_atan_f32(a, out, n) vec_atan_f32_dispatch((a), (out), (n))
 #define vec_tan_f32(a, out, n) vec_tan_f32_dispatch((a), (out), (n))
 #define vec_negame_f32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
+
+#define vec_atan2(a, b, out, n) vec_atan2_dispatch((a), (b), (out), (n))
+#define vec_atan2_f32(a, b, out, n) vec_atan2_f32_dispatch((a), (b), (out), (n))
 
 #define vec_add_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
 #define vec_sub_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
@@ -5046,89 +5442,113 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 DEFINE_ME_EVAL(f32, float,
                vec_add_f32, vec_sub_f32, vec_mul_f32, vec_div_f32, vec_pow_f32,
                vec_add_scalar_f32, vec_mul_scalar_f32, vec_pow_scalar_f32,
-               vec_sqrt_f32, vec_sin_f32_cached, vec_cos_f32_cached, vec_tan_f32, vec_negame_f32,
-               sqrtf, sinf, cosf, tanf, expf, logf, fabsf, powf,
-               vec_copy, 1)
+               vec_sqrt_f32, vec_sin_f32_cached, vec_cos_f32_cached, vec_tan_f32,
+               vec_asin_f32, vec_acos_f32, vec_atan_f32, vec_negame_f32,
+               sqrtf, sinf, cosf, tanf, asinf, acosf, atanf, expf, logf, fabsf, powf,
+               vec_copy, 1, 1, 1, 1,
+               vec_atan2_f32, atan2f, 1)
 
 /* Generate float64 (double) evaluator */
 DEFINE_ME_EVAL(f64, double,
                vec_add, vec_sub, vec_mul, vec_div, vec_pow,
                vec_add_scalar, vec_mul_scalar, vec_pow_scalar,
-               vec_sqrt, vec_sin_cached, vec_cos_cached, vec_tan, vec_negate,
-               sqrt, sin, cos, tan, exp, log, fabs, pow,
-               vec_copy, 1)
+               vec_sqrt, vec_sin_cached, vec_cos_cached, vec_tan,
+               vec_asin, vec_acos, vec_atan, vec_negate,
+               sqrt, sin, cos, tan, asin, acos, atan, exp, log, fabs, pow,
+               vec_copy, 1, 1, 1, 1,
+               vec_atan2, atan2, 1)
 
 /* Generate integer evaluators - sin/cos cast to double and back */
 DEFINE_ME_EVAL(i8, int8_t,
                vec_add_i8, vec_sub_i8, vec_mul_i8, vec_div_i8, vec_pow_i8,
                vec_add_scalar_i8, vec_mul_scalar_i8, vec_pow_scalar_i8,
-               vec_sqrt_i8, vec_sqrt_i8, vec_sqrt_i8, vec_copy, vec_negame_i8,
-               sqrt, sin, cos, tan, exp, log, fabs, pow,
-               vec_conj_noop, 0)
+               vec_sqrt_i8, vec_sqrt_i8, vec_sqrt_i8, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_negame_i8,
+               sqrt, sin, cos, tan, asin, acos, atan, exp, log, fabs, pow,
+               vec_conj_noop, 0, 0, 0, 0,
+               vec_add_i8, atan2, 0)
 
 DEFINE_ME_EVAL(i16, int16_t,
                vec_add_i16, vec_sub_i16, vec_mul_i16, vec_div_i16, vec_pow_i16,
                vec_add_scalar_i16, vec_mul_scalar_i16, vec_pow_scalar_i16,
-               vec_sqrt_i16, vec_sqrt_i16, vec_sqrt_i16, vec_copy, vec_negame_i16,
-               sqrt, sin, cos, tan, exp, log, fabs, pow,
-               vec_conj_noop, 0)
+               vec_sqrt_i16, vec_sqrt_i16, vec_sqrt_i16, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_negame_i16,
+               sqrt, sin, cos, tan, asin, acos, atan, exp, log, fabs, pow,
+               vec_conj_noop, 0, 0, 0, 0,
+               vec_add_i16, atan2, 0)
 
 DEFINE_ME_EVAL(i32, int32_t,
                vec_add_i32, vec_sub_i32, vec_mul_i32, vec_div_i32, vec_pow_i32,
                vec_add_scalar_i32, vec_mul_scalar_i32, vec_pow_scalar_i32,
-               vec_sqrt_i32, vec_sqrt_i32, vec_sqrt_i32, vec_copy, vec_negame_i32,
-               sqrt, sin, cos, tan, exp, log, fabs, pow,
-               vec_conj_noop, 0)
+               vec_sqrt_i32, vec_sqrt_i32, vec_sqrt_i32, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_negame_i32,
+               sqrt, sin, cos, tan, asin, acos, atan, exp, log, fabs, pow,
+               vec_conj_noop, 0, 0, 0, 0,
+               vec_add_i32, atan2, 0)
 
 DEFINE_ME_EVAL(i64, int64_t,
                vec_add_i64, vec_sub_i64, vec_mul_i64, vec_div_i64, vec_pow_i64,
                vec_add_scalar_i64, vec_mul_scalar_i64, vec_pow_scalar_i64,
-               vec_sqrt_i64, vec_sqrt_i64, vec_sqrt_i64, vec_copy, vec_negame_i64,
-               sqrt, sin, cos, tan, exp, log, fabs, pow,
-               vec_conj_noop, 0)
+               vec_sqrt_i64, vec_sqrt_i64, vec_sqrt_i64, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_negame_i64,
+               sqrt, sin, cos, tan, asin, acos, atan, exp, log, fabs, pow,
+               vec_conj_noop, 0, 0, 0, 0,
+               vec_add_i64, atan2, 0)
 
 DEFINE_ME_EVAL(u8, uint8_t,
                vec_add_u8, vec_sub_u8, vec_mul_u8, vec_div_u8, vec_pow_u8,
                vec_add_scalar_u8, vec_mul_scalar_u8, vec_pow_scalar_u8,
-               vec_sqrt_u8, vec_sqrt_u8, vec_sqrt_u8, vec_copy, vec_negame_u8,
-               sqrt, sin, cos, tan, exp, log, fabs, pow,
-               vec_conj_noop, 0)
+               vec_sqrt_u8, vec_sqrt_u8, vec_sqrt_u8, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_negame_u8,
+               sqrt, sin, cos, tan, asin, acos, atan, exp, log, fabs, pow,
+               vec_conj_noop, 0, 0, 0, 0,
+               vec_add_u8, atan2, 0)
 
 DEFINE_ME_EVAL(u16, uint16_t,
                vec_add_u16, vec_sub_u16, vec_mul_u16, vec_div_u16, vec_pow_u16,
                vec_add_scalar_u16, vec_mul_scalar_u16, vec_pow_scalar_u16,
-               vec_sqrt_u16, vec_sqrt_u16, vec_sqrt_u16, vec_copy, vec_negame_u16,
-               sqrt, sin, cos, tan, exp, log, fabs, pow,
-               vec_conj_noop, 0)
+               vec_sqrt_u16, vec_sqrt_u16, vec_sqrt_u16, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_negame_u16,
+               sqrt, sin, cos, tan, asin, acos, atan, exp, log, fabs, pow,
+               vec_conj_noop, 0, 0, 0, 0,
+               vec_add_u16, atan2, 0)
 
 DEFINE_ME_EVAL(u32, uint32_t,
                vec_add_u32, vec_sub_u32, vec_mul_u32, vec_div_u32, vec_pow_u32,
                vec_add_scalar_u32, vec_mul_scalar_u32, vec_pow_scalar_u32,
-               vec_sqrt_u32, vec_sqrt_u32, vec_sqrt_u32, vec_copy, vec_negame_u32,
-               sqrt, sin, cos, tan, exp, log, fabs, pow,
-               vec_conj_noop, 0)
+               vec_sqrt_u32, vec_sqrt_u32, vec_sqrt_u32, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_negame_u32,
+               sqrt, sin, cos, tan, asin, acos, atan, exp, log, fabs, pow,
+               vec_conj_noop, 0, 0, 0, 0,
+               vec_add_u32, atan2, 0)
 
 DEFINE_ME_EVAL(u64, uint64_t,
                vec_add_u64, vec_sub_u64, vec_mul_u64, vec_div_u64, vec_pow_u64,
                vec_add_scalar_u64, vec_mul_scalar_u64, vec_pow_scalar_u64,
-               vec_sqrt_u64, vec_sqrt_u64, vec_sqrt_u64, vec_copy, vec_negame_u64,
-               sqrt, sin, cos, tan, exp, log, fabs, pow,
-               vec_conj_noop, 0)
+               vec_sqrt_u64, vec_sqrt_u64, vec_sqrt_u64, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_negame_u64,
+               sqrt, sin, cos, tan, asin, acos, atan, exp, log, fabs, pow,
+               vec_conj_noop, 0, 0, 0, 0,
+               vec_add_u64, atan2, 0)
 
 /* Generate complex evaluators */
 DEFINE_ME_EVAL(c64, float _Complex,
                vec_add_c64, vec_sub_c64, vec_mul_c64, vec_div_c64, vec_pow_c64,
                vec_add_scalar_c64, vec_mul_scalar_c64, vec_pow_scalar_c64,
-               vec_sqrt_c64, vec_sqrt_c64, vec_sqrt_c64, vec_copy, vec_negame_c64,
-               me_csqrtf, me_csqrtf, me_csqrtf, tan, me_cexpf, me_clogf, me_cabsf, me_cpowf,
-               vec_conj_c64, 0)
+               vec_sqrt_c64, vec_sqrt_c64, vec_sqrt_c64, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_negame_c64,
+               me_csqrtf, me_csqrtf, me_csqrtf, tan, asin, acos, atan, me_cexpf, me_clogf, me_cabsf, me_cpowf,
+               vec_conj_c64, 0, 0, 0, 0,
+               vec_add_c64, atan2, 0)
 
 DEFINE_ME_EVAL(c128, double _Complex,
                vec_add_c128, vec_sub_c128, vec_mul_c128, vec_div_c128, vec_pow_c128,
                vec_add_scalar_c128, vec_mul_scalar_c128, vec_pow_scalar_c128,
-               vec_sqrt_c128, vec_sqrt_c128, vec_sqrt_c128, vec_copy, vec_negame_c128,
-               me_csqrt, me_csqrt, me_csqrt, tan, me_cexp, me_clog, me_cabs, me_cpow,
-               vec_conj_c128, 0)
+               vec_sqrt_c128, vec_sqrt_c128, vec_sqrt_c128, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_negame_c128,
+               me_csqrt, me_csqrt, me_csqrt, tan, asin, acos, atan, me_cexp, me_clog, me_cabs, me_cpow,
+               vec_conj_c128, 0, 0, 0, 0,
+               vec_add_c128, atan2, 0)
 
 /* Public API - dispatches to correct type-specific evaluator */
 /* Structure to track promoted variables */
