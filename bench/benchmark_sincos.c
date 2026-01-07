@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
+#include <string.h>
 #include <sys/time.h>
 #include "miniexpr.h"
 #include "minctest.h"
@@ -118,10 +119,17 @@ static void benchmark_dtype(const dtype_info_t *info, const int *blocks, int nbl
     printf("\n========================================\n");
     printf("sin^2 + cos^2 (%s)\n", info->name);
     printf("========================================\n");
-    printf("Block    ME_U10    ME_U35  ME_SCAL       C\n");
-    printf("Backend U10: %s\n", me_get_sincos_backend());
+    printf("BlockKiB ME_U10    ME_U35  ME_SCAL       C\n");
+    me_set_sincos_simd(1);
+    me_set_sincos_ulp(10);
+    const char *backend_u10 = me_get_sincos_backend();
+    printf("Backend U10: %s\n", backend_u10);
     me_set_sincos_ulp(35);
-    printf("Backend U35: %s\n", me_get_sincos_backend());
+    const char *backend_u35 = me_get_sincos_backend();
+    printf("Backend U35: %s\n", backend_u35);
+    if (strcmp(backend_u10, backend_u35) == 0) {
+        printf("Note: backend did not change between U10 and U35\n");
+    }
     me_set_sincos_ulp(10);
 
     for (int i = 0; i < nblocks; i++) {
@@ -141,8 +149,9 @@ static void benchmark_dtype(const dtype_info_t *info, const int *blocks, int nbl
         double me_scalar_gbps = data_gb / me_scalar_time;
         double c_gbps = data_gb / c_time;
 
-        printf("%5d  %7.2f  %7.2f  %7.2f  %7.2f\n",
-               nitems, me_gbps_u10, me_gbps_u35, me_scalar_gbps, c_gbps);
+        int kib = (int)((nitems * info->elem_size) / 1024);
+        printf("%6d  %7.2f  %7.2f  %7.2f  %7.2f\n",
+               kib, me_gbps_u10, me_gbps_u35, me_scalar_gbps, c_gbps);
     }
 
     me_set_sincos_simd(1);
