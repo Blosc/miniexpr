@@ -88,6 +88,11 @@ static ME_THREAD_LOCAL unsigned long long me_eval_cookie = 0;
 #endif
 
 #if ME_ENABLE_SLEEF_SIMD
+#if defined(__clang__) || defined(__GNUC__)
+#define ME_AVX2_TARGET __attribute__((target("avx2,fma")))
+#else
+#define ME_AVX2_TARGET
+#endif
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunknown-pragmas"
@@ -3525,7 +3530,7 @@ static void vec_sincos_f32_scalar(const float* a, float* sin_out, float* cos_out
 }
 
 #if ME_ENABLE_SLEEF_SIMD && (defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64))
-static void vec_sincos_avx2(const double* a, double* sin_out, double* cos_out, int n) {
+static ME_AVX2_TARGET void vec_sincos_avx2(const double* a, double* sin_out, double* cos_out, int n) {
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
@@ -3540,7 +3545,7 @@ static void vec_sincos_avx2(const double* a, double* sin_out, double* cos_out, i
     }
 }
 
-static void vec_sincos_f32_avx2(const float* a, float* sin_out, float* cos_out, int n) {
+static ME_AVX2_TARGET void vec_sincos_f32_avx2(const float* a, float* sin_out, float* cos_out, int n) {
     int i = 0;
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
@@ -3555,7 +3560,7 @@ static void vec_sincos_f32_avx2(const float* a, float* sin_out, float* cos_out, 
     }
 }
 
-static void vec_sin_avx2(const double* a, double* out, int n) {
+static ME_AVX2_TARGET void vec_sin_avx2(const double* a, double* out, int n) {
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
@@ -3568,7 +3573,7 @@ static void vec_sin_avx2(const double* a, double* out, int n) {
     }
 }
 
-static void vec_cos_avx2(const double* a, double* out, int n) {
+static ME_AVX2_TARGET void vec_cos_avx2(const double* a, double* out, int n) {
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
@@ -3581,7 +3586,7 @@ static void vec_cos_avx2(const double* a, double* out, int n) {
     }
 }
 
-static void vec_sin_f32_avx2(const float* a, float* out, int n) {
+static ME_AVX2_TARGET void vec_sin_f32_avx2(const float* a, float* out, int n) {
     int i = 0;
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
@@ -3594,7 +3599,7 @@ static void vec_sin_f32_avx2(const float* a, float* out, int n) {
     }
 }
 
-static void vec_cos_f32_avx2(const float* a, float* out, int n) {
+static ME_AVX2_TARGET void vec_cos_f32_avx2(const float* a, float* out, int n) {
     int i = 0;
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
