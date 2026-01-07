@@ -96,10 +96,14 @@ static ME_THREAD_LOCAL unsigned long long me_eval_cookie = 0;
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunknown-pragmas"
+#pragma clang diagnostic ignored "-Wshadow"
+#pragma clang diagnostic ignored "-Wmacro-redefined"
 #elif defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#pragma GCC diagnostic ignored "-Wshadow"
 #endif
+/* Limit warning suppression to the SLEEF include block below. */
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)
 #if defined(__clang__)

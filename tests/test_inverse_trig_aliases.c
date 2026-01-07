@@ -30,8 +30,10 @@ int main() {
     me_expr *expr_arccos = NULL;
     int rc_expr_arccos = me_compile("arccos(x)", vars, 1, ME_FLOAT64, &err, &expr_arccos);
 
-    if (!expr_acos || !expr_arccos) {
-        printf("  FAIL: Compilation failed\n");
+    if (rc_expr_acos != ME_COMPILE_SUCCESS || rc_expr_arccos != ME_COMPILE_SUCCESS ||
+        !expr_acos || !expr_arccos) {
+        printf("  FAIL: Compilation failed (acos=%d, arccos=%d, err=%d)\n",
+               rc_expr_acos, rc_expr_arccos, err);
     } else {
         const void *var_ptrs[] = {x};
         ME_EVAL_CHECK(expr_acos, var_ptrs, 1, result_a, VECTOR_SIZE);
@@ -64,8 +66,10 @@ int main() {
     me_expr *expr_arcsin = NULL;
     int rc_expr_arcsin = me_compile("arcsin(x)", vars, 1, ME_FLOAT64, &err, &expr_arcsin);
 
-    if (!expr_asin || !expr_arcsin) {
-        printf("  FAIL: Compilation failed\n");
+    if (rc_expr_asin != ME_COMPILE_SUCCESS || rc_expr_arcsin != ME_COMPILE_SUCCESS ||
+        !expr_asin || !expr_arcsin) {
+        printf("  FAIL: Compilation failed (asin=%d, arcsin=%d, err=%d)\n",
+               rc_expr_asin, rc_expr_arcsin, err);
     } else {
         const void *var_ptrs[] = {x};
         ME_EVAL_CHECK(expr_asin, var_ptrs, 1, result_a, VECTOR_SIZE);
@@ -98,8 +102,10 @@ int main() {
     me_expr *expr_arctan = NULL;
     int rc_expr_arctan = me_compile("arctan(x)", vars, 1, ME_FLOAT64, &err, &expr_arctan);
 
-    if (!expr_atan || !expr_arctan) {
-        printf("  FAIL: Compilation failed\n");
+    if (rc_expr_atan != ME_COMPILE_SUCCESS || rc_expr_arctan != ME_COMPILE_SUCCESS ||
+        !expr_atan || !expr_arctan) {
+        printf("  FAIL: Compilation failed (atan=%d, arctan=%d, err=%d)\n",
+               rc_expr_atan, rc_expr_arctan, err);
     } else {
         const void *var_ptrs[] = {x};
         ME_EVAL_CHECK(expr_atan, var_ptrs, 1, result_a, VECTOR_SIZE);
@@ -134,8 +140,10 @@ int main() {
     me_expr *expr_arctan2 = NULL;
     int rc_expr_arctan2 = me_compile("arctan2(y, x)", vars2, 2, ME_FLOAT64, &err, &expr_arctan2);
 
-    if (!expr_atan2 || !expr_arctan2) {
-        printf("  FAIL: Compilation failed\n");
+    if (rc_expr_atan2 != ME_COMPILE_SUCCESS || rc_expr_arctan2 != ME_COMPILE_SUCCESS ||
+        !expr_atan2 || !expr_arctan2) {
+        printf("  FAIL: Compilation failed (atan2=%d, arctan2=%d, err=%d)\n",
+               rc_expr_atan2, rc_expr_arctan2, err);
     } else {
         const void *var_ptrs[] = {y, x};
         ME_EVAL_CHECK(expr_atan2, var_ptrs, 2, result_a, VECTOR_SIZE);
