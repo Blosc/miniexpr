@@ -121,6 +121,7 @@ static ME_THREAD_LOCAL unsigned long long me_eval_cookie = 0;
 #define __FMA__ 1
 #endif
 #define ENABLE_AVX2
+#include "../../sleef/src/common/common.c"
 #include "../../sleef/src/libm/rempitab.c"
 #include "../../sleef/src/libm/sleefsimddp.c"
 #include "../../sleef/src/libm/sleefsimdsp.c"
