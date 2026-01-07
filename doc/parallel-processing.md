@@ -236,7 +236,7 @@ int main() {
         input[i] = (double)i;
     }
 
-    // Compile expression for chunked evaluation: x^2 + 2*x + 1
+    // Compile expression for chunked evaluation: x**2 + 2*x + 1
     // Define variable (just the name - everything else optional)
     me_variable vars[] = {{"x"}};
 

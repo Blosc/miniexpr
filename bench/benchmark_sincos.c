@@ -1,5 +1,5 @@
 /*
- * Benchmark sin^2 + cos^2 for float32/float64 with varying block sizes.
+ * Benchmark sin**2 + cos**2 for float32/float64 with varying block sizes.
  */
 
 #include <stdio.h>
@@ -105,7 +105,7 @@ static void benchmark_dtype(const dtype_info_t *info, const int *blocks, int nbl
     me_variable vars[] = {{"a", info->dtype, data}};
     int err = 0;
     me_expr *expr = NULL;
-    int rc_expr = me_compile("sin(a) * sin(a) + cos(a) * cos(a)",
+    int rc_expr = me_compile("sin(a) ** 2 + cos(a) ** 2",
                              vars, 1, info->dtype, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("Failed to compile sin/cos expression for %s (err=%d)\n", info->name, err);
@@ -117,7 +117,7 @@ static void benchmark_dtype(const dtype_info_t *info, const int *blocks, int nbl
     const void *var_ptrs[] = {data};
 
     printf("\n========================================\n");
-    printf("sin^2 + cos^2 (%s)\n", info->name);
+    printf("sin**2 + cos**2 (%s)\n", info->name);
     printf("========================================\n");
     printf("BlockKiB ME_U10    ME_U35  ME_SCAL       C\n");
     me_set_sincos_simd(1);
@@ -172,7 +172,7 @@ int main(void) {
     printf("========================================\n");
     printf("MiniExpr sin/cos Benchmark (Block Sizes)\n");
     printf("========================================\n");
-    printf("Expression: sin(a)^2 + cos(a)^2\n");
+    printf("Expression: sin(a)**2 + cos(a)**2\n");
 
     for (size_t i = 0; i < sizeof(infos) / sizeof(infos[0]); i++) {
         benchmark_dtype(&infos[i], blocks, nblocks);

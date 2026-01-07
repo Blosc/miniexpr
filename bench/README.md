@@ -65,6 +65,23 @@ Comparison operator throughput.
 ./build/benchmark_comparisons
 ```
 
+### benchmark_sincos.c
+sin/cos expression throughput across block sizes.
+
+```bash
+./build/benchmark_sincos
+```
+
+Note: This benchmark uses `sin(a) ** 2 + cos(a) ** 2`. Performance should be similar to
+`sin(a) * sin(a) + cos(a) * cos(a)` if sin/cos are not evaluated twice.
+
+### benchmark_sincos_threads.c
+Multi-threaded sin/cos expression throughput.
+
+```bash
+./build/benchmark_sincos_threads
+```
+
 ### benchmark_memory_efficiency.c
 Working-set size vs throughput and memory behavior.
 

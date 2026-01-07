@@ -1,4 +1,4 @@
-/* Benchmark: sin^2 + cos^2 with multi-threaded evaluation */
+/* Benchmark: sin**2 + cos**2 with multi-threaded evaluation */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -190,7 +190,7 @@ static void benchmark_dtype(const dtype_info_t *info, int total_elems) {
     me_variable vars[] = {{"a", info->dtype, data}};
     int err = 0;
     me_expr *expr = NULL;
-    int rc_expr = me_compile("sin(a) * sin(a) + cos(a) * cos(a)",
+    int rc_expr = me_compile("sin(a) ** 2 + cos(a) ** 2",
                              vars, 1, info->dtype, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("Failed to compile sin/cos expression for %s (err=%d)\n", info->name, err);
@@ -202,7 +202,7 @@ static void benchmark_dtype(const dtype_info_t *info, int total_elems) {
     double data_gb = (double)(total_elems * info->elem_size * 2ULL) / 1e9;
 
     printf("\n========================================\n");
-    printf("sin^2 + cos^2 (%s, GB/s)\n", info->name);
+    printf("sin**2 + cos**2 (%s, GB/s)\n", info->name);
     printf("========================================\n");
     printf("Threads   ME_U10    ME_U35  ME_SCAL       C\n");
     me_set_sincos_simd(1);
@@ -255,7 +255,7 @@ int main(void) {
     printf("========================================\n");
     printf("MiniExpr sin/cos Benchmark (Threads)\n");
     printf("========================================\n");
-    printf("Expression: sin(a)^2 + cos(a)^2\n");
+    printf("Expression: sin(a)**2 + cos(a)**2\n");
     printf("Total elements: %d\n", total_elems);
 
     for (size_t i = 0; i < sizeof(infos) / sizeof(infos[0]); i++) {
