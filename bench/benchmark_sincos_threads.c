@@ -205,27 +205,27 @@ static void benchmark_dtype(const dtype_info_t *info, int total_elems) {
     printf("sin**2 + cos**2 (%s, GB/s)\n", info->name);
     printf("========================================\n");
     printf("Threads   ME_U10    ME_U35  ME_SCAL       C\n");
-    me_set_sincos_simd(1);
-    me_set_sincos_ulp(10);
-    const char *backend_u10 = me_get_sincos_backend();
+    me_disable_simd(false);
+    me_set_simd_ulp_mode(ME_SIMD_ULP_1);
+    const char *backend_u10 = me_get_simd_backend();
     printf("Backend U10: %s\n", backend_u10);
-    me_set_sincos_ulp(35);
-    const char *backend_u35 = me_get_sincos_backend();
+    me_set_simd_ulp_mode(ME_SIMD_ULP_3_5);
+    const char *backend_u35 = me_get_simd_backend();
     printf("Backend U35: %s\n", backend_u35);
     if (strcmp(backend_u10, backend_u35) == 0) {
         printf("Note: backend did not change between U10 and U35\n");
     }
-    me_set_sincos_ulp(10);
+    me_set_simd_ulp_mode(ME_SIMD_ULP_1);
 
     for (int num_threads = 1; num_threads <= MAX_THREADS; num_threads++) {
-        me_set_sincos_simd(1);
-        me_set_sincos_ulp(10);
+        me_disable_simd(false);
+        me_set_simd_ulp_mode(ME_SIMD_ULP_1);
         double me_time_u10 = run_benchmark_me(expr, data, out, info->elem_size,
                                               total_elems, num_threads, 5);
-        me_set_sincos_ulp(35);
+        me_set_simd_ulp_mode(ME_SIMD_ULP_3_5);
         double me_time_u35 = run_benchmark_me(expr, data, out, info->elem_size,
                                               total_elems, num_threads, 5);
-        me_set_sincos_simd(0);
+        me_disable_simd(true);
         double me_scalar_time = run_benchmark_me(expr, data, out, info->elem_size,
                                                  total_elems, num_threads, 5);
         double c_time = run_benchmark_c(data, out, info, total_elems,
@@ -238,8 +238,8 @@ static void benchmark_dtype(const dtype_info_t *info, int total_elems) {
                data_gb / c_time);
     }
 
-    me_set_sincos_simd(1);
-    me_set_sincos_ulp(10);
+    me_disable_simd(false);
+    me_set_simd_ulp_mode(ME_SIMD_ULP_1);
     me_free(expr);
     free(data);
     free(out);

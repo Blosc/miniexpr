@@ -162,6 +162,39 @@ void test_complex_power_comparison() {
     printf("  PASS\n");
 }
 
+void test_power_cube_equality() {
+    TEST("a1 ** 3 == (a1 * a1 * a1)");
+
+    double a1[VECTOR_SIZE] = {2.0, -3.0, 1.5, 0.0, 4.0, -1.0, 2.5, -2.0, 3.5, 5.0};
+    double result[VECTOR_SIZE] = {0};
+
+    me_variable vars[] = {{"a1"}};
+
+    int err;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a1 ** 3 == (a1 * a1 * a1)", vars, 1, ME_FLOAT64, &err, &expr);
+
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs[] = {a1};
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        double left = a1[i] * a1[i] * a1[i];
+        double expected = (fabs(left - left) < TOLERANCE) ? 1.0 : 0.0;
+        printf("  [%d] %.6f ** 3 (%.6f) == (%.6f * %.6f * %.6f) (%.6f) -> expected: %.0f, got: %.6f\n",
+               i, a1[i], left, a1[i], a1[i], a1[i], left, expected, result[i]);
+        ASSERT_EQ(expected, result[i], i);
+    }
+
+    me_free(expr);
+    printf("  PASS\n");
+}
+
 int main() {
     printf("=== Testing Comparison Operators with Power Operations ===\n\n");
 
@@ -169,6 +202,7 @@ int main() {
     test_power_less_than_comparison();
     test_power_greater_equal_comparison();
     test_complex_power_comparison();
+    test_power_cube_equality();
 
     printf("\n=== Test Summary ===\n");
     printf("Tests run: %d\n", tests_run);

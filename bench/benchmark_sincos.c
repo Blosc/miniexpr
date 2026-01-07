@@ -120,27 +120,27 @@ static void benchmark_dtype(const dtype_info_t *info, const int *blocks, int nbl
     printf("sin**2 + cos**2 (%s)\n", info->name);
     printf("========================================\n");
     printf("BlockKiB ME_U10    ME_U35  ME_SCAL       C\n");
-    me_set_sincos_simd(1);
-    me_set_sincos_ulp(10);
-    const char *backend_u10 = me_get_sincos_backend();
+    me_disable_simd(false);
+    me_set_simd_ulp_mode(ME_SIMD_ULP_1);
+    const char *backend_u10 = me_get_simd_backend();
     printf("Backend U10: %s\n", backend_u10);
-    me_set_sincos_ulp(35);
-    const char *backend_u35 = me_get_sincos_backend();
+    me_set_simd_ulp_mode(ME_SIMD_ULP_3_5);
+    const char *backend_u35 = me_get_simd_backend();
     printf("Backend U35: %s\n", backend_u35);
     if (strcmp(backend_u10, backend_u35) == 0) {
         printf("Note: backend did not change between U10 and U35\n");
     }
-    me_set_sincos_ulp(10);
+    me_set_simd_ulp_mode(ME_SIMD_ULP_1);
 
     for (int i = 0; i < nblocks; i++) {
         int nitems = blocks[i];
         int iterations = (nitems < 65536) ? 20 : 8;
-        me_set_sincos_simd(1);
-        me_set_sincos_ulp(10);
+        me_disable_simd(false);
+        me_set_simd_ulp_mode(ME_SIMD_ULP_1);
         double me_time_u10 = run_me(expr, var_ptrs, out, nitems, iterations);
-        me_set_sincos_ulp(35);
+        me_set_simd_ulp_mode(ME_SIMD_ULP_3_5);
         double me_time_u35 = run_me(expr, var_ptrs, out, nitems, iterations);
-        me_set_sincos_simd(0);
+        me_disable_simd(true);
         double me_scalar_time = run_me(expr, var_ptrs, out, nitems, iterations);
         double c_time = run_c(data, out, nitems, info, iterations);
         double data_gb = (double)(nitems * info->elem_size * 2ULL) / 1e9;
@@ -154,8 +154,8 @@ static void benchmark_dtype(const dtype_info_t *info, const int *blocks, int nbl
                kib, me_gbps_u10, me_gbps_u35, me_scalar_gbps, c_gbps);
     }
 
-    me_set_sincos_simd(1);
-    me_set_sincos_ulp(10);
+    me_disable_simd(false);
+    me_set_simd_ulp_mode(ME_SIMD_ULP_1);
     me_free(expr);
     free(data);
     free(out);
