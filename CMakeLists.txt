@@ -5,6 +5,10 @@ if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "MSVC")
   message(FATAL_ERROR "MSVC is not supported. Use clang-cl (e.g., cmake -G \"Visual Studio 17 2022\" -T ClangCL).")
 endif()
 
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 option(MINIEXPR_BUILD_SHARED "Build shared library" ON)
 option(MINIEXPR_BUILD_STATIC "Build static library" ON)
 option(MINIEXPR_BUILD_TESTS "Build tests" ON)
