@@ -1,4 +1,18 @@
 file(GLOB MINIEXPR_BENCH_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
+if(WIN32)
+  # These benchmarks rely on pthreads/time APIs not available on Windows CI.
+  list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_blocksize\\.c$")
+  list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_blocksize_threads\\.c$")
+  list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_chunked\\.c$")
+  list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_chunksize\\.c$")
+  list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_comparisons\\.c$")
+  list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_mixed_types\\.c$")
+  list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_reductions\\.c$")
+  list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_reductions_threads\\.c$")
+  list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_sincos\\.c$")
+  list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_sincos_threads\\.c$")
+  list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_threadsafe\\.c$")
+endif()
 
 foreach(bench_src IN LISTS MINIEXPR_BENCH_SOURCES)
   get_filename_component(bench_name "${bench_src}" NAME_WE)
