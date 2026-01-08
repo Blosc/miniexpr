@@ -153,11 +153,46 @@ The `examples/` directory contains complete, runnable examples demonstrating var
 
 Build and run:
 ```bash
-make examples
-./build/01_simple_expression
+mkdir -p build
+cd build
+cmake ..
+make -j
+./01_simple_expression
 ```
 
 See [examples/README.md](examples/README.md) for detailed documentation of each example.
+
+## Building
+
+CMake (recommended):
+```bash
+mkdir -p build
+cd build
+cmake ..
+make -j
+ctest
+```
+Tip: run a subset of tests with `ctest -R <pattern>`.
+
+Options:
+- `-DMINIEXPR_BUILD_TESTS=ON|OFF`
+- `-DMINIEXPR_BUILD_EXAMPLES=ON|OFF`
+- `-DMINIEXPR_BUILD_BENCH=ON|OFF`
+- `-DMINIEXPR_USE_SLEEF=ON|OFF`
+
+Windows (clang-cl):
+```bash
+mkdir build
+cd build
+cmake .. -G "Visual Studio 17 2022" -T ClangCL
+cmake --build .
+```
+
+Makefile fallback:
+```bash
+make lib
+make examples
+```
 
 ## Documentation
 

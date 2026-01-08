@@ -87,11 +87,20 @@ a=1.0, b=1.0 -> distance=1.41
 If you have the miniexpr source files in your project:
 
 ```bash
-gcc -o distance example.c miniexpr.c -lm
+gcc -o distance example.c src/miniexpr.c src/functions.c -lm
 ./distance
 ```
 
 The `-lm` flag links the math library for functions like `sqrt()`.
+
+With CMake (recommended):
+```bash
+mkdir -p build
+cd build
+cmake ..
+make -j
+ctest
+```
 
 ## Next Steps
 

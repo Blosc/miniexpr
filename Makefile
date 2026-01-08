@@ -2,21 +2,28 @@
 # Organized structure: src/, bench/, tests/
 
 CC ?= gcc
-SLEEF_CFLAGS = -Isrc -I../sleef/src/common -I../sleef/src/arch -I../sleef/src/libm
+SLEEF_DIR ?= ../sleef
+ifneq ("$(wildcard $(SLEEF_DIR)/src)","")
+  SLEEF_CFLAGS = -Isrc -Isrc/sleef_compat -I$(SLEEF_DIR) -I$(SLEEF_DIR)/src -I$(SLEEF_DIR)/src/common -I$(SLEEF_DIR)/src/arch
+  SLEEF_DEFS =
+else
+  SLEEF_CFLAGS = -Isrc
+  SLEEF_DEFS = -DME_USE_SLEEF=0
+endif
 ifeq ($(OS),Windows_NT)
   # Check if we are using clang-cl
   ifneq (,$(findstring clang-cl,$(CC)))
-    CFLAGS = -O2 -DNDEBUG $(SLEEF_CFLAGS)
-    DEBUG_CFLAGS = -O0 -g $(SLEEF_CFLAGS)
+    CFLAGS = -O2 -DNDEBUG $(SLEEF_CFLAGS) $(SLEEF_DEFS)
+    DEBUG_CFLAGS = -O0 -g $(SLEEF_CFLAGS) $(SLEEF_DEFS)
     LDFLAGS = clang_rt.builtins-x86_64.lib
   else
-    CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG $(SLEEF_CFLAGS)
-    DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g $(SLEEF_CFLAGS)
+    CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG $(SLEEF_CFLAGS) $(SLEEF_DEFS)
+    DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g $(SLEEF_CFLAGS) $(SLEEF_DEFS)
     LDFLAGS = -lm
   endif
 else
-  CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG $(SLEEF_CFLAGS)
-  DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g $(SLEEF_CFLAGS)
+  CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG $(SLEEF_CFLAGS) $(SLEEF_DEFS)
+  DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g $(SLEEF_CFLAGS) $(SLEEF_DEFS)
   LDFLAGS = -lm
 endif
 
@@ -28,8 +35,8 @@ EXAMPLEDIR = examples
 BUILDDIR = build
 
 # Source files
-LIB_SRC = $(SRCDIR)/miniexpr.c
-LIB_OBJ = $(BUILDDIR)/miniexpr.o
+LIB_SRCS = $(SRCDIR)/miniexpr.c $(SRCDIR)/functions.c
+LIB_OBJS = $(BUILDDIR)/miniexpr.o $(BUILDDIR)/functions.o
 LIB_HDR = $(SRCDIR)/miniexpr.h
 
 ifeq ($(OS),Windows_NT)
@@ -74,6 +81,9 @@ help:
 	@echo "  make clean        - Remove all build artifacts"
 	@echo "  make help         - Show this help"
 	@echo ""
+	@echo "Environment overrides:"
+	@echo "  SLEEF_DIR=../sleef  - Path to SLEEF source tree (optional)"
+	@echo ""
 	@echo "Individual benchmarks:"
 	@echo "  make $(BUILDDIR)/benchmark_all_types"
 	@echo "  make $(BUILDDIR)/benchmark_types"
@@ -87,12 +97,13 @@ $(BUILDDIR):
 	@mkdir -p $(BUILDDIR)
 
 # Build library object
-lib: $(LIB_OBJ)
+lib: $(LIB_OBJS)
 
-$(LIB_OBJ): $(LIB_SRC) $(LIB_HDR) | $(BUILDDIR)
+$(LIB_OBJS): $(LIB_SRCS) $(LIB_HDR) | $(BUILDDIR)
 	@echo "Building library..."
-	$(CC) $(CFLAGS) -c $(LIB_SRC) -o $@
-	@echo "✓ Library built: $@"
+	$(CC) $(CFLAGS) -c $(SRCDIR)/miniexpr.c -o $(BUILDDIR)/miniexpr.o
+	$(CC) $(CFLAGS) -c $(SRCDIR)/functions.c -o $(BUILDDIR)/functions.o
+	@echo "✓ Library built: $(LIB_OBJS)"
 
 # Build library in debug mode
 debug: CFLAGS = $(DEBUG_CFLAGS)
@@ -107,9 +118,9 @@ debug-test: clean test
 # Build all benchmarks
 bench: $(BENCH_BINS)
 
-$(BUILDDIR)/%$(EXE): $(BENCHDIR)/%.c $(LIB_OBJ) | $(BUILDDIR)
+$(BUILDDIR)/%$(EXE): $(BENCHDIR)/%.c $(LIB_OBJS) | $(BUILDDIR)
 	@echo "Building benchmark: $@"
-	$(CC) $(CFLAGS) -I$(SRCDIR) $< $(LIB_OBJ) -o $@ $(LDFLAGS)
+	$(CC) $(CFLAGS) -I$(SRCDIR) $< $(LIB_OBJS) -o $@ $(LDFLAGS)
 	@echo "✓ Built: $@"
 
 # Build and run all tests
@@ -126,17 +137,17 @@ test: $(TEST_BINS)
 	@echo ""
 	@echo "✅ All tests passed!"
 
-$(BUILDDIR)/%$(EXE): $(TESTDIR)/%.c $(LIB_OBJ) | $(BUILDDIR)
+$(BUILDDIR)/%$(EXE): $(TESTDIR)/%.c $(LIB_OBJS) | $(BUILDDIR)
 	@echo "Building test: $@"
-	$(CC) $(CFLAGS) -I$(SRCDIR) $< $(LIB_OBJ) -o $@ $(LDFLAGS)
+	$(CC) $(CFLAGS) -I$(SRCDIR) $< $(LIB_OBJS) -o $@ $(LDFLAGS)
 	@echo "✓ Built: $@"
 
 # Build all examples
 examples: $(EXAMPLE_BINS)
 
-$(BUILDDIR)/%$(EXE): $(EXAMPLEDIR)/%.c $(LIB_OBJ) | $(BUILDDIR)
+$(BUILDDIR)/%$(EXE): $(EXAMPLEDIR)/%.c $(LIB_OBJS) | $(BUILDDIR)
 	@echo "Building example: $@"
-	$(CC) $(CFLAGS) -I$(SRCDIR) $< $(LIB_OBJ) -o $@ $(LDFLAGS) -lpthread
+	$(CC) $(CFLAGS) -I$(SRCDIR) $< $(LIB_OBJS) -o $@ $(LDFLAGS) -lpthread
 	@echo "✓ Built: $@"
 
 # Clean build artifacts

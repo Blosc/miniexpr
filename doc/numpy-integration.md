@@ -181,8 +181,11 @@ me_dtype = NUMPY_TO_ME[array.dtype.num]
 Run the test suite to verify conversions:
 
 ```bash
-make build/test_numpy_conversion
-./build/test_numpy_conversion
+mkdir -p build
+cd build
+cmake ..
+make -j
+ctest -R test_numpy_conversion
 ```
 
 All 27 tests should pass.

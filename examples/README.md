@@ -4,10 +4,14 @@ This directory contains practical examples demonstrating various features and us
 
 ## Quick Start
 
-To build and run all examples:
+From the repository root, build and run all examples:
 
 ```bash
-make examples
+mkdir -p build
+cd build
+cmake ..
+make -j
+ctest
 ```
 
 To run a specific example:
@@ -270,6 +274,17 @@ Chunk size matters enormously for parallel performance:
 
 ## Building Examples
 
+### Using CMake (recommended)
+
+From the repo root:
+```bash
+mkdir -p build
+cd build
+cmake ..
+make -j
+ctest
+```
+
 ### Using the Makefile
 
 Add to your `Makefile`:
@@ -280,9 +295,9 @@ EXAMPLE_BINS = $(patsubst examples/%.c,$(BUILDDIR)/%,$(EXAMPLE_SRCS))
 
 examples: $(EXAMPLE_BINS)
 
-$(BUILDDIR)/%: examples/%.c $(BUILDDIR)/miniexpr.o
+$(BUILDDIR)/%: examples/%.c $(BUILDDIR)/miniexpr.o $(BUILDDIR)/functions.o
 	@echo "Building example: $@"
-	$(CC) $(CFLAGS) -Isrc $< $(BUILDDIR)/miniexpr.o -o $@ -lm
+	$(CC) $(CFLAGS) -Isrc $< $(BUILDDIR)/miniexpr.o $(BUILDDIR)/functions.o -o $@ -lm
 ```
 
 Then run:
@@ -295,12 +310,12 @@ make examples
 Compile any example manually:
 
 ```bash
-gcc -O2 -Isrc examples/01_simple_expression.c build/miniexpr.o -o 01_simple_expression -lm
+gcc -O2 -Isrc examples/01_simple_expression.c build/miniexpr.o build/functions.o -o 01_simple_expression -lm
 ```
 
 For the parallel example (requires pthreads):
 ```bash
-gcc -O2 -Isrc examples/05_parallel_evaluation.c build/miniexpr.o -o 05_parallel_evaluation -lm -lpthread
+gcc -O2 -Isrc examples/05_parallel_evaluation.c build/miniexpr.o build/functions.o -o 05_parallel_evaluation -lm -lpthread
 ```
 
 ---

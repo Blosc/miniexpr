@@ -1,0 +1,11 @@
+file(GLOB MINIEXPR_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
+if(WIN32)
+  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_threadsafe_chunk\\.c$")
+endif()
+
+foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
+  get_filename_component(test_name "${test_src}" NAME_WE)
+  add_executable("${test_name}" "${test_src}")
+  target_link_libraries("${test_name}" PRIVATE ${MINIEXPR_DEFAULT_LIB} ${MINIEXPR_THREADS_LIB})
+  add_test(NAME "${test_name}" COMMAND "${test_name}")
+endforeach()

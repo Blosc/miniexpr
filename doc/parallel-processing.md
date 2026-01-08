@@ -137,7 +137,7 @@ int main() {
 ### Compilation
 
 ```bash
-gcc -o parallel parallel.c miniexpr.c -lm -lpthread
+gcc -o parallel parallel.c src/miniexpr.c src/functions.c -lm -lpthread
 ./parallel
 ```
 
@@ -343,7 +343,7 @@ int main() {
 ### Compilation with OpenMP
 
 ```bash
-gcc -o parallel_omp parallel_omp.c miniexpr.c -lm -fopenmp
+gcc -o parallel_omp parallel_omp.c src/miniexpr.c src/functions.c -lm -fopenmp
 ./parallel_omp
 ```
 
