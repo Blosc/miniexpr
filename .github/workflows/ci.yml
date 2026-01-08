@@ -33,14 +33,22 @@ jobs:
       shell: bash
       run: |
         if [ "$RUNNER_OS" == "Windows" ]; then
-          export CC=clang-cl
+          # Visual Studio generators are multi-config; select Release at build time.
+          cmake -S . -B build -G "Visual Studio 17 2022" -T ClangCL
+        else
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
         fi
-        make lib
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          cmake --build build --config Release
+        else
+          cmake --build build
+        fi
     
     - name: Build and run tests
       shell: bash
       run: |
         if [ "$RUNNER_OS" == "Windows" ]; then
-          export CC=clang-cl
+          ctest --test-dir build -C Release
+        else
+          ctest --test-dir build
         fi
-        make test
