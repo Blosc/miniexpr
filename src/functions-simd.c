@@ -19,6 +19,12 @@
 #include <intrin.h>
 #endif
 
+#if defined(_MSC_VER) && !defined(__clang__)
+#define IVDEP
+#else
+#define IVDEP _Pragma("GCC ivdep")
+#endif
+
 #if defined(_MSC_VER)
 #define ME_THREAD_LOCAL __declspec(thread)
 #else
@@ -49,6 +55,7 @@ static ME_THREAD_LOCAL unsigned long long me_eval_cookie = 0;
 #pragma clang diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic ignored "-Wshadow"
 #pragma clang diagnostic ignored "-Wmacro-redefined"
+#pragma clang diagnostic ignored "-Wunused-function"
 #elif defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunknown-pragmas"
@@ -146,7 +153,7 @@ static ME_THREAD_LOCAL me_sincos_cache_f32 me_sincos_cache_sp = {0};
 
 static void vec_sin_scalar(const double* a, double* out, int n) {
     int i;
-#pragma GCC ivdep
+IVDEP
     for (i = 0; i < n; i++) {
         out[i] = sin(a[i]);
     }
@@ -154,7 +161,7 @@ static void vec_sin_scalar(const double* a, double* out, int n) {
 
 static void vec_cos_scalar(const double* a, double* out, int n) {
     int i;
-#pragma GCC ivdep
+IVDEP
     for (i = 0; i < n; i++) {
         out[i] = cos(a[i]);
     }
@@ -162,7 +169,7 @@ static void vec_cos_scalar(const double* a, double* out, int n) {
 
 static void vec_sin_f32_scalar(const float* a, float* out, int n) {
     int i;
-#pragma GCC ivdep
+IVDEP
     for (i = 0; i < n; i++) {
         out[i] = sinf(a[i]);
     }
@@ -170,7 +177,7 @@ static void vec_sin_f32_scalar(const float* a, float* out, int n) {
 
 static void vec_cos_f32_scalar(const float* a, float* out, int n) {
     int i;
-#pragma GCC ivdep
+IVDEP
     for (i = 0; i < n; i++) {
         out[i] = cosf(a[i]);
     }
@@ -178,7 +185,7 @@ static void vec_cos_f32_scalar(const float* a, float* out, int n) {
 
 static void vec_asin_scalar(const double* a, double* out, int n) {
     int i;
-#pragma GCC ivdep
+IVDEP
     for (i = 0; i < n; i++) {
         out[i] = asin(a[i]);
     }
@@ -186,7 +193,7 @@ static void vec_asin_scalar(const double* a, double* out, int n) {
 
 static void vec_acos_scalar(const double* a, double* out, int n) {
     int i;
-#pragma GCC ivdep
+IVDEP
     for (i = 0; i < n; i++) {
         out[i] = acos(a[i]);
     }
@@ -194,7 +201,7 @@ static void vec_acos_scalar(const double* a, double* out, int n) {
 
 static void vec_atan_scalar(const double* a, double* out, int n) {
     int i;
-#pragma GCC ivdep
+IVDEP
     for (i = 0; i < n; i++) {
         out[i] = atan(a[i]);
     }
@@ -202,7 +209,7 @@ static void vec_atan_scalar(const double* a, double* out, int n) {
 
 static void vec_atan2_scalar(const double* a, const double* b, double* out, int n) {
     int i;
-#pragma GCC ivdep
+IVDEP
     for (i = 0; i < n; i++) {
         out[i] = atan2(a[i], b[i]);
     }
@@ -210,7 +217,7 @@ static void vec_atan2_scalar(const double* a, const double* b, double* out, int 
 
 static void vec_asin_f32_scalar(const float* a, float* out, int n) {
     int i;
-#pragma GCC ivdep
+IVDEP
     for (i = 0; i < n; i++) {
         out[i] = asinf(a[i]);
     }
@@ -218,7 +225,7 @@ static void vec_asin_f32_scalar(const float* a, float* out, int n) {
 
 static void vec_acos_f32_scalar(const float* a, float* out, int n) {
     int i;
-#pragma GCC ivdep
+IVDEP
     for (i = 0; i < n; i++) {
         out[i] = acosf(a[i]);
     }
@@ -226,7 +233,7 @@ static void vec_acos_f32_scalar(const float* a, float* out, int n) {
 
 static void vec_atan_f32_scalar(const float* a, float* out, int n) {
     int i;
-#pragma GCC ivdep
+IVDEP
     for (i = 0; i < n; i++) {
         out[i] = atanf(a[i]);
     }
@@ -234,7 +241,7 @@ static void vec_atan_f32_scalar(const float* a, float* out, int n) {
 
 static void vec_atan2_f32_scalar(const float* a, const float* b, float* out, int n) {
     int i;
-#pragma GCC ivdep
+IVDEP
     for (i = 0; i < n; i++) {
         out[i] = atan2f(a[i], b[i]);
     }
@@ -242,7 +249,7 @@ static void vec_atan2_f32_scalar(const float* a, const float* b, float* out, int
 
 static void vec_tan_scalar(const double* a, double* out, int n) {
     int i;
-#pragma GCC ivdep
+IVDEP
     for (i = 0; i < n; i++) {
         out[i] = tan(a[i]);
     }
@@ -250,7 +257,7 @@ static void vec_tan_scalar(const double* a, double* out, int n) {
 
 static void vec_tan_f32_scalar(const float* a, float* out, int n) {
     int i;
-#pragma GCC ivdep
+IVDEP
     for (i = 0; i < n; i++) {
         out[i] = tanf(a[i]);
     }
@@ -258,7 +265,7 @@ static void vec_tan_f32_scalar(const float* a, float* out, int n) {
 
 static void vec_sincos_scalar(const double* a, double* sin_out, double* cos_out, int n) {
     int i;
-#pragma GCC ivdep
+IVDEP
     for (i = 0; i < n; i++) {
         sin_out[i] = sin(a[i]);
         cos_out[i] = cos(a[i]);
@@ -267,7 +274,7 @@ static void vec_sincos_scalar(const double* a, double* sin_out, double* cos_out,
 
 static void vec_sincos_f32_scalar(const float* a, float* sin_out, float* cos_out, int n) {
     int i;
-#pragma GCC ivdep
+IVDEP
     for (i = 0; i < n; i++) {
         sin_out[i] = sinf(a[i]);
         cos_out[i] = cosf(a[i]);
@@ -901,13 +908,11 @@ static int me_cpu_supports_avx2(void) {
 #endif
 }
 
+#if ME_ENABLE_SLEEF_SIMD && (defined(__aarch64__) || defined(_M_ARM64))
 static int me_cpu_supports_advsimd(void) {
-#if defined(__aarch64__) || defined(_M_ARM64)
     return 1;
-#else
-    return 0;
-#endif
 }
+#endif
 
 static void me_init_simd(void) {
     if (me_simd_initialized) {
