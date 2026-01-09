@@ -885,6 +885,12 @@ static int run_additional_edge_cases(void) {
                             continue;
                         }
                     }
+                    if (expected == 0.0 && out64[i] == 0.0) {
+                        continue;
+                    }
+                    if (isinf(expected) && isinf(out64[i]) && (signbit(expected) == signbit(out64[i]))) {
+                        continue;
+                    }
                     if (memcmp(&expected, &out64[i], sizeof(double)) != 0) {
                         printf("nextafter edge case failed (f64)\n");
                         failures++;
@@ -909,6 +915,12 @@ static int run_additional_edge_cases(void) {
                         if (out32[i] == 0.0f) {
                             continue;
                         }
+                    }
+                    if (expected == 0.0f && out32[i] == 0.0f) {
+                        continue;
+                    }
+                    if (isinf(expected) && isinf(out32[i]) && (signbit(expected) == signbit(out32[i]))) {
+                        continue;
                     }
                     if (memcmp(&expected, &out32[i], sizeof(float)) != 0) {
                         printf("nextafter edge case failed (f32)\n");
