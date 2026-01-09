@@ -1695,6 +1695,10 @@ int main(void) {
     failures += run_unary_pair_f64("sinh", sinh, n, -3.0, 3.0, 1e-12);
     failures += run_unary_pair_f64("cosh", cosh, n, -3.0, 3.0, 1e-12);
     failures += run_unary_pair_f64("tanh", tanh, n, -3.0, 3.0, 1e-12);
+    failures += run_unary_pair_f64("tan", tan, n, -1.0, 1.0, 1e-12);
+    failures += run_unary_pair_f64("asin", asin, n, -0.9, 0.9, 1e-12);
+    failures += run_unary_pair_f64("acos", acos, n, -0.9, 0.9, 1e-12);
+    failures += run_unary_pair_f64("atan", atan, n, -5.0, 5.0, 1e-12);
     failures += run_unary_pair_f64("acosh", acosh, n, 1.0, 10.0, 1e-12);
     failures += run_unary_pair_f64("asinh", asinh, n, -5.0, 5.0, 1e-12);
     failures += run_unary_pair_f64("atanh", atanh, n, -0.9, 0.9, 1e-12);
@@ -1707,6 +1711,7 @@ int main(void) {
     failures += run_unary_pair_f64("trunc", trunc, n, -3.5, 3.5, 1e-12);
 
     failures += run_binary_pair_f64("pow", pow, n, 0.1, 4.0, -2.0, 2.0, 1e-11);
+    failures += run_binary_pair_f64("atan2", atan2, n, -3.0, 3.0, -3.0, 3.0, 1e-12);
     failures += run_binary_pair_f64("copysign", copysign, n, -5.0, 5.0, -5.0, 5.0, 0.0);
     failures += run_binary_pair_f64("fdim", fdim, n, -5.0, 5.0, -5.0, 5.0, 1e-12);
     failures += run_binary_pair_f64("fmax", fmax, n, -5.0, 5.0, -5.0, 5.0, 0.0);
@@ -1736,6 +1741,10 @@ int main(void) {
     failures += run_unary_pair_f32("sinh", sinhf, n, -3.0f, 3.0f, 1e-5f);
     failures += run_unary_pair_f32("cosh", coshf, n, -3.0f, 3.0f, 1e-5f);
     failures += run_unary_pair_f32("tanh", tanhf, n, -3.0f, 3.0f, 1e-5f);
+    failures += run_unary_pair_f32("tan", tanf, n, -1.0f, 1.0f, 1e-5f);
+    failures += run_unary_pair_f32("asin", asinf, n, -0.9f, 0.9f, 1e-5f);
+    failures += run_unary_pair_f32("acos", acosf, n, -0.9f, 0.9f, 1e-5f);
+    failures += run_unary_pair_f32("atan", atanf, n, -5.0f, 5.0f, 1e-5f);
     failures += run_unary_pair_f32("acosh", acoshf, n, 1.0f, 10.0f, 1e-5f);
     failures += run_unary_pair_f32("asinh", asinhf, n, -5.0f, 5.0f, 1e-5f);
     failures += run_unary_pair_f32("atanh", atanhf, n, -0.9f, 0.9f, 1e-5f);
@@ -1748,6 +1757,7 @@ int main(void) {
     failures += run_unary_pair_f32("trunc", truncf, n, -3.5f, 3.5f, 1e-5f);
 
     failures += run_binary_pair_f32("pow", powf, n, 0.1f, 4.0f, -2.0f, 2.0f, 1e-5f);
+    failures += run_binary_pair_f32("atan2", atan2f, n, -3.0f, 3.0f, -3.0f, 3.0f, 1e-5f);
     failures += run_binary_pair_f32("copysign", copysignf, n, -5.0f, 5.0f, -5.0f, 5.0f, 0.0f);
     failures += run_binary_pair_f32("fdim", fdimf, n, -5.0f, 5.0f, -5.0f, 5.0f, 1e-5f);
     failures += run_binary_pair_f32("fmax", fmaxf, n, -5.0f, 5.0f, -5.0f, 5.0f, 0.0f);
