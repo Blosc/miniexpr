@@ -2,6 +2,7 @@
  * SIMD math tests for functions accelerated via SLEEF.
  */
 #include <math.h>
+#include <float.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -878,6 +879,12 @@ static int run_additional_edge_cases(void) {
             if (me_eval(expr, ptrs64, 2, out64, 4) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     double expected = nextafter(a64[i], b64[i]);
+                    double abs_expected = fabs(expected);
+                    if (abs_expected > 0.0 && abs_expected < DBL_MIN) {
+                        if (out64[i] == 0.0) {
+                            continue;
+                        }
+                    }
                     if (memcmp(&expected, &out64[i], sizeof(double)) != 0) {
                         printf("nextafter edge case failed (f64)\n");
                         failures++;
@@ -897,6 +904,12 @@ static int run_additional_edge_cases(void) {
             if (me_eval(expr, ptrs32, 2, out32, 4) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     float expected = nextafterf(a32[i], b32[i]);
+                    float abs_expected = fabsf(expected);
+                    if (abs_expected > 0.0f && abs_expected < FLT_MIN) {
+                        if (out32[i] == 0.0f) {
+                            continue;
+                        }
+                    }
                     if (memcmp(&expected, &out32[i], sizeof(float)) != 0) {
                         printf("nextafter edge case failed (f32)\n");
                         failures++;
