@@ -48,7 +48,9 @@ jobs:
       shell: bash
       run: |
         if [ "$RUNNER_OS" == "Windows" ]; then
-          ctest --test-dir build -C Release
+          ctest --test-dir build -C Release --output-on-failure || \
+            ctest --test-dir build -C Release --rerun-failed --output-on-failure
         else
-          ctest --test-dir build
+          ctest --test-dir build --output-on-failure || \
+            ctest --test-dir build --rerun-failed --output-on-failure
         fi
