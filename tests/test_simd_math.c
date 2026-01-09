@@ -970,6 +970,393 @@ static int run_additional_edge_cases(void) {
     return failures;
 }
 
+static int run_more_edge_cases(void) {
+    int failures = 0;
+
+    {
+        double out64[4] = {0};
+        float out32[4] = {0};
+        double a64[] = {5.5, -5.5, 5.5, -5.5};
+        double b64[] = {2.0, 2.0, -2.0, -2.0};
+        float a32[] = {5.5f, -5.5f, 5.5f, -5.5f};
+        float b32[] = {2.0f, 2.0f, -2.0f, -2.0f};
+
+        me_variable vars64[] = {{"a", ME_FLOAT64, a64}, {"b", ME_FLOAT64, b64}};
+        me_variable vars32[] = {{"a", ME_FLOAT32, a32}, {"b", ME_FLOAT32, b32}};
+        const void *ptrs64[] = {a64, b64};
+        const void *ptrs32[] = {a32, b32};
+        me_expr *expr = NULL;
+        int err = 0;
+
+        if (me_compile("fmod(a, b)", vars64, 2, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs64, 2, out64, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    double expected = fmod(a64[i], b64[i]);
+                    if ((isnan(expected) && !isnan(out64[i])) ||
+                        (!isnan(expected) && expected != out64[i])) {
+                        printf("fmod edge case failed (f64)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+
+        expr = NULL;
+        if (me_compile("fmod(a, b)", vars32, 2, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs32, 2, out32, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    float expected = fmodf(a32[i], b32[i]);
+                    if ((isnan(expected) && !isnan(out32[i])) ||
+                        (!isnan(expected) && expected != out32[i])) {
+                        printf("fmod edge case failed (f32)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+    }
+
+    {
+        double out64[4] = {0};
+        float out32[4] = {0};
+        double a64[] = {INFINITY, 3.0, NAN, 0.0};
+        double b64[] = {4.0, INFINITY, 2.0, NAN};
+        float a32[] = {INFINITY, 3.0f, NAN, 0.0f};
+        float b32[] = {4.0f, INFINITY, 2.0f, NAN};
+
+        me_variable vars64[] = {{"a", ME_FLOAT64, a64}, {"b", ME_FLOAT64, b64}};
+        me_variable vars32[] = {{"a", ME_FLOAT32, a32}, {"b", ME_FLOAT32, b32}};
+        const void *ptrs64[] = {a64, b64};
+        const void *ptrs32[] = {a32, b32};
+        me_expr *expr = NULL;
+        int err = 0;
+
+        if (me_compile("hypot(a, b)", vars64, 2, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs64, 2, out64, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    double expected = hypot(a64[i], b64[i]);
+                    if ((isnan(expected) && !isnan(out64[i])) ||
+                        (!isnan(expected) && expected != out64[i])) {
+                        printf("hypot edge case failed (f64)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+
+        expr = NULL;
+        if (me_compile("hypot(a, b)", vars32, 2, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs32, 2, out32, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    float expected = hypotf(a32[i], b32[i]);
+                    if ((isnan(expected) && !isnan(out32[i])) ||
+                        (!isnan(expected) && expected != out32[i])) {
+                        printf("hypot edge case failed (f32)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+    }
+
+    {
+        double out64[6] = {0};
+        float out32[6] = {0};
+        double a64[] = {0.5, 1.5, 2.5, -0.5, -1.5, -2.5};
+        float a32[] = {0.5f, 1.5f, 2.5f, -0.5f, -1.5f, -2.5f};
+
+        me_variable vars64[] = {{"a", ME_FLOAT64, a64}};
+        me_variable vars32[] = {{"a", ME_FLOAT32, a32}};
+        const void *ptrs64[] = {a64};
+        const void *ptrs32[] = {a32};
+        me_expr *expr = NULL;
+        int err = 0;
+
+        if (me_compile("rint(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 6) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 6; i++) {
+                    double expected = rint(a64[i]);
+                    if (expected != out64[i]) {
+                        printf("rint edge case failed (f64)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+
+        expr = NULL;
+        if (me_compile("rint(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 6) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 6; i++) {
+                    float expected = rintf(a32[i]);
+                    if (expected != out32[i]) {
+                        printf("rint edge case failed (f32)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+    }
+
+    return failures;
+}
+
+static int run_edge_overflow_cases(void) {
+    int failures = 0;
+
+    {
+        double out64[4] = {0};
+        float out32[4] = {0};
+        double a64[] = {1.0, -1.0, NAN, 2.0};
+        double b64[] = {NAN, 2.0, 3.0, NAN};
+        float a32[] = {1.0f, -1.0f, NAN, 2.0f};
+        float b32[] = {NAN, 2.0f, 3.0f, NAN};
+
+        me_variable vars64[] = {{"a", ME_FLOAT64, a64}, {"b", ME_FLOAT64, b64}};
+        me_variable vars32[] = {{"a", ME_FLOAT32, a32}, {"b", ME_FLOAT32, b32}};
+        const void *ptrs64[] = {a64, b64};
+        const void *ptrs32[] = {a32, b32};
+        me_expr *expr = NULL;
+        int err = 0;
+
+        if (me_compile("fdim(a, b)", vars64, 2, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs64, 2, out64, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    double expected = fdim(a64[i], b64[i]);
+                    if ((isnan(expected) && !isnan(out64[i])) ||
+                        (!isnan(expected) && expected != out64[i])) {
+                        printf("fdim NaN edge case failed (f64)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+
+        expr = NULL;
+        if (me_compile("fdim(a, b)", vars32, 2, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs32, 2, out32, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    float expected = fdimf(a32[i], b32[i]);
+                    if ((isnan(expected) && !isnan(out32[i])) ||
+                        (!isnan(expected) && expected != out32[i])) {
+                        printf("fdim NaN edge case failed (f32)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+    }
+
+    {
+        double out64[4] = {0};
+        float out32[4] = {0};
+        double a64[] = {1.0, 2.0, -3.0, NAN};
+        float a32[] = {1.0f, 2.0f, -3.0f, NAN};
+
+        me_variable vars64[] = {{"a", ME_FLOAT64, a64}};
+        me_variable vars32[] = {{"a", ME_FLOAT32, a32}};
+        const void *ptrs64[] = {a64};
+        const void *ptrs32[] = {a32};
+        me_expr *expr = NULL;
+        int err = 0;
+
+        if (me_compile("lgamma(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    double expected = lgamma(a64[i]);
+                    if ((isnan(expected) && !isnan(out64[i])) ||
+                        (!isnan(expected) && expected != out64[i])) {
+                        printf("lgamma edge case failed (f64)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+
+        expr = NULL;
+        if (me_compile("lgamma(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    float expected = lgammaf(a32[i]);
+                    if ((isnan(expected) && !isnan(out32[i])) ||
+                        (!isnan(expected) && expected != out32[i])) {
+                        printf("lgamma edge case failed (f32)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+    }
+
+    {
+        double out64[3] = {0};
+        float out32[3] = {0};
+        double a64[] = {1e3, -1e3, NAN};
+        float a32[] = {100.0f, -100.0f, NAN};
+
+        me_variable vars64[] = {{"a", ME_FLOAT64, a64}};
+        me_variable vars32[] = {{"a", ME_FLOAT32, a32}};
+        const void *ptrs64[] = {a64};
+        const void *ptrs32[] = {a32};
+        me_expr *expr = NULL;
+        int err = 0;
+
+        if (me_compile("exp2(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 3) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 3; i++) {
+                    double expected = exp2(a64[i]);
+                    if ((isnan(expected) && !isnan(out64[i])) ||
+                        (!isnan(expected) && expected != out64[i])) {
+                        printf("exp2 overflow edge case failed (f64)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+
+        expr = NULL;
+        if (me_compile("exp2(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 3) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 3; i++) {
+                    float expected = exp2f(a32[i]);
+                    if ((isnan(expected) && !isnan(out32[i])) ||
+                        (!isnan(expected) && expected != out32[i])) {
+                        printf("exp2 overflow edge case failed (f32)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+    }
+
+    {
+        double out64[3] = {0};
+        float out32[3] = {0};
+        double a64[] = {400.0, -400.0, NAN};
+        float a32[] = {50.0f, -50.0f, NAN};
+
+        me_variable vars64[] = {{"a", ME_FLOAT64, a64}};
+        me_variable vars32[] = {{"a", ME_FLOAT32, a32}};
+        const void *ptrs64[] = {a64};
+        const void *ptrs32[] = {a32};
+        me_expr *expr = NULL;
+        int err = 0;
+
+        if (me_compile("exp10(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 3) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 3; i++) {
+                    double expected = exp10_ref(a64[i]);
+                    if ((isnan(expected) && !isnan(out64[i])) ||
+                        (!isnan(expected) && expected != out64[i])) {
+                        printf("exp10 overflow edge case failed (f64)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+
+        expr = NULL;
+        if (me_compile("exp10(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 3) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 3; i++) {
+                    float expected = exp10_ref_f(a32[i]);
+                    if ((isnan(expected) && !isnan(out32[i])) ||
+                        (!isnan(expected) && expected != out32[i])) {
+                        printf("exp10 overflow edge case failed (f32)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+    }
+
+    return failures;
+}
+
 int main(void) {
     int failures = 0;
     const int n = 1024;
@@ -1079,6 +1466,8 @@ int main(void) {
 
     failures += run_nan_edge_cases();
     failures += run_additional_edge_cases();
+    failures += run_more_edge_cases();
+    failures += run_edge_overflow_cases();
 
     return failures ? 1 : 0;
 }
