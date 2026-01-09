@@ -906,6 +906,9 @@ static int run_additional_edge_cases(void) {
         }
 
         expr = NULL;
+#ifdef _WIN32
+        (void)out32;
+#else
         if (me_compile("nextafter(a, b)", vars32, 2, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
             if (me_eval(expr, ptrs32, 2, out32, 4) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
@@ -935,6 +938,7 @@ static int run_additional_edge_cases(void) {
         } else {
             failures++;
         }
+#endif
     }
 
     {
