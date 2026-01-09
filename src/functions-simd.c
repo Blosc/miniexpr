@@ -3856,6 +3856,10 @@ static void me_init_simd(void) {
         vec_hypot_impl = vec_hypot_avx2;
         vec_ldexp_impl = vec_ldexp_avx2;
         vec_nextafter_impl = vec_nextafter_avx2;
+#ifdef _WIN32
+        /* Windows SIMD nextafter diverges in edge cases; keep scalar for determinism. */
+        vec_nextafter_impl = vec_nextafter_scalar;
+#endif
         vec_remainder_impl = vec_remainder_avx2;
         vec_fma_impl = vec_fma_avx2;
         vec_sin_f32_impl = vec_sin_f32_avx2;
@@ -3902,6 +3906,10 @@ static void me_init_simd(void) {
         vec_hypot_f32_impl = vec_hypot_f32_avx2;
         vec_ldexp_f32_impl = vec_ldexp_f32_avx2;
         vec_nextafter_f32_impl = vec_nextafter_f32_avx2;
+#ifdef _WIN32
+        /* Windows SIMD nextafter diverges in edge cases; keep scalar for determinism. */
+        vec_nextafter_f32_impl = vec_nextafter_f32_scalar;
+#endif
         vec_remainder_f32_impl = vec_remainder_f32_avx2;
         vec_fma_f32_impl = vec_fma_f32_avx2;
         vec_sincos_impl = vec_sincos_avx2;
@@ -3957,6 +3965,10 @@ static void me_init_simd(void) {
         vec_hypot_impl = vec_hypot_advsimd;
         vec_ldexp_impl = vec_ldexp_advsimd;
         vec_nextafter_impl = vec_nextafter_advsimd;
+#ifdef _WIN32
+        /* Windows SIMD nextafter diverges in edge cases; keep scalar for determinism. */
+        vec_nextafter_impl = vec_nextafter_scalar;
+#endif
         vec_remainder_impl = vec_remainder_advsimd;
         vec_fma_impl = vec_fma_advsimd;
         vec_sin_f32_impl = vec_sin_f32_advsimd;
@@ -4003,6 +4015,10 @@ static void me_init_simd(void) {
         vec_hypot_f32_impl = vec_hypot_f32_advsimd;
         vec_ldexp_f32_impl = vec_ldexp_f32_advsimd;
         vec_nextafter_f32_impl = vec_nextafter_f32_advsimd;
+#ifdef _WIN32
+        /* Windows SIMD nextafter diverges in edge cases; keep scalar for determinism. */
+        vec_nextafter_f32_impl = vec_nextafter_f32_scalar;
+#endif
         vec_remainder_f32_impl = vec_remainder_f32_advsimd;
         vec_fma_f32_impl = vec_fma_f32_advsimd;
         vec_sincos_impl = vec_sincos_advsimd;
