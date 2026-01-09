@@ -863,10 +863,10 @@ static int run_additional_edge_cases(void) {
     {
         double out64[4] = {0};
         float out32[4] = {0};
-        double a64[] = {1.0, -1.0, 0.0, 0.0};
-        double b64[] = {2.0, -2.0, 1.0, -1.0};
-        float a32[] = {1.0f, -1.0f, 0.0f, 0.0f};
-        float b32[] = {2.0f, -2.0f, 1.0f, -1.0f};
+        double a64[] = {1.0, -1.0, 2.0, -2.0};
+        double b64[] = {2.0, -2.0, 3.0, -3.0};
+        float a32[] = {1.0f, -1.0f, 2.0f, -2.0f};
+        float b32[] = {2.0f, -2.0f, 3.0f, -3.0f};
 
         me_variable vars64[] = {{"a", ME_FLOAT64, a64}, {"b", ME_FLOAT64, b64}};
         me_variable vars32[] = {{"a", ME_FLOAT32, a32}, {"b", ME_FLOAT32, b32}};
