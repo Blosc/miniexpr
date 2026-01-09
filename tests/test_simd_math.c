@@ -1357,6 +1357,322 @@ static int run_edge_overflow_cases(void) {
     return failures;
 }
 
+static int run_more_math_edges(void) {
+    int failures = 0;
+
+    {
+        double out64[5] = {0};
+        float out32[5] = {0};
+        double a64[] = {0.0, 1.0, -1.0, 0.5, -0.5};
+        float a32[] = {0.0f, 1.0f, -1.0f, 0.5f, -0.5f};
+
+        me_variable vars64[] = {{"a", ME_FLOAT64, a64}};
+        me_variable vars32[] = {{"a", ME_FLOAT32, a32}};
+        const void *ptrs64[] = {a64};
+        const void *ptrs32[] = {a32};
+        me_expr *expr = NULL;
+        int err = 0;
+
+        if (me_compile("sinpi(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 5) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 5; i++) {
+                    double expected = sinpi_ref(a64[i]);
+                    if (!nearly_equal(out64[i], expected, 1e-12)) {
+                        printf("sinpi edge case failed (f64)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+
+        expr = NULL;
+        if (me_compile("sinpi(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 5) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 5; i++) {
+                    float expected = sinpi_ref_f(a32[i]);
+                    if (!nearly_equal_f(out32[i], expected, 1e-5f)) {
+                        printf("sinpi edge case failed (f32)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+    }
+
+    {
+        double out64[5] = {0};
+        float out32[5] = {0};
+        double a64[] = {0.0, 1.0, -1.0, 0.5, -0.5};
+        float a32[] = {0.0f, 1.0f, -1.0f, 0.5f, -0.5f};
+
+        me_variable vars64[] = {{"a", ME_FLOAT64, a64}};
+        me_variable vars32[] = {{"a", ME_FLOAT32, a32}};
+        const void *ptrs64[] = {a64};
+        const void *ptrs32[] = {a32};
+        me_expr *expr = NULL;
+        int err = 0;
+
+        if (me_compile("cospi(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 5) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 5; i++) {
+                    double expected = cospi_ref(a64[i]);
+                    if (!nearly_equal(out64[i], expected, 1e-12)) {
+                        printf("cospi edge case failed (f64)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+
+        expr = NULL;
+        if (me_compile("cospi(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 5) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 5; i++) {
+                    float expected = cospi_ref_f(a32[i]);
+                    if (!nearly_equal_f(out32[i], expected, 1e-5f)) {
+                        printf("cospi edge case failed (f32)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+    }
+
+    {
+        double out64[4] = {0};
+        float out32[4] = {0};
+        double a64[] = {0.0, 1.0, 5.0, 10.0};
+        float a32[] = {0.0f, 1.0f, 5.0f, 10.0f};
+
+        me_variable vars64[] = {{"a", ME_FLOAT64, a64}};
+        me_variable vars32[] = {{"a", ME_FLOAT32, a32}};
+        const void *ptrs64[] = {a64};
+        const void *ptrs32[] = {a32};
+        me_expr *expr = NULL;
+        int err = 0;
+
+        if (me_compile("erf(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    double expected = erf(a64[i]);
+                    if (!nearly_equal(out64[i], expected, 1e-12)) {
+                        printf("erf edge case failed (f64)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+
+        expr = NULL;
+        if (me_compile("erf(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    float expected = erff(a32[i]);
+                    if (!nearly_equal_f(out32[i], expected, 1e-5f)) {
+                        printf("erf edge case failed (f32)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+    }
+
+    {
+        double out64[4] = {0};
+        float out32[4] = {0};
+        double a64[] = {0.0, 1.0, 5.0, 10.0};
+        float a32[] = {0.0f, 1.0f, 5.0f, 10.0f};
+
+        me_variable vars64[] = {{"a", ME_FLOAT64, a64}};
+        me_variable vars32[] = {{"a", ME_FLOAT32, a32}};
+        const void *ptrs64[] = {a64};
+        const void *ptrs32[] = {a32};
+        me_expr *expr = NULL;
+        int err = 0;
+
+        if (me_compile("erfc(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    double expected = erfc(a64[i]);
+                    if (!nearly_equal(out64[i], expected, 1e-12)) {
+                        printf("erfc edge case failed (f64)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+
+        expr = NULL;
+        if (me_compile("erfc(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    float expected = erfcf(a32[i]);
+                    if (!nearly_equal_f(out32[i], expected, 1e-5f)) {
+                        printf("erfc edge case failed (f32)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+    }
+
+    {
+        double out64[4] = {0};
+        float out32[4] = {0};
+        double a64[] = {1.0, 2.0, 0.5, -0.5};
+        float a32[] = {1.0f, 2.0f, 0.5f, -0.5f};
+
+        me_variable vars64[] = {{"a", ME_FLOAT64, a64}};
+        me_variable vars32[] = {{"a", ME_FLOAT32, a32}};
+        const void *ptrs64[] = {a64};
+        const void *ptrs32[] = {a32};
+        me_expr *expr = NULL;
+        int err = 0;
+
+        if (me_compile("tgamma(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    double expected = tgamma(a64[i]);
+                    if (!nearly_equal(out64[i], expected, 1e-12)) {
+                        printf("tgamma edge case failed (f64)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+
+        expr = NULL;
+        if (me_compile("tgamma(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    float expected = tgammaf(a32[i]);
+                    if (!nearly_equal_f(out32[i], expected, 1e-5f)) {
+                        printf("tgamma edge case failed (f32)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+    }
+
+    {
+        double out64[4] = {0};
+        float out32[4] = {0};
+        double a64[] = {-2.0, -1.0, 0.0, 1.0};
+        float a32[] = {-2.0f, -1.0f, 0.0f, 1.0f};
+
+        me_variable vars64[] = {{"a", ME_FLOAT64, a64}};
+        me_variable vars32[] = {{"a", ME_FLOAT32, a32}};
+        const void *ptrs64[] = {a64};
+        const void *ptrs32[] = {a32};
+        me_expr *expr = NULL;
+        int err = 0;
+
+        if (me_compile("tgamma(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    double expected = tgamma(a64[i]);
+                    if ((isnan(expected) && !isnan(out64[i])) ||
+                        (isinf(expected) && !isinf(out64[i])) ||
+                        (!isnan(expected) && !isinf(expected) && expected != out64[i])) {
+                        printf("tgamma pole edge case failed (f64)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+
+        expr = NULL;
+        if (me_compile("tgamma(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    float expected = tgammaf(a32[i]);
+                    if ((isnan(expected) && !isnan(out32[i])) ||
+                        (isinf(expected) && !isinf(out32[i])) ||
+                        (!isnan(expected) && !isinf(expected) && expected != out32[i])) {
+                        printf("tgamma pole edge case failed (f32)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+    }
+
+    return failures;
+}
+
 int main(void) {
     int failures = 0;
     const int n = 1024;
@@ -1468,6 +1784,7 @@ int main(void) {
     failures += run_additional_edge_cases();
     failures += run_more_edge_cases();
     failures += run_edge_overflow_cases();
+    failures += run_more_math_edges();
 
     return failures ? 1 : 0;
 }
