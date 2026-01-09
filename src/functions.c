@@ -453,6 +453,18 @@ static double log1p_wrapper(double x) { return log1p(x); }
 /* Wrapper for log2: base-2 logarithm */
 static double log2_wrapper(double x) { return log2(x); }
 
+/* Wrapper for exp10: base-10 exponent */
+static double exp10_wrapper(double x) { return pow(10.0, x); }
+
+/* Wrapper for sinpi: sin(pi * x) */
+static double sinpi_wrapper(double x) { return sin(pi() * x); }
+
+/* Wrapper for cospi: cos(pi * x) */
+static double cospi_wrapper(double x) { return cos(pi() * x); }
+
+/* Wrapper for ldexp: x * 2^exp with integer exponent */
+static double ldexp_wrapper(double x, double exp) { return ldexp(x, (int)exp); }
+
 /* logaddexp: log(exp(a) + exp(b)), numerically stable */
 static double logaddexp(double a, double b) {
     if (a == b) {
@@ -556,16 +568,31 @@ static const me_variable functions[] = {
     {"atan", 0, atan, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"atan2", 0, atan2, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"atanh", 0, atanh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"cbrt", 0, cbrt, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"ceil", 0, ceil, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"conj", 0, conj_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"copysign", 0, copysign, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"cos", 0, cos, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"cosh", 0, cosh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"cospi", 0, cospi_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"e", 0, e, ME_FUNCTION0 | ME_FLAG_PURE, 0},
+    {"erf", 0, erf, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"erfc", 0, erfc, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"exp", 0, exp, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"exp10", 0, exp10_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"exp2", 0, exp2, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"expm1", 0, expm1_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"fac", 0, fac, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"fdim", 0, fdim, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"floor", 0, floor, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"fma", 0, fma, ME_FUNCTION3 | ME_FLAG_PURE, 0},
+    {"fmax", 0, fmax, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"fmin", 0, fmin, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"fmod", 0, fmod, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"hypot", 0, hypot, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"imag", 0, imag_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"ldexp", 0, ldexp_wrapper, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"lgamma", 0, lgamma, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"ln", 0, log, ME_FUNCTION1 | ME_FLAG_PURE, 0},
 #ifdef ME_NAT_LOG
     {"log", 0, log, ME_FUNCTION1 | ME_FLAG_PURE, 0},
@@ -579,20 +606,25 @@ static const me_variable functions[] = {
     {"max", 0, max_reduce, ME_FUNCTION1, 0},
     {"min", 0, min_reduce, ME_FUNCTION1, 0},
     {"ncr", 0, ncr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"nextafter", 0, nextafter, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"npr", 0, npr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"pi", 0, pi, ME_FUNCTION0 | ME_FLAG_PURE, 0},
     {"pow", 0, pow, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"prod", 0, prod_reduce, ME_FUNCTION1, 0},
     {"real", 0, real_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"remainder", 0, remainder, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"rint", 0, rint, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"round", 0, round_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"sign", 0, sign, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"sin", 0, sin, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"sinh", 0, sinh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"sinpi", 0, sinpi_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"sqrt", 0, sqrt, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"square", 0, square, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"sum", 0, sum_reduce, ME_FUNCTION1, 0},
     {"tan", 0, tan, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"tanh", 0, tanh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"tgamma", 0, tgamma, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"trunc", 0, trunc_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"where", 0, where_scalar, ME_FUNCTION3 | ME_FLAG_PURE, 0},
     {0, 0, 0, 0, 0}
@@ -3432,14 +3464,20 @@ typedef float (*me_fun1_f32)(float);
     VEC_ADD_SCALAR, VEC_MUL_SCALAR, VEC_POW_SCALAR, \
     VEC_SQRT, VEC_SIN, VEC_COS, VEC_TAN, \
     VEC_ASIN, VEC_ACOS, VEC_ATAN, \
-    VEC_EXP, VEC_LOG, VEC_LOG10, VEC_LOG1P, VEC_LOG2, VEC_EXPM1, \
+    VEC_EXP, VEC_LOG, VEC_LOG10, VEC_LOG1P, VEC_LOG2, VEC_EXPM1, VEC_EXP2, VEC_EXP10, \
     VEC_SINH, VEC_COSH, VEC_TANH, \
     VEC_ABS, VEC_CEIL, VEC_FLOOR, VEC_ROUND, VEC_TRUNC, \
-    VEC_ACOSH, VEC_ASINH, VEC_ATANH, \
+    VEC_ACOSH, VEC_ASINH, VEC_ATANH, VEC_CBRT, VEC_ERF, VEC_ERFC, VEC_SINPI, VEC_COSPI, \
+    VEC_TGAMMA, VEC_LGAMMA, VEC_RINT, \
+    VEC_COPYSIGN, VEC_FDIM, VEC_FMAX, VEC_FMIN, VEC_FMOD, VEC_HYPOT, VEC_LDEXP, \
+    VEC_NEXTAFTER, VEC_REMAINDER, VEC_FMA, \
     VEC_NEGATE, \
     SQRT_FUNC, SIN_FUNC, COS_FUNC, TAN_FUNC, ASIN_FUNC, ACOS_FUNC, ATAN_FUNC, \
-    EXP_FUNC, LOG_FUNC, LOG10_FUNC, LOG1P_FUNC, LOG2_FUNC, EXPM1_FUNC, \
-    SINH_FUNC, COSH_FUNC, TANH_FUNC, ACOSH_FUNC, ASINH_FUNC, ATANH_FUNC, \
+    EXP_FUNC, LOG_FUNC, LOG10_FUNC, LOG1P_FUNC, LOG2_FUNC, EXPM1_FUNC, EXP2_FUNC, EXP10_FUNC, \
+    SINH_FUNC, COSH_FUNC, TANH_FUNC, ACOSH_FUNC, ASINH_FUNC, ATANH_FUNC, CBRT_FUNC, ERF_FUNC, ERFC_FUNC, \
+    SINPI_FUNC, COSPI_FUNC, TGAMMA_FUNC, LGAMMA_FUNC, RINT_FUNC, \
+    COPYSIGN_FUNC, FDIM_FUNC, FMAX_FUNC, FMIN_FUNC, FMOD_FUNC, HYPOT_FUNC, LDEXP_FUNC, \
+    NEXTAFTER_FUNC, REMAINDER_FUNC, FMA_FUNC, \
     CEIL_FUNC, FLOOR_FUNC, ROUND_FUNC, TRUNC_FUNC, FABS_FUNC, POW_FUNC, \
     VEC_CONJ, HAS_VEC_TAN, HAS_VEC_ASIN, HAS_VEC_ACOS, HAS_VEC_ATAN, HAS_VEC_MATH, \
     VEC_ATAN2, ATAN2_FUNC, HAS_VEC_ATAN2) \
@@ -3547,6 +3585,60 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                     } else { \
                         goto general_case_binary_##SUFFIX; \
                     } \
+                } else if (func == (me_fun2)copysign) { \
+                    if (ldata && rdata && HAS_VEC_MATH) { \
+                        VEC_COPYSIGN(ldata, rdata, output, n->nitems); \
+                    } else { \
+                        goto general_case_binary_##SUFFIX; \
+                    } \
+                } else if (func == (me_fun2)fdim) { \
+                    if (ldata && rdata && HAS_VEC_MATH) { \
+                        VEC_FDIM(ldata, rdata, output, n->nitems); \
+                    } else { \
+                        goto general_case_binary_##SUFFIX; \
+                    } \
+                } else if (func == (me_fun2)fmax) { \
+                    if (ldata && rdata && HAS_VEC_MATH) { \
+                        VEC_FMAX(ldata, rdata, output, n->nitems); \
+                    } else { \
+                        goto general_case_binary_##SUFFIX; \
+                    } \
+                } else if (func == (me_fun2)fmin) { \
+                    if (ldata && rdata && HAS_VEC_MATH) { \
+                        VEC_FMIN(ldata, rdata, output, n->nitems); \
+                    } else { \
+                        goto general_case_binary_##SUFFIX; \
+                    } \
+                } else if (func == (me_fun2)fmod) { \
+                    if (ldata && rdata && HAS_VEC_MATH) { \
+                        VEC_FMOD(ldata, rdata, output, n->nitems); \
+                    } else { \
+                        goto general_case_binary_##SUFFIX; \
+                    } \
+                } else if (func == (me_fun2)hypot) { \
+                    if (ldata && rdata && HAS_VEC_MATH) { \
+                        VEC_HYPOT(ldata, rdata, output, n->nitems); \
+                    } else { \
+                        goto general_case_binary_##SUFFIX; \
+                    } \
+                } else if (func == (me_fun2)LDEXP_FUNC) { \
+                    if (ldata && rdata && HAS_VEC_MATH) { \
+                        VEC_LDEXP(ldata, rdata, output, n->nitems); \
+                    } else { \
+                        goto general_case_binary_##SUFFIX; \
+                    } \
+                } else if (func == (me_fun2)nextafter) { \
+                    if (ldata && rdata && HAS_VEC_MATH) { \
+                        VEC_NEXTAFTER(ldata, rdata, output, n->nitems); \
+                    } else { \
+                        goto general_case_binary_##SUFFIX; \
+                    } \
+                } else if (func == (me_fun2)remainder) { \
+                    if (ldata && rdata && HAS_VEC_MATH) { \
+                        VEC_REMAINDER(ldata, rdata, output, n->nitems); \
+                    } else { \
+                        goto general_case_binary_##SUFFIX; \
+                    } \
                 } else { \
                     general_case_binary_##SUFFIX: \
                     for (i = 0; i < n->nitems; i++) { \
@@ -3555,6 +3647,31 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                         double b = (right->type == ME_CONSTANT) ? right->value : \
                                   FROM_TYPE_##SUFFIX(rdata[i]); \
                         output[i] = TO_TYPE_##SUFFIX(func(a, b)); \
+                    } \
+                } \
+            } else if (arity == 3 && IS_FUNCTION(n->type) && n->function == (void*)fma) { \
+                me_expr *xexpr = (me_expr*)n->parameters[0]; \
+                me_expr *yexpr = (me_expr*)n->parameters[1]; \
+                me_expr *zexpr = (me_expr*)n->parameters[2]; \
+                \
+                const TYPE *xdata = (xexpr->type == ME_CONSTANT) ? NULL : \
+                                   (xexpr->type == ME_VARIABLE) ? (const TYPE*)xexpr->bound : (const TYPE*)xexpr->output; \
+                const TYPE *ydata = (yexpr->type == ME_CONSTANT) ? NULL : \
+                                   (yexpr->type == ME_VARIABLE) ? (const TYPE*)yexpr->bound : (const TYPE*)yexpr->output; \
+                const TYPE *zdata = (zexpr->type == ME_CONSTANT) ? NULL : \
+                                   (zexpr->type == ME_VARIABLE) ? (const TYPE*)zexpr->bound : (const TYPE*)zexpr->output; \
+                \
+                if (HAS_VEC_MATH && xdata && ydata && zdata) { \
+                    VEC_FMA(xdata, ydata, zdata, output, n->nitems); \
+                } else { \
+                    for (i = 0; i < n->nitems; i++) { \
+                        double a = (xexpr->type == ME_CONSTANT) ? xexpr->value : \
+                                  FROM_TYPE_##SUFFIX(xdata[i]); \
+                        double b = (yexpr->type == ME_CONSTANT) ? yexpr->value : \
+                                  FROM_TYPE_##SUFFIX(ydata[i]); \
+                        double c = (zexpr->type == ME_CONSTANT) ? zexpr->value : \
+                                  FROM_TYPE_##SUFFIX(zdata[i]); \
+                        output[i] = TO_TYPE_##SUFFIX(FMA_FUNC(a, b, c)); \
                     } \
                 } \
             } else if (arity == 3 && IS_FUNCTION(n->type) && n->function == (void*)where_scalar) { \
@@ -3643,12 +3760,32 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                     if (adata) VEC_COSH(adata, output, n->nitems); \
                 } else if (HAS_VEC_MATH && func_ptr == (void*)tanh) { \
                     if (adata) VEC_TANH(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)exp2) { \
+                    if (adata) VEC_EXP2(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)exp10_wrapper) { \
+                    if (adata) VEC_EXP10(adata, output, n->nitems); \
                 } else if (HAS_VEC_MATH && func_ptr == (void*)acosh) { \
                     if (adata) VEC_ACOSH(adata, output, n->nitems); \
                 } else if (HAS_VEC_MATH && func_ptr == (void*)asinh) { \
                     if (adata) VEC_ASINH(adata, output, n->nitems); \
                 } else if (HAS_VEC_MATH && func_ptr == (void*)atanh) { \
                     if (adata) VEC_ATANH(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)cbrt) { \
+                    if (adata) VEC_CBRT(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)erf) { \
+                    if (adata) VEC_ERF(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)erfc) { \
+                    if (adata) VEC_ERFC(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)sinpi_wrapper) { \
+                    if (adata) VEC_SINPI(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)cospi_wrapper) { \
+                    if (adata) VEC_COSPI(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)tgamma) { \
+                    if (adata) VEC_TGAMMA(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)lgamma) { \
+                    if (adata) VEC_LGAMMA(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)rint) { \
+                    if (adata) VEC_RINT(adata, output, n->nitems); \
                 } else if (HAS_VEC_MATH && func_ptr == (void*)fabs) { \
                     if (adata) VEC_ABS(adata, output, n->nitems); \
                 } else if (HAS_VEC_MATH && func_ptr == (void*)ceil) { \
@@ -3757,6 +3894,8 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_tan(a, out, n) vec_tan_dispatch((a), (out), (n))
 #define vec_exp(a, out, n) vec_exp_dispatch((a), (out), (n))
 #define vec_expm1(a, out, n) vec_expm1_dispatch((a), (out), (n))
+#define vec_exp2(a, out, n) vec_exp2_dispatch((a), (out), (n))
+#define vec_exp10(a, out, n) vec_exp10_dispatch((a), (out), (n))
 #define vec_log(a, out, n) vec_log_dispatch((a), (out), (n))
 #define vec_log10(a, out, n) vec_log10_dispatch((a), (out), (n))
 #define vec_log1p(a, out, n) vec_log1p_dispatch((a), (out), (n))
@@ -3772,6 +3911,25 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_acosh(a, out, n) vec_acosh_dispatch((a), (out), (n))
 #define vec_asinh(a, out, n) vec_asinh_dispatch((a), (out), (n))
 #define vec_atanh(a, out, n) vec_atanh_dispatch((a), (out), (n))
+#define vec_cbrt(a, out, n) vec_cbrt_dispatch((a), (out), (n))
+#define vec_erf(a, out, n) vec_erf_dispatch((a), (out), (n))
+#define vec_erfc(a, out, n) vec_erfc_dispatch((a), (out), (n))
+#define vec_sinpi(a, out, n) vec_sinpi_dispatch((a), (out), (n))
+#define vec_cospi(a, out, n) vec_cospi_dispatch((a), (out), (n))
+#define vec_tgamma(a, out, n) vec_tgamma_dispatch((a), (out), (n))
+#define vec_lgamma(a, out, n) vec_lgamma_dispatch((a), (out), (n))
+#define vec_rint(a, out, n) vec_rint_dispatch((a), (out), (n))
+#define vec_copysign(a, b, out, n) vec_copysign_dispatch((a), (b), (out), (n))
+#define vec_fdim(a, b, out, n) vec_fdim_dispatch((a), (b), (out), (n))
+#define vec_fmax(a, b, out, n) vec_fmax_dispatch((a), (b), (out), (n))
+#define vec_fmin(a, b, out, n) vec_fmin_dispatch((a), (b), (out), (n))
+#define vec_fmod(a, b, out, n) vec_fmod_dispatch((a), (b), (out), (n))
+#define vec_hypot(a, b, out, n) vec_hypot_dispatch((a), (b), (out), (n))
+#define vec_ldexp(a, b, out, n) vec_ldexp_dispatch((a), (b), (out), (n))
+#define vec_nextafter(a, b, out, n) vec_nextafter_dispatch((a), (b), (out), (n))
+#define vec_remainder(a, b, out, n) vec_remainder_dispatch((a), (b), (out), (n))
+#define vec_fma(a, b, c, out, n) vec_fma_dispatch((a), (b), (c), (out), (n))
+#define vec_fma_unused(a, b, c, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i]; } while(0)
 #define vec_negate(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 #define vec_copy(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i]; } while(0)
 
@@ -3792,6 +3950,8 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_tan_f32(a, out, n) vec_tan_f32_dispatch((a), (out), (n))
 #define vec_exp_f32(a, out, n) vec_exp_f32_dispatch((a), (out), (n))
 #define vec_expm1_f32(a, out, n) vec_expm1_f32_dispatch((a), (out), (n))
+#define vec_exp2_f32(a, out, n) vec_exp2_f32_dispatch((a), (out), (n))
+#define vec_exp10_f32(a, out, n) vec_exp10_f32_dispatch((a), (out), (n))
 #define vec_log_f32(a, out, n) vec_log_f32_dispatch((a), (out), (n))
 #define vec_log10_f32(a, out, n) vec_log10_f32_dispatch((a), (out), (n))
 #define vec_log1p_f32(a, out, n) vec_log1p_f32_dispatch((a), (out), (n))
@@ -3807,6 +3967,24 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_acosh_f32(a, out, n) vec_acosh_f32_dispatch((a), (out), (n))
 #define vec_asinh_f32(a, out, n) vec_asinh_f32_dispatch((a), (out), (n))
 #define vec_atanh_f32(a, out, n) vec_atanh_f32_dispatch((a), (out), (n))
+#define vec_cbrt_f32(a, out, n) vec_cbrt_f32_dispatch((a), (out), (n))
+#define vec_erf_f32(a, out, n) vec_erf_f32_dispatch((a), (out), (n))
+#define vec_erfc_f32(a, out, n) vec_erfc_f32_dispatch((a), (out), (n))
+#define vec_sinpi_f32(a, out, n) vec_sinpi_f32_dispatch((a), (out), (n))
+#define vec_cospi_f32(a, out, n) vec_cospi_f32_dispatch((a), (out), (n))
+#define vec_tgamma_f32(a, out, n) vec_tgamma_f32_dispatch((a), (out), (n))
+#define vec_lgamma_f32(a, out, n) vec_lgamma_f32_dispatch((a), (out), (n))
+#define vec_rint_f32(a, out, n) vec_rint_f32_dispatch((a), (out), (n))
+#define vec_copysign_f32(a, b, out, n) vec_copysign_f32_dispatch((a), (b), (out), (n))
+#define vec_fdim_f32(a, b, out, n) vec_fdim_f32_dispatch((a), (b), (out), (n))
+#define vec_fmax_f32(a, b, out, n) vec_fmax_f32_dispatch((a), (b), (out), (n))
+#define vec_fmin_f32(a, b, out, n) vec_fmin_f32_dispatch((a), (b), (out), (n))
+#define vec_fmod_f32(a, b, out, n) vec_fmod_f32_dispatch((a), (b), (out), (n))
+#define vec_hypot_f32(a, b, out, n) vec_hypot_f32_dispatch((a), (b), (out), (n))
+#define vec_ldexp_f32(a, b, out, n) vec_ldexp_f32_dispatch((a), (b), (out), (n))
+#define vec_nextafter_f32(a, b, out, n) vec_nextafter_f32_dispatch((a), (b), (out), (n))
+#define vec_remainder_f32(a, b, out, n) vec_remainder_f32_dispatch((a), (b), (out), (n))
+#define vec_fma_f32(a, b, c, out, n) vec_fma_f32_dispatch((a), (b), (c), (out), (n))
 #define vec_negame_f32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
 #define vec_atan2(a, b, out, n) vec_atan2_dispatch((a), (b), (out), (n))
@@ -3967,13 +4145,21 @@ DEFINE_ME_EVAL(f32, float,
                vec_sqrt_f32, vec_sin_f32_cached, vec_cos_f32_cached, vec_tan_f32,
                vec_asin_f32, vec_acos_f32, vec_atan_f32,
                vec_exp_f32, vec_log_f32, vec_log10_f32, vec_log1p_f32, vec_log2_f32, vec_expm1_f32,
+               vec_exp2_f32, vec_exp10_f32,
                vec_sinh_f32, vec_cosh_f32, vec_tanh_f32,
                vec_abs_f32, vec_ceil_f32, vec_floor_f32, vec_round_f32, vec_trunc_f32,
                vec_acosh_f32, vec_asinh_f32, vec_atanh_f32,
+               vec_cbrt_f32, vec_erf_f32, vec_erfc_f32, vec_sinpi_f32, vec_cospi_f32,
+               vec_tgamma_f32, vec_lgamma_f32, vec_rint_f32,
+               vec_copysign_f32, vec_fdim_f32, vec_fmax_f32, vec_fmin_f32, vec_fmod_f32, vec_hypot_f32, vec_ldexp_f32,
+               vec_nextafter_f32, vec_remainder_f32, vec_fma_f32,
                vec_negame_f32,
                sqrtf, sinf, cosf, tanf, asinf, acosf, atanf,
-               expf, logf, log10f, log1pf, log2f, expm1f,
-               sinhf, coshf, tanhf, acoshf, asinhf, atanhf,
+               expf, logf, log10f, log1pf, log2f, expm1f, exp2f, exp10_wrapper,
+               sinhf, coshf, tanhf, acoshf, asinhf, atanhf, cbrtf, erff, erfcf,
+               sinpi_wrapper, cospi_wrapper, tgammaf, lgammaf, rintf,
+               copysignf, fdimf, fmaxf, fminf, fmodf, hypotf, ldexp_wrapper,
+               nextafterf, remainderf, fmaf,
                ceilf, floorf, roundf, truncf, fabsf, powf,
                vec_copy, 1, 1, 1, 1, 1,
                vec_atan2_f32, atan2f, 1)
@@ -3985,13 +4171,21 @@ DEFINE_ME_EVAL(f64, double,
                vec_sqrt, vec_sin_cached, vec_cos_cached, vec_tan,
                vec_asin, vec_acos, vec_atan,
                vec_exp, vec_log, vec_log10, vec_log1p, vec_log2, vec_expm1,
+               vec_exp2, vec_exp10,
                vec_sinh, vec_cosh, vec_tanh,
                vec_abs, vec_ceil, vec_floor, vec_round, vec_trunc,
                vec_acosh, vec_asinh, vec_atanh,
+               vec_cbrt, vec_erf, vec_erfc, vec_sinpi, vec_cospi,
+               vec_tgamma, vec_lgamma, vec_rint,
+               vec_copysign, vec_fdim, vec_fmax, vec_fmin, vec_fmod, vec_hypot, vec_ldexp,
+               vec_nextafter, vec_remainder, vec_fma,
                vec_negate,
                sqrt, sin, cos, tan, asin, acos, atan,
-               exp, log, log10, log1p, log2, expm1,
-               sinh, cosh, tanh, acosh, asinh, atanh,
+               exp, log, log10, log1p, log2, expm1, exp2, exp10_wrapper,
+               sinh, cosh, tanh, acosh, asinh, atanh, cbrt, erf, erfc,
+               sinpi_wrapper, cospi_wrapper, tgamma, lgamma, rint,
+               copysign, fdim, fmax, fmin, fmod, hypot, ldexp_wrapper,
+               nextafter, remainder, fma,
                ceil, floor, round, trunc, fabs, pow,
                vec_copy, 1, 1, 1, 1, 1,
                vec_atan2, atan2, 1)
@@ -4002,14 +4196,20 @@ DEFINE_ME_EVAL(i8, int8_t,
                vec_add_scalar_i8, vec_mul_scalar_i8, vec_pow_scalar_i8,
                vec_sqrt_i8, vec_sqrt_i8, vec_sqrt_i8, vec_copy,
                vec_copy, vec_copy, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
+               vec_add_i8, vec_add_i8, vec_add_i8, vec_add_i8, vec_add_i8, vec_add_i8, vec_add_i8,
+               vec_add_i8, vec_add_i8, vec_fma_unused,
                vec_negame_i8,
                sqrt, sin, cos, tan, asin, acos, atan,
-               exp, log, log10, log1p, log2, expm1,
-               sinh, cosh, tanh, acosh, asinh, atanh,
+               exp, log, log10, log1p, log2, expm1, exp2, exp10_wrapper,
+               sinh, cosh, tanh, acosh, asinh, atanh, cbrt, erf, erfc,
+               sinpi_wrapper, cospi_wrapper, tgamma, lgamma, rint,
+               copysign, fdim, fmax, fmin, fmod, hypot, ldexp_wrapper,
+               nextafter, remainder, fma,
                ceil, floor, round, trunc, fabs, pow,
                vec_conj_noop, 0, 0, 0, 0, 0,
                vec_add_i8, atan2, 0)
@@ -4019,14 +4219,20 @@ DEFINE_ME_EVAL(i16, int16_t,
                vec_add_scalar_i16, vec_mul_scalar_i16, vec_pow_scalar_i16,
                vec_sqrt_i16, vec_sqrt_i16, vec_sqrt_i16, vec_copy,
                vec_copy, vec_copy, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
+               vec_add_i16, vec_add_i16, vec_add_i16, vec_add_i16, vec_add_i16, vec_add_i16, vec_add_i16,
+               vec_add_i16, vec_add_i16, vec_fma_unused,
                vec_negame_i16,
                sqrt, sin, cos, tan, asin, acos, atan,
-               exp, log, log10, log1p, log2, expm1,
-               sinh, cosh, tanh, acosh, asinh, atanh,
+               exp, log, log10, log1p, log2, expm1, exp2, exp10_wrapper,
+               sinh, cosh, tanh, acosh, asinh, atanh, cbrt, erf, erfc,
+               sinpi_wrapper, cospi_wrapper, tgamma, lgamma, rint,
+               copysign, fdim, fmax, fmin, fmod, hypot, ldexp_wrapper,
+               nextafter, remainder, fma,
                ceil, floor, round, trunc, fabs, pow,
                vec_conj_noop, 0, 0, 0, 0, 0,
                vec_add_i16, atan2, 0)
@@ -4036,14 +4242,20 @@ DEFINE_ME_EVAL(i32, int32_t,
                vec_add_scalar_i32, vec_mul_scalar_i32, vec_pow_scalar_i32,
                vec_sqrt_i32, vec_sqrt_i32, vec_sqrt_i32, vec_copy,
                vec_copy, vec_copy, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
+               vec_add_i32, vec_add_i32, vec_add_i32, vec_add_i32, vec_add_i32, vec_add_i32, vec_add_i32,
+               vec_add_i32, vec_add_i32, vec_fma_unused,
                vec_negame_i32,
                sqrt, sin, cos, tan, asin, acos, atan,
-               exp, log, log10, log1p, log2, expm1,
-               sinh, cosh, tanh, acosh, asinh, atanh,
+               exp, log, log10, log1p, log2, expm1, exp2, exp10_wrapper,
+               sinh, cosh, tanh, acosh, asinh, atanh, cbrt, erf, erfc,
+               sinpi_wrapper, cospi_wrapper, tgamma, lgamma, rint,
+               copysign, fdim, fmax, fmin, fmod, hypot, ldexp_wrapper,
+               nextafter, remainder, fma,
                ceil, floor, round, trunc, fabs, pow,
                vec_conj_noop, 0, 0, 0, 0, 0,
                vec_add_i32, atan2, 0)
@@ -4053,14 +4265,20 @@ DEFINE_ME_EVAL(i64, int64_t,
                vec_add_scalar_i64, vec_mul_scalar_i64, vec_pow_scalar_i64,
                vec_sqrt_i64, vec_sqrt_i64, vec_sqrt_i64, vec_copy,
                vec_copy, vec_copy, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
+               vec_add_i64, vec_add_i64, vec_add_i64, vec_add_i64, vec_add_i64, vec_add_i64, vec_add_i64,
+               vec_add_i64, vec_add_i64, vec_fma_unused,
                vec_negame_i64,
                sqrt, sin, cos, tan, asin, acos, atan,
-               exp, log, log10, log1p, log2, expm1,
-               sinh, cosh, tanh, acosh, asinh, atanh,
+               exp, log, log10, log1p, log2, expm1, exp2, exp10_wrapper,
+               sinh, cosh, tanh, acosh, asinh, atanh, cbrt, erf, erfc,
+               sinpi_wrapper, cospi_wrapper, tgamma, lgamma, rint,
+               copysign, fdim, fmax, fmin, fmod, hypot, ldexp_wrapper,
+               nextafter, remainder, fma,
                ceil, floor, round, trunc, fabs, pow,
                vec_conj_noop, 0, 0, 0, 0, 0,
                vec_add_i64, atan2, 0)
@@ -4070,14 +4288,20 @@ DEFINE_ME_EVAL(u8, uint8_t,
                vec_add_scalar_u8, vec_mul_scalar_u8, vec_pow_scalar_u8,
                vec_sqrt_u8, vec_sqrt_u8, vec_sqrt_u8, vec_copy,
                vec_copy, vec_copy, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
+               vec_add_u8, vec_add_u8, vec_add_u8, vec_add_u8, vec_add_u8, vec_add_u8, vec_add_u8,
+               vec_add_u8, vec_add_u8, vec_fma_unused,
                vec_negame_u8,
                sqrt, sin, cos, tan, asin, acos, atan,
-               exp, log, log10, log1p, log2, expm1,
-               sinh, cosh, tanh, acosh, asinh, atanh,
+               exp, log, log10, log1p, log2, expm1, exp2, exp10_wrapper,
+               sinh, cosh, tanh, acosh, asinh, atanh, cbrt, erf, erfc,
+               sinpi_wrapper, cospi_wrapper, tgamma, lgamma, rint,
+               copysign, fdim, fmax, fmin, fmod, hypot, ldexp_wrapper,
+               nextafter, remainder, fma,
                ceil, floor, round, trunc, fabs, pow,
                vec_conj_noop, 0, 0, 0, 0, 0,
                vec_add_u8, atan2, 0)
@@ -4087,14 +4311,20 @@ DEFINE_ME_EVAL(u16, uint16_t,
                vec_add_scalar_u16, vec_mul_scalar_u16, vec_pow_scalar_u16,
                vec_sqrt_u16, vec_sqrt_u16, vec_sqrt_u16, vec_copy,
                vec_copy, vec_copy, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
+               vec_add_u16, vec_add_u16, vec_add_u16, vec_add_u16, vec_add_u16, vec_add_u16, vec_add_u16,
+               vec_add_u16, vec_add_u16, vec_fma_unused,
                vec_negame_u16,
                sqrt, sin, cos, tan, asin, acos, atan,
-               exp, log, log10, log1p, log2, expm1,
-               sinh, cosh, tanh, acosh, asinh, atanh,
+               exp, log, log10, log1p, log2, expm1, exp2, exp10_wrapper,
+               sinh, cosh, tanh, acosh, asinh, atanh, cbrt, erf, erfc,
+               sinpi_wrapper, cospi_wrapper, tgamma, lgamma, rint,
+               copysign, fdim, fmax, fmin, fmod, hypot, ldexp_wrapper,
+               nextafter, remainder, fma,
                ceil, floor, round, trunc, fabs, pow,
                vec_conj_noop, 0, 0, 0, 0, 0,
                vec_add_u16, atan2, 0)
@@ -4104,14 +4334,20 @@ DEFINE_ME_EVAL(u32, uint32_t,
                vec_add_scalar_u32, vec_mul_scalar_u32, vec_pow_scalar_u32,
                vec_sqrt_u32, vec_sqrt_u32, vec_sqrt_u32, vec_copy,
                vec_copy, vec_copy, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
+               vec_add_u32, vec_add_u32, vec_add_u32, vec_add_u32, vec_add_u32, vec_add_u32, vec_add_u32,
+               vec_add_u32, vec_add_u32, vec_fma_unused,
                vec_negame_u32,
                sqrt, sin, cos, tan, asin, acos, atan,
-               exp, log, log10, log1p, log2, expm1,
-               sinh, cosh, tanh, acosh, asinh, atanh,
+               exp, log, log10, log1p, log2, expm1, exp2, exp10_wrapper,
+               sinh, cosh, tanh, acosh, asinh, atanh, cbrt, erf, erfc,
+               sinpi_wrapper, cospi_wrapper, tgamma, lgamma, rint,
+               copysign, fdim, fmax, fmin, fmod, hypot, ldexp_wrapper,
+               nextafter, remainder, fma,
                ceil, floor, round, trunc, fabs, pow,
                vec_conj_noop, 0, 0, 0, 0, 0,
                vec_add_u32, atan2, 0)
@@ -4121,14 +4357,20 @@ DEFINE_ME_EVAL(u64, uint64_t,
                vec_add_scalar_u64, vec_mul_scalar_u64, vec_pow_scalar_u64,
                vec_sqrt_u64, vec_sqrt_u64, vec_sqrt_u64, vec_copy,
                vec_copy, vec_copy, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
+               vec_add_u64, vec_add_u64, vec_add_u64, vec_add_u64, vec_add_u64, vec_add_u64, vec_add_u64,
+               vec_add_u64, vec_add_u64, vec_fma_unused,
                vec_negame_u64,
                sqrt, sin, cos, tan, asin, acos, atan,
-               exp, log, log10, log1p, log2, expm1,
-               sinh, cosh, tanh, acosh, asinh, atanh,
+               exp, log, log10, log1p, log2, expm1, exp2, exp10_wrapper,
+               sinh, cosh, tanh, acosh, asinh, atanh, cbrt, erf, erfc,
+               sinpi_wrapper, cospi_wrapper, tgamma, lgamma, rint,
+               copysign, fdim, fmax, fmin, fmod, hypot, ldexp_wrapper,
+               nextafter, remainder, fma,
                ceil, floor, round, trunc, fabs, pow,
                vec_conj_noop, 0, 0, 0, 0, 0,
                vec_add_u64, atan2, 0)
@@ -4139,14 +4381,20 @@ DEFINE_ME_EVAL(c64, float _Complex,
                vec_add_scalar_c64, vec_mul_scalar_c64, vec_pow_scalar_c64,
                vec_sqrt_c64, vec_sqrt_c64, vec_sqrt_c64, vec_copy,
                vec_copy, vec_copy, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
+               vec_add_c64, vec_add_c64, vec_add_c64, vec_add_c64, vec_add_c64, vec_add_c64, vec_add_c64,
+               vec_add_c64, vec_add_c64, vec_fma_unused,
                vec_negame_c64,
                me_csqrtf, me_csqrtf, me_csqrtf, tan, asin, acos, atan,
-               me_cexpf, me_clogf, log10, log1p, log2, expm1,
-               sinh, cosh, tanh, acosh, asinh, atanh,
+               me_cexpf, me_clogf, log10, log1p, log2, expm1, exp2, exp10_wrapper,
+               sinh, cosh, tanh, acosh, asinh, atanh, cbrt, erf, erfc,
+               sinpi_wrapper, cospi_wrapper, tgamma, lgamma, rint,
+               copysign, fdim, fmax, fmin, fmod, hypot, ldexp_wrapper,
+               nextafter, remainder, fma,
                ceil, floor, round, trunc, me_cabsf, me_cpowf,
                vec_conj_c64, 0, 0, 0, 0, 0,
                vec_add_c64, atan2, 0)
@@ -4156,14 +4404,20 @@ DEFINE_ME_EVAL(c128, double _Complex,
                vec_add_scalar_c128, vec_mul_scalar_c128, vec_pow_scalar_c128,
                vec_sqrt_c128, vec_sqrt_c128, vec_sqrt_c128, vec_copy,
                vec_copy, vec_copy, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
                vec_copy, vec_copy, vec_copy,
+               vec_add_c128, vec_add_c128, vec_add_c128, vec_add_c128, vec_add_c128, vec_add_c128, vec_add_c128,
+               vec_add_c128, vec_add_c128, vec_fma_unused,
                vec_negame_c128,
                me_csqrt, me_csqrt, me_csqrt, tan, asin, acos, atan,
-               me_cexp, me_clog, log10, log1p, log2, expm1,
-               sinh, cosh, tanh, acosh, asinh, atanh,
+               me_cexp, me_clog, log10, log1p, log2, expm1, exp2, exp10_wrapper,
+               sinh, cosh, tanh, acosh, asinh, atanh, cbrt, erf, erfc,
+               sinpi_wrapper, cospi_wrapper, tgamma, lgamma, rint,
+               copysign, fdim, fmax, fmin, fmod, hypot, ldexp_wrapper,
+               nextafter, remainder, fma,
                ceil, floor, round, trunc, me_cabs, me_cpow,
                vec_conj_c128, 0, 0, 0, 0, 0,
                vec_add_c128, atan2, 0)

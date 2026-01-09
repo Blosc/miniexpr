@@ -139,6 +139,9 @@ miniexpr supports many standard mathematical functions:
 - Exponential/Logarithmic: `exp`, `log`, `log10`, `pow`
 - Power/Root: `sqrt`, `pow`, `abs`
 - Rounding: `floor`, `ceil`
+- Extra unary: `exp2` (2^x), `exp10` (10^x), `cbrt` (cube root), `erf`/`erfc` (error functions), `sinpi`/`cospi` (sin/cos of pi*x), `tgamma`/`lgamma` (gamma and log gamma), `rint` (round to nearest integer)
+- Extra binary: `copysign` (magnitude with sign), `fdim` (positive difference), `fmax`/`fmin` (IEEE max/min), `fmod` (floating remainder), `hypot` (sqrt(x^2+y^2)), `ldexp` (x * 2^n), `nextafter` (next representable), `remainder` (IEEE remainder)
+- Extra ternary: `fma` (fused multiply-add)
 - Reductions: `sum`, `prod`, `min`, `max`, `any`, `all`
 - And more...
 

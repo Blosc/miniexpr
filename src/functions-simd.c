@@ -124,11 +124,15 @@ typedef void (*me_vec_unary_f64)(const double* a, double* out, int n);
 typedef void (*me_vec_unary_f32)(const float* a, float* out, int n);
 typedef void (*me_vec_binary_f64)(const double* a, const double* b, double* out, int n);
 typedef void (*me_vec_binary_f32)(const float* a, const float* b, float* out, int n);
+typedef void (*me_vec_ternary_f64)(const double* a, const double* b, const double* c, double* out, int n);
+typedef void (*me_vec_ternary_f32)(const float* a, const float* b, const float* c, float* out, int n);
 typedef void (*me_vec_sincos_f64)(const double* a, double* sin_out, double* cos_out, int n);
 typedef void (*me_vec_sincos_f32)(const float* a, float* sin_out, float* cos_out, int n);
 
 /* Default to u35 for SIMD transcendentals; use me_set_simd_ulp_mode(ME_SIMD_ULP_1) for u10. */
 static int me_simd_use_u35 = 1;
+static const double me_pi = 3.14159265358979323846;
+static const float me_pif = 3.14159265358979323846f;
 
 typedef struct {
     const void *key;
@@ -548,6 +552,326 @@ static void vec_trunc_f32_scalar(const float* a, float* out, int n) {
 IVDEP
     for (i = 0; i < n; i++) {
         out[i] = truncf(a[i]);
+    }
+}
+
+static void vec_exp2_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = exp2(a[i]);
+    }
+}
+
+static void vec_exp2_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = exp2f(a[i]);
+    }
+}
+
+static void vec_exp10_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = pow(10.0, a[i]);
+    }
+}
+
+static void vec_exp10_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = powf(10.0f, a[i]);
+    }
+}
+
+static void vec_cbrt_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = cbrt(a[i]);
+    }
+}
+
+static void vec_cbrt_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = cbrtf(a[i]);
+    }
+}
+
+static void vec_erf_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = erf(a[i]);
+    }
+}
+
+static void vec_erf_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = erff(a[i]);
+    }
+}
+
+static void vec_erfc_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = erfc(a[i]);
+    }
+}
+
+static void vec_erfc_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = erfcf(a[i]);
+    }
+}
+
+static void vec_sinpi_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = sin(me_pi * a[i]);
+    }
+}
+
+static void vec_sinpi_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = sinf(me_pif * a[i]);
+    }
+}
+
+static void vec_cospi_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = cos(me_pi * a[i]);
+    }
+}
+
+static void vec_cospi_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = cosf(me_pif * a[i]);
+    }
+}
+
+static void vec_tgamma_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = tgamma(a[i]);
+    }
+}
+
+static void vec_tgamma_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = tgammaf(a[i]);
+    }
+}
+
+static void vec_lgamma_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = lgamma(a[i]);
+    }
+}
+
+static void vec_lgamma_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = lgammaf(a[i]);
+    }
+}
+
+static void vec_rint_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = rint(a[i]);
+    }
+}
+
+static void vec_rint_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = rintf(a[i]);
+    }
+}
+
+static void vec_copysign_scalar(const double* a, const double* b, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = copysign(a[i], b[i]);
+    }
+}
+
+static void vec_copysign_f32_scalar(const float* a, const float* b, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = copysignf(a[i], b[i]);
+    }
+}
+
+static void vec_fdim_scalar(const double* a, const double* b, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = fdim(a[i], b[i]);
+    }
+}
+
+static void vec_fdim_f32_scalar(const float* a, const float* b, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = fdimf(a[i], b[i]);
+    }
+}
+
+static void vec_fmax_scalar(const double* a, const double* b, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = fmax(a[i], b[i]);
+    }
+}
+
+static void vec_fmax_f32_scalar(const float* a, const float* b, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = fmaxf(a[i], b[i]);
+    }
+}
+
+static void vec_fmin_scalar(const double* a, const double* b, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = fmin(a[i], b[i]);
+    }
+}
+
+static void vec_fmin_f32_scalar(const float* a, const float* b, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = fminf(a[i], b[i]);
+    }
+}
+
+static void vec_fmod_scalar(const double* a, const double* b, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = fmod(a[i], b[i]);
+    }
+}
+
+static void vec_fmod_f32_scalar(const float* a, const float* b, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = fmodf(a[i], b[i]);
+    }
+}
+
+static void vec_hypot_scalar(const double* a, const double* b, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = hypot(a[i], b[i]);
+    }
+}
+
+static void vec_hypot_f32_scalar(const float* a, const float* b, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = hypotf(a[i], b[i]);
+    }
+}
+
+static void vec_ldexp_scalar(const double* a, const double* b, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = ldexp(a[i], (int)b[i]);
+    }
+}
+
+static void vec_ldexp_f32_scalar(const float* a, const float* b, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = ldexpf(a[i], (int)b[i]);
+    }
+}
+
+static void vec_nextafter_scalar(const double* a, const double* b, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = nextafter(a[i], b[i]);
+    }
+}
+
+static void vec_nextafter_f32_scalar(const float* a, const float* b, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = nextafterf(a[i], b[i]);
+    }
+}
+
+static void vec_remainder_scalar(const double* a, const double* b, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = remainder(a[i], b[i]);
+    }
+}
+
+static void vec_remainder_f32_scalar(const float* a, const float* b, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = remainderf(a[i], b[i]);
+    }
+}
+
+static void vec_fma_scalar(const double* a, const double* b, const double* c, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = fma(a[i], b[i], c[i]);
+    }
+}
+
+static void vec_fma_f32_scalar(const float* a, const float* b, const float* c, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = fmaf(a[i], b[i], c[i]);
     }
 }
 
@@ -1295,6 +1619,552 @@ static ME_AVX2_TARGET void vec_pow_f32_avx2(const float* a, const float* b, floa
         out[i] = powf(a[i], b[i]);
     }
 }
+
+static ME_AVX2_TARGET void vec_exp2_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = me_simd_use_u35 ? xexp2_u35(v) : xexp2(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = exp2(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_exp2_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = me_simd_use_u35 ? xexp2f_u35(v) : xexp2f(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = exp2f(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_exp10_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = me_simd_use_u35 ? xexp10_u35(v) : xexp10(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = pow(10.0, a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_exp10_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = me_simd_use_u35 ? xexp10f_u35(v) : xexp10f(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = powf(10.0f, a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_cbrt_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xcbrt_u1(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = cbrt(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_cbrt_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xcbrtf_u1(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = cbrtf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_erf_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xerf_u1(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = erf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_erf_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xerff_u1(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = erff(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_erfc_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xerfc_u15(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = erfc(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_erfc_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xerfcf_u15(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = erfcf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_sinpi_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xsinpi_u05(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = sin(me_pi * a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_sinpi_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xsinpif_u05(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = sinf(me_pif * a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_cospi_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xcospi_u05(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = cos(me_pi * a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_cospi_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xcospif_u05(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = cosf(me_pif * a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_tgamma_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xtgamma_u1(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = tgamma(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_tgamma_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xtgammaf_u1(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = tgammaf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_lgamma_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xlgamma_u1(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = lgamma(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_lgamma_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xlgammaf_u1(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = lgammaf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_rint_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xrint(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = rint(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_rint_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xrintf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = rintf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_copysign_avx2(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble r = xcopysign(va, vb);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = copysign(a[i], b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_copysign_f32_avx2(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat r = xcopysignf(va, vb);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = copysignf(a[i], b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_fdim_avx2(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble r = xfdim(va, vb);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fdim(a[i], b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_fdim_f32_avx2(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat r = xfdimf(va, vb);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fdimf(a[i], b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_fmax_avx2(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble r = xfmax(va, vb);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fmax(a[i], b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_fmax_f32_avx2(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat r = xfmaxf(va, vb);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fmaxf(a[i], b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_fmin_avx2(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble r = xfmin(va, vb);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fmin(a[i], b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_fmin_f32_avx2(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat r = xfminf(va, vb);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fminf(a[i], b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_fmod_avx2(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble r = xfmod(va, vb);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fmod(a[i], b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_fmod_f32_avx2(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat r = xfmodf(va, vb);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fmodf(a[i], b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_hypot_avx2(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble r = me_simd_use_u35 ? xhypot_u35(va, vb) : xhypot_u05(va, vb);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = hypot(a[i], b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_hypot_f32_avx2(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat r = me_simd_use_u35 ? xhypotf_u35(va, vb) : xhypotf_u05(va, vb);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = hypotf(a[i], b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_ldexp_avx2(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble vb_int = xtrunc(vb);
+        vint q = vrint_vi_vd(vb_int);
+        vdouble r = xldexp(va, q);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = ldexp(a[i], (int)b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_ldexp_f32_avx2(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat vb_int = xtruncf(vb);
+        vint2 q = vrint_vi2_vf(vb_int);
+        vfloat r = xldexpf(va, q);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = ldexpf(a[i], (int)b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_nextafter_avx2(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble r = xnextafter(va, vb);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = nextafter(a[i], b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_nextafter_f32_avx2(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat r = xnextafterf(va, vb);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = nextafterf(a[i], b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_remainder_avx2(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble r = xremainder(va, vb);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = remainder(a[i], b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_remainder_f32_avx2(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat r = xremainderf(va, vb);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = remainderf(a[i], b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_fma_avx2(const double* a, const double* b, const double* c, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble vc = vloadu_vd_p(c + i);
+        vdouble r = xfma(va, vb, vc);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fma(a[i], b[i], c[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_fma_f32_avx2(const float* a, const float* b, const float* c, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat vc = vloadu_vf_p(c + i);
+        vfloat r = xfmaf(va, vb, vc);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fmaf(a[i], b[i], c[i]);
+    }
+}
 #endif
 
 #if ME_ENABLE_SLEEF_SIMD && (defined(__aarch64__) || defined(_M_ARM64))
@@ -2007,6 +2877,552 @@ static void vec_pow_f32_advsimd(const float* a, const float* b, float* out, int 
         out[i] = powf(a[i], b[i]);
     }
 }
+
+static void vec_exp2_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = me_simd_use_u35 ? xexp2_u35(v) : xexp2(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = exp2(a[i]);
+    }
+}
+
+static void vec_exp2_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = me_simd_use_u35 ? xexp2f_u35(v) : xexp2f(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = exp2f(a[i]);
+    }
+}
+
+static void vec_exp10_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = me_simd_use_u35 ? xexp10_u35(v) : xexp10(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = pow(10.0, a[i]);
+    }
+}
+
+static void vec_exp10_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = me_simd_use_u35 ? xexp10f_u35(v) : xexp10f(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = powf(10.0f, a[i]);
+    }
+}
+
+static void vec_cbrt_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xcbrt_u1(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = cbrt(a[i]);
+    }
+}
+
+static void vec_cbrt_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xcbrtf_u1(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = cbrtf(a[i]);
+    }
+}
+
+static void vec_erf_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xerf_u1(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = erf(a[i]);
+    }
+}
+
+static void vec_erf_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xerff_u1(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = erff(a[i]);
+    }
+}
+
+static void vec_erfc_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xerfc_u15(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = erfc(a[i]);
+    }
+}
+
+static void vec_erfc_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xerfcf_u15(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = erfcf(a[i]);
+    }
+}
+
+static void vec_sinpi_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xsinpi_u05(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = sin(me_pi * a[i]);
+    }
+}
+
+static void vec_sinpi_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xsinpif_u05(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = sinf(me_pif * a[i]);
+    }
+}
+
+static void vec_cospi_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xcospi_u05(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = cos(me_pi * a[i]);
+    }
+}
+
+static void vec_cospi_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xcospif_u05(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = cosf(me_pif * a[i]);
+    }
+}
+
+static void vec_tgamma_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xtgamma_u1(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = tgamma(a[i]);
+    }
+}
+
+static void vec_tgamma_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xtgammaf_u1(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = tgammaf(a[i]);
+    }
+}
+
+static void vec_lgamma_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xlgamma_u1(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = lgamma(a[i]);
+    }
+}
+
+static void vec_lgamma_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xlgammaf_u1(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = lgammaf(a[i]);
+    }
+}
+
+static void vec_rint_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xrint(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = rint(a[i]);
+    }
+}
+
+static void vec_rint_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xrintf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = rintf(a[i]);
+    }
+}
+
+static void vec_copysign_advsimd(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble r = xcopysign(va, vb);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = copysign(a[i], b[i]);
+    }
+}
+
+static void vec_copysign_f32_advsimd(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat r = xcopysignf(va, vb);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = copysignf(a[i], b[i]);
+    }
+}
+
+static void vec_fdim_advsimd(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble r = xfdim(va, vb);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fdim(a[i], b[i]);
+    }
+}
+
+static void vec_fdim_f32_advsimd(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat r = xfdimf(va, vb);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fdimf(a[i], b[i]);
+    }
+}
+
+static void vec_fmax_advsimd(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble r = xfmax(va, vb);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fmax(a[i], b[i]);
+    }
+}
+
+static void vec_fmax_f32_advsimd(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat r = xfmaxf(va, vb);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fmaxf(a[i], b[i]);
+    }
+}
+
+static void vec_fmin_advsimd(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble r = xfmin(va, vb);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fmin(a[i], b[i]);
+    }
+}
+
+static void vec_fmin_f32_advsimd(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat r = xfminf(va, vb);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fminf(a[i], b[i]);
+    }
+}
+
+static void vec_fmod_advsimd(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble r = xfmod(va, vb);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fmod(a[i], b[i]);
+    }
+}
+
+static void vec_fmod_f32_advsimd(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat r = xfmodf(va, vb);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fmodf(a[i], b[i]);
+    }
+}
+
+static void vec_hypot_advsimd(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble r = me_simd_use_u35 ? xhypot_u35(va, vb) : xhypot_u05(va, vb);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = hypot(a[i], b[i]);
+    }
+}
+
+static void vec_hypot_f32_advsimd(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat r = me_simd_use_u35 ? xhypotf_u35(va, vb) : xhypotf_u05(va, vb);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = hypotf(a[i], b[i]);
+    }
+}
+
+static void vec_ldexp_advsimd(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble vb_int = xtrunc(vb);
+        vint q = vrint_vi_vd(vb_int);
+        vdouble r = xldexp(va, q);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = ldexp(a[i], (int)b[i]);
+    }
+}
+
+static void vec_ldexp_f32_advsimd(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat vb_int = xtruncf(vb);
+        vint2 q = vrint_vi2_vf(vb_int);
+        vfloat r = xldexpf(va, q);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = ldexpf(a[i], (int)b[i]);
+    }
+}
+
+static void vec_nextafter_advsimd(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble r = xnextafter(va, vb);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = nextafter(a[i], b[i]);
+    }
+}
+
+static void vec_nextafter_f32_advsimd(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat r = xnextafterf(va, vb);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = nextafterf(a[i], b[i]);
+    }
+}
+
+static void vec_remainder_advsimd(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble r = xremainder(va, vb);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = remainder(a[i], b[i]);
+    }
+}
+
+static void vec_remainder_f32_advsimd(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat r = xremainderf(va, vb);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = remainderf(a[i], b[i]);
+    }
+}
+
+static void vec_fma_advsimd(const double* a, const double* b, const double* c, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble vc = vloadu_vd_p(c + i);
+        vdouble r = xfma(va, vb, vc);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fma(a[i], b[i], c[i]);
+    }
+}
+
+static void vec_fma_f32_advsimd(const float* a, const float* b, const float* c, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat vc = vloadu_vf_p(c + i);
+        vfloat r = xfmaf(va, vb, vc);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fmaf(a[i], b[i], c[i]);
+    }
+}
 #endif
 
 static me_vec_unary_f64 vec_sin_impl = vec_sin_scalar;
@@ -2034,7 +3450,27 @@ static me_vec_unary_f64 vec_ceil_impl = vec_ceil_scalar;
 static me_vec_unary_f64 vec_floor_impl = vec_floor_scalar;
 static me_vec_unary_f64 vec_round_impl = vec_round_scalar;
 static me_vec_unary_f64 vec_trunc_impl = vec_trunc_scalar;
+static me_vec_unary_f64 vec_exp2_impl = vec_exp2_scalar;
+static me_vec_unary_f64 vec_exp10_impl = vec_exp10_scalar;
+static me_vec_unary_f64 vec_cbrt_impl = vec_cbrt_scalar;
+static me_vec_unary_f64 vec_erf_impl = vec_erf_scalar;
+static me_vec_unary_f64 vec_erfc_impl = vec_erfc_scalar;
+static me_vec_unary_f64 vec_sinpi_impl = vec_sinpi_scalar;
+static me_vec_unary_f64 vec_cospi_impl = vec_cospi_scalar;
+static me_vec_unary_f64 vec_tgamma_impl = vec_tgamma_scalar;
+static me_vec_unary_f64 vec_lgamma_impl = vec_lgamma_scalar;
+static me_vec_unary_f64 vec_rint_impl = vec_rint_scalar;
 static me_vec_binary_f64 vec_pow_impl = vec_pow_scalar;
+static me_vec_binary_f64 vec_copysign_impl = vec_copysign_scalar;
+static me_vec_binary_f64 vec_fdim_impl = vec_fdim_scalar;
+static me_vec_binary_f64 vec_fmax_impl = vec_fmax_scalar;
+static me_vec_binary_f64 vec_fmin_impl = vec_fmin_scalar;
+static me_vec_binary_f64 vec_fmod_impl = vec_fmod_scalar;
+static me_vec_binary_f64 vec_hypot_impl = vec_hypot_scalar;
+static me_vec_binary_f64 vec_ldexp_impl = vec_ldexp_scalar;
+static me_vec_binary_f64 vec_nextafter_impl = vec_nextafter_scalar;
+static me_vec_binary_f64 vec_remainder_impl = vec_remainder_scalar;
+static me_vec_ternary_f64 vec_fma_impl = vec_fma_scalar;
 static me_vec_unary_f32 vec_sin_f32_impl = vec_sin_f32_scalar;
 static me_vec_unary_f32 vec_cos_f32_impl = vec_cos_f32_scalar;
 static me_vec_unary_f32 vec_tan_f32_impl = vec_tan_f32_scalar;
@@ -2060,7 +3496,27 @@ static me_vec_unary_f32 vec_ceil_f32_impl = vec_ceil_f32_scalar;
 static me_vec_unary_f32 vec_floor_f32_impl = vec_floor_f32_scalar;
 static me_vec_unary_f32 vec_round_f32_impl = vec_round_f32_scalar;
 static me_vec_unary_f32 vec_trunc_f32_impl = vec_trunc_f32_scalar;
+static me_vec_unary_f32 vec_exp2_f32_impl = vec_exp2_f32_scalar;
+static me_vec_unary_f32 vec_exp10_f32_impl = vec_exp10_f32_scalar;
+static me_vec_unary_f32 vec_cbrt_f32_impl = vec_cbrt_f32_scalar;
+static me_vec_unary_f32 vec_erf_f32_impl = vec_erf_f32_scalar;
+static me_vec_unary_f32 vec_erfc_f32_impl = vec_erfc_f32_scalar;
+static me_vec_unary_f32 vec_sinpi_f32_impl = vec_sinpi_f32_scalar;
+static me_vec_unary_f32 vec_cospi_f32_impl = vec_cospi_f32_scalar;
+static me_vec_unary_f32 vec_tgamma_f32_impl = vec_tgamma_f32_scalar;
+static me_vec_unary_f32 vec_lgamma_f32_impl = vec_lgamma_f32_scalar;
+static me_vec_unary_f32 vec_rint_f32_impl = vec_rint_f32_scalar;
 static me_vec_binary_f32 vec_pow_f32_impl = vec_pow_f32_scalar;
+static me_vec_binary_f32 vec_copysign_f32_impl = vec_copysign_f32_scalar;
+static me_vec_binary_f32 vec_fdim_f32_impl = vec_fdim_f32_scalar;
+static me_vec_binary_f32 vec_fmax_f32_impl = vec_fmax_f32_scalar;
+static me_vec_binary_f32 vec_fmin_f32_impl = vec_fmin_f32_scalar;
+static me_vec_binary_f32 vec_fmod_f32_impl = vec_fmod_f32_scalar;
+static me_vec_binary_f32 vec_hypot_f32_impl = vec_hypot_f32_scalar;
+static me_vec_binary_f32 vec_ldexp_f32_impl = vec_ldexp_f32_scalar;
+static me_vec_binary_f32 vec_nextafter_f32_impl = vec_nextafter_f32_scalar;
+static me_vec_binary_f32 vec_remainder_f32_impl = vec_remainder_f32_scalar;
+static me_vec_ternary_f32 vec_fma_f32_impl = vec_fma_f32_scalar;
 static me_vec_sincos_f64 vec_sincos_impl = vec_sincos_scalar;
 static me_vec_sincos_f32 vec_sincos_f32_impl = vec_sincos_f32_scalar;
 static int me_simd_initialized = 0;
@@ -2280,7 +3736,27 @@ static void me_init_simd(void) {
         vec_floor_impl = vec_floor_scalar;
         vec_round_impl = vec_round_scalar;
         vec_trunc_impl = vec_trunc_scalar;
+        vec_exp2_impl = vec_exp2_scalar;
+        vec_exp10_impl = vec_exp10_scalar;
+        vec_cbrt_impl = vec_cbrt_scalar;
+        vec_erf_impl = vec_erf_scalar;
+        vec_erfc_impl = vec_erfc_scalar;
+        vec_sinpi_impl = vec_sinpi_scalar;
+        vec_cospi_impl = vec_cospi_scalar;
+        vec_tgamma_impl = vec_tgamma_scalar;
+        vec_lgamma_impl = vec_lgamma_scalar;
+        vec_rint_impl = vec_rint_scalar;
         vec_pow_impl = vec_pow_scalar;
+        vec_copysign_impl = vec_copysign_scalar;
+        vec_fdim_impl = vec_fdim_scalar;
+        vec_fmax_impl = vec_fmax_scalar;
+        vec_fmin_impl = vec_fmin_scalar;
+        vec_fmod_impl = vec_fmod_scalar;
+        vec_hypot_impl = vec_hypot_scalar;
+        vec_ldexp_impl = vec_ldexp_scalar;
+        vec_nextafter_impl = vec_nextafter_scalar;
+        vec_remainder_impl = vec_remainder_scalar;
+        vec_fma_impl = vec_fma_scalar;
         vec_sin_f32_impl = vec_sin_f32_scalar;
         vec_cos_f32_impl = vec_cos_f32_scalar;
         vec_tan_f32_impl = vec_tan_f32_scalar;
@@ -2306,7 +3782,27 @@ static void me_init_simd(void) {
         vec_floor_f32_impl = vec_floor_f32_scalar;
         vec_round_f32_impl = vec_round_f32_scalar;
         vec_trunc_f32_impl = vec_trunc_f32_scalar;
+        vec_exp2_f32_impl = vec_exp2_f32_scalar;
+        vec_exp10_f32_impl = vec_exp10_f32_scalar;
+        vec_cbrt_f32_impl = vec_cbrt_f32_scalar;
+        vec_erf_f32_impl = vec_erf_f32_scalar;
+        vec_erfc_f32_impl = vec_erfc_f32_scalar;
+        vec_sinpi_f32_impl = vec_sinpi_f32_scalar;
+        vec_cospi_f32_impl = vec_cospi_f32_scalar;
+        vec_tgamma_f32_impl = vec_tgamma_f32_scalar;
+        vec_lgamma_f32_impl = vec_lgamma_f32_scalar;
+        vec_rint_f32_impl = vec_rint_f32_scalar;
         vec_pow_f32_impl = vec_pow_f32_scalar;
+        vec_copysign_f32_impl = vec_copysign_f32_scalar;
+        vec_fdim_f32_impl = vec_fdim_f32_scalar;
+        vec_fmax_f32_impl = vec_fmax_f32_scalar;
+        vec_fmin_f32_impl = vec_fmin_f32_scalar;
+        vec_fmod_f32_impl = vec_fmod_f32_scalar;
+        vec_hypot_f32_impl = vec_hypot_f32_scalar;
+        vec_ldexp_f32_impl = vec_ldexp_f32_scalar;
+        vec_nextafter_f32_impl = vec_nextafter_f32_scalar;
+        vec_remainder_f32_impl = vec_remainder_f32_scalar;
+        vec_fma_f32_impl = vec_fma_f32_scalar;
         vec_sincos_impl = vec_sincos_scalar;
         vec_sincos_f32_impl = vec_sincos_f32_scalar;
         me_simd_backend = "scalar";
@@ -2341,7 +3837,27 @@ static void me_init_simd(void) {
         vec_floor_impl = vec_floor_avx2;
         vec_round_impl = vec_round_avx2;
         vec_trunc_impl = vec_trunc_avx2;
+        vec_exp2_impl = vec_exp2_avx2;
+        vec_exp10_impl = vec_exp10_avx2;
+        vec_cbrt_impl = vec_cbrt_avx2;
+        vec_erf_impl = vec_erf_avx2;
+        vec_erfc_impl = vec_erfc_avx2;
+        vec_sinpi_impl = vec_sinpi_avx2;
+        vec_cospi_impl = vec_cospi_avx2;
+        vec_tgamma_impl = vec_tgamma_avx2;
+        vec_lgamma_impl = vec_lgamma_avx2;
+        vec_rint_impl = vec_rint_avx2;
         vec_pow_impl = vec_pow_avx2;
+        vec_copysign_impl = vec_copysign_avx2;
+        vec_fdim_impl = vec_fdim_avx2;
+        vec_fmax_impl = vec_fmax_avx2;
+        vec_fmin_impl = vec_fmin_avx2;
+        vec_fmod_impl = vec_fmod_avx2;
+        vec_hypot_impl = vec_hypot_avx2;
+        vec_ldexp_impl = vec_ldexp_avx2;
+        vec_nextafter_impl = vec_nextafter_avx2;
+        vec_remainder_impl = vec_remainder_avx2;
+        vec_fma_impl = vec_fma_avx2;
         vec_sin_f32_impl = vec_sin_f32_avx2;
         vec_cos_f32_impl = vec_cos_f32_avx2;
         vec_tan_f32_impl = vec_tan_f32_avx2;
@@ -2367,7 +3883,27 @@ static void me_init_simd(void) {
         vec_floor_f32_impl = vec_floor_f32_avx2;
         vec_round_f32_impl = vec_round_f32_avx2;
         vec_trunc_f32_impl = vec_trunc_f32_avx2;
+        vec_exp2_f32_impl = vec_exp2_f32_avx2;
+        vec_exp10_f32_impl = vec_exp10_f32_avx2;
+        vec_cbrt_f32_impl = vec_cbrt_f32_avx2;
+        vec_erf_f32_impl = vec_erf_f32_avx2;
+        vec_erfc_f32_impl = vec_erfc_f32_avx2;
+        vec_sinpi_f32_impl = vec_sinpi_f32_avx2;
+        vec_cospi_f32_impl = vec_cospi_f32_avx2;
+        vec_tgamma_f32_impl = vec_tgamma_f32_avx2;
+        vec_lgamma_f32_impl = vec_lgamma_f32_avx2;
+        vec_rint_f32_impl = vec_rint_f32_avx2;
         vec_pow_f32_impl = vec_pow_f32_avx2;
+        vec_copysign_f32_impl = vec_copysign_f32_avx2;
+        vec_fdim_f32_impl = vec_fdim_f32_avx2;
+        vec_fmax_f32_impl = vec_fmax_f32_avx2;
+        vec_fmin_f32_impl = vec_fmin_f32_avx2;
+        vec_fmod_f32_impl = vec_fmod_f32_avx2;
+        vec_hypot_f32_impl = vec_hypot_f32_avx2;
+        vec_ldexp_f32_impl = vec_ldexp_f32_avx2;
+        vec_nextafter_f32_impl = vec_nextafter_f32_avx2;
+        vec_remainder_f32_impl = vec_remainder_f32_avx2;
+        vec_fma_f32_impl = vec_fma_f32_avx2;
         vec_sincos_impl = vec_sincos_avx2;
         vec_sincos_f32_impl = vec_sincos_f32_avx2;
         me_simd_backend = me_simd_use_u35 ? "avx2-u35" : "avx2-u10";
@@ -2402,7 +3938,27 @@ static void me_init_simd(void) {
         vec_floor_impl = vec_floor_advsimd;
         vec_round_impl = vec_round_advsimd;
         vec_trunc_impl = vec_trunc_advsimd;
+        vec_exp2_impl = vec_exp2_advsimd;
+        vec_exp10_impl = vec_exp10_advsimd;
+        vec_cbrt_impl = vec_cbrt_advsimd;
+        vec_erf_impl = vec_erf_advsimd;
+        vec_erfc_impl = vec_erfc_advsimd;
+        vec_sinpi_impl = vec_sinpi_advsimd;
+        vec_cospi_impl = vec_cospi_advsimd;
+        vec_tgamma_impl = vec_tgamma_advsimd;
+        vec_lgamma_impl = vec_lgamma_advsimd;
+        vec_rint_impl = vec_rint_advsimd;
         vec_pow_impl = vec_pow_advsimd;
+        vec_copysign_impl = vec_copysign_advsimd;
+        vec_fdim_impl = vec_fdim_advsimd;
+        vec_fmax_impl = vec_fmax_advsimd;
+        vec_fmin_impl = vec_fmin_advsimd;
+        vec_fmod_impl = vec_fmod_advsimd;
+        vec_hypot_impl = vec_hypot_advsimd;
+        vec_ldexp_impl = vec_ldexp_advsimd;
+        vec_nextafter_impl = vec_nextafter_advsimd;
+        vec_remainder_impl = vec_remainder_advsimd;
+        vec_fma_impl = vec_fma_advsimd;
         vec_sin_f32_impl = vec_sin_f32_advsimd;
         vec_cos_f32_impl = vec_cos_f32_advsimd;
         vec_tan_f32_impl = vec_tan_f32_advsimd;
@@ -2428,7 +3984,27 @@ static void me_init_simd(void) {
         vec_floor_f32_impl = vec_floor_f32_advsimd;
         vec_round_f32_impl = vec_round_f32_advsimd;
         vec_trunc_f32_impl = vec_trunc_f32_advsimd;
+        vec_exp2_f32_impl = vec_exp2_f32_advsimd;
+        vec_exp10_f32_impl = vec_exp10_f32_advsimd;
+        vec_cbrt_f32_impl = vec_cbrt_f32_advsimd;
+        vec_erf_f32_impl = vec_erf_f32_advsimd;
+        vec_erfc_f32_impl = vec_erfc_f32_advsimd;
+        vec_sinpi_f32_impl = vec_sinpi_f32_advsimd;
+        vec_cospi_f32_impl = vec_cospi_f32_advsimd;
+        vec_tgamma_f32_impl = vec_tgamma_f32_advsimd;
+        vec_lgamma_f32_impl = vec_lgamma_f32_advsimd;
+        vec_rint_f32_impl = vec_rint_f32_advsimd;
         vec_pow_f32_impl = vec_pow_f32_advsimd;
+        vec_copysign_f32_impl = vec_copysign_f32_advsimd;
+        vec_fdim_f32_impl = vec_fdim_f32_advsimd;
+        vec_fmax_f32_impl = vec_fmax_f32_advsimd;
+        vec_fmin_f32_impl = vec_fmin_f32_advsimd;
+        vec_fmod_f32_impl = vec_fmod_f32_advsimd;
+        vec_hypot_f32_impl = vec_hypot_f32_advsimd;
+        vec_ldexp_f32_impl = vec_ldexp_f32_advsimd;
+        vec_nextafter_f32_impl = vec_nextafter_f32_advsimd;
+        vec_remainder_f32_impl = vec_remainder_f32_advsimd;
+        vec_fma_f32_impl = vec_fma_f32_advsimd;
         vec_sincos_impl = vec_sincos_advsimd;
         vec_sincos_f32_impl = vec_sincos_f32_advsimd;
         me_simd_backend = me_simd_use_u35 ? "advsimd-u35" : "advsimd-u10";
@@ -2605,6 +4181,106 @@ void vec_pow_dispatch(const double* a, const double* b, double* out, int n) {
     vec_pow_impl(a, b, out, n);
 }
 
+void vec_exp2_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_exp2_impl(a, out, n);
+}
+
+void vec_exp10_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_exp10_impl(a, out, n);
+}
+
+void vec_cbrt_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_cbrt_impl(a, out, n);
+}
+
+void vec_erf_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_erf_impl(a, out, n);
+}
+
+void vec_erfc_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_erfc_impl(a, out, n);
+}
+
+void vec_sinpi_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_sinpi_impl(a, out, n);
+}
+
+void vec_cospi_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_cospi_impl(a, out, n);
+}
+
+void vec_tgamma_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_tgamma_impl(a, out, n);
+}
+
+void vec_lgamma_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_lgamma_impl(a, out, n);
+}
+
+void vec_rint_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_rint_impl(a, out, n);
+}
+
+void vec_copysign_dispatch(const double* a, const double* b, double* out, int n) {
+    me_init_simd();
+    vec_copysign_impl(a, b, out, n);
+}
+
+void vec_fdim_dispatch(const double* a, const double* b, double* out, int n) {
+    me_init_simd();
+    vec_fdim_impl(a, b, out, n);
+}
+
+void vec_fmax_dispatch(const double* a, const double* b, double* out, int n) {
+    me_init_simd();
+    vec_fmax_impl(a, b, out, n);
+}
+
+void vec_fmin_dispatch(const double* a, const double* b, double* out, int n) {
+    me_init_simd();
+    vec_fmin_impl(a, b, out, n);
+}
+
+void vec_fmod_dispatch(const double* a, const double* b, double* out, int n) {
+    me_init_simd();
+    vec_fmod_impl(a, b, out, n);
+}
+
+void vec_hypot_dispatch(const double* a, const double* b, double* out, int n) {
+    me_init_simd();
+    vec_hypot_impl(a, b, out, n);
+}
+
+void vec_ldexp_dispatch(const double* a, const double* b, double* out, int n) {
+    me_init_simd();
+    vec_ldexp_impl(a, b, out, n);
+}
+
+void vec_nextafter_dispatch(const double* a, const double* b, double* out, int n) {
+    me_init_simd();
+    vec_nextafter_impl(a, b, out, n);
+}
+
+void vec_remainder_dispatch(const double* a, const double* b, double* out, int n) {
+    me_init_simd();
+    vec_remainder_impl(a, b, out, n);
+}
+
+void vec_fma_dispatch(const double* a, const double* b, const double* c, double* out, int n) {
+    me_init_simd();
+    vec_fma_impl(a, b, c, out, n);
+}
+
 void vec_abs_f32_dispatch(const float* a, float* out, int n) {
     me_init_simd();
     vec_abs_f32_impl(a, out, n);
@@ -2700,6 +4376,106 @@ void vec_pow_f32_dispatch(const float* a, const float* b, float* out, int n) {
     vec_pow_f32_impl(a, b, out, n);
 }
 
+void vec_exp2_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_exp2_f32_impl(a, out, n);
+}
+
+void vec_exp10_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_exp10_f32_impl(a, out, n);
+}
+
+void vec_cbrt_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_cbrt_f32_impl(a, out, n);
+}
+
+void vec_erf_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_erf_f32_impl(a, out, n);
+}
+
+void vec_erfc_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_erfc_f32_impl(a, out, n);
+}
+
+void vec_sinpi_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_sinpi_f32_impl(a, out, n);
+}
+
+void vec_cospi_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_cospi_f32_impl(a, out, n);
+}
+
+void vec_tgamma_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_tgamma_f32_impl(a, out, n);
+}
+
+void vec_lgamma_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_lgamma_f32_impl(a, out, n);
+}
+
+void vec_rint_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_rint_f32_impl(a, out, n);
+}
+
+void vec_copysign_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    me_init_simd();
+    vec_copysign_f32_impl(a, b, out, n);
+}
+
+void vec_fdim_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    me_init_simd();
+    vec_fdim_f32_impl(a, b, out, n);
+}
+
+void vec_fmax_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    me_init_simd();
+    vec_fmax_f32_impl(a, b, out, n);
+}
+
+void vec_fmin_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    me_init_simd();
+    vec_fmin_f32_impl(a, b, out, n);
+}
+
+void vec_fmod_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    me_init_simd();
+    vec_fmod_f32_impl(a, b, out, n);
+}
+
+void vec_hypot_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    me_init_simd();
+    vec_hypot_f32_impl(a, b, out, n);
+}
+
+void vec_ldexp_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    me_init_simd();
+    vec_ldexp_f32_impl(a, b, out, n);
+}
+
+void vec_nextafter_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    me_init_simd();
+    vec_nextafter_f32_impl(a, b, out, n);
+}
+
+void vec_remainder_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    me_init_simd();
+    vec_remainder_f32_impl(a, b, out, n);
+}
+
+void vec_fma_f32_dispatch(const float* a, const float* b, const float* c, float* out, int n) {
+    me_init_simd();
+    vec_fma_f32_impl(a, b, c, out, n);
+}
+
 void me_disable_simd(int disabled) {
     if (!disabled) {
         me_simd_enabled = 1;
@@ -2733,7 +4509,27 @@ void me_disable_simd(int disabled) {
         vec_floor_impl = vec_floor_scalar;
         vec_round_impl = vec_round_scalar;
         vec_trunc_impl = vec_trunc_scalar;
+        vec_exp2_impl = vec_exp2_scalar;
+        vec_exp10_impl = vec_exp10_scalar;
+        vec_cbrt_impl = vec_cbrt_scalar;
+        vec_erf_impl = vec_erf_scalar;
+        vec_erfc_impl = vec_erfc_scalar;
+        vec_sinpi_impl = vec_sinpi_scalar;
+        vec_cospi_impl = vec_cospi_scalar;
+        vec_tgamma_impl = vec_tgamma_scalar;
+        vec_lgamma_impl = vec_lgamma_scalar;
+        vec_rint_impl = vec_rint_scalar;
         vec_pow_impl = vec_pow_scalar;
+        vec_copysign_impl = vec_copysign_scalar;
+        vec_fdim_impl = vec_fdim_scalar;
+        vec_fmax_impl = vec_fmax_scalar;
+        vec_fmin_impl = vec_fmin_scalar;
+        vec_fmod_impl = vec_fmod_scalar;
+        vec_hypot_impl = vec_hypot_scalar;
+        vec_ldexp_impl = vec_ldexp_scalar;
+        vec_nextafter_impl = vec_nextafter_scalar;
+        vec_remainder_impl = vec_remainder_scalar;
+        vec_fma_impl = vec_fma_scalar;
         vec_sin_f32_impl = vec_sin_f32_scalar;
         vec_cos_f32_impl = vec_cos_f32_scalar;
         vec_tan_f32_impl = vec_tan_f32_scalar;
@@ -2759,7 +4555,27 @@ void me_disable_simd(int disabled) {
         vec_floor_f32_impl = vec_floor_f32_scalar;
         vec_round_f32_impl = vec_round_f32_scalar;
         vec_trunc_f32_impl = vec_trunc_f32_scalar;
+        vec_exp2_f32_impl = vec_exp2_f32_scalar;
+        vec_exp10_f32_impl = vec_exp10_f32_scalar;
+        vec_cbrt_f32_impl = vec_cbrt_f32_scalar;
+        vec_erf_f32_impl = vec_erf_f32_scalar;
+        vec_erfc_f32_impl = vec_erfc_f32_scalar;
+        vec_sinpi_f32_impl = vec_sinpi_f32_scalar;
+        vec_cospi_f32_impl = vec_cospi_f32_scalar;
+        vec_tgamma_f32_impl = vec_tgamma_f32_scalar;
+        vec_lgamma_f32_impl = vec_lgamma_f32_scalar;
+        vec_rint_f32_impl = vec_rint_f32_scalar;
         vec_pow_f32_impl = vec_pow_f32_scalar;
+        vec_copysign_f32_impl = vec_copysign_f32_scalar;
+        vec_fdim_f32_impl = vec_fdim_f32_scalar;
+        vec_fmax_f32_impl = vec_fmax_f32_scalar;
+        vec_fmin_f32_impl = vec_fmin_f32_scalar;
+        vec_fmod_f32_impl = vec_fmod_f32_scalar;
+        vec_hypot_f32_impl = vec_hypot_f32_scalar;
+        vec_ldexp_f32_impl = vec_ldexp_f32_scalar;
+        vec_nextafter_f32_impl = vec_nextafter_f32_scalar;
+        vec_remainder_f32_impl = vec_remainder_f32_scalar;
+        vec_fma_f32_impl = vec_fma_f32_scalar;
         vec_sincos_impl = vec_sincos_scalar;
         vec_sincos_f32_impl = vec_sincos_f32_scalar;
         me_simd_backend = "scalar";

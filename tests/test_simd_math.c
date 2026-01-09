@@ -21,6 +21,42 @@ static int nearly_equal_f(float a, float b, float tol) {
     return diff <= tol * scale;
 }
 
+static double exp10_ref(double x) {
+    return pow(10.0, x);
+}
+
+static float exp10_ref_f(float x) {
+    return powf(10.0f, x);
+}
+
+static double sinpi_ref(double x) {
+    const double pi = 3.14159265358979323846;
+    return sin(pi * x);
+}
+
+static float sinpi_ref_f(float x) {
+    const float pi = 3.14159265358979323846f;
+    return sinf(pi * x);
+}
+
+static double cospi_ref(double x) {
+    const double pi = 3.14159265358979323846;
+    return cos(pi * x);
+}
+
+static float cospi_ref_f(float x) {
+    const float pi = 3.14159265358979323846f;
+    return cosf(pi * x);
+}
+
+static double ldexp_ref(double x, double exp) {
+    return ldexp(x, (int)exp);
+}
+
+static float ldexp_ref_f(float x, float exp) {
+    return ldexpf(x, (int)exp);
+}
+
 static void fill_input_range_f64(double *input, int n, double min_val, double max_val) {
     double span = max_val - min_val;
     for (int i = 0; i < n; i++) {
@@ -307,6 +343,162 @@ static int run_binary_f32(const char *name, float (*func)(float, float), int n,
     return 0;
 }
 
+static int run_ternary_f64(const char *name, double (*func)(double, double, double), int n,
+                           bool simd_enabled, double a_min, double a_max,
+                           double b_min, double b_max, double c_min, double c_max,
+                           double tol) {
+    double *a = (double *)malloc((size_t)n * sizeof(double));
+    double *b = (double *)malloc((size_t)n * sizeof(double));
+    double *c = (double *)malloc((size_t)n * sizeof(double));
+    double *out = (double *)malloc((size_t)n * sizeof(double));
+    if (!a || !b || !c || !out) {
+        printf("Allocation failed\n");
+        free(a);
+        free(b);
+        free(c);
+        free(out);
+        return 1;
+    }
+
+    fill_input_range_f64(a, n, a_min, a_max);
+    fill_input_range_f64(b, n, b_min, b_max);
+    fill_input_range_f64(c, n, c_min, c_max);
+
+    me_variable vars[] = {{"a", ME_FLOAT64, a}, {"b", ME_FLOAT64, b}, {"c", ME_FLOAT64, c}};
+    int err = 0;
+    me_expr *expr = NULL;
+    char expr_text[64];
+
+    snprintf(expr_text, sizeof(expr_text), "%s(a, b, c)", name);
+    if (me_compile(expr_text, vars, 3, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("Failed to compile %s (err=%d)\n", expr_text, err);
+        free(a);
+        free(b);
+        free(c);
+        free(out);
+        return 1;
+    }
+
+    const void *var_ptrs[] = {a, b, c};
+    me_disable_simd(!simd_enabled);
+    int eval_rc = me_eval(expr, var_ptrs, 3, out, n);
+    if (eval_rc != ME_EVAL_SUCCESS) {
+        printf("%s eval failed (err=%d)\n", expr_text, eval_rc);
+        me_free(expr);
+        free(a);
+        free(b);
+        free(c);
+        free(out);
+        return 1;
+    }
+
+    int failures = 0;
+    for (int i = 0; i < n; i++) {
+        double expected = func(a[i], b[i], c[i]);
+        if (!nearly_equal(out[i], expected, tol)) {
+            if (failures < 5) {
+                printf("%s mismatch at %d: got %.15f expected %.15f\n",
+                       expr_text, i, out[i], expected);
+            }
+            failures++;
+        }
+    }
+
+    me_free(expr);
+    free(a);
+    free(b);
+    free(c);
+    free(out);
+    me_disable_simd(false);
+
+    if (failures) {
+        printf("%s f64 %s FAIL: %d mismatches\n",
+               expr_text, simd_enabled ? "SIMD" : "scalar", failures);
+        return 1;
+    }
+
+    printf("%s f64 %s PASS\n", expr_text, simd_enabled ? "SIMD" : "scalar");
+    return 0;
+}
+
+static int run_ternary_f32(const char *name, float (*func)(float, float, float), int n,
+                           bool simd_enabled, float a_min, float a_max,
+                           float b_min, float b_max, float c_min, float c_max,
+                           float tol) {
+    float *a = (float *)malloc((size_t)n * sizeof(float));
+    float *b = (float *)malloc((size_t)n * sizeof(float));
+    float *c = (float *)malloc((size_t)n * sizeof(float));
+    float *out = (float *)malloc((size_t)n * sizeof(float));
+    if (!a || !b || !c || !out) {
+        printf("Allocation failed\n");
+        free(a);
+        free(b);
+        free(c);
+        free(out);
+        return 1;
+    }
+
+    fill_input_range_f32(a, n, a_min, a_max);
+    fill_input_range_f32(b, n, b_min, b_max);
+    fill_input_range_f32(c, n, c_min, c_max);
+
+    me_variable vars[] = {{"a", ME_FLOAT32, a}, {"b", ME_FLOAT32, b}, {"c", ME_FLOAT32, c}};
+    int err = 0;
+    me_expr *expr = NULL;
+    char expr_text[64];
+
+    snprintf(expr_text, sizeof(expr_text), "%s(a, b, c)", name);
+    if (me_compile(expr_text, vars, 3, ME_FLOAT32, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("Failed to compile %s f32 (err=%d)\n", expr_text, err);
+        free(a);
+        free(b);
+        free(c);
+        free(out);
+        return 1;
+    }
+
+    const void *var_ptrs[] = {a, b, c};
+    me_disable_simd(!simd_enabled);
+    int eval_rc = me_eval(expr, var_ptrs, 3, out, n);
+    if (eval_rc != ME_EVAL_SUCCESS) {
+        printf("%s f32 eval failed (err=%d)\n", expr_text, eval_rc);
+        me_free(expr);
+        free(a);
+        free(b);
+        free(c);
+        free(out);
+        return 1;
+    }
+
+    int failures = 0;
+    for (int i = 0; i < n; i++) {
+        float expected = func(a[i], b[i], c[i]);
+        if (!nearly_equal_f(out[i], expected, tol)) {
+            if (failures < 5) {
+                printf("%s f32 mismatch at %d: got %.7f expected %.7f\n",
+                       expr_text, i, out[i], expected);
+            }
+            failures++;
+        }
+    }
+
+    me_free(expr);
+    free(a);
+    free(b);
+    free(c);
+    free(out);
+    me_disable_simd(false);
+
+    if (failures) {
+        printf("%s f32 %s FAIL: %d mismatches\n",
+               expr_text, simd_enabled ? "SIMD" : "scalar", failures);
+        return 1;
+    }
+
+    printf("%s f32 %s PASS\n", expr_text, simd_enabled ? "SIMD" : "scalar");
+    return 0;
+}
+
 static int run_unary_pair_f64(const char *name, double (*func)(double), int n,
                               double min_val, double max_val, double tol) {
     int failures = 0;
@@ -341,6 +533,24 @@ static int run_binary_pair_f32(const char *name, float (*func)(float, float), in
     return failures;
 }
 
+static int run_ternary_pair_f64(const char *name, double (*func)(double, double, double), int n,
+                                double a_min, double a_max, double b_min, double b_max,
+                                double c_min, double c_max, double tol) {
+    int failures = 0;
+    failures += run_ternary_f64(name, func, n, false, a_min, a_max, b_min, b_max, c_min, c_max, tol);
+    failures += run_ternary_f64(name, func, n, true, a_min, a_max, b_min, b_max, c_min, c_max, tol);
+    return failures;
+}
+
+static int run_ternary_pair_f32(const char *name, float (*func)(float, float, float), int n,
+                                float a_min, float a_max, float b_min, float b_max,
+                                float c_min, float c_max, float tol) {
+    int failures = 0;
+    failures += run_ternary_f32(name, func, n, false, a_min, a_max, b_min, b_max, c_min, c_max, tol);
+    failures += run_ternary_f32(name, func, n, true, a_min, a_max, b_min, b_max, c_min, c_max, tol);
+    return failures;
+}
+
 int main(void) {
     int failures = 0;
     const int n = 1024;
@@ -348,44 +558,84 @@ int main(void) {
     failures += run_unary_pair_f64("abs", fabs, n, -10.0, 10.0, 1e-12);
     failures += run_unary_pair_f64("exp", exp, n, -5.0, 5.0, 1e-12);
     failures += run_unary_pair_f64("expm1", expm1, n, -3.0, 3.0, 1e-12);
+    failures += run_unary_pair_f64("exp2", exp2, n, -5.0, 5.0, 1e-12);
+    failures += run_unary_pair_f64("exp10", exp10_ref, n, -2.0, 2.0, 1e-12);
     failures += run_unary_pair_f64("log", log, n, 0.1, 10.0, 1e-12);
     failures += run_unary_pair_f64("log10", log10, n, 0.1, 10.0, 1e-12);
     failures += run_unary_pair_f64("log1p", log1p, n, -0.9, 10.0, 1e-12);
     failures += run_unary_pair_f64("log2", log2, n, 0.1, 10.0, 1e-12);
     failures += run_unary_pair_f64("sqrt", sqrt, n, 0.0, 100.0, 1e-12);
+    failures += run_unary_pair_f64("cbrt", cbrt, n, -10.0, 10.0, 1e-12);
+    failures += run_unary_pair_f64("erf", erf, n, -2.0, 2.0, 1e-12);
+    failures += run_unary_pair_f64("erfc", erfc, n, -2.0, 2.0, 1e-12);
+    failures += run_unary_pair_f64("sinpi", sinpi_ref, n, -2.0, 2.0, 1e-12);
+    failures += run_unary_pair_f64("cospi", cospi_ref, n, -2.0, 2.0, 1e-12);
     failures += run_unary_pair_f64("sinh", sinh, n, -3.0, 3.0, 1e-12);
     failures += run_unary_pair_f64("cosh", cosh, n, -3.0, 3.0, 1e-12);
     failures += run_unary_pair_f64("tanh", tanh, n, -3.0, 3.0, 1e-12);
     failures += run_unary_pair_f64("acosh", acosh, n, 1.0, 10.0, 1e-12);
     failures += run_unary_pair_f64("asinh", asinh, n, -5.0, 5.0, 1e-12);
     failures += run_unary_pair_f64("atanh", atanh, n, -0.9, 0.9, 1e-12);
+    failures += run_unary_pair_f64("tgamma", tgamma, n, 0.5, 5.0, 1e-12);
+    failures += run_unary_pair_f64("lgamma", lgamma, n, 0.5, 5.0, 1e-12);
+    failures += run_unary_pair_f64("rint", rint, n, -5.0, 5.0, 1e-12);
     failures += run_unary_pair_f64("ceil", ceil, n, -3.5, 3.5, 1e-12);
     failures += run_unary_pair_f64("floor", floor, n, -3.5, 3.5, 1e-12);
     failures += run_unary_pair_f64("round", round, n, -3.5, 3.5, 1e-12);
     failures += run_unary_pair_f64("trunc", trunc, n, -3.5, 3.5, 1e-12);
 
     failures += run_binary_pair_f64("pow", pow, n, 0.1, 4.0, -2.0, 2.0, 1e-11);
+    failures += run_binary_pair_f64("copysign", copysign, n, -5.0, 5.0, -5.0, 5.0, 0.0);
+    failures += run_binary_pair_f64("fdim", fdim, n, -5.0, 5.0, -5.0, 5.0, 1e-12);
+    failures += run_binary_pair_f64("fmax", fmax, n, -5.0, 5.0, -5.0, 5.0, 0.0);
+    failures += run_binary_pair_f64("fmin", fmin, n, -5.0, 5.0, -5.0, 5.0, 0.0);
+    failures += run_binary_pair_f64("fmod", fmod, n, -5.0, 5.0, 0.5, 5.0, 1e-12);
+    failures += run_binary_pair_f64("hypot", hypot, n, -3.0, 3.0, -3.0, 3.0, 1e-12);
+    failures += run_binary_pair_f64("ldexp", ldexp_ref, n, -5.0, 5.0, -4.0, 4.0, 1e-12);
+    failures += run_binary_pair_f64("nextafter", nextafter, n, -2.0, 2.0, -2.0, 2.0, 0.0);
+    failures += run_binary_pair_f64("remainder", remainder, n, -5.0, 5.0, 0.5, 5.0, 1e-12);
+    failures += run_ternary_pair_f64("fma", fma, n, -5.0, 5.0, -5.0, 5.0, -5.0, 5.0, 1e-11);
 
     failures += run_unary_pair_f32("abs", fabsf, n, -10.0f, 10.0f, 1e-5f);
     failures += run_unary_pair_f32("exp", expf, n, -5.0f, 5.0f, 1e-5f);
     failures += run_unary_pair_f32("expm1", expm1f, n, -3.0f, 3.0f, 1e-5f);
+    failures += run_unary_pair_f32("exp2", exp2f, n, -5.0f, 5.0f, 1e-5f);
+    failures += run_unary_pair_f32("exp10", exp10_ref_f, n, -2.0f, 2.0f, 1e-5f);
     failures += run_unary_pair_f32("log", logf, n, 0.1f, 10.0f, 1e-5f);
     failures += run_unary_pair_f32("log10", log10f, n, 0.1f, 10.0f, 1e-5f);
     failures += run_unary_pair_f32("log1p", log1pf, n, -0.9f, 10.0f, 1e-5f);
     failures += run_unary_pair_f32("log2", log2f, n, 0.1f, 10.0f, 1e-5f);
     failures += run_unary_pair_f32("sqrt", sqrtf, n, 0.0f, 100.0f, 1e-5f);
+    failures += run_unary_pair_f32("cbrt", cbrtf, n, -10.0f, 10.0f, 1e-5f);
+    failures += run_unary_pair_f32("erf", erff, n, -2.0f, 2.0f, 1e-5f);
+    failures += run_unary_pair_f32("erfc", erfcf, n, -2.0f, 2.0f, 1e-5f);
+    failures += run_unary_pair_f32("sinpi", sinpi_ref_f, n, -2.0f, 2.0f, 1e-5f);
+    failures += run_unary_pair_f32("cospi", cospi_ref_f, n, -2.0f, 2.0f, 1e-5f);
     failures += run_unary_pair_f32("sinh", sinhf, n, -3.0f, 3.0f, 1e-5f);
     failures += run_unary_pair_f32("cosh", coshf, n, -3.0f, 3.0f, 1e-5f);
     failures += run_unary_pair_f32("tanh", tanhf, n, -3.0f, 3.0f, 1e-5f);
     failures += run_unary_pair_f32("acosh", acoshf, n, 1.0f, 10.0f, 1e-5f);
     failures += run_unary_pair_f32("asinh", asinhf, n, -5.0f, 5.0f, 1e-5f);
     failures += run_unary_pair_f32("atanh", atanhf, n, -0.9f, 0.9f, 1e-5f);
+    failures += run_unary_pair_f32("tgamma", tgammaf, n, 0.5f, 5.0f, 1e-5f);
+    failures += run_unary_pair_f32("lgamma", lgammaf, n, 0.5f, 5.0f, 1e-5f);
+    failures += run_unary_pair_f32("rint", rintf, n, -5.0f, 5.0f, 1e-5f);
     failures += run_unary_pair_f32("ceil", ceilf, n, -3.5f, 3.5f, 1e-5f);
     failures += run_unary_pair_f32("floor", floorf, n, -3.5f, 3.5f, 1e-5f);
     failures += run_unary_pair_f32("round", roundf, n, -3.5f, 3.5f, 1e-5f);
     failures += run_unary_pair_f32("trunc", truncf, n, -3.5f, 3.5f, 1e-5f);
 
     failures += run_binary_pair_f32("pow", powf, n, 0.1f, 4.0f, -2.0f, 2.0f, 1e-5f);
+    failures += run_binary_pair_f32("copysign", copysignf, n, -5.0f, 5.0f, -5.0f, 5.0f, 0.0f);
+    failures += run_binary_pair_f32("fdim", fdimf, n, -5.0f, 5.0f, -5.0f, 5.0f, 1e-5f);
+    failures += run_binary_pair_f32("fmax", fmaxf, n, -5.0f, 5.0f, -5.0f, 5.0f, 0.0f);
+    failures += run_binary_pair_f32("fmin", fminf, n, -5.0f, 5.0f, -5.0f, 5.0f, 0.0f);
+    failures += run_binary_pair_f32("fmod", fmodf, n, -5.0f, 5.0f, 0.5f, 5.0f, 1e-5f);
+    failures += run_binary_pair_f32("hypot", hypotf, n, -3.0f, 3.0f, -3.0f, 3.0f, 1e-5f);
+    failures += run_binary_pair_f32("ldexp", ldexp_ref_f, n, -5.0f, 5.0f, -4.0f, 4.0f, 1e-5f);
+    failures += run_binary_pair_f32("nextafter", nextafterf, n, -2.0f, 2.0f, -2.0f, 2.0f, 0.0f);
+    failures += run_binary_pair_f32("remainder", remainderf, n, -5.0f, 5.0f, 0.5f, 5.0f, 1e-5f);
+    failures += run_ternary_pair_f32("fma", fmaf, n, -5.0f, 5.0f, -5.0f, 5.0f, -5.0f, 5.0f, 1e-5f);
 
     return failures ? 1 : 0;
 }
