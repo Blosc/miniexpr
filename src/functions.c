@@ -3430,9 +3430,18 @@ typedef float (*me_fun1_f32)(float);
 /* Template for type-specific evaluator */
 #define DEFINE_ME_EVAL(SUFFIX, TYPE, VEC_ADD, VEC_SUB, VEC_MUL, VEC_DIV, VEC_POW, \
     VEC_ADD_SCALAR, VEC_MUL_SCALAR, VEC_POW_SCALAR, \
-    VEC_SQRT, VEC_SIN, VEC_COS, VEC_TAN, VEC_ASIN, VEC_ACOS, VEC_ATAN, VEC_NEGATE, \
-    SQRT_FUNC, SIN_FUNC, COS_FUNC, TAN_FUNC, ASIN_FUNC, ACOS_FUNC, ATAN_FUNC, EXP_FUNC, LOG_FUNC, FABS_FUNC, POW_FUNC, \
-    VEC_CONJ, HAS_VEC_TAN, HAS_VEC_ASIN, HAS_VEC_ACOS, HAS_VEC_ATAN, \
+    VEC_SQRT, VEC_SIN, VEC_COS, VEC_TAN, \
+    VEC_ASIN, VEC_ACOS, VEC_ATAN, \
+    VEC_EXP, VEC_LOG, VEC_LOG10, VEC_LOG1P, VEC_LOG2, VEC_EXPM1, \
+    VEC_SINH, VEC_COSH, VEC_TANH, \
+    VEC_ABS, VEC_CEIL, VEC_FLOOR, VEC_ROUND, VEC_TRUNC, \
+    VEC_ACOSH, VEC_ASINH, VEC_ATANH, \
+    VEC_NEGATE, \
+    SQRT_FUNC, SIN_FUNC, COS_FUNC, TAN_FUNC, ASIN_FUNC, ACOS_FUNC, ATAN_FUNC, \
+    EXP_FUNC, LOG_FUNC, LOG10_FUNC, LOG1P_FUNC, LOG2_FUNC, EXPM1_FUNC, \
+    SINH_FUNC, COSH_FUNC, TANH_FUNC, ACOSH_FUNC, ASINH_FUNC, ATANH_FUNC, \
+    CEIL_FUNC, FLOOR_FUNC, ROUND_FUNC, TRUNC_FUNC, FABS_FUNC, POW_FUNC, \
+    VEC_CONJ, HAS_VEC_TAN, HAS_VEC_ASIN, HAS_VEC_ACOS, HAS_VEC_ATAN, HAS_VEC_MATH, \
     VEC_ATAN2, ATAN2_FUNC, HAS_VEC_ATAN2) \
 static void me_eval_##SUFFIX(const me_expr *n) { \
     if (!n || !n->output) return; \
@@ -3616,6 +3625,40 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                             } \
                         } \
                     } \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)exp) { \
+                    if (adata) VEC_EXP(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)log) { \
+                    if (adata) VEC_LOG(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)log10) { \
+                    if (adata) VEC_LOG10(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)log1p_wrapper) { \
+                    if (adata) VEC_LOG1P(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)log2_wrapper) { \
+                    if (adata) VEC_LOG2(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)expm1_wrapper) { \
+                    if (adata) VEC_EXPM1(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)sinh) { \
+                    if (adata) VEC_SINH(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)cosh) { \
+                    if (adata) VEC_COSH(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)tanh) { \
+                    if (adata) VEC_TANH(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)acosh) { \
+                    if (adata) VEC_ACOSH(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)asinh) { \
+                    if (adata) VEC_ASINH(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)atanh) { \
+                    if (adata) VEC_ATANH(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)fabs) { \
+                    if (adata) VEC_ABS(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)ceil) { \
+                    if (adata) VEC_CEIL(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)floor) { \
+                    if (adata) VEC_FLOOR(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)round_wrapper) { \
+                    if (adata) VEC_ROUND(adata, output, n->nitems); \
+                } else if (HAS_VEC_MATH && func_ptr == (void*)trunc_wrapper) { \
+                    if (adata) VEC_TRUNC(adata, output, n->nitems); \
                 } else if (func_ptr == (void*)negate) { \
                     if (adata) VEC_NEGATE(adata, output, n->nitems); \
                 } else if (func_ptr == (void*)imag_wrapper) { \
@@ -3701,17 +3744,34 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sub(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
 #define vec_mul(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
 #define vec_div(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = pow((a)[_i], (b)[_i]); } while(0)
+#define vec_pow(a, b, out, n) vec_pow_dispatch((a), (b), (out), (n))
 #define vec_add_scalar(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
 #define vec_mul_scalar(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
 #define vec_pow_scalar(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = pow((a)[_i], (b)); } while(0)
-#define vec_sqrt(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = sqrt((a)[_i]); } while(0)
+#define vec_sqrt(a, out, n) vec_sqrt_dispatch((a), (out), (n))
 #define vec_sin(a, out, n) vec_sin_dispatch((a), (out), (n))
 #define vec_cos(a, out, n) vec_cos_dispatch((a), (out), (n))
 #define vec_asin(a, out, n) vec_asin_dispatch((a), (out), (n))
 #define vec_acos(a, out, n) vec_acos_dispatch((a), (out), (n))
 #define vec_atan(a, out, n) vec_atan_dispatch((a), (out), (n))
 #define vec_tan(a, out, n) vec_tan_dispatch((a), (out), (n))
+#define vec_exp(a, out, n) vec_exp_dispatch((a), (out), (n))
+#define vec_expm1(a, out, n) vec_expm1_dispatch((a), (out), (n))
+#define vec_log(a, out, n) vec_log_dispatch((a), (out), (n))
+#define vec_log10(a, out, n) vec_log10_dispatch((a), (out), (n))
+#define vec_log1p(a, out, n) vec_log1p_dispatch((a), (out), (n))
+#define vec_log2(a, out, n) vec_log2_dispatch((a), (out), (n))
+#define vec_sinh(a, out, n) vec_sinh_dispatch((a), (out), (n))
+#define vec_cosh(a, out, n) vec_cosh_dispatch((a), (out), (n))
+#define vec_tanh(a, out, n) vec_tanh_dispatch((a), (out), (n))
+#define vec_abs(a, out, n) vec_abs_dispatch((a), (out), (n))
+#define vec_ceil(a, out, n) vec_ceil_dispatch((a), (out), (n))
+#define vec_floor(a, out, n) vec_floor_dispatch((a), (out), (n))
+#define vec_round(a, out, n) vec_round_dispatch((a), (out), (n))
+#define vec_trunc(a, out, n) vec_trunc_dispatch((a), (out), (n))
+#define vec_acosh(a, out, n) vec_acosh_dispatch((a), (out), (n))
+#define vec_asinh(a, out, n) vec_asinh_dispatch((a), (out), (n))
+#define vec_atanh(a, out, n) vec_atanh_dispatch((a), (out), (n))
 #define vec_negate(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 #define vec_copy(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i]; } while(0)
 
@@ -3719,17 +3779,34 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sub_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
 #define vec_mul_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
 #define vec_div_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = powf((a)[_i], (b)[_i]); } while(0)
+#define vec_pow_f32(a, b, out, n) vec_pow_f32_dispatch((a), (b), (out), (n))
 #define vec_add_scalar_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
 #define vec_mul_scalar_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
 #define vec_pow_scalar_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = powf((a)[_i], (b)); } while(0)
-#define vec_sqrt_f32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = sqrtf((a)[_i]); } while(0)
+#define vec_sqrt_f32(a, out, n) vec_sqrt_f32_dispatch((a), (out), (n))
 #define vec_sin_f32(a, out, n) vec_sin_f32_dispatch((a), (out), (n))
 #define vec_cos_f32(a, out, n) vec_cos_f32_dispatch((a), (out), (n))
 #define vec_asin_f32(a, out, n) vec_asin_f32_dispatch((a), (out), (n))
 #define vec_acos_f32(a, out, n) vec_acos_f32_dispatch((a), (out), (n))
 #define vec_atan_f32(a, out, n) vec_atan_f32_dispatch((a), (out), (n))
 #define vec_tan_f32(a, out, n) vec_tan_f32_dispatch((a), (out), (n))
+#define vec_exp_f32(a, out, n) vec_exp_f32_dispatch((a), (out), (n))
+#define vec_expm1_f32(a, out, n) vec_expm1_f32_dispatch((a), (out), (n))
+#define vec_log_f32(a, out, n) vec_log_f32_dispatch((a), (out), (n))
+#define vec_log10_f32(a, out, n) vec_log10_f32_dispatch((a), (out), (n))
+#define vec_log1p_f32(a, out, n) vec_log1p_f32_dispatch((a), (out), (n))
+#define vec_log2_f32(a, out, n) vec_log2_f32_dispatch((a), (out), (n))
+#define vec_sinh_f32(a, out, n) vec_sinh_f32_dispatch((a), (out), (n))
+#define vec_cosh_f32(a, out, n) vec_cosh_f32_dispatch((a), (out), (n))
+#define vec_tanh_f32(a, out, n) vec_tanh_f32_dispatch((a), (out), (n))
+#define vec_abs_f32(a, out, n) vec_abs_f32_dispatch((a), (out), (n))
+#define vec_ceil_f32(a, out, n) vec_ceil_f32_dispatch((a), (out), (n))
+#define vec_floor_f32(a, out, n) vec_floor_f32_dispatch((a), (out), (n))
+#define vec_round_f32(a, out, n) vec_round_f32_dispatch((a), (out), (n))
+#define vec_trunc_f32(a, out, n) vec_trunc_f32_dispatch((a), (out), (n))
+#define vec_acosh_f32(a, out, n) vec_acosh_f32_dispatch((a), (out), (n))
+#define vec_asinh_f32(a, out, n) vec_asinh_f32_dispatch((a), (out), (n))
+#define vec_atanh_f32(a, out, n) vec_atanh_f32_dispatch((a), (out), (n))
 #define vec_negame_f32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
 #define vec_atan2(a, b, out, n) vec_atan2_dispatch((a), (b), (out), (n))
@@ -3888,9 +3965,17 @@ DEFINE_ME_EVAL(f32, float,
                vec_add_f32, vec_sub_f32, vec_mul_f32, vec_div_f32, vec_pow_f32,
                vec_add_scalar_f32, vec_mul_scalar_f32, vec_pow_scalar_f32,
                vec_sqrt_f32, vec_sin_f32_cached, vec_cos_f32_cached, vec_tan_f32,
-               vec_asin_f32, vec_acos_f32, vec_atan_f32, vec_negame_f32,
-               sqrtf, sinf, cosf, tanf, asinf, acosf, atanf, expf, logf, fabsf, powf,
-               vec_copy, 1, 1, 1, 1,
+               vec_asin_f32, vec_acos_f32, vec_atan_f32,
+               vec_exp_f32, vec_log_f32, vec_log10_f32, vec_log1p_f32, vec_log2_f32, vec_expm1_f32,
+               vec_sinh_f32, vec_cosh_f32, vec_tanh_f32,
+               vec_abs_f32, vec_ceil_f32, vec_floor_f32, vec_round_f32, vec_trunc_f32,
+               vec_acosh_f32, vec_asinh_f32, vec_atanh_f32,
+               vec_negame_f32,
+               sqrtf, sinf, cosf, tanf, asinf, acosf, atanf,
+               expf, logf, log10f, log1pf, log2f, expm1f,
+               sinhf, coshf, tanhf, acoshf, asinhf, atanhf,
+               ceilf, floorf, roundf, truncf, fabsf, powf,
+               vec_copy, 1, 1, 1, 1, 1,
                vec_atan2_f32, atan2f, 1)
 
 /* Generate float64 (double) evaluator */
@@ -3898,9 +3983,17 @@ DEFINE_ME_EVAL(f64, double,
                vec_add, vec_sub, vec_mul, vec_div, vec_pow,
                vec_add_scalar, vec_mul_scalar, vec_pow_scalar,
                vec_sqrt, vec_sin_cached, vec_cos_cached, vec_tan,
-               vec_asin, vec_acos, vec_atan, vec_negate,
-               sqrt, sin, cos, tan, asin, acos, atan, exp, log, fabs, pow,
-               vec_copy, 1, 1, 1, 1,
+               vec_asin, vec_acos, vec_atan,
+               vec_exp, vec_log, vec_log10, vec_log1p, vec_log2, vec_expm1,
+               vec_sinh, vec_cosh, vec_tanh,
+               vec_abs, vec_ceil, vec_floor, vec_round, vec_trunc,
+               vec_acosh, vec_asinh, vec_atanh,
+               vec_negate,
+               sqrt, sin, cos, tan, asin, acos, atan,
+               exp, log, log10, log1p, log2, expm1,
+               sinh, cosh, tanh, acosh, asinh, atanh,
+               ceil, floor, round, trunc, fabs, pow,
+               vec_copy, 1, 1, 1, 1, 1,
                vec_atan2, atan2, 1)
 
 /* Generate integer evaluators - sin/cos cast to double and back */
@@ -3908,72 +4001,136 @@ DEFINE_ME_EVAL(i8, int8_t,
                vec_add_i8, vec_sub_i8, vec_mul_i8, vec_div_i8, vec_pow_i8,
                vec_add_scalar_i8, vec_mul_scalar_i8, vec_pow_scalar_i8,
                vec_sqrt_i8, vec_sqrt_i8, vec_sqrt_i8, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_negame_i8,
-               sqrt, sin, cos, tan, asin, acos, atan, exp, log, fabs, pow,
-               vec_conj_noop, 0, 0, 0, 0,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_negame_i8,
+               sqrt, sin, cos, tan, asin, acos, atan,
+               exp, log, log10, log1p, log2, expm1,
+               sinh, cosh, tanh, acosh, asinh, atanh,
+               ceil, floor, round, trunc, fabs, pow,
+               vec_conj_noop, 0, 0, 0, 0, 0,
                vec_add_i8, atan2, 0)
 
 DEFINE_ME_EVAL(i16, int16_t,
                vec_add_i16, vec_sub_i16, vec_mul_i16, vec_div_i16, vec_pow_i16,
                vec_add_scalar_i16, vec_mul_scalar_i16, vec_pow_scalar_i16,
                vec_sqrt_i16, vec_sqrt_i16, vec_sqrt_i16, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_negame_i16,
-               sqrt, sin, cos, tan, asin, acos, atan, exp, log, fabs, pow,
-               vec_conj_noop, 0, 0, 0, 0,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_negame_i16,
+               sqrt, sin, cos, tan, asin, acos, atan,
+               exp, log, log10, log1p, log2, expm1,
+               sinh, cosh, tanh, acosh, asinh, atanh,
+               ceil, floor, round, trunc, fabs, pow,
+               vec_conj_noop, 0, 0, 0, 0, 0,
                vec_add_i16, atan2, 0)
 
 DEFINE_ME_EVAL(i32, int32_t,
                vec_add_i32, vec_sub_i32, vec_mul_i32, vec_div_i32, vec_pow_i32,
                vec_add_scalar_i32, vec_mul_scalar_i32, vec_pow_scalar_i32,
                vec_sqrt_i32, vec_sqrt_i32, vec_sqrt_i32, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_negame_i32,
-               sqrt, sin, cos, tan, asin, acos, atan, exp, log, fabs, pow,
-               vec_conj_noop, 0, 0, 0, 0,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_negame_i32,
+               sqrt, sin, cos, tan, asin, acos, atan,
+               exp, log, log10, log1p, log2, expm1,
+               sinh, cosh, tanh, acosh, asinh, atanh,
+               ceil, floor, round, trunc, fabs, pow,
+               vec_conj_noop, 0, 0, 0, 0, 0,
                vec_add_i32, atan2, 0)
 
 DEFINE_ME_EVAL(i64, int64_t,
                vec_add_i64, vec_sub_i64, vec_mul_i64, vec_div_i64, vec_pow_i64,
                vec_add_scalar_i64, vec_mul_scalar_i64, vec_pow_scalar_i64,
                vec_sqrt_i64, vec_sqrt_i64, vec_sqrt_i64, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_negame_i64,
-               sqrt, sin, cos, tan, asin, acos, atan, exp, log, fabs, pow,
-               vec_conj_noop, 0, 0, 0, 0,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_negame_i64,
+               sqrt, sin, cos, tan, asin, acos, atan,
+               exp, log, log10, log1p, log2, expm1,
+               sinh, cosh, tanh, acosh, asinh, atanh,
+               ceil, floor, round, trunc, fabs, pow,
+               vec_conj_noop, 0, 0, 0, 0, 0,
                vec_add_i64, atan2, 0)
 
 DEFINE_ME_EVAL(u8, uint8_t,
                vec_add_u8, vec_sub_u8, vec_mul_u8, vec_div_u8, vec_pow_u8,
                vec_add_scalar_u8, vec_mul_scalar_u8, vec_pow_scalar_u8,
                vec_sqrt_u8, vec_sqrt_u8, vec_sqrt_u8, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_negame_u8,
-               sqrt, sin, cos, tan, asin, acos, atan, exp, log, fabs, pow,
-               vec_conj_noop, 0, 0, 0, 0,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_negame_u8,
+               sqrt, sin, cos, tan, asin, acos, atan,
+               exp, log, log10, log1p, log2, expm1,
+               sinh, cosh, tanh, acosh, asinh, atanh,
+               ceil, floor, round, trunc, fabs, pow,
+               vec_conj_noop, 0, 0, 0, 0, 0,
                vec_add_u8, atan2, 0)
 
 DEFINE_ME_EVAL(u16, uint16_t,
                vec_add_u16, vec_sub_u16, vec_mul_u16, vec_div_u16, vec_pow_u16,
                vec_add_scalar_u16, vec_mul_scalar_u16, vec_pow_scalar_u16,
                vec_sqrt_u16, vec_sqrt_u16, vec_sqrt_u16, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_negame_u16,
-               sqrt, sin, cos, tan, asin, acos, atan, exp, log, fabs, pow,
-               vec_conj_noop, 0, 0, 0, 0,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_negame_u16,
+               sqrt, sin, cos, tan, asin, acos, atan,
+               exp, log, log10, log1p, log2, expm1,
+               sinh, cosh, tanh, acosh, asinh, atanh,
+               ceil, floor, round, trunc, fabs, pow,
+               vec_conj_noop, 0, 0, 0, 0, 0,
                vec_add_u16, atan2, 0)
 
 DEFINE_ME_EVAL(u32, uint32_t,
                vec_add_u32, vec_sub_u32, vec_mul_u32, vec_div_u32, vec_pow_u32,
                vec_add_scalar_u32, vec_mul_scalar_u32, vec_pow_scalar_u32,
                vec_sqrt_u32, vec_sqrt_u32, vec_sqrt_u32, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_negame_u32,
-               sqrt, sin, cos, tan, asin, acos, atan, exp, log, fabs, pow,
-               vec_conj_noop, 0, 0, 0, 0,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_negame_u32,
+               sqrt, sin, cos, tan, asin, acos, atan,
+               exp, log, log10, log1p, log2, expm1,
+               sinh, cosh, tanh, acosh, asinh, atanh,
+               ceil, floor, round, trunc, fabs, pow,
+               vec_conj_noop, 0, 0, 0, 0, 0,
                vec_add_u32, atan2, 0)
 
 DEFINE_ME_EVAL(u64, uint64_t,
                vec_add_u64, vec_sub_u64, vec_mul_u64, vec_div_u64, vec_pow_u64,
                vec_add_scalar_u64, vec_mul_scalar_u64, vec_pow_scalar_u64,
                vec_sqrt_u64, vec_sqrt_u64, vec_sqrt_u64, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_negame_u64,
-               sqrt, sin, cos, tan, asin, acos, atan, exp, log, fabs, pow,
-               vec_conj_noop, 0, 0, 0, 0,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_negame_u64,
+               sqrt, sin, cos, tan, asin, acos, atan,
+               exp, log, log10, log1p, log2, expm1,
+               sinh, cosh, tanh, acosh, asinh, atanh,
+               ceil, floor, round, trunc, fabs, pow,
+               vec_conj_noop, 0, 0, 0, 0, 0,
                vec_add_u64, atan2, 0)
 
 /* Generate complex evaluators */
@@ -3981,18 +4138,34 @@ DEFINE_ME_EVAL(c64, float _Complex,
                vec_add_c64, vec_sub_c64, vec_mul_c64, vec_div_c64, vec_pow_c64,
                vec_add_scalar_c64, vec_mul_scalar_c64, vec_pow_scalar_c64,
                vec_sqrt_c64, vec_sqrt_c64, vec_sqrt_c64, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_negame_c64,
-               me_csqrtf, me_csqrtf, me_csqrtf, tan, asin, acos, atan, me_cexpf, me_clogf, me_cabsf, me_cpowf,
-               vec_conj_c64, 0, 0, 0, 0,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_negame_c64,
+               me_csqrtf, me_csqrtf, me_csqrtf, tan, asin, acos, atan,
+               me_cexpf, me_clogf, log10, log1p, log2, expm1,
+               sinh, cosh, tanh, acosh, asinh, atanh,
+               ceil, floor, round, trunc, me_cabsf, me_cpowf,
+               vec_conj_c64, 0, 0, 0, 0, 0,
                vec_add_c64, atan2, 0)
 
 DEFINE_ME_EVAL(c128, double _Complex,
                vec_add_c128, vec_sub_c128, vec_mul_c128, vec_div_c128, vec_pow_c128,
                vec_add_scalar_c128, vec_mul_scalar_c128, vec_pow_scalar_c128,
                vec_sqrt_c128, vec_sqrt_c128, vec_sqrt_c128, vec_copy,
-               vec_copy, vec_copy, vec_copy, vec_negame_c128,
-               me_csqrt, me_csqrt, me_csqrt, tan, asin, acos, atan, me_cexp, me_clog, me_cabs, me_cpow,
-               vec_conj_c128, 0, 0, 0, 0,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy, vec_copy, vec_copy,
+               vec_copy, vec_copy, vec_copy,
+               vec_negame_c128,
+               me_csqrt, me_csqrt, me_csqrt, tan, asin, acos, atan,
+               me_cexp, me_clog, log10, log1p, log2, expm1,
+               sinh, cosh, tanh, acosh, asinh, atanh,
+               ceil, floor, round, trunc, me_cabs, me_cpow,
+               vec_conj_c128, 0, 0, 0, 0, 0,
                vec_add_c128, atan2, 0)
 
 /* Public API - dispatches to correct type-specific evaluator */

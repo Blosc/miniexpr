@@ -263,6 +263,310 @@ IVDEP
     }
 }
 
+static void vec_abs_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = fabs(a[i]);
+    }
+}
+
+static void vec_abs_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = fabsf(a[i]);
+    }
+}
+
+static void vec_exp_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = exp(a[i]);
+    }
+}
+
+static void vec_exp_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = expf(a[i]);
+    }
+}
+
+static void vec_expm1_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = expm1(a[i]);
+    }
+}
+
+static void vec_expm1_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = expm1f(a[i]);
+    }
+}
+
+static void vec_log_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = log(a[i]);
+    }
+}
+
+static void vec_log_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = logf(a[i]);
+    }
+}
+
+static void vec_log10_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = log10(a[i]);
+    }
+}
+
+static void vec_log10_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = log10f(a[i]);
+    }
+}
+
+static void vec_log1p_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = log1p(a[i]);
+    }
+}
+
+static void vec_log1p_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = log1pf(a[i]);
+    }
+}
+
+static void vec_log2_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = log2(a[i]);
+    }
+}
+
+static void vec_log2_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = log2f(a[i]);
+    }
+}
+
+static void vec_sqrt_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = sqrt(a[i]);
+    }
+}
+
+static void vec_sqrt_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = sqrtf(a[i]);
+    }
+}
+
+static void vec_sinh_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = sinh(a[i]);
+    }
+}
+
+static void vec_sinh_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = sinhf(a[i]);
+    }
+}
+
+static void vec_cosh_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = cosh(a[i]);
+    }
+}
+
+static void vec_cosh_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = coshf(a[i]);
+    }
+}
+
+static void vec_tanh_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = tanh(a[i]);
+    }
+}
+
+static void vec_tanh_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = tanhf(a[i]);
+    }
+}
+
+static void vec_acosh_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = acosh(a[i]);
+    }
+}
+
+static void vec_acosh_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = acoshf(a[i]);
+    }
+}
+
+static void vec_asinh_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = asinh(a[i]);
+    }
+}
+
+static void vec_asinh_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = asinhf(a[i]);
+    }
+}
+
+static void vec_atanh_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = atanh(a[i]);
+    }
+}
+
+static void vec_atanh_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = atanhf(a[i]);
+    }
+}
+
+static void vec_ceil_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = ceil(a[i]);
+    }
+}
+
+static void vec_ceil_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = ceilf(a[i]);
+    }
+}
+
+static void vec_floor_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = floor(a[i]);
+    }
+}
+
+static void vec_floor_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = floorf(a[i]);
+    }
+}
+
+static void vec_round_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = round(a[i]);
+    }
+}
+
+static void vec_round_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = roundf(a[i]);
+    }
+}
+
+static void vec_trunc_scalar(const double* a, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = trunc(a[i]);
+    }
+}
+
+static void vec_trunc_f32_scalar(const float* a, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = truncf(a[i]);
+    }
+}
+
+static void vec_pow_scalar(const double* a, const double* b, double* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = pow(a[i], b[i]);
+    }
+}
+
+static void vec_pow_f32_scalar(const float* a, const float* b, float* out, int n) {
+    int i;
+IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = powf(a[i], b[i]);
+    }
+}
+
 static void vec_sincos_scalar(const double* a, double* sin_out, double* cos_out, int n) {
     int i;
 IVDEP
@@ -495,6 +799,502 @@ static ME_AVX2_TARGET void vec_tan_f32_avx2(const float* a, float* out, int n) {
         out[i] = tanf(a[i]);
     }
 }
+
+static ME_AVX2_TARGET void vec_abs_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xfabs(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fabs(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_abs_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xfabsf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fabsf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_exp_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xexp(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = exp(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_exp_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xexpf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = expf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_expm1_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xexpm1(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = expm1(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_expm1_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xexpm1f(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = expm1f(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_log_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = me_simd_use_u35 ? xlog(v) : xlog_u1(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = log(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_log_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = me_simd_use_u35 ? xlogf(v) : xlogf_u1(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = logf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_log10_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xlog10(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = log10(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_log10_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xlog10f(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = log10f(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_log1p_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xlog1p(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = log1p(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_log1p_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xlog1pf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = log1pf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_log2_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xlog2(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = log2(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_log2_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xlog2f(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = log2f(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_sqrt_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xsqrt(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = sqrt(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_sqrt_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xsqrtf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = sqrtf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_sinh_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xsinh(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = sinh(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_sinh_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xsinhf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = sinhf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_cosh_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xcosh(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = cosh(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_cosh_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xcoshf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = coshf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_tanh_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xtanh(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = tanh(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_tanh_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xtanhf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = tanhf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_acosh_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xacosh(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = acosh(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_acosh_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xacoshf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = acoshf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_asinh_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xasinh(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = asinh(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_asinh_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xasinhf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = asinhf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_atanh_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xatanh(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = atanh(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_atanh_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xatanhf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = atanhf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_ceil_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xceil(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = ceil(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_ceil_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xceilf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = ceilf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_floor_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xfloor(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = floor(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_floor_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xfloorf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = floorf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_round_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xround(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = round(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_round_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xroundf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = roundf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_trunc_avx2(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xtrunc(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = trunc(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_trunc_f32_avx2(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xtruncf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = truncf(a[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_pow_avx2(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble r = xpow(va, vb);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = pow(a[i], b[i]);
+    }
+}
+
+static ME_AVX2_TARGET void vec_pow_f32_avx2(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~7;
+    for (; i < limit; i += 8) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat r = xpowf(va, vb);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = powf(a[i], b[i]);
+    }
+}
 #endif
 
 #if ME_ENABLE_SLEEF_SIMD && (defined(__aarch64__) || defined(_M_ARM64))
@@ -711,6 +1511,502 @@ static void vec_tan_f32_advsimd(const float* a, float* out, int n) {
         out[i] = tanf(a[i]);
     }
 }
+
+static void vec_abs_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xfabs(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fabs(a[i]);
+    }
+}
+
+static void vec_abs_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xfabsf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = fabsf(a[i]);
+    }
+}
+
+static void vec_exp_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xexp(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = exp(a[i]);
+    }
+}
+
+static void vec_exp_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xexpf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = expf(a[i]);
+    }
+}
+
+static void vec_expm1_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xexpm1(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = expm1(a[i]);
+    }
+}
+
+static void vec_expm1_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xexpm1f(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = expm1f(a[i]);
+    }
+}
+
+static void vec_log_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = me_simd_use_u35 ? xlog(v) : xlog_u1(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = log(a[i]);
+    }
+}
+
+static void vec_log_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = me_simd_use_u35 ? xlogf(v) : xlogf_u1(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = logf(a[i]);
+    }
+}
+
+static void vec_log10_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xlog10(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = log10(a[i]);
+    }
+}
+
+static void vec_log10_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xlog10f(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = log10f(a[i]);
+    }
+}
+
+static void vec_log1p_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xlog1p(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = log1p(a[i]);
+    }
+}
+
+static void vec_log1p_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xlog1pf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = log1pf(a[i]);
+    }
+}
+
+static void vec_log2_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xlog2(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = log2(a[i]);
+    }
+}
+
+static void vec_log2_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xlog2f(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = log2f(a[i]);
+    }
+}
+
+static void vec_sqrt_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xsqrt(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = sqrt(a[i]);
+    }
+}
+
+static void vec_sqrt_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xsqrtf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = sqrtf(a[i]);
+    }
+}
+
+static void vec_sinh_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xsinh(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = sinh(a[i]);
+    }
+}
+
+static void vec_sinh_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xsinhf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = sinhf(a[i]);
+    }
+}
+
+static void vec_cosh_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xcosh(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = cosh(a[i]);
+    }
+}
+
+static void vec_cosh_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xcoshf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = coshf(a[i]);
+    }
+}
+
+static void vec_tanh_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xtanh(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = tanh(a[i]);
+    }
+}
+
+static void vec_tanh_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xtanhf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = tanhf(a[i]);
+    }
+}
+
+static void vec_acosh_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xacosh(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = acosh(a[i]);
+    }
+}
+
+static void vec_acosh_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xacoshf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = acoshf(a[i]);
+    }
+}
+
+static void vec_asinh_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xasinh(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = asinh(a[i]);
+    }
+}
+
+static void vec_asinh_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xasinhf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = asinhf(a[i]);
+    }
+}
+
+static void vec_atanh_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xatanh(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = atanh(a[i]);
+    }
+}
+
+static void vec_atanh_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xatanhf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = atanhf(a[i]);
+    }
+}
+
+static void vec_ceil_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xceil(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = ceil(a[i]);
+    }
+}
+
+static void vec_ceil_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xceilf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = ceilf(a[i]);
+    }
+}
+
+static void vec_floor_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xfloor(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = floor(a[i]);
+    }
+}
+
+static void vec_floor_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xfloorf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = floorf(a[i]);
+    }
+}
+
+static void vec_round_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xround(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = round(a[i]);
+    }
+}
+
+static void vec_round_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xroundf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = roundf(a[i]);
+    }
+}
+
+static void vec_trunc_advsimd(const double* a, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble v = vloadu_vd_p(a + i);
+        vdouble r = xtrunc(v);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = trunc(a[i]);
+    }
+}
+
+static void vec_trunc_f32_advsimd(const float* a, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat v = vloadu_vf_p(a + i);
+        vfloat r = xtruncf(v);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = truncf(a[i]);
+    }
+}
+
+static void vec_pow_advsimd(const double* a, const double* b, double* out, int n) {
+    int i = 0;
+    const int limit = n & ~1;
+    for (; i < limit; i += 2) {
+        vdouble va = vloadu_vd_p(a + i);
+        vdouble vb = vloadu_vd_p(b + i);
+        vdouble r = xpow(va, vb);
+        vstoreu_v_p_vd(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = pow(a[i], b[i]);
+    }
+}
+
+static void vec_pow_f32_advsimd(const float* a, const float* b, float* out, int n) {
+    int i = 0;
+    const int limit = n & ~3;
+    for (; i < limit; i += 4) {
+        vfloat va = vloadu_vf_p(a + i);
+        vfloat vb = vloadu_vf_p(b + i);
+        vfloat r = xpowf(va, vb);
+        vstoreu_v_p_vf(out + i, r);
+    }
+    for (; i < n; i++) {
+        out[i] = powf(a[i], b[i]);
+    }
+}
 #endif
 
 static me_vec_unary_f64 vec_sin_impl = vec_sin_scalar;
@@ -720,6 +2016,25 @@ static me_vec_unary_f64 vec_asin_impl = vec_asin_scalar;
 static me_vec_unary_f64 vec_acos_impl = vec_acos_scalar;
 static me_vec_unary_f64 vec_atan_impl = vec_atan_scalar;
 static me_vec_binary_f64 vec_atan2_impl = vec_atan2_scalar;
+static me_vec_unary_f64 vec_abs_impl = vec_abs_scalar;
+static me_vec_unary_f64 vec_exp_impl = vec_exp_scalar;
+static me_vec_unary_f64 vec_expm1_impl = vec_expm1_scalar;
+static me_vec_unary_f64 vec_log_impl = vec_log_scalar;
+static me_vec_unary_f64 vec_log10_impl = vec_log10_scalar;
+static me_vec_unary_f64 vec_log1p_impl = vec_log1p_scalar;
+static me_vec_unary_f64 vec_log2_impl = vec_log2_scalar;
+static me_vec_unary_f64 vec_sqrt_impl = vec_sqrt_scalar;
+static me_vec_unary_f64 vec_sinh_impl = vec_sinh_scalar;
+static me_vec_unary_f64 vec_cosh_impl = vec_cosh_scalar;
+static me_vec_unary_f64 vec_tanh_impl = vec_tanh_scalar;
+static me_vec_unary_f64 vec_acosh_impl = vec_acosh_scalar;
+static me_vec_unary_f64 vec_asinh_impl = vec_asinh_scalar;
+static me_vec_unary_f64 vec_atanh_impl = vec_atanh_scalar;
+static me_vec_unary_f64 vec_ceil_impl = vec_ceil_scalar;
+static me_vec_unary_f64 vec_floor_impl = vec_floor_scalar;
+static me_vec_unary_f64 vec_round_impl = vec_round_scalar;
+static me_vec_unary_f64 vec_trunc_impl = vec_trunc_scalar;
+static me_vec_binary_f64 vec_pow_impl = vec_pow_scalar;
 static me_vec_unary_f32 vec_sin_f32_impl = vec_sin_f32_scalar;
 static me_vec_unary_f32 vec_cos_f32_impl = vec_cos_f32_scalar;
 static me_vec_unary_f32 vec_tan_f32_impl = vec_tan_f32_scalar;
@@ -727,6 +2042,25 @@ static me_vec_unary_f32 vec_asin_f32_impl = vec_asin_f32_scalar;
 static me_vec_unary_f32 vec_acos_f32_impl = vec_acos_f32_scalar;
 static me_vec_unary_f32 vec_atan_f32_impl = vec_atan_f32_scalar;
 static me_vec_binary_f32 vec_atan2_f32_impl = vec_atan2_f32_scalar;
+static me_vec_unary_f32 vec_abs_f32_impl = vec_abs_f32_scalar;
+static me_vec_unary_f32 vec_exp_f32_impl = vec_exp_f32_scalar;
+static me_vec_unary_f32 vec_expm1_f32_impl = vec_expm1_f32_scalar;
+static me_vec_unary_f32 vec_log_f32_impl = vec_log_f32_scalar;
+static me_vec_unary_f32 vec_log10_f32_impl = vec_log10_f32_scalar;
+static me_vec_unary_f32 vec_log1p_f32_impl = vec_log1p_f32_scalar;
+static me_vec_unary_f32 vec_log2_f32_impl = vec_log2_f32_scalar;
+static me_vec_unary_f32 vec_sqrt_f32_impl = vec_sqrt_f32_scalar;
+static me_vec_unary_f32 vec_sinh_f32_impl = vec_sinh_f32_scalar;
+static me_vec_unary_f32 vec_cosh_f32_impl = vec_cosh_f32_scalar;
+static me_vec_unary_f32 vec_tanh_f32_impl = vec_tanh_f32_scalar;
+static me_vec_unary_f32 vec_acosh_f32_impl = vec_acosh_f32_scalar;
+static me_vec_unary_f32 vec_asinh_f32_impl = vec_asinh_f32_scalar;
+static me_vec_unary_f32 vec_atanh_f32_impl = vec_atanh_f32_scalar;
+static me_vec_unary_f32 vec_ceil_f32_impl = vec_ceil_f32_scalar;
+static me_vec_unary_f32 vec_floor_f32_impl = vec_floor_f32_scalar;
+static me_vec_unary_f32 vec_round_f32_impl = vec_round_f32_scalar;
+static me_vec_unary_f32 vec_trunc_f32_impl = vec_trunc_f32_scalar;
+static me_vec_binary_f32 vec_pow_f32_impl = vec_pow_f32_scalar;
 static me_vec_sincos_f64 vec_sincos_impl = vec_sincos_scalar;
 static me_vec_sincos_f32 vec_sincos_f32_impl = vec_sincos_f32_scalar;
 static int me_simd_initialized = 0;
@@ -928,6 +2262,25 @@ static void me_init_simd(void) {
         vec_acos_impl = vec_acos_scalar;
         vec_atan_impl = vec_atan_scalar;
         vec_atan2_impl = vec_atan2_scalar;
+        vec_abs_impl = vec_abs_scalar;
+        vec_exp_impl = vec_exp_scalar;
+        vec_expm1_impl = vec_expm1_scalar;
+        vec_log_impl = vec_log_scalar;
+        vec_log10_impl = vec_log10_scalar;
+        vec_log1p_impl = vec_log1p_scalar;
+        vec_log2_impl = vec_log2_scalar;
+        vec_sqrt_impl = vec_sqrt_scalar;
+        vec_sinh_impl = vec_sinh_scalar;
+        vec_cosh_impl = vec_cosh_scalar;
+        vec_tanh_impl = vec_tanh_scalar;
+        vec_acosh_impl = vec_acosh_scalar;
+        vec_asinh_impl = vec_asinh_scalar;
+        vec_atanh_impl = vec_atanh_scalar;
+        vec_ceil_impl = vec_ceil_scalar;
+        vec_floor_impl = vec_floor_scalar;
+        vec_round_impl = vec_round_scalar;
+        vec_trunc_impl = vec_trunc_scalar;
+        vec_pow_impl = vec_pow_scalar;
         vec_sin_f32_impl = vec_sin_f32_scalar;
         vec_cos_f32_impl = vec_cos_f32_scalar;
         vec_tan_f32_impl = vec_tan_f32_scalar;
@@ -935,6 +2288,25 @@ static void me_init_simd(void) {
         vec_acos_f32_impl = vec_acos_f32_scalar;
         vec_atan_f32_impl = vec_atan_f32_scalar;
         vec_atan2_f32_impl = vec_atan2_f32_scalar;
+        vec_abs_f32_impl = vec_abs_f32_scalar;
+        vec_exp_f32_impl = vec_exp_f32_scalar;
+        vec_expm1_f32_impl = vec_expm1_f32_scalar;
+        vec_log_f32_impl = vec_log_f32_scalar;
+        vec_log10_f32_impl = vec_log10_f32_scalar;
+        vec_log1p_f32_impl = vec_log1p_f32_scalar;
+        vec_log2_f32_impl = vec_log2_f32_scalar;
+        vec_sqrt_f32_impl = vec_sqrt_f32_scalar;
+        vec_sinh_f32_impl = vec_sinh_f32_scalar;
+        vec_cosh_f32_impl = vec_cosh_f32_scalar;
+        vec_tanh_f32_impl = vec_tanh_f32_scalar;
+        vec_acosh_f32_impl = vec_acosh_f32_scalar;
+        vec_asinh_f32_impl = vec_asinh_f32_scalar;
+        vec_atanh_f32_impl = vec_atanh_f32_scalar;
+        vec_ceil_f32_impl = vec_ceil_f32_scalar;
+        vec_floor_f32_impl = vec_floor_f32_scalar;
+        vec_round_f32_impl = vec_round_f32_scalar;
+        vec_trunc_f32_impl = vec_trunc_f32_scalar;
+        vec_pow_f32_impl = vec_pow_f32_scalar;
         vec_sincos_impl = vec_sincos_scalar;
         vec_sincos_f32_impl = vec_sincos_f32_scalar;
         me_simd_backend = "scalar";
@@ -951,6 +2323,25 @@ static void me_init_simd(void) {
         vec_acos_impl = vec_acos_avx2;
         vec_atan_impl = vec_atan_avx2;
         vec_atan2_impl = vec_atan2_avx2;
+        vec_abs_impl = vec_abs_avx2;
+        vec_exp_impl = vec_exp_avx2;
+        vec_expm1_impl = vec_expm1_avx2;
+        vec_log_impl = vec_log_avx2;
+        vec_log10_impl = vec_log10_avx2;
+        vec_log1p_impl = vec_log1p_avx2;
+        vec_log2_impl = vec_log2_avx2;
+        vec_sqrt_impl = vec_sqrt_avx2;
+        vec_sinh_impl = vec_sinh_avx2;
+        vec_cosh_impl = vec_cosh_avx2;
+        vec_tanh_impl = vec_tanh_avx2;
+        vec_acosh_impl = vec_acosh_avx2;
+        vec_asinh_impl = vec_asinh_avx2;
+        vec_atanh_impl = vec_atanh_avx2;
+        vec_ceil_impl = vec_ceil_avx2;
+        vec_floor_impl = vec_floor_avx2;
+        vec_round_impl = vec_round_avx2;
+        vec_trunc_impl = vec_trunc_avx2;
+        vec_pow_impl = vec_pow_avx2;
         vec_sin_f32_impl = vec_sin_f32_avx2;
         vec_cos_f32_impl = vec_cos_f32_avx2;
         vec_tan_f32_impl = vec_tan_f32_avx2;
@@ -958,6 +2349,25 @@ static void me_init_simd(void) {
         vec_acos_f32_impl = vec_acos_f32_avx2;
         vec_atan_f32_impl = vec_atan_f32_avx2;
         vec_atan2_f32_impl = vec_atan2_f32_avx2;
+        vec_abs_f32_impl = vec_abs_f32_avx2;
+        vec_exp_f32_impl = vec_exp_f32_avx2;
+        vec_expm1_f32_impl = vec_expm1_f32_avx2;
+        vec_log_f32_impl = vec_log_f32_avx2;
+        vec_log10_f32_impl = vec_log10_f32_avx2;
+        vec_log1p_f32_impl = vec_log1p_f32_avx2;
+        vec_log2_f32_impl = vec_log2_f32_avx2;
+        vec_sqrt_f32_impl = vec_sqrt_f32_avx2;
+        vec_sinh_f32_impl = vec_sinh_f32_avx2;
+        vec_cosh_f32_impl = vec_cosh_f32_avx2;
+        vec_tanh_f32_impl = vec_tanh_f32_avx2;
+        vec_acosh_f32_impl = vec_acosh_f32_avx2;
+        vec_asinh_f32_impl = vec_asinh_f32_avx2;
+        vec_atanh_f32_impl = vec_atanh_f32_avx2;
+        vec_ceil_f32_impl = vec_ceil_f32_avx2;
+        vec_floor_f32_impl = vec_floor_f32_avx2;
+        vec_round_f32_impl = vec_round_f32_avx2;
+        vec_trunc_f32_impl = vec_trunc_f32_avx2;
+        vec_pow_f32_impl = vec_pow_f32_avx2;
         vec_sincos_impl = vec_sincos_avx2;
         vec_sincos_f32_impl = vec_sincos_f32_avx2;
         me_simd_backend = me_simd_use_u35 ? "avx2-u35" : "avx2-u10";
@@ -974,6 +2384,25 @@ static void me_init_simd(void) {
         vec_acos_impl = vec_acos_advsimd;
         vec_atan_impl = vec_atan_advsimd;
         vec_atan2_impl = vec_atan2_advsimd;
+        vec_abs_impl = vec_abs_advsimd;
+        vec_exp_impl = vec_exp_advsimd;
+        vec_expm1_impl = vec_expm1_advsimd;
+        vec_log_impl = vec_log_advsimd;
+        vec_log10_impl = vec_log10_advsimd;
+        vec_log1p_impl = vec_log1p_advsimd;
+        vec_log2_impl = vec_log2_advsimd;
+        vec_sqrt_impl = vec_sqrt_advsimd;
+        vec_sinh_impl = vec_sinh_advsimd;
+        vec_cosh_impl = vec_cosh_advsimd;
+        vec_tanh_impl = vec_tanh_advsimd;
+        vec_acosh_impl = vec_acosh_advsimd;
+        vec_asinh_impl = vec_asinh_advsimd;
+        vec_atanh_impl = vec_atanh_advsimd;
+        vec_ceil_impl = vec_ceil_advsimd;
+        vec_floor_impl = vec_floor_advsimd;
+        vec_round_impl = vec_round_advsimd;
+        vec_trunc_impl = vec_trunc_advsimd;
+        vec_pow_impl = vec_pow_advsimd;
         vec_sin_f32_impl = vec_sin_f32_advsimd;
         vec_cos_f32_impl = vec_cos_f32_advsimd;
         vec_tan_f32_impl = vec_tan_f32_advsimd;
@@ -981,6 +2410,25 @@ static void me_init_simd(void) {
         vec_acos_f32_impl = vec_acos_f32_advsimd;
         vec_atan_f32_impl = vec_atan_f32_advsimd;
         vec_atan2_f32_impl = vec_atan2_f32_advsimd;
+        vec_abs_f32_impl = vec_abs_f32_advsimd;
+        vec_exp_f32_impl = vec_exp_f32_advsimd;
+        vec_expm1_f32_impl = vec_expm1_f32_advsimd;
+        vec_log_f32_impl = vec_log_f32_advsimd;
+        vec_log10_f32_impl = vec_log10_f32_advsimd;
+        vec_log1p_f32_impl = vec_log1p_f32_advsimd;
+        vec_log2_f32_impl = vec_log2_f32_advsimd;
+        vec_sqrt_f32_impl = vec_sqrt_f32_advsimd;
+        vec_sinh_f32_impl = vec_sinh_f32_advsimd;
+        vec_cosh_f32_impl = vec_cosh_f32_advsimd;
+        vec_tanh_f32_impl = vec_tanh_f32_advsimd;
+        vec_acosh_f32_impl = vec_acosh_f32_advsimd;
+        vec_asinh_f32_impl = vec_asinh_f32_advsimd;
+        vec_atanh_f32_impl = vec_atanh_f32_advsimd;
+        vec_ceil_f32_impl = vec_ceil_f32_advsimd;
+        vec_floor_f32_impl = vec_floor_f32_advsimd;
+        vec_round_f32_impl = vec_round_f32_advsimd;
+        vec_trunc_f32_impl = vec_trunc_f32_advsimd;
+        vec_pow_f32_impl = vec_pow_f32_advsimd;
         vec_sincos_impl = vec_sincos_advsimd;
         vec_sincos_f32_impl = vec_sincos_f32_advsimd;
         me_simd_backend = me_simd_use_u35 ? "advsimd-u35" : "advsimd-u10";
@@ -1062,6 +2510,196 @@ void vec_atan2_f32_dispatch(const float* a, const float* b, float* out, int n) {
     vec_atan2_f32_impl(a, b, out, n);
 }
 
+void vec_abs_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_abs_impl(a, out, n);
+}
+
+void vec_exp_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_exp_impl(a, out, n);
+}
+
+void vec_expm1_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_expm1_impl(a, out, n);
+}
+
+void vec_log_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_log_impl(a, out, n);
+}
+
+void vec_log10_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_log10_impl(a, out, n);
+}
+
+void vec_log1p_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_log1p_impl(a, out, n);
+}
+
+void vec_log2_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_log2_impl(a, out, n);
+}
+
+void vec_sqrt_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_sqrt_impl(a, out, n);
+}
+
+void vec_sinh_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_sinh_impl(a, out, n);
+}
+
+void vec_cosh_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_cosh_impl(a, out, n);
+}
+
+void vec_tanh_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_tanh_impl(a, out, n);
+}
+
+void vec_acosh_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_acosh_impl(a, out, n);
+}
+
+void vec_asinh_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_asinh_impl(a, out, n);
+}
+
+void vec_atanh_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_atanh_impl(a, out, n);
+}
+
+void vec_ceil_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_ceil_impl(a, out, n);
+}
+
+void vec_floor_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_floor_impl(a, out, n);
+}
+
+void vec_round_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_round_impl(a, out, n);
+}
+
+void vec_trunc_dispatch(const double* a, double* out, int n) {
+    me_init_simd();
+    vec_trunc_impl(a, out, n);
+}
+
+void vec_pow_dispatch(const double* a, const double* b, double* out, int n) {
+    me_init_simd();
+    vec_pow_impl(a, b, out, n);
+}
+
+void vec_abs_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_abs_f32_impl(a, out, n);
+}
+
+void vec_exp_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_exp_f32_impl(a, out, n);
+}
+
+void vec_expm1_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_expm1_f32_impl(a, out, n);
+}
+
+void vec_log_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_log_f32_impl(a, out, n);
+}
+
+void vec_log10_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_log10_f32_impl(a, out, n);
+}
+
+void vec_log1p_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_log1p_f32_impl(a, out, n);
+}
+
+void vec_log2_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_log2_f32_impl(a, out, n);
+}
+
+void vec_sqrt_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_sqrt_f32_impl(a, out, n);
+}
+
+void vec_sinh_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_sinh_f32_impl(a, out, n);
+}
+
+void vec_cosh_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_cosh_f32_impl(a, out, n);
+}
+
+void vec_tanh_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_tanh_f32_impl(a, out, n);
+}
+
+void vec_acosh_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_acosh_f32_impl(a, out, n);
+}
+
+void vec_asinh_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_asinh_f32_impl(a, out, n);
+}
+
+void vec_atanh_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_atanh_f32_impl(a, out, n);
+}
+
+void vec_ceil_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_ceil_f32_impl(a, out, n);
+}
+
+void vec_floor_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_floor_f32_impl(a, out, n);
+}
+
+void vec_round_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_round_f32_impl(a, out, n);
+}
+
+void vec_trunc_f32_dispatch(const float* a, float* out, int n) {
+    me_init_simd();
+    vec_trunc_f32_impl(a, out, n);
+}
+
+void vec_pow_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    me_init_simd();
+    vec_pow_f32_impl(a, b, out, n);
+}
+
 void me_disable_simd(int disabled) {
     if (!disabled) {
         me_simd_enabled = 1;
@@ -1073,9 +2711,55 @@ void me_disable_simd(int disabled) {
         vec_sin_impl = vec_sin_scalar;
         vec_cos_impl = vec_cos_scalar;
         vec_tan_impl = vec_tan_scalar;
+        vec_asin_impl = vec_asin_scalar;
+        vec_acos_impl = vec_acos_scalar;
+        vec_atan_impl = vec_atan_scalar;
+        vec_atan2_impl = vec_atan2_scalar;
+        vec_abs_impl = vec_abs_scalar;
+        vec_exp_impl = vec_exp_scalar;
+        vec_expm1_impl = vec_expm1_scalar;
+        vec_log_impl = vec_log_scalar;
+        vec_log10_impl = vec_log10_scalar;
+        vec_log1p_impl = vec_log1p_scalar;
+        vec_log2_impl = vec_log2_scalar;
+        vec_sqrt_impl = vec_sqrt_scalar;
+        vec_sinh_impl = vec_sinh_scalar;
+        vec_cosh_impl = vec_cosh_scalar;
+        vec_tanh_impl = vec_tanh_scalar;
+        vec_acosh_impl = vec_acosh_scalar;
+        vec_asinh_impl = vec_asinh_scalar;
+        vec_atanh_impl = vec_atanh_scalar;
+        vec_ceil_impl = vec_ceil_scalar;
+        vec_floor_impl = vec_floor_scalar;
+        vec_round_impl = vec_round_scalar;
+        vec_trunc_impl = vec_trunc_scalar;
+        vec_pow_impl = vec_pow_scalar;
         vec_sin_f32_impl = vec_sin_f32_scalar;
         vec_cos_f32_impl = vec_cos_f32_scalar;
         vec_tan_f32_impl = vec_tan_f32_scalar;
+        vec_asin_f32_impl = vec_asin_f32_scalar;
+        vec_acos_f32_impl = vec_acos_f32_scalar;
+        vec_atan_f32_impl = vec_atan_f32_scalar;
+        vec_atan2_f32_impl = vec_atan2_f32_scalar;
+        vec_abs_f32_impl = vec_abs_f32_scalar;
+        vec_exp_f32_impl = vec_exp_f32_scalar;
+        vec_expm1_f32_impl = vec_expm1_f32_scalar;
+        vec_log_f32_impl = vec_log_f32_scalar;
+        vec_log10_f32_impl = vec_log10_f32_scalar;
+        vec_log1p_f32_impl = vec_log1p_f32_scalar;
+        vec_log2_f32_impl = vec_log2_f32_scalar;
+        vec_sqrt_f32_impl = vec_sqrt_f32_scalar;
+        vec_sinh_f32_impl = vec_sinh_f32_scalar;
+        vec_cosh_f32_impl = vec_cosh_f32_scalar;
+        vec_tanh_f32_impl = vec_tanh_f32_scalar;
+        vec_acosh_f32_impl = vec_acosh_f32_scalar;
+        vec_asinh_f32_impl = vec_asinh_f32_scalar;
+        vec_atanh_f32_impl = vec_atanh_f32_scalar;
+        vec_ceil_f32_impl = vec_ceil_f32_scalar;
+        vec_floor_f32_impl = vec_floor_f32_scalar;
+        vec_round_f32_impl = vec_round_f32_scalar;
+        vec_trunc_f32_impl = vec_trunc_f32_scalar;
+        vec_pow_f32_impl = vec_pow_f32_scalar;
         vec_sincos_impl = vec_sincos_scalar;
         vec_sincos_f32_impl = vec_sincos_f32_scalar;
         me_simd_backend = "scalar";
