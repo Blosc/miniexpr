@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "miniexpr.h"
 
 static int nearly_equal(double a, double b, double tol) {
@@ -551,6 +552,424 @@ static int run_ternary_pair_f32(const char *name, float (*func)(float, float, fl
     return failures;
 }
 
+static int run_binary_const_f64(const char *expr_text, double (*func)(double, double),
+                                const double *a, double b, double *out, int n,
+                                bool simd_enabled, double tol) {
+    me_variable vars[] = {{"a", ME_FLOAT64, (void*)a}};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    if (me_compile(expr_text, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("Failed to compile %s (err=%d)\n", expr_text, err);
+        return 1;
+    }
+
+    const void *var_ptrs[] = {a};
+    me_disable_simd(!simd_enabled);
+    int eval_rc = me_eval(expr, var_ptrs, 1, out, n);
+    if (eval_rc != ME_EVAL_SUCCESS) {
+        printf("%s eval failed (err=%d)\n", expr_text, eval_rc);
+        me_free(expr);
+        return 1;
+    }
+
+    int failures = 0;
+    for (int i = 0; i < n; i++) {
+        double expected = func(a[i], b);
+        if (!nearly_equal(out[i], expected, tol)) {
+            if (failures < 5) {
+                printf("%s mismatch at %d: got %.15f expected %.15f\n",
+                       expr_text, i, out[i], expected);
+            }
+            failures++;
+        }
+    }
+
+    me_free(expr);
+    me_disable_simd(false);
+    return failures;
+}
+
+static int run_binary_const_f32(const char *expr_text, float (*func)(float, float),
+                                const float *a, float b, float *out, int n,
+                                bool simd_enabled, float tol) {
+    me_variable vars[] = {{"a", ME_FLOAT32, (void*)a}};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    if (me_compile(expr_text, vars, 1, ME_FLOAT32, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("Failed to compile %s f32 (err=%d)\n", expr_text, err);
+        return 1;
+    }
+
+    const void *var_ptrs[] = {a};
+    me_disable_simd(!simd_enabled);
+    int eval_rc = me_eval(expr, var_ptrs, 1, out, n);
+    if (eval_rc != ME_EVAL_SUCCESS) {
+        printf("%s f32 eval failed (err=%d)\n", expr_text, eval_rc);
+        me_free(expr);
+        return 1;
+    }
+
+    int failures = 0;
+    for (int i = 0; i < n; i++) {
+        float expected = func(a[i], b);
+        if (!nearly_equal_f(out[i], expected, tol)) {
+            if (failures < 5) {
+                printf("%s f32 mismatch at %d: got %.7f expected %.7f\n",
+                       expr_text, i, out[i], expected);
+            }
+            failures++;
+        }
+    }
+
+    me_free(expr);
+    me_disable_simd(false);
+    return failures;
+}
+
+static int run_ternary_const_f64(const char *expr_text, double (*func)(double, double, double),
+                                 const double *a, double b, double c, double *out, int n,
+                                 bool simd_enabled, double tol) {
+    me_variable vars[] = {{"a", ME_FLOAT64, (void*)a}};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    if (me_compile(expr_text, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("Failed to compile %s (err=%d)\n", expr_text, err);
+        return 1;
+    }
+
+    const void *var_ptrs[] = {a};
+    me_disable_simd(!simd_enabled);
+    int eval_rc = me_eval(expr, var_ptrs, 1, out, n);
+    if (eval_rc != ME_EVAL_SUCCESS) {
+        printf("%s eval failed (err=%d)\n", expr_text, eval_rc);
+        me_free(expr);
+        return 1;
+    }
+
+    int failures = 0;
+    for (int i = 0; i < n; i++) {
+        double expected = func(a[i], b, c);
+        if (!nearly_equal(out[i], expected, tol)) {
+            if (failures < 5) {
+                printf("%s mismatch at %d: got %.15f expected %.15f\n",
+                       expr_text, i, out[i], expected);
+            }
+            failures++;
+        }
+    }
+
+    me_free(expr);
+    me_disable_simd(false);
+    return failures;
+}
+
+static int run_ternary_const_f32(const char *expr_text, float (*func)(float, float, float),
+                                 const float *a, float b, float c, float *out, int n,
+                                 bool simd_enabled, float tol) {
+    me_variable vars[] = {{"a", ME_FLOAT32, (void*)a}};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    if (me_compile(expr_text, vars, 1, ME_FLOAT32, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("Failed to compile %s f32 (err=%d)\n", expr_text, err);
+        return 1;
+    }
+
+    const void *var_ptrs[] = {a};
+    me_disable_simd(!simd_enabled);
+    int eval_rc = me_eval(expr, var_ptrs, 1, out, n);
+    if (eval_rc != ME_EVAL_SUCCESS) {
+        printf("%s f32 eval failed (err=%d)\n", expr_text, eval_rc);
+        me_free(expr);
+        return 1;
+    }
+
+    int failures = 0;
+    for (int i = 0; i < n; i++) {
+        float expected = func(a[i], b, c);
+        if (!nearly_equal_f(out[i], expected, tol)) {
+            if (failures < 5) {
+                printf("%s f32 mismatch at %d: got %.7f expected %.7f\n",
+                       expr_text, i, out[i], expected);
+            }
+            failures++;
+        }
+    }
+
+    me_free(expr);
+    me_disable_simd(false);
+    return failures;
+}
+
+static int run_nan_edge_cases(void) {
+    int failures = 0;
+    double nan = NAN;
+    double out64[4] = {0};
+    float out32[4] = {0};
+    double a64[] = {nan, 1.0, nan, -2.0};
+    double b64[] = {2.0, nan, nan, 3.0};
+    float a32[] = {NAN, 1.0f, NAN, -2.0f};
+    float b32[] = {2.0f, NAN, NAN, 3.0f};
+
+    me_variable vars64[] = {{"a", ME_FLOAT64, a64}, {"b", ME_FLOAT64, b64}};
+    me_variable vars32[] = {{"a", ME_FLOAT32, a32}, {"b", ME_FLOAT32, b32}};
+    const void *ptrs64[] = {a64, b64};
+    const void *ptrs32[] = {a32, b32};
+    me_expr *expr = NULL;
+    int err = 0;
+
+    if (me_compile("fmax(a, b)", vars64, 2, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+        if (me_eval(expr, ptrs64, 2, out64, 4) == ME_EVAL_SUCCESS) {
+            for (int i = 0; i < 4; i++) {
+                double expected = fmax(a64[i], b64[i]);
+                if ((isnan(expected) && !isnan(out64[i])) ||
+                    (!isnan(expected) && expected != out64[i])) {
+                    printf("fmax NaN edge case failed (f64)\n");
+                    failures++;
+                    break;
+                }
+            }
+        } else {
+            failures++;
+        }
+        me_free(expr);
+    } else {
+        failures++;
+    }
+
+    expr = NULL;
+    if (me_compile("fmin(a, b)", vars64, 2, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+        if (me_eval(expr, ptrs64, 2, out64, 4) == ME_EVAL_SUCCESS) {
+            for (int i = 0; i < 4; i++) {
+                double expected = fmin(a64[i], b64[i]);
+                if ((isnan(expected) && !isnan(out64[i])) ||
+                    (!isnan(expected) && expected != out64[i])) {
+                    printf("fmin NaN edge case failed (f64)\n");
+                    failures++;
+                    break;
+                }
+            }
+        } else {
+            failures++;
+        }
+        me_free(expr);
+    } else {
+        failures++;
+    }
+
+    expr = NULL;
+    if (me_compile("fmax(a, b)", vars32, 2, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
+        if (me_eval(expr, ptrs32, 2, out32, 4) == ME_EVAL_SUCCESS) {
+            for (int i = 0; i < 4; i++) {
+                float expected = fmaxf(a32[i], b32[i]);
+                if ((isnan(expected) && !isnan(out32[i])) ||
+                    (!isnan(expected) && expected != out32[i])) {
+                    printf("fmax NaN edge case failed (f32)\n");
+                    failures++;
+                    break;
+                }
+            }
+        } else {
+            failures++;
+        }
+        me_free(expr);
+    } else {
+        failures++;
+    }
+
+    expr = NULL;
+    if (me_compile("fmin(a, b)", vars32, 2, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
+        if (me_eval(expr, ptrs32, 2, out32, 4) == ME_EVAL_SUCCESS) {
+            for (int i = 0; i < 4; i++) {
+                float expected = fminf(a32[i], b32[i]);
+                if ((isnan(expected) && !isnan(out32[i])) ||
+                    (!isnan(expected) && expected != out32[i])) {
+                    printf("fmin NaN edge case failed (f32)\n");
+                    failures++;
+                    break;
+                }
+            }
+        } else {
+            failures++;
+        }
+        me_free(expr);
+    } else {
+        failures++;
+    }
+
+    return failures;
+}
+
+static int run_additional_edge_cases(void) {
+    int failures = 0;
+
+    {
+        double out64[4] = {0};
+        float out32[4] = {0};
+        double a64[] = {1.0, -0.0, INFINITY, -INFINITY};
+        double b64[] = {-2.0, 3.0, 5.0, -7.0};
+        float a32[] = {1.0f, -0.0f, INFINITY, -INFINITY};
+        float b32[] = {-2.0f, 3.0f, 5.0f, -7.0f};
+
+        me_variable vars64[] = {{"a", ME_FLOAT64, a64}, {"b", ME_FLOAT64, b64}};
+        me_variable vars32[] = {{"a", ME_FLOAT32, a32}, {"b", ME_FLOAT32, b32}};
+        const void *ptrs64[] = {a64, b64};
+        const void *ptrs32[] = {a32, b32};
+        me_expr *expr = NULL;
+        int err = 0;
+
+        if (me_compile("copysign(a, b)", vars64, 2, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs64, 2, out64, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    double expected = copysign(a64[i], b64[i]);
+                    if (memcmp(&expected, &out64[i], sizeof(double)) != 0) {
+                        printf("copysign edge case failed (f64)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+
+        expr = NULL;
+        if (me_compile("copysign(a, b)", vars32, 2, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs32, 2, out32, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    float expected = copysignf(a32[i], b32[i]);
+                    if (memcmp(&expected, &out32[i], sizeof(float)) != 0) {
+                        printf("copysign edge case failed (f32)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+    }
+
+    {
+        double out64[4] = {0};
+        float out32[4] = {0};
+        double a64[] = {0.0, -0.0, 1.0, -1.0};
+        double b64[] = {INFINITY, -INFINITY, INFINITY, -INFINITY};
+        float a32[] = {0.0f, -0.0f, 1.0f, -1.0f};
+        float b32[] = {INFINITY, -INFINITY, INFINITY, -INFINITY};
+
+        me_variable vars64[] = {{"a", ME_FLOAT64, a64}, {"b", ME_FLOAT64, b64}};
+        me_variable vars32[] = {{"a", ME_FLOAT32, a32}, {"b", ME_FLOAT32, b32}};
+        const void *ptrs64[] = {a64, b64};
+        const void *ptrs32[] = {a32, b32};
+        me_expr *expr = NULL;
+        int err = 0;
+
+        if (me_compile("nextafter(a, b)", vars64, 2, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs64, 2, out64, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    double expected = nextafter(a64[i], b64[i]);
+                    if (memcmp(&expected, &out64[i], sizeof(double)) != 0) {
+                        printf("nextafter edge case failed (f64)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+
+        expr = NULL;
+        if (me_compile("nextafter(a, b)", vars32, 2, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs32, 2, out32, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    float expected = nextafterf(a32[i], b32[i]);
+                    if (memcmp(&expected, &out32[i], sizeof(float)) != 0) {
+                        printf("nextafter edge case failed (f32)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+    }
+
+    {
+        double out64[4] = {0};
+        float out32[4] = {0};
+        double a64[] = {1.0, -1.0, 5.0, -5.0};
+        double b64[] = {0.0, 0.0, 2.0, -2.0};
+        float a32[] = {1.0f, -1.0f, 5.0f, -5.0f};
+        float b32[] = {0.0f, 0.0f, 2.0f, -2.0f};
+
+        me_variable vars64[] = {{"a", ME_FLOAT64, a64}, {"b", ME_FLOAT64, b64}};
+        me_variable vars32[] = {{"a", ME_FLOAT32, a32}, {"b", ME_FLOAT32, b32}};
+        const void *ptrs64[] = {a64, b64};
+        const void *ptrs32[] = {a32, b32};
+        me_expr *expr = NULL;
+        int err = 0;
+
+        if (me_compile("remainder(a, b)", vars64, 2, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs64, 2, out64, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    double expected = remainder(a64[i], b64[i]);
+                    if ((isnan(expected) && !isnan(out64[i])) ||
+                        (!isnan(expected) && expected != out64[i])) {
+                        printf("remainder edge case failed (f64)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+
+        expr = NULL;
+        if (me_compile("remainder(a, b)", vars32, 2, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
+            if (me_eval(expr, ptrs32, 2, out32, 4) == ME_EVAL_SUCCESS) {
+                for (int i = 0; i < 4; i++) {
+                    float expected = remainderf(a32[i], b32[i]);
+                    if ((isnan(expected) && !isnan(out32[i])) ||
+                        (!isnan(expected) && expected != out32[i])) {
+                        printf("remainder edge case failed (f32)\n");
+                        failures++;
+                        break;
+                    }
+                }
+            } else {
+                failures++;
+            }
+            me_free(expr);
+        } else {
+            failures++;
+        }
+    }
+
+    return failures;
+}
+
 int main(void) {
     int failures = 0;
     const int n = 1024;
@@ -636,6 +1055,30 @@ int main(void) {
     failures += run_binary_pair_f32("nextafter", nextafterf, n, -2.0f, 2.0f, -2.0f, 2.0f, 0.0f);
     failures += run_binary_pair_f32("remainder", remainderf, n, -5.0f, 5.0f, 0.5f, 5.0f, 1e-5f);
     failures += run_ternary_pair_f32("fma", fmaf, n, -5.0f, 5.0f, -5.0f, 5.0f, -5.0f, 5.0f, 1e-5f);
+
+    {
+        double a64[16];
+        float a32[16];
+        double out64[16];
+        float out32[16];
+        for (int i = 0; i < 16; i++) {
+            a64[i] = -4.0 + 0.5 * i;
+            a32[i] = (float)a64[i];
+        }
+
+        failures += run_binary_const_f64("ldexp(a, 3.7)", ldexp_ref, a64, 3.7, out64, 16, false, 1e-12);
+        failures += run_binary_const_f64("ldexp(a, 3.7)", ldexp_ref, a64, 3.7, out64, 16, true, 1e-12);
+        failures += run_binary_const_f32("ldexp(a, 3.7)", ldexp_ref_f, a32, 3.7f, out32, 16, false, 1e-5f);
+        failures += run_binary_const_f32("ldexp(a, 3.7)", ldexp_ref_f, a32, 3.7f, out32, 16, true, 1e-5f);
+
+        failures += run_ternary_const_f64("fma(a, 2.5, -1.25)", fma, a64, 2.5, -1.25, out64, 16, false, 1e-12);
+        failures += run_ternary_const_f64("fma(a, 2.5, -1.25)", fma, a64, 2.5, -1.25, out64, 16, true, 1e-12);
+        failures += run_ternary_const_f32("fma(a, 2.5, -1.25)", fmaf, a32, 2.5f, -1.25f, out32, 16, false, 1e-5f);
+        failures += run_ternary_const_f32("fma(a, 2.5, -1.25)", fmaf, a32, 2.5f, -1.25f, out32, 16, true, 1e-5f);
+    }
+
+    failures += run_nan_edge_cases();
+    failures += run_additional_edge_cases();
 
     return failures ? 1 : 0;
 }
