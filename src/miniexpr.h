@@ -194,7 +194,10 @@ typedef enum {
  *   vars_chunk: Array of pointers to variable data chunks (same order as in me_compile)
  *   n_vars: Number of variables (must match the number used in me_compile)
  *   output_chunk: Pointer to output buffer for this chunk
- *   chunk_nitems: Number of elements in this chunk
+ *   chunk_nitems: Number of elements in this chunk. This is an element count
+ *                 (not bytes) and must correspond to the input arrays' element
+ *                 count; the output buffer must be sized for this many output
+ *                 elements (using the output dtype size).
  *
  * Returns:
  *   ME_EVAL_SUCCESS (0) on success, or a negative ME_EVAL_ERR_* code on failure.
