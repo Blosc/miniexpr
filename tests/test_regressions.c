@@ -7,6 +7,14 @@
 #include "miniexpr.h"
 #include "minctest.h"
 
+#if defined(_MSC_VER) && defined(__clang__)
+#define ME_CREAL(x) __builtin_creal(x)
+#define ME_CIMAG(x) __builtin_cimag(x)
+#else
+#define ME_CREAL(x) creal(x)
+#define ME_CIMAG(x) cimag(x)
+#endif
+
 
 
 #define SMALL_SIZE 10
@@ -925,7 +933,9 @@ static int test_abs_complex_output(void) {
     printf("\nTest: abs(complex) returns real magnitude\n");
     printf("======================================================================\n");
 
-    double _Complex data[] = {1.0 + 1.0*I, 3.0 + 4.0*I, NAN + NAN*I};
+    double _Complex data[] = {1.0 + 1.0*(double _Complex)I,
+                              3.0 + 4.0*(double _Complex)I,
+                              NAN + NAN*(double _Complex)I};
     const int nitems = 3;
     me_variable vars[] = {{"x", ME_COMPLEX128}};
     const void *var_ptrs[] = {data};
@@ -965,7 +975,7 @@ static int test_complex_unsupported_function_rejected(void) {
     printf("\nTest: complex unsupported function is rejected\n");
     printf("======================================================================\n");
 
-    double _Complex data[] = {1.0 + 1.0*I};
+    double _Complex data[] = {1.0 + 1.0*(double _Complex)I};
     me_variable vars[] = {{"x", ME_COMPLEX128}};
     const void *var_ptrs[] = {data};
     int err = 0;
@@ -1006,7 +1016,9 @@ static int test_complex_negation_via_sub(void) {
     printf("\nTest: complex negation via (0 - x)\n");
     printf("======================================================================\n");
 
-    double _Complex data[] = {1.0 + 2.0*I, -3.0 + 4.0*I, NAN + NAN*I};
+    double _Complex data[] = {1.0 + 2.0*(double _Complex)I,
+                              -3.0 + 4.0*(double _Complex)I,
+                              NAN + NAN*(double _Complex)I};
     const int nitems = 3;
     me_variable vars[] = {{"x", ME_COMPLEX128}};
     const void *var_ptrs[] = {data};
@@ -1029,13 +1041,13 @@ static int test_complex_negation_via_sub(void) {
     ME_EVAL_CHECK(expr, var_ptrs, 1, output, nitems);
 
     int passed = 1;
-    if (!(creal(output[0]) == -1.0 && cimag(output[0]) == -2.0 &&
-          creal(output[1]) == 3.0 && cimag(output[1]) == -4.0 &&
-          isnan(creal(output[2])) && isnan(cimag(output[2])))) {
+    if (!(ME_CREAL(output[0]) == -1.0 && ME_CIMAG(output[0]) == -2.0 &&
+          ME_CREAL(output[1]) == 3.0 && ME_CIMAG(output[1]) == -4.0 &&
+          isnan(ME_CREAL(output[2])) && isnan(ME_CIMAG(output[2])))) {
         printf("  ❌ FAILED: output=[%g%+gj, %g%+gj, %g%+gj]\n",
-               creal(output[0]), cimag(output[0]),
-               creal(output[1]), cimag(output[1]),
-               creal(output[2]), cimag(output[2]));
+               ME_CREAL(output[0]), ME_CIMAG(output[0]),
+               ME_CREAL(output[1]), ME_CIMAG(output[1]),
+               ME_CREAL(output[2]), ME_CIMAG(output[2]));
         passed = 0;
     } else {
         printf("  ✅ PASS\n");
