@@ -172,7 +172,8 @@ typedef enum {
     ME_COMPILE_ERR_COMPLEX_UNSUPPORTED = -4,
     ME_COMPILE_ERR_REDUCTION_INVALID = -5,
     ME_COMPILE_ERR_VAR_MIXED = -6,
-    ME_COMPILE_ERR_VAR_UNSPECIFIED = -7
+    ME_COMPILE_ERR_VAR_UNSPECIFIED = -7,
+    ME_COMPILE_ERR_INVALID_ARG_TYPE = -8
 } me_compile_status;
 
 /* Status codes for me_eval(). */

@@ -815,6 +815,35 @@ static int test_log_int_promotes_output(void) {
     return passed;
 }
 
+static int test_invalid_dtype_compile(void) {
+    printf("\nTest: invalid dtype returns ME_COMPILE_ERR_INVALID_ARG_TYPE\n");
+    printf("======================================================================\n");
+
+    int err = 0;
+    me_expr *expr = NULL;
+    me_variable vars[] = {{"x", (me_dtype)-1}};
+
+    int rc = me_compile("x + 1", vars, 1, ME_AUTO, &err, &expr);
+    int passed = 1;
+    if (rc != ME_COMPILE_ERR_INVALID_ARG_TYPE) {
+        printf("  ❌ FAILED: invalid variable dtype rc=%d\n", rc);
+        passed = 0;
+    } else {
+        printf("  ✅ PASS: invalid variable dtype\n");
+    }
+
+    vars[0].dtype = ME_INT32;
+    rc = me_compile("x + 1", vars, 1, (me_dtype)-1, &err, &expr);
+    if (rc != ME_COMPILE_ERR_INVALID_ARG_TYPE) {
+        printf("  ❌ FAILED: invalid output dtype rc=%d\n", rc);
+        passed = 0;
+    } else {
+        printf("  ✅ PASS: invalid output dtype\n");
+    }
+
+    return passed;
+}
+
 // ============================================================================
 // MAIN TEST RUNNER
 // ============================================================================
@@ -831,6 +860,7 @@ int main() {
     printf("  - conj on real inputs preserves dtype\n");
     printf("  - sum(comparison) with explicit output dtype\n");
     printf("  - log(int) promotes to float output\n");
+    printf("  - invalid dtype returns explicit error\n");
     printf("========================================================================\n");
 
     int total = 0;
@@ -875,6 +905,9 @@ int main() {
 
     total++;
     if (test_log_int_promotes_output()) passed++;
+
+    total++;
+    if (test_invalid_dtype_compile()) passed++;
 
     // ========================================================================
     // ARCTAN2 BUG TESTS

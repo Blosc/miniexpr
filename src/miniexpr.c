@@ -150,6 +150,10 @@ static bool is_integral_or_bool(me_dtype dtype) {
     return dtype == ME_BOOL || (dtype >= ME_INT8 && dtype <= ME_UINT64);
 }
 
+static bool is_valid_dtype(me_dtype dtype) {
+    return dtype >= ME_AUTO && dtype <= ME_COMPLEX128;
+}
+
 static me_dtype promote_float_math_result(me_dtype param_type) {
     if (param_type == ME_COMPLEX64 || param_type == ME_COMPLEX128) {
         return param_type;
@@ -542,6 +546,20 @@ static int private_compile(const char* expression, const me_variable* variables,
     if (!expression || !out || var_count < 0) {
         if (error) *error = -1;
         return ME_COMPILE_ERR_INVALID_ARG;
+    }
+
+    if (dtype != ME_AUTO && !is_valid_dtype(dtype)) {
+        if (error) *error = -1;
+        return ME_COMPILE_ERR_INVALID_ARG_TYPE;
+    }
+
+    if (variables && var_count > 0) {
+        for (int i = 0; i < var_count; i++) {
+            if (!is_valid_dtype(variables[i].dtype)) {
+                if (error) *error = -1;
+                return ME_COMPILE_ERR_INVALID_ARG_TYPE;
+            }
+        }
     }
 
     // Validate dtype usage: either all vars are ME_AUTO (use dtype), or dtype is ME_AUTO (use var dtypes)
