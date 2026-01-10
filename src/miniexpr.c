@@ -146,6 +146,26 @@ static me_dtype promote_types(me_dtype a, me_dtype b) {
     return ME_FLOAT64; // Fallback for out-of-range types
 }
 
+static bool is_integral_or_bool(me_dtype dtype) {
+    return dtype == ME_BOOL || (dtype >= ME_INT8 && dtype <= ME_UINT64);
+}
+
+static me_dtype promote_float_math_result(me_dtype param_type) {
+    if (param_type == ME_COMPLEX64 || param_type == ME_COMPLEX128) {
+        return param_type;
+    }
+    if (param_type == ME_FLOAT32) {
+        return ME_FLOAT32;
+    }
+    if (param_type == ME_FLOAT64) {
+        return ME_FLOAT64;
+    }
+    if (is_integral_or_bool(param_type)) {
+        return ME_FLOAT64;
+    }
+    return param_type;
+}
+
 
 static bool contains_reduction(const me_expr* n) {
     if (!n) return false;
@@ -275,6 +295,11 @@ me_dtype infer_result_type(const me_expr* n) {
                 }
             }
 
+            if (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && is_float_math_function(n->function)) {
+                me_dtype param_type = infer_result_type((const me_expr*)n->parameters[0]);
+                return promote_float_math_result(param_type);
+            }
+
             // For comparisons with ME_BOOL output, we still need to infer the
             // computation type from operands (e.g., float64 for float inputs).
             // Don't return ME_BOOL early - let the operand types determine
@@ -348,6 +373,11 @@ me_dtype infer_output_type(const me_expr* n) {
                 me_dtype x_type = infer_output_type((const me_expr*)n->parameters[1]);
                 me_dtype y_type = infer_output_type((const me_expr*)n->parameters[2]);
                 return promote_types(x_type, y_type);
+            }
+
+            if (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && is_float_math_function(n->function)) {
+                me_dtype param_type = infer_output_type((const me_expr*)n->parameters[0]);
+                return promote_float_math_result(param_type);
             }
 
             // If this node is a comparison (dtype == ME_BOOL set during parsing),

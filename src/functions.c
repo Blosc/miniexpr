@@ -503,6 +503,42 @@ static double square(double x) { return x * x; }
 /* Wrapper for trunc: truncate towards zero */
 static double trunc_wrapper(double x) { return trunc(x); }
 
+bool is_float_math_function(const void* func) {
+    return func == (void*)acos ||
+        func == (void*)acosh ||
+        func == (void*)asin ||
+        func == (void*)asinh ||
+        func == (void*)atan ||
+        func == (void*)atanh ||
+        func == (void*)cbrt ||
+        func == (void*)ceil ||
+        func == (void*)cos ||
+        func == (void*)cosh ||
+        func == (void*)cospi_wrapper ||
+        func == (void*)erf ||
+        func == (void*)erfc ||
+        func == (void*)exp ||
+        func == (void*)exp10_wrapper ||
+        func == (void*)exp2 ||
+        func == (void*)expm1_wrapper ||
+        func == (void*)floor ||
+        func == (void*)lgamma ||
+        func == (void*)log ||
+        func == (void*)log10 ||
+        func == (void*)log1p_wrapper ||
+        func == (void*)log2_wrapper ||
+        func == (void*)rint ||
+        func == (void*)round_wrapper ||
+        func == (void*)sin ||
+        func == (void*)sinh ||
+        func == (void*)sinpi_wrapper ||
+        func == (void*)sqrt ||
+        func == (void*)tan ||
+        func == (void*)tanh ||
+        func == (void*)tgamma ||
+        func == (void*)trunc_wrapper;
+}
+
 /* Scalar helper for where(), used only in generic slow path */
 double where_scalar(double c, double x, double y) {
     return (c != 0.0) ? x : y;

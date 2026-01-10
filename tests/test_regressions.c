@@ -766,6 +766,55 @@ static int test_sum_comparison_explicit_output(void) {
     return passed;
 }
 
+static int test_log_int_promotes_output(void) {
+    printf("\nTest: log(int) promotes to float output (ME_AUTO)\n");
+    printf("======================================================================\n");
+
+    int32_t data[] = {1, 2, 3, 4, 5};
+    const int nitems = (int)(sizeof(data) / sizeof(data[0]));
+    me_variable vars[] = {{"x", ME_INT32}};
+    const void *var_ptrs[] = {data};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int rc_expr = me_compile("log(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 0;
+    }
+
+    me_dtype dtype = me_get_dtype(expr);
+    if (dtype != ME_FLOAT64) {
+        printf("  ❌ FAILED: expected output dtype ME_FLOAT64, got %d\n", dtype);
+        me_free(expr);
+        return 0;
+    }
+
+    double output[nitems];
+    ME_EVAL_CHECK(expr, var_ptrs, 1, output, nitems);
+
+    int passed = 1;
+    double max_diff = 0.0;
+    const double tolerance = 1e-12;
+    for (int i = 0; i < nitems; i++) {
+        double expected = log((double)data[i]);
+        double diff = fabs(output[i] - expected);
+        if (diff > max_diff) max_diff = diff;
+        if (diff > tolerance) {
+            passed = 0;
+        }
+    }
+
+    if (passed) {
+        printf("  ✅ PASS\n");
+    } else {
+        printf("  ❌ FAIL (max diff: %.12g)\n", max_diff);
+    }
+
+    me_free(expr);
+    return passed;
+}
+
 // ============================================================================
 // MAIN TEST RUNNER
 // ============================================================================
@@ -781,6 +830,7 @@ int main() {
     printf("  - scalar constant operations\n");
     printf("  - conj on real inputs preserves dtype\n");
     printf("  - sum(comparison) with explicit output dtype\n");
+    printf("  - log(int) promotes to float output\n");
     printf("========================================================================\n");
 
     int total = 0;
@@ -822,6 +872,9 @@ int main() {
 
     total++;
     if (test_sum_comparison_explicit_output()) passed++;
+
+    total++;
+    if (test_log_int_promotes_output()) passed++;
 
     // ========================================================================
     // ARCTAN2 BUG TESTS

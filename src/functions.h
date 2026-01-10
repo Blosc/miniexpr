@@ -78,6 +78,7 @@ me_dtype infer_result_type(const me_expr* n);
 void me_free_parameters(me_expr* n);
 
 bool is_reduction_node(const me_expr* n);
+bool is_float_math_function(const void* func);
 me_dtype reduction_output_dtype(me_dtype dt, const void* func);
 double min_reduce(double x);
 double max_reduce(double x);
