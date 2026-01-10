@@ -492,6 +492,7 @@ static double round_wrapper(double x) { return round(x); }
 
 /* sign: returns -1.0, 0.0, or 1.0 based on sign of x */
 static double sign(double x) {
+    if (isnan(x)) return NAN;
     if (x > 0.0) return 1.0;
     if (x < 0.0) return -1.0;
     return 0.0;
@@ -511,7 +512,6 @@ bool is_float_math_function(const void* func) {
         func == (void*)atan ||
         func == (void*)atanh ||
         func == (void*)cbrt ||
-        func == (void*)ceil ||
         func == (void*)cos ||
         func == (void*)cosh ||
         func == (void*)cospi_wrapper ||
@@ -521,22 +521,18 @@ bool is_float_math_function(const void* func) {
         func == (void*)exp10_wrapper ||
         func == (void*)exp2 ||
         func == (void*)expm1_wrapper ||
-        func == (void*)floor ||
         func == (void*)lgamma ||
         func == (void*)log ||
         func == (void*)log10 ||
         func == (void*)log1p_wrapper ||
         func == (void*)log2_wrapper ||
-        func == (void*)rint ||
-        func == (void*)round_wrapper ||
         func == (void*)sin ||
         func == (void*)sinh ||
         func == (void*)sinpi_wrapper ||
         func == (void*)sqrt ||
         func == (void*)tan ||
         func == (void*)tanh ||
-        func == (void*)tgamma ||
-        func == (void*)trunc_wrapper;
+        func == (void*)tgamma;
 }
 
 /* Scalar helper for where(), used only in generic slow path */
@@ -3613,6 +3609,16 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                 } else if (func == sub) { \
                     if (ldata && rdata) { \
                         VEC_SUB(ldata, rdata, output, n->nitems); \
+                    } else if (ldata && right->type == ME_CONSTANT) { \
+                        TYPE b = TO_TYPE_##SUFFIX(right->value); \
+                        for (i = 0; i < n->nitems; i++) { \
+                            output[i] = ldata[i] - b; \
+                        } \
+                    } else if (left->type == ME_CONSTANT && rdata) { \
+                        TYPE a = TO_TYPE_##SUFFIX(left->value); \
+                        for (i = 0; i < n->nitems; i++) { \
+                            output[i] = a - rdata[i]; \
+                        } \
                     } else { \
                         goto general_case_binary_##SUFFIX; \
                     } \
@@ -5641,11 +5647,43 @@ static void private_eval(const me_expr* n) {
         return;
     }
 
-    // Special case: imag() and real() functions return real from complex input
+    // Special case: imag(), real(), abs() return real from complex input
     if (IS_FUNCTION(n->type) && ARITY(n->type) == 1) {
-        if (n->function == (void*)imag_wrapper || n->function == (void*)real_wrapper) {
+        if (n->function == (void*)imag_wrapper || n->function == (void*)real_wrapper ||
+            n->function == (void*)fabs) {
             me_expr* arg = (me_expr*)n->parameters[0];
             me_dtype arg_type = infer_result_type(arg);
+
+            if (n->function == (void*)fabs && arg_type == ME_COMPLEX64) {
+                if (!arg->output) {
+                    arg->output = malloc(n->nitems * sizeof(float _Complex));
+                    arg->nitems = n->nitems;
+                    ((me_expr*)arg)->dtype = ME_COMPLEX64;
+                }
+                me_eval_c64(arg);
+
+                const float _Complex* cdata = (const float _Complex*)arg->output;
+                float* output = (float*)n->output;
+                for (int i = 0; i < n->nitems; i++) {
+                    output[i] = cabsf(cdata[i]);
+                }
+                return;
+            }
+            else if (n->function == (void*)fabs && arg_type == ME_COMPLEX128) {
+                if (!arg->output) {
+                    arg->output = malloc(n->nitems * sizeof(double _Complex));
+                    arg->nitems = n->nitems;
+                    ((me_expr*)arg)->dtype = ME_COMPLEX128;
+                }
+                me_eval_c128(arg);
+
+                const double _Complex* cdata = (const double _Complex*)arg->output;
+                double* output = (double*)n->output;
+                for (int i = 0; i < n->nitems; i++) {
+                    output[i] = cabs(cdata[i]);
+                }
+                return;
+            }
 
             if (arg_type == ME_COMPLEX64) {
                 // Evaluate argument as complex64
@@ -6398,7 +6436,6 @@ void optimize(me_expr* n) {
     }
 }
 
-#if defined(_WIN32) || defined(_WIN64)
 bool has_complex_node(const me_expr* n) {
     if (!n) return false;
     if (n->dtype == ME_COMPLEX64 || n->dtype == ME_COMPLEX128) return true;
@@ -6418,4 +6455,64 @@ bool has_complex_input(const me_expr* n) {
     }
     return false;
 }
-#endif
+
+bool has_complex_input_types(const me_expr* n) {
+    if (!n) return false;
+    if (n->dtype == ME_COMPLEX64 || n->dtype == ME_COMPLEX128 ||
+        n->input_dtype == ME_COMPLEX64 || n->input_dtype == ME_COMPLEX128) {
+        return true;
+    }
+
+    switch (TYPE_MASK(n->type)) {
+    case ME_CONSTANT:
+    case ME_VARIABLE:
+        return n->dtype == ME_COMPLEX64 || n->dtype == ME_COMPLEX128 ||
+            n->input_dtype == ME_COMPLEX64 || n->input_dtype == ME_COMPLEX128;
+    default:
+        break;
+    }
+
+    const int arity = ARITY(n->type);
+    for (int i = 0; i < arity; i++) {
+        if (has_complex_input_types((const me_expr*)n->parameters[i])) return true;
+    }
+    return false;
+}
+
+static bool is_complex_supported_function(const me_expr* n) {
+    if (!n || !IS_FUNCTION(n->type)) return true;
+    if (is_reduction_node(n)) return true;
+    if (is_comparison_node(n)) return false;
+
+    const int arity = ARITY(n->type);
+    const void* func = n->function;
+
+    if (arity == 1) {
+        return func == (void*)negate ||
+            func == (void*)sqrt ||
+            func == (void*)conj_wrapper ||
+            func == (void*)real_wrapper ||
+            func == (void*)imag_wrapper ||
+            func == (void*)fabs;
+    }
+    if (arity == 2) {
+        return func == add ||
+            func == sub ||
+            func == mul ||
+            func == divide ||
+            func == (void*)pow;
+    }
+
+    return false;
+}
+
+bool has_unsupported_complex_function(const me_expr* n) {
+    if (!n) return false;
+    if (IS_FUNCTION(n->type) && !is_complex_supported_function(n)) return true;
+
+    const int arity = ARITY(n->type);
+    for (int i = 0; i < arity; i++) {
+        if (has_unsupported_complex_function((const me_expr*)n->parameters[i])) return true;
+    }
+    return false;
+}

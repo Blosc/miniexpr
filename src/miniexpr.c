@@ -297,6 +297,16 @@ me_dtype infer_result_type(const me_expr* n) {
                     // If input is not complex, return as-is (shouldn't happen, but be safe)
                     return param_type;
                 }
+                if (n->function == (void*)fabs) {
+                    me_dtype param_type = infer_result_type((const me_expr*)n->parameters[0]);
+                    if (param_type == ME_COMPLEX64) {
+                        return ME_FLOAT32;
+                    }
+                    if (param_type == ME_COMPLEX128) {
+                        return ME_FLOAT64;
+                    }
+                    return param_type;
+                }
             }
 
             if (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && is_float_math_function(n->function)) {
@@ -367,6 +377,16 @@ me_dtype infer_output_type(const me_expr* n) {
                         return ME_FLOAT64;
                     }
                     // If input is not complex, return as-is (shouldn't happen, but be safe)
+                    return param_type;
+                }
+                if (n->function == (void*)fabs) {
+                    me_dtype param_type = infer_output_type((const me_expr*)n->parameters[0]);
+                    if (param_type == ME_COMPLEX64) {
+                        return ME_FLOAT32;
+                    }
+                    if (param_type == ME_COMPLEX128) {
+                        return ME_FLOAT64;
+                    }
                     return param_type;
                 }
             }
@@ -648,6 +668,24 @@ static int private_compile(const char* expression, const me_variable* variables,
         if (error) *error = -1;
         if (vars_copy) free(vars_copy);
         return ME_COMPILE_ERR_REDUCTION_INVALID;
+    }
+
+    bool any_complex_vars = false;
+    if (variables && var_count > 0) {
+        const me_variable* vars_check = vars_copy ? vars_copy : variables;
+        for (int i = 0; i < var_count; i++) {
+            if (vars_check[i].dtype == ME_COMPLEX64 || vars_check[i].dtype == ME_COMPLEX128) {
+                any_complex_vars = true;
+                break;
+            }
+        }
+    }
+
+    if ((any_complex_vars || has_complex_input_types(root)) && has_unsupported_complex_function(root)) {
+        me_free(root);
+        if (error) *error = -1;
+        if (vars_copy) free(vars_copy);
+        return ME_COMPILE_ERR_INVALID_ARG_TYPE;
     }
 
 #if defined(_WIN32) || defined(_WIN64)

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <complex.h>
 #include <string.h>
 #include "miniexpr.h"
 #include "minctest.h"
@@ -790,7 +791,7 @@ static int test_log_int_promotes_output(void) {
         return 0;
     }
 
-    double output[nitems];
+    double output[5];
     ME_EVAL_CHECK(expr, var_ptrs, 1, output, nitems);
 
     int passed = 1;
@@ -844,6 +845,205 @@ static int test_invalid_dtype_compile(void) {
     return passed;
 }
 
+static int test_ceil_int_identity(void) {
+    printf("\nTest: ceil(int) preserves values and dtype\n");
+    printf("======================================================================\n");
+
+    int32_t data[] = {1, 2, 3, 4, 5};
+    const int nitems = (int)(sizeof(data) / sizeof(data[0]));
+    me_variable vars[] = {{"x", ME_INT32}};
+    const void *var_ptrs[] = {data};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int rc = me_compile("ceil(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", rc);
+        return 0;
+    }
+
+    if (me_get_dtype(expr) != ME_INT32) {
+        printf("  ❌ FAILED: expected output dtype ME_INT32, got %d\n", me_get_dtype(expr));
+        me_free(expr);
+        return 0;
+    }
+
+    int32_t output[5];
+    ME_EVAL_CHECK(expr, var_ptrs, 1, output, nitems);
+
+    int passed = 1;
+    for (int i = 0; i < nitems; i++) {
+        if (output[i] != data[i]) {
+            printf("  ❌ FAILED: output[%d]=%d expected %d\n", i, output[i], data[i]);
+            passed = 0;
+            break;
+        }
+    }
+
+    if (passed) {
+        printf("  ✅ PASS\n");
+    }
+
+    me_free(expr);
+    return passed;
+}
+
+static int test_sign_nan_propagation(void) {
+    printf("\nTest: sign(NaN) propagates NaN\n");
+    printf("======================================================================\n");
+
+    float data[] = {1.0f, NAN, -2.0f};
+    const int nitems = (int)(sizeof(data) / sizeof(data[0]));
+    me_variable vars[] = {{"x", ME_FLOAT32}};
+    const void *var_ptrs[] = {data};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int rc = me_compile("sign(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", rc);
+        return 0;
+    }
+
+    float output[3];
+    ME_EVAL_CHECK(expr, var_ptrs, 1, output, nitems);
+
+    int passed = 1;
+    if (!(output[0] == 1.0f && isnan(output[1]) && output[2] == -1.0f)) {
+        printf("  ❌ FAILED: output=[%g, %g, %g]\n", output[0], output[1], output[2]);
+        passed = 0;
+    } else {
+        printf("  ✅ PASS\n");
+    }
+
+    me_free(expr);
+    return passed;
+}
+
+static int test_abs_complex_output(void) {
+    printf("\nTest: abs(complex) returns real magnitude\n");
+    printf("======================================================================\n");
+
+    double _Complex data[] = {1.0 + 1.0*I, 3.0 + 4.0*I, NAN + NAN*I};
+    const int nitems = 3;
+    me_variable vars[] = {{"x", ME_COMPLEX128}};
+    const void *var_ptrs[] = {data};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int rc = me_compile("abs(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", rc);
+        return 0;
+    }
+
+    if (me_get_dtype(expr) != ME_FLOAT64) {
+        printf("  ❌ FAILED: expected output dtype ME_FLOAT64, got %d\n", me_get_dtype(expr));
+        me_free(expr);
+        return 0;
+    }
+
+    double output[3];
+    ME_EVAL_CHECK(expr, var_ptrs, 1, output, nitems);
+
+    int passed = 1;
+    if (!(fabs(output[0] - sqrt(2.0)) < 1e-12 &&
+          fabs(output[1] - 5.0) < 1e-12 &&
+          isnan(output[2]))) {
+        printf("  ❌ FAILED: output=[%g, %g, %g]\n", output[0], output[1], output[2]);
+        passed = 0;
+    } else {
+        printf("  ✅ PASS\n");
+    }
+
+    me_free(expr);
+    return passed;
+}
+
+static int test_complex_unsupported_function_rejected(void) {
+    printf("\nTest: complex unsupported function is rejected\n");
+    printf("======================================================================\n");
+
+    double _Complex data[] = {1.0 + 1.0*I};
+    me_variable vars[] = {{"x", ME_COMPLEX128}};
+    const void *var_ptrs[] = {data};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int rc = me_compile("sin(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_ERR_INVALID_ARG_TYPE) {
+        printf("  ❌ FAILED: expected invalid arg type, rc=%d\n", rc);
+        return 0;
+    }
+
+    rc = me_compile("x != 0", vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_ERR_INVALID_ARG_TYPE) {
+        printf("  ❌ FAILED: expected invalid arg type for comparison, rc=%d\n", rc);
+        return 0;
+    }
+
+    rc = me_compile("sum(x != 0)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_ERR_INVALID_ARG_TYPE) {
+        printf("  ❌ FAILED: expected invalid arg type for reduction comparison, rc=%d\n", rc);
+        return 0;
+    }
+
+    // sanity: supported complex op should compile
+    rc = me_compile("x + 1", vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: expected complex add to compile, rc=%d\n", rc);
+        return 0;
+    }
+    me_free(expr);
+    (void)var_ptrs;
+
+    printf("  ✅ PASS\n");
+    return 1;
+}
+
+static int test_complex_negation_via_sub(void) {
+    printf("\nTest: complex negation via (0 - x)\n");
+    printf("======================================================================\n");
+
+    double _Complex data[] = {1.0 + 2.0*I, -3.0 + 4.0*I, NAN + NAN*I};
+    const int nitems = 3;
+    me_variable vars[] = {{"x", ME_COMPLEX128}};
+    const void *var_ptrs[] = {data};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int rc = me_compile("0 - x", vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", rc);
+        return 0;
+    }
+
+    if (me_get_dtype(expr) != ME_COMPLEX128) {
+        printf("  ❌ FAILED: expected output dtype ME_COMPLEX128, got %d\n", me_get_dtype(expr));
+        me_free(expr);
+        return 0;
+    }
+
+    double _Complex output[3];
+    ME_EVAL_CHECK(expr, var_ptrs, 1, output, nitems);
+
+    int passed = 1;
+    if (!(creal(output[0]) == -1.0 && cimag(output[0]) == -2.0 &&
+          creal(output[1]) == 3.0 && cimag(output[1]) == -4.0 &&
+          isnan(creal(output[2])) && isnan(cimag(output[2])))) {
+        printf("  ❌ FAILED: output=[%g%+gj, %g%+gj, %g%+gj]\n",
+               creal(output[0]), cimag(output[0]),
+               creal(output[1]), cimag(output[1]),
+               creal(output[2]), cimag(output[2]));
+        passed = 0;
+    } else {
+        printf("  ✅ PASS\n");
+    }
+
+    me_free(expr);
+    return passed;
+}
+
 // ============================================================================
 // MAIN TEST RUNNER
 // ============================================================================
@@ -861,6 +1061,11 @@ int main() {
     printf("  - sum(comparison) with explicit output dtype\n");
     printf("  - log(int) promotes to float output\n");
     printf("  - invalid dtype returns explicit error\n");
+    printf("  - ceil(int) preserves values\n");
+    printf("  - sign propagates NaN\n");
+    printf("  - abs(complex) returns magnitude\n");
+    printf("  - complex unsupported functions rejected\n");
+    printf("  - complex negation via subtraction\n");
     printf("========================================================================\n");
 
     int total = 0;
@@ -908,6 +1113,21 @@ int main() {
 
     total++;
     if (test_invalid_dtype_compile()) passed++;
+
+    total++;
+    if (test_ceil_int_identity()) passed++;
+
+    total++;
+    if (test_sign_nan_propagation()) passed++;
+
+    total++;
+    if (test_abs_complex_output()) passed++;
+
+    total++;
+    if (test_complex_unsupported_function_rejected()) passed++;
+
+    total++;
+    if (test_complex_negation_via_sub()) passed++;
 
     // ========================================================================
     // ARCTAN2 BUG TESTS
