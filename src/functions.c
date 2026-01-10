@@ -5665,7 +5665,13 @@ static void private_eval(const me_expr* n) {
                 const float _Complex* cdata = (const float _Complex*)arg->output;
                 float* output = (float*)n->output;
                 for (int i = 0; i < n->nitems; i++) {
+#if defined(_MSC_VER) && defined(__clang__)
+                    float re = __builtin_crealf(cdata[i]);
+                    float im = __builtin_cimagf(cdata[i]);
+                    output[i] = hypotf(re, im);
+#else
                     output[i] = cabsf(cdata[i]);
+#endif
                 }
                 return;
             }
@@ -5680,7 +5686,13 @@ static void private_eval(const me_expr* n) {
                 const double _Complex* cdata = (const double _Complex*)arg->output;
                 double* output = (double*)n->output;
                 for (int i = 0; i < n->nitems; i++) {
+#if defined(_MSC_VER) && defined(__clang__)
+                    double re = __builtin_creal(cdata[i]);
+                    double im = __builtin_cimag(cdata[i]);
+                    output[i] = hypot(re, im);
+#else
                     output[i] = cabs(cdata[i]);
+#endif
                 }
                 return;
             }
