@@ -3,6 +3,7 @@
 #include <math.h>
 #include <complex.h>
 #include <string.h>
+#include <stdint.h>
 #include "miniexpr.h"
 #include "minctest.h"
 
