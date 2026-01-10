@@ -732,6 +732,41 @@ int test_conj_real_preserves_dtype() {
 }
 
 // ============================================================================
+// REDUCTION + COMPARISON (EXPLICIT OUTPUT DTYPE)
+// ============================================================================
+
+static int test_sum_comparison_explicit_output(void) {
+    printf("\n=== Regression: sum(x != 0) with explicit output dtype ===\n");
+
+    int32_t data[] = {0, 1, 2, 0, 3, 0, 4, 5};
+    const int nitems = (int)(sizeof(data) / sizeof(data[0]));
+    me_variable vars[] = {{"x", ME_INT32}};
+    const void *var_ptrs[] = {data};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int rc_expr = me_compile("sum(x != 0)", vars, 1, ME_INT64, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 0;
+    }
+
+    int64_t output = 0;
+    ME_EVAL_CHECK(expr, var_ptrs, 1, &output, nitems);
+
+    int passed = 1;
+    if (output != 5) {
+        printf("  ❌ FAILED: expected 5, got %lld\n", (long long)output);
+        passed = 0;
+    } else {
+        printf("  ✅ PASS\n");
+    }
+
+    me_free(expr);
+    return passed;
+}
+
+// ============================================================================
 // MAIN TEST RUNNER
 // ============================================================================
 
@@ -745,6 +780,7 @@ int main() {
     printf("  - constant type inference\n");
     printf("  - scalar constant operations\n");
     printf("  - conj on real inputs preserves dtype\n");
+    printf("  - sum(comparison) with explicit output dtype\n");
     printf("========================================================================\n");
 
     int total = 0;
@@ -778,10 +814,20 @@ int main() {
                                            SMALL_SIZE, 10.0f)) passed++;
 
     // ========================================================================
+    // REDUCTION + COMPARISON TEST
+    // ========================================================================
+    printf("\n\n========================================================================\n");
+    printf("SECTION 2: REDUCTION + COMPARISON\n");
+    printf("========================================================================\n");
+
+    total++;
+    if (test_sum_comparison_explicit_output()) passed++;
+
+    // ========================================================================
     // ARCTAN2 BUG TESTS
     // ========================================================================
     printf("\n\n========================================================================\n");
-    printf("SECTION 2: ARCTAN2 MIXED ARRAY/SCALAR OPERAND TESTS\n");
+    printf("SECTION 3: ARCTAN2 MIXED ARRAY/SCALAR OPERAND TESTS\n");
     printf("========================================================================\n");
 
     double y_data[CHUNK_SIZE] = {0.0, 1.0, -1.0, 2.0, -2.0};
@@ -809,7 +855,7 @@ int main() {
     // ARCTAN2 COMPLEX EXPRESSION TESTS
     // ========================================================================
     printf("\n\n========================================================================\n");
-    printf("SECTION 3: ARCTAN2 WITH COMPLEX EXPRESSIONS\n");
+    printf("SECTION 4: ARCTAN2 WITH COMPLEX EXPRESSIONS\n");
     printf("========================================================================\n");
 
     double x_data4[CHUNK_SIZE] = {0.0, 1.0, 2.0, -1.0, 0.5};
@@ -832,7 +878,7 @@ int main() {
     // CONSTANT TYPE INFERENCE TESTS
     // ========================================================================
     printf("\n\n========================================================================\n");
-    printf("SECTION 4: CONSTANT TYPE INFERENCE TESTS\n");
+    printf("SECTION 5: CONSTANT TYPE INFERENCE TESTS\n");
     printf("========================================================================\n");
 
     total++;
@@ -851,7 +897,7 @@ int main() {
     // SCALAR CONSTANT BUG TESTS
     // ========================================================================
     printf("\n\n========================================================================\n");
-    printf("SECTION 5: SCALAR CONSTANT OPERATIONS\n");
+    printf("SECTION 6: SCALAR CONSTANT OPERATIONS\n");
     printf("========================================================================\n");
 
     total++;
@@ -873,10 +919,10 @@ int main() {
     if (test_scalar_constant("Test 5.6: a / 4", "a / 4", div_4_f32)) passed++;
 
     // ========================================================================
-    // SECTION 6: LARGE INT64 + FLOAT CONSTANT (expected to fail)
+    // SECTION 7: LARGE INT64 + FLOAT CONSTANT (expected to fail)
     // ========================================================================
     printf("\n\n========================================================================\n");
-    printf("SECTION 6: LARGE INT64 + FLOAT CONSTANT\n");
+    printf("SECTION 7: LARGE INT64 + FLOAT CONSTANT\n");
     printf("========================================================================\n");
 
     total++;
@@ -884,10 +930,10 @@ int main() {
                                   1000)) passed++;
 
     // ========================================================================
-    // SECTION 7: FLOAT32 ARRAY + FLOAT64 CONSTANTS
+    // SECTION 8: FLOAT32 ARRAY + FLOAT64 CONSTANTS
     // ========================================================================
     printf("\n\n========================================================================\n");
-    printf("SECTION 7: FLOAT32 ARRAY + FLOAT64 CONSTANTS\n");
+    printf("SECTION 8: FLOAT32 ARRAY + FLOAT64 CONSTANTS\n");
     printf("========================================================================\n");
 
     total++;
@@ -895,10 +941,10 @@ int main() {
                                              SMALL_SIZE)) passed++;
 
     // ========================================================================
-    // SECTION 8: CONJ ON REAL INPUTS (FLOAT32)
+    // SECTION 9: CONJ ON REAL INPUTS (FLOAT32)
     // ========================================================================
     printf("\n\n========================================================================\n");
-    printf("SECTION 8: CONJ ON REAL INPUTS (FLOAT32)\n");
+    printf("SECTION 9: CONJ ON REAL INPUTS (FLOAT32)\n");
     printf("========================================================================\n");
 
     total++;

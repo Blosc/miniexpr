@@ -2094,6 +2094,17 @@ static double cmp_le(double a, double b) { return a <= b ? 1.0 : 0.0; }
 static double cmp_gt(double a, double b) { return a > b ? 1.0 : 0.0; }
 static double cmp_ge(double a, double b) { return a >= b ? 1.0 : 0.0; }
 
+static bool is_comparison_function(const void* func) {
+    return func == (void*)cmp_eq || func == (void*)cmp_ne ||
+        func == (void*)cmp_lt || func == (void*)cmp_le ||
+        func == (void*)cmp_gt || func == (void*)cmp_ge;
+}
+
+static bool is_comparison_node(const me_expr* n) {
+    return n && IS_FUNCTION(n->type) && ARITY(n->type) == 2 &&
+        is_comparison_function(n->function);
+}
+
 /* Logical operators (for bool type) - short-circuit via OR/AND */
 static double logical_and(double a, double b) { return ((int)a) && ((int)b) ? 1.0 : 0.0; }
 static double logical_or(double a, double b) { return ((int)a) || ((int)b) ? 1.0 : 0.0; }
@@ -3322,6 +3333,18 @@ DEFINE_VEC_CONVERT(f32, bool, float, bool)
 DEFINE_VEC_CONVERT(f64, bool, double, bool)
 DEFINE_VEC_CONVERT(f64, f32, double, float)
 
+static void vec_convert_c64_to_bool(const float _Complex *in, bool *out, int n) {
+    int i;
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = IS_NONZERO_c64(in[i]);
+}
+
+static void vec_convert_c128_to_bool(const double _Complex *in, bool *out, int n) {
+    int i;
+    IVDEP
+    for (i = 0; i < n; i++) out[i] = IS_NONZERO_c128(in[i]);
+}
+
 DEFINE_VEC_CONVERT(i8, i16, int8_t, int16_t)
 DEFINE_VEC_CONVERT(i8, i32, int8_t, int32_t)
 DEFINE_VEC_CONVERT(i8, i64, int8_t, int64_t)
@@ -3400,6 +3423,8 @@ static convert_func_t get_convert_func(me_dtype from, me_dtype to) {
     CONV_CASE(ME_UINT64, ME_BOOL, u64, bool)
     CONV_CASE(ME_FLOAT32, ME_BOOL, f32, bool)
     CONV_CASE(ME_FLOAT64, ME_BOOL, f64, bool)
+    if (from == ME_COMPLEX64 && to == ME_BOOL) return (convert_func_t)vec_convert_c64_to_bool;
+    if (from == ME_COMPLEX128 && to == ME_BOOL) return (convert_func_t)vec_convert_c128_to_bool;
 
     CONV_CASE(ME_INT8, ME_INT16, i8, i16)
     CONV_CASE(ME_INT8, ME_INT32, i8, i32)
@@ -4737,14 +4762,45 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
     me_dtype arg_type = arg->dtype;
     if (arg->type != ME_CONSTANT && arg->type != ME_VARIABLE) {
         arg_type = infer_output_type(arg);
+        const bool is_comparison_bool = (arg_type == ME_BOOL) && is_comparison_node(arg);
+        me_dtype eval_type = is_comparison_bool ? infer_result_type(arg) : arg_type;
         if (nitems > 0) {
-            if (!arg->output) {
-                arg->output = malloc((size_t)nitems * dtype_size(arg_type));
-                if (!arg->output) return;
+            if (is_comparison_bool) {
+                void* eval_output = malloc((size_t)nitems * dtype_size(eval_type));
+                if (!eval_output) return;
+                arg->output = eval_output;
+                arg->nitems = nitems;
+                arg->dtype = eval_type;
+                private_eval(arg);
+
+                void* bool_output = malloc((size_t)nitems * sizeof(bool));
+                if (!bool_output) {
+                    free(eval_output);
+                    return;
+                }
+                convert_func_t conv = get_convert_func(eval_type, ME_BOOL);
+                if (!conv) {
+                    arg->output = NULL;
+                    arg->dtype = arg_type;
+                    free(eval_output);
+                    free(bool_output);
+                    return;
+                }
+                conv(eval_output, bool_output, nitems);
+                free(eval_output);
+
+                arg->output = bool_output;
+                arg->dtype = ME_BOOL;
             }
-            arg->nitems = nitems;
-            arg->dtype = arg_type;
-            private_eval(arg);
+            else {
+                if (!arg->output) {
+                    arg->output = malloc((size_t)nitems * dtype_size(arg_type));
+                    if (!arg->output) return;
+                }
+                arg->nitems = nitems;
+                arg->dtype = arg_type;
+                private_eval(arg);
+            }
         }
     }
     me_dtype result_type = reduction_output_dtype(arg_type, n->function);
