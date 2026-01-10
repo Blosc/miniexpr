@@ -12,6 +12,7 @@ miniexpr is designed to be embedded directly into larger projects, not distribut
 - Thread-safe operations for parallel processing
 
 **Note**: This is a pre-alpha project.
+**Windows note**: Complex types are not supported on Windows because the C99 complex ABI is not stable across MSVC/clang-cl. `me_compile()` will reject expressions that involve complex variables or outputs.
 
 ## API Functions
 
@@ -19,8 +20,8 @@ miniexpr provides a simple, focused API with just two main functions:
 
 ### `me_compile()`
 ```c
-me_expr *me_compile(const char *expression, const me_variable *variables,
-                    int var_count, me_dtype dtype, int *error);
+int me_compile(const char *expression, const me_variable *variables,
+               int var_count, me_dtype dtype, int *error, me_expr **out);
 ```
 Compiles an expression for evaluation. Variable and output pointers are provided during evaluation rather than compilation.
 
@@ -28,17 +29,18 @@ Compiles an expression for evaluation. Variable and output pointers are provided
 
 ```c
 me_variable vars[] = {{"x"}, {"y"}};  // Just the names!
-me_expr *expr = me_compile("x + y", vars, 2, ME_FLOAT64, &err);
-
+me_expr *expr = NULL;
+if (me_compile("x + y", vars, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 // Later, provide data in the same order as vars array
 const void *data[] = {x_array, y_array};  // x first, y second
-me_eval(expr, data, 2, output, nitems);
+if (me_eval(expr, data, 2, output, nitems) != ME_EVAL_SUCCESS) { /* handle error */ }
 ```
 
 For mixed types (use `ME_AUTO` for output dtype to infer from variables):
 ```c
 me_variable vars[] = {{"temp", ME_FLOAT64}, {"count", ME_INT32}};
-me_expr *expr = me_compile("temp * count", vars, 2, ME_AUTO, &err);
+me_expr *expr = NULL;
+if (me_compile("temp * count", vars, 2, ME_AUTO, &err, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 // Result type will be inferred (ME_FLOAT64 in this case)
 ```
 
@@ -61,8 +63,8 @@ Mixing modes (some vars with types, some `ME_AUTO`) will cause compilation to fa
 
 ### `me_eval()`
 ```c
-void me_eval(const me_expr *expr, const void **vars_chunk,
-             int n_vars, void *output_chunk, int chunk_nitems);
+int me_eval(const me_expr *expr, const void **vars_chunk,
+            int n_vars, void *output_chunk, int chunk_nitems);
 ```
 Evaluates the compiled expression with new variable and output pointers. This allows processing arrays in chunks without recompilation, and is thread-safe for parallel evaluation across multiple threads.
 
@@ -72,6 +74,7 @@ Evaluates the compiled expression with new variable and output pointers. This al
 - `n_vars`: Number of variables (must match the number used in `me_compile`)
 - `output_chunk`: Pointer to output buffer for this chunk
 - `chunk_nitems`: Number of elements in this chunk
+- Return value: `ME_EVAL_SUCCESS` (0) on success, or a negative `ME_EVAL_ERR_*` code on failure
 
 ### `me_free()`
 ```c
@@ -88,6 +91,26 @@ miniexpr supports various data types through the `me_dtype` enumeration:
 - Floating point: `ME_FLOAT32`, `ME_FLOAT64`
 - Complex numbers: `ME_COMPLEX64`, `ME_COMPLEX128`
 
+## Reductions
+
+miniexpr provides scalar reductions over a single variable or constant:
+- `sum(x)`, `prod(x)` (sum/product)
+- `min(x)`, `max(x)`
+- `any(x)`, `all(x)` (truthiness over nonzero values)
+
+**Rules:**
+- The argument may be any expression that does not itself contain reductions (e.g., `sum(x + 1)` is valid, `sum(sum(x))` is not).
+- Reductions may appear inside larger expressions; their scalar result is broadcast (e.g., `x + sum(x)` is valid).
+
+**Result types:**
+- `sum`/`prod`: integer inputs promote to 64-bit (`int64`/`uint64`); floats keep their type.
+- `min`/`max`: same dtype as the input.
+- `any`/`all`: `bool` output for any input type (nonzero is true).
+- Note: `sum`/`prod` on `float32` inputs accumulate in `float64` and cast back to `float32`.
+
+**Floating-point NaNs:**
+- `min`/`max` propagate NaNs if any element is NaN.
+
 ## Usage
 
 To use miniexpr in your project, simply include the source files (`miniexpr.c` and `miniexpr.h`) directly in your build system.
@@ -102,8 +125,8 @@ me_variable vars[] = {{"x"}, {"y"}};
 int err;
 
 // Compile expression
-me_expr *expr = me_compile("x + y", vars, 2, ME_FLOAT64, &err);
-
+me_expr *expr = NULL;
+if (me_compile("x + y", vars, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 // Prepare data
 double x_data[] = {1.0, 2.0, 3.0};
 double y_data[] = {4.0, 5.0, 6.0};
@@ -112,8 +135,7 @@ double result[3];
 const void *var_ptrs[] = {x_data, y_data};
 
 // Evaluate (thread-safe)
-me_eval(expr, var_ptrs, 2, result, 3);
-
+if (me_eval(expr, var_ptrs, 2, result, 3) != ME_EVAL_SUCCESS) { /* handle error */ }
 // Clean up
 me_free(expr);
 ```
@@ -131,11 +153,46 @@ The `examples/` directory contains complete, runnable examples demonstrating var
 
 Build and run:
 ```bash
-make examples
-./build/01_simple_expression
+mkdir -p build
+cd build
+cmake ..
+make -j
+./01_simple_expression
 ```
 
 See [examples/README.md](examples/README.md) for detailed documentation of each example.
+
+## Building
+
+CMake (recommended):
+```bash
+mkdir -p build
+cd build
+cmake ..
+make -j
+ctest
+```
+Tip: run a subset of tests with `ctest -R <pattern>`.
+
+Options:
+- `-DMINIEXPR_BUILD_TESTS=ON|OFF`
+- `-DMINIEXPR_BUILD_EXAMPLES=ON|OFF`
+- `-DMINIEXPR_BUILD_BENCH=ON|OFF`
+- `-DMINIEXPR_USE_SLEEF=ON|OFF`
+
+Windows (clang-cl):
+```bash
+mkdir build
+cd build
+cmake .. -G "Visual Studio 17 2022" -T ClangCL
+cmake --build .
+```
+
+Makefile fallback:
+```bash
+make lib
+make examples
+```
 
 ## Documentation
 

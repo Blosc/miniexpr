@@ -42,14 +42,8 @@ int main() {
     // Compile the expression once for chunked evaluation
     // All variables will use ME_FLOAT64 since output dtype is specified
     int error;
-    me_expr *expr = me_compile("c * 9/5 + 32", vars, 1, ME_FLOAT64, &error);
-
-    if (!expr) {
-        printf("Parse error at position %d\n", error);
-        free(celsius);
-        free(fahrenheit);
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("c * 9/5 + 32", vars, 1, ME_FLOAT64, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     // Process in chunks
     printf("Processing %d elements in chunks of %d...\n",
@@ -71,8 +65,7 @@ int main() {
         void *output_chunk = &fahrenheit[offset];
 
         // Evaluate this chunk
-        me_eval(expr, vars_chunk, 1, output_chunk, current_chunk_size);
-
+        if (me_eval(expr, vars_chunk, 1, output_chunk, current_chunk_size) != ME_EVAL_SUCCESS) { /* handle error */ }
         if ((chunk + 1) % 10 == 0) {
             printf("Processed chunk %d/%d (%.1f%%)\n",
                    chunk + 1, num_chunks,
@@ -150,12 +143,8 @@ int main() {
     me_variable vars[] = {{"x"}, {"y"}};
 
     int error;
-    me_expr *expr = me_compile("sqrt(x*x + y*y)", vars, 2, ME_FLOAT64, &error);
-
-    if (!expr) {
-        printf("Parse error\n");
-        goto cleanup;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("sqrt(x*x + y*y)", vars, 2, ME_FLOAT64, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     // Process file in chunks
     size_t total_processed = 0;
@@ -170,8 +159,7 @@ int main() {
 
         // Process this chunk
         const void *vars_chunk[] = {x_chunk, y_chunk};
-        me_eval(expr, vars_chunk, 2, result_chunk, elements_read);
-
+        if (me_eval(expr, vars_chunk, 2, result_chunk, elements_read) != ME_EVAL_SUCCESS) { /* handle error */ }
         // Write results
         fwrite(result_chunk, sizeof(double), elements_read, output);
 
@@ -227,12 +215,8 @@ int main() {
     me_variable vars[] = {{"P"}, {"V"}, {"n"}};
 
     int error;
-    me_expr *expr = me_compile("(P * V) / (n * 8.314)", vars, 3, ME_FLOAT32, &error);
-
-    if (!expr) {
-        printf("Parse error\n");
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("(P * V) / (n * 8.314)", vars, 3, ME_FLOAT32, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     // Process in chunks
     for (int offset = 0; offset < TOTAL; offset += CHUNK) {
@@ -244,7 +228,7 @@ int main() {
             &moles[offset]
         };
 
-        me_eval(expr, vars_chunk, 3, &temperature[offset], size);
+        if (me_eval(expr, vars_chunk, 3, &temperature[offset], size) != ME_EVAL_SUCCESS) { /* handle error */ }
     }
 
     printf("Computed temperatures for %d samples\n", TOTAL);

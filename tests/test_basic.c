@@ -21,6 +21,9 @@
 #include <math.h>
 #include <stdint.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 #define TEST_SIZE 100
 
@@ -38,9 +41,10 @@ int test_simple_expression() {
 
     me_variable vars[] = {{"a"}, {"b"}};
     int err;
-    me_expr *expr = me_compile("a + b", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a + b", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
         free(a);
         free(b);
@@ -49,7 +53,7 @@ int test_simple_expression() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval(expr, var_ptrs, 2, result, TEST_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, TEST_SIZE);
 
     int passed = 1;
     for (int i = 0; i < TEST_SIZE; i++) {
@@ -86,9 +90,10 @@ int test_complex_expression() {
 
     me_variable vars[] = {{"a"}, {"b"}};
     int err;
-    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error\n");
         free(a);
         free(b);
@@ -97,7 +102,7 @@ int test_complex_expression() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval(expr, var_ptrs, 2, result, TEST_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, TEST_SIZE);
 
     int passed = 1;
     for (int i = 0; i < TEST_SIZE; i++) {
@@ -134,9 +139,10 @@ int test_integer_types() {
 
     me_variable vars[] = {{"a"}, {"b"}};
     int err;
-    me_expr *expr = me_compile("a + b", vars, 2, ME_INT32, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a + b", vars, 2, ME_INT32, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error\n");
         free(a);
         free(b);
@@ -145,7 +151,7 @@ int test_integer_types() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval(expr, var_ptrs, 2, result, TEST_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, TEST_SIZE);
 
     int passed = 1;
     for (int i = 0; i < TEST_SIZE; i++) {
@@ -182,9 +188,10 @@ int test_mixed_types() {
 
     me_variable vars[] = {{"a", ME_INT32}, {"b", ME_FLOAT64}};
     int err;
-    me_expr *expr = me_compile("a + b", vars, 2, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a + b", vars, 2, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error\n");
         free(a);
         free(b);
@@ -193,7 +200,7 @@ int test_mixed_types() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval(expr, var_ptrs, 2, result, TEST_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, TEST_SIZE);
 
     int passed = 1;
     for (int i = 0; i < TEST_SIZE; i++) {
@@ -216,6 +223,76 @@ int test_mixed_types() {
     return passed ? 0 : 1;
 }
 
+int test_fac_ln() {
+    printf("\n=== Test 5: fac and ln ===\n");
+
+    const int n = 10;
+    double *a = malloc((size_t)n * sizeof(double));
+    double *fac_out = malloc((size_t)n * sizeof(double));
+    double *ln_out = malloc((size_t)n * sizeof(double));
+
+    for (int i = 0; i < n; i++) {
+        a[i] = (double)i;
+    }
+
+    int err;
+    me_expr *fac_expr = NULL;
+    me_expr *ln_expr = NULL;
+    me_variable vars[] = {{"a"}};
+
+    if (me_compile("fac(a)", vars, 1, ME_FLOAT64, &err, &fac_expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: fac compilation error at position %d\n", err);
+        free(a);
+        free(fac_out);
+        free(ln_out);
+        return 1;
+    }
+    if (me_compile("ln(a + 1)", vars, 1, ME_FLOAT64, &err, &ln_expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: ln compilation error at position %d\n", err);
+        me_free(fac_expr);
+        free(a);
+        free(fac_out);
+        free(ln_out);
+        return 1;
+    }
+
+    const void *var_ptrs[] = {a};
+    ME_EVAL_CHECK(fac_expr, var_ptrs, 1, fac_out, n);
+    ME_EVAL_CHECK(ln_expr, var_ptrs, 1, ln_out, n);
+
+    int passed = 1;
+    for (int i = 0; i < n; i++) {
+        double expected_fac = 1.0;
+        for (int j = 1; j <= i; j++) {
+            expected_fac *= (double)j;
+        }
+        double expected_ln = log(a[i] + 1.0);
+        if (fabs(fac_out[i] - expected_fac) > 1e-10) {
+            printf("  ❌ FAILED fac at [%d]: got %.6f, expected %.6f\n",
+                   i, fac_out[i], expected_fac);
+            passed = 0;
+            break;
+        }
+        if (fabs(ln_out[i] - expected_ln) > 1e-10) {
+            printf("  ❌ FAILED ln at [%d]: got %.6f, expected %.6f\n",
+                   i, ln_out[i], expected_ln);
+            passed = 0;
+            break;
+        }
+    }
+
+    if (passed) {
+        printf("  ✅ PASSED\n");
+    }
+
+    me_free(fac_expr);
+    me_free(ln_expr);
+    free(a);
+    free(fac_out);
+    free(ln_out);
+    return passed ? 0 : 1;
+}
+
 int main() {
     printf("========================================\n");
     printf("MiniExpr Basic Functionality Tests\n");
@@ -226,6 +303,7 @@ int main() {
     failures += test_complex_expression();
     failures += test_integer_types();
     failures += test_mixed_types();
+    failures += test_fac_ln();
 
     printf("\n========================================\n");
     if (failures == 0) {

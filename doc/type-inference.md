@@ -20,8 +20,8 @@ float data[] = {1.0f, 2.0f, 3.0f, 4.0f};
 me_variable vars[] = {{"x", ME_FLOAT32}};
 
 // Expression with constant
-me_expr *expr = me_compile("x + 3.0", vars, 1, ME_AUTO, &err);
-
+me_expr *expr = NULL;
+if (me_compile("x + 3.0", vars, 1, ME_AUTO, &err, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 // Result: Constants inferred as FLOAT32
 // me_get_dtype(expr) returns ME_FLOAT32 ✓
 ```
@@ -44,8 +44,8 @@ This is especially important for:
 float positions[1000000];  // 4MB instead of 8MB
 
 me_variable vars[] = {{"pos", ME_FLOAT32}};
-me_expr *expr = me_compile("pos * 2.5 + 1.0", vars, 1, ME_AUTO, &err);
-
+me_expr *expr = NULL;
+if (me_compile("pos * 2.5 + 1.0", vars, 1, ME_AUTO, &err, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 // Constants 2.5 and 1.0 are FLOAT32
 // Result is FLOAT32 → saves memory!
 ```
@@ -69,7 +69,8 @@ Many hardware accelerators work best with consistent types:
 // All FLOAT32 → can use SIMD instructions
 float a[N], result[N];
 me_variable vars[] = {{"a", ME_FLOAT32}};
-me_expr *expr = me_compile("sqrt(a*a + 2.5)", vars, 1, ME_AUTO, &err);
+me_expr *expr = NULL;
+if (me_compile("sqrt(a*a + 2.5)", vars, 1, ME_AUTO, &err, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 // Entire computation in FLOAT32 → faster on GPU/SIMD
 ```
 
@@ -84,7 +85,8 @@ When all variables are `ME_AUTO` and you specify an output dtype, all variables 
 ```c
 // All variables use FLOAT64 (homogeneous)
 me_variable vars[] = {{"x"}, {"y"}};  // Both ME_AUTO
-me_expr *expr = me_compile("x + y", vars, 2, ME_FLOAT64, &err);
+me_expr *expr = NULL;
+if (me_compile("x + y", vars, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 // Result: FLOAT64 (all variables treated as FLOAT64)
 ```
 
@@ -95,7 +97,8 @@ When variables have explicit types and you specify an output dtype, variables ke
 ```c
 // Variables keep their types, result is cast to FLOAT64
 me_variable vars[] = {{"x", ME_FLOAT32}, {"y", ME_FLOAT32}};
-me_expr *expr = me_compile("x + 3.0", vars, 2, ME_FLOAT64, &err);
+me_expr *expr = NULL;
+if (me_compile("x + 3.0", vars, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 // Computation: FLOAT32 + FLOAT32 → FLOAT32
 // Output: Cast to FLOAT64
 // Result: FLOAT64 (cast from FLOAT32 computation)
@@ -117,7 +120,8 @@ me_variable vars[] = {
     {"temperature", ME_FLOAT32},
     {"pressure", ME_FLOAT32}
 };
-me_expr *expr = me_compile("temperature * 1.8 + 32.0", vars, 1, ME_AUTO, &err);
+me_expr *expr = NULL;
+if (me_compile("temperature * 1.8 + 32.0", vars, 1, ME_AUTO, &err, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 // Constants match variable type → consistent FLOAT32
 ```
 
@@ -128,7 +132,8 @@ me_variable vars[] = {
     {"count", ME_INT32},
     {"price", ME_FLOAT64}
 };
-me_expr *expr = me_compile("count * price * 1.08", vars, 2, ME_AUTO, &err);
+me_expr *expr = NULL;
+if (me_compile("count * price * 1.08", vars, 2, ME_AUTO, &err, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 // Constants infer from first variable (INT32)
 // But expression promotes to FLOAT64 due to mixed types
 // Result: FLOAT64 ✓
@@ -139,7 +144,8 @@ me_expr *expr = me_compile("count * price * 1.08", vars, 2, ME_AUTO, &err);
 ```c
 // DON'T DO THIS:
 me_variable vars[] = {{"x"}};  // No dtype specified!
-me_expr *expr = me_compile("x + 3.0", vars, 1, ME_AUTO, &err);
+me_expr *expr = NULL;
+if (me_compile("x + 3.0", vars, 1, ME_AUTO, &err, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 // Ambiguous: what type is x? what type is 3.0?
 ```
 

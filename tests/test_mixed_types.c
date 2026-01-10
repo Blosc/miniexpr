@@ -1,9 +1,12 @@
 #include "../src/miniexpr.h"
+#include "minctest.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+
+
 
 #define VECTOR_SIZE 10
 
@@ -27,15 +30,16 @@ int main() {
     };
 
     int err;
-    me_expr *expr1 = me_compile("a + b", vars1, 2, ME_AUTO, &err);
+    me_expr *expr1 = NULL;
+    int rc_expr1 = me_compile("a + b", vars1, 2, ME_AUTO, &err, &expr1);
 
-    if (!expr1) {
+    if (rc_expr1 != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
         printf("  This shows runtime type mismatch detection is working!\n");
     } else {
         printf("  ✓ Compilation succeeded\n");
         const void *var_ptrs1[] = {a_int32, b_int64};
-        me_eval(expr1, var_ptrs1, 2, result_int64, VECTOR_SIZE);
+        ME_EVAL_CHECK(expr1, var_ptrs1, 2, result_int64, VECTOR_SIZE);
 
         printf("  Results: ");
         for (int i = 0; i < 5; i++) {
@@ -61,15 +65,16 @@ int main() {
         {"b", ME_FLOAT32}
     };
 
-    me_expr *expr2 = me_compile("a + b", vars2, 2, ME_AUTO, &err);
+    me_expr *expr2 = NULL;
+    int rc_expr2 = me_compile("a + b", vars2, 2, ME_AUTO, &err, &expr2);
 
-    if (!expr2) {
+    if (rc_expr2 != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
         printf("  This shows runtime type mismatch detection is working!\n");
     } else {
         printf("  ✓ Compilation succeeded\n");
         const void *var_ptrs2[] = {a_int32, b_float};
-        me_eval(expr2, var_ptrs2, 2, result_float, VECTOR_SIZE);
+        ME_EVAL_CHECK(expr2, var_ptrs2, 2, result_float, VECTOR_SIZE);
 
         printf("  Results: ");
         for (int i = 0; i < 5; i++) {
@@ -95,15 +100,16 @@ int main() {
         {"b", ME_FLOAT64}
     };
 
-    me_expr *expr3 = me_compile("a + b", vars3, 2, ME_AUTO, &err);
+    me_expr *expr3 = NULL;
+    int rc_expr3 = me_compile("a + b", vars3, 2, ME_AUTO, &err, &expr3);
 
-    if (!expr3) {
+    if (rc_expr3 != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error at position %d\n", err);
         printf("  This shows runtime type mismatch detection is working!\n");
     } else {
         printf("  ✓ Compilation succeeded\n");
         const void *var_ptrs3[] = {b_float, b_double};
-        me_eval(expr3, var_ptrs3, 2, result_double, VECTOR_SIZE);
+        ME_EVAL_CHECK(expr3, var_ptrs3, 2, result_double, VECTOR_SIZE);
 
         printf("  Results: ");
         for (int i = 0; i < 5; i++) {
