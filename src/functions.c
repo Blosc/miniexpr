@@ -3573,15 +3573,58 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
         case ME_FUNCTION4: case ME_FUNCTION5: case ME_FUNCTION6: case ME_FUNCTION7: \
         case ME_CLOSURE0: case ME_CLOSURE1: case ME_CLOSURE2: case ME_CLOSURE3: \
         case ME_CLOSURE4: case ME_CLOSURE5: case ME_CLOSURE6: case ME_CLOSURE7: \
+            { \
+            /* Check if this node is a conversion node (arity=1, function=NULL) */ \
+            int is_conv_node = (arity == 1 && IS_FUNCTION(n->type) && n->function == NULL); \
+            \
+            if (is_conv_node) { \
+                /* Conversion node: evaluate child with native dtype, then convert */ \
+                me_expr *source = (me_expr*)n->parameters[0]; \
+                me_dtype source_dtype = n->input_dtype; \
+                size_t source_size = dtype_size(source_dtype); \
+                \
+                if (source->type != ME_CONSTANT && source->type != ME_VARIABLE) { \
+                    if (!source->output) { \
+                        source->output = malloc(n->nitems * source_size); \
+                        source->nitems = n->nitems; \
+                    } \
+                    /* Evaluate source with its native dtype via private_eval */ \
+                    private_eval(source); \
+                } \
+                \
+                /* Perform the conversion */ \
+                const void *src_data = (source->type == ME_CONSTANT) ? NULL : \
+                    (source->type == ME_VARIABLE) ? source->bound : source->output; \
+                if (src_data) { \
+                    convert_func_t conv = get_convert_func(source_dtype, n->dtype); \
+                    if (conv) { \
+                        conv(src_data, output, n->nitems); \
+                    } \
+                } \
+                break; \
+            } \
+            \
             for (j = 0; j < arity; j++) { \
                 me_expr *param = (me_expr*)n->parameters[j]; \
                 if (param->type != ME_CONSTANT && param->type != ME_VARIABLE) { \
+                    /* Check if param is a conversion node - if so, let it keep its dtype */ \
+                    int param_is_conv = (ARITY(param->type) == 1 && IS_FUNCTION(param->type) && param->function == NULL); \
                     if (!param->output) { \
-                        param->output = malloc(n->nitems * sizeof(TYPE)); \
+                        if (param_is_conv) { \
+                            /* Conversion node: allocate for target dtype */ \
+                            param->output = malloc(n->nitems * sizeof(TYPE)); \
+                        } else { \
+                            param->output = malloc(n->nitems * sizeof(TYPE)); \
+                            param->dtype = n->dtype; \
+                        } \
                         param->nitems = n->nitems; \
-                        param->dtype = n->dtype; \
                     } \
-                    me_eval_##SUFFIX(param); \
+                    if (param_is_conv) { \
+                        /* Evaluate conversion node - it will handle its child's dtype */ \
+                        me_eval_##SUFFIX(param); \
+                    } else { \
+                        me_eval_##SUFFIX(param); \
+                    } \
                 } \
             } \
             \
@@ -3932,6 +3975,7 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                         } \
                     } \
                 } \
+            } \
             } \
             break; \
         \
@@ -4526,6 +4570,10 @@ static void save_variable_bindings(const me_expr* node,
     case ME_CLOSURE6:
     case ME_CLOSURE7:
         {
+            // Skip conversion nodes - they handle their own type conversion
+            if (IS_FUNCTION(node->type) && ARITY(node->type) == 1 && node->function == NULL) {
+                break;
+            }
             const int arity = ARITY(node->type);
             for (int i = 0; i < arity; i++) {
                 save_variable_bindings((const me_expr*)node->parameters[i],
@@ -4590,6 +4638,10 @@ static void promote_variables_in_tree(me_expr* n, me_dtype target_type,
     case ME_CLOSURE6:
     case ME_CLOSURE7:
         {
+            // Skip conversion nodes - they handle their own type conversion
+            if (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == NULL) {
+                break;
+            }
             const int arity = ARITY(n->type);
             for (int i = 0; i < arity; i++) {
                 promote_variables_in_tree((me_expr*)n->parameters[i], target_type,
@@ -4631,6 +4683,10 @@ static void restore_variables_in_tree(me_expr* n, const void** original_bounds,
     case ME_CLOSURE6:
     case ME_CLOSURE7:
         {
+            // Skip conversion nodes - they handle their own type conversion
+            if (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == NULL) {
+                break;
+            }
             const int arity = ARITY(n->type);
             for (int i = 0; i < arity; i++) {
                 restore_variables_in_tree((me_expr*)n->parameters[i], original_bounds, original_types, restore_idx);
@@ -4668,6 +4724,10 @@ static bool all_variables_match_type(const me_expr* n, me_dtype target_type) {
     case ME_CLOSURE6:
     case ME_CLOSURE7:
         {
+            // Skip conversion nodes - they handle their own type conversion
+            if (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == NULL) {
+                return true;
+            }
             const int arity = ARITY(n->type);
             for (int i = 0; i < arity; i++) {
                 if (!all_variables_match_type((const me_expr*)n->parameters[i], target_type)) {
@@ -6288,6 +6348,43 @@ int me_eval(const me_expr* expr, const void** vars_chunk,
 
     if (actual_var_count != n_vars) {
         return ME_EVAL_ERR_VAR_MISMATCH;
+    }
+
+    // Check if using synthetic addresses (sequential char pointers 1 byte apart)
+    // Only sort if synthetic addresses are detected to restore declaration order
+    int uses_synthetic = 0;
+    if (actual_var_count >= 2) {
+        // Synthetic addresses are consecutive bytes in a char array
+        // Check if all adjacent pointer differences are exactly 1 or -1
+        uses_synthetic = 1;
+        for (int i = 0; i < actual_var_count - 1 && uses_synthetic; i++) {
+            ptrdiff_t diff = (const char*)original_var_pointers[i+1] - (const char*)original_var_pointers[i];
+            if (diff != 1 && diff != -1) {
+                uses_synthetic = 0;
+            }
+        }
+    } else if (actual_var_count == 1) {
+        // Single variable - can't determine, but sorting is a no-op anyway
+        uses_synthetic = 0;
+    }
+
+    if (uses_synthetic) {
+        // Sort original_var_pointers (and var_sizes) by pointer value to ensure
+        // consistent order matching the declaration order (synthetic addresses are sequential)
+        for (int i = 0; i < actual_var_count - 1; i++) {
+            for (int j = i + 1; j < actual_var_count; j++) {
+                if (original_var_pointers[i] > original_var_pointers[j]) {
+                    // Swap pointers
+                    const void* tmp_ptr = original_var_pointers[i];
+                    original_var_pointers[i] = original_var_pointers[j];
+                    original_var_pointers[j] = tmp_ptr;
+                    // Swap sizes
+                    size_t tmp_size = var_sizes[i];
+                    var_sizes[i] = var_sizes[j];
+                    var_sizes[j] = tmp_size;
+                }
+            }
+        }
     }
 
     // Clone the expression tree

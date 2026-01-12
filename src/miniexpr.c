@@ -452,24 +452,20 @@ void apply_type_promotion(me_expr* node) {
         // Store the promoted output type
         node->dtype = promoted;
 
-        // TODO: Conversion nodes not fully implemented yet
-        // See TYPE_PROMOTION_IMPLEMENTATION.md for details
-        /*
-        // Insert conversion nodes if needed
-        if (left_type != promoted) {
-            me_expr *conv_left = creame_conversion_node(left, promoted);
+        // Insert conversion nodes if needed for nested expressions with different dtype
+        if (left_type != promoted && TYPE_MASK(left->type) >= ME_FUNCTION0) {
+            me_expr *conv_left = create_conversion_node(left, promoted);
             if (conv_left) {
                 node->parameters[0] = conv_left;
             }
         }
 
-        if (right_type != promoted) {
-            me_expr *conv_right = creame_conversion_node(right, promoted);
+        if (right_type != promoted && TYPE_MASK(right->type) >= ME_FUNCTION0) {
+            me_expr *conv_right = create_conversion_node(right, promoted);
             if (conv_right) {
                 node->parameters[1] = conv_right;
             }
         }
-        */
     }
 }
 
@@ -802,15 +798,8 @@ static int private_compile(const char* expression, const me_variable* variables,
             root->dtype = dtype;
         }
 
-        // Check for mixed-type nested expressions (not currently supported)
-        if (check_mixed_type_nested(root, root->dtype)) {
-            fprintf(stderr, "Error: Mixed-type nested expressions are not supported.\n");
-            fprintf(stderr, "       Nested sub-expressions must have the same dtype as their parent.\n");
-            me_free(root);
-            if (error) *error = -1;
-            if (vars_copy) free(vars_copy);
-            return ME_COMPILE_ERR_MIXED_TYPE_NESTED;
-        }
+        // Mixed-type nested expressions now handled via conversion nodes
+        // (see apply_type_promotion which inserts conversion nodes when needed)
 
         if (error) *error = 0;
         if (vars_copy) free(vars_copy);

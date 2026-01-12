@@ -751,21 +751,44 @@ int test_mixed_int64_float64_add() {
     me_free(expr);
 
     // Nested expression: b + (a + a)
-    // This should now fail at compile time due to mixed-type nested expressions
-    printf("\nTest: float64 + (int64 + int64) nested add (should fail compilation)\n");
+    // This should now work with conversion nodes handling the mixed types
+    printf("\nTest: float64 + (int64 + int64) nested add\n");
     printf("======================================================================\n");
     err = 0;
     expr = NULL;
     rc_expr = me_compile("b + (a + a)", vars, 2, ME_FLOAT64, &err, &expr);
 
     int passed2 = 0;
-    if (rc_expr == ME_COMPILE_ERR_MIXED_TYPE_NESTED) {
-        printf("  ✅ PASS: Correctly rejected mixed-type nested expression\n");
-        passed2 = 1;
-    } else if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAIL: Got error %d, expected ME_COMPILE_ERR_MIXED_TYPE_NESTED\n", rc_expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAIL: Compilation failed with error %d\n", rc_expr);
     } else {
-        printf("  ❌ FAIL: Compilation succeeded but should have failed\n");
+        // Evaluate the expression
+        const void *var_ptrs2[] = {a, b};
+        double result2[SMALL_SIZE];
+        ME_EVAL_CHECK(expr, var_ptrs2, 2, result2, SMALL_SIZE);
+
+        // Verify results: b[i] + (a[i] + a[i]) = b[i] + 2*a[i]
+        int all_correct = 1;
+        double max_diff2 = 0.0;
+        for (int i = 0; i < SMALL_SIZE; i++) {
+            double expected = b[i] + (double)(a[i] + a[i]);
+            if (isnan(result2[i])) {
+                all_correct = 0;
+                continue;
+            }
+            double diff = fabs(result2[i] - expected);
+            if (diff > max_diff2) max_diff2 = diff;
+            if (diff > 1e-12) {
+                all_correct = 0;
+            }
+        }
+
+        if (all_correct) {
+            printf("  ✅ PASS: Mixed-type nested expression works correctly\n");
+            passed2 = 1;
+        } else {
+            printf("  ❌ FAIL: Results incorrect (max diff: %.12f)\n", max_diff2);
+        }
         me_free(expr);
     }
 
