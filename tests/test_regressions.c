@@ -750,34 +750,43 @@ int test_mixed_int64_float64_add() {
 
     me_free(expr);
 
-    // Nested expression: b + (a + a)
-    // This should now work with conversion nodes handling the mixed types
+    return passed1;
+}
+
+int test_mixed_int64_float64_nested_add() {
     printf("\nTest: float64 + (int64 + int64) nested add\n");
     printf("======================================================================\n");
-    err = 0;
-    expr = NULL;
-    rc_expr = me_compile("b + (a + a)", vars, 2, ME_FLOAT64, &err, &expr);
 
-    int passed2 = 0;
+    int64_t a[SMALL_SIZE];
+    double b[SMALL_SIZE];
+    for (int i = 0; i < SMALL_SIZE; i++) {
+        a[i] = (int64_t)(i - 5);
+        b[i] = 1000.5 + (double)i * 0.25;
+    }
+
+    me_variable vars[] = {{"a", ME_INT64}, {"b", ME_FLOAT64}};
+    int err = 0;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("b + (a + a)", vars, 2, ME_FLOAT64, &err, &expr);
+
+    int passed = 0;
     if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAIL: Compilation failed with error %d\n", rc_expr);
     } else {
-        // Evaluate the expression
-        const void *var_ptrs2[] = {a, b};
-        double result2[SMALL_SIZE];
-        ME_EVAL_CHECK(expr, var_ptrs2, 2, result2, SMALL_SIZE);
+        const void *var_ptrs[] = {a, b};
+        double result[SMALL_SIZE];
+        ME_EVAL_CHECK(expr, var_ptrs, 2, result, SMALL_SIZE);
 
-        // Verify results: b[i] + (a[i] + a[i]) = b[i] + 2*a[i]
         int all_correct = 1;
-        double max_diff2 = 0.0;
+        double max_diff = 0.0;
         for (int i = 0; i < SMALL_SIZE; i++) {
             double expected = b[i] + (double)(a[i] + a[i]);
-            if (isnan(result2[i])) {
+            if (isnan(result[i])) {
                 all_correct = 0;
                 continue;
             }
-            double diff = fabs(result2[i] - expected);
-            if (diff > max_diff2) max_diff2 = diff;
+            double diff = fabs(result[i] - expected);
+            if (diff > max_diff) max_diff = diff;
             if (diff > 1e-12) {
                 all_correct = 0;
             }
@@ -785,14 +794,74 @@ int test_mixed_int64_float64_add() {
 
         if (all_correct) {
             printf("  ✅ PASS: Mixed-type nested expression works correctly\n");
-            passed2 = 1;
+            passed = 1;
         } else {
-            printf("  ❌ FAIL: Results incorrect (max diff: %.12f)\n", max_diff2);
+            printf("  ❌ FAIL: Results incorrect (max diff: %.12f)\n", max_diff);
         }
         me_free(expr);
     }
 
-    return passed1 && passed2;
+    return passed;
+}
+
+int test_float32_int32_nested_add() {
+    printf("\nTest: float32 + (int32 + int32) nested add\n");
+    printf("======================================================================\n");
+
+    float a[SMALL_SIZE];
+    int32_t b[SMALL_SIZE];
+    int32_t c[SMALL_SIZE];
+    for (int i = 0; i < SMALL_SIZE; i++) {
+        a[i] = 10.5f + (float)i * 0.125f;
+        b[i] = i - 3;
+        c[i] = 2 * i + 1;
+    }
+
+    me_variable vars[] = {{"a", ME_FLOAT32}, {"b", ME_INT32}, {"c", ME_INT32}};
+    int err = 0;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a + (b + c)", vars, 3, ME_AUTO, &err, &expr);
+
+    int passed = 0;
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAIL: Compilation failed with error %d\n", rc_expr);
+    } else {
+        me_dtype out_dtype = me_get_dtype(expr);
+        if (out_dtype != ME_FLOAT64) {
+            printf("  ❌ FAIL: expected ME_FLOAT64 output, got %d\n", out_dtype);
+            me_free(expr);
+            return 0;
+        }
+
+        const void *var_ptrs[] = {a, b, c};
+        double result[SMALL_SIZE];
+        ME_EVAL_CHECK(expr, var_ptrs, 3, result, SMALL_SIZE);
+
+        int all_correct = 1;
+        double max_diff = 0.0;
+        for (int i = 0; i < SMALL_SIZE; i++) {
+            double expected = (double)a[i] + (double)(b[i] + c[i]);
+            if (isnan(result[i])) {
+                all_correct = 0;
+                continue;
+            }
+            double diff = fabs(result[i] - expected);
+            if (diff > max_diff) max_diff = diff;
+            if (diff > 1e-12) {
+                all_correct = 0;
+            }
+        }
+
+        if (all_correct) {
+            printf("  ✅ PASS: Mixed-type nested expression works correctly\n");
+            passed = 1;
+        } else {
+            printf("  ❌ FAIL: Results incorrect (max diff: %.12f)\n", max_diff);
+        }
+        me_free(expr);
+    }
+
+    return passed;
 }
 
 // ============================================================================
@@ -1372,6 +1441,10 @@ int main() {
 
     total++;
     if (test_mixed_int64_float64_add()) passed++;
+    total++;
+    if (test_mixed_int64_float64_nested_add()) passed++;
+    total++;
+    if (test_float32_int32_nested_add()) passed++;
 
     // ========================================================================
     // SECTION 10: CONJ ON REAL INPUTS (FLOAT32)
