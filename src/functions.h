@@ -63,6 +63,11 @@ enum {
     TOK_BITWISE, TOK_SHIFT, TOK_COMPARE, TOK_POW
 };
 
+/* Check if a pointer is a synthetic address (used internally for chunked evaluation).
+ * Returns non-zero if the pointer was assigned by me_compile for ordinal variable matching.
+ */
+int is_synthetic_address(const void* ptr);
+
 #define TYPE_MASK(TYPE) ((TYPE)&0x0000001F)
 #define IS_PURE(TYPE) (((TYPE) & ME_FLAG_PURE) != 0)
 #define IS_FUNCTION(TYPE) (((TYPE) & ME_FUNCTION0) != 0)

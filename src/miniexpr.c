@@ -811,6 +811,12 @@ static int private_compile(const char* expression, const me_variable* variables,
 // Synthetic addresses for ordinal matching (when user provides NULL addresses)
 static char synthetic_var_addresses[ME_MAX_VARS];
 
+// Check if a pointer is a synthetic address
+int is_synthetic_address(const void* ptr) {
+    const char* p = (const char*)ptr;
+    return (p >= synthetic_var_addresses && p < synthetic_var_addresses + ME_MAX_VARS);
+}
+
 int me_compile(const char* expression, const me_variable* variables,
                int var_count, me_dtype dtype, int* error, me_expr** out) {
     if (out) *out = NULL;

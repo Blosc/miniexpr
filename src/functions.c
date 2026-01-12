@@ -6350,22 +6350,16 @@ int me_eval(const me_expr* expr, const void** vars_chunk,
         return ME_EVAL_ERR_VAR_MISMATCH;
     }
 
-    // Check if using synthetic addresses (sequential char pointers 1 byte apart)
+    // Check if using synthetic addresses by testing if all pointers are synthetic
     // Only sort if synthetic addresses are detected to restore declaration order
     int uses_synthetic = 0;
-    if (actual_var_count >= 2) {
-        // Synthetic addresses are consecutive bytes in a char array
-        // Check if all adjacent pointer differences are exactly 1 or -1
+    if (actual_var_count >= 1) {
         uses_synthetic = 1;
-        for (int i = 0; i < actual_var_count - 1 && uses_synthetic; i++) {
-            ptrdiff_t diff = (const char*)original_var_pointers[i+1] - (const char*)original_var_pointers[i];
-            if (diff != 1 && diff != -1) {
+        for (int i = 0; i < actual_var_count && uses_synthetic; i++) {
+            if (!is_synthetic_address(original_var_pointers[i])) {
                 uses_synthetic = 0;
             }
         }
-    } else if (actual_var_count == 1) {
-        // Single variable - can't determine, but sorting is a no-op anyway
-        uses_synthetic = 0;
     }
 
     if (uses_synthetic) {
