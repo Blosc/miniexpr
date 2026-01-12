@@ -473,6 +473,73 @@ void apply_type_promotion(me_expr* node) {
     }
 }
 
+/* Check for mixed-type nested expressions (currently not supported) */
+static int check_mixed_type_nested(const me_expr* node, me_dtype parent_dtype) {
+    if (!node) return 0;
+
+    switch (TYPE_MASK(node->type)) {
+    case ME_CONSTANT:
+    case ME_VARIABLE:
+        return 0;
+
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        /* Skip reduction nodes - they handle their own type conversions */
+        if (is_reduction_node(node)) {
+            return 0;
+        }
+
+        /* Skip comparison nodes - they naturally have different output type (bool) than operands */
+        if (is_comparison_node(node)) {
+            return 0;
+        }
+
+        /* Only check binary operations (arity 2) for mixed-type nested expressions */
+        /* Unary operations are fine */
+        const int arity = ARITY(node->type);
+        if (arity == 2 && IS_FUNCTION(node->type)) {
+            me_expr* left = (me_expr*)node->parameters[0];
+            me_expr* right = (me_expr*)node->parameters[1];
+
+            /* If either operand is a nested expression (not constant/variable) with different dtype, flag it */
+            if (left && TYPE_MASK(left->type) >= ME_FUNCTION0 &&
+                left->dtype != ME_AUTO && node->dtype != ME_AUTO &&
+                left->dtype != node->dtype) {
+                return 1;
+            }
+            if (right && TYPE_MASK(right->type) >= ME_FUNCTION0 &&
+                right->dtype != ME_AUTO && node->dtype != ME_AUTO &&
+                right->dtype != node->dtype) {
+                return 1;
+            }
+        }
+
+        /* Recursively check children */
+        for (int i = 0; i < arity; i++) {
+            if (check_mixed_type_nested((const me_expr*)node->parameters[i], node->dtype)) {
+                return 1;
+            }
+        }
+        break;
+    }
+
+    return 0;
+}
+
 me_expr* new_expr(const int type, const me_expr* parameters[]) {
     const int arity = ARITY(type);
     const int psize = sizeof(void*) * arity;
@@ -733,6 +800,16 @@ static int private_compile(const char* expression, const me_variable* variables,
         else {
             // User explicitly requested a dtype - use it (will cast if needed)
             root->dtype = dtype;
+        }
+
+        // Check for mixed-type nested expressions (not currently supported)
+        if (check_mixed_type_nested(root, root->dtype)) {
+            fprintf(stderr, "Error: Mixed-type nested expressions are not supported.\n");
+            fprintf(stderr, "       Nested sub-expressions must have the same dtype as their parent.\n");
+            me_free(root);
+            if (error) *error = -1;
+            if (vars_copy) free(vars_copy);
+            return ME_COMPILE_ERR_MIXED_TYPE_NESTED;
         }
 
         if (error) *error = 0;

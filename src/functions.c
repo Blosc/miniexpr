@@ -409,7 +409,7 @@ me_dtype reduction_output_dtype(me_dtype dt, const void* func) {
 }
 
 /* Get size of a type in bytes */
-static size_t dtype_size(me_dtype dtype) {
+size_t dtype_size(me_dtype dtype) {
     switch (dtype) {
     case ME_BOOL: return sizeof(bool);
     case ME_INT8: return sizeof(int8_t);
@@ -2132,7 +2132,7 @@ static bool is_comparison_function(const void* func) {
         func == (void*)cmp_gt || func == (void*)cmp_ge;
 }
 
-static bool is_comparison_node(const me_expr* n) {
+bool is_comparison_node(const me_expr* n) {
     return n && IS_FUNCTION(n->type) && ARITY(n->type) == 2 &&
         is_comparison_function(n->function);
 }

@@ -78,7 +78,9 @@ me_dtype infer_result_type(const me_expr* n);
 void me_free_parameters(me_expr* n);
 
 bool is_reduction_node(const me_expr* n);
+bool is_comparison_node(const me_expr* n);
 bool is_float_math_function(const void* func);
+size_t dtype_size(me_dtype dtype);
 bool has_complex_input_types(const me_expr* n);
 bool has_unsupported_complex_function(const me_expr* n);
 me_dtype reduction_output_dtype(me_dtype dt, const void* func);

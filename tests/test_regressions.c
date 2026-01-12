@@ -589,10 +589,6 @@ int test_int64_large_constant(const char *description, int size) {
         printf("  ❌ FAIL (max diff: %.12f)\n", max_diff);
     }
 
-    // The caller expects this test to surface the reported problem; return the
-    // actual pass/fail so it shows up in the overall summary. The external app
-    // that reported the issue used this expression and observed incorrect
-    // behaviour, so a failure here indicates the bug is present.
     return passed;
 }
 
@@ -695,6 +691,85 @@ int test_float32_array_float64_constants(const char *description, int size) {
     }
 
     return passed;
+}
+
+// ============================================================================
+// MIXED INT64 + FLOAT64 ADD
+// ============================================================================
+int test_mixed_int64_float64_add() {
+    printf("\nTest: mixed int64/float64 add returns float64 without NaNs\n");
+    printf("======================================================================\n");
+
+    int64_t a[SMALL_SIZE];
+    double b[SMALL_SIZE];
+    for (int i = 0; i < SMALL_SIZE; i++) {
+        a[i] = (int64_t)(i - 5);
+        b[i] = 1000.5 + (double)i * 0.25;
+    }
+
+    me_variable vars[] = {{"a", ME_INT64}, {"b", ME_FLOAT64}};
+    int err;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a + b", vars, 2, ME_FLOAT64, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ COMPILATION FAILED (error %d)\n", err);
+        return 0;
+    }
+
+    me_dtype out_dtype = me_get_dtype(expr);
+    if (out_dtype != ME_FLOAT64) {
+        printf("  ❌ FAILED: expected ME_FLOAT64 output, got %d\n", out_dtype);
+        me_free(expr);
+        return 0;
+    }
+
+    const void *var_ptrs[] = {a, b};
+    double result[SMALL_SIZE];
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, SMALL_SIZE);
+
+    int passed1 = 1;
+    double max_diff = 0.0;
+    for (int i = 0; i < SMALL_SIZE; i++) {
+        double expected = (double)a[i] + b[i];
+        if (isnan(result[i])) {
+            passed1 = 0;
+            continue;
+        }
+        double diff = fabs(result[i] - expected);
+        if (diff > max_diff) max_diff = diff;
+        if (diff > 1e-12) {
+            passed1 = 0;
+        }
+    }
+
+    if (passed1) {
+        printf("  ✅ PASS\n");
+    } else {
+        printf("  ❌ FAIL (max diff: %.12f)\n", max_diff);
+    }
+
+    me_free(expr);
+
+    // Nested expression: b + (a + a)
+    // This should now fail at compile time due to mixed-type nested expressions
+    printf("\nTest: float64 + (int64 + int64) nested add (should fail compilation)\n");
+    printf("======================================================================\n");
+    err = 0;
+    expr = NULL;
+    rc_expr = me_compile("b + (a + a)", vars, 2, ME_FLOAT64, &err, &expr);
+
+    int passed2 = 0;
+    if (rc_expr == ME_COMPILE_ERR_MIXED_TYPE_NESTED) {
+        printf("  ✅ PASS: Correctly rejected mixed-type nested expression\n");
+        passed2 = 1;
+    } else if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAIL: Got error %d, expected ME_COMPILE_ERR_MIXED_TYPE_NESTED\n", rc_expr);
+    } else {
+        printf("  ❌ FAIL: Compilation succeeded but should have failed\n");
+        me_free(expr);
+    }
+
+    return passed1 && passed2;
 }
 
 // ============================================================================
@@ -1266,10 +1341,20 @@ int main() {
                                              SMALL_SIZE)) passed++;
 
     // ========================================================================
-    // SECTION 9: CONJ ON REAL INPUTS (FLOAT32)
+    // SECTION 9: MIXED INT64 + FLOAT64 ADD
     // ========================================================================
     printf("\n\n========================================================================\n");
-    printf("SECTION 9: CONJ ON REAL INPUTS (FLOAT32)\n");
+    printf("SECTION 9: MIXED INT64 + FLOAT64 ADD\n");
+    printf("========================================================================\n");
+
+    total++;
+    if (test_mixed_int64_float64_add()) passed++;
+
+    // ========================================================================
+    // SECTION 10: CONJ ON REAL INPUTS (FLOAT32)
+    // ========================================================================
+    printf("\n\n========================================================================\n");
+    printf("SECTION 10: CONJ ON REAL INPUTS (FLOAT32)\n");
     printf("========================================================================\n");
 
     total++;
