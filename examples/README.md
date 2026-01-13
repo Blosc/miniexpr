@@ -272,6 +272,21 @@ Chunk size matters enormously for parallel performance:
 
 ---
 
+### 10_boolean_logical_ops.c
+**Logical operators on boolean arrays**
+
+- **What it demonstrates**: Logical semantics for `&`, `|`, `^`, and `~` on bool arrays
+- **Expressions**: `a & b`, `a | b`, `a ^ b`, `~a`, `(o0 > 0.5) & (o1 > 10000)`
+- **Concepts**: ME_BOOL output, boolean masks, comparison composition
+- **Best for**: Masking, filtering, conditional logic
+
+**Run it:**
+```bash
+./build/10_boolean_logical_ops
+```
+
+---
+
 ## Building Examples
 
 ### Using CMake (recommended)

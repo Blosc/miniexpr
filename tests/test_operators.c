@@ -284,6 +284,118 @@ void test_logical_bool() {
     }
 
     me_free(expr);
+
+    // Test OR
+    expr = NULL;
+    rc_expr = me_compile("a | b", vars, 2, ME_BOOL, &err, &expr);
+
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: OR compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs_or[] = {a, b};
+    ME_EVAL_CHECK(expr, var_ptrs_or, 2, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        bool expected = a[i] || b[i];
+        if (result[i] != expected) {
+            printf("  FAIL OR at [%d]: expected %d, got %d\n", i, expected, result[i]);
+            tests_failed++;
+            me_free(expr);
+            return;
+        }
+    }
+
+    me_free(expr);
+
+    // Test XOR
+    expr = NULL;
+    rc_expr = me_compile("a ^ b", vars, 2, ME_BOOL, &err, &expr);
+
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: XOR compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs_xor[] = {a, b};
+    ME_EVAL_CHECK(expr, var_ptrs_xor, 2, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        bool expected = a[i] != b[i];
+        if (result[i] != expected) {
+            printf("  FAIL XOR at [%d]: expected %d, got %d\n", i, expected, result[i]);
+            tests_failed++;
+            me_free(expr);
+            return;
+        }
+    }
+
+    me_free(expr);
+
+    // Test NOT
+    me_variable vars_not[] = {{"a"}};
+    expr = NULL;
+    rc_expr = me_compile("~a", vars_not, 1, ME_BOOL, &err, &expr);
+
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: NOT compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs_not[] = {a};
+    ME_EVAL_CHECK(expr, var_ptrs_not, 1, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        bool expected = !a[i];
+        if (result[i] != expected) {
+            printf("  FAIL NOT at [%d]: expected %d, got %d\n", i, expected, result[i]);
+            tests_failed++;
+            me_free(expr);
+            return;
+        }
+    }
+
+    me_free(expr);
+    printf("  PASS\n");
+}
+
+void test_logical_comparisons() {
+    TEST("logical ops on comparison results");
+
+    float o0[VECTOR_SIZE] = {0.2f, 0.6f, 1.2f, 0.4f, 0.9f, 0.1f, 0.8f, 0.0f, 0.51f, 0.49f};
+    int32_t o1[VECTOR_SIZE] = {9999, 10001, 10000, 15000, 5000, 20000, 10002, 42, 10001, 10000};
+    bool result[VECTOR_SIZE] = {0};
+
+    me_variable vars[] = {{"o0", ME_FLOAT32}, {"o1", ME_INT32}};
+
+    int err;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("((o0 > 0.5) & (o1 > 10000))", vars, 2, ME_BOOL, &err, &expr);
+
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs[] = {o0, o1};
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        bool expected = (o0[i] > 0.5f) && (o1[i] > 10000);
+        if (result[i] != expected) {
+            printf("  FAIL at [%d]: expected %d, got %d\n", i, expected, result[i]);
+            tests_failed++;
+            me_free(expr);
+            return;
+        }
+    }
+
+    me_free(expr);
     printf("  PASS\n");
 }
 
@@ -298,6 +410,7 @@ int main() {
     test_comparison_eq_float();
     test_comparison_lt_int();
     test_logical_bool();
+    test_logical_comparisons();
 
     printf("\n=== Test Summary ===\n");
     printf("Tests run: %d\n", tests_run);

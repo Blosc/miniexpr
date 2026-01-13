@@ -2110,7 +2110,7 @@ static double comma(double a, double b) {
     return b;
 }
 
-/* Bitwise operators (for integer types) */
+/* Bitwise operators (for integer types; bool uses logical semantics) */
 static double bit_and(double a, double b) { return (double)((int64_t)a & (int64_t)b); }
 static double bit_or(double a, double b) { return (double)((int64_t)a | (int64_t)b); }
 static double bit_xor(double a, double b) { return (double)((int64_t)a ^ (int64_t)b); }
@@ -2142,6 +2142,23 @@ static double logical_and(double a, double b) { return ((int)a) && ((int)b) ? 1.
 static double logical_or(double a, double b) { return ((int)a) || ((int)b) ? 1.0 : 0.0; }
 static double logical_not(double a) { return !(int)a ? 1.0 : 0.0; }
 static double logical_xor(double a, double b) { return ((int)a) != ((int)b) ? 1.0 : 0.0; }
+
+static void promote_logical_bool(me_expr* node) {
+    if (!node || node->dtype != ME_BOOL) return;
+
+    if (node->function == bit_and) {
+        node->function = logical_and;
+    }
+    else if (node->function == bit_or) {
+        node->function = logical_or;
+    }
+    else if (node->function == bit_xor) {
+        node->function = logical_xor;
+    }
+    else if (node->function == bit_not) {
+        node->function = logical_not;
+    }
+}
 
 static bool is_identifier_start(char c) {
     return isalpha((unsigned char)c) || c == '_';
@@ -2529,29 +2546,39 @@ static me_expr* base(state* s) {
 
 
 static me_expr* power(state* s) {
-    /* <power>     =    {("-" | "+")} <base> */
-    int sign = 1;
-    while (s->type == TOK_INFIX && (s->function == add || s->function == sub)) {
-        if (s->function == sub) sign = -sign;
+    /* <power>     =    {("-" | "+" | "~")} <base> */
+    if (s->type == TOK_INFIX && (s->function == add || s->function == sub)) {
+        me_fun2 t = (me_fun2)s->function;
         next_token(s);
-    }
+        me_expr* inner = power(s);
+        CHECK_NULL(inner);
 
-    me_expr* ret;
+        if (t == add) {
+            return inner;
+        }
 
-    if (sign == 1) {
-        ret = base(s);
-    }
-    else {
-        me_expr* b = base(s);
-        CHECK_NULL(b);
-
-        ret = NEW_EXPR(ME_FUNCTION1 | ME_FLAG_PURE, b);
-        CHECK_NULL(ret, me_free(b));
+        me_expr* ret = NEW_EXPR(ME_FUNCTION1 | ME_FLAG_PURE, inner);
+        CHECK_NULL(ret, me_free(inner));
 
         ret->function = negate;
+        return ret;
     }
 
-    return ret;
+    if (s->type == TOK_BITWISE && s->function == bit_not) {
+        next_token(s);
+        me_expr* inner = power(s);
+        CHECK_NULL(inner);
+
+        me_expr* ret = NEW_EXPR(ME_FUNCTION1 | ME_FLAG_PURE, inner);
+        CHECK_NULL(ret, me_free(inner));
+
+        ret->function = bit_not;
+        ret->dtype = inner->dtype;
+        promote_logical_bool(ret);
+        return ret;
+    }
+
+    return base(s);
 }
 
 #ifdef ME_POW_FROM_RIGHT
@@ -2686,6 +2713,7 @@ static me_expr* bitwise_and(state* s) {
 
         ret->function = bit_and;
         apply_type_promotion(ret);
+        promote_logical_bool(ret);
     }
 
     return ret;
@@ -2694,7 +2722,7 @@ static me_expr* bitwise_and(state* s) {
 
 static me_expr* bitwise_xor(state* s) {
     /* <bitwise_xor> =    <bitwise_and> {"^" <bitwise_and>} */
-    /* Note: ^ is XOR for integers/bools. Use ** for power */
+    /* Note: ^ is XOR for integers and logical XOR for bools. Use ** for power */
     me_expr* ret = bitwise_and(s);
     CHECK_NULL(ret);
 
@@ -2709,6 +2737,7 @@ static me_expr* bitwise_xor(state* s) {
 
         ret->function = bit_xor;
         apply_type_promotion(ret);
+        promote_logical_bool(ret);
     }
 
     return ret;
@@ -2732,6 +2761,7 @@ static me_expr* bitwise_or(state* s) {
 
         ret->function = (void*)t;
         apply_type_promotion(ret);
+        promote_logical_bool(ret);
     }
 
     return ret;

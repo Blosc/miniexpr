@@ -215,6 +215,10 @@ RGB( 32,192,128) -> Gray=136
 
 Comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`) can output boolean arrays. This is useful for filtering, masking, or conditional operations.
 
+For boolean arrays, the operators `&`, `|`, `^`, and `~` follow logical semantics
+(like NumPy's `logical_and/or/xor/not`). This makes it easy to combine comparison
+masks with boolean inputs.
+
 ```c
 #include <stdio.h>
 #include <stdbool.h>

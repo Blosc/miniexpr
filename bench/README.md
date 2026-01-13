@@ -65,6 +65,13 @@ Comparison operator throughput.
 ./build/benchmark_comparisons
 ```
 
+### benchmark_logical_bool.c
+Logical operator throughput for boolean arrays.
+
+```bash
+./build/benchmark_logical_bool
+```
+
 ### benchmark_sincos.c
 sin/cos expression throughput across block sizes.
 
