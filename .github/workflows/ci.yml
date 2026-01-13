@@ -12,6 +12,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         compiler: [gcc]
+        exclude:
+          - os: windows-latest
+            compiler: gcc
         include:
 #          - os: windows-latest
 #            compiler: msvc
@@ -22,54 +25,32 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up MSVC
-      if: matrix.compiler == 'msvc' || matrix.compiler == 'clang-cl'
+    - name: Set up MSVC (Windows)
+      if: runner.os == 'Windows'
       uses: ilammy/msvc-dev-cmd@v1
-    
-    - name: Build library (GCC)
-      if: matrix.compiler == 'gcc'
+
+    - name: Build library
       shell: bash
-      run: make lib
+      run: |
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          # Visual Studio generators are multi-config; select Release at build time.
+          cmake -S . -B build -G "Visual Studio 17 2022" -T ClangCL
+        else
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        fi
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          cmake --build build --config Release
+        else
+          cmake --build build
+        fi
     
-    - name: Build and run tests (GCC)
-      if: matrix.compiler == 'gcc'
+    - name: Build and run tests
       shell: bash
-      run: make test
-
-    - name: Build library (MSVC)
-      if: matrix.compiler == 'msvc'
-      shell: cmd
       run: |
-        if not exist build mkdir build
-        cl /O2 /DNDEBUG /Isrc src/miniexpr.c /c /Fobuild/miniexpr.obj
-
-    - name: Build and run tests (MSVC)
-      if: matrix.compiler == 'msvc'
-      shell: cmd
-      run: |
-        setlocal enabledelayedexpansion
-        for %%f in (tests\*.c) do (
-          cl /O2 /DNDEBUG /Isrc %%f build/miniexpr.obj /Febuild/%%~nf.exe
-          if !errorlevel! neq 0 exit /b !errorlevel!
-          build\%%~nf.exe
-          if !errorlevel! neq 0 exit /b !errorlevel!
-        )
-
-    - name: Build library (clang-cl)
-      if: matrix.compiler == 'clang-cl'
-      shell: cmd
-      run: |
-        if not exist build mkdir build
-        clang-cl /O2 /DNDEBUG /Isrc src/miniexpr.c /c /Fobuild/miniexpr.obj
-
-    - name: Build and run tests (clang-cl)
-      if: matrix.compiler == 'clang-cl'
-      shell: cmd
-      run: |
-        setlocal enabledelayedexpansion
-        for %%f in (tests\*.c) do (
-          clang-cl /O2 /DNDEBUG /Isrc %%f build/miniexpr.obj /Febuild/%%~nf.exe
-          if !errorlevel! neq 0 exit /b !errorlevel!
-          build\%%~nf.exe
-          if !errorlevel! neq 0 exit /b !errorlevel!
-        )
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          ctest --test-dir build -C Release --output-on-failure || \
+            ctest --test-dir build -C Release --rerun-failed --output-on-failure
+        else
+          ctest --test-dir build --output-on-failure || \
+            ctest --test-dir build --rerun-failed --output-on-failure
+        fi

@@ -1,7 +1,7 @@
 /*
  * Benchmark with single persistent thread pool across all tests
  * Tests various chunk sizes from 1 KB to 130 MB with 4 threads
- * 
+ *
  * Usage: ./benchmark_chunksize
  *
  * Output: CSV-style results showing performance for each chunk size
@@ -14,6 +14,13 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "miniexpr.h"
+#include "minctest.h"
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+
 
 #define NUM_THREADS 4
 #define TOTAL_SIZE_MB 1024  // 1 GB total dataset
@@ -72,7 +79,7 @@ static void *worker_thread(void *arg) {
             }
             double *output = (double *) pool->output + my_chunk_idx;
 
-            me_eval(pool->expr, adjusted_inputs, pool->num_inputs,
+            ME_EVAL_CHECK(pool->expr, adjusted_inputs, pool->num_inputs,
                     output, chunk_size);
 
             // Update completion status
@@ -150,8 +157,9 @@ static double benchmark_chunksize(thread_pool_t *pool, size_t chunk_bytes,
     // Compile expression
     me_variable vars[] = {{"a"}, {"b"}, {"c"}};
     int error;
-    me_expr *expr = me_compile("(a + b) * c", vars, 3, ME_FLOAT64, &error);
-    if (!expr) return 0.0;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("(a + b) * c", vars, 3, ME_FLOAT64, &error, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) return 0.0;
 
     const void *inputs[] = {a, b, c};
 
@@ -168,8 +176,14 @@ static double benchmark_chunksize(thread_pool_t *pool, size_t chunk_bytes,
     pool->work_ready = true;
     pthread_mutex_unlock(&pool->work_mutex);
 
+#ifdef _WIN32
+    LARGE_INTEGER freq, start, end;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&start);
+#else
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
+#endif
 
     // Signal threads that work is available
     pthread_cond_broadcast(&pool->work_available);
@@ -181,9 +195,14 @@ static double benchmark_chunksize(thread_pool_t *pool, size_t chunk_bytes,
     }
     pthread_mutex_unlock(&pool->work_mutex);
 
+#ifdef _WIN32
+    QueryPerformanceCounter(&end);
+    double elapsed = (double)(end.QuadPart - start.QuadPart) / (double)freq.QuadPart;
+#else
     clock_gettime(CLOCK_MONOTONIC, &end);
-
     double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+#endif
+
     double throughput = (total_elements / elapsed) / 1e6; // Melems/sec
 
     me_free(expr);

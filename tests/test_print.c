@@ -1,7 +1,11 @@
 /* Test and demonstration of me_print() debugging function */
 
+#include <stdlib.h>
 #include <stdio.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 int main() {
     printf("========================================\n");
@@ -13,8 +17,9 @@ int main() {
     printf("   Expression tree:\n");
     me_variable vars1[] = {{"x"}};
     int err;
-    me_expr *expr1 = me_compile("x + 5", vars1, 1, ME_FLOAT64, &err);
-    if (expr1) {
+    me_expr *expr1 = NULL;
+    int rc_expr1 = me_compile("x + 5", vars1, 1, ME_FLOAT64, &err, &expr1);
+    if (rc_expr1 == ME_COMPILE_SUCCESS) {
         me_print(expr1);
         me_free(expr1);
     }
@@ -24,8 +29,9 @@ int main() {
     printf("2. Complex expression: (a + b) * (c - d)\n");
     printf("   Expression tree:\n");
     me_variable vars2[] = {{"a"}, {"b"}, {"c"}, {"d"}};
-    me_expr *expr2 = me_compile("(a + b) * (c - d)", vars2, 4, ME_FLOAT64, &err);
-    if (expr2) {
+    me_expr *expr2 = NULL;
+    int rc_expr2 = me_compile("(a + b) * (c - d)", vars2, 4, ME_FLOAT64, &err, &expr2);
+    if (rc_expr2 == ME_COMPILE_SUCCESS) {
         me_print(expr2);
         me_free(expr2);
     }
@@ -35,8 +41,9 @@ int main() {
     printf("3. Expression with functions: sqrt(x*x + y*y)\n");
     printf("   Expression tree:\n");
     me_variable vars3[] = {{"x"}, {"y"}};
-    me_expr *expr3 = me_compile("sqrt(x*x + y*y)", vars3, 2, ME_FLOAT64, &err);
-    if (expr3) {
+    me_expr *expr3 = NULL;
+    int rc_expr3 = me_compile("sqrt(x*x + y*y)", vars3, 2, ME_FLOAT64, &err, &expr3);
+    if (rc_expr3 == ME_COMPILE_SUCCESS) {
         me_print(expr3);
         me_free(expr3);
     }
@@ -49,13 +56,14 @@ int main() {
     double result[3];
 
     me_variable vars4[] = {{"x"}, {"y"}};
-    me_expr *expr4 = me_compile("x + y", vars4, 2, ME_FLOAT64, &err);
-    if (expr4) {
+    me_expr *expr4 = NULL;
+    int rc_expr4 = me_compile("x + y", vars4, 2, ME_FLOAT64, &err, &expr4);
+    if (rc_expr4 == ME_COMPILE_SUCCESS) {
         printf("   Tree structure:\n");
         me_print(expr4);
 
         const void *var_ptrs[] = {x, y};
-        me_eval(expr4, var_ptrs, 2, result, 3);
+        ME_EVAL_CHECK(expr4, var_ptrs, 2, result, 3);
 
         printf("   Evaluation results:\n");
         for (int i = 0; i < 3; i++) {

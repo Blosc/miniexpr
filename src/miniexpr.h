@@ -44,6 +44,21 @@ extern "C" {
 
 #endif
 
+/* Internal eval block size (elements). Compile-time fixed. */
+#ifndef ME_EVAL_BLOCK_NITEMS
+#define ME_EVAL_BLOCK_NITEMS 4096
+#endif
+
+/* Maximum number of variables supported in a single expression. */
+#ifndef ME_MAX_VARS
+#define ME_MAX_VARS 128
+#endif
+
+/* Enable internal eval blocking for large chunks (1 = on, 0 = off). */
+#ifndef ME_EVAL_ENABLE_BLOCKING
+#define ME_EVAL_ENABLE_BLOCKING 1
+#endif
+
 
 /* Data type enumeration - Full C99 support */
 typedef enum {
@@ -120,29 +135,56 @@ typedef struct me_variable {
  *          - ME_AUTO: All variables must specify their dtypes, output is inferred
  *          - Specific type: Either all variables are ME_AUTO (homogeneous, all use this type),
  *            OR all variables have explicit dtypes (heterogeneous, result cast to this type)
- *   error: Optional pointer to receive error position (0 on success, >0 on error)
+ *   error: Optional pointer to receive error position (0 on success, >0 on parse error)
+ *   out: Output pointer to receive the compiled expression
  *
- * Returns: Compiled expression ready for chunked evaluation, or NULL on error
+ * Returns: ME_COMPILE_SUCCESS (0) on success, or a negative ME_COMPILE_ERR_* code on failure
  *
  * Example 1 (simple - all same type):
  *   me_variable vars[] = {{"x"}, {"y"}};  // Both ME_AUTO
- *   me_expr *expr = me_compile("x + y", vars, 2, ME_FLOAT64, &err);
+ *   me_expr *expr = NULL;
+ *   if (me_compile("x + y", vars, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) { return; }
  *
  * Example 2 (mixed types with ME_AUTO):
  *   me_variable vars[] = {{"x", ME_INT32}, {"y", ME_FLOAT64}};
- *   me_expr *expr = me_compile("x + y", vars, 2, ME_AUTO, &err);
+ *   me_expr *expr = NULL;
+ *   if (me_compile("x + y", vars, 2, ME_AUTO, &err, &expr) != ME_COMPILE_SUCCESS) { return; }
  *
  * Example 3 (mixed types with explicit output):
  *   me_variable vars[] = {{"x", ME_INT32}, {"y", ME_FLOAT64}};
- *   me_expr *expr = me_compile("x + y", vars, 2, ME_FLOAT32, &err);
+ *   me_expr *expr = NULL;
+ *   if (me_compile("x + y", vars, 2, ME_FLOAT32, &err, &expr) != ME_COMPILE_SUCCESS) { return; }
  *   // Variables keep their types, result is cast to FLOAT32
  *
  *   // Later, provide data in same order as variable definitions
  *   const void *data[] = {x_array, y_array};  // x first, y second
- *   me_eval(expr, data, 2, output, nitems);
+ *   if (me_eval(expr, data, 2, output, nitems) != ME_EVAL_SUCCESS) { return; }
  */
-me_expr *me_compile(const char *expression, const me_variable *variables,
-                    int var_count, me_dtype dtype, int *error);
+int me_compile(const char *expression, const me_variable *variables,
+               int var_count, me_dtype dtype, int *error, me_expr **out);
+
+/* Status codes for me_compile(). */
+typedef enum {
+    ME_COMPILE_SUCCESS = 0,
+    ME_COMPILE_ERR_OOM = -1,
+    ME_COMPILE_ERR_PARSE = -2,
+    ME_COMPILE_ERR_INVALID_ARG = -3,
+    ME_COMPILE_ERR_COMPLEX_UNSUPPORTED = -4,
+    ME_COMPILE_ERR_REDUCTION_INVALID = -5,
+    ME_COMPILE_ERR_VAR_MIXED = -6,
+    ME_COMPILE_ERR_VAR_UNSPECIFIED = -7,
+    ME_COMPILE_ERR_INVALID_ARG_TYPE = -8,
+    ME_COMPILE_ERR_MIXED_TYPE_NESTED = -9  /* Nested expressions with mixed types not supported */
+} me_compile_status;
+
+/* Status codes for me_eval(). */
+typedef enum {
+    ME_EVAL_SUCCESS = 0,
+    ME_EVAL_ERR_OOM = -1,
+    ME_EVAL_ERR_NULL_EXPR = -2,
+    ME_EVAL_ERR_TOO_MANY_VARS = -3,
+    ME_EVAL_ERR_VAR_MISMATCH = -4
+} me_eval_status;
 
 /* Evaluates compiled expression with variable and output pointers.
  * This function can be safely called from multiple threads simultaneously on the
@@ -154,13 +196,19 @@ me_expr *me_compile(const char *expression, const me_variable *variables,
  *   vars_chunk: Array of pointers to variable data chunks (same order as in me_compile)
  *   n_vars: Number of variables (must match the number used in me_compile)
  *   output_chunk: Pointer to output buffer for this chunk
- *   chunk_nitems: Number of elements in this chunk
+ *   chunk_nitems: Number of elements in this chunk. This is an element count
+ *                 (not bytes) and must correspond to the input arrays' element
+ *                 count; the output buffer must be sized for this many output
+ *                 elements (using the output dtype size).
+ *
+ * Returns:
+ *   ME_EVAL_SUCCESS (0) on success, or a negative ME_EVAL_ERR_* code on failure.
  *
  * Use this function for both serial and parallel evaluation. It is thread-safe
  * and can be used from multiple threads to process different chunks simultaneously.
  */
-void me_eval(const me_expr *expr, const void **vars_chunk,
-             int n_vars, void *output_chunk, int chunk_nitems);
+int me_eval(const me_expr *expr, const void **vars_chunk,
+            int n_vars, void *output_chunk, int chunk_nitems);
 
 /* Prints the expression tree for debugging purposes. */
 void me_print(const me_expr *n);
@@ -173,6 +221,22 @@ void me_free(me_expr *n);
  * Returns the dtype that will be used for the output of me_eval().
  */
 me_dtype me_get_dtype(const me_expr *expr);
+
+/* Toggle SIMD transcendentals (1 = disable, 0 = enable). */
+void me_disable_simd(int disabled);
+
+typedef enum {
+    ME_SIMD_ULP_1 = 0,
+    ME_SIMD_ULP_3_5 = 1
+} me_simd_ulp_mode;
+
+/* Select SLEEF SIMD precision mode. */
+void me_set_simd_ulp_mode(me_simd_ulp_mode mode);
+
+
+/* Returns the active SIMD backend label (e.g., "advsimd-u35", "scalar"). */
+const char *me_get_simd_backend(void);
+
 
 
 #ifdef __cplusplus

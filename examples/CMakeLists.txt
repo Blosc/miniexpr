@@ -1,0 +1,15 @@
+file(GLOB MINIEXPR_EXAMPLE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
+if(WIN32)
+  # These examples rely on pthreads/time APIs not available on Windows CI.
+  list(FILTER MINIEXPR_EXAMPLE_SOURCES EXCLUDE REGEX "05_parallel_evaluation\\.c$")
+  list(FILTER MINIEXPR_EXAMPLE_SOURCES EXCLUDE REGEX "test_chunk_sizes\\.c$")
+endif()
+
+foreach(example_src IN LISTS MINIEXPR_EXAMPLE_SOURCES)
+  get_filename_component(example_name "${example_src}" NAME_WE)
+  add_executable("${example_name}" "${example_src}")
+  target_link_libraries("${example_name}" PRIVATE ${MINIEXPR_DEFAULT_LIB} ${MINIEXPR_THREADS_LIB})
+  if(NOT WIN32)
+    target_link_libraries("${example_name}" PRIVATE m)
+  endif()
+endforeach()
