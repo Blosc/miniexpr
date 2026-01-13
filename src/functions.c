@@ -2143,6 +2143,19 @@ static double logical_or(double a, double b) { return ((int)a) || ((int)b) ? 1.0
 static double logical_not(double a) { return !(int)a ? 1.0 : 0.0; }
 static double logical_xor(double a, double b) { return ((int)a) != ((int)b) ? 1.0 : 0.0; }
 
+static bool is_logical_function(const void* func) {
+    return func == (void*)logical_and || func == (void*)logical_or ||
+        func == (void*)logical_not || func == (void*)logical_xor;
+}
+
+typedef void (*convert_func_t)(const void*, void*, int);
+static convert_func_t get_convert_func(me_dtype from, me_dtype to);
+
+static void vec_and_bool(const bool* a, const bool* b, bool* out, int n);
+static void vec_or_bool(const bool* a, const bool* b, bool* out, int n);
+static void vec_xor_bool(const bool* a, const bool* b, bool* out, int n);
+static void vec_not_bool(const bool* a, bool* out, int n);
+
 static void promote_logical_bool(me_expr* node) {
     if (!node || node->dtype != ME_BOOL) return;
 
@@ -2158,6 +2171,258 @@ static void promote_logical_bool(me_expr* node) {
     else if (node->function == bit_not) {
         node->function = logical_not;
     }
+}
+
+static bool eval_operand_to_type(me_expr* expr, me_dtype eval_type, int nitems,
+                                 const void** data, void** temp,
+                                 bool* is_const, double* const_val) {
+    if (!expr || !data || !temp || !is_const || !const_val) return false;
+
+    *data = NULL;
+    *temp = NULL;
+    *is_const = false;
+    *const_val = 0.0;
+
+    if (expr->type == ME_CONSTANT) {
+        *is_const = true;
+        *const_val = expr->value;
+        return true;
+    }
+
+    if (expr->type == ME_VARIABLE) {
+        if (expr->dtype == eval_type) {
+            *data = expr->bound;
+            return true;
+        }
+
+        void* buffer = malloc((size_t)nitems * dtype_size(eval_type));
+        if (!buffer) return false;
+
+        convert_func_t conv = get_convert_func(expr->dtype, eval_type);
+        if (!conv) {
+            free(buffer);
+            return false;
+        }
+
+        conv(expr->bound, buffer, nitems);
+        *data = buffer;
+        *temp = buffer;
+        return true;
+    }
+
+    void* buffer = malloc((size_t)nitems * dtype_size(eval_type));
+    if (!buffer) return false;
+
+    void* saved_output = expr->output;
+    me_dtype saved_dtype = expr->dtype;
+    int saved_nitems = expr->nitems;
+
+    expr->output = buffer;
+    expr->dtype = eval_type;
+    expr->nitems = nitems;
+    private_eval(expr);
+
+    expr->output = saved_output;
+    expr->dtype = saved_dtype;
+    expr->nitems = saved_nitems;
+
+    *data = buffer;
+    *temp = buffer;
+    return true;
+}
+
+static bool compare_to_bool_output(const me_expr* n, me_dtype eval_type,
+                                   const void* ldata, const void* rdata,
+                                   bool lconst, bool rconst,
+                                   double lval, double rval,
+                                   bool* out, int nitems) {
+    if (!n || !out) return false;
+
+    if (eval_type == ME_COMPLEX64 || eval_type == ME_COMPLEX128) {
+        return false;
+    }
+
+    const void* func = n->function;
+
+#define CMP_LOOP_OP(TYPE, OP) \
+    do { \
+        const TYPE* lptr = (const TYPE*)ldata; \
+        const TYPE* rptr = (const TYPE*)rdata; \
+        TYPE lc = (TYPE)lval; \
+        TYPE rc = (TYPE)rval; \
+        for (int i = 0; i < nitems; i++) { \
+            TYPE a = lconst ? lc : lptr[i]; \
+            TYPE b = rconst ? rc : rptr[i]; \
+            out[i] = (a OP b); \
+        } \
+    } while (0)
+
+#define CMP_SWITCH(TYPE) \
+    do { \
+        if (func == (void*)cmp_eq) { CMP_LOOP_OP(TYPE, ==); } \
+        else if (func == (void*)cmp_ne) { CMP_LOOP_OP(TYPE, !=); } \
+        else if (func == (void*)cmp_lt) { CMP_LOOP_OP(TYPE, <); } \
+        else if (func == (void*)cmp_le) { CMP_LOOP_OP(TYPE, <=); } \
+        else if (func == (void*)cmp_gt) { CMP_LOOP_OP(TYPE, >); } \
+        else if (func == (void*)cmp_ge) { CMP_LOOP_OP(TYPE, >=); } \
+        else { return false; } \
+    } while (0)
+
+    switch (eval_type) {
+    case ME_BOOL:
+        CMP_SWITCH(bool);
+        break;
+    case ME_INT8:
+        CMP_SWITCH(int8_t);
+        break;
+    case ME_INT16:
+        CMP_SWITCH(int16_t);
+        break;
+    case ME_INT32:
+        CMP_SWITCH(int32_t);
+        break;
+    case ME_INT64:
+        CMP_SWITCH(int64_t);
+        break;
+    case ME_UINT8:
+        CMP_SWITCH(uint8_t);
+        break;
+    case ME_UINT16:
+        CMP_SWITCH(uint16_t);
+        break;
+    case ME_UINT32:
+        CMP_SWITCH(uint32_t);
+        break;
+    case ME_UINT64:
+        CMP_SWITCH(uint64_t);
+        break;
+    case ME_FLOAT32:
+        CMP_SWITCH(float);
+        break;
+    case ME_FLOAT64:
+        CMP_SWITCH(double);
+        break;
+    default:
+        return false;
+    }
+
+#undef CMP_SWITCH
+#undef CMP_LOOP_OP
+    return true;
+}
+
+static bool eval_bool_expr(me_expr* n) {
+    if (!n || !n->output) return false;
+
+    if (n->type == ME_CONSTANT) {
+        bool val = (bool)(n->value != 0.0);
+        bool* out = (bool*)n->output;
+        for (int i = 0; i < n->nitems; i++) {
+            out[i] = val;
+        }
+        return true;
+    }
+
+    if (n->type == ME_VARIABLE) {
+        bool* out = (bool*)n->output;
+        if (n->dtype == ME_BOOL) {
+            const bool* src = (const bool*)n->bound;
+            for (int i = 0; i < n->nitems; i++) {
+                out[i] = src[i];
+            }
+            return true;
+        }
+
+        convert_func_t conv = get_convert_func(n->dtype, ME_BOOL);
+        if (!conv) return false;
+        conv(n->bound, out, n->nitems);
+        return true;
+    }
+
+    if (IS_FUNCTION(n->type) && is_comparison_node(n)) {
+        me_expr* left = (me_expr*)n->parameters[0];
+        me_expr* right = (me_expr*)n->parameters[1];
+        if (!left || !right) return false;
+
+        me_dtype eval_type = infer_result_type(n);
+        const void* ldata = NULL;
+        const void* rdata = NULL;
+        void* ltemp = NULL;
+        void* rtemp = NULL;
+        bool lconst = false;
+        bool rconst = false;
+        double lval = 0.0;
+        double rval = 0.0;
+
+        if (!eval_operand_to_type(left, eval_type, n->nitems, &ldata, &ltemp, &lconst, &lval) ||
+            !eval_operand_to_type(right, eval_type, n->nitems, &rdata, &rtemp, &rconst, &rval)) {
+            free(ltemp);
+            free(rtemp);
+            return false;
+        }
+
+        bool ok = compare_to_bool_output(n, eval_type, ldata, rdata,
+                                         lconst, rconst, lval, rval,
+                                         (bool*)n->output, n->nitems);
+
+        free(ltemp);
+        free(rtemp);
+        return ok;
+    }
+
+    if (IS_FUNCTION(n->type) && is_logical_function(n->function)) {
+        const int arity = ARITY(n->type);
+        if (arity == 1 && n->function == (void*)logical_not) {
+            me_expr* arg = (me_expr*)n->parameters[0];
+            if (!arg) return false;
+            if (!arg->output) {
+                arg->output = malloc((size_t)n->nitems * sizeof(bool));
+                if (!arg->output) return false;
+            }
+            arg->nitems = n->nitems;
+            if (!eval_bool_expr(arg)) return false;
+            vec_not_bool((const bool*)arg->output, (bool*)n->output, n->nitems);
+            return true;
+        }
+
+        if (arity == 2) {
+            me_expr* left = (me_expr*)n->parameters[0];
+            me_expr* right = (me_expr*)n->parameters[1];
+            if (!left || !right) return false;
+
+            if (!left->output) {
+                left->output = malloc((size_t)n->nitems * sizeof(bool));
+                if (!left->output) return false;
+            }
+            if (!right->output) {
+                right->output = malloc((size_t)n->nitems * sizeof(bool));
+                if (!right->output) return false;
+            }
+            left->nitems = n->nitems;
+            right->nitems = n->nitems;
+
+            if (!eval_bool_expr(left) || !eval_bool_expr(right)) return false;
+
+            if (n->function == (void*)logical_and) {
+                vec_and_bool((const bool*)left->output, (const bool*)right->output,
+                             (bool*)n->output, n->nitems);
+            }
+            else if (n->function == (void*)logical_or) {
+                vec_or_bool((const bool*)left->output, (const bool*)right->output,
+                            (bool*)n->output, n->nitems);
+            }
+            else if (n->function == (void*)logical_xor) {
+                vec_xor_bool((const bool*)left->output, (const bool*)right->output,
+                             (bool*)n->output, n->nitems);
+            }
+            else {
+                return false;
+            }
+            return true;
+        }
+    }
+
+    return false;
 }
 
 static bool is_identifier_start(char c) {
@@ -3455,8 +3720,6 @@ DEFINE_VEC_CONVERT(f64, c128, double, double _Complex)
 DEFINE_VEC_CONVERT(c64, c128, float _Complex, double _Complex)
 
 /* Function to get conversion function pointer */
-typedef void (*convert_func_t)(const void*, void*, int);
-
 static convert_func_t get_convert_func(me_dtype from, me_dtype to) {
     /* Return conversion function for a specific type pair */
     if (from == to) return NULL; // No conversion needed
@@ -5857,6 +6120,39 @@ static void private_eval(const me_expr* n) {
 
     // Infer the result type from the expression tree
     me_dtype result_type = infer_result_type(n);
+
+    // Fast path for boolean expressions: compute directly into bool output
+    if (n->dtype == ME_BOOL && infer_output_type(n) == ME_BOOL) {
+        promoted_var_t promotions[ME_MAX_VARS];
+        int promo_count = 0;
+
+        const void* original_bounds[ME_MAX_VARS];
+        me_dtype original_types[ME_MAX_VARS];
+        int save_idx = 0;
+
+        save_variable_bindings(n, original_bounds, original_types, &save_idx);
+        promote_variables_in_tree((me_expr*)n, result_type, promotions, &promo_count, n->nitems);
+
+        if (!eval_bool_expr((me_expr*)n)) {
+            int restore_idx = 0;
+            restore_variables_in_tree((me_expr*)n, original_bounds, original_types, &restore_idx);
+            for (int i = 0; i < promo_count; i++) {
+                if (promotions[i].needs_free) {
+                    free(promotions[i].promoted_data);
+                }
+            }
+            return;
+        }
+
+        int restore_idx = 0;
+        restore_variables_in_tree((me_expr*)n, original_bounds, original_types, &restore_idx);
+        for (int i = 0; i < promo_count; i++) {
+            if (promotions[i].needs_free) {
+                free(promotions[i].promoted_data);
+            }
+        }
+        return;
+    }
 
     // If all variables already match result type, use fast path
     bool all_match = all_variables_match_type(n, result_type);
