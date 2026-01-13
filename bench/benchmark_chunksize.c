@@ -16,6 +16,10 @@
 #include "miniexpr.h"
 #include "minctest.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 
 
 #define NUM_THREADS 4
@@ -172,8 +176,14 @@ static double benchmark_chunksize(thread_pool_t *pool, size_t chunk_bytes,
     pool->work_ready = true;
     pthread_mutex_unlock(&pool->work_mutex);
 
+#ifdef _WIN32
+    LARGE_INTEGER freq, start, end;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&start);
+#else
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
+#endif
 
     // Signal threads that work is available
     pthread_cond_broadcast(&pool->work_available);
@@ -185,9 +195,14 @@ static double benchmark_chunksize(thread_pool_t *pool, size_t chunk_bytes,
     }
     pthread_mutex_unlock(&pool->work_mutex);
 
+#ifdef _WIN32
+    QueryPerformanceCounter(&end);
+    double elapsed = (double)(end.QuadPart - start.QuadPart) / (double)freq.QuadPart;
+#else
     clock_gettime(CLOCK_MONOTONIC, &end);
-
     double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+#endif
+
     double throughput = (total_elements / elapsed) / 1e6; // Melems/sec
 
     me_free(expr);

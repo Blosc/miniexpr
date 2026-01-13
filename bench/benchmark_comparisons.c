@@ -21,18 +21,26 @@
 #include "miniexpr.h"
 #include "minctest.h"
 
-
-
-/* Configuration */
-#define TOTAL_SIZE (10 * 1024 * 1024)  /* 10M elements */
-#define WARMUP_ITERS 2
-#define BENCH_ITERS 10
-
+#ifdef _WIN32
+#include <windows.h>
+static double get_time_sec(void) {
+    LARGE_INTEGER freq, counter;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&counter);
+    return (double)counter.QuadPart / (double)freq.QuadPart;
+}
+#else
 static double get_time_sec(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec + ts.tv_nsec / 1e9;
 }
+#endif
+
+/* Configuration */
+#define TOTAL_SIZE (10 * 1024 * 1024)  /* 10M elements */
+#define WARMUP_ITERS 2
+#define BENCH_ITERS 10
 
 typedef struct {
     const char *name;
