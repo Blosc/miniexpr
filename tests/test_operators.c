@@ -399,6 +399,45 @@ void test_logical_comparisons() {
     printf("  PASS\n");
 }
 
+void test_unary_bool_funcs() {
+    TEST("unary funcs on bool");
+
+    bool a[VECTOR_SIZE] = {true, false, true, true, false, false, true, false, true, false};
+    bool result[VECTOR_SIZE] = {0};
+    const char *exprs[] = {"abs(a)", "ceil(a)", "floor(a)", "trunc(a)", "square(a)"};
+    const int expr_count = (int)(sizeof(exprs) / sizeof(exprs[0]));
+
+    me_variable vars[] = {{"a", ME_BOOL}};
+    const void *var_ptrs[] = {a};
+
+    for (int e = 0; e < expr_count; e++) {
+        int err;
+        me_expr *expr = NULL;
+        int rc_expr = me_compile(exprs[e], vars, 1, ME_BOOL, &err, &expr);
+
+        if (rc_expr != ME_COMPILE_SUCCESS) {
+            printf("  FAIL: %s compilation error at position %d\n", exprs[e], err);
+            tests_failed++;
+            return;
+        }
+
+        ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
+
+        for (int i = 0; i < VECTOR_SIZE; i++) {
+            if (result[i] != a[i]) {
+                printf("  FAIL %s at [%d]: expected %d, got %d\n", exprs[e], i, a[i], result[i]);
+                tests_failed++;
+                me_free(expr);
+                return;
+            }
+        }
+
+        me_free(expr);
+    }
+
+    printf("  PASS\n");
+}
+
 int main() {
     printf("=== Testing New Operators ===\n\n");
 
@@ -411,6 +450,7 @@ int main() {
     test_comparison_lt_int();
     test_logical_bool();
     test_logical_comparisons();
+    test_unary_bool_funcs();
 
     printf("\n=== Test Summary ===\n");
     printf("Tests run: %d\n", tests_run);

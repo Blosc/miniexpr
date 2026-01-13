@@ -3408,13 +3408,13 @@ DEFINE_INT_VEC_OPS(u64, uint64_t)
 static void vec_and_bool(const bool* a, const bool* b, bool* out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = a[i] && b[i];
+    for (i = 0; i < n; i++) out[i] = a[i] & b[i];
 }
 
 static void vec_or_bool(const bool* a, const bool* b, bool* out, int n) {
     int i;
     IVDEP
-    for (i = 0; i < n; i++) out[i] = a[i] || b[i];
+    for (i = 0; i < n; i++) out[i] = a[i] | b[i];
 }
 
 static void vec_xor_bool(const bool* a, const bool* b, bool* out, int n) {
@@ -6141,7 +6141,7 @@ static void private_eval(const me_expr* n) {
                     free(promotions[i].promoted_data);
                 }
             }
-            return;
+            goto fallback_eval;
         }
 
         int restore_idx = 0;
@@ -6154,6 +6154,8 @@ static void private_eval(const me_expr* n) {
         return;
     }
 
+fallback_eval:
+    ;
     // If all variables already match result type, use fast path
     bool all_match = all_variables_match_type(n, result_type);
     if (result_type == n->dtype && all_match) {
