@@ -8,6 +8,7 @@
 #include <sys/time.h>
 #include <math.h>
 #include "miniexpr.h"
+#include "functions-simd.h"
 
 #define MAX_THREADS 12
 
@@ -218,6 +219,19 @@ static void benchmark_dtype(const dtype_info_t *info, int total_elems) {
     params_u35.simd_ulp_mode = ME_SIMD_ULP_3_5;
     me_eval_params params_scalar = ME_EVAL_PARAMS_DEFAULTS;
     params_scalar.disable_simd = true;
+
+    me_simd_params_state simd_state;
+    me_simd_params_push(&params_u10, &simd_state);
+    printf("Backend U10: %s (mode=%s)\n",
+           me_simd_backend_label(),
+           me_simd_use_u35_flag() ? "u35" : "u10");
+    me_simd_params_pop(&simd_state);
+
+    me_simd_params_push(&params_u35, &simd_state);
+    printf("Backend U35: %s (mode=%s)\n",
+           me_simd_backend_label(),
+           me_simd_use_u35_flag() ? "u35" : "u10");
+    me_simd_params_pop(&simd_state);
 
     for (int num_threads = 1; num_threads <= MAX_THREADS; num_threads++) {
         double me_time_u10 = run_benchmark_me(expr, data, out, info->elem_size,
