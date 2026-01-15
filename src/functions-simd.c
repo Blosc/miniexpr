@@ -34,6 +34,7 @@
 static ME_THREAD_LOCAL unsigned long long me_eval_cookie = 0;
 static ME_THREAD_LOCAL int me_simd_force_scalar = 0;
 static ME_THREAD_LOCAL int me_simd_use_u35_override = -1;
+static void me_init_simd(void);
 
 #ifndef ME_USE_SLEEF
 #define ME_USE_SLEEF 1
@@ -950,11 +951,12 @@ IVDEP
 
 #if ME_ENABLE_SLEEF_SIMD && (defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64))
 static ME_AVX2_TARGET void vec_sincos_avx2(const double* a, double* sin_out, double* cos_out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble2 r = me_simd_use_u35_active() ? xsincos(v) : xsincos_u1(v);
+        vdouble2 r = use_u35 ? xsincos(v) : xsincos_u1(v);
         vstoreu_v_p_vd(sin_out + i, vd2getx_vd_vd2(r));
         vstoreu_v_p_vd(cos_out + i, vd2gety_vd_vd2(r));
     }
@@ -965,11 +967,12 @@ static ME_AVX2_TARGET void vec_sincos_avx2(const double* a, double* sin_out, dou
 }
 
 static ME_AVX2_TARGET void vec_sincos_f32_avx2(const float* a, float* sin_out, float* cos_out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat2 r = me_simd_use_u35_active() ? xsincosf(v) : xsincosf_u1(v);
+        vfloat2 r = use_u35 ? xsincosf(v) : xsincosf_u1(v);
         vstoreu_v_p_vf(sin_out + i, vf2getx_vf_vf2(r));
         vstoreu_v_p_vf(cos_out + i, vf2gety_vf_vf2(r));
     }
@@ -980,11 +983,12 @@ static ME_AVX2_TARGET void vec_sincos_f32_avx2(const float* a, float* sin_out, f
 }
 
 static ME_AVX2_TARGET void vec_sin_avx2(const double* a, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35_active() ? xsin(v) : xsin_u1(v);
+        vdouble r = use_u35 ? xsin(v) : xsin_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -993,11 +997,12 @@ static ME_AVX2_TARGET void vec_sin_avx2(const double* a, double* out, int n) {
 }
 
 static ME_AVX2_TARGET void vec_cos_avx2(const double* a, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35_active() ? xcos(v) : xcos_u1(v);
+        vdouble r = use_u35 ? xcos(v) : xcos_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -1006,11 +1011,12 @@ static ME_AVX2_TARGET void vec_cos_avx2(const double* a, double* out, int n) {
 }
 
 static ME_AVX2_TARGET void vec_sin_f32_avx2(const float* a, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35_active() ? xsinf(v) : xsinf_u1(v);
+        vfloat r = use_u35 ? xsinf(v) : xsinf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -1019,11 +1025,12 @@ static ME_AVX2_TARGET void vec_sin_f32_avx2(const float* a, float* out, int n) {
 }
 
 static ME_AVX2_TARGET void vec_cos_f32_avx2(const float* a, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35_active() ? xcosf(v) : xcosf_u1(v);
+        vfloat r = use_u35 ? xcosf(v) : xcosf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -1032,11 +1039,12 @@ static ME_AVX2_TARGET void vec_cos_f32_avx2(const float* a, float* out, int n) {
 }
 
 static ME_AVX2_TARGET void vec_asin_avx2(const double* a, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35_active() ? xasin(v) : xasin_u1(v);
+        vdouble r = use_u35 ? xasin(v) : xasin_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -1045,11 +1053,12 @@ static ME_AVX2_TARGET void vec_asin_avx2(const double* a, double* out, int n) {
 }
 
 static ME_AVX2_TARGET void vec_acos_avx2(const double* a, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35_active() ? xacos(v) : xacos_u1(v);
+        vdouble r = use_u35 ? xacos(v) : xacos_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -1058,11 +1067,12 @@ static ME_AVX2_TARGET void vec_acos_avx2(const double* a, double* out, int n) {
 }
 
 static ME_AVX2_TARGET void vec_atan_avx2(const double* a, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35_active() ? xatan(v) : xatan_u1(v);
+        vdouble r = use_u35 ? xatan(v) : xatan_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -1071,12 +1081,13 @@ static ME_AVX2_TARGET void vec_atan_avx2(const double* a, double* out, int n) {
 }
 
 static ME_AVX2_TARGET void vec_atan2_avx2(const double* a, const double* b, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble vy = vloadu_vd_p(a + i);
         vdouble vx = vloadu_vd_p(b + i);
-        vdouble r = me_simd_use_u35_active() ? xatan2(vy, vx) : xatan2_u1(vy, vx);
+        vdouble r = use_u35 ? xatan2(vy, vx) : xatan2_u1(vy, vx);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -1085,11 +1096,12 @@ static ME_AVX2_TARGET void vec_atan2_avx2(const double* a, const double* b, doub
 }
 
 static ME_AVX2_TARGET void vec_asin_f32_avx2(const float* a, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35_active() ? xasinf(v) : xasinf_u1(v);
+        vfloat r = use_u35 ? xasinf(v) : xasinf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -1098,11 +1110,12 @@ static ME_AVX2_TARGET void vec_asin_f32_avx2(const float* a, float* out, int n) 
 }
 
 static ME_AVX2_TARGET void vec_acos_f32_avx2(const float* a, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35_active() ? xacosf(v) : xacosf_u1(v);
+        vfloat r = use_u35 ? xacosf(v) : xacosf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -1111,11 +1124,12 @@ static ME_AVX2_TARGET void vec_acos_f32_avx2(const float* a, float* out, int n) 
 }
 
 static ME_AVX2_TARGET void vec_atan_f32_avx2(const float* a, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35_active() ? xatanf(v) : xatanf_u1(v);
+        vfloat r = use_u35 ? xatanf(v) : xatanf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -1124,12 +1138,13 @@ static ME_AVX2_TARGET void vec_atan_f32_avx2(const float* a, float* out, int n) 
 }
 
 static ME_AVX2_TARGET void vec_atan2_f32_avx2(const float* a, const float* b, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat vy = vloadu_vf_p(a + i);
         vfloat vx = vloadu_vf_p(b + i);
-        vfloat r = me_simd_use_u35_active() ? xatan2f(vy, vx) : xatan2f_u1(vy, vx);
+        vfloat r = use_u35 ? xatan2f(vy, vx) : xatan2f_u1(vy, vx);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -1138,11 +1153,12 @@ static ME_AVX2_TARGET void vec_atan2_f32_avx2(const float* a, const float* b, fl
 }
 
 static ME_AVX2_TARGET void vec_tan_avx2(const double* a, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35_active() ? xtan(v) : xtan_u1(v);
+        vdouble r = use_u35 ? xtan(v) : xtan_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -1151,11 +1167,12 @@ static ME_AVX2_TARGET void vec_tan_avx2(const double* a, double* out, int n) {
 }
 
 static ME_AVX2_TARGET void vec_tan_f32_avx2(const float* a, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35_active() ? xtanf(v) : xtanf_u1(v);
+        vfloat r = use_u35 ? xtanf(v) : xtanf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -1242,11 +1259,12 @@ static ME_AVX2_TARGET void vec_expm1_f32_avx2(const float* a, float* out, int n)
 }
 
 static ME_AVX2_TARGET void vec_log_avx2(const double* a, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35_active() ? xlog(v) : xlog_u1(v);
+        vdouble r = use_u35 ? xlog(v) : xlog_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -1255,11 +1273,12 @@ static ME_AVX2_TARGET void vec_log_avx2(const double* a, double* out, int n) {
 }
 
 static ME_AVX2_TARGET void vec_log_f32_avx2(const float* a, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35_active() ? xlogf(v) : xlogf_u1(v);
+        vfloat r = use_u35 ? xlogf(v) : xlogf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -1660,11 +1679,12 @@ static ME_AVX2_TARGET void vec_pow_f32_avx2(const float* a, const float* b, floa
 }
 
 static ME_AVX2_TARGET void vec_exp2_avx2(const double* a, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35_active() ? xexp2_u35(v) : xexp2(v);
+        vdouble r = use_u35 ? xexp2_u35(v) : xexp2(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -1673,11 +1693,12 @@ static ME_AVX2_TARGET void vec_exp2_avx2(const double* a, double* out, int n) {
 }
 
 static ME_AVX2_TARGET void vec_exp2_f32_avx2(const float* a, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35_active() ? xexp2f_u35(v) : xexp2f(v);
+        vfloat r = use_u35 ? xexp2f_u35(v) : xexp2f(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -1686,11 +1707,12 @@ static ME_AVX2_TARGET void vec_exp2_f32_avx2(const float* a, float* out, int n) 
 }
 
 static ME_AVX2_TARGET void vec_exp10_avx2(const double* a, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35_active() ? xexp10_u35(v) : xexp10(v);
+        vdouble r = use_u35 ? xexp10_u35(v) : xexp10(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -1699,11 +1721,12 @@ static ME_AVX2_TARGET void vec_exp10_avx2(const double* a, double* out, int n) {
 }
 
 static ME_AVX2_TARGET void vec_exp10_f32_avx2(const float* a, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35_active() ? xexp10f_u35(v) : xexp10f(v);
+        vfloat r = use_u35 ? xexp10f_u35(v) : xexp10f(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2060,12 +2083,13 @@ static ME_AVX2_TARGET void vec_fmod_f32_avx2(const float* a, const float* b, flo
 }
 
 static ME_AVX2_TARGET void vec_hypot_avx2(const double* a, const double* b, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble va = vloadu_vd_p(a + i);
         vdouble vb = vloadu_vd_p(b + i);
-        vdouble r = me_simd_use_u35_active() ? xhypot_u35(va, vb) : xhypot_u05(va, vb);
+        vdouble r = use_u35 ? xhypot_u35(va, vb) : xhypot_u05(va, vb);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2074,12 +2098,13 @@ static ME_AVX2_TARGET void vec_hypot_avx2(const double* a, const double* b, doub
 }
 
 static ME_AVX2_TARGET void vec_hypot_f32_avx2(const float* a, const float* b, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat va = vloadu_vf_p(a + i);
         vfloat vb = vloadu_vf_p(b + i);
-        vfloat r = me_simd_use_u35_active() ? xhypotf_u35(va, vb) : xhypotf_u05(va, vb);
+        vfloat r = use_u35 ? xhypotf_u35(va, vb) : xhypotf_u05(va, vb);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2208,11 +2233,12 @@ static ME_AVX2_TARGET void vec_fma_f32_avx2(const float* a, const float* b, cons
 
 #if ME_ENABLE_SLEEF_SIMD && (defined(__aarch64__) || defined(_M_ARM64))
 static void vec_sincos_advsimd(const double* a, double* sin_out, double* cos_out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble2 r = me_simd_use_u35_active() ? xsincos(v) : xsincos_u1(v);
+        vdouble2 r = use_u35 ? xsincos(v) : xsincos_u1(v);
         vstoreu_v_p_vd(sin_out + i, vd2getx_vd_vd2(r));
         vstoreu_v_p_vd(cos_out + i, vd2gety_vd_vd2(r));
     }
@@ -2223,11 +2249,12 @@ static void vec_sincos_advsimd(const double* a, double* sin_out, double* cos_out
 }
 
 static void vec_sincos_f32_advsimd(const float* a, float* sin_out, float* cos_out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat2 r = me_simd_use_u35_active() ? xsincosf(v) : xsincosf_u1(v);
+        vfloat2 r = use_u35 ? xsincosf(v) : xsincosf_u1(v);
         vstoreu_v_p_vf(sin_out + i, vf2getx_vf_vf2(r));
         vstoreu_v_p_vf(cos_out + i, vf2gety_vf_vf2(r));
     }
@@ -2238,11 +2265,12 @@ static void vec_sincos_f32_advsimd(const float* a, float* sin_out, float* cos_ou
 }
 
 static void vec_sin_advsimd(const double* a, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35_active() ? xsin(v) : xsin_u1(v);
+        vdouble r = use_u35 ? xsin(v) : xsin_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2251,11 +2279,12 @@ static void vec_sin_advsimd(const double* a, double* out, int n) {
 }
 
 static void vec_cos_advsimd(const double* a, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35_active() ? xcos(v) : xcos_u1(v);
+        vdouble r = use_u35 ? xcos(v) : xcos_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2264,11 +2293,12 @@ static void vec_cos_advsimd(const double* a, double* out, int n) {
 }
 
 static void vec_sin_f32_advsimd(const float* a, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35_active() ? xsinf(v) : xsinf_u1(v);
+        vfloat r = use_u35 ? xsinf(v) : xsinf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2277,11 +2307,12 @@ static void vec_sin_f32_advsimd(const float* a, float* out, int n) {
 }
 
 static void vec_cos_f32_advsimd(const float* a, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35_active() ? xcosf(v) : xcosf_u1(v);
+        vfloat r = use_u35 ? xcosf(v) : xcosf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2290,11 +2321,12 @@ static void vec_cos_f32_advsimd(const float* a, float* out, int n) {
 }
 
 static void vec_asin_advsimd(const double* a, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35_active() ? xasin(v) : xasin_u1(v);
+        vdouble r = use_u35 ? xasin(v) : xasin_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2303,11 +2335,12 @@ static void vec_asin_advsimd(const double* a, double* out, int n) {
 }
 
 static void vec_acos_advsimd(const double* a, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35_active() ? xacos(v) : xacos_u1(v);
+        vdouble r = use_u35 ? xacos(v) : xacos_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2316,11 +2349,12 @@ static void vec_acos_advsimd(const double* a, double* out, int n) {
 }
 
 static void vec_atan_advsimd(const double* a, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35_active() ? xatan(v) : xatan_u1(v);
+        vdouble r = use_u35 ? xatan(v) : xatan_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2329,12 +2363,13 @@ static void vec_atan_advsimd(const double* a, double* out, int n) {
 }
 
 static void vec_atan2_advsimd(const double* a, const double* b, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble vy = vloadu_vd_p(a + i);
         vdouble vx = vloadu_vd_p(b + i);
-        vdouble r = me_simd_use_u35_active() ? xatan2(vy, vx) : xatan2_u1(vy, vx);
+        vdouble r = use_u35 ? xatan2(vy, vx) : xatan2_u1(vy, vx);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2343,11 +2378,12 @@ static void vec_atan2_advsimd(const double* a, const double* b, double* out, int
 }
 
 static void vec_asin_f32_advsimd(const float* a, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35_active() ? xasinf(v) : xasinf_u1(v);
+        vfloat r = use_u35 ? xasinf(v) : xasinf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2356,11 +2392,12 @@ static void vec_asin_f32_advsimd(const float* a, float* out, int n) {
 }
 
 static void vec_acos_f32_advsimd(const float* a, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35_active() ? xacosf(v) : xacosf_u1(v);
+        vfloat r = use_u35 ? xacosf(v) : xacosf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2369,11 +2406,12 @@ static void vec_acos_f32_advsimd(const float* a, float* out, int n) {
 }
 
 static void vec_atan_f32_advsimd(const float* a, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35_active() ? xatanf(v) : xatanf_u1(v);
+        vfloat r = use_u35 ? xatanf(v) : xatanf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2382,12 +2420,13 @@ static void vec_atan_f32_advsimd(const float* a, float* out, int n) {
 }
 
 static void vec_atan2_f32_advsimd(const float* a, const float* b, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat vy = vloadu_vf_p(a + i);
         vfloat vx = vloadu_vf_p(b + i);
-        vfloat r = me_simd_use_u35_active() ? xatan2f(vy, vx) : xatan2f_u1(vy, vx);
+        vfloat r = use_u35 ? xatan2f(vy, vx) : xatan2f_u1(vy, vx);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2396,11 +2435,12 @@ static void vec_atan2_f32_advsimd(const float* a, const float* b, float* out, in
 }
 
 static void vec_tan_advsimd(const double* a, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35_active() ? xtan(v) : xtan_u1(v);
+        vdouble r = use_u35 ? xtan(v) : xtan_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2409,11 +2449,12 @@ static void vec_tan_advsimd(const double* a, double* out, int n) {
 }
 
 static void vec_tan_f32_advsimd(const float* a, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35_active() ? xtanf(v) : xtanf_u1(v);
+        vfloat r = use_u35 ? xtanf(v) : xtanf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2500,11 +2541,12 @@ static void vec_expm1_f32_advsimd(const float* a, float* out, int n) {
 }
 
 static void vec_log_advsimd(const double* a, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35_active() ? xlog(v) : xlog_u1(v);
+        vdouble r = use_u35 ? xlog(v) : xlog_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2513,11 +2555,12 @@ static void vec_log_advsimd(const double* a, double* out, int n) {
 }
 
 static void vec_log_f32_advsimd(const float* a, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35_active() ? xlogf(v) : xlogf_u1(v);
+        vfloat r = use_u35 ? xlogf(v) : xlogf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2918,11 +2961,12 @@ static void vec_pow_f32_advsimd(const float* a, const float* b, float* out, int 
 }
 
 static void vec_exp2_advsimd(const double* a, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35_active() ? xexp2_u35(v) : xexp2(v);
+        vdouble r = use_u35 ? xexp2_u35(v) : xexp2(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2931,11 +2975,12 @@ static void vec_exp2_advsimd(const double* a, double* out, int n) {
 }
 
 static void vec_exp2_f32_advsimd(const float* a, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35_active() ? xexp2f_u35(v) : xexp2f(v);
+        vfloat r = use_u35 ? xexp2f_u35(v) : xexp2f(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2944,11 +2989,12 @@ static void vec_exp2_f32_advsimd(const float* a, float* out, int n) {
 }
 
 static void vec_exp10_advsimd(const double* a, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35_active() ? xexp10_u35(v) : xexp10(v);
+        vdouble r = use_u35 ? xexp10_u35(v) : xexp10(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2957,11 +3003,12 @@ static void vec_exp10_advsimd(const double* a, double* out, int n) {
 }
 
 static void vec_exp10_f32_advsimd(const float* a, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35_active() ? xexp10f_u35(v) : xexp10f(v);
+        vfloat r = use_u35 ? xexp10f_u35(v) : xexp10f(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -3318,12 +3365,13 @@ static void vec_fmod_f32_advsimd(const float* a, const float* b, float* out, int
 }
 
 static void vec_hypot_advsimd(const double* a, const double* b, double* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble va = vloadu_vd_p(a + i);
         vdouble vb = vloadu_vd_p(b + i);
-        vdouble r = me_simd_use_u35_active() ? xhypot_u35(va, vb) : xhypot_u05(va, vb);
+        vdouble r = use_u35 ? xhypot_u35(va, vb) : xhypot_u05(va, vb);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -3332,12 +3380,13 @@ static void vec_hypot_advsimd(const double* a, const double* b, double* out, int
 }
 
 static void vec_hypot_f32_advsimd(const float* a, const float* b, float* out, int n) {
+    const int use_u35 = me_simd_use_u35_active();
     int i = 0;
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat va = vloadu_vf_p(a + i);
         vfloat vb = vloadu_vf_p(b + i);
-        vfloat r = me_simd_use_u35_active() ? xhypotf_u35(va, vb) : xhypotf_u05(va, vb);
+        vfloat r = use_u35 ? xhypotf_u35(va, vb) : xhypotf_u05(va, vb);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -3574,6 +3623,7 @@ void vec_sin_cached(const double* a, double* out, int n) {
         vec_sin_scalar(a, out, n);
         return;
     }
+    me_init_simd();
     me_sincos_cache_f64 *cache = &me_sincos_cache_dp;
     if (cache->cookie != me_eval_cookie || cache->key != a || cache->nitems != n) {
         if (cache->cap < n) {
@@ -3609,6 +3659,7 @@ void vec_cos_cached(const double* a, double* out, int n) {
         vec_cos_scalar(a, out, n);
         return;
     }
+    me_init_simd();
     me_sincos_cache_f64 *cache = &me_sincos_cache_dp;
     if (cache->cookie != me_eval_cookie || cache->key != a || cache->nitems != n) {
         if (cache->cap < n) {
@@ -3644,6 +3695,7 @@ void vec_sin_f32_cached(const float* a, float* out, int n) {
         vec_sin_f32_scalar(a, out, n);
         return;
     }
+    me_init_simd();
     me_sincos_cache_f32 *cache = &me_sincos_cache_sp;
     if (cache->cookie != me_eval_cookie || cache->key != a || cache->nitems != n) {
         if (cache->cap < n) {
@@ -3679,6 +3731,7 @@ void vec_cos_f32_cached(const float* a, float* out, int n) {
         vec_cos_f32_scalar(a, out, n);
         return;
     }
+    me_init_simd();
     me_sincos_cache_f32 *cache = &me_sincos_cache_sp;
     if (cache->cookie != me_eval_cookie || cache->key != a || cache->nitems != n) {
         if (cache->cap < n) {
@@ -3760,6 +3813,7 @@ static int me_cpu_supports_advsimd(void) {
 #endif
 
 static void me_init_simd(void) {
+    const int use_u35 = me_simd_use_u35_active();
     if (me_simd_initialized) {
         return;
     }
@@ -3969,7 +4023,7 @@ static void me_init_simd(void) {
         vec_fma_f32_impl = vec_fma_f32_avx2;
         vec_sincos_impl = vec_sincos_avx2;
         vec_sincos_f32_impl = vec_sincos_f32_avx2;
-        me_simd_backend = me_simd_use_u35_active() ? "avx2-u35" : "avx2-u10";
+        me_simd_backend = use_u35 ? "avx2-u35" : "avx2-u10";
         return;
     }
 #endif
@@ -4078,13 +4132,22 @@ static void me_init_simd(void) {
         vec_fma_f32_impl = vec_fma_f32_advsimd;
         vec_sincos_impl = vec_sincos_advsimd;
         vec_sincos_f32_impl = vec_sincos_f32_advsimd;
-        me_simd_backend = me_simd_use_u35_active() ? "advsimd-u35" : "advsimd-u10";
+        me_simd_backend = use_u35 ? "advsimd-u35" : "advsimd-u10";
     }
 #endif
 
     if (me_simd_backend[0] == '\0') {
         me_simd_backend = "scalar";
     }
+}
+
+int me_simd_initialized_for_tests(void) {
+    return me_simd_initialized;
+}
+
+void me_simd_reset_for_tests(void) {
+    me_simd_initialized = 0;
+    me_simd_backend = "scalar";
 }
 
 void vec_sin_dispatch(const double* a, double* out, int n) {
