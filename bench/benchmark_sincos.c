@@ -7,10 +7,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
-#include <string.h>
 #include <sys/time.h>
 #include "miniexpr.h"
-#include "minctest.h"
 
 static double get_time(void) {
     struct timeval tv;
@@ -39,12 +37,20 @@ static void fill_data(void *data, const dtype_info_t *info, int nitems) {
 }
 
 static double run_me(const me_expr *expr, const void **vars, void *out,
-                     int nitems, int iterations) {
-    ME_EVAL_CHECK(expr, vars, 1, out, nitems);
+                     int nitems, int iterations, const me_eval_params *params) {
+    int rc = me_eval(expr, vars, 1, out, nitems, params);
+    if (rc != ME_EVAL_SUCCESS) {
+        fprintf(stderr, "me_eval failed: %d\n", rc);
+        exit(1);
+    }
 
     double start = get_time();
     for (int i = 0; i < iterations; i++) {
-        ME_EVAL_CHECK(expr, vars, 1, out, nitems);
+        rc = me_eval(expr, vars, 1, out, nitems, params);
+        if (rc != ME_EVAL_SUCCESS) {
+            fprintf(stderr, "me_eval failed: %d\n", rc);
+            exit(1);
+        }
     }
     return (get_time() - start) / iterations;
 }
@@ -120,28 +126,20 @@ static void benchmark_dtype(const dtype_info_t *info, const int *blocks, int nbl
     printf("sin**2 + cos**2 (%s)\n", info->name);
     printf("========================================\n");
     printf("BlockKiB ME_U10    ME_U35  ME_SCAL       C\n");
-    me_disable_simd(false);
-    me_set_simd_ulp_mode(ME_SIMD_ULP_1);
-    const char *backend_u10 = me_get_simd_backend();
-    printf("Backend U10: %s\n", backend_u10);
-    me_set_simd_ulp_mode(ME_SIMD_ULP_3_5);
-    const char *backend_u35 = me_get_simd_backend();
-    printf("Backend U35: %s\n", backend_u35);
-    if (strcmp(backend_u10, backend_u35) == 0) {
-        printf("Note: backend did not change between U10 and U35\n");
-    }
-    me_set_simd_ulp_mode(ME_SIMD_ULP_1);
+
+    me_eval_params params_u10 = ME_EVAL_PARAMS_DEFAULTS;
+    params_u10.simd_ulp_mode = ME_SIMD_ULP_1;
+    me_eval_params params_u35 = ME_EVAL_PARAMS_DEFAULTS;
+    params_u35.simd_ulp_mode = ME_SIMD_ULP_3_5;
+    me_eval_params params_scalar = ME_EVAL_PARAMS_DEFAULTS;
+    params_scalar.disable_simd = true;
 
     for (int i = 0; i < nblocks; i++) {
         int nitems = blocks[i];
         int iterations = (nitems < 65536) ? 20 : 8;
-        me_disable_simd(false);
-        me_set_simd_ulp_mode(ME_SIMD_ULP_1);
-        double me_time_u10 = run_me(expr, var_ptrs, out, nitems, iterations);
-        me_set_simd_ulp_mode(ME_SIMD_ULP_3_5);
-        double me_time_u35 = run_me(expr, var_ptrs, out, nitems, iterations);
-        me_disable_simd(true);
-        double me_scalar_time = run_me(expr, var_ptrs, out, nitems, iterations);
+        double me_time_u10 = run_me(expr, var_ptrs, out, nitems, iterations, &params_u10);
+        double me_time_u35 = run_me(expr, var_ptrs, out, nitems, iterations, &params_u35);
+        double me_scalar_time = run_me(expr, var_ptrs, out, nitems, iterations, &params_scalar);
         double c_time = run_c(data, out, nitems, info, iterations);
         double data_gb = (double)(nitems * info->elem_size * 2ULL) / 1e9;
         double me_gbps_u10 = data_gb / me_time_u10;
@@ -154,8 +152,6 @@ static void benchmark_dtype(const dtype_info_t *info, const int *blocks, int nbl
                kib, me_gbps_u10, me_gbps_u35, me_scalar_gbps, c_gbps);
     }
 
-    me_disable_simd(false);
-    me_set_simd_ulp_mode(ME_SIMD_ULP_1);
     me_free(expr);
     free(data);
     free(out);

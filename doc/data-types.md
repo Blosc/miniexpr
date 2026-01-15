@@ -39,7 +39,7 @@ int main() {
 
     // Evaluate
     const void *var_ptrs[] = {width, height};
-    if (me_eval(expr, var_ptrs, 2, area, n) != ME_EVAL_SUCCESS) { /* handle error */ }
+    if (me_eval(expr, var_ptrs, 2, area, n, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
     // Print results
     printf("Rectangle Areas (INT32):\n");
     for (int i = 0; i < n; i++) {
@@ -86,7 +86,7 @@ int main() {
     if (me_compile("3.14159265 * r * r", vars, 1, ME_FLOAT32, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     const void *var_ptrs[] = {radius};
-    if (me_eval(expr, var_ptrs, 1, area, n) != ME_EVAL_SUCCESS) { /* handle error */ }
+    if (me_eval(expr, var_ptrs, 1, area, n, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
     printf("Circle Areas (FLOAT32):\n");
     for (int i = 0; i < n; i++) {
         printf("Radius=%.2f -> Area=%.2f\n", radius[i], area[i]);
@@ -141,7 +141,7 @@ int main() {
     if (me_compile("items * price * 1.08", vars, 2, ME_AUTO, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     const void *var_ptrs[] = {items, price};
-    if (me_eval(expr, var_ptrs, 2, total, n) != ME_EVAL_SUCCESS) { /* handle error */ }
+    if (me_eval(expr, var_ptrs, 2, total, n, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
     printf("Shopping Cart (Mixed Types):\n");
     for (int i = 0; i < n; i++) {
         printf("Items=%d × $%.2f = $%.2f (with tax)\n",
@@ -189,7 +189,7 @@ int main() {
     if (me_compile("0.299*r + 0.587*g + 0.114*b", vars, 3, ME_UINT8, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     const void *var_ptrs[] = {red, green, blue};
-    if (me_eval(expr, var_ptrs, 3, gray, n) != ME_EVAL_SUCCESS) { /* handle error */ }
+    if (me_eval(expr, var_ptrs, 3, gray, n, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
     printf("RGB to Grayscale (UINT8):\n");
     for (int i = 0; i < n; i++) {
         printf("RGB(%3d,%3d,%3d) -> Gray=%3d\n",
@@ -245,7 +245,7 @@ int main() {
     if (me_compile("a ** 2 == (a + b)", vars, 2, ME_BOOL, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     const void *var_ptrs[] = {a, b};
-    if (me_eval(expr, var_ptrs, 2, is_equal, n) != ME_EVAL_SUCCESS) { /* handle error */ }
+    if (me_eval(expr, var_ptrs, 2, is_equal, n, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
     printf("Comparison Results (BOOL):\n");
     for (int i = 0; i < n; i++) {
         printf("a=%.1f: a² (%.1f) == a+b (%.1f) -> %s\n",
@@ -316,7 +316,7 @@ int main() {
     if (me_compile("a + b", vars, 2, ME_FLOAT32, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     const void *var_ptrs[] = {a, b};
-    if (me_eval(expr, var_ptrs, 2, result, 5) != ME_EVAL_SUCCESS) { /* handle error */ }
+    if (me_eval(expr, var_ptrs, 2, result, 5, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
     printf("Mixed Types with FLOAT32 Output:\n");
     for (int i = 0; i < 5; i++) {
         printf("a=%d + b=%.1f = %.2f (FLOAT32)\n", a[i], b[i], result[i]);

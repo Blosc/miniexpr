@@ -7,9 +7,7 @@
 #include <pthread.h>
 #include <sys/time.h>
 #include <math.h>
-#include <string.h>
 #include "miniexpr.h"
-#include "minctest.h"
 
 #define MAX_THREADS 12
 
@@ -32,6 +30,7 @@ typedef struct {
     size_t elem_size;
     int start_idx;
     int count;
+    const me_eval_params *params;
 } thread_args_t;
 
 typedef struct {
@@ -64,9 +63,13 @@ static void *eval_worker(void *arg) {
     };
     unsigned char *out_base = (unsigned char *)args->output;
 
-    ME_EVAL_CHECK(args->expr, vars_chunk, 1,
-                  out_base + (size_t)args->start_idx * args->elem_size,
-                  args->count);
+    int rc = me_eval(args->expr, vars_chunk, 1,
+                     out_base + (size_t)args->start_idx * args->elem_size,
+                     args->count, args->params);
+    if (rc != ME_EVAL_SUCCESS) {
+        fprintf(stderr, "me_eval failed: %d\n", rc);
+        exit(1);
+    }
     return NULL;
 }
 
@@ -100,7 +103,8 @@ static void *eval_worker_c(void *arg) {
 }
 
 static void run_threads_me(const me_expr *expr, const void *data, void *out,
-                           size_t elem_size, int total_elems, int num_threads) {
+                           size_t elem_size, int total_elems, int num_threads,
+                           const me_eval_params *params) {
     pthread_t threads[MAX_THREADS];
     thread_args_t thread_args[MAX_THREADS];
 
@@ -116,6 +120,7 @@ static void run_threads_me(const me_expr *expr, const void *data, void *out,
         thread_args[t].elem_size = elem_size;
         thread_args[t].start_idx = offset;
         thread_args[t].count = count;
+        thread_args[t].params = params;
         offset += count;
 
         pthread_create(&threads[t], NULL, eval_worker, &thread_args[t]);
@@ -154,12 +159,13 @@ static void run_threads_c(const void *data, void *out, const dtype_info_t *info,
 
 static double run_benchmark_me(const me_expr *expr, const void *data, void *out,
                                size_t elem_size, int total_elems,
-                               int num_threads, int iterations) {
-    run_threads_me(expr, data, out, elem_size, total_elems, num_threads);
+                               int num_threads, int iterations,
+                               const me_eval_params *params) {
+    run_threads_me(expr, data, out, elem_size, total_elems, num_threads, params);
 
     double start = get_time();
     for (int i = 0; i < iterations; i++) {
-        run_threads_me(expr, data, out, elem_size, total_elems, num_threads);
+        run_threads_me(expr, data, out, elem_size, total_elems, num_threads, params);
     }
     return (get_time() - start) / iterations;
 }
@@ -205,29 +211,21 @@ static void benchmark_dtype(const dtype_info_t *info, int total_elems) {
     printf("sin**2 + cos**2 (%s, GB/s)\n", info->name);
     printf("========================================\n");
     printf("Threads   ME_U10    ME_U35  ME_SCAL       C\n");
-    me_disable_simd(false);
-    me_set_simd_ulp_mode(ME_SIMD_ULP_1);
-    const char *backend_u10 = me_get_simd_backend();
-    printf("Backend U10: %s\n", backend_u10);
-    me_set_simd_ulp_mode(ME_SIMD_ULP_3_5);
-    const char *backend_u35 = me_get_simd_backend();
-    printf("Backend U35: %s\n", backend_u35);
-    if (strcmp(backend_u10, backend_u35) == 0) {
-        printf("Note: backend did not change between U10 and U35\n");
-    }
-    me_set_simd_ulp_mode(ME_SIMD_ULP_1);
+
+    me_eval_params params_u10 = ME_EVAL_PARAMS_DEFAULTS;
+    params_u10.simd_ulp_mode = ME_SIMD_ULP_1;
+    me_eval_params params_u35 = ME_EVAL_PARAMS_DEFAULTS;
+    params_u35.simd_ulp_mode = ME_SIMD_ULP_3_5;
+    me_eval_params params_scalar = ME_EVAL_PARAMS_DEFAULTS;
+    params_scalar.disable_simd = true;
 
     for (int num_threads = 1; num_threads <= MAX_THREADS; num_threads++) {
-        me_disable_simd(false);
-        me_set_simd_ulp_mode(ME_SIMD_ULP_1);
         double me_time_u10 = run_benchmark_me(expr, data, out, info->elem_size,
-                                              total_elems, num_threads, 5);
-        me_set_simd_ulp_mode(ME_SIMD_ULP_3_5);
+                                              total_elems, num_threads, 5, &params_u10);
         double me_time_u35 = run_benchmark_me(expr, data, out, info->elem_size,
-                                              total_elems, num_threads, 5);
-        me_disable_simd(true);
+                                              total_elems, num_threads, 5, &params_u35);
         double me_scalar_time = run_benchmark_me(expr, data, out, info->elem_size,
-                                                 total_elems, num_threads, 5);
+                                                 total_elems, num_threads, 5, &params_scalar);
         double c_time = run_benchmark_c(data, out, info, total_elems,
                                         num_threads, 5);
         printf("%7d  %7.2f  %7.2f  %7.2f  %7.2f\n",
@@ -238,8 +236,6 @@ static void benchmark_dtype(const dtype_info_t *info, int total_elems) {
                data_gb / c_time);
     }
 
-    me_disable_simd(false);
-    me_set_simd_ulp_mode(ME_SIMD_ULP_1);
     me_free(expr);
     free(data);
     free(out);

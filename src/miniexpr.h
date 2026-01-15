@@ -37,6 +37,7 @@
 #ifndef MINIEXPR_H
 #define MINIEXPR_H
 
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -186,6 +187,25 @@ typedef enum {
     ME_EVAL_ERR_VAR_MISMATCH = -4
 } me_eval_status;
 
+/* SIMD precision options for transcendentals. */
+typedef enum {
+    ME_SIMD_ULP_DEFAULT = 0,
+    ME_SIMD_ULP_1 = 1,
+    ME_SIMD_ULP_3_5 = 2
+} me_simd_ulp_mode;
+
+#ifndef ME_SIMD_ULP_DEFAULT_MODE
+#define ME_SIMD_ULP_DEFAULT_MODE ME_SIMD_ULP_3_5
+#endif
+
+/* Optional per-call evaluation parameters. */
+typedef struct {
+    bool disable_simd;
+    me_simd_ulp_mode simd_ulp_mode;
+} me_eval_params;
+
+#define ME_EVAL_PARAMS_DEFAULTS ((me_eval_params){false, ME_SIMD_ULP_DEFAULT})
+
 /* Evaluates compiled expression with variable and output pointers.
  * This function can be safely called from multiple threads simultaneously on the
  * same compiled expression. It creates a temporary clone of the expression tree
@@ -200,6 +220,7 @@ typedef enum {
  *                 (not bytes) and must correspond to the input arrays' element
  *                 count; the output buffer must be sized for this many output
  *                 elements (using the output dtype size).
+ *   params: Optional SIMD evaluation settings (NULL for defaults).
  *
  * Returns:
  *   ME_EVAL_SUCCESS (0) on success, or a negative ME_EVAL_ERR_* code on failure.
@@ -208,7 +229,8 @@ typedef enum {
  * and can be used from multiple threads to process different chunks simultaneously.
  */
 int me_eval(const me_expr *expr, const void **vars_chunk,
-            int n_vars, void *output_chunk, int chunk_nitems);
+            int n_vars, void *output_chunk, int chunk_nitems,
+            const me_eval_params *params);
 
 /* Prints the expression tree for debugging purposes. */
 void me_print(const me_expr *n);
@@ -221,22 +243,6 @@ void me_free(me_expr *n);
  * Returns the dtype that will be used for the output of me_eval().
  */
 me_dtype me_get_dtype(const me_expr *expr);
-
-/* Toggle SIMD transcendentals (1 = disable, 0 = enable). */
-void me_disable_simd(int disabled);
-
-typedef enum {
-    ME_SIMD_ULP_1 = 0,
-    ME_SIMD_ULP_3_5 = 1
-} me_simd_ulp_mode;
-
-/* Select SLEEF SIMD precision mode. */
-void me_set_simd_ulp_mode(me_simd_ulp_mode mode);
-
-
-/* Returns the active SIMD backend label (e.g., "advsimd-u35", "scalar"). */
-const char *me_get_simd_backend(void);
-
 
 
 #ifdef __cplusplus

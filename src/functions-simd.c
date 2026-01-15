@@ -32,6 +32,8 @@
 #endif
 
 static ME_THREAD_LOCAL unsigned long long me_eval_cookie = 0;
+static ME_THREAD_LOCAL int me_simd_force_scalar = 0;
+static ME_THREAD_LOCAL int me_simd_use_u35_override = -1;
 
 #ifndef ME_USE_SLEEF
 #define ME_USE_SLEEF 1
@@ -129,8 +131,8 @@ typedef void (*me_vec_ternary_f32)(const float* a, const float* b, const float* 
 typedef void (*me_vec_sincos_f64)(const double* a, double* sin_out, double* cos_out, int n);
 typedef void (*me_vec_sincos_f32)(const float* a, float* sin_out, float* cos_out, int n);
 
-/* Default to u35 for SIMD transcendentals; use me_set_simd_ulp_mode(ME_SIMD_ULP_1) for u10. */
-static int me_simd_use_u35 = 1;
+/* Default to ME_SIMD_ULP_DEFAULT_MODE for SIMD transcendentals. */
+static int me_simd_use_u35_default = (ME_SIMD_ULP_DEFAULT_MODE == ME_SIMD_ULP_3_5) ? 1 : 0;
 static const double me_pi = 3.14159265358979323846;
 static const float me_pif = 3.14159265358979323846f;
 
@@ -154,6 +156,43 @@ typedef struct {
 
 static ME_THREAD_LOCAL me_sincos_cache_f64 me_sincos_cache_dp = {0};
 static ME_THREAD_LOCAL me_sincos_cache_f32 me_sincos_cache_sp = {0};
+
+static int me_simd_use_u35_active(void) {
+    if (me_simd_use_u35_override >= 0) {
+        return me_simd_use_u35_override;
+    }
+    return me_simd_use_u35_default;
+}
+
+void me_simd_params_push(const me_eval_params *params, me_simd_params_state *state) {
+    state->force_scalar = me_simd_force_scalar;
+    state->override_u35 = me_simd_use_u35_override;
+
+    if (!params) {
+        me_simd_force_scalar = 0;
+        me_simd_use_u35_override = -1;
+        return;
+    }
+
+    me_simd_force_scalar = params->disable_simd ? 1 : 0;
+    switch (params->simd_ulp_mode) {
+    case ME_SIMD_ULP_1:
+        me_simd_use_u35_override = 0;
+        break;
+    case ME_SIMD_ULP_3_5:
+        me_simd_use_u35_override = 1;
+        break;
+    case ME_SIMD_ULP_DEFAULT:
+    default:
+        me_simd_use_u35_override = -1;
+        break;
+    }
+}
+
+void me_simd_params_pop(const me_simd_params_state *state) {
+    me_simd_force_scalar = state->force_scalar;
+    me_simd_use_u35_override = state->override_u35;
+}
 
 static void vec_sin_scalar(const double* a, double* out, int n) {
     int i;
@@ -915,7 +954,7 @@ static ME_AVX2_TARGET void vec_sincos_avx2(const double* a, double* sin_out, dou
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble2 r = me_simd_use_u35 ? xsincos(v) : xsincos_u1(v);
+        vdouble2 r = me_simd_use_u35_active() ? xsincos(v) : xsincos_u1(v);
         vstoreu_v_p_vd(sin_out + i, vd2getx_vd_vd2(r));
         vstoreu_v_p_vd(cos_out + i, vd2gety_vd_vd2(r));
     }
@@ -930,7 +969,7 @@ static ME_AVX2_TARGET void vec_sincos_f32_avx2(const float* a, float* sin_out, f
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat2 r = me_simd_use_u35 ? xsincosf(v) : xsincosf_u1(v);
+        vfloat2 r = me_simd_use_u35_active() ? xsincosf(v) : xsincosf_u1(v);
         vstoreu_v_p_vf(sin_out + i, vf2getx_vf_vf2(r));
         vstoreu_v_p_vf(cos_out + i, vf2gety_vf_vf2(r));
     }
@@ -945,7 +984,7 @@ static ME_AVX2_TARGET void vec_sin_avx2(const double* a, double* out, int n) {
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35 ? xsin(v) : xsin_u1(v);
+        vdouble r = me_simd_use_u35_active() ? xsin(v) : xsin_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -958,7 +997,7 @@ static ME_AVX2_TARGET void vec_cos_avx2(const double* a, double* out, int n) {
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35 ? xcos(v) : xcos_u1(v);
+        vdouble r = me_simd_use_u35_active() ? xcos(v) : xcos_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -971,7 +1010,7 @@ static ME_AVX2_TARGET void vec_sin_f32_avx2(const float* a, float* out, int n) {
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35 ? xsinf(v) : xsinf_u1(v);
+        vfloat r = me_simd_use_u35_active() ? xsinf(v) : xsinf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -984,7 +1023,7 @@ static ME_AVX2_TARGET void vec_cos_f32_avx2(const float* a, float* out, int n) {
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35 ? xcosf(v) : xcosf_u1(v);
+        vfloat r = me_simd_use_u35_active() ? xcosf(v) : xcosf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -997,7 +1036,7 @@ static ME_AVX2_TARGET void vec_asin_avx2(const double* a, double* out, int n) {
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35 ? xasin(v) : xasin_u1(v);
+        vdouble r = me_simd_use_u35_active() ? xasin(v) : xasin_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -1010,7 +1049,7 @@ static ME_AVX2_TARGET void vec_acos_avx2(const double* a, double* out, int n) {
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35 ? xacos(v) : xacos_u1(v);
+        vdouble r = me_simd_use_u35_active() ? xacos(v) : xacos_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -1023,7 +1062,7 @@ static ME_AVX2_TARGET void vec_atan_avx2(const double* a, double* out, int n) {
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35 ? xatan(v) : xatan_u1(v);
+        vdouble r = me_simd_use_u35_active() ? xatan(v) : xatan_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -1037,7 +1076,7 @@ static ME_AVX2_TARGET void vec_atan2_avx2(const double* a, const double* b, doub
     for (; i < limit; i += 4) {
         vdouble vy = vloadu_vd_p(a + i);
         vdouble vx = vloadu_vd_p(b + i);
-        vdouble r = me_simd_use_u35 ? xatan2(vy, vx) : xatan2_u1(vy, vx);
+        vdouble r = me_simd_use_u35_active() ? xatan2(vy, vx) : xatan2_u1(vy, vx);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -1050,7 +1089,7 @@ static ME_AVX2_TARGET void vec_asin_f32_avx2(const float* a, float* out, int n) 
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35 ? xasinf(v) : xasinf_u1(v);
+        vfloat r = me_simd_use_u35_active() ? xasinf(v) : xasinf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -1063,7 +1102,7 @@ static ME_AVX2_TARGET void vec_acos_f32_avx2(const float* a, float* out, int n) 
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35 ? xacosf(v) : xacosf_u1(v);
+        vfloat r = me_simd_use_u35_active() ? xacosf(v) : xacosf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -1076,7 +1115,7 @@ static ME_AVX2_TARGET void vec_atan_f32_avx2(const float* a, float* out, int n) 
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35 ? xatanf(v) : xatanf_u1(v);
+        vfloat r = me_simd_use_u35_active() ? xatanf(v) : xatanf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -1090,7 +1129,7 @@ static ME_AVX2_TARGET void vec_atan2_f32_avx2(const float* a, const float* b, fl
     for (; i < limit; i += 8) {
         vfloat vy = vloadu_vf_p(a + i);
         vfloat vx = vloadu_vf_p(b + i);
-        vfloat r = me_simd_use_u35 ? xatan2f(vy, vx) : xatan2f_u1(vy, vx);
+        vfloat r = me_simd_use_u35_active() ? xatan2f(vy, vx) : xatan2f_u1(vy, vx);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -1103,7 +1142,7 @@ static ME_AVX2_TARGET void vec_tan_avx2(const double* a, double* out, int n) {
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35 ? xtan(v) : xtan_u1(v);
+        vdouble r = me_simd_use_u35_active() ? xtan(v) : xtan_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -1116,7 +1155,7 @@ static ME_AVX2_TARGET void vec_tan_f32_avx2(const float* a, float* out, int n) {
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35 ? xtanf(v) : xtanf_u1(v);
+        vfloat r = me_simd_use_u35_active() ? xtanf(v) : xtanf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -1207,7 +1246,7 @@ static ME_AVX2_TARGET void vec_log_avx2(const double* a, double* out, int n) {
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35 ? xlog(v) : xlog_u1(v);
+        vdouble r = me_simd_use_u35_active() ? xlog(v) : xlog_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -1220,7 +1259,7 @@ static ME_AVX2_TARGET void vec_log_f32_avx2(const float* a, float* out, int n) {
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35 ? xlogf(v) : xlogf_u1(v);
+        vfloat r = me_simd_use_u35_active() ? xlogf(v) : xlogf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -1625,7 +1664,7 @@ static ME_AVX2_TARGET void vec_exp2_avx2(const double* a, double* out, int n) {
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35 ? xexp2_u35(v) : xexp2(v);
+        vdouble r = me_simd_use_u35_active() ? xexp2_u35(v) : xexp2(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -1638,7 +1677,7 @@ static ME_AVX2_TARGET void vec_exp2_f32_avx2(const float* a, float* out, int n) 
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35 ? xexp2f_u35(v) : xexp2f(v);
+        vfloat r = me_simd_use_u35_active() ? xexp2f_u35(v) : xexp2f(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -1651,7 +1690,7 @@ static ME_AVX2_TARGET void vec_exp10_avx2(const double* a, double* out, int n) {
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35 ? xexp10_u35(v) : xexp10(v);
+        vdouble r = me_simd_use_u35_active() ? xexp10_u35(v) : xexp10(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -1664,7 +1703,7 @@ static ME_AVX2_TARGET void vec_exp10_f32_avx2(const float* a, float* out, int n)
     const int limit = n & ~7;
     for (; i < limit; i += 8) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35 ? xexp10f_u35(v) : xexp10f(v);
+        vfloat r = me_simd_use_u35_active() ? xexp10f_u35(v) : xexp10f(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2026,7 +2065,7 @@ static ME_AVX2_TARGET void vec_hypot_avx2(const double* a, const double* b, doub
     for (; i < limit; i += 4) {
         vdouble va = vloadu_vd_p(a + i);
         vdouble vb = vloadu_vd_p(b + i);
-        vdouble r = me_simd_use_u35 ? xhypot_u35(va, vb) : xhypot_u05(va, vb);
+        vdouble r = me_simd_use_u35_active() ? xhypot_u35(va, vb) : xhypot_u05(va, vb);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2040,7 +2079,7 @@ static ME_AVX2_TARGET void vec_hypot_f32_avx2(const float* a, const float* b, fl
     for (; i < limit; i += 8) {
         vfloat va = vloadu_vf_p(a + i);
         vfloat vb = vloadu_vf_p(b + i);
-        vfloat r = me_simd_use_u35 ? xhypotf_u35(va, vb) : xhypotf_u05(va, vb);
+        vfloat r = me_simd_use_u35_active() ? xhypotf_u35(va, vb) : xhypotf_u05(va, vb);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2173,7 +2212,7 @@ static void vec_sincos_advsimd(const double* a, double* sin_out, double* cos_out
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble2 r = me_simd_use_u35 ? xsincos(v) : xsincos_u1(v);
+        vdouble2 r = me_simd_use_u35_active() ? xsincos(v) : xsincos_u1(v);
         vstoreu_v_p_vd(sin_out + i, vd2getx_vd_vd2(r));
         vstoreu_v_p_vd(cos_out + i, vd2gety_vd_vd2(r));
     }
@@ -2188,7 +2227,7 @@ static void vec_sincos_f32_advsimd(const float* a, float* sin_out, float* cos_ou
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat2 r = me_simd_use_u35 ? xsincosf(v) : xsincosf_u1(v);
+        vfloat2 r = me_simd_use_u35_active() ? xsincosf(v) : xsincosf_u1(v);
         vstoreu_v_p_vf(sin_out + i, vf2getx_vf_vf2(r));
         vstoreu_v_p_vf(cos_out + i, vf2gety_vf_vf2(r));
     }
@@ -2203,7 +2242,7 @@ static void vec_sin_advsimd(const double* a, double* out, int n) {
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35 ? xsin(v) : xsin_u1(v);
+        vdouble r = me_simd_use_u35_active() ? xsin(v) : xsin_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2216,7 +2255,7 @@ static void vec_cos_advsimd(const double* a, double* out, int n) {
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35 ? xcos(v) : xcos_u1(v);
+        vdouble r = me_simd_use_u35_active() ? xcos(v) : xcos_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2229,7 +2268,7 @@ static void vec_sin_f32_advsimd(const float* a, float* out, int n) {
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35 ? xsinf(v) : xsinf_u1(v);
+        vfloat r = me_simd_use_u35_active() ? xsinf(v) : xsinf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2242,7 +2281,7 @@ static void vec_cos_f32_advsimd(const float* a, float* out, int n) {
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35 ? xcosf(v) : xcosf_u1(v);
+        vfloat r = me_simd_use_u35_active() ? xcosf(v) : xcosf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2255,7 +2294,7 @@ static void vec_asin_advsimd(const double* a, double* out, int n) {
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35 ? xasin(v) : xasin_u1(v);
+        vdouble r = me_simd_use_u35_active() ? xasin(v) : xasin_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2268,7 +2307,7 @@ static void vec_acos_advsimd(const double* a, double* out, int n) {
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35 ? xacos(v) : xacos_u1(v);
+        vdouble r = me_simd_use_u35_active() ? xacos(v) : xacos_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2281,7 +2320,7 @@ static void vec_atan_advsimd(const double* a, double* out, int n) {
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35 ? xatan(v) : xatan_u1(v);
+        vdouble r = me_simd_use_u35_active() ? xatan(v) : xatan_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2295,7 +2334,7 @@ static void vec_atan2_advsimd(const double* a, const double* b, double* out, int
     for (; i < limit; i += 2) {
         vdouble vy = vloadu_vd_p(a + i);
         vdouble vx = vloadu_vd_p(b + i);
-        vdouble r = me_simd_use_u35 ? xatan2(vy, vx) : xatan2_u1(vy, vx);
+        vdouble r = me_simd_use_u35_active() ? xatan2(vy, vx) : xatan2_u1(vy, vx);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2308,7 +2347,7 @@ static void vec_asin_f32_advsimd(const float* a, float* out, int n) {
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35 ? xasinf(v) : xasinf_u1(v);
+        vfloat r = me_simd_use_u35_active() ? xasinf(v) : xasinf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2321,7 +2360,7 @@ static void vec_acos_f32_advsimd(const float* a, float* out, int n) {
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35 ? xacosf(v) : xacosf_u1(v);
+        vfloat r = me_simd_use_u35_active() ? xacosf(v) : xacosf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2334,7 +2373,7 @@ static void vec_atan_f32_advsimd(const float* a, float* out, int n) {
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35 ? xatanf(v) : xatanf_u1(v);
+        vfloat r = me_simd_use_u35_active() ? xatanf(v) : xatanf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2348,7 +2387,7 @@ static void vec_atan2_f32_advsimd(const float* a, const float* b, float* out, in
     for (; i < limit; i += 4) {
         vfloat vy = vloadu_vf_p(a + i);
         vfloat vx = vloadu_vf_p(b + i);
-        vfloat r = me_simd_use_u35 ? xatan2f(vy, vx) : xatan2f_u1(vy, vx);
+        vfloat r = me_simd_use_u35_active() ? xatan2f(vy, vx) : xatan2f_u1(vy, vx);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2361,7 +2400,7 @@ static void vec_tan_advsimd(const double* a, double* out, int n) {
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35 ? xtan(v) : xtan_u1(v);
+        vdouble r = me_simd_use_u35_active() ? xtan(v) : xtan_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2374,7 +2413,7 @@ static void vec_tan_f32_advsimd(const float* a, float* out, int n) {
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35 ? xtanf(v) : xtanf_u1(v);
+        vfloat r = me_simd_use_u35_active() ? xtanf(v) : xtanf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2465,7 +2504,7 @@ static void vec_log_advsimd(const double* a, double* out, int n) {
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35 ? xlog(v) : xlog_u1(v);
+        vdouble r = me_simd_use_u35_active() ? xlog(v) : xlog_u1(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2478,7 +2517,7 @@ static void vec_log_f32_advsimd(const float* a, float* out, int n) {
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35 ? xlogf(v) : xlogf_u1(v);
+        vfloat r = me_simd_use_u35_active() ? xlogf(v) : xlogf_u1(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2883,7 +2922,7 @@ static void vec_exp2_advsimd(const double* a, double* out, int n) {
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35 ? xexp2_u35(v) : xexp2(v);
+        vdouble r = me_simd_use_u35_active() ? xexp2_u35(v) : xexp2(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2896,7 +2935,7 @@ static void vec_exp2_f32_advsimd(const float* a, float* out, int n) {
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35 ? xexp2f_u35(v) : xexp2f(v);
+        vfloat r = me_simd_use_u35_active() ? xexp2f_u35(v) : xexp2f(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -2909,7 +2948,7 @@ static void vec_exp10_advsimd(const double* a, double* out, int n) {
     const int limit = n & ~1;
     for (; i < limit; i += 2) {
         vdouble v = vloadu_vd_p(a + i);
-        vdouble r = me_simd_use_u35 ? xexp10_u35(v) : xexp10(v);
+        vdouble r = me_simd_use_u35_active() ? xexp10_u35(v) : xexp10(v);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -2922,7 +2961,7 @@ static void vec_exp10_f32_advsimd(const float* a, float* out, int n) {
     const int limit = n & ~3;
     for (; i < limit; i += 4) {
         vfloat v = vloadu_vf_p(a + i);
-        vfloat r = me_simd_use_u35 ? xexp10f_u35(v) : xexp10f(v);
+        vfloat r = me_simd_use_u35_active() ? xexp10f_u35(v) : xexp10f(v);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -3284,7 +3323,7 @@ static void vec_hypot_advsimd(const double* a, const double* b, double* out, int
     for (; i < limit; i += 2) {
         vdouble va = vloadu_vd_p(a + i);
         vdouble vb = vloadu_vd_p(b + i);
-        vdouble r = me_simd_use_u35 ? xhypot_u35(va, vb) : xhypot_u05(va, vb);
+        vdouble r = me_simd_use_u35_active() ? xhypot_u35(va, vb) : xhypot_u05(va, vb);
         vstoreu_v_p_vd(out + i, r);
     }
     for (; i < n; i++) {
@@ -3298,7 +3337,7 @@ static void vec_hypot_f32_advsimd(const float* a, const float* b, float* out, in
     for (; i < limit; i += 4) {
         vfloat va = vloadu_vf_p(a + i);
         vfloat vb = vloadu_vf_p(b + i);
-        vfloat r = me_simd_use_u35 ? xhypotf_u35(va, vb) : xhypotf_u05(va, vb);
+        vfloat r = me_simd_use_u35_active() ? xhypotf_u35(va, vb) : xhypotf_u05(va, vb);
         vstoreu_v_p_vf(out + i, r);
     }
     for (; i < n; i++) {
@@ -3914,7 +3953,7 @@ static void me_init_simd(void) {
         vec_fma_f32_impl = vec_fma_f32_avx2;
         vec_sincos_impl = vec_sincos_avx2;
         vec_sincos_f32_impl = vec_sincos_f32_avx2;
-        me_simd_backend = me_simd_use_u35 ? "avx2-u35" : "avx2-u10";
+        me_simd_backend = me_simd_use_u35_active() ? "avx2-u35" : "avx2-u10";
         return;
     }
 #endif
@@ -4023,7 +4062,7 @@ static void me_init_simd(void) {
         vec_fma_f32_impl = vec_fma_f32_advsimd;
         vec_sincos_impl = vec_sincos_advsimd;
         vec_sincos_f32_impl = vec_sincos_f32_advsimd;
-        me_simd_backend = me_simd_use_u35 ? "advsimd-u35" : "advsimd-u10";
+        me_simd_backend = me_simd_use_u35_active() ? "advsimd-u35" : "advsimd-u10";
     }
 #endif
 
@@ -4033,580 +4072,829 @@ static void me_init_simd(void) {
 }
 
 void vec_sin_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_sin_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_sin_impl(a, out, n);
 }
 
 void vec_cos_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_cos_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_cos_impl(a, out, n);
 }
 
 void vec_asin_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_asin_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_asin_impl(a, out, n);
 }
 
 void vec_acos_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_acos_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_acos_impl(a, out, n);
 }
 
 void vec_atan_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_atan_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_atan_impl(a, out, n);
 }
 
 void vec_tan_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_tan_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_tan_impl(a, out, n);
 }
 
 void vec_atan2_dispatch(const double* a, const double* b, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_atan2_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_atan2_impl(a, b, out, n);
 }
 
 void vec_sin_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_sin_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_sin_f32_impl(a, out, n);
 }
 
 void vec_cos_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_cos_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_cos_f32_impl(a, out, n);
 }
 
 void vec_asin_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_asin_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_asin_f32_impl(a, out, n);
 }
 
 void vec_acos_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_acos_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_acos_f32_impl(a, out, n);
 }
 
 void vec_atan_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_atan_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_atan_f32_impl(a, out, n);
 }
 
 void vec_tan_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_tan_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_tan_f32_impl(a, out, n);
 }
 
 void vec_atan2_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_atan2_f32_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_atan2_f32_impl(a, b, out, n);
 }
 
 void vec_abs_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_abs_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_abs_impl(a, out, n);
 }
 
 void vec_exp_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_exp_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_exp_impl(a, out, n);
 }
 
 void vec_expm1_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_expm1_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_expm1_impl(a, out, n);
 }
 
 void vec_log_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_log_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_log_impl(a, out, n);
 }
 
 void vec_log10_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_log10_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_log10_impl(a, out, n);
 }
 
 void vec_log1p_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_log1p_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_log1p_impl(a, out, n);
 }
 
 void vec_log2_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_log2_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_log2_impl(a, out, n);
 }
 
 void vec_sqrt_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_sqrt_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_sqrt_impl(a, out, n);
 }
 
 void vec_sinh_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_sinh_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_sinh_impl(a, out, n);
 }
 
 void vec_cosh_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_cosh_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_cosh_impl(a, out, n);
 }
 
 void vec_tanh_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_tanh_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_tanh_impl(a, out, n);
 }
 
 void vec_acosh_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_acosh_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_acosh_impl(a, out, n);
 }
 
 void vec_asinh_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_asinh_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_asinh_impl(a, out, n);
 }
 
 void vec_atanh_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_atanh_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_atanh_impl(a, out, n);
 }
 
 void vec_ceil_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_ceil_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_ceil_impl(a, out, n);
 }
 
 void vec_floor_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_floor_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_floor_impl(a, out, n);
 }
 
 void vec_round_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_round_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_round_impl(a, out, n);
 }
 
 void vec_trunc_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_trunc_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_trunc_impl(a, out, n);
 }
 
 void vec_pow_dispatch(const double* a, const double* b, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_pow_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_pow_impl(a, b, out, n);
 }
 
 void vec_exp2_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_exp2_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_exp2_impl(a, out, n);
 }
 
 void vec_exp10_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_exp10_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_exp10_impl(a, out, n);
 }
 
 void vec_cbrt_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_cbrt_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_cbrt_impl(a, out, n);
 }
 
 void vec_erf_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_erf_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_erf_impl(a, out, n);
 }
 
 void vec_erfc_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_erfc_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_erfc_impl(a, out, n);
 }
 
 void vec_sinpi_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_sinpi_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_sinpi_impl(a, out, n);
 }
 
 void vec_cospi_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_cospi_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_cospi_impl(a, out, n);
 }
 
 void vec_tgamma_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_tgamma_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_tgamma_impl(a, out, n);
 }
 
 void vec_lgamma_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_lgamma_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_lgamma_impl(a, out, n);
 }
 
 void vec_rint_dispatch(const double* a, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_rint_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_rint_impl(a, out, n);
 }
 
 void vec_copysign_dispatch(const double* a, const double* b, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_copysign_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_copysign_impl(a, b, out, n);
 }
 
 void vec_fdim_dispatch(const double* a, const double* b, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_fdim_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_fdim_impl(a, b, out, n);
 }
 
 void vec_fmax_dispatch(const double* a, const double* b, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_fmax_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_fmax_impl(a, b, out, n);
 }
 
 void vec_fmin_dispatch(const double* a, const double* b, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_fmin_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_fmin_impl(a, b, out, n);
 }
 
 void vec_fmod_dispatch(const double* a, const double* b, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_fmod_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_fmod_impl(a, b, out, n);
 }
 
 void vec_hypot_dispatch(const double* a, const double* b, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_hypot_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_hypot_impl(a, b, out, n);
 }
 
 void vec_ldexp_dispatch(const double* a, const double* b, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_ldexp_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_ldexp_impl(a, b, out, n);
 }
 
 void vec_nextafter_dispatch(const double* a, const double* b, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_nextafter_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_nextafter_impl(a, b, out, n);
 }
 
 void vec_remainder_dispatch(const double* a, const double* b, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_remainder_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_remainder_impl(a, b, out, n);
 }
 
 void vec_fma_dispatch(const double* a, const double* b, const double* c, double* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_fma_scalar(a, b, c, out, n);
+        return;
+    }
     me_init_simd();
     vec_fma_impl(a, b, c, out, n);
 }
 
 void vec_abs_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_abs_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_abs_f32_impl(a, out, n);
 }
 
 void vec_exp_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_exp_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_exp_f32_impl(a, out, n);
 }
 
 void vec_expm1_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_expm1_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_expm1_f32_impl(a, out, n);
 }
 
 void vec_log_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_log_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_log_f32_impl(a, out, n);
 }
 
 void vec_log10_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_log10_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_log10_f32_impl(a, out, n);
 }
 
 void vec_log1p_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_log1p_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_log1p_f32_impl(a, out, n);
 }
 
 void vec_log2_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_log2_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_log2_f32_impl(a, out, n);
 }
 
 void vec_sqrt_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_sqrt_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_sqrt_f32_impl(a, out, n);
 }
 
 void vec_sinh_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_sinh_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_sinh_f32_impl(a, out, n);
 }
 
 void vec_cosh_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_cosh_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_cosh_f32_impl(a, out, n);
 }
 
 void vec_tanh_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_tanh_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_tanh_f32_impl(a, out, n);
 }
 
 void vec_acosh_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_acosh_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_acosh_f32_impl(a, out, n);
 }
 
 void vec_asinh_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_asinh_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_asinh_f32_impl(a, out, n);
 }
 
 void vec_atanh_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_atanh_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_atanh_f32_impl(a, out, n);
 }
 
 void vec_ceil_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_ceil_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_ceil_f32_impl(a, out, n);
 }
 
 void vec_floor_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_floor_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_floor_f32_impl(a, out, n);
 }
 
 void vec_round_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_round_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_round_f32_impl(a, out, n);
 }
 
 void vec_trunc_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_trunc_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_trunc_f32_impl(a, out, n);
 }
 
 void vec_pow_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_pow_f32_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_pow_f32_impl(a, b, out, n);
 }
 
 void vec_exp2_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_exp2_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_exp2_f32_impl(a, out, n);
 }
 
 void vec_exp10_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_exp10_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_exp10_f32_impl(a, out, n);
 }
 
 void vec_cbrt_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_cbrt_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_cbrt_f32_impl(a, out, n);
 }
 
 void vec_erf_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_erf_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_erf_f32_impl(a, out, n);
 }
 
 void vec_erfc_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_erfc_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_erfc_f32_impl(a, out, n);
 }
 
 void vec_sinpi_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_sinpi_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_sinpi_f32_impl(a, out, n);
 }
 
 void vec_cospi_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_cospi_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_cospi_f32_impl(a, out, n);
 }
 
 void vec_tgamma_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_tgamma_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_tgamma_f32_impl(a, out, n);
 }
 
 void vec_lgamma_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_lgamma_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_lgamma_f32_impl(a, out, n);
 }
 
 void vec_rint_f32_dispatch(const float* a, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_rint_f32_scalar(a, out, n);
+        return;
+    }
     me_init_simd();
     vec_rint_f32_impl(a, out, n);
 }
 
 void vec_copysign_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_copysign_f32_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_copysign_f32_impl(a, b, out, n);
 }
 
 void vec_fdim_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_fdim_f32_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_fdim_f32_impl(a, b, out, n);
 }
 
 void vec_fmax_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_fmax_f32_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_fmax_f32_impl(a, b, out, n);
 }
 
 void vec_fmin_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_fmin_f32_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_fmin_f32_impl(a, b, out, n);
 }
 
 void vec_fmod_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_fmod_f32_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_fmod_f32_impl(a, b, out, n);
 }
 
 void vec_hypot_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_hypot_f32_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_hypot_f32_impl(a, b, out, n);
 }
 
 void vec_ldexp_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_ldexp_f32_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_ldexp_f32_impl(a, b, out, n);
 }
 
 void vec_nextafter_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_nextafter_f32_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_nextafter_f32_impl(a, b, out, n);
 }
 
 void vec_remainder_f32_dispatch(const float* a, const float* b, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_remainder_f32_scalar(a, b, out, n);
+        return;
+    }
     me_init_simd();
     vec_remainder_f32_impl(a, b, out, n);
 }
 
 void vec_fma_f32_dispatch(const float* a, const float* b, const float* c, float* out, int n) {
+    if (me_simd_force_scalar) {
+        vec_fma_f32_scalar(a, b, c, out, n);
+        return;
+    }
     me_init_simd();
     vec_fma_f32_impl(a, b, c, out, n);
-}
-
-void me_disable_simd(int disabled) {
-    if (!disabled) {
-        me_simd_enabled = 1;
-        me_simd_initialized = 0;
-        me_init_simd();
-    } else {
-        me_simd_enabled = 0;
-        me_simd_initialized = 1;
-        vec_sin_impl = vec_sin_scalar;
-        vec_cos_impl = vec_cos_scalar;
-        vec_tan_impl = vec_tan_scalar;
-        vec_asin_impl = vec_asin_scalar;
-        vec_acos_impl = vec_acos_scalar;
-        vec_atan_impl = vec_atan_scalar;
-        vec_atan2_impl = vec_atan2_scalar;
-        vec_abs_impl = vec_abs_scalar;
-        vec_exp_impl = vec_exp_scalar;
-        vec_expm1_impl = vec_expm1_scalar;
-        vec_log_impl = vec_log_scalar;
-        vec_log10_impl = vec_log10_scalar;
-        vec_log1p_impl = vec_log1p_scalar;
-        vec_log2_impl = vec_log2_scalar;
-        vec_sqrt_impl = vec_sqrt_scalar;
-        vec_sinh_impl = vec_sinh_scalar;
-        vec_cosh_impl = vec_cosh_scalar;
-        vec_tanh_impl = vec_tanh_scalar;
-        vec_acosh_impl = vec_acosh_scalar;
-        vec_asinh_impl = vec_asinh_scalar;
-        vec_atanh_impl = vec_atanh_scalar;
-        vec_ceil_impl = vec_ceil_scalar;
-        vec_floor_impl = vec_floor_scalar;
-        vec_round_impl = vec_round_scalar;
-        vec_trunc_impl = vec_trunc_scalar;
-        vec_exp2_impl = vec_exp2_scalar;
-        vec_exp10_impl = vec_exp10_scalar;
-        vec_cbrt_impl = vec_cbrt_scalar;
-        vec_erf_impl = vec_erf_scalar;
-        vec_erfc_impl = vec_erfc_scalar;
-        vec_sinpi_impl = vec_sinpi_scalar;
-        vec_cospi_impl = vec_cospi_scalar;
-        vec_tgamma_impl = vec_tgamma_scalar;
-        vec_lgamma_impl = vec_lgamma_scalar;
-        vec_rint_impl = vec_rint_scalar;
-        vec_pow_impl = vec_pow_scalar;
-        vec_copysign_impl = vec_copysign_scalar;
-        vec_fdim_impl = vec_fdim_scalar;
-        vec_fmax_impl = vec_fmax_scalar;
-        vec_fmin_impl = vec_fmin_scalar;
-        vec_fmod_impl = vec_fmod_scalar;
-        vec_hypot_impl = vec_hypot_scalar;
-        vec_ldexp_impl = vec_ldexp_scalar;
-        vec_nextafter_impl = vec_nextafter_scalar;
-        vec_remainder_impl = vec_remainder_scalar;
-        vec_fma_impl = vec_fma_scalar;
-        vec_sin_f32_impl = vec_sin_f32_scalar;
-        vec_cos_f32_impl = vec_cos_f32_scalar;
-        vec_tan_f32_impl = vec_tan_f32_scalar;
-        vec_asin_f32_impl = vec_asin_f32_scalar;
-        vec_acos_f32_impl = vec_acos_f32_scalar;
-        vec_atan_f32_impl = vec_atan_f32_scalar;
-        vec_atan2_f32_impl = vec_atan2_f32_scalar;
-        vec_abs_f32_impl = vec_abs_f32_scalar;
-        vec_exp_f32_impl = vec_exp_f32_scalar;
-        vec_expm1_f32_impl = vec_expm1_f32_scalar;
-        vec_log_f32_impl = vec_log_f32_scalar;
-        vec_log10_f32_impl = vec_log10_f32_scalar;
-        vec_log1p_f32_impl = vec_log1p_f32_scalar;
-        vec_log2_f32_impl = vec_log2_f32_scalar;
-        vec_sqrt_f32_impl = vec_sqrt_f32_scalar;
-        vec_sinh_f32_impl = vec_sinh_f32_scalar;
-        vec_cosh_f32_impl = vec_cosh_f32_scalar;
-        vec_tanh_f32_impl = vec_tanh_f32_scalar;
-        vec_acosh_f32_impl = vec_acosh_f32_scalar;
-        vec_asinh_f32_impl = vec_asinh_f32_scalar;
-        vec_atanh_f32_impl = vec_atanh_f32_scalar;
-        vec_ceil_f32_impl = vec_ceil_f32_scalar;
-        vec_floor_f32_impl = vec_floor_f32_scalar;
-        vec_round_f32_impl = vec_round_f32_scalar;
-        vec_trunc_f32_impl = vec_trunc_f32_scalar;
-        vec_exp2_f32_impl = vec_exp2_f32_scalar;
-        vec_exp10_f32_impl = vec_exp10_f32_scalar;
-        vec_cbrt_f32_impl = vec_cbrt_f32_scalar;
-        vec_erf_f32_impl = vec_erf_f32_scalar;
-        vec_erfc_f32_impl = vec_erfc_f32_scalar;
-        vec_sinpi_f32_impl = vec_sinpi_f32_scalar;
-        vec_cospi_f32_impl = vec_cospi_f32_scalar;
-        vec_tgamma_f32_impl = vec_tgamma_f32_scalar;
-        vec_lgamma_f32_impl = vec_lgamma_f32_scalar;
-        vec_rint_f32_impl = vec_rint_f32_scalar;
-        vec_pow_f32_impl = vec_pow_f32_scalar;
-        vec_copysign_f32_impl = vec_copysign_f32_scalar;
-        vec_fdim_f32_impl = vec_fdim_f32_scalar;
-        vec_fmax_f32_impl = vec_fmax_f32_scalar;
-        vec_fmin_f32_impl = vec_fmin_f32_scalar;
-        vec_fmod_f32_impl = vec_fmod_f32_scalar;
-        vec_hypot_f32_impl = vec_hypot_f32_scalar;
-        vec_ldexp_f32_impl = vec_ldexp_f32_scalar;
-        vec_nextafter_f32_impl = vec_nextafter_f32_scalar;
-        vec_remainder_f32_impl = vec_remainder_f32_scalar;
-        vec_fma_f32_impl = vec_fma_f32_scalar;
-        vec_sincos_impl = vec_sincos_scalar;
-        vec_sincos_f32_impl = vec_sincos_f32_scalar;
-        me_simd_backend = "scalar";
-    }
-}
-
-void me_set_simd_ulp_mode(me_simd_ulp_mode mode) {
-    me_simd_use_u35 = (mode == ME_SIMD_ULP_3_5) ? 1 : 0;
-    if (me_simd_enabled) {
-        me_simd_initialized = 0;
-        me_init_simd();
-    }
-}
-
-const char *me_get_simd_backend(void) {
-    me_init_simd();
-    return me_simd_backend;
 }

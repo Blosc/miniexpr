@@ -102,8 +102,9 @@ static int run_unary_f64(const char *name, double (*func)(double), int n,
     }
 
     const void *var_ptrs[] = {input};
-    me_disable_simd(!simd_enabled);
-    int eval_rc = me_eval(expr, var_ptrs, 1, out, n);
+    me_eval_params eval_params = ME_EVAL_PARAMS_DEFAULTS;
+    eval_params.disable_simd = !simd_enabled;
+    int eval_rc = me_eval(expr, var_ptrs, 1, out, n, &eval_params);
     if (eval_rc != ME_EVAL_SUCCESS) {
         printf("%s eval failed (err=%d)\n", expr_text, eval_rc);
         me_free(expr);
@@ -127,7 +128,6 @@ static int run_unary_f64(const char *name, double (*func)(double), int n,
     me_free(expr);
     free(input);
     free(out);
-    me_disable_simd(false);
 
     if (failures) {
         printf("%s f64 %s FAIL: %d mismatches\n",
@@ -166,8 +166,9 @@ static int run_unary_f32(const char *name, float (*func)(float), int n,
     }
 
     const void *var_ptrs[] = {input};
-    me_disable_simd(!simd_enabled);
-    int eval_rc = me_eval(expr, var_ptrs, 1, out, n);
+    me_eval_params eval_params = ME_EVAL_PARAMS_DEFAULTS;
+    eval_params.disable_simd = !simd_enabled;
+    int eval_rc = me_eval(expr, var_ptrs, 1, out, n, &eval_params);
     if (eval_rc != ME_EVAL_SUCCESS) {
         printf("%s f32 eval failed (err=%d)\n", expr_text, eval_rc);
         me_free(expr);
@@ -191,7 +192,6 @@ static int run_unary_f32(const char *name, float (*func)(float), int n,
     me_free(expr);
     free(input);
     free(out);
-    me_disable_simd(false);
 
     if (failures) {
         printf("%s f32 %s FAIL: %d mismatches\n",
@@ -235,8 +235,9 @@ static int run_binary_f64(const char *name, double (*func)(double, double), int 
     }
 
     const void *var_ptrs[] = {a, b};
-    me_disable_simd(!simd_enabled);
-    int eval_rc = me_eval(expr, var_ptrs, 2, out, n);
+    me_eval_params eval_params = ME_EVAL_PARAMS_DEFAULTS;
+    eval_params.disable_simd = !simd_enabled;
+    int eval_rc = me_eval(expr, var_ptrs, 2, out, n, &eval_params);
     if (eval_rc != ME_EVAL_SUCCESS) {
         printf("%s eval failed (err=%d)\n", expr_text, eval_rc);
         me_free(expr);
@@ -262,7 +263,6 @@ static int run_binary_f64(const char *name, double (*func)(double, double), int 
     free(a);
     free(b);
     free(out);
-    me_disable_simd(false);
 
     if (failures) {
         printf("%s f64 %s FAIL: %d mismatches\n",
@@ -306,8 +306,9 @@ static int run_binary_f32(const char *name, float (*func)(float, float), int n,
     }
 
     const void *var_ptrs[] = {a, b};
-    me_disable_simd(!simd_enabled);
-    int eval_rc = me_eval(expr, var_ptrs, 2, out, n);
+    me_eval_params eval_params = ME_EVAL_PARAMS_DEFAULTS;
+    eval_params.disable_simd = !simd_enabled;
+    int eval_rc = me_eval(expr, var_ptrs, 2, out, n, &eval_params);
     if (eval_rc != ME_EVAL_SUCCESS) {
         printf("%s f32 eval failed (err=%d)\n", expr_text, eval_rc);
         me_free(expr);
@@ -333,7 +334,6 @@ static int run_binary_f32(const char *name, float (*func)(float, float), int n,
     free(a);
     free(b);
     free(out);
-    me_disable_simd(false);
 
     if (failures) {
         printf("%s f32 %s FAIL: %d mismatches\n",
@@ -382,8 +382,9 @@ static int run_ternary_f64(const char *name, double (*func)(double, double, doub
     }
 
     const void *var_ptrs[] = {a, b, c};
-    me_disable_simd(!simd_enabled);
-    int eval_rc = me_eval(expr, var_ptrs, 3, out, n);
+    me_eval_params eval_params = ME_EVAL_PARAMS_DEFAULTS;
+    eval_params.disable_simd = !simd_enabled;
+    int eval_rc = me_eval(expr, var_ptrs, 3, out, n, &eval_params);
     if (eval_rc != ME_EVAL_SUCCESS) {
         printf("%s eval failed (err=%d)\n", expr_text, eval_rc);
         me_free(expr);
@@ -411,7 +412,6 @@ static int run_ternary_f64(const char *name, double (*func)(double, double, doub
     free(b);
     free(c);
     free(out);
-    me_disable_simd(false);
 
     if (failures) {
         printf("%s f64 %s FAIL: %d mismatches\n",
@@ -460,8 +460,9 @@ static int run_ternary_f32(const char *name, float (*func)(float, float, float),
     }
 
     const void *var_ptrs[] = {a, b, c};
-    me_disable_simd(!simd_enabled);
-    int eval_rc = me_eval(expr, var_ptrs, 3, out, n);
+    me_eval_params eval_params = ME_EVAL_PARAMS_DEFAULTS;
+    eval_params.disable_simd = !simd_enabled;
+    int eval_rc = me_eval(expr, var_ptrs, 3, out, n, &eval_params);
     if (eval_rc != ME_EVAL_SUCCESS) {
         printf("%s f32 eval failed (err=%d)\n", expr_text, eval_rc);
         me_free(expr);
@@ -489,7 +490,6 @@ static int run_ternary_f32(const char *name, float (*func)(float, float, float),
     free(b);
     free(c);
     free(out);
-    me_disable_simd(false);
 
     if (failures) {
         printf("%s f32 %s FAIL: %d mismatches\n",
@@ -566,8 +566,9 @@ static int run_binary_const_f64(const char *expr_text, double (*func)(double, do
     }
 
     const void *var_ptrs[] = {a};
-    me_disable_simd(!simd_enabled);
-    int eval_rc = me_eval(expr, var_ptrs, 1, out, n);
+    me_eval_params eval_params = ME_EVAL_PARAMS_DEFAULTS;
+    eval_params.disable_simd = !simd_enabled;
+    int eval_rc = me_eval(expr, var_ptrs, 1, out, n, &eval_params);
     if (eval_rc != ME_EVAL_SUCCESS) {
         printf("%s eval failed (err=%d)\n", expr_text, eval_rc);
         me_free(expr);
@@ -587,7 +588,6 @@ static int run_binary_const_f64(const char *expr_text, double (*func)(double, do
     }
 
     me_free(expr);
-    me_disable_simd(false);
     return failures;
 }
 
@@ -604,8 +604,9 @@ static int run_binary_const_f32(const char *expr_text, float (*func)(float, floa
     }
 
     const void *var_ptrs[] = {a};
-    me_disable_simd(!simd_enabled);
-    int eval_rc = me_eval(expr, var_ptrs, 1, out, n);
+    me_eval_params eval_params = ME_EVAL_PARAMS_DEFAULTS;
+    eval_params.disable_simd = !simd_enabled;
+    int eval_rc = me_eval(expr, var_ptrs, 1, out, n, &eval_params);
     if (eval_rc != ME_EVAL_SUCCESS) {
         printf("%s f32 eval failed (err=%d)\n", expr_text, eval_rc);
         me_free(expr);
@@ -625,7 +626,6 @@ static int run_binary_const_f32(const char *expr_text, float (*func)(float, floa
     }
 
     me_free(expr);
-    me_disable_simd(false);
     return failures;
 }
 
@@ -642,8 +642,9 @@ static int run_ternary_const_f64(const char *expr_text, double (*func)(double, d
     }
 
     const void *var_ptrs[] = {a};
-    me_disable_simd(!simd_enabled);
-    int eval_rc = me_eval(expr, var_ptrs, 1, out, n);
+    me_eval_params eval_params = ME_EVAL_PARAMS_DEFAULTS;
+    eval_params.disable_simd = !simd_enabled;
+    int eval_rc = me_eval(expr, var_ptrs, 1, out, n, &eval_params);
     if (eval_rc != ME_EVAL_SUCCESS) {
         printf("%s eval failed (err=%d)\n", expr_text, eval_rc);
         me_free(expr);
@@ -663,7 +664,6 @@ static int run_ternary_const_f64(const char *expr_text, double (*func)(double, d
     }
 
     me_free(expr);
-    me_disable_simd(false);
     return failures;
 }
 
@@ -680,8 +680,9 @@ static int run_ternary_const_f32(const char *expr_text, float (*func)(float, flo
     }
 
     const void *var_ptrs[] = {a};
-    me_disable_simd(!simd_enabled);
-    int eval_rc = me_eval(expr, var_ptrs, 1, out, n);
+    me_eval_params eval_params = ME_EVAL_PARAMS_DEFAULTS;
+    eval_params.disable_simd = !simd_enabled;
+    int eval_rc = me_eval(expr, var_ptrs, 1, out, n, &eval_params);
     if (eval_rc != ME_EVAL_SUCCESS) {
         printf("%s f32 eval failed (err=%d)\n", expr_text, eval_rc);
         me_free(expr);
@@ -701,7 +702,6 @@ static int run_ternary_const_f32(const char *expr_text, float (*func)(float, flo
     }
 
     me_free(expr);
-    me_disable_simd(false);
     return failures;
 }
 
@@ -723,7 +723,7 @@ static int run_nan_edge_cases(void) {
     int err = 0;
 
     if (me_compile("fmax(a, b)", vars64, 2, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-        if (me_eval(expr, ptrs64, 2, out64, 4) == ME_EVAL_SUCCESS) {
+        if (me_eval(expr, ptrs64, 2, out64, 4, NULL) == ME_EVAL_SUCCESS) {
             for (int i = 0; i < 4; i++) {
                 double expected = fmax(a64[i], b64[i]);
                 if ((isnan(expected) && !isnan(out64[i])) ||
@@ -743,7 +743,7 @@ static int run_nan_edge_cases(void) {
 
     expr = NULL;
     if (me_compile("fmin(a, b)", vars64, 2, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-        if (me_eval(expr, ptrs64, 2, out64, 4) == ME_EVAL_SUCCESS) {
+        if (me_eval(expr, ptrs64, 2, out64, 4, NULL) == ME_EVAL_SUCCESS) {
             for (int i = 0; i < 4; i++) {
                 double expected = fmin(a64[i], b64[i]);
                 if ((isnan(expected) && !isnan(out64[i])) ||
@@ -763,7 +763,7 @@ static int run_nan_edge_cases(void) {
 
     expr = NULL;
     if (me_compile("fmax(a, b)", vars32, 2, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
-        if (me_eval(expr, ptrs32, 2, out32, 4) == ME_EVAL_SUCCESS) {
+        if (me_eval(expr, ptrs32, 2, out32, 4, NULL) == ME_EVAL_SUCCESS) {
             for (int i = 0; i < 4; i++) {
                 float expected = fmaxf(a32[i], b32[i]);
                 if ((isnan(expected) && !isnan(out32[i])) ||
@@ -783,7 +783,7 @@ static int run_nan_edge_cases(void) {
 
     expr = NULL;
     if (me_compile("fmin(a, b)", vars32, 2, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
-        if (me_eval(expr, ptrs32, 2, out32, 4) == ME_EVAL_SUCCESS) {
+        if (me_eval(expr, ptrs32, 2, out32, 4, NULL) == ME_EVAL_SUCCESS) {
             for (int i = 0; i < 4; i++) {
                 float expected = fminf(a32[i], b32[i]);
                 if ((isnan(expected) && !isnan(out32[i])) ||
@@ -823,7 +823,7 @@ static int run_additional_edge_cases(void) {
         int err = 0;
 
         if (me_compile("copysign(a, b)", vars64, 2, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs64, 2, out64, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs64, 2, out64, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     double expected = copysign(a64[i], b64[i]);
                     if (memcmp(&expected, &out64[i], sizeof(double)) != 0) {
@@ -842,7 +842,7 @@ static int run_additional_edge_cases(void) {
 
         expr = NULL;
         if (me_compile("copysign(a, b)", vars32, 2, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs32, 2, out32, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs32, 2, out32, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     float expected = copysignf(a32[i], b32[i]);
                     if (memcmp(&expected, &out32[i], sizeof(float)) != 0) {
@@ -876,7 +876,7 @@ static int run_additional_edge_cases(void) {
         int err = 0;
 
         if (me_compile("nextafter(a, b)", vars64, 2, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs64, 2, out64, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs64, 2, out64, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     double expected = nextafter(a64[i], b64[i]);
                     double abs_expected = fabs(expected);
@@ -910,7 +910,7 @@ static int run_additional_edge_cases(void) {
         (void)out32;
 #else
         if (me_compile("nextafter(a, b)", vars32, 2, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs32, 2, out32, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs32, 2, out32, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     float expected = nextafterf(a32[i], b32[i]);
                     float abs_expected = fabsf(expected);
@@ -957,7 +957,7 @@ static int run_additional_edge_cases(void) {
         int err = 0;
 
         if (me_compile("remainder(a, b)", vars64, 2, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs64, 2, out64, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs64, 2, out64, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     double expected = remainder(a64[i], b64[i]);
                     if ((isnan(expected) && !isnan(out64[i])) ||
@@ -977,7 +977,7 @@ static int run_additional_edge_cases(void) {
 
         expr = NULL;
         if (me_compile("remainder(a, b)", vars32, 2, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs32, 2, out32, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs32, 2, out32, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     float expected = remainderf(a32[i], b32[i]);
                     if ((isnan(expected) && !isnan(out32[i])) ||
@@ -1018,7 +1018,7 @@ static int run_more_edge_cases(void) {
         int err = 0;
 
         if (me_compile("fmod(a, b)", vars64, 2, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs64, 2, out64, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs64, 2, out64, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     double expected = fmod(a64[i], b64[i]);
                     if ((isnan(expected) && !isnan(out64[i])) ||
@@ -1038,7 +1038,7 @@ static int run_more_edge_cases(void) {
 
         expr = NULL;
         if (me_compile("fmod(a, b)", vars32, 2, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs32, 2, out32, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs32, 2, out32, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     float expected = fmodf(a32[i], b32[i]);
                     if ((isnan(expected) && !isnan(out32[i])) ||
@@ -1073,7 +1073,7 @@ static int run_more_edge_cases(void) {
         int err = 0;
 
         if (me_compile("hypot(a, b)", vars64, 2, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs64, 2, out64, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs64, 2, out64, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     double expected = hypot(a64[i], b64[i]);
                     if ((isnan(expected) && !isnan(out64[i])) ||
@@ -1093,7 +1093,7 @@ static int run_more_edge_cases(void) {
 
         expr = NULL;
         if (me_compile("hypot(a, b)", vars32, 2, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs32, 2, out32, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs32, 2, out32, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     float expected = hypotf(a32[i], b32[i]);
                     if ((isnan(expected) && !isnan(out32[i])) ||
@@ -1126,7 +1126,7 @@ static int run_more_edge_cases(void) {
         int err = 0;
 
         if (me_compile("rint(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs64, 1, out64, 6) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 6, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 6; i++) {
                     double expected = rint(a64[i]);
                     if (expected != out64[i]) {
@@ -1145,7 +1145,7 @@ static int run_more_edge_cases(void) {
 
         expr = NULL;
         if (me_compile("rint(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs32, 1, out32, 6) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 6, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 6; i++) {
                     float expected = rintf(a32[i]);
                     if (expected != out32[i]) {
@@ -1185,7 +1185,7 @@ static int run_edge_overflow_cases(void) {
         int err = 0;
 
         if (me_compile("fdim(a, b)", vars64, 2, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs64, 2, out64, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs64, 2, out64, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     double expected = fdim(a64[i], b64[i]);
                     if ((isnan(expected) && !isnan(out64[i])) ||
@@ -1205,7 +1205,7 @@ static int run_edge_overflow_cases(void) {
 
         expr = NULL;
         if (me_compile("fdim(a, b)", vars32, 2, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs32, 2, out32, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs32, 2, out32, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     float expected = fdimf(a32[i], b32[i]);
                     if ((isnan(expected) && !isnan(out32[i])) ||
@@ -1238,7 +1238,7 @@ static int run_edge_overflow_cases(void) {
         int err = 0;
 
         if (me_compile("lgamma(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs64, 1, out64, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     double expected = lgamma(a64[i]);
                     if ((isnan(expected) && !isnan(out64[i])) ||
@@ -1258,7 +1258,7 @@ static int run_edge_overflow_cases(void) {
 
         expr = NULL;
         if (me_compile("lgamma(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs32, 1, out32, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     float expected = lgammaf(a32[i]);
                     if ((isnan(expected) && !isnan(out32[i])) ||
@@ -1291,7 +1291,7 @@ static int run_edge_overflow_cases(void) {
         int err = 0;
 
         if (me_compile("exp2(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs64, 1, out64, 3) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 3, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 3; i++) {
                     double expected = exp2(a64[i]);
                     if ((isnan(expected) && !isnan(out64[i])) ||
@@ -1311,7 +1311,7 @@ static int run_edge_overflow_cases(void) {
 
         expr = NULL;
         if (me_compile("exp2(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs32, 1, out32, 3) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 3, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 3; i++) {
                     float expected = exp2f(a32[i]);
                     if ((isnan(expected) && !isnan(out32[i])) ||
@@ -1344,7 +1344,7 @@ static int run_edge_overflow_cases(void) {
         int err = 0;
 
         if (me_compile("exp10(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs64, 1, out64, 3) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 3, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 3; i++) {
                     double expected = exp10_ref(a64[i]);
                     if ((isnan(expected) && !isnan(out64[i])) ||
@@ -1364,7 +1364,7 @@ static int run_edge_overflow_cases(void) {
 
         expr = NULL;
         if (me_compile("exp10(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs32, 1, out32, 3) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 3, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 3; i++) {
                     float expected = exp10_ref_f(a32[i]);
                     if ((isnan(expected) && !isnan(out32[i])) ||
@@ -1403,7 +1403,7 @@ static int run_more_math_edges(void) {
         int err = 0;
 
         if (me_compile("sinpi(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs64, 1, out64, 5) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 5, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 5; i++) {
                     double expected = sinpi_ref(a64[i]);
                     if (!nearly_equal(out64[i], expected, 1e-12)) {
@@ -1422,7 +1422,7 @@ static int run_more_math_edges(void) {
 
         expr = NULL;
         if (me_compile("sinpi(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs32, 1, out32, 5) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 5, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 5; i++) {
                     float expected = sinpi_ref_f(a32[i]);
                     if (!nearly_equal_f(out32[i], expected, 1e-5f)) {
@@ -1454,7 +1454,7 @@ static int run_more_math_edges(void) {
         int err = 0;
 
         if (me_compile("cospi(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs64, 1, out64, 5) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 5, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 5; i++) {
                     double expected = cospi_ref(a64[i]);
                     if (!nearly_equal(out64[i], expected, 1e-12)) {
@@ -1473,7 +1473,7 @@ static int run_more_math_edges(void) {
 
         expr = NULL;
         if (me_compile("cospi(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs32, 1, out32, 5) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 5, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 5; i++) {
                     float expected = cospi_ref_f(a32[i]);
                     if (!nearly_equal_f(out32[i], expected, 1e-5f)) {
@@ -1505,7 +1505,7 @@ static int run_more_math_edges(void) {
         int err = 0;
 
         if (me_compile("erf(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs64, 1, out64, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     double expected = erf(a64[i]);
                     if (!nearly_equal(out64[i], expected, 1e-12)) {
@@ -1524,7 +1524,7 @@ static int run_more_math_edges(void) {
 
         expr = NULL;
         if (me_compile("erf(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs32, 1, out32, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     float expected = erff(a32[i]);
                     if (!nearly_equal_f(out32[i], expected, 1e-5f)) {
@@ -1556,7 +1556,7 @@ static int run_more_math_edges(void) {
         int err = 0;
 
         if (me_compile("erfc(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs64, 1, out64, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     double expected = erfc(a64[i]);
                     if (!nearly_equal(out64[i], expected, 1e-12)) {
@@ -1575,7 +1575,7 @@ static int run_more_math_edges(void) {
 
         expr = NULL;
         if (me_compile("erfc(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs32, 1, out32, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     float expected = erfcf(a32[i]);
                     if (!nearly_equal_f(out32[i], expected, 1e-5f)) {
@@ -1607,7 +1607,7 @@ static int run_more_math_edges(void) {
         int err = 0;
 
         if (me_compile("tgamma(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs64, 1, out64, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     double expected = tgamma(a64[i]);
                     if (!nearly_equal(out64[i], expected, 1e-12)) {
@@ -1626,7 +1626,7 @@ static int run_more_math_edges(void) {
 
         expr = NULL;
         if (me_compile("tgamma(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs32, 1, out32, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     float expected = tgammaf(a32[i]);
                     if (!nearly_equal_f(out32[i], expected, 1e-5f)) {
@@ -1658,7 +1658,7 @@ static int run_more_math_edges(void) {
         int err = 0;
 
         if (me_compile("tgamma(a)", vars64, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs64, 1, out64, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs64, 1, out64, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     double expected = tgamma(a64[i]);
                     if ((isnan(expected) && !isnan(out64[i])) ||
@@ -1679,7 +1679,7 @@ static int run_more_math_edges(void) {
 
         expr = NULL;
         if (me_compile("tgamma(a)", vars32, 1, ME_FLOAT32, &err, &expr) == ME_COMPILE_SUCCESS) {
-            if (me_eval(expr, ptrs32, 1, out32, 4) == ME_EVAL_SUCCESS) {
+            if (me_eval(expr, ptrs32, 1, out32, 4, NULL) == ME_EVAL_SUCCESS) {
                 for (int i = 0; i < 4; i++) {
                     float expected = tgammaf(a32[i]);
                     if ((isnan(expected) && !isnan(out32[i])) ||

@@ -32,7 +32,7 @@ int main() {
     const void *var_ptrs[] = {a, b};
 
     // Evaluate the expression (thread-safe)
-    if (me_eval(expr, var_ptrs, 2, result, n) != ME_EVAL_SUCCESS) { /* handle error */ }
+    if (me_eval(expr, var_ptrs, 2, result, n, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
     // Print results
     printf("Computing sqrt(a*a + b*b):\n");
     for (int i = 0; i < n; i++) {
@@ -79,6 +79,14 @@ a=1.0, b=1.0 -> distance=1.41
    - Number of variables
    - Output buffer pointer
    - Number of items to process
+   - Optional SIMD params (`NULL` for defaults)
+
+   Example override:
+   ```c
+   me_eval_params params = ME_EVAL_PARAMS_DEFAULTS;
+   params.disable_simd = true;
+   if (me_eval(expr, var_ptrs, 2, result, n, &params) != ME_EVAL_SUCCESS) { /* handle error */ }
+   ```
 
 5. **Clean up**: Always call `me_free()` to release the compiled expression.
 

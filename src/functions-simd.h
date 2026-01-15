@@ -11,6 +11,16 @@ Blosc - Blocked Shuffling and Compression Library
 #ifndef MINIEXPR_FUNCTIONS_SIMD_H
 #define MINIEXPR_FUNCTIONS_SIMD_H
 
+#include "miniexpr.h"
+
+typedef struct {
+    int force_scalar;
+    int override_u35;
+} me_simd_params_state;
+
+void me_simd_params_push(const me_eval_params *params, me_simd_params_state *state);
+void me_simd_params_pop(const me_simd_params_state *state);
+
 void me_sincos_eval_start(void);
 
 void vec_sin_dispatch(const double* a, double* out, int n);

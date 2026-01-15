@@ -50,7 +50,7 @@ void* worker_thread(void *arg) {
            data->thread_id, data->start_idx, data->end_idx - 1, chunk_size);
 
     // Thread-safe evaluation
-    if (me_eval(data->expr, vars_chunk, 2, output_chunk, chunk_size) != ME_EVAL_SUCCESS) {
+    if (me_eval(data->expr, vars_chunk, 2, output_chunk, chunk_size, NULL) != ME_EVAL_SUCCESS) {
         printf("Thread %d: me_eval failed\n", data->thread_id);
         return NULL;
     }
@@ -215,7 +215,7 @@ void* worker_dynamic(void *arg) {
         const void *vars_chunk[] = {&queue->input[start]};
         void *output_chunk = &queue->output[start];
 
-        if (me_eval(queue->expr, vars_chunk, 1, output_chunk, size) != ME_EVAL_SUCCESS) {
+        if (me_eval(queue->expr, vars_chunk, 1, output_chunk, size, NULL) != ME_EVAL_SUCCESS) {
             printf("Thread: me_eval failed\n");
             return NULL;
         }
@@ -321,7 +321,7 @@ int main() {
 
         const void *vars_chunk[] = {&a[chunk], &b[chunk]};
 
-        if (me_eval(expr, vars_chunk, 2, &c[chunk], size) != ME_EVAL_SUCCESS) { /* handle error */ }
+        if (me_eval(expr, vars_chunk, 2, &c[chunk], size, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
         #pragma omp critical
         {
             printf("Thread %d processed chunk at %d\n",

@@ -351,7 +351,7 @@ if (me_compile("x + y", vars, 2, ME_FLOAT64, &error, &expr) != ME_COMPILE_SUCCES
 const void *var_ptrs[] = {x_data, y_data};
 
 // 4. Evaluate
-if (me_eval(expr, var_ptrs, 2, result, n) != ME_EVAL_SUCCESS) { /* handle error */ }
+if (me_eval(expr, var_ptrs, 2, result, n, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
 // 5. Cleanup
 me_free(expr);
 ```
@@ -373,7 +373,7 @@ for (int chunk = 0; chunk < num_chunks; chunk++) {
     int size = min(CHUNK_SIZE, TOTAL_SIZE - offset);
 
     const void *var_ptrs[] = {&data[offset]};
-    if (me_eval(expr, var_ptrs, 1, &result[offset], size) != ME_EVAL_SUCCESS) { /* handle error */ }
+    if (me_eval(expr, var_ptrs, 1, &result[offset], size, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
 }
 ```
 

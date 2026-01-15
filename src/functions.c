@@ -6660,7 +6660,8 @@ static me_expr* clone_expr(const me_expr* src) {
  * even on the same expression object. Each call creates a temporary
  * clone of the expression tree to avoid race conditions. */
 int me_eval(const me_expr* expr, const void** vars_chunk,
-            int n_vars, void* output_chunk, int chunk_nitems) {
+            int n_vars, void* output_chunk, int chunk_nitems,
+            const me_eval_params* params) {
     if (!expr) return ME_EVAL_ERR_NULL_EXPR;
 
     // Verify variable count matches
@@ -6712,6 +6713,9 @@ int me_eval(const me_expr* expr, const void** vars_chunk,
     // Clone the expression tree
     me_expr* clone = clone_expr(expr);
     if (!clone) return ME_EVAL_ERR_OOM;
+
+    me_simd_params_state simd_state;
+    me_simd_params_push(params, &simd_state);
 
     const int block_nitems = ME_EVAL_BLOCK_NITEMS;
     int status = ME_EVAL_SUCCESS;
@@ -6797,6 +6801,7 @@ int me_eval(const me_expr* expr, const void** vars_chunk,
 
 cleanup:
     // Free the clone (including any intermediate buffers it allocated)
+    me_simd_params_pop(&simd_state);
     me_free(clone);
     return status;
 }

@@ -33,7 +33,7 @@ me_expr *expr = NULL;
 if (me_compile("x + y", vars, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 // Later, provide data in the same order as vars array
 const void *data[] = {x_array, y_array};  // x first, y second
-if (me_eval(expr, data, 2, output, nitems) != ME_EVAL_SUCCESS) { /* handle error */ }
+if (me_eval(expr, data, 2, output, nitems, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
 ```
 
 For mixed types (use `ME_AUTO` for output dtype to infer from variables):
@@ -64,7 +64,8 @@ Mixing modes (some vars with types, some `ME_AUTO`) will cause compilation to fa
 ### `me_eval()`
 ```c
 int me_eval(const me_expr *expr, const void **vars_chunk,
-            int n_vars, void *output_chunk, int chunk_nitems);
+            int n_vars, void *output_chunk, int chunk_nitems,
+            const me_eval_params *params);
 ```
 Evaluates the compiled expression with new variable and output pointers. This allows processing arrays in chunks without recompilation, and is thread-safe for parallel evaluation across multiple threads.
 
@@ -74,7 +75,15 @@ Evaluates the compiled expression with new variable and output pointers. This al
 - `n_vars`: Number of variables (must match the number used in `me_compile`)
 - `output_chunk`: Pointer to output buffer for this chunk
 - `chunk_nitems`: Number of elements in this chunk
+- `params`: Optional SIMD evaluation settings (`NULL` for defaults)
 - Return value: `ME_EVAL_SUCCESS` (0) on success, or a negative `ME_EVAL_ERR_*` code on failure
+
+Use `ME_EVAL_PARAMS_DEFAULTS` to start from defaults and override only what you need:
+```c
+me_eval_params params = ME_EVAL_PARAMS_DEFAULTS;
+params.disable_simd = true;
+if (me_eval(expr, var_ptrs, 2, result, 3, &params) != ME_EVAL_SUCCESS) { /* handle error */ }
+```
 
 ### `me_free()`
 ```c
@@ -135,7 +144,7 @@ double result[3];
 const void *var_ptrs[] = {x_data, y_data};
 
 // Evaluate (thread-safe)
-if (me_eval(expr, var_ptrs, 2, result, 3) != ME_EVAL_SUCCESS) { /* handle error */ }
+if (me_eval(expr, var_ptrs, 2, result, 3, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
 // Clean up
 me_free(expr);
 ```

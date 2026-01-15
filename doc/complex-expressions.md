@@ -54,7 +54,7 @@ int main() {
     const void *var_ptrs[] = {h, x, angle, g, v};
 
     // Evaluate the expression (thread-safe)
-    if (me_eval(expr, var_ptrs, 5, y, n) != ME_EVAL_SUCCESS) { /* handle error */ }
+    if (me_eval(expr, var_ptrs, 5, y, n, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
     // Print results
     printf("Projectile Trajectory (v=20 m/s, angle=45°):\n");
     printf("Distance (m) | Height (m)\n");

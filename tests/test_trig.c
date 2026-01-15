@@ -60,7 +60,7 @@ static int test_identity(int n) {
     }
 
     const void *var_ptrs[] = {input};
-    int eval_rc = me_eval(expr, var_ptrs, 1, out, n);
+    int eval_rc = me_eval(expr, var_ptrs, 1, out, n, NULL);
     if (eval_rc != ME_EVAL_SUCCESS) {
         printf("Evaluation failed (err=%d)\n", eval_rc);
         me_free(expr);
@@ -119,8 +119,9 @@ static int run_trig_f64(const char *name, double (*func)(double), int n,
     }
 
     const void *var_ptrs[] = {input};
-    me_disable_simd(!simd_enabled);
-    int eval_rc = me_eval(expr, var_ptrs, 1, out, n);
+    me_eval_params eval_params = ME_EVAL_PARAMS_DEFAULTS;
+    eval_params.disable_simd = !simd_enabled;
+    int eval_rc = me_eval(expr, var_ptrs, 1, out, n, &eval_params);
     if (eval_rc != ME_EVAL_SUCCESS) {
         printf("%s eval failed (err=%d)\n", expr_text, eval_rc);
         me_free(expr);
@@ -144,8 +145,6 @@ static int run_trig_f64(const char *name, double (*func)(double), int n,
     me_free(expr);
     free(input);
     free(out);
-    me_disable_simd(false);
-
     if (failures) {
         printf("%s f64 %s FAIL: %d mismatches\n",
                expr_text, simd_enabled ? "SIMD" : "scalar", failures);
@@ -183,8 +182,9 @@ static int run_trig_f32(const char *name, float (*func)(float), int n,
     }
 
     const void *var_ptrs[] = {input};
-    me_disable_simd(!simd_enabled);
-    int eval_rc = me_eval(expr, var_ptrs, 1, out, n);
+    me_eval_params eval_params = ME_EVAL_PARAMS_DEFAULTS;
+    eval_params.disable_simd = !simd_enabled;
+    int eval_rc = me_eval(expr, var_ptrs, 1, out, n, &eval_params);
     if (eval_rc != ME_EVAL_SUCCESS) {
         printf("%s f32 eval failed (err=%d)\n", expr_text, eval_rc);
         me_free(expr);
@@ -208,8 +208,6 @@ static int run_trig_f32(const char *name, float (*func)(float), int n,
     me_free(expr);
     free(input);
     free(out);
-    me_disable_simd(false);
-
     if (failures) {
         printf("%s f32 %s FAIL: %d mismatches\n",
                expr_text, simd_enabled ? "SIMD" : "scalar", failures);
@@ -248,8 +246,9 @@ static int run_atan2_f64(int n, bool simd_enabled) {
     }
 
     const void *var_ptrs[] = {y, x};
-    me_disable_simd(!simd_enabled);
-    int eval_rc = me_eval(expr, var_ptrs, 2, out, n);
+    me_eval_params eval_params = ME_EVAL_PARAMS_DEFAULTS;
+    eval_params.disable_simd = !simd_enabled;
+    int eval_rc = me_eval(expr, var_ptrs, 2, out, n, &eval_params);
     if (eval_rc != ME_EVAL_SUCCESS) {
         printf("atan2(y, x) eval failed (err=%d)\n", eval_rc);
         me_free(expr);
@@ -275,8 +274,6 @@ static int run_atan2_f64(int n, bool simd_enabled) {
     free(x);
     free(y);
     free(out);
-    me_disable_simd(false);
-
     if (failures) {
         printf("atan2(y, x) f64 %s FAIL: %d mismatches\n",
                simd_enabled ? "SIMD" : "scalar", failures);
@@ -315,8 +312,9 @@ static int run_atan2_f32(int n, bool simd_enabled) {
     }
 
     const void *var_ptrs[] = {y, x};
-    me_disable_simd(!simd_enabled);
-    int eval_rc = me_eval(expr, var_ptrs, 2, out, n);
+    me_eval_params eval_params = ME_EVAL_PARAMS_DEFAULTS;
+    eval_params.disable_simd = !simd_enabled;
+    int eval_rc = me_eval(expr, var_ptrs, 2, out, n, &eval_params);
     if (eval_rc != ME_EVAL_SUCCESS) {
         printf("atan2(y, x) f32 eval failed (err=%d)\n", eval_rc);
         me_free(expr);
@@ -342,8 +340,6 @@ static int run_atan2_f32(int n, bool simd_enabled) {
     free(x);
     free(y);
     free(out);
-    me_disable_simd(false);
-
     if (failures) {
         printf("atan2(y, x) f32 %s FAIL: %d mismatches\n",
                simd_enabled ? "SIMD" : "scalar", failures);
