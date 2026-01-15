@@ -3570,6 +3570,10 @@ void vec_sin_cached(const double* a, double* out, int n) {
     if (!a || !out || n <= 0) {
         return;
     }
+    if (me_simd_force_scalar) {
+        vec_sin_scalar(a, out, n);
+        return;
+    }
     me_sincos_cache_f64 *cache = &me_sincos_cache_dp;
     if (cache->cookie != me_eval_cookie || cache->key != a || cache->nitems != n) {
         if (cache->cap < n) {
@@ -3599,6 +3603,10 @@ void vec_sin_cached(const double* a, double* out, int n) {
 
 void vec_cos_cached(const double* a, double* out, int n) {
     if (!a || !out || n <= 0) {
+        return;
+    }
+    if (me_simd_force_scalar) {
+        vec_cos_scalar(a, out, n);
         return;
     }
     me_sincos_cache_f64 *cache = &me_sincos_cache_dp;
@@ -3632,6 +3640,10 @@ void vec_sin_f32_cached(const float* a, float* out, int n) {
     if (!a || !out || n <= 0) {
         return;
     }
+    if (me_simd_force_scalar) {
+        vec_sin_f32_scalar(a, out, n);
+        return;
+    }
     me_sincos_cache_f32 *cache = &me_sincos_cache_sp;
     if (cache->cookie != me_eval_cookie || cache->key != a || cache->nitems != n) {
         if (cache->cap < n) {
@@ -3661,6 +3673,10 @@ void vec_sin_f32_cached(const float* a, float* out, int n) {
 
 void vec_cos_f32_cached(const float* a, float* out, int n) {
     if (!a || !out || n <= 0) {
+        return;
+    }
+    if (me_simd_force_scalar) {
+        vec_cos_f32_scalar(a, out, n);
         return;
     }
     me_sincos_cache_f32 *cache = &me_sincos_cache_sp;
