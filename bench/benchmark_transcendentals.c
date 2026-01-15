@@ -9,7 +9,6 @@
 #include <stdlib.h>
 #include <sys/time.h>
 #include "miniexpr.h"
-#include "functions-simd.h"
 
 static double get_time(void) {
     struct timeval tv;
@@ -133,19 +132,6 @@ static void benchmark_dtype(const dtype_info_t *info, const int *blocks, int nbl
     params_u35.simd_ulp_mode = ME_SIMD_ULP_3_5;
     me_eval_params params_scalar = ME_EVAL_PARAMS_DEFAULTS;
     params_scalar.disable_simd = true;
-
-    me_simd_params_state simd_state;
-    me_simd_params_push(&params_u10, &simd_state);
-    printf("Backend U10: %s (mode=%s)\n",
-           me_simd_backend_label(),
-           me_simd_use_u35_flag() ? "u35" : "u10");
-    me_simd_params_pop(&simd_state);
-
-    me_simd_params_push(&params_u35, &simd_state);
-    printf("Backend U35: %s (mode=%s)\n",
-           me_simd_backend_label(),
-           me_simd_use_u35_flag() ? "u35" : "u10");
-    me_simd_params_pop(&simd_state);
 
     for (int i = 0; i < nblocks; i++) {
         int nitems = blocks[i];

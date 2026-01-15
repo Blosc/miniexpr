@@ -4087,18 +4087,6 @@ static void me_init_simd(void) {
     }
 }
 
-const char *me_simd_backend_label(void) {
-    if (me_simd_force_scalar) {
-        return "scalar-forced";
-    }
-    me_init_simd();
-    return me_simd_backend;
-}
-
-int me_simd_use_u35_flag(void) {
-    return me_simd_use_u35_active();
-}
-
 void vec_sin_dispatch(const double* a, double* out, int n) {
     if (me_simd_force_scalar) {
         vec_sin_scalar(a, out, n);

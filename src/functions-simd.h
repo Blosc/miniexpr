@@ -20,9 +20,6 @@ typedef struct {
 
 void me_simd_params_push(const me_eval_params *params, me_simd_params_state *state);
 void me_simd_params_pop(const me_simd_params_state *state);
-const char *me_simd_backend_label(void);
-int me_simd_use_u35_flag(void);
-
 void me_sincos_eval_start(void);
 
 void vec_sin_dispatch(const double* a, double* out, int n);
