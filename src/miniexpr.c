@@ -1048,12 +1048,22 @@ static int compute_valid_items(const me_expr* expr, int64_t nchunk, int64_t nblo
 
     int64_t valid = 1;
     for (int i = 0; i < nd; i++) {
-        const int64_t start = chunk_idx[i] * chunkshape[i] + block_idx[i] * blockshape[i];
-        if (shape[i] <= start) {
+        const int64_t chunk_start = chunk_idx[i] * chunkshape[i];
+        if (shape[i] <= chunk_start) {
             valid = 0;
             break;
         }
-        const int64_t remain = shape[i] - start;
+        int64_t chunk_len = shape[i] - chunk_start;
+        if (chunk_len > chunkshape[i]) {
+            chunk_len = chunkshape[i];
+        }
+
+        const int64_t block_start = block_idx[i] * blockshape[i];
+        if (block_start >= chunk_len) {
+            valid = 0;
+            break;
+        }
+        const int64_t remain = chunk_len - block_start;
         const int64_t len = (remain < blockshape[i]) ? remain : blockshape[i];
         if (valid > LLONG_MAX / len) {
             return ME_EVAL_ERR_INVALID_ARG;
