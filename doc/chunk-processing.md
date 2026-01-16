@@ -245,6 +245,46 @@ int main() {
 }
 ```
 
+## Multidimensional chunks with padding (b2nd-style)
+
+When working with b2nd arrays (chunk/ block grids with edge padding), use the `_nd` APIs:
+
+- `me_compile_nd(expr, vars, nvars, dtype, ndims, shape, chunkshape, blockshape, ...)`
+- `me_eval_nd(expr, vars_block, nvars, out_block, block_nitems, nchunk, nblock, params)`
+- `me_nd_valid_nitems(expr, nchunk, nblock, &valid)`
+
+Key points:
+1. `shape`, `chunkshape`, `blockshape` are C-order arrays (length = `ndims`).
+2. `nchunk` is the zero-based chunk index over the whole array (C-order); `nblock` is the block index inside that chunk (also C-order).
+3. Callers pass *padded* block buffers (size = `prod(blockshape)` elements). `me_eval_nd` computes only the valid elements and zero-fills the padded tail in the output.
+4. For best performance with padding, `me_eval_nd` packs valid elements, evaluates once, and scatters back; fully valid blocks still take a single fast path.
+
+Minimal 2D example (padding on edges):
+
+```c
+int64_t shape[2]      = {5, 4};
+int32_t chunkshape[2] = {3, 3};
+int32_t blockshape[2] = {2, 2};
+me_variable vars[] = {{"x", ME_FLOAT64}, {"y", ME_FLOAT64}};
+me_expr *expr = NULL;
+int err;
+me_compile_nd("x + y", vars, 2, ME_FLOAT64, 2,
+              shape, chunkshape, blockshape, &err, &expr);
+
+/* Block buffers are always padded to prod(blockshape) */
+double x_block[4], y_block[4], out_block[4];
+const void *ptrs[] = {x_block, y_block};
+int64_t nchunk = 1; /* chunk (1,1) in C-order for this shape */
+int64_t nblock = 0; /* first block inside that chunk */
+
+int64_t valid = 0;
+me_nd_valid_nitems(expr, nchunk, nblock, &valid); /* tells how many outputs are real */
+me_eval_nd(expr, ptrs, 2, out_block, 4, nchunk, nblock, NULL);
+/* out_block[valid..] is zeroed */
+```
+
+See `examples/11_nd_padding_example.c` for a fuller walkthrough, and `bench/benchmark_nd_padding` to gauge performance with different padding patterns.
+
 ## Key Points
 
 1. **Compile once** - Create the expression once, then reuse it for all chunks

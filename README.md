@@ -18,10 +18,15 @@ miniexpr is designed to be embedded directly into larger projects, not distribut
 
 miniexpr provides a simple, focused API with just two main functions:
 
-### `me_compile()`
+### `me_compile()` and `me_compile_nd()`
 ```c
 int me_compile(const char *expression, const me_variable *variables,
                int var_count, me_dtype dtype, int *error, me_expr **out);
+
+int me_compile_nd(const char *expression, const me_variable *variables,
+                  int var_count, me_dtype dtype, int ndims,
+                  const int64_t *shape, const int32_t *chunkshape,
+                  const int32_t *blockshape, int *error, me_expr **out);
 ```
 Compiles an expression for evaluation. Variable and output pointers are provided during evaluation rather than compilation.
 
@@ -61,11 +66,17 @@ The `dtype` parameter has two mutually exclusive modes:
 
 Mixing modes (some vars with types, some `ME_AUTO`) will cause compilation to fail.
 
-### `me_eval()`
+### `me_eval()` and `me_eval_nd()`
 ```c
 int me_eval(const me_expr *expr, const void **vars_chunk,
             int n_vars, void *output_chunk, int chunk_nitems,
             const me_eval_params *params);
+
+int me_eval_nd(const me_expr *expr, const void **vars_block,
+               int n_vars, void *output_block, int block_nitems,
+               int64_t nchunk, int64_t nblock, const me_eval_params *params);
+
+int me_nd_valid_nitems(const me_expr *expr, int64_t nchunk, int64_t nblock, int64_t *valid_nitems);
 ```
 Evaluates the compiled expression with new variable and output pointers. This allows processing arrays in chunks without recompilation, and is thread-safe for parallel evaluation across multiple threads.
 
@@ -84,6 +95,13 @@ me_eval_params params = ME_EVAL_PARAMS_DEFAULTS;
 params.disable_simd = true;
 if (me_eval(expr, var_ptrs, 2, result, 3, &params) != ME_EVAL_SUCCESS) { /* handle error */ }
 ```
+
+**ND/padded blocks (b2nd-style):**
+- `shape`, `chunkshape`, `blockshape` are C-order arrays (`ndims` length).
+- `nchunk` is the chunk index over the full array (C-order); `nblock` is the block index inside that chunk (C-order).
+- Callers pass padded blocks of size `prod(blockshape)`. `me_eval_nd` evaluates only valid elements and zero-fills the padded tail in the output. Use `me_nd_valid_nitems` to know how many outputs are real for a given `(nchunk, nblock)`.
+
+See `examples/11_nd_padding_example.c` and `doc/chunk-processing.md` for a walkthrough, and `bench/benchmark_nd_padding` to gauge performance with different padding patterns.
 
 ### `me_free()`
 ```c
