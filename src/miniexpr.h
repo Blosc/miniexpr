@@ -260,6 +260,9 @@ int me_eval_nd(const me_expr *expr, const void **vars_chunk,
                int n_vars, void *output_chunk, int chunk_nitems,
                int64_t nchunk, int64_t nblock, const me_eval_params *params);
 
+/* Query number of valid (unpadded) elements for a given chunk/block. */
+int me_nd_valid_nitems(const me_expr *expr, int64_t nchunk, int64_t nblock, int64_t *valid_nitems);
+
 /* Prints the expression tree for debugging purposes. */
 void me_print(const me_expr *n);
 

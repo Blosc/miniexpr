@@ -979,13 +979,9 @@ me_dtype me_get_dtype(const me_expr* expr) {
     return expr ? expr->dtype : ME_AUTO;
 }
 
-int me_eval_nd(const me_expr* expr, const void** vars_chunk,
-               int n_vars, void* output_chunk, int chunk_nitems,
-               int64_t nchunk, int64_t nblock, const me_eval_params* params) {
-    if (!expr) {
-        return ME_EVAL_ERR_NULL_EXPR;
-    }
-    if (!output_chunk || chunk_nitems <= 0) {
+static int compute_valid_items(const me_expr* expr, int64_t nchunk, int64_t nblock,
+                               int chunk_nitems, int64_t* valid_items, int64_t* padded_items) {
+    if (!expr || !valid_items || !padded_items) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
 
@@ -995,13 +991,16 @@ int me_eval_nd(const me_expr* expr, const void** vars_chunk,
     }
 
     const int nd = info->ndims;
+    if (nd > 64) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
     const int64_t* shape = info->data;
     const int64_t* chunkshape = shape + nd;
     const int64_t* blockshape = chunkshape + nd;
 
     int64_t total_chunks = 1;
     int64_t total_blocks = 1;
-    int64_t padded_items = 1;
+    int64_t padded = 1;
 
     for (int i = 0; i < nd; i++) {
         if (chunkshape[i] <= 0 || blockshape[i] <= 0) {
@@ -1017,24 +1016,21 @@ int me_eval_nd(const me_expr* expr, const void** vars_chunk,
         }
         total_chunks *= nchunks_d;
         total_blocks *= nblocks_d;
-        if (padded_items > LLONG_MAX / blockshape[i]) {
+        if (padded > LLONG_MAX / blockshape[i]) {
             return ME_EVAL_ERR_INVALID_ARG;
         }
-        padded_items *= blockshape[i];
+        padded *= blockshape[i];
     }
 
     if (nchunk < 0 || nchunk >= total_chunks || nblock < 0 || nblock >= total_blocks) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
-    if ((int64_t)chunk_nitems < padded_items) {
+    if (chunk_nitems > 0 && (int64_t)chunk_nitems < padded) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
 
     int64_t chunk_idx[64];
     int64_t block_idx[64];
-    if (nd > 64) {
-        return ME_EVAL_ERR_INVALID_ARG;
-    }
 
     int64_t tmp = nchunk;
     for (int i = nd - 1; i >= 0; i--) {
@@ -1050,29 +1046,50 @@ int me_eval_nd(const me_expr* expr, const void** vars_chunk,
         tmp /= nblocks_d;
     }
 
-    int64_t valid_items = 1;
+    int64_t valid = 1;
     for (int i = 0; i < nd; i++) {
         const int64_t start = chunk_idx[i] * chunkshape[i] + block_idx[i] * blockshape[i];
         if (shape[i] <= start) {
-            valid_items = 0;
+            valid = 0;
             break;
         }
         const int64_t remain = shape[i] - start;
         const int64_t len = (remain < blockshape[i]) ? remain : blockshape[i];
-        if (valid_items > LLONG_MAX / len) {
+        if (valid > LLONG_MAX / len) {
             return ME_EVAL_ERR_INVALID_ARG;
         }
-        valid_items *= len;
+        valid *= len;
     }
 
-    if (valid_items > (int64_t)chunk_nitems) {
+    if (chunk_nitems > 0 && valid > (int64_t)chunk_nitems) {
         return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    *valid_items = valid;
+    *padded_items = padded;
+    return ME_EVAL_SUCCESS;
+}
+
+int me_eval_nd(const me_expr* expr, const void** vars_chunk,
+               int n_vars, void* output_chunk, int chunk_nitems,
+               int64_t nchunk, int64_t nblock, const me_eval_params* params) {
+    if (!expr) {
+        return ME_EVAL_ERR_NULL_EXPR;
+    }
+    if (!output_chunk || chunk_nitems <= 0) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    int64_t valid_items = 0;
+    int64_t padded_items = 0;
+    int rc = compute_valid_items(expr, nchunk, nblock, chunk_nitems, &valid_items, &padded_items);
+    if (rc != ME_EVAL_SUCCESS) {
+        return rc;
     }
     if (valid_items > INT_MAX) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
 
-    int rc = ME_EVAL_SUCCESS;
     if (valid_items > 0) {
         rc = me_eval(expr, vars_chunk, n_vars, output_chunk, (int)valid_items, params);
         if (rc != ME_EVAL_SUCCESS) {
@@ -1085,12 +1102,21 @@ int me_eval_nd(const me_expr* expr, const void** vars_chunk,
         return ME_EVAL_ERR_INVALID_ARG;
     }
 
-    if (valid_items < (int64_t)chunk_nitems) {
+    if (valid_items < padded_items) {
         unsigned char* out_bytes = (unsigned char*)output_chunk;
         const size_t offset = (size_t)valid_items * item_size;
-        const size_t pad_bytes = ((size_t)chunk_nitems - (size_t)valid_items) * item_size;
+        const size_t pad_bytes = ((size_t)padded_items - (size_t)valid_items) * item_size;
         memset(out_bytes + offset, 0, pad_bytes);
     }
 
+    return ME_EVAL_SUCCESS;
+}
+
+int me_nd_valid_nitems(const me_expr* expr, int64_t nchunk, int64_t nblock, int64_t* valid_nitems) {
+    if (!valid_nitems) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+    int64_t padded = 0;
+    int rc = compute_valid_items(expr, nchunk, nblock, -1, valid_nitems, &padded);
     return rc;
 }
