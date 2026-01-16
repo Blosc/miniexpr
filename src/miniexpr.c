@@ -57,6 +57,17 @@ For log = base 10 log comment the next line. */
 #include <stdbool.h>
 #include <assert.h>
 
+/* ND metadata attached to compiled expressions (used by me_eval_nd). */
+typedef struct {
+    int ndims;
+    /* Layout: shape[ndims], chunkshape[ndims], blockshape[ndims] (all int64_t). */
+    int64_t data[1];
+} me_nd_info;
+
+static int64_t ceil_div64(int64_t a, int64_t b) {
+    return (b == 0) ? 0 : (a + b - 1) / b;
+}
+
 #ifndef NAN
 #define NAN (0.0/0.0)
 #endif
@@ -865,6 +876,57 @@ int me_compile(const char* expression, const me_variable* variables,
     return private_compile(expression, variables, var_count, NULL, 0, dtype, error, out);
 }
 
+int me_compile_nd(const char* expression, const me_variable* variables,
+                  int var_count, me_dtype dtype, int ndims,
+                  const int64_t* shape, const int32_t* chunkshape,
+                  const int32_t* blockshape, int* error, me_expr** out) {
+    if (out) *out = NULL;
+    if (!expression || !out || ndims <= 0 || !shape || !chunkshape || !blockshape) {
+        if (error) *error = -1;
+        return ME_COMPILE_ERR_INVALID_ARG;
+    }
+
+    for (int i = 0; i < ndims; i++) {
+        if (chunkshape[i] <= 0 || blockshape[i] <= 0) {
+            if (error) *error = -1;
+            return ME_COMPILE_ERR_INVALID_ARG;
+        }
+    }
+
+    me_expr* expr = NULL;
+    int rc = me_compile(expression, variables, var_count, dtype, error, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        return rc;
+    }
+
+    const size_t extra_items = (size_t)(3 * ndims - 1);
+    const size_t info_size = sizeof(me_nd_info) + extra_items * sizeof(int64_t);
+    me_nd_info* info = malloc(info_size);
+    if (!info) {
+        me_free(expr);
+        if (error) *error = -1;
+        return ME_COMPILE_ERR_OOM;
+    }
+
+    info->ndims = ndims;
+    int64_t* ptr = info->data;
+    for (int i = 0; i < ndims; i++) {
+        ptr[i] = shape[i];
+    }
+    ptr += ndims;
+    for (int i = 0; i < ndims; i++) {
+        ptr[i] = (int64_t)chunkshape[i];
+    }
+    ptr += ndims;
+    for (int i = 0; i < ndims; i++) {
+        ptr[i] = (int64_t)blockshape[i];
+    }
+
+    expr->bytecode = info;
+    *out = expr;
+    return rc;
+}
+
 static void pn(const me_expr* n, int depth) {
     int i, arity;
     printf("%*s", depth, "");
@@ -915,4 +977,120 @@ void me_print(const me_expr* n) {
 
 me_dtype me_get_dtype(const me_expr* expr) {
     return expr ? expr->dtype : ME_AUTO;
+}
+
+int me_eval_nd(const me_expr* expr, const void** vars_chunk,
+               int n_vars, void* output_chunk, int chunk_nitems,
+               int64_t nchunk, int64_t nblock, const me_eval_params* params) {
+    if (!expr) {
+        return ME_EVAL_ERR_NULL_EXPR;
+    }
+    if (!output_chunk || chunk_nitems <= 0) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    const me_nd_info* info = (const me_nd_info*)expr->bytecode;
+    if (!info || info->ndims <= 0) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    const int nd = info->ndims;
+    const int64_t* shape = info->data;
+    const int64_t* chunkshape = shape + nd;
+    const int64_t* blockshape = chunkshape + nd;
+
+    int64_t total_chunks = 1;
+    int64_t total_blocks = 1;
+    int64_t padded_items = 1;
+
+    for (int i = 0; i < nd; i++) {
+        if (chunkshape[i] <= 0 || blockshape[i] <= 0) {
+            return ME_EVAL_ERR_INVALID_ARG;
+        }
+        const int64_t nchunks_d = ceil_div64(shape[i], chunkshape[i]);
+        const int64_t nblocks_d = ceil_div64(chunkshape[i], blockshape[i]);
+        if (nchunks_d <= 0 || nblocks_d <= 0) {
+            return ME_EVAL_ERR_INVALID_ARG;
+        }
+        if (total_chunks > LLONG_MAX / nchunks_d || total_blocks > LLONG_MAX / nblocks_d) {
+            return ME_EVAL_ERR_INVALID_ARG;
+        }
+        total_chunks *= nchunks_d;
+        total_blocks *= nblocks_d;
+        if (padded_items > LLONG_MAX / blockshape[i]) {
+            return ME_EVAL_ERR_INVALID_ARG;
+        }
+        padded_items *= blockshape[i];
+    }
+
+    if (nchunk < 0 || nchunk >= total_chunks || nblock < 0 || nblock >= total_blocks) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+    if ((int64_t)chunk_nitems < padded_items) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    int64_t chunk_idx[64];
+    int64_t block_idx[64];
+    if (nd > 64) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    int64_t tmp = nchunk;
+    for (int i = nd - 1; i >= 0; i--) {
+        const int64_t nchunks_d = ceil_div64(shape[i], chunkshape[i]);
+        chunk_idx[i] = (nchunks_d == 0) ? 0 : (tmp % nchunks_d);
+        tmp /= nchunks_d;
+    }
+
+    tmp = nblock;
+    for (int i = nd - 1; i >= 0; i--) {
+        const int64_t nblocks_d = ceil_div64(chunkshape[i], blockshape[i]);
+        block_idx[i] = (nblocks_d == 0) ? 0 : (tmp % nblocks_d);
+        tmp /= nblocks_d;
+    }
+
+    int64_t valid_items = 1;
+    for (int i = 0; i < nd; i++) {
+        const int64_t start = chunk_idx[i] * chunkshape[i] + block_idx[i] * blockshape[i];
+        if (shape[i] <= start) {
+            valid_items = 0;
+            break;
+        }
+        const int64_t remain = shape[i] - start;
+        const int64_t len = (remain < blockshape[i]) ? remain : blockshape[i];
+        if (valid_items > LLONG_MAX / len) {
+            return ME_EVAL_ERR_INVALID_ARG;
+        }
+        valid_items *= len;
+    }
+
+    if (valid_items > (int64_t)chunk_nitems) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+    if (valid_items > INT_MAX) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    int rc = ME_EVAL_SUCCESS;
+    if (valid_items > 0) {
+        rc = me_eval(expr, vars_chunk, n_vars, output_chunk, (int)valid_items, params);
+        if (rc != ME_EVAL_SUCCESS) {
+            return rc;
+        }
+    }
+
+    const size_t item_size = dtype_size(me_get_dtype(expr));
+    if (item_size == 0) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    if (valid_items < (int64_t)chunk_nitems) {
+        unsigned char* out_bytes = (unsigned char*)output_chunk;
+        const size_t offset = (size_t)valid_items * item_size;
+        const size_t pad_bytes = ((size_t)chunk_nitems - (size_t)valid_items) * item_size;
+        memset(out_bytes + offset, 0, pad_bytes);
+    }
+
+    return rc;
 }

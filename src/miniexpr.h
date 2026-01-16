@@ -38,6 +38,7 @@
 #define MINIEXPR_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -164,6 +165,23 @@ typedef struct me_variable {
 int me_compile(const char *expression, const me_variable *variables,
                int var_count, me_dtype dtype, int *error, me_expr **out);
 
+/* Compile expression with multidimensional metadata (b2nd-aware).
+ * Additional parameters describe the logical array shape, chunkshape and
+ * blockshape (all C-order). Padding is implied by these shapes.
+ *
+ * Parameters:
+ *   ndims: Number of dimensions.
+ *   shape: Logical array shape (length ndims).
+ *   chunkshape: Chunk shape (length ndims).
+ *   blockshape: Block shape inside a chunk (length ndims).
+ *
+ * Returns the same status codes as me_compile().
+ */
+int me_compile_nd(const char *expression, const me_variable *variables,
+                  int var_count, me_dtype dtype, int ndims,
+                  const int64_t *shape, const int32_t *chunkshape,
+                  const int32_t *blockshape, int *error, me_expr **out);
+
 /* Status codes for me_compile(). */
 typedef enum {
     ME_COMPILE_SUCCESS = 0,
@@ -184,7 +202,8 @@ typedef enum {
     ME_EVAL_ERR_OOM = -1,
     ME_EVAL_ERR_NULL_EXPR = -2,
     ME_EVAL_ERR_TOO_MANY_VARS = -3,
-    ME_EVAL_ERR_VAR_MISMATCH = -4
+    ME_EVAL_ERR_VAR_MISMATCH = -4,
+    ME_EVAL_ERR_INVALID_ARG = -5
 } me_eval_status;
 
 /* SIMD precision options for transcendentals. */
@@ -231,6 +250,15 @@ typedef struct {
 int me_eval(const me_expr *expr, const void **vars_chunk,
             int n_vars, void *output_chunk, int chunk_nitems,
             const me_eval_params *params);
+
+/* Evaluate a padded b2nd block.
+ * Only the valid (unpadded) elements are computed; padded output is zeroed.
+ * nchunk and nblock are C-order indices for the chunk within the array
+ * and the block within that chunk.
+ */
+int me_eval_nd(const me_expr *expr, const void **vars_chunk,
+               int n_vars, void *output_chunk, int chunk_nitems,
+               int64_t nchunk, int64_t nblock, const me_eval_params *params);
 
 /* Prints the expression tree for debugging purposes. */
 void me_print(const me_expr *n);
