@@ -1089,7 +1089,7 @@ static int collect_var_sizes(const me_expr* expr, size_t* var_sizes, int n_vars)
         var_sizes[i] = 0;
     }
 
-    /* Assume synthetic addresses map variable index directly. */
+    /* DFS to collect sizes from variable nodes (synthetic address index). */
     const me_expr* stack[256];
     int top = 0;
     stack[top++] = expr;

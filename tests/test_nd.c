@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "../src/miniexpr.h"
 #include "../src/minctest.h"
 
@@ -165,6 +166,110 @@ cleanup:
     return status;
 }
 
+static int test_nd_reductions(void) {
+    int status = 0;
+    int err = 0;
+    me_expr* expr = NULL;
+    int64_t shape[1] = {3};
+    int32_t chunkshape[1] = {3};
+    int32_t blockshape[1] = {2};
+    const int padded = 2;
+
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    if (me_compile_nd("sum(x)", vars, 1, ME_FLOAT64, 1,
+                      shape, chunkshape, blockshape, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("FAILED me_compile_nd reductions: %d\n", err);
+        return 1;
+    }
+
+    double out_buf[2] = {-1.0, -1.0};
+    double block0[2] = {1.0, 2.0};
+    const void* ptrs0[] = {block0};
+    int64_t valid = 0;
+    me_nd_valid_nitems(expr, 0, 0, &valid);
+    if (valid != 2) {
+        printf("FAILED reductions valid block0 (got=%lld)\n", (long long)valid);
+        status = 1;
+        goto cleanup;
+    }
+    if (me_eval_nd(expr, ptrs0, 1, out_buf, padded, 0, 0, NULL) != ME_EVAL_SUCCESS || out_buf[0] != 3.0) {
+        printf("FAILED reductions sum block0 (out=%g)\n", out_buf[0]);
+        status = 1;
+        goto cleanup;
+    }
+
+    double block1[2] = {3.0, 0.0}; /* last is padding */
+    const void* ptrs1[] = {block1};
+    out_buf[0] = -1.0;
+    me_nd_valid_nitems(expr, 0, 1, &valid);
+    if (valid != 1) {
+        printf("FAILED reductions valid block1 (got=%lld)\n", (long long)valid);
+        status = 1;
+        goto cleanup;
+    }
+    if (me_eval_nd(expr, ptrs1, 1, out_buf, padded, 0, 1, NULL) != ME_EVAL_SUCCESS || out_buf[0] != 3.0) {
+        printf("FAILED reductions sum block1 (out=%g)\n", out_buf[0]);
+        status = 1;
+        goto cleanup;
+    }
+
+cleanup:
+    me_free(expr);
+    return status;
+}
+
+static int test_nd_reductions_prod(void) {
+    int status = 0;
+    int err = 0;
+    me_expr* expr = NULL;
+    int64_t shape[1] = {4};
+    int32_t chunkshape[1] = {3};
+    int32_t blockshape[1] = {2};
+    const int padded = 2;
+
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    if (me_compile_nd("prod(x)", vars, 1, ME_FLOAT64, 1,
+                      shape, chunkshape, blockshape, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("FAILED me_compile_nd prod: %d\n", err);
+        return 1;
+    }
+
+    double out_buf[2] = {-1.0, -1.0};
+    double block0[2] = {2.0, 3.0}; /* valid=2 */
+    const void* ptrs0[] = {block0};
+    int64_t valid = 0;
+    me_nd_valid_nitems(expr, 0, 0, &valid);
+    if (valid != 2) {
+        printf("FAILED prod valid block0 (got=%lld)\n", (long long)valid);
+        status = 1;
+        goto cleanup;
+    }
+    if (me_eval_nd(expr, ptrs0, 1, out_buf, padded, 0, 0, NULL) != ME_EVAL_SUCCESS || out_buf[0] != 6.0) {
+        printf("FAILED prod block0 (out=%g)\n", out_buf[0]);
+        status = 1;
+        goto cleanup;
+    }
+
+    double block1[2] = {4.0, 0.0}; /* valid=1 */
+    const void* ptrs1[] = {block1};
+    out_buf[0] = -1.0;
+    me_nd_valid_nitems(expr, 0, 1, &valid);
+    if (valid != 1) {
+        printf("FAILED prod valid block1 (got=%lld)\n", (long long)valid);
+        status = 1;
+        goto cleanup;
+    }
+    if (me_eval_nd(expr, ptrs1, 1, out_buf, padded, 0, 1, NULL) != ME_EVAL_SUCCESS || out_buf[0] != 4.0) {
+        printf("FAILED prod block1 (out=%g)\n", out_buf[0]);
+        status = 1;
+        goto cleanup;
+    }
+
+cleanup:
+    me_free(expr);
+    return status;
+}
+
 static int test_big_stress(void) {
     int status = 0;
     int err = 0;
@@ -276,6 +381,210 @@ cleanup:
     return status;
 }
 
+static int test_nd_mixed_reductions(void) {
+    int status = 0;
+    int err = 0;
+    me_expr* expr = NULL;
+    const int64_t shape[3] = {20000, 20000, 20000};
+    const int32_t chunkshape[3] = {250, 250, 250};
+    const int32_t blockshape[3] = {32, 64, 64};
+
+    const int padded_items = blockshape[0] * blockshape[1] * blockshape[2];
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+
+    if (me_compile_nd("prod(sin(x)**2 + cos(x)**2) + sum(sin(x)**2 + cos(x)**2)",
+                      vars, 1, ME_FLOAT64, 3,
+                      shape, chunkshape, blockshape, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("FAILED me_compile_nd mixed reductions: %d\n", err);
+        return 1;
+    }
+
+    double* in = malloc((size_t)padded_items * sizeof(double));
+    double* out_buf = malloc((size_t)padded_items * sizeof(double));
+    if (!in || !out_buf) {
+        printf("FAILED alloc for mixed reductions\n");
+        me_free(expr);
+        free(in);
+        free(out_buf);
+        return 1;
+    }
+
+    /* Use monotonically increasing x in [0,1]; sin^2+cos^2 stays 1.
+       Explicitly zero padded tail to mimic b2nd padding. */
+    for (int i = 0; i < padded_items; i++) {
+        in[i] = (double)i / (double)padded_items;
+        out_buf[i] = -1.0;
+    }
+    /* Zero padded rows/cols in the block buffer. */
+    for (int z = blockshape[2]; z < blockshape[2]; z++) (void)z; /* placeholder to keep structure */
+    /* In 3D block, padding only on highest offsets; simpler: zero any coordinates that fall outside chunkshape tail. */
+    int64_t nblocks_dim0 = (chunkshape[0] + blockshape[0] - 1) / blockshape[0];
+    int64_t nblocks_dim1 = (chunkshape[1] + blockshape[1] - 1) / blockshape[1];
+    int64_t nblocks_dim2 = (chunkshape[2] + blockshape[2] - 1) / blockshape[2];
+    /* For interior block (nblock=0), no padding; for edge block we zero tail after computing valid dims. */
+    int64_t valid0 = (chunkshape[0] < blockshape[0]) ? chunkshape[0] : blockshape[0];
+    int64_t valid1 = (chunkshape[1] < blockshape[1]) ? chunkshape[1] : blockshape[1];
+    int64_t valid2 = (chunkshape[2] < blockshape[2]) ? chunkshape[2] : blockshape[2];
+    for (int z = valid2; z < blockshape[2]; z++) {
+        for (int y = 0; y < blockshape[1]; y++) {
+            for (int x = 0; x < blockshape[0]; x++) {
+                int idx = (x * blockshape[1] + y) * blockshape[2] + z;
+                in[idx] = 0.0;
+            }
+        }
+    }
+    for (int y = valid1; y < blockshape[1]; y++) {
+        for (int x = 0; x < blockshape[0]; x++) {
+            for (int z = 0; z < blockshape[2]; z++) {
+                int idx = (x * blockshape[1] + y) * blockshape[2] + z;
+                in[idx] = 0.0;
+            }
+        }
+    }
+    for (int x = valid0; x < blockshape[0]; x++) {
+        for (int y = 0; y < blockshape[1]; y++) {
+            for (int z = 0; z < blockshape[2]; z++) {
+                int idx = (x * blockshape[1] + y) * blockshape[2] + z;
+                in[idx] = 0.0;
+            }
+        }
+    }
+    const void* ptrs[] = {in};
+
+    /* Interior full block (no padding) */
+    int64_t nchunk = 0;
+    int64_t nblock = 0;
+    const double expected_full = 1.0 + (double)padded_items;
+    int rc = me_eval_nd(expr, ptrs, 1, out_buf, padded_items, nchunk, nblock, NULL);
+    if (rc != ME_EVAL_SUCCESS || out_buf[0] != expected_full) {
+        printf("FAILED mixed reductions full block (rc=%d, out=%g, exp=%g)\n", rc, out_buf[0], expected_full);
+        status = 1;
+        goto cleanup;
+    }
+
+    /* Edge chunk/block to exercise padding */
+    int64_t nchunks_dim0 = (shape[0] + chunkshape[0] - 1) / chunkshape[0];
+    int64_t nchunks_dim1 = (shape[1] + chunkshape[1] - 1) / chunkshape[1];
+    int64_t nchunks_dim2 = (shape[2] + chunkshape[2] - 1) / chunkshape[2];
+    nchunk = (nchunks_dim0 - 1) * nchunks_dim1 * nchunks_dim2 + (nchunks_dim1 - 1) * nchunks_dim2 + (nchunks_dim2 - 1);
+    nblock = ((chunkshape[0] + blockshape[0] - 1) / blockshape[0] - 1) *
+             ((chunkshape[1] + blockshape[1] - 1) / blockshape[1]) *
+             ((chunkshape[2] + blockshape[2] - 1) / blockshape[2]) +
+             ((chunkshape[1] + blockshape[1] - 1) / blockshape[1] - 1) *
+             ((chunkshape[2] + blockshape[2] - 1) / blockshape[2]) +
+             ((chunkshape[2] + blockshape[2] - 1) / blockshape[2] - 1);
+
+    int64_t valid = 0;
+    me_nd_valid_nitems(expr, nchunk, nblock, &valid);
+    rc = me_eval_nd(expr, ptrs, 1, out_buf, padded_items, nchunk, nblock, NULL);
+    if (rc != ME_EVAL_SUCCESS || out_buf[0] != 1.0 + (double)valid) {
+        printf("FAILED mixed reductions edge block (rc=%d, valid=%lld, out=%g exp=%g)\n",
+               rc, (long long)valid, out_buf[0], 1.0 + (double)valid);
+        status = 1;
+    }
+
+cleanup:
+    free(in);
+    free(out_buf);
+    me_free(expr);
+    return status;
+}
+
+static int test_nd_all_padded_reductions(void) {
+    int status = 0;
+    int err = 0;
+    me_expr* expr = NULL;
+    const int64_t shape[3] = {310, 305, 299};
+    const int32_t chunkshape[3] = {200, 180, 170}; /* padding in chunks */
+    const int32_t blockshape[3] = {90, 90, 90};    /* padding in blocks */
+
+    const int64_t padded_items = (int64_t)blockshape[0] * blockshape[1] * blockshape[2]; /* 729000 */
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+
+    if (me_compile_nd("prod(x) + sum(x) + min(x)", vars, 1, ME_FLOAT64, 3,
+                      shape, chunkshape, blockshape, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("FAILED me_compile_nd all-padded reductions: %d\n", err);
+        return 1;
+    }
+
+    double* in = malloc((size_t)padded_items * sizeof(double));
+    double* out_buf = malloc((size_t)padded_items * sizeof(double));
+    if (!in || !out_buf) {
+        printf("FAILED alloc in all-padded reductions\n");
+        free(in); free(out_buf); me_free(expr);
+        return 1;
+    }
+
+    for (int64_t i = 0; i < padded_items; i++) {
+        in[i] = 1.0;      /* valid values all 1 -> prod=1, sum=N, min=1 */
+        out_buf[i] = -1.0;
+    }
+    const void* ptrs[] = {in};
+
+    /* Walk every chunk and block to ensure padding handling everywhere. */
+    const int64_t nchunks_dim0 = (shape[0] + chunkshape[0] - 1) / chunkshape[0];
+    const int64_t nchunks_dim1 = (shape[1] + chunkshape[1] - 1) / chunkshape[1];
+    const int64_t nchunks_dim2 = (shape[2] + chunkshape[2] - 1) / chunkshape[2];
+    const int64_t nblocks_dim0 = (chunkshape[0] + blockshape[0] - 1) / blockshape[0];
+    const int64_t nblocks_dim1 = (chunkshape[1] + blockshape[1] - 1) / blockshape[1];
+    const int64_t nblocks_dim2 = (chunkshape[2] + blockshape[2] - 1) / blockshape[2];
+
+    for (int64_t c0 = 0; c0 < nchunks_dim0; c0++) {
+        for (int64_t c1 = 0; c1 < nchunks_dim1; c1++) {
+            for (int64_t c2 = 0; c2 < nchunks_dim2; c2++) {
+                const int64_t nchunk = c0 * nchunks_dim1 * nchunks_dim2 +
+                                       c1 * nchunks_dim2 +
+                                       c2;
+                for (int64_t b0 = 0; b0 < nblocks_dim0; b0++) {
+                    for (int64_t b1 = 0; b1 < nblocks_dim1; b1++) {
+                        for (int64_t b2 = 0; b2 < nblocks_dim2; b2++) {
+                            const int64_t nblock = b0 * nblocks_dim1 * nblocks_dim2 +
+                                                   b1 * nblocks_dim2 +
+                                                   b2;
+                            int64_t valid = 0;
+                            me_nd_valid_nitems(expr, nchunk, nblock, &valid);
+                            memset(out_buf, 0, (size_t)padded_items * sizeof(double));
+                            int rc = me_eval_nd(expr, ptrs, 1, out_buf, padded_items, nchunk, nblock, NULL);
+                            const double expected = 1.0 /* prod */ + (double)valid /* sum */ + 1.0 /* min */;
+                            if (rc != ME_EVAL_SUCCESS) {
+                                printf("FAILED all-padded reductions rc=%d (chunk=%lld block=%lld)\n",
+                                       rc, (long long)nchunk, (long long)nblock);
+                                status = 1;
+                                goto cleanup;
+                            }
+                            int64_t nz = 0;
+                            for (int64_t i = 0; i < padded_items; i++) {
+                                double v = out_buf[i];
+                                if (v != 0.0) {
+                                    nz++;
+                                    if (v != expected) {
+                                        printf("FAILED all-padded reductions val=%g exp=%g chunk=%lld block=%lld idx=%lld\n",
+                                               v, expected, (long long)nchunk, (long long)nblock, (long long)i);
+                                        status = 1;
+                                        goto cleanup;
+                                    }
+                                }
+                            }
+                            if (nz != valid) {
+                                printf("FAILED all-padded reductions nz=%lld valid=%lld chunk=%lld block=%lld\n",
+                                       (long long)nz, (long long)valid, (long long)nchunk, (long long)nblock);
+                                status = 1;
+                                goto cleanup;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+cleanup:
+    free(in);
+    free(out_buf);
+    me_free(expr);
+    return status;
+}
+
 int main(void) {
     int failed = 0;
 
@@ -296,10 +605,30 @@ int main(void) {
     failed |= t3;
     printf("Result: %s\n\n", t3 ? "FAIL" : "PASS");
 
-    printf("Test 4: Large 3D stress (no real allocation beyond block)\n");
-    int t4 = test_big_stress();
+    printf("Test 4: ND reductions with padding\n");
+    int t4 = test_nd_reductions();
     failed |= t4;
     printf("Result: %s\n\n", t4 ? "FAIL" : "PASS");
+
+    printf("Test 5: ND reductions (prod) with padding\n");
+    int t5 = test_nd_reductions_prod();
+    failed |= t5;
+    printf("Result: %s\n\n", t5 ? "FAIL" : "PASS");
+
+    printf("Test 6: Large 3D stress (no real allocation beyond block)\n");
+    int t6 = test_big_stress();
+    failed |= t6;
+    printf("Result: %s\n\n", t6 ? "FAIL" : "PASS");
+
+    printf("Test 7: Mixed reductions (sum + prod) with padding\n");
+    int t7 = test_nd_mixed_reductions();
+    failed |= t7;
+    printf("Result: %s\n\n", t7 ? "FAIL" : "PASS");
+
+    printf("Test 8: All-padded reductions (prod+sum+min) on edge chunk/block\n");
+    int t8 = test_nd_all_padded_reductions();
+    failed |= t8;
+    printf("Result: %s\n\n", t8 ? "FAIL" : "PASS");
 
     printf("=====================\n");
     printf("Summary: %s\n", failed ? "FAIL" : "PASS");

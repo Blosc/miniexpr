@@ -48,6 +48,7 @@ For log = base 10 log comment the next line. */
 
 #include "functions.h"
 #include "functions-simd.h"
+#include <stdbool.h>
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
@@ -437,6 +438,18 @@ static bool is_reduction_function(const void* func) {
 bool is_reduction_node(const me_expr* n) {
     return n && IS_FUNCTION(n->type) && ARITY(n->type) == 1 &&
         is_reduction_function(n->function);
+}
+
+static bool contains_reduction(const me_expr* n) {
+    if (!n) return false;
+    if (is_reduction_node(n)) return true;
+    if (IS_FUNCTION(n->type) || IS_CLOSURE(n->type)) {
+        const int arity = ARITY(n->type);
+        for (int i = 0; i < arity; i++) {
+            if (contains_reduction((const me_expr*)n->parameters[i])) return true;
+        }
+    }
+    return false;
 }
 
 static void private_eval(const me_expr* n);
@@ -6720,7 +6733,7 @@ int me_eval(const me_expr* expr, const void** vars_chunk,
     const int block_nitems = ME_EVAL_BLOCK_NITEMS;
     int status = ME_EVAL_SUCCESS;
 
-    if (!ME_EVAL_ENABLE_BLOCKING || chunk_nitems <= block_nitems) {
+    if (!ME_EVAL_ENABLE_BLOCKING || chunk_nitems <= block_nitems || contains_reduction(clone)) {
         // Update clone's variable bindings
         update_vars_by_pointer(clone, original_var_pointers, vars_chunk, n_vars);
 
