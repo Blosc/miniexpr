@@ -39,7 +39,7 @@ void* worker_thread(void *arg) {
     int chunk_size = data->end_idx - data->start_idx;
 
     // Prepare pointers to this thread's chunk
-    const void *vars_chunk[] = {
+    const void *vars_block[] = {
         &data->x[data->start_idx],
         &data->y[data->start_idx]
     };
@@ -50,7 +50,7 @@ void* worker_thread(void *arg) {
            data->thread_id, data->start_idx, data->end_idx - 1, chunk_size);
 
     // Thread-safe evaluation
-    if (me_eval(data->expr, vars_chunk, 2, output_chunk, chunk_size, NULL) != ME_EVAL_SUCCESS) {
+    if (me_eval(data->expr, vars_block, 2, output_chunk, chunk_size, NULL) != ME_EVAL_SUCCESS) {
         printf("Thread %d: me_eval failed\n", data->thread_id);
         return NULL;
     }
@@ -212,10 +212,10 @@ void* worker_dynamic(void *arg) {
         }
 
         // Process this chunk
-        const void *vars_chunk[] = {&queue->input[start]};
+        const void *vars_block[] = {&queue->input[start]};
         void *output_chunk = &queue->output[start];
 
-        if (me_eval(queue->expr, vars_chunk, 1, output_chunk, size, NULL) != ME_EVAL_SUCCESS) {
+        if (me_eval(queue->expr, vars_block, 1, output_chunk, size, NULL) != ME_EVAL_SUCCESS) {
             printf("Thread: me_eval failed\n");
             return NULL;
         }
@@ -319,9 +319,9 @@ int main() {
         int size = (chunk + CHUNK_SIZE > TOTAL_SIZE) ?
                    (TOTAL_SIZE - chunk) : CHUNK_SIZE;
 
-        const void *vars_chunk[] = {&a[chunk], &b[chunk]};
+        const void *vars_block[] = {&a[chunk], &b[chunk]};
 
-        if (me_eval(expr, vars_chunk, 2, &c[chunk], size, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
+        if (me_eval(expr, vars_block, 2, &c[chunk], size, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
         #pragma omp critical
         {
             printf("Thread %d processed chunk at %d\n",

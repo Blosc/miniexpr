@@ -6672,8 +6672,8 @@ static me_expr* clone_expr(const me_expr* src) {
  * This function is safe to call from multiple threads simultaneously,
  * even on the same expression object. Each call creates a temporary
  * clone of the expression tree to avoid race conditions. */
-int me_eval(const me_expr* expr, const void** vars_chunk,
-            int n_vars, void* output_chunk, int chunk_nitems,
+int me_eval(const me_expr* expr, const void** vars_block,
+            int n_vars, void* output_block, int block_nitems,
             const me_eval_params* params) {
     if (!expr) return ME_EVAL_ERR_NULL_EXPR;
 
@@ -6730,19 +6730,19 @@ int me_eval(const me_expr* expr, const void** vars_chunk,
     me_simd_params_state simd_state;
     me_simd_params_push(params, &simd_state);
 
-    const int block_nitems = ME_EVAL_BLOCK_NITEMS;
+    const int eval_block_nitems = ME_EVAL_BLOCK_NITEMS;
     int status = ME_EVAL_SUCCESS;
 
-    if (!ME_EVAL_ENABLE_BLOCKING || chunk_nitems <= block_nitems || contains_reduction(clone)) {
+    if (!ME_EVAL_ENABLE_BLOCKING || block_nitems <= eval_block_nitems || contains_reduction(clone)) {
         // Update clone's variable bindings
-        update_vars_by_pointer(clone, original_var_pointers, vars_chunk, n_vars);
+        update_vars_by_pointer(clone, original_var_pointers, vars_block, n_vars);
 
         // Update clone's nitems throughout the tree
         int update_idx = 0;
-        update_variable_bindings(clone, NULL, &update_idx, chunk_nitems);
+        update_variable_bindings(clone, NULL, &update_idx, block_nitems);
 
         // Set output pointer
-        clone->output = output_chunk;
+        clone->output = output_block;
 
         // Evaluate the clone
         me_sincos_eval_start();
@@ -6750,12 +6750,12 @@ int me_eval(const me_expr* expr, const void** vars_chunk,
     }
     else if (is_reduction_node(clone)) {
         // Reductions operate on the full chunk; avoid block processing.
-        update_vars_by_pointer(clone, original_var_pointers, vars_chunk, n_vars);
+        update_vars_by_pointer(clone, original_var_pointers, vars_block, n_vars);
 
         int update_idx = 0;
-        update_variable_bindings(clone, NULL, &update_idx, chunk_nitems);
+        update_variable_bindings(clone, NULL, &update_idx, block_nitems);
 
-        clone->output = output_chunk;
+        clone->output = output_block;
         me_sincos_eval_start();
         private_eval(clone);
     }
@@ -6784,15 +6784,15 @@ int me_eval(const me_expr* expr, const void** vars_chunk,
 #elif defined(__GNUC__) && !defined(__clang__)
 #pragma GCC unroll 4
 #endif
-        for (int offset = 0; offset < chunk_nitems; offset += block_nitems) {
-            int current = block_nitems;
-            if (offset + current > chunk_nitems) {
-                current = chunk_nitems - offset;
+        for (int offset = 0; offset < block_nitems; offset += eval_block_nitems) {
+            int current = eval_block_nitems;
+            if (offset + current > block_nitems) {
+                current = block_nitems - offset;
             }
 
             const void* block_vars[ME_MAX_VARS];
             for (int i = 0; i < n_vars; i++) {
-                const unsigned char* base = (const unsigned char*)vars_chunk[i];
+                const unsigned char* base = (const unsigned char*)vars_block[i];
                 block_vars[i] = base + (size_t)offset * var_sizes[i];
             }
 
@@ -6803,7 +6803,7 @@ int me_eval(const me_expr* expr, const void** vars_chunk,
             int update_idx = 0;
             update_variable_bindings(clone, NULL, &update_idx, current);
 
-            clone->output = (unsigned char*)output_chunk + (size_t)offset * output_item_size;
+            clone->output = (unsigned char*)output_block + (size_t)offset * output_item_size;
             me_sincos_eval_start();
             private_eval(clone);
         }

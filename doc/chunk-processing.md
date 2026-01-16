@@ -61,11 +61,11 @@ int main() {
         }
 
         // Pointers to current chunk
-        const void *vars_chunk[] = {&celsius[offset]};
+        const void *vars_block[] = {&celsius[offset]};
         void *output_chunk = &fahrenheit[offset];
 
         // Evaluate this chunk
-        if (me_eval(expr, vars_chunk, 1, output_chunk, current_chunk_size, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
+        if (me_eval(expr, vars_block, 1, output_chunk, current_chunk_size, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
         if ((chunk + 1) % 10 == 0) {
             printf("Processed chunk %d/%d (%.1f%%)\n",
                    chunk + 1, num_chunks,
@@ -158,8 +158,8 @@ int main() {
         fread(y_chunk, sizeof(double), elements_read, input);
 
         // Process this chunk
-        const void *vars_chunk[] = {x_chunk, y_chunk};
-        if (me_eval(expr, vars_chunk, 2, result_chunk, elements_read, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
+        const void *vars_block[] = {x_chunk, y_chunk};
+        if (me_eval(expr, vars_block, 2, result_chunk, elements_read, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
         // Write results
         fwrite(result_chunk, sizeof(double), elements_read, output);
 
@@ -222,13 +222,13 @@ int main() {
     for (int offset = 0; offset < TOTAL; offset += CHUNK) {
         int size = (offset + CHUNK > TOTAL) ? (TOTAL - offset) : CHUNK;
 
-        const void *vars_chunk[] = {
+        const void *vars_block[] = {
             &pressure[offset],
             &volume[offset],
             &moles[offset]
         };
 
-        if (me_eval(expr, vars_chunk, 3, &temperature[offset], size, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
+        if (me_eval(expr, vars_block, 3, &temperature[offset], size, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
     }
 
     printf("Computed temperatures for %d samples\n", TOTAL);
@@ -289,7 +289,7 @@ See `examples/11_nd_padding_example.c` for a fuller walkthrough, and `bench/benc
 
 1. **Compile once** - Create the expression once, then reuse it for all chunks
 2. **Manage chunk boundaries** - Handle the last chunk which might be smaller
-3. **Use const void* arrays** - Pass pointers to chunk starts via `vars_chunk`
+3. **Use const void* arrays** - Pass pointers to chunk starts via `vars_block`
 4. **Update pointers** - For each chunk, point to the correct offset in your arrays
 5. **Thread-safe** - `me_eval()` is safe for parallel processing from multiple threads
 

@@ -1118,19 +1118,19 @@ static int collect_var_sizes(const me_expr* expr, size_t* var_sizes, int n_vars)
     return ME_EVAL_SUCCESS;
 }
 
-int me_eval_nd(const me_expr* expr, const void** vars_chunk,
-               int n_vars, void* output_chunk, int chunk_nitems,
+int me_eval_nd(const me_expr* expr, const void** vars_block,
+               int n_vars, void* output_block, int block_nitems,
                int64_t nchunk, int64_t nblock, const me_eval_params* params) {
     if (!expr) {
         return ME_EVAL_ERR_NULL_EXPR;
     }
-    if (!output_chunk || chunk_nitems <= 0) {
+    if (!output_block || block_nitems <= 0) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
 
     int64_t valid_items = 0;
     int64_t padded_items = 0;
-    int rc = compute_valid_items(expr, nchunk, nblock, chunk_nitems, &valid_items, &padded_items);
+    int rc = compute_valid_items(expr, nchunk, nblock, block_nitems, &valid_items, &padded_items);
     if (rc != ME_EVAL_SUCCESS) {
         return rc;
     }
@@ -1146,10 +1146,10 @@ int me_eval_nd(const me_expr* expr, const void** vars_chunk,
     /* Fast path: no padding needed (valid == padded), single call. */
     if (valid_items == padded_items) {
         if (valid_items == 0) {
-            memset(output_chunk, 0, (size_t)padded_items * item_size);
+            memset(output_block, 0, (size_t)padded_items * item_size);
             return ME_EVAL_SUCCESS;
         }
-        return me_eval(expr, vars_chunk, n_vars, output_chunk, (int)valid_items, params);
+        return me_eval(expr, vars_block, n_vars, output_block, (int)valid_items, params);
     }
 
     const me_nd_info* info = (const me_nd_info*)expr->bytecode;
@@ -1214,7 +1214,7 @@ int me_eval_nd(const me_expr* expr, const void** vars_chunk,
 
     /* Pack → single eval → scatter */
     if (valid_items == 0) {
-        memset(output_chunk, 0, (size_t)padded_items * item_size);
+        memset(output_block, 0, (size_t)padded_items * item_size);
         return ME_EVAL_SUCCESS;
     }
 
@@ -1243,7 +1243,7 @@ int me_eval_nd(const me_expr* expr, const void** vars_chunk,
             off += indices[i] * stride[i];
         }
         for (int v = 0; v < n_vars; v++) {
-            const unsigned char* src = (const unsigned char*)vars_chunk[v] + (size_t)off * var_sizes[v];
+            const unsigned char* src = (const unsigned char*)vars_block[v] + (size_t)off * var_sizes[v];
             memcpy((unsigned char*)packed_vars[v] + (size_t)write_idx * var_sizes[v], src, var_sizes[v]);
         }
         write_idx++;
@@ -1262,7 +1262,7 @@ int me_eval_nd(const me_expr* expr, const void** vars_chunk,
     }
 
     /* Scatter back and zero padding */
-    memset(output_chunk, 0, (size_t)padded_items * item_size);
+    memset(output_block, 0, (size_t)padded_items * item_size);
     indices[0] = 0;
     for (int i = 1; i < nd; i++) indices[i] = 0;
     write_idx = 0;
@@ -1271,7 +1271,7 @@ int me_eval_nd(const me_expr* expr, const void** vars_chunk,
         for (int i = 0; i < nd; i++) {
             off += indices[i] * stride[i];
         }
-        unsigned char* dst = (unsigned char*)output_chunk + (size_t)off * item_size;
+        unsigned char* dst = (unsigned char*)output_block + (size_t)off * item_size;
         memcpy(dst, (unsigned char*)packed_out + (size_t)write_idx * item_size, item_size);
         write_idx++;
         for (int i = nd - 1; i >= 0; i--) {

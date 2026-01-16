@@ -232,10 +232,10 @@ typedef struct {
  *
  * Parameters:
  *   expr: Compiled expression (from me_compile)
- *   vars_chunk: Array of pointers to variable data chunks (same order as in me_compile)
+ *   vars_block: Array of pointers to variable data blocks (same order as in me_compile)
  *   n_vars: Number of variables (must match the number used in me_compile)
- *   output_chunk: Pointer to output buffer for this chunk
- *   chunk_nitems: Number of elements in this chunk. This is an element count
+ *   output_block: Pointer to output buffer for this block
+ *   block_nitems: Number of elements in this block. This is an element count
  *                 (not bytes) and must correspond to the input arrays' element
  *                 count; the output buffer must be sized for this many output
  *                 elements (using the output dtype size).
@@ -247,17 +247,18 @@ typedef struct {
  * Use this function for both serial and parallel evaluation. It is thread-safe
  * and can be used from multiple threads to process different chunks simultaneously.
  */
-int me_eval(const me_expr *expr, const void **vars_chunk,
-            int n_vars, void *output_chunk, int chunk_nitems,
+int me_eval(const me_expr *expr, const void **vars_block,
+            int n_vars, void *output_block, int block_nitems,
             const me_eval_params *params);
 
 /* Evaluate a padded b2nd block.
  * Only the valid (unpadded) elements are computed; padded output is zeroed.
  * nchunk and nblock are C-order indices for the chunk within the array
  * and the block within that chunk.
+ * vars_block points to block buffers (not base arrays).
  */
-int me_eval_nd(const me_expr *expr, const void **vars_chunk,
-               int n_vars, void *output_chunk, int chunk_nitems,
+int me_eval_nd(const me_expr *expr, const void **vars_block,
+               int n_vars, void *output_block, int block_nitems,
                int64_t nchunk, int64_t nblock, const me_eval_params *params);
 
 /* Query number of valid (unpadded) elements for a given chunk/block. */

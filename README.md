@@ -68,8 +68,8 @@ Mixing modes (some vars with types, some `ME_AUTO`) will cause compilation to fa
 
 ### `me_eval()` and `me_eval_nd()`
 ```c
-int me_eval(const me_expr *expr, const void **vars_chunk,
-            int n_vars, void *output_chunk, int chunk_nitems,
+int me_eval(const me_expr *expr, const void **vars_block,
+            int n_vars, void *output_block, int block_nitems,
             const me_eval_params *params);
 
 int me_eval_nd(const me_expr *expr, const void **vars_block,
@@ -82,10 +82,10 @@ Evaluates the compiled expression with new variable and output pointers. This al
 
 **Parameters:**
 - `expr`: Compiled expression (from `me_compile`)
-- `vars_chunk`: Array of pointers to variable data chunks (same order as in `me_compile`)
+- `vars_block`: Array of pointers to variable block buffers (same order as in `me_compile`)
 - `n_vars`: Number of variables (must match the number used in `me_compile`)
-- `output_chunk`: Pointer to output buffer for this chunk
-- `chunk_nitems`: Number of elements in this chunk
+- `output_block`: Pointer to output buffer for this block
+- `block_nitems`: Number of elements in this block (padded size for `me_eval_nd`)
 - `params`: Optional SIMD evaluation settings (`NULL` for defaults)
 - Return value: `ME_EVAL_SUCCESS` (0) on success, or a negative `ME_EVAL_ERR_*` code on failure
 

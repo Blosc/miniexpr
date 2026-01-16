@@ -103,6 +103,13 @@ Mixed-type expressions and type promotion overhead.
 ./build/benchmark_mixed_types
 ```
 
+### benchmark_nd_padding_threads.c
+Multi-threaded ND padding scenarios vs pure C (1 GB logical array).
+
+```bash
+./build/benchmark_nd_padding_threads
+```
+
 ### benchmark_threadsafe.c
 Thread-safe evaluation overhead vs single-threaded.
 
