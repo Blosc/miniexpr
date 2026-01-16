@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "functions-simd.h"
 #include "miniexpr.h"
 
 static int nearly_equal(double a, double b, double tol) {
@@ -1702,10 +1703,46 @@ static int run_more_math_edges(void) {
     return failures;
 }
 
+static int test_simd_init(void) {
+    double data[] = {0.1, 0.2, 0.3, 0.4};
+    double out[4] = {0};
+    const void *vars[] = {data};
+    me_variable v[] = {{"x", ME_FLOAT64, data}};
+    me_expr *expr = NULL;
+    int err = 0;
+
+    me_simd_reset_for_tests();
+    if (me_simd_initialized_for_tests() != 0) {
+        printf("SIMD init state should be 0 before eval\n");
+        return 1;
+    }
+
+    if (me_compile("sin(x) + cos(x)", v, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("Failed to compile simd init test (err=%d)\n", err);
+        return 1;
+    }
+
+    if (me_eval(expr, vars, 1, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("me_eval failed in simd init test\n");
+        me_free(expr);
+        return 1;
+    }
+
+    if (me_simd_initialized_for_tests() == 0) {
+        printf("SIMD init state should be 1 after eval\n");
+        me_free(expr);
+        return 1;
+    }
+
+    me_free(expr);
+    return 0;
+}
+
 int main(void) {
     int failures = 0;
     const int n = 1024;
 
+    failures += test_simd_init();
     failures += run_unary_pair_f64("abs", fabs, n, -10.0, 10.0, 1e-12);
     failures += run_unary_pair_f64("exp", exp, n, -5.0, 5.0, 1e-12);
     failures += run_unary_pair_f64("expm1", expm1, n, -3.0, 3.0, 1e-12);
