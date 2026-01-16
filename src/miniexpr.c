@@ -1080,6 +1080,44 @@ static int compute_valid_items(const me_expr* expr, int64_t nchunk, int64_t nblo
     return ME_EVAL_SUCCESS;
 }
 
+static int collect_var_sizes(const me_expr* expr, size_t* var_sizes, int n_vars) {
+    if (!expr || !var_sizes || n_vars <= 0) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    for (int i = 0; i < n_vars; i++) {
+        var_sizes[i] = 0;
+    }
+
+    /* Assume synthetic addresses map variable index directly. */
+    const me_expr* stack[256];
+    int top = 0;
+    stack[top++] = expr;
+    while (top) {
+        const me_expr* n = stack[--top];
+        if (!n) continue;
+        if (TYPE_MASK(n->type) == ME_VARIABLE && is_synthetic_address(n->bound)) {
+            int idx = (int)((const char*)n->bound - synthetic_var_addresses);
+            if (idx >= 0 && idx < n_vars && var_sizes[idx] == 0) {
+                var_sizes[idx] = dtype_size(n->input_dtype);
+            }
+        }
+        else if (IS_FUNCTION(n->type) || IS_CLOSURE(n->type)) {
+            const int arity = ARITY(n->type);
+            for (int i = 0; i < arity && top < 256; i++) {
+                stack[top++] = (const me_expr*)n->parameters[i];
+            }
+        }
+    }
+
+    for (int i = 0; i < n_vars; i++) {
+        if (var_sizes[i] == 0) {
+            return ME_EVAL_ERR_INVALID_ARG;
+        }
+    }
+    return ME_EVAL_SUCCESS;
+}
+
 int me_eval_nd(const me_expr* expr, const void** vars_chunk,
                int n_vars, void* output_chunk, int chunk_nitems,
                int64_t nchunk, int64_t nblock, const me_eval_params* params) {
@@ -1100,24 +1138,151 @@ int me_eval_nd(const me_expr* expr, const void** vars_chunk,
         return ME_EVAL_ERR_INVALID_ARG;
     }
 
-    if (valid_items > 0) {
-        rc = me_eval(expr, vars_chunk, n_vars, output_chunk, (int)valid_items, params);
-        if (rc != ME_EVAL_SUCCESS) {
-            return rc;
-        }
-    }
-
     const size_t item_size = dtype_size(me_get_dtype(expr));
     if (item_size == 0) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
 
-    if (valid_items < padded_items) {
-        unsigned char* out_bytes = (unsigned char*)output_chunk;
-        const size_t offset = (size_t)valid_items * item_size;
-        const size_t pad_bytes = ((size_t)padded_items - (size_t)valid_items) * item_size;
-        memset(out_bytes + offset, 0, pad_bytes);
+    /* Fast path: no padding needed (valid == padded), single call. */
+    if (valid_items == padded_items) {
+        if (valid_items == 0) {
+            memset(output_chunk, 0, (size_t)padded_items * item_size);
+            return ME_EVAL_SUCCESS;
+        }
+        return me_eval(expr, vars_chunk, n_vars, output_chunk, (int)valid_items, params);
     }
+
+    const me_nd_info* info = (const me_nd_info*)expr->bytecode;
+    const int nd = info->ndims;
+    const int64_t* shape = info->data;
+    const int64_t* chunkshape = shape + nd;
+    const int64_t* blockshape = chunkshape + nd;
+
+    size_t var_sizes[ME_MAX_VARS];
+    rc = collect_var_sizes(expr, var_sizes, n_vars);
+    if (rc != ME_EVAL_SUCCESS) {
+        return rc;
+    }
+
+    /* Compute per-dim lengths for this chunk/block. */
+    int64_t chunk_idx[64];
+    int64_t block_idx[64];
+    int64_t valid_len[64];
+    if (nd > 64) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    int64_t tmp = nchunk;
+    for (int i = nd - 1; i >= 0; i--) {
+        const int64_t nchunks_d = ceil_div64(shape[i], chunkshape[i]);
+        chunk_idx[i] = (nchunks_d == 0) ? 0 : (tmp % nchunks_d);
+        tmp /= nchunks_d;
+    }
+
+    tmp = nblock;
+    for (int i = nd - 1; i >= 0; i--) {
+        const int64_t nblocks_d = ceil_div64(chunkshape[i], blockshape[i]);
+        block_idx[i] = (nblocks_d == 0) ? 0 : (tmp % nblocks_d);
+        tmp /= nblocks_d;
+    }
+
+    for (int i = 0; i < nd; i++) {
+        const int64_t chunk_start = chunk_idx[i] * chunkshape[i];
+        int64_t chunk_len = shape[i] - chunk_start;
+        if (chunk_len > chunkshape[i]) {
+            chunk_len = chunkshape[i];
+        }
+        const int64_t block_start = block_idx[i] * blockshape[i];
+        if (block_start >= chunk_len) {
+            valid_len[i] = 0;
+        }
+        else {
+            int64_t len = chunk_len - block_start;
+            if (len > blockshape[i]) {
+                len = blockshape[i];
+            }
+            valid_len[i] = len;
+        }
+    }
+
+    /* Strides inside padded block (C-order). */
+    int64_t stride[64];
+    stride[nd - 1] = 1;
+    for (int i = nd - 2; i >= 0; i--) {
+        stride[i] = stride[i + 1] * blockshape[i + 1];
+    }
+
+    /* Pack → single eval → scatter */
+    if (valid_items == 0) {
+        memset(output_chunk, 0, (size_t)padded_items * item_size);
+        return ME_EVAL_SUCCESS;
+    }
+
+    void* packed_vars[ME_MAX_VARS];
+    for (int v = 0; v < n_vars; v++) {
+        packed_vars[v] = malloc((size_t)valid_items * var_sizes[v]);
+        if (!packed_vars[v]) {
+            for (int u = 0; u < v; u++) free(packed_vars[u]);
+            return ME_EVAL_ERR_OOM;
+        }
+    }
+    void* packed_out = malloc((size_t)valid_items * item_size);
+    if (!packed_out) {
+        for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
+        return ME_EVAL_ERR_OOM;
+    }
+
+    /* Pack valid elements */
+    int64_t indices[64] = {0};
+    int64_t write_idx = 0;
+    int64_t total_iters = 1;
+    for (int i = 0; i < nd; i++) total_iters *= valid_len[i];
+    for (int64_t it = 0; it < total_iters; it++) {
+        int64_t off = 0;
+        for (int i = 0; i < nd; i++) {
+            off += indices[i] * stride[i];
+        }
+        for (int v = 0; v < n_vars; v++) {
+            const unsigned char* src = (const unsigned char*)vars_chunk[v] + (size_t)off * var_sizes[v];
+            memcpy((unsigned char*)packed_vars[v] + (size_t)write_idx * var_sizes[v], src, var_sizes[v]);
+        }
+        write_idx++;
+        for (int i = nd - 1; i >= 0; i--) {
+            indices[i]++;
+            if (indices[i] < valid_len[i]) break;
+            indices[i] = 0;
+        }
+    }
+
+    rc = me_eval(expr, (const void**)packed_vars, n_vars, packed_out, (int)valid_items, params);
+    if (rc != ME_EVAL_SUCCESS) {
+        for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
+        free(packed_out);
+        return rc;
+    }
+
+    /* Scatter back and zero padding */
+    memset(output_chunk, 0, (size_t)padded_items * item_size);
+    indices[0] = 0;
+    for (int i = 1; i < nd; i++) indices[i] = 0;
+    write_idx = 0;
+    for (int64_t it = 0; it < total_iters; it++) {
+        int64_t off = 0;
+        for (int i = 0; i < nd; i++) {
+            off += indices[i] * stride[i];
+        }
+        unsigned char* dst = (unsigned char*)output_chunk + (size_t)off * item_size;
+        memcpy(dst, (unsigned char*)packed_out + (size_t)write_idx * item_size, item_size);
+        write_idx++;
+        for (int i = nd - 1; i >= 0; i--) {
+            indices[i]++;
+            if (indices[i] < valid_len[i]) break;
+            indices[i] = 0;
+        }
+    }
+
+    for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
+    free(packed_out);
 
     return ME_EVAL_SUCCESS;
 }
