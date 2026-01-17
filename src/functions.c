@@ -409,6 +409,16 @@ me_dtype reduction_output_dtype(me_dtype dt, const void* func) {
     return dt;
 }
 
+me_reduce_kind reduction_kind(const void* func) {
+    if (func == (void*)sum_reduce) return ME_REDUCE_SUM;
+    if (func == (void*)prod_reduce) return ME_REDUCE_PROD;
+    if (func == (void*)min_reduce) return ME_REDUCE_MIN;
+    if (func == (void*)max_reduce) return ME_REDUCE_MAX;
+    if (func == (void*)any_reduce) return ME_REDUCE_ANY;
+    if (func == (void*)all_reduce) return ME_REDUCE_ALL;
+    return ME_REDUCE_NONE;
+}
+
 /* Get size of a type in bytes */
 size_t dtype_size(me_dtype dtype) {
     switch (dtype) {
@@ -6964,4 +6974,13 @@ bool has_unsupported_complex_function(const me_expr* n) {
         if (has_unsupported_complex_function((const me_expr*)n->parameters[i])) return true;
     }
     return false;
+}
+me_cmp_kind comparison_kind(const void* func) {
+    if (func == (void*)cmp_eq) return ME_CMP_EQ;
+    if (func == (void*)cmp_ne) return ME_CMP_NE;
+    if (func == (void*)cmp_lt) return ME_CMP_LT;
+    if (func == (void*)cmp_le) return ME_CMP_LE;
+    if (func == (void*)cmp_gt) return ME_CMP_GT;
+    if (func == (void*)cmp_ge) return ME_CMP_GE;
+    return ME_CMP_NONE;
 }

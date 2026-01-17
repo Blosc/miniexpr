@@ -92,6 +92,29 @@ me_dtype reduction_output_dtype(me_dtype dt, const void* func);
 double min_reduce(double x);
 double max_reduce(double x);
 
+typedef enum {
+    ME_REDUCE_NONE = 0,
+    ME_REDUCE_SUM,
+    ME_REDUCE_PROD,
+    ME_REDUCE_MIN,
+    ME_REDUCE_MAX,
+    ME_REDUCE_ANY,
+    ME_REDUCE_ALL
+} me_reduce_kind;
+
+me_reduce_kind reduction_kind(const void* func);
+
+typedef enum {
+    ME_CMP_NONE = 0,
+    ME_CMP_EQ,
+    ME_CMP_NE,
+    ME_CMP_LT,
+    ME_CMP_LE,
+    ME_CMP_GT,
+    ME_CMP_GE
+} me_cmp_kind;
+
+
 void optimize(me_expr* n);
 void next_token(state* s);
 me_expr* list(state* s);
@@ -106,3 +129,4 @@ bool has_complex_input(const me_expr* n);
 #endif
 
 #endif
+me_cmp_kind comparison_kind(const void* func);

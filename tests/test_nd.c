@@ -281,6 +281,110 @@ cleanup:
     return status;
 }
 
+static int test_nd_predicate_reductions(void) {
+    int status = 0;
+    int err = 0;
+    me_expr* expr_sum = NULL;
+    me_expr* expr_sum_left = NULL;
+    me_expr* expr_any = NULL;
+    me_expr* expr_all = NULL;
+    int64_t shape[1] = {3};
+    int32_t chunkshape[1] = {3};
+    int32_t blockshape[1] = {2};
+    const int padded = 2;
+
+    me_variable vars[] = {{"x", ME_INT32}};
+
+    if (me_compile_nd("sum(x > 1)", vars, 1, ME_INT64, 1,
+                      shape, chunkshape, blockshape, &err, &expr_sum) != ME_COMPILE_SUCCESS) {
+        printf("FAILED me_compile_nd pred sum: %d\n", err);
+        return 1;
+    }
+    if (me_compile_nd("sum(1 < x)", vars, 1, ME_INT64, 1,
+                      shape, chunkshape, blockshape, &err, &expr_sum_left) != ME_COMPILE_SUCCESS) {
+        printf("FAILED me_compile_nd pred sum left: %d\n", err);
+        status = 1;
+        goto cleanup;
+    }
+    if (me_compile_nd("any(x == 2)", vars, 1, ME_BOOL, 1,
+                      shape, chunkshape, blockshape, &err, &expr_any) != ME_COMPILE_SUCCESS) {
+        printf("FAILED me_compile_nd pred any: %d\n", err);
+        status = 1;
+        goto cleanup;
+    }
+    if (me_compile_nd("all(x == 2)", vars, 1, ME_BOOL, 1,
+                      shape, chunkshape, blockshape, &err, &expr_all) != ME_COMPILE_SUCCESS) {
+        printf("FAILED me_compile_nd pred all: %d\n", err);
+        status = 1;
+        goto cleanup;
+    }
+
+    int32_t block0[2] = {0, 2};
+    int32_t block1[2] = {3, 0}; /* last is padding */
+    const void* ptrs0[] = {block0};
+    const void* ptrs1[] = {block1};
+    int64_t valid = 0;
+
+    int64_t out_i64[2] = {-1, -1};
+    bool out_b[2] = {false, true};
+
+    me_nd_valid_nitems(expr_sum, 0, 0, &valid);
+    if (valid != 2) {
+        printf("FAILED pred valid block0 (got=%lld)\n", (long long)valid);
+        status = 1;
+        goto cleanup;
+    }
+    if (me_eval_nd(expr_sum, ptrs0, 1, out_i64, padded, 0, 0, NULL) != ME_EVAL_SUCCESS || out_i64[0] != 1) {
+        printf("FAILED pred sum block0 (out=%lld)\n", (long long)out_i64[0]);
+        status = 1;
+        goto cleanup;
+    }
+    if (me_eval_nd(expr_sum_left, ptrs0, 1, out_i64, padded, 0, 0, NULL) != ME_EVAL_SUCCESS || out_i64[0] != 1) {
+        printf("FAILED pred sum left block0 (out=%lld)\n", (long long)out_i64[0]);
+        status = 1;
+        goto cleanup;
+    }
+    if (me_eval_nd(expr_any, ptrs0, 1, out_b, padded, 0, 0, NULL) != ME_EVAL_SUCCESS || !out_b[0]) {
+        printf("FAILED pred any block0 (out=%d)\n", (int)out_b[0]);
+        status = 1;
+        goto cleanup;
+    }
+    if (me_eval_nd(expr_all, ptrs0, 1, out_b, padded, 0, 0, NULL) != ME_EVAL_SUCCESS || out_b[0]) {
+        printf("FAILED pred all block0 (out=%d)\n", (int)out_b[0]);
+        status = 1;
+        goto cleanup;
+    }
+
+    me_nd_valid_nitems(expr_sum, 0, 1, &valid);
+    if (valid != 1) {
+        printf("FAILED pred valid block1 (got=%lld)\n", (long long)valid);
+        status = 1;
+        goto cleanup;
+    }
+    if (me_eval_nd(expr_sum, ptrs1, 1, out_i64, padded, 0, 1, NULL) != ME_EVAL_SUCCESS || out_i64[0] != 1) {
+        printf("FAILED pred sum block1 (out=%lld)\n", (long long)out_i64[0]);
+        status = 1;
+        goto cleanup;
+    }
+    if (me_eval_nd(expr_any, ptrs1, 1, out_b, padded, 0, 1, NULL) != ME_EVAL_SUCCESS || out_b[0]) {
+        printf("FAILED pred any block1 (out=%d)\n", (int)out_b[0]);
+        status = 1;
+        goto cleanup;
+    }
+    if (me_eval_nd(expr_all, ptrs1, 1, out_b, padded, 0, 1, NULL) != ME_EVAL_SUCCESS || out_b[0]) {
+        printf("FAILED pred all block1 (out=%d)\n", (int)out_b[0]);
+        status = 1;
+        goto cleanup;
+    }
+
+cleanup:
+    me_free(expr_sum);
+    me_free(expr_sum_left);
+    me_free(expr_any);
+    me_free(expr_all);
+    return status;
+}
+
 static int test_big_stress(void) {
     int status = 0;
     int err = 0;
@@ -640,6 +744,11 @@ int main(void) {
     int t8 = test_nd_all_padded_reductions();
     failed |= t8;
     printf("Result: %s\n\n", t8 ? "FAIL" : "PASS");
+
+    printf("Test 9: Predicate reductions (sum/any/all) with padding\n");
+    int t9 = test_nd_predicate_reductions();
+    failed |= t9;
+    printf("Result: %s\n\n", t9 ? "FAIL" : "PASS");
 
     printf("=====================\n");
     printf("Summary: %s\n", failed ? "FAIL" : "PASS");
