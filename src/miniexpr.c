@@ -217,6 +217,44 @@ static bool contains_reduction(const me_expr* n) {
     }
 }
 
+static bool output_is_scalar(const me_expr* n) {
+    if (!n) return true;
+    if (is_reduction_node(n)) return true;
+
+    switch (TYPE_MASK(n->type)) {
+    case ME_CONSTANT:
+        return true;
+    case ME_VARIABLE:
+        return false;
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
+            const int arity = ARITY(n->type);
+            for (int i = 0; i < arity; i++) {
+                if (!output_is_scalar((const me_expr*)n->parameters[i])) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    default:
+        return true;
+    }
+}
 static bool reduction_usage_is_valid(const me_expr* n) {
     if (!n) return true;
     if (is_reduction_node(n)) {
@@ -1143,10 +1181,18 @@ int me_eval_nd(const me_expr* expr, const void** vars_block,
         return ME_EVAL_ERR_INVALID_ARG;
     }
 
+    const bool is_reduction_output = contains_reduction(expr) && output_is_scalar(expr);
+
     /* Fast path: no padding needed (valid == padded), single call. */
     if (valid_items == padded_items) {
         if (valid_items == 0) {
-            memset(output_block, 0, (size_t)padded_items * item_size);
+            /* Scalar outputs only write the first item. */
+            if (is_reduction_output) {
+                memset(output_block, 0, item_size);
+            }
+            else {
+                memset(output_block, 0, (size_t)padded_items * item_size);
+            }
             return ME_EVAL_SUCCESS;
         }
         return me_eval(expr, vars_block, n_vars, output_block, (int)valid_items, params);
@@ -1214,7 +1260,12 @@ int me_eval_nd(const me_expr* expr, const void** vars_block,
 
     /* Pack → single eval → scatter */
     if (valid_items == 0) {
-        memset(output_block, 0, (size_t)padded_items * item_size);
+        if (is_reduction_output) {
+            memset(output_block, 0, item_size);
+        }
+        else {
+            memset(output_block, 0, (size_t)padded_items * item_size);
+        }
         return ME_EVAL_SUCCESS;
     }
 
@@ -1226,10 +1277,13 @@ int me_eval_nd(const me_expr* expr, const void** vars_block,
             return ME_EVAL_ERR_OOM;
         }
     }
-    void* packed_out = malloc((size_t)valid_items * item_size);
-    if (!packed_out) {
-        for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
-        return ME_EVAL_ERR_OOM;
+    void* packed_out = NULL;
+    if (!is_reduction_output) {
+        packed_out = malloc((size_t)valid_items * item_size);
+        if (!packed_out) {
+            for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
+            return ME_EVAL_ERR_OOM;
+        }
     }
 
     /* Pack valid elements */
@@ -1254,30 +1308,39 @@ int me_eval_nd(const me_expr* expr, const void** vars_block,
         }
     }
 
-    rc = me_eval(expr, (const void**)packed_vars, n_vars, packed_out, (int)valid_items, params);
-    if (rc != ME_EVAL_SUCCESS) {
-        for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
-        free(packed_out);
-        return rc;
-    }
-
-    /* Scatter back and zero padding */
-    memset(output_block, 0, (size_t)padded_items * item_size);
-    indices[0] = 0;
-    for (int i = 1; i < nd; i++) indices[i] = 0;
-    write_idx = 0;
-    for (int64_t it = 0; it < total_iters; it++) {
-        int64_t off = 0;
-        for (int i = 0; i < nd; i++) {
-            off += indices[i] * stride[i];
+    if (is_reduction_output) {
+        rc = me_eval(expr, (const void**)packed_vars, n_vars, output_block, (int)valid_items, params);
+        if (rc != ME_EVAL_SUCCESS) {
+            for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
+            return rc;
         }
-        unsigned char* dst = (unsigned char*)output_block + (size_t)off * item_size;
-        memcpy(dst, (unsigned char*)packed_out + (size_t)write_idx * item_size, item_size);
-        write_idx++;
-        for (int i = nd - 1; i >= 0; i--) {
-            indices[i]++;
-            if (indices[i] < valid_len[i]) break;
-            indices[i] = 0;
+    }
+    else {
+        rc = me_eval(expr, (const void**)packed_vars, n_vars, packed_out, (int)valid_items, params);
+        if (rc != ME_EVAL_SUCCESS) {
+            for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
+            free(packed_out);
+            return rc;
+        }
+
+        /* Scatter back and zero padding */
+        memset(output_block, 0, (size_t)padded_items * item_size);
+        indices[0] = 0;
+        for (int i = 1; i < nd; i++) indices[i] = 0;
+        write_idx = 0;
+        for (int64_t it = 0; it < total_iters; it++) {
+            int64_t off = 0;
+            for (int i = 0; i < nd; i++) {
+                off += indices[i] * stride[i];
+            }
+            unsigned char* dst = (unsigned char*)output_block + (size_t)off * item_size;
+            memcpy(dst, (unsigned char*)packed_out + (size_t)write_idx * item_size, item_size);
+            write_idx++;
+            for (int i = nd - 1; i >= 0; i--) {
+                indices[i]++;
+                if (indices[i] < valid_len[i]) break;
+                indices[i] = 0;
+            }
         }
     }
 

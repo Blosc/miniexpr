@@ -257,7 +257,8 @@ Key points:
 1. `shape`, `chunkshape`, `blockshape` are C-order arrays (length = `ndims`).
 2. `nchunk` is the zero-based chunk index over the whole array (C-order); `nblock` is the block index inside that chunk (also C-order).
 3. Callers pass *padded* block buffers (size = `prod(blockshape)` elements). `me_eval_nd` computes only the valid elements and zero-fills the padded tail in the output.
-4. For best performance with padding, `me_eval_nd` packs valid elements, evaluates once, and scatters back; fully valid blocks still take a single fast path.
+4. For expressions whose overall result is a scalar (reductions like `sum(x)` or `sum(x) + 1`), `output_block` only needs space for one item; `me_eval_nd` writes a single element and does not zero any tail.
+5. For best performance with padding, `me_eval_nd` packs valid elements, evaluates once, and scatters back; fully valid blocks still take a single fast path.
 
 Minimal 2D example (padding on edges):
 

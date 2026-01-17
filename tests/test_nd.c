@@ -182,7 +182,7 @@ static int test_nd_reductions(void) {
         return 1;
     }
 
-    double out_buf[2] = {-1.0, -1.0};
+    double out_buf[2] = {-1.0, 123.0};
     double block0[2] = {1.0, 2.0};
     const void* ptrs0[] = {block0};
     int64_t valid = 0;
@@ -197,10 +197,16 @@ static int test_nd_reductions(void) {
         status = 1;
         goto cleanup;
     }
+    if (out_buf[1] != 123.0) {
+        printf("FAILED reductions: scalar output overwrote tail (tail=%g)\n", out_buf[1]);
+        status = 1;
+        goto cleanup;
+    }
 
     double block1[2] = {3.0, 0.0}; /* last is padding */
     const void* ptrs1[] = {block1};
     out_buf[0] = -1.0;
+    out_buf[1] = 123.0;
     me_nd_valid_nitems(expr, 0, 1, &valid);
     if (valid != 1) {
         printf("FAILED reductions valid block1 (got=%lld)\n", (long long)valid);
@@ -209,6 +215,11 @@ static int test_nd_reductions(void) {
     }
     if (me_eval_nd(expr, ptrs1, 1, out_buf, padded, 0, 1, NULL) != ME_EVAL_SUCCESS || out_buf[0] != 3.0) {
         printf("FAILED reductions sum block1 (out=%g)\n", out_buf[0]);
+        status = 1;
+        goto cleanup;
+    }
+    if (out_buf[1] != 123.0) {
+        printf("FAILED reductions: scalar output overwrote tail (tail=%g)\n", out_buf[1]);
         status = 1;
         goto cleanup;
     }

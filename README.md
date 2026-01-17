@@ -100,6 +100,7 @@ if (me_eval(expr, var_ptrs, 2, result, 3, &params) != ME_EVAL_SUCCESS) { /* hand
 - `shape`, `chunkshape`, `blockshape` are C-order arrays (`ndims` length).
 - `nchunk` is the chunk index over the full array (C-order); `nblock` is the block index inside that chunk (C-order).
 - Callers pass padded blocks of size `prod(blockshape)`. `me_eval_nd` evaluates only valid elements and zero-fills the padded tail in the output. Use `me_nd_valid_nitems` to know how many outputs are real for a given `(nchunk, nblock)`.
+- For expressions whose overall result is a scalar (e.g., `sum(x)` or `sum(x) + 1`), `output_block` only needs space for one item. In this case `me_eval_nd` writes a single element and does not zero any tail.
 
 See `examples/11_nd_padding_example.c` and `doc/chunk-processing.md` for a walkthrough, and `bench/benchmark_nd_padding` to gauge performance with different padding patterns.
 
