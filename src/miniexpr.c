@@ -302,6 +302,28 @@ static double me_cimag(double _Complex v) {
 #endif
 }
 
+static float _Complex me_cmplxf(float re, float im) {
+#if defined(_MSC_VER)
+    float _Complex v;
+    __real__ v = re;
+    __imag__ v = im;
+    return v;
+#else
+    return re + im * I;
+#endif
+}
+
+static double _Complex me_cmplx(double re, double im) {
+#if defined(_MSC_VER)
+    double _Complex v;
+    __real__ v = re;
+    __imag__ v = im;
+    return v;
+#else
+    return re + im * I;
+#endif
+}
+
 static void write_scalar(void* out, me_dtype out_type, me_dtype in_type, const me_scalar* v) {
     if (out_type == in_type) {
         switch (out_type) {
@@ -415,36 +437,36 @@ static void write_scalar(void* out, me_dtype out_type, me_dtype in_type, const m
         switch (in_type) {
         case ME_COMPLEX64: *(float _Complex*)out = v->c64; break;
         case ME_COMPLEX128: *(float _Complex*)out = (float _Complex)v->c128; break;
-        case ME_FLOAT32: *(float _Complex*)out = v->f32 + 0.0f * I; break;
-        case ME_FLOAT64: *(float _Complex*)out = (float)v->f64 + 0.0f * I; break;
+        case ME_FLOAT32: *(float _Complex*)out = me_cmplxf(v->f32, 0.0f); break;
+        case ME_FLOAT64: *(float _Complex*)out = me_cmplxf((float)v->f64, 0.0f); break;
         case ME_INT8:
         case ME_INT16:
         case ME_INT32:
-        case ME_INT64: *(float _Complex*)out = (float)v->i64 + 0.0f * I; break;
+        case ME_INT64: *(float _Complex*)out = me_cmplxf((float)v->i64, 0.0f); break;
         case ME_UINT8:
         case ME_UINT16:
         case ME_UINT32:
-        case ME_UINT64: *(float _Complex*)out = (float)v->u64 + 0.0f * I; break;
-        case ME_BOOL: *(float _Complex*)out = (v->b ? 1.0f : 0.0f) + 0.0f * I; break;
-        default: *(float _Complex*)out = 0.0f + 0.0f * I; break;
+        case ME_UINT64: *(float _Complex*)out = me_cmplxf((float)v->u64, 0.0f); break;
+        case ME_BOOL: *(float _Complex*)out = me_cmplxf(v->b ? 1.0f : 0.0f, 0.0f); break;
+        default: *(float _Complex*)out = me_cmplxf(0.0f, 0.0f); break;
         }
         break;
     case ME_COMPLEX128:
         switch (in_type) {
         case ME_COMPLEX64: *(double _Complex*)out = (double _Complex)v->c64; break;
         case ME_COMPLEX128: *(double _Complex*)out = v->c128; break;
-        case ME_FLOAT32: *(double _Complex*)out = (double)v->f32 + 0.0 * I; break;
-        case ME_FLOAT64: *(double _Complex*)out = v->f64 + 0.0 * I; break;
+        case ME_FLOAT32: *(double _Complex*)out = me_cmplx((double)v->f32, 0.0); break;
+        case ME_FLOAT64: *(double _Complex*)out = me_cmplx(v->f64, 0.0); break;
         case ME_INT8:
         case ME_INT16:
         case ME_INT32:
-        case ME_INT64: *(double _Complex*)out = (double)v->i64 + 0.0 * I; break;
+        case ME_INT64: *(double _Complex*)out = me_cmplx((double)v->i64, 0.0); break;
         case ME_UINT8:
         case ME_UINT16:
         case ME_UINT32:
-        case ME_UINT64: *(double _Complex*)out = (double)v->u64 + 0.0 * I; break;
-        case ME_BOOL: *(double _Complex*)out = (v->b ? 1.0 : 0.0) + 0.0 * I; break;
-        default: *(double _Complex*)out = 0.0 + 0.0 * I; break;
+        case ME_UINT64: *(double _Complex*)out = me_cmplx((double)v->u64, 0.0); break;
+        case ME_BOOL: *(double _Complex*)out = me_cmplx(v->b ? 1.0 : 0.0, 0.0); break;
+        default: *(double _Complex*)out = me_cmplx(0.0, 0.0); break;
         }
         break;
     default:
