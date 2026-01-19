@@ -420,6 +420,25 @@ static void write_scalar(void* out, me_dtype out_type, me_dtype in_type, const m
     }
 }
 
+static void read_scalar(const void* in, me_dtype in_type, me_scalar* v) {
+    switch (in_type) {
+    case ME_BOOL: v->b = *(const bool*)in; break;
+    case ME_INT8: v->i64 = *(const int8_t*)in; break;
+    case ME_INT16: v->i64 = *(const int16_t*)in; break;
+    case ME_INT32: v->i64 = *(const int32_t*)in; break;
+    case ME_INT64: v->i64 = *(const int64_t*)in; break;
+    case ME_UINT8: v->u64 = *(const uint8_t*)in; break;
+    case ME_UINT16: v->u64 = *(const uint16_t*)in; break;
+    case ME_UINT32: v->u64 = *(const uint32_t*)in; break;
+    case ME_UINT64: v->u64 = *(const uint64_t*)in; break;
+    case ME_FLOAT32: v->f32 = *(const float*)in; break;
+    case ME_FLOAT64: v->f64 = *(const double*)in; break;
+    case ME_COMPLEX64: v->c64 = *(const float _Complex*)in; break;
+    case ME_COMPLEX128: v->c128 = *(const double _Complex*)in; break;
+    default: break;
+    }
+}
+
 static bool read_as_bool(const void* base, int64_t off, me_dtype type, bool* out) {
     switch (type) {
     case ME_BOOL: *out = ((const bool*)base)[off]; return true;
@@ -1923,19 +1942,275 @@ int me_eval_nd(const me_expr* expr, const void** vars_block,
         return ME_EVAL_SUCCESS;
     }
 
-    const char* disable_reduce_fastpath_env = getenv("ME_DISABLE_ND_REDUCE_FASTPATH");
-    const bool disable_reduce_fastpath = (disable_reduce_fastpath_env &&
-                                          disable_reduce_fastpath_env[0] != '\0' &&
-                                          strcmp(disable_reduce_fastpath_env, "0") != 0);
+    bool allow_repeat_reduce = false;
+    me_reduce_kind rkind = ME_REDUCE_NONE;
+    if (is_reduction_output && is_reduction_node(expr)) {
+        rkind = reduction_kind(expr->function);
+        if (rkind == ME_REDUCE_ANY || rkind == ME_REDUCE_ALL) {
+            allow_repeat_reduce = true;
+        }
+        else if (rkind == ME_REDUCE_SUM) {
+            const me_expr* arg = (const me_expr*)expr->parameters[0];
+            if (arg && TYPE_MASK(arg->type) == ME_VARIABLE) {
+                allow_repeat_reduce = true;
+            }
+        }
+    }
 
-    /* Optional: disable reduction fast paths for benchmarking/debugging. */
-    if (!disable_reduce_fastpath && is_reduction_output) {
+    /* Decide whether repeat-eval is applicable, and precompute run layout. */
+    int split_dim = -2;
+    int64_t run_len = 0;
+    int64_t total_runs = 0;
+    bool repeat_eval_selected = false;
+    if (!is_reduction_output || allow_repeat_reduce) {
+        split_dim = nd - 2;
+        run_len = valid_len[nd - 1];
+        bool can_extend = (valid_len[nd - 1] == blockshape[nd - 1]);
+        for (int i = nd - 2; i >= 0; i--) {
+            if (can_extend && valid_len[i] == blockshape[i]) {
+                if (run_len > LLONG_MAX / blockshape[i]) {
+                    split_dim = -2;
+                    break;
+                }
+                run_len *= blockshape[i];
+                split_dim = i - 1;
+            }
+            else {
+                break;
+            }
+        }
+
+        if (split_dim >= -1 && run_len > 0 && run_len <= INT_MAX) {
+            total_runs = 1;
+            bool overflow = false;
+            if (split_dim >= 0) {
+                for (int i = 0; i <= split_dim; i++) {
+                    if (total_runs > LLONG_MAX / valid_len[i]) {
+                        overflow = true;
+                        break;
+                    }
+                    total_runs *= valid_len[i];
+                }
+            }
+            if (!overflow) {
+                if (!is_reduction_output) {
+                    repeat_eval_selected = true;
+                }
+                else if (rkind == ME_REDUCE_SUM) {
+                    repeat_eval_selected = (total_runs <= 16);
+                }
+                else {
+                    repeat_eval_selected = allow_repeat_reduce;
+                }
+            }
+        }
+    }
+
+    /* Reduction fast paths (skip when repeat-eval is selected). */
+    if (is_reduction_output && !repeat_eval_selected) {
         if (reduce_strided_predicate(expr, vars_block, n_vars, valid_len, stride, nd,
                                      valid_items, output_block)) {
             return ME_EVAL_SUCCESS;
         }
         if (reduce_strided_variable(expr, vars_block, n_vars, valid_len, stride, nd,
                                     valid_items, output_block)) {
+            return ME_EVAL_SUCCESS;
+        }
+    }
+
+    /* Repeat me_eval on contiguous valid runs instead of packing. */
+    if (repeat_eval_selected) {
+        const void* run_ptrs[ME_MAX_VARS];
+        if (is_reduction_output) {
+            me_scalar acc;
+            bool acc_init = (rkind != ME_REDUCE_MIN && rkind != ME_REDUCE_MAX);
+            const me_dtype output_type = expr->dtype;
+            switch (output_type) {
+            case ME_BOOL: acc.b = (rkind == ME_REDUCE_ALL); break;
+            case ME_INT8:
+            case ME_INT16:
+            case ME_INT32:
+            case ME_INT64: acc.i64 = (rkind == ME_REDUCE_PROD) ? 1 : 0; break;
+            case ME_UINT8:
+            case ME_UINT16:
+            case ME_UINT32:
+            case ME_UINT64: acc.u64 = (rkind == ME_REDUCE_PROD) ? 1 : 0; break;
+            case ME_FLOAT32:
+            case ME_FLOAT64: acc.f64 = (rkind == ME_REDUCE_PROD) ? 1.0 : 0.0; break;
+            case ME_COMPLEX64: acc.c64 = (rkind == ME_REDUCE_PROD) ? (float _Complex)1.0f : (float _Complex)0.0f; break;
+            case ME_COMPLEX128: acc.c128 = (rkind == ME_REDUCE_PROD) ? (double _Complex)1.0 : (double _Complex)0.0; break;
+            default: acc_init = false; break;
+            }
+
+            int64_t indices[64] = {0};
+            bool done = false;
+            for (int64_t run = 0; run < total_runs && !done; run++) {
+                int64_t off = 0;
+                if (split_dim >= 0) {
+                    for (int i = 0; i <= split_dim; i++) {
+                        off += indices[i] * stride[i];
+                    }
+                }
+                for (int v = 0; v < n_vars; v++) {
+                    run_ptrs[v] = (const unsigned char*)vars_block[v] + (size_t)off * var_sizes[v];
+                }
+                me_scalar run_out;
+                rc = me_eval(expr, run_ptrs, n_vars, &run_out, (int)run_len, params);
+                if (rc != ME_EVAL_SUCCESS) {
+                    return rc;
+                }
+
+                me_scalar run_val;
+                read_scalar(&run_out, output_type, &run_val);
+
+                if (!acc_init) {
+                    if (output_type == ME_FLOAT32) {
+                        acc.f64 = (double)run_val.f32;
+                    }
+                    else if (output_type == ME_FLOAT64) {
+                        acc.f64 = run_val.f64;
+                    }
+                    else {
+                        acc = run_val;
+                    }
+                    acc_init = true;
+                }
+                else {
+                    switch (rkind) {
+                    case ME_REDUCE_SUM:
+                        switch (output_type) {
+                        case ME_INT8:
+                        case ME_INT16:
+                        case ME_INT32:
+                        case ME_INT64: acc.i64 += run_val.i64; break;
+                        case ME_UINT8:
+                        case ME_UINT16:
+                        case ME_UINT32:
+                        case ME_UINT64: acc.u64 += run_val.u64; break;
+                        case ME_FLOAT32: acc.f64 += (double)run_val.f32; break;
+                        case ME_FLOAT64: acc.f64 += run_val.f64; break;
+                        case ME_COMPLEX64: acc.c64 += run_val.c64; break;
+                        case ME_COMPLEX128: acc.c128 += run_val.c128; break;
+                        default: break;
+                        }
+                        break;
+                    case ME_REDUCE_PROD:
+                        switch (output_type) {
+                        case ME_INT8:
+                        case ME_INT16:
+                        case ME_INT32:
+                        case ME_INT64: acc.i64 *= run_val.i64; break;
+                        case ME_UINT8:
+                        case ME_UINT16:
+                        case ME_UINT32:
+                        case ME_UINT64: acc.u64 *= run_val.u64; break;
+                        case ME_FLOAT32: acc.f64 *= (double)run_val.f32; break;
+                        case ME_FLOAT64: acc.f64 *= run_val.f64; break;
+                        case ME_COMPLEX64: acc.c64 *= run_val.c64; break;
+                        case ME_COMPLEX128: acc.c128 *= run_val.c128; break;
+                        default: break;
+                        }
+                        break;
+                    case ME_REDUCE_MIN:
+                        switch (output_type) {
+                        case ME_INT8:
+                        case ME_INT16:
+                        case ME_INT32:
+                        case ME_INT64: if (run_val.i64 < acc.i64) acc.i64 = run_val.i64; break;
+                        case ME_UINT8:
+                        case ME_UINT16:
+                        case ME_UINT32:
+                        case ME_UINT64: if (run_val.u64 < acc.u64) acc.u64 = run_val.u64; break;
+                        case ME_FLOAT32:
+                            if (run_val.f32 != run_val.f32) { acc.f64 = NAN; done = true; }
+                            else if (run_val.f32 < (float)acc.f64) acc.f64 = (double)run_val.f32;
+                            break;
+                        case ME_FLOAT64:
+                            if (run_val.f64 != run_val.f64) { acc.f64 = NAN; done = true; }
+                            else if (run_val.f64 < acc.f64) acc.f64 = run_val.f64;
+                            break;
+                        default: break;
+                        }
+                        break;
+                    case ME_REDUCE_MAX:
+                        switch (output_type) {
+                        case ME_INT8:
+                        case ME_INT16:
+                        case ME_INT32:
+                        case ME_INT64: if (run_val.i64 > acc.i64) acc.i64 = run_val.i64; break;
+                        case ME_UINT8:
+                        case ME_UINT16:
+                        case ME_UINT32:
+                        case ME_UINT64: if (run_val.u64 > acc.u64) acc.u64 = run_val.u64; break;
+                        case ME_FLOAT32:
+                            if (run_val.f32 != run_val.f32) { acc.f64 = NAN; done = true; }
+                            else if (run_val.f32 > (float)acc.f64) acc.f64 = (double)run_val.f32;
+                            break;
+                        case ME_FLOAT64:
+                            if (run_val.f64 != run_val.f64) { acc.f64 = NAN; done = true; }
+                            else if (run_val.f64 > acc.f64) acc.f64 = run_val.f64;
+                            break;
+                        default: break;
+                        }
+                        break;
+                    case ME_REDUCE_ANY:
+                        if (output_type == ME_BOOL) {
+                            acc.b = acc.b || run_val.b;
+                            if (acc.b) done = true;
+                        }
+                        break;
+                    case ME_REDUCE_ALL:
+                        if (output_type == ME_BOOL) {
+                            acc.b = acc.b && run_val.b;
+                            if (!acc.b) done = true;
+                        }
+                        break;
+                    default:
+                        break;
+                    }
+                }
+
+                if (split_dim >= 0) {
+                    for (int i = split_dim; i >= 0; i--) {
+                        indices[i]++;
+                        if (indices[i] < valid_len[i]) break;
+                        indices[i] = 0;
+                    }
+                }
+            }
+
+            if (output_type == ME_FLOAT32) {
+                acc.f32 = (float)acc.f64;
+            }
+            write_scalar(output_block, output_type, output_type, &acc);
+            return ME_EVAL_SUCCESS;
+        }
+        else {
+            memset(output_block, 0, (size_t)padded_items * item_size);
+            int64_t indices[64] = {0};
+            for (int64_t run = 0; run < total_runs; run++) {
+                int64_t off = 0;
+                if (split_dim >= 0) {
+                    for (int i = 0; i <= split_dim; i++) {
+                        off += indices[i] * stride[i];
+                    }
+                }
+                for (int v = 0; v < n_vars; v++) {
+                    run_ptrs[v] = (const unsigned char*)vars_block[v] + (size_t)off * var_sizes[v];
+                }
+                void* out_ptr = (unsigned char*)output_block + (size_t)off * item_size;
+                rc = me_eval(expr, run_ptrs, n_vars, out_ptr, (int)run_len, params);
+                if (rc != ME_EVAL_SUCCESS) {
+                    return rc;
+                }
+                if (split_dim >= 0) {
+                    for (int i = split_dim; i >= 0; i--) {
+                        indices[i]++;
+                        if (indices[i] < valid_len[i]) break;
+                        indices[i] = 0;
+                    }
+                }
+            }
             return ME_EVAL_SUCCESS;
         }
     }
