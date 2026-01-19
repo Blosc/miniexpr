@@ -270,6 +270,38 @@ typedef union {
     double _Complex c128;
 } me_scalar;
 
+static float me_crealf(float _Complex v) {
+#if defined(_MSC_VER)
+    return __real__ v;
+#else
+    return crealf(v);
+#endif
+}
+
+static float me_cimagf(float _Complex v) {
+#if defined(_MSC_VER)
+    return __imag__ v;
+#else
+    return cimagf(v);
+#endif
+}
+
+static double me_creal(double _Complex v) {
+#if defined(_MSC_VER)
+    return __real__ v;
+#else
+    return creal(v);
+#endif
+}
+
+static double me_cimag(double _Complex v) {
+#if defined(_MSC_VER)
+    return __imag__ v;
+#else
+    return cimag(v);
+#endif
+}
+
 static void write_scalar(void* out, me_dtype out_type, me_dtype in_type, const me_scalar* v) {
     if (out_type == in_type) {
         switch (out_type) {
@@ -304,8 +336,8 @@ static void write_scalar(void* out, me_dtype out_type, me_dtype in_type, const m
         case ME_UINT64: *(bool*)out = v->u64 != 0; break;
         case ME_FLOAT32: *(bool*)out = v->f32 != 0.0f; break;
         case ME_FLOAT64: *(bool*)out = v->f64 != 0.0; break;
-        case ME_COMPLEX64: *(bool*)out = (crealf(v->c64) != 0.0f || cimagf(v->c64) != 0.0f); break;
-        case ME_COMPLEX128: *(bool*)out = (creal(v->c128) != 0.0 || cimag(v->c128) != 0.0); break;
+        case ME_COMPLEX64: *(bool*)out = (me_crealf(v->c64) != 0.0f || me_cimagf(v->c64) != 0.0f); break;
+        case ME_COMPLEX128: *(bool*)out = (me_creal(v->c128) != 0.0 || me_cimag(v->c128) != 0.0); break;
         default: *(bool*)out = false; break;
         }
         break;
@@ -749,7 +781,7 @@ static bool reduce_strided_variable(const me_expr* expr, const void** vars_block
         }
         case ME_COMPLEX64: {
             float _Complex v = ((const float _Complex*)base)[off];
-            bool nonzero = (crealf(v) != 0.0f || cimagf(v) != 0.0f);
+            bool nonzero = (me_crealf(v) != 0.0f || me_cimagf(v) != 0.0f);
             if (rkind == ME_REDUCE_ANY) { if (nonzero) { acc.b = true; goto done_reduce; } }
             else if (rkind == ME_REDUCE_ALL) { if (!nonzero) { acc.b = false; goto done_reduce; } }
             else if (rkind == ME_REDUCE_PROD) acc.c64 *= v;
@@ -758,7 +790,7 @@ static bool reduce_strided_variable(const me_expr* expr, const void** vars_block
         }
         case ME_COMPLEX128: {
             double _Complex v = ((const double _Complex*)base)[off];
-            bool nonzero = (creal(v) != 0.0 || cimag(v) != 0.0);
+            bool nonzero = (me_creal(v) != 0.0 || me_cimag(v) != 0.0);
             if (rkind == ME_REDUCE_ANY) { if (nonzero) { acc.b = true; goto done_reduce; } }
             else if (rkind == ME_REDUCE_ALL) { if (!nonzero) { acc.b = false; goto done_reduce; } }
             else if (rkind == ME_REDUCE_PROD) acc.c128 *= v;
