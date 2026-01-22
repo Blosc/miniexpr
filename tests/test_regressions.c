@@ -943,6 +943,135 @@ static int test_sum_comparison_explicit_output(void) {
     return passed;
 }
 
+static int test_sum_where_select(void) {
+    printf("\nTest: sum(where(a < b, b, a)) with float32 inputs\n");
+    printf("======================================================================\n");
+
+    const int nitems = 1000;
+    float *a = (float *)malloc((size_t)nitems * sizeof(float));
+    float *b = (float *)malloc((size_t)nitems * sizeof(float));
+    if (!a || !b) {
+        printf("  ❌ FAILED: malloc failed\n");
+        free(a);
+        free(b);
+        return 0;
+    }
+
+    double expected = 0.0;
+    for (int i = 0; i < nitems; i++) {
+        a[i] = (float)i / (float)(nitems - 1);
+        b[i] = (float)(nitems - 1 - i) / (float)(nitems - 1);
+        expected += (a[i] < b[i]) ? b[i] : a[i];
+    }
+
+    me_variable vars[] = {
+        {"a", ME_FLOAT32},
+        {"b", ME_FLOAT32},
+    };
+    int err = 0;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("sum(where(a < b, b, a))", vars, 2, ME_FLOAT64, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        free(a);
+        free(b);
+        return 0;
+    }
+
+    const void *var_ptrs[] = {a, b};
+    double output = 0.0;
+    ME_EVAL_CHECK(expr, var_ptrs, 2, &output, nitems);
+
+    double diff = fabs(output - expected);
+#ifdef __FAST_MATH__
+    const double tolerance = 1e-4;
+#else
+    const double tolerance = 1e-5;
+#endif
+
+    int passed = 1;
+    if (diff > tolerance) {
+        printf("  ❌ FAILED: output=%.9f expected=%.9f diff=%.9e\n", output, expected, diff);
+        passed = 0;
+    } else {
+        printf("  ✅ PASS\n");
+    }
+
+    me_free(expr);
+    free(a);
+    free(b);
+    return passed;
+}
+
+static int test_sum_where_select_mixed_types(void) {
+    printf("\nTest: sum(where(b < a, b, a)) with float32/int32 inputs (ME_AUTO)\n");
+    printf("======================================================================\n");
+
+    const int nitems = 1000;
+    float *a = (float *)malloc((size_t)nitems * sizeof(float));
+    int32_t *b = (int32_t *)malloc((size_t)nitems * sizeof(int32_t));
+    if (!a || !b) {
+        printf("  ❌ FAILED: malloc failed\n");
+        free(a);
+        free(b);
+        return 0;
+    }
+
+    double expected = 0.0;
+    for (int i = 0; i < nitems; i++) {
+        int r = i % 10;
+        a[i] = (float)r + 0.25f;
+        b[i] = (int32_t)(9 - r);
+        expected += ((double)b[i] < (double)a[i]) ? (double)b[i] : (double)a[i];
+    }
+
+    me_variable vars[] = {
+        {"a", ME_FLOAT32},
+        {"b", ME_INT32},
+    };
+    int err = 0;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("sum(where(b < a, b, a))", vars, 2, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        free(a);
+        free(b);
+        return 0;
+    }
+
+    me_dtype out_dtype = me_get_dtype(expr);
+    if (out_dtype != ME_FLOAT64) {
+        printf("  ❌ FAILED: expected output dtype ME_FLOAT64, got %d\n", out_dtype);
+        me_free(expr);
+        free(a);
+        free(b);
+        return 0;
+    }
+
+    const void *var_ptrs[] = {a, b};
+    double output = 0.0;
+    ME_EVAL_CHECK(expr, var_ptrs, 2, &output, nitems);
+
+    double diff = fabs(output - expected);
+#ifdef __FAST_MATH__
+    const double tolerance = 1e-4;
+#else
+    const double tolerance = 1e-6;
+#endif
+    int passed = 1;
+    if (diff > tolerance) {
+        printf("  ❌ FAILED: output=%.9f expected=%.9f diff=%.9e\n", output, expected, diff);
+        passed = 0;
+    } else {
+        printf("  ✅ PASS\n");
+    }
+
+    me_free(expr);
+    free(a);
+    free(b);
+    return passed;
+}
+
 static int test_log_int_promotes_output(void) {
     printf("\nTest: log(int) promotes to float output (ME_AUTO)\n");
     printf("======================================================================\n");
@@ -1241,6 +1370,8 @@ int main() {
     printf("  - scalar constant operations\n");
     printf("  - conj on real inputs preserves dtype\n");
     printf("  - sum(comparison) with explicit output dtype\n");
+    printf("  - sum(where(condition, x, y)) with comparison predicate\n");
+    printf("  - sum(where(condition, x, y)) with mixed input dtypes\n");
     printf("  - log(int) promotes to float output\n");
     printf("  - invalid dtype returns explicit error\n");
     printf("  - ceil(int) preserves values\n");
@@ -1291,6 +1422,12 @@ int main() {
 
     total++;
     if (test_sum_comparison_explicit_output()) passed++;
+
+    total++;
+    if (test_sum_where_select()) passed++;
+
+    total++;
+    if (test_sum_where_select_mixed_types()) passed++;
 
     total++;
     if (test_log_int_promotes_output()) passed++;

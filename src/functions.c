@@ -2790,7 +2790,8 @@ static me_expr* base(state* s) {
             int i;
             for (i = 0; i < arity; i++) {
                 next_token(s);
-                ret->parameters[i] = expr(s);
+                /* Allow full comparison expressions inside multi-arg function calls. */
+                ret->parameters[i] = comparison(s);
                 CHECK_NULL(ret->parameters[i], me_free(ret));
 
                 if (s->type != TOK_SEP) {
