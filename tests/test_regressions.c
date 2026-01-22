@@ -1072,6 +1072,184 @@ static int test_sum_where_select_mixed_types(void) {
     return passed;
 }
 
+static int test_where_select(void) {
+    printf("\nTest: where(a < b, b, a) with float32 inputs (ME_AUTO)\n");
+    printf("======================================================================\n");
+
+    const int nitems = 1000;
+    float *a = (float *)malloc((size_t)nitems * sizeof(float));
+    float *b = (float *)malloc((size_t)nitems * sizeof(float));
+    float *expected = (float *)malloc((size_t)nitems * sizeof(float));
+    if (!a || !b || !expected) {
+        printf("  ❌ FAILED: malloc failed\n");
+        free(a);
+        free(b);
+        free(expected);
+        return 0;
+    }
+
+    for (int i = 0; i < nitems; i++) {
+        a[i] = (float)i / (float)(nitems - 1);
+        b[i] = (float)(nitems - 1 - i) / (float)(nitems - 1);
+        expected[i] = (a[i] < b[i]) ? b[i] : a[i];
+    }
+
+    me_variable vars[] = {
+        {"a", ME_FLOAT32},
+        {"b", ME_FLOAT32},
+    };
+    int err = 0;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("where(a < b, b, a)", vars, 2, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        free(a);
+        free(b);
+        free(expected);
+        return 0;
+    }
+
+    me_dtype out_dtype = me_get_dtype(expr);
+    if (out_dtype != ME_FLOAT32) {
+        printf("  ❌ FAILED: expected output dtype ME_FLOAT32, got %d\n", out_dtype);
+        me_free(expr);
+        free(a);
+        free(b);
+        free(expected);
+        return 0;
+    }
+
+    const void *var_ptrs[] = {a, b};
+    float *output = (float *)malloc((size_t)nitems * sizeof(float));
+    if (!output) {
+        printf("  ❌ FAILED: malloc failed\n");
+        me_free(expr);
+        free(a);
+        free(b);
+        free(expected);
+        return 0;
+    }
+
+    ME_EVAL_CHECK(expr, var_ptrs, 2, output, nitems);
+
+    int passed = 1;
+    float max_diff = 0.0f;
+#ifdef __FAST_MATH__
+    const float tolerance = 1e-4f;
+#else
+    const float tolerance = 1e-6f;
+#endif
+    for (int i = 0; i < nitems; i++) {
+        float diff = fabsf(output[i] - expected[i]);
+        if (diff > max_diff) max_diff = diff;
+        if (diff > tolerance) {
+            passed = 0;
+        }
+    }
+
+    if (passed) {
+        printf("  ✅ PASS\n");
+    } else {
+        printf("  ❌ FAIL (max diff: %.9f)\n", max_diff);
+    }
+
+    me_free(expr);
+    free(a);
+    free(b);
+    free(expected);
+    free(output);
+    return passed;
+}
+
+static int test_where_float32_math(void) {
+    printf("\nTest: where(a < b, a + b, a - b) with float32 inputs (ME_AUTO)\n");
+    printf("======================================================================\n");
+
+    const int nitems = 512;
+    float *a = (float *)malloc((size_t)nitems * sizeof(float));
+    float *b = (float *)malloc((size_t)nitems * sizeof(float));
+    float *expected = (float *)malloc((size_t)nitems * sizeof(float));
+    if (!a || !b || !expected) {
+        printf("  ❌ FAILED: malloc failed\n");
+        free(a);
+        free(b);
+        free(expected);
+        return 0;
+    }
+
+    for (int i = 0; i < nitems; i++) {
+        a[i] = (float)i * 0.25f;
+        b[i] = (float)(nitems - 1 - i) * 0.125f;
+        expected[i] = (a[i] < b[i]) ? (a[i] + b[i]) : (a[i] - b[i]);
+    }
+
+    me_variable vars[] = {
+        {"a", ME_FLOAT32},
+        {"b", ME_FLOAT32},
+    };
+    int err = 0;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("where(a < b, a + b, a - b)", vars, 2, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        free(a);
+        free(b);
+        free(expected);
+        return 0;
+    }
+
+    me_dtype out_dtype = me_get_dtype(expr);
+    if (out_dtype != ME_FLOAT32) {
+        printf("  ❌ FAILED: expected output dtype ME_FLOAT32, got %d\n", out_dtype);
+        me_free(expr);
+        free(a);
+        free(b);
+        free(expected);
+        return 0;
+    }
+
+    const void *var_ptrs[] = {a, b};
+    float *output = (float *)malloc((size_t)nitems * sizeof(float));
+    if (!output) {
+        printf("  ❌ FAILED: malloc failed\n");
+        me_free(expr);
+        free(a);
+        free(b);
+        free(expected);
+        return 0;
+    }
+
+    ME_EVAL_CHECK(expr, var_ptrs, 2, output, nitems);
+
+    int passed = 1;
+    float max_diff = 0.0f;
+#ifdef __FAST_MATH__
+    const float tolerance = 1e-4f;
+#else
+    const float tolerance = 1e-6f;
+#endif
+    for (int i = 0; i < nitems; i++) {
+        float diff = fabsf(output[i] - expected[i]);
+        if (diff > max_diff) max_diff = diff;
+        if (diff > tolerance) {
+            passed = 0;
+        }
+    }
+
+    if (passed) {
+        printf("  ✅ PASS\n");
+    } else {
+        printf("  ❌ FAIL (max diff: %.9f)\n", max_diff);
+    }
+
+    me_free(expr);
+    free(a);
+    free(b);
+    free(expected);
+    free(output);
+    return passed;
+}
+
 static int test_log_int_promotes_output(void) {
     printf("\nTest: log(int) promotes to float output (ME_AUTO)\n");
     printf("======================================================================\n");
@@ -1372,6 +1550,8 @@ int main() {
     printf("  - sum(comparison) with explicit output dtype\n");
     printf("  - sum(where(condition, x, y)) with comparison predicate\n");
     printf("  - sum(where(condition, x, y)) with mixed input dtypes\n");
+    printf("  - where(condition, x, y) returns array output\n");
+    printf("  - where(condition, a + b, a - b) preserves float32 output\n");
     printf("  - log(int) promotes to float output\n");
     printf("  - invalid dtype returns explicit error\n");
     printf("  - ceil(int) preserves values\n");
@@ -1428,6 +1608,12 @@ int main() {
 
     total++;
     if (test_sum_where_select_mixed_types()) passed++;
+
+    total++;
+    if (test_where_select()) passed++;
+
+    total++;
+    if (test_where_float32_math()) passed++;
 
     total++;
     if (test_log_int_promotes_output()) passed++;
