@@ -4,10 +4,14 @@ This directory contains practical examples demonstrating various features and us
 
 ## Quick Start
 
-To build and run all examples:
+From the repository root, build and run all examples:
 
 ```bash
-make examples
+mkdir -p build
+cd build
+cmake ..
+make -j
+ctest
 ```
 
 To run a specific example:
@@ -253,7 +257,48 @@ Chunk size matters enormously for parallel performance:
 
 ---
 
+### 09_reduction_expressions.c
+**Reductions inside larger expressions**
+
+- **What it demonstrates**: Reductions over expressions and reductions used inside larger expressions
+- **Expressions**: `sum(x + 1)`, `x + sum(x)`
+- **Concepts**: Reduction arguments, scalar broadcast
+- **Best for**: Mixing aggregate values with elementwise math
+
+**Run it:**
+```bash
+./build/09_reduction_expressions
+```
+
+---
+
+### 10_boolean_logical_ops.c
+**Logical operators on boolean arrays**
+
+- **What it demonstrates**: Logical semantics for `&`, `|`, `^`, and `~` on bool arrays
+- **Expressions**: `a & b`, `a | b`, `a ^ b`, `~a`, `(o0 > 0.5) & (o1 > 10000)`
+- **Concepts**: ME_BOOL output, boolean masks, comparison composition
+- **Best for**: Masking, filtering, conditional logic
+
+**Run it:**
+```bash
+./build/10_boolean_logical_ops
+```
+
+---
+
 ## Building Examples
+
+### Using CMake (recommended)
+
+From the repo root:
+```bash
+mkdir -p build
+cd build
+cmake ..
+make -j
+ctest
+```
 
 ### Using the Makefile
 
@@ -265,9 +310,9 @@ EXAMPLE_BINS = $(patsubst examples/%.c,$(BUILDDIR)/%,$(EXAMPLE_SRCS))
 
 examples: $(EXAMPLE_BINS)
 
-$(BUILDDIR)/%: examples/%.c $(BUILDDIR)/miniexpr.o
+$(BUILDDIR)/%: examples/%.c $(BUILDDIR)/miniexpr.o $(BUILDDIR)/functions.o
 	@echo "Building example: $@"
-	$(CC) $(CFLAGS) -Isrc $< $(BUILDDIR)/miniexpr.o -o $@ -lm
+	$(CC) $(CFLAGS) -Isrc $< $(BUILDDIR)/miniexpr.o $(BUILDDIR)/functions.o -o $@ -lm
 ```
 
 Then run:
@@ -280,12 +325,12 @@ make examples
 Compile any example manually:
 
 ```bash
-gcc -O2 -Isrc examples/01_simple_expression.c build/miniexpr.o -o 01_simple_expression -lm
+gcc -O2 -Isrc examples/01_simple_expression.c build/miniexpr.o build/functions.o -o 01_simple_expression -lm
 ```
 
 For the parallel example (requires pthreads):
 ```bash
-gcc -O2 -Isrc examples/05_parallel_evaluation.c build/miniexpr.o -o 05_parallel_evaluation -lm -lpthread
+gcc -O2 -Isrc examples/05_parallel_evaluation.c build/miniexpr.o build/functions.o -o 05_parallel_evaluation -lm -lpthread
 ```
 
 ---
@@ -300,14 +345,13 @@ me_variable vars[] = {{"x"}, {"y"}};
 
 // 2. Compile expression
 int error;
-me_expr *expr = me_compile("x + y", vars, 2, ME_FLOAT64, &error);
-
+me_expr *expr = NULL;
+if (me_compile("x + y", vars, 2, ME_FLOAT64, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 // 3. Prepare data pointers
 const void *var_ptrs[] = {x_data, y_data};
 
 // 4. Evaluate
-me_eval(expr, var_ptrs, 2, result, n);
-
+if (me_eval(expr, var_ptrs, 2, result, n, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
 // 5. Cleanup
 me_free(expr);
 ```
@@ -315,8 +359,8 @@ me_free(expr);
 ### Error Handling Pattern
 
 ```c
-if (!expr) {
-    printf("Parse error at position %d\n", error);
+if (me_compile(expression, vars, var_count, dtype, &error, &expr) != ME_COMPILE_SUCCESS) {
+    printf("Compile error (pos=%d)\n", error);
     return 1;
 }
 ```
@@ -329,7 +373,7 @@ for (int chunk = 0; chunk < num_chunks; chunk++) {
     int size = min(CHUNK_SIZE, TOTAL_SIZE - offset);
 
     const void *var_ptrs[] = {&data[offset]};
-    me_eval(expr, var_ptrs, 1, &result[offset], size);
+    if (me_eval(expr, var_ptrs, 1, &result[offset], size, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
 }
 ```
 

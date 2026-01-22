@@ -37,11 +37,28 @@
 #ifndef MINIEXPR_H
 #define MINIEXPR_H
 
+#include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 
 
+#endif
+
+/* Internal eval block size (elements). Compile-time fixed. */
+#ifndef ME_EVAL_BLOCK_NITEMS
+#define ME_EVAL_BLOCK_NITEMS 4096
+#endif
+
+/* Maximum number of variables supported in a single expression. */
+#ifndef ME_MAX_VARS
+#define ME_MAX_VARS 128
+#endif
+
+/* Enable internal eval blocking for large chunks (1 = on, 0 = off). */
+#ifndef ME_EVAL_ENABLE_BLOCKING
+#define ME_EVAL_ENABLE_BLOCKING 1
 #endif
 
 
@@ -120,29 +137,93 @@ typedef struct me_variable {
  *          - ME_AUTO: All variables must specify their dtypes, output is inferred
  *          - Specific type: Either all variables are ME_AUTO (homogeneous, all use this type),
  *            OR all variables have explicit dtypes (heterogeneous, result cast to this type)
- *   error: Optional pointer to receive error position (0 on success, >0 on error)
+ *   error: Optional pointer to receive error position (0 on success, >0 on parse error)
+ *   out: Output pointer to receive the compiled expression
  *
- * Returns: Compiled expression ready for chunked evaluation, or NULL on error
+ * Returns: ME_COMPILE_SUCCESS (0) on success, or a negative ME_COMPILE_ERR_* code on failure
  *
  * Example 1 (simple - all same type):
  *   me_variable vars[] = {{"x"}, {"y"}};  // Both ME_AUTO
- *   me_expr *expr = me_compile("x + y", vars, 2, ME_FLOAT64, &err);
+ *   me_expr *expr = NULL;
+ *   if (me_compile("x + y", vars, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) { return; }
  *
  * Example 2 (mixed types with ME_AUTO):
  *   me_variable vars[] = {{"x", ME_INT32}, {"y", ME_FLOAT64}};
- *   me_expr *expr = me_compile("x + y", vars, 2, ME_AUTO, &err);
+ *   me_expr *expr = NULL;
+ *   if (me_compile("x + y", vars, 2, ME_AUTO, &err, &expr) != ME_COMPILE_SUCCESS) { return; }
  *
  * Example 3 (mixed types with explicit output):
  *   me_variable vars[] = {{"x", ME_INT32}, {"y", ME_FLOAT64}};
- *   me_expr *expr = me_compile("x + y", vars, 2, ME_FLOAT32, &err);
+ *   me_expr *expr = NULL;
+ *   if (me_compile("x + y", vars, 2, ME_FLOAT32, &err, &expr) != ME_COMPILE_SUCCESS) { return; }
  *   // Variables keep their types, result is cast to FLOAT32
  *
  *   // Later, provide data in same order as variable definitions
  *   const void *data[] = {x_array, y_array};  // x first, y second
- *   me_eval(expr, data, 2, output, nitems);
+ *   if (me_eval(expr, data, 2, output, nitems) != ME_EVAL_SUCCESS) { return; }
  */
-me_expr *me_compile(const char *expression, const me_variable *variables,
-                    int var_count, me_dtype dtype, int *error);
+int me_compile(const char *expression, const me_variable *variables,
+               int var_count, me_dtype dtype, int *error, me_expr **out);
+
+/* Compile expression with multidimensional metadata (b2nd-aware).
+ * Additional parameters describe the logical array shape, chunkshape and
+ * blockshape (all C-order). Padding is implied by these shapes.
+ *
+ * Parameters:
+ *   ndims: Number of dimensions.
+ *   shape: Logical array shape (length ndims).
+ *   chunkshape: Chunk shape (length ndims).
+ *   blockshape: Block shape inside a chunk (length ndims).
+ *
+ * Returns the same status codes as me_compile().
+ */
+int me_compile_nd(const char *expression, const me_variable *variables,
+                  int var_count, me_dtype dtype, int ndims,
+                  const int64_t *shape, const int32_t *chunkshape,
+                  const int32_t *blockshape, int *error, me_expr **out);
+
+/* Status codes for me_compile(). */
+typedef enum {
+    ME_COMPILE_SUCCESS = 0,
+    ME_COMPILE_ERR_OOM = -1,
+    ME_COMPILE_ERR_PARSE = -2,
+    ME_COMPILE_ERR_INVALID_ARG = -3,
+    ME_COMPILE_ERR_COMPLEX_UNSUPPORTED = -4,
+    ME_COMPILE_ERR_REDUCTION_INVALID = -5,
+    ME_COMPILE_ERR_VAR_MIXED = -6,
+    ME_COMPILE_ERR_VAR_UNSPECIFIED = -7,
+    ME_COMPILE_ERR_INVALID_ARG_TYPE = -8,
+    ME_COMPILE_ERR_MIXED_TYPE_NESTED = -9  /* Nested expressions with mixed types not supported */
+} me_compile_status;
+
+/* Status codes for me_eval(). */
+typedef enum {
+    ME_EVAL_SUCCESS = 0,
+    ME_EVAL_ERR_OOM = -1,
+    ME_EVAL_ERR_NULL_EXPR = -2,
+    ME_EVAL_ERR_TOO_MANY_VARS = -3,
+    ME_EVAL_ERR_VAR_MISMATCH = -4,
+    ME_EVAL_ERR_INVALID_ARG = -5
+} me_eval_status;
+
+/* SIMD precision options for transcendentals. */
+typedef enum {
+    ME_SIMD_ULP_DEFAULT = 0,
+    ME_SIMD_ULP_1 = 1,
+    ME_SIMD_ULP_3_5 = 2
+} me_simd_ulp_mode;
+
+#ifndef ME_SIMD_ULP_DEFAULT_MODE
+#define ME_SIMD_ULP_DEFAULT_MODE ME_SIMD_ULP_3_5
+#endif
+
+/* Optional per-call evaluation parameters. */
+typedef struct {
+    bool disable_simd;
+    me_simd_ulp_mode simd_ulp_mode;
+} me_eval_params;
+
+#define ME_EVAL_PARAMS_DEFAULTS ((me_eval_params){false, ME_SIMD_ULP_DEFAULT})
 
 /* Evaluates compiled expression with variable and output pointers.
  * This function can be safely called from multiple threads simultaneously on the
@@ -151,16 +232,37 @@ me_expr *me_compile(const char *expression, const me_variable *variables,
  *
  * Parameters:
  *   expr: Compiled expression (from me_compile)
- *   vars_chunk: Array of pointers to variable data chunks (same order as in me_compile)
+ *   vars_block: Array of pointers to variable data blocks (same order as in me_compile)
  *   n_vars: Number of variables (must match the number used in me_compile)
- *   output_chunk: Pointer to output buffer for this chunk
- *   chunk_nitems: Number of elements in this chunk
+ *   output_block: Pointer to output buffer for this block
+ *   block_nitems: Number of elements in this block. This is an element count
+ *                 (not bytes) and must correspond to the input arrays' element
+ *                 count; the output buffer must be sized for this many output
+ *                 elements (using the output dtype size).
+ *   params: Optional SIMD evaluation settings (NULL for defaults).
+ *
+ * Returns:
+ *   ME_EVAL_SUCCESS (0) on success, or a negative ME_EVAL_ERR_* code on failure.
  *
  * Use this function for both serial and parallel evaluation. It is thread-safe
  * and can be used from multiple threads to process different chunks simultaneously.
  */
-void me_eval(const me_expr *expr, const void **vars_chunk,
-             int n_vars, void *output_chunk, int chunk_nitems);
+int me_eval(const me_expr *expr, const void **vars_block,
+            int n_vars, void *output_block, int block_nitems,
+            const me_eval_params *params);
+
+/* Evaluate a padded b2nd block.
+ * Only the valid (unpadded) elements are computed; padded output is zeroed.
+ * nchunk and nblock are C-order indices for the chunk within the array
+ * and the block within that chunk.
+ * vars_block points to block buffers (not base arrays).
+ */
+int me_eval_nd(const me_expr *expr, const void **vars_block,
+               int n_vars, void *output_block, int block_nitems,
+               int64_t nchunk, int64_t nblock, const me_eval_params *params);
+
+/* Query number of valid (unpadded) elements for a given chunk/block. */
+int me_nd_valid_nitems(const me_expr *expr, int64_t nchunk, int64_t nblock, int64_t *valid_nitems);
 
 /* Prints the expression tree for debugging purposes. */
 void me_print(const me_expr *n);

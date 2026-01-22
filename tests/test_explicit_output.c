@@ -12,6 +12,9 @@
 #include <stdbool.h>
 #include <math.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 #define VECTOR_SIZE 10
 
@@ -50,9 +53,10 @@ void test_mixed_types_float32_output() {
     };
 
     int err;
-    me_expr *expr = me_compile("a + b", vars, 2, ME_FLOAT32, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a + b", vars, 2, ME_FLOAT32, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -67,7 +71,7 @@ void test_mixed_types_float32_output() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     int passed = 1;
     for (int i = 0; i < VECTOR_SIZE; i++) {
@@ -109,9 +113,10 @@ void test_float32_vars_float64_output() {
     };
 
     int err;
-    me_expr *expr = me_compile("x + y", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("x + y", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -126,7 +131,7 @@ void test_float32_vars_float64_output() {
     }
 
     const void *var_ptrs[] = {x, y};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     int passed = 1;
     for (int i = 0; i < VECTOR_SIZE; i++) {
@@ -164,9 +169,10 @@ void test_float32_with_constant_float64_output() {
     me_variable vars[] = {{"a", ME_FLOAT32}};
 
     int err;
-    me_expr *expr = me_compile("a + 3.0", vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a + 3.0", vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -181,7 +187,7 @@ void test_float32_with_constant_float64_output() {
     }
 
     const void *var_ptrs[] = {a};
-    me_eval(expr, var_ptrs, 1, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
 
     int passed = 1;
     for (int i = 0; i < VECTOR_SIZE; i++) {
@@ -222,9 +228,10 @@ void test_comparison_explicit_bool_output() {
     };
 
     int err;
-    me_expr *expr = me_compile("a > b", vars, 2, ME_BOOL, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a > b", vars, 2, ME_BOOL, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
@@ -239,7 +246,7 @@ void test_comparison_explicit_bool_output() {
     }
 
     const void *var_ptrs[] = {a, b};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     int passed = 1;
     for (int i = 0; i < VECTOR_SIZE; i++) {

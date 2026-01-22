@@ -42,14 +42,8 @@ int main() {
     // Compile the expression once for chunked evaluation
     // All variables will use ME_FLOAT64 since output dtype is specified
     int error;
-    me_expr *expr = me_compile("c * 9/5 + 32", vars, 1, ME_FLOAT64, &error);
-
-    if (!expr) {
-        printf("Parse error at position %d\n", error);
-        free(celsius);
-        free(fahrenheit);
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("c * 9/5 + 32", vars, 1, ME_FLOAT64, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     // Process in chunks
     printf("Processing %d elements in chunks of %d...\n",
@@ -67,12 +61,11 @@ int main() {
         }
 
         // Pointers to current chunk
-        const void *vars_chunk[] = {&celsius[offset]};
+        const void *vars_block[] = {&celsius[offset]};
         void *output_chunk = &fahrenheit[offset];
 
         // Evaluate this chunk
-        me_eval(expr, vars_chunk, 1, output_chunk, current_chunk_size);
-
+        if (me_eval(expr, vars_block, 1, output_chunk, current_chunk_size, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
         if ((chunk + 1) % 10 == 0) {
             printf("Processed chunk %d/%d (%.1f%%)\n",
                    chunk + 1, num_chunks,
@@ -150,12 +143,8 @@ int main() {
     me_variable vars[] = {{"x"}, {"y"}};
 
     int error;
-    me_expr *expr = me_compile("sqrt(x*x + y*y)", vars, 2, ME_FLOAT64, &error);
-
-    if (!expr) {
-        printf("Parse error\n");
-        goto cleanup;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("sqrt(x*x + y*y)", vars, 2, ME_FLOAT64, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     // Process file in chunks
     size_t total_processed = 0;
@@ -169,9 +158,8 @@ int main() {
         fread(y_chunk, sizeof(double), elements_read, input);
 
         // Process this chunk
-        const void *vars_chunk[] = {x_chunk, y_chunk};
-        me_eval(expr, vars_chunk, 2, result_chunk, elements_read);
-
+        const void *vars_block[] = {x_chunk, y_chunk};
+        if (me_eval(expr, vars_block, 2, result_chunk, elements_read, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
         // Write results
         fwrite(result_chunk, sizeof(double), elements_read, output);
 
@@ -227,24 +215,20 @@ int main() {
     me_variable vars[] = {{"P"}, {"V"}, {"n"}};
 
     int error;
-    me_expr *expr = me_compile("(P * V) / (n * 8.314)", vars, 3, ME_FLOAT32, &error);
-
-    if (!expr) {
-        printf("Parse error\n");
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("(P * V) / (n * 8.314)", vars, 3, ME_FLOAT32, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     // Process in chunks
     for (int offset = 0; offset < TOTAL; offset += CHUNK) {
         int size = (offset + CHUNK > TOTAL) ? (TOTAL - offset) : CHUNK;
 
-        const void *vars_chunk[] = {
+        const void *vars_block[] = {
             &pressure[offset],
             &volume[offset],
             &moles[offset]
         };
 
-        me_eval(expr, vars_chunk, 3, &temperature[offset], size);
+        if (me_eval(expr, vars_block, 3, &temperature[offset], size, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
     }
 
     printf("Computed temperatures for %d samples\n", TOTAL);
@@ -261,11 +245,52 @@ int main() {
 }
 ```
 
+## Multidimensional chunks with padding (b2nd-style)
+
+When working with b2nd arrays (chunk/ block grids with edge padding), use the `_nd` APIs:
+
+- `me_compile_nd(expr, vars, nvars, dtype, ndims, shape, chunkshape, blockshape, ...)`
+- `me_eval_nd(expr, vars_block, nvars, out_block, block_nitems, nchunk, nblock, params)`
+- `me_nd_valid_nitems(expr, nchunk, nblock, &valid)`
+
+Key points:
+1. `shape`, `chunkshape`, `blockshape` are C-order arrays (length = `ndims`).
+2. `nchunk` is the zero-based chunk index over the whole array (C-order); `nblock` is the block index inside that chunk (also C-order).
+3. Callers pass *padded* block buffers (size = `prod(blockshape)` elements). `me_eval_nd` computes only the valid elements and zero-fills the padded tail in the output.
+4. For expressions whose overall result is a scalar (reductions like `sum(x)` or `sum(x) + 1`), `output_block` only needs space for one item; `me_eval_nd` writes a single element and does not zero any tail.
+5. For best performance with padding, `me_eval_nd` packs valid elements, evaluates once, and scatters back; fully valid blocks still take a single fast path. Predicate reduction fast paths are limited to `any`/`all` comparisons; `sum(x == c)` falls back to the pack path.
+
+Minimal 2D example (padding on edges):
+
+```c
+int64_t shape[2]      = {5, 4};
+int32_t chunkshape[2] = {3, 3};
+int32_t blockshape[2] = {2, 2};
+me_variable vars[] = {{"x", ME_FLOAT64}, {"y", ME_FLOAT64}};
+me_expr *expr = NULL;
+int err;
+me_compile_nd("x + y", vars, 2, ME_FLOAT64, 2,
+              shape, chunkshape, blockshape, &err, &expr);
+
+/* Block buffers are always padded to prod(blockshape) */
+double x_block[4], y_block[4], out_block[4];
+const void *ptrs[] = {x_block, y_block};
+int64_t nchunk = 1; /* chunk (1,1) in C-order for this shape */
+int64_t nblock = 0; /* first block inside that chunk */
+
+int64_t valid = 0;
+me_nd_valid_nitems(expr, nchunk, nblock, &valid); /* tells how many outputs are real */
+me_eval_nd(expr, ptrs, 2, out_block, 4, nchunk, nblock, NULL);
+/* out_block[valid..] is zeroed */
+```
+
+See `examples/11_nd_padding_example.c` for a fuller walkthrough, and `bench/benchmark_nd_padding` to gauge performance with different padding patterns.
+
 ## Key Points
 
 1. **Compile once** - Create the expression once, then reuse it for all chunks
 2. **Manage chunk boundaries** - Handle the last chunk which might be smaller
-3. **Use const void* arrays** - Pass pointers to chunk starts via `vars_chunk`
+3. **Use const void* arrays** - Pass pointers to chunk starts via `vars_block`
 4. **Update pointers** - For each chunk, point to the correct offset in your arrays
 5. **Thread-safe** - `me_eval()` is safe for parallel processing from multiple threads
 

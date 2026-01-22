@@ -9,6 +9,8 @@ miniexpr automatically promotes types when necessary. The general promotion hier
 - Lower precision → Higher precision
 - Real types → Complex types (when complex is involved)
 
+**Windows note**: Complex types are not supported on Windows due to C99 complex ABI incompatibilities across MSVC/clang-cl. `me_compile()` will reject expressions that involve complex variables or complex outputs.
+
 ## Example 1: Integer Operations
 
 Let's compute the area of rectangles using 32-bit integers:
@@ -32,17 +34,12 @@ int main() {
 
     // Compile the expression
     int error;
-    me_expr *expr = me_compile("width * height", vars, 2, ME_INT32, &error);
-
-    if (!expr) {
-        printf("Parse error at position %d\n", error);
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("width * height", vars, 2, ME_INT32, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     // Evaluate
     const void *var_ptrs[] = {width, height};
-    me_eval(expr, var_ptrs, 2, area, n);
-
+    if (me_eval(expr, var_ptrs, 2, area, n, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
     // Print results
     printf("Rectangle Areas (INT32):\n");
     for (int i = 0; i < n; i++) {
@@ -85,16 +82,11 @@ int main() {
     // Circle area: π * r²
     // Using an approximation of π
     int error;
-    me_expr *expr = me_compile("3.14159265 * r * r", vars, 1, ME_FLOAT32, &error);
-
-    if (!expr) {
-        printf("Parse error at position %d\n", error);
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("3.14159265 * r * r", vars, 1, ME_FLOAT32, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     const void *var_ptrs[] = {radius};
-    me_eval(expr, var_ptrs, 1, area, n);
-
+    if (me_eval(expr, var_ptrs, 1, area, n, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
     printf("Circle Areas (FLOAT32):\n");
     for (int i = 0; i < n; i++) {
         printf("Radius=%.2f -> Area=%.2f\n", radius[i], area[i]);
@@ -145,16 +137,11 @@ int main() {
     // Calculate total cost with 8% tax
     // Using ME_AUTO lets the library infer the result type (ME_FLOAT64)
     int error;
-    me_expr *expr = me_compile("items * price * 1.08", vars, 2, ME_AUTO, &error);
-
-    if (!expr) {
-        printf("Parse error at position %d\n", error);
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("items * price * 1.08", vars, 2, ME_AUTO, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     const void *var_ptrs[] = {items, price};
-    me_eval(expr, var_ptrs, 2, total, n);
-
+    if (me_eval(expr, var_ptrs, 2, total, n, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
     printf("Shopping Cart (Mixed Types):\n");
     for (int i = 0; i < n; i++) {
         printf("Items=%d × $%.2f = $%.2f (with tax)\n",
@@ -198,16 +185,11 @@ int main() {
     me_variable vars[] = {{"r"}, {"g"}, {"b"}};
 
     int error;
-    me_expr *expr = me_compile("0.299*r + 0.587*g + 0.114*b", vars, 3, ME_UINT8, &error);
-
-    if (!expr) {
-        printf("Parse error at position %d\n", error);
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("0.299*r + 0.587*g + 0.114*b", vars, 3, ME_UINT8, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     const void *var_ptrs[] = {red, green, blue};
-    me_eval(expr, var_ptrs, 3, gray, n);
-
+    if (me_eval(expr, var_ptrs, 3, gray, n, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
     printf("RGB to Grayscale (UINT8):\n");
     for (int i = 0; i < n; i++) {
         printf("RGB(%3d,%3d,%3d) -> Gray=%3d\n",
@@ -233,6 +215,10 @@ RGB( 32,192,128) -> Gray=136
 
 Comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`) can output boolean arrays. This is useful for filtering, masking, or conditional operations.
 
+For boolean arrays, the operators `&`, `|`, `^`, and `~` follow logical semantics
+(like NumPy's `logical_and/or/xor/not`). This makes it easy to combine comparison
+masks with boolean inputs.
+
 ```c
 #include <stdio.h>
 #include <stdbool.h>
@@ -255,16 +241,11 @@ int main() {
     };
 
     int error;
-    me_expr *expr = me_compile("a ** 2 == (a + b)", vars, 2, ME_BOOL, &error);
-
-    if (!expr) {
-        printf("Parse error at position %d\n", error);
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("a ** 2 == (a + b)", vars, 2, ME_BOOL, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     const void *var_ptrs[] = {a, b};
-    me_eval(expr, var_ptrs, 2, is_equal, n);
-
+    if (me_eval(expr, var_ptrs, 2, is_equal, n, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
     printf("Comparison Results (BOOL):\n");
     for (int i = 0; i < n; i++) {
         printf("a=%.1f: a² (%.1f) == a+b (%.1f) -> %s\n",
@@ -293,13 +274,15 @@ a=6.0: a² (36.0) == a+b (36.0) -> true
 **Method 1: Explicit variable dtypes with ME_BOOL output**
 ```c
 me_variable vars[] = {{"x", ME_FLOAT64}, {"y", ME_FLOAT64}};
-me_expr *expr = me_compile("x < y", vars, 2, ME_BOOL, &error);
+me_expr *expr = NULL;
+if (me_compile("x < y", vars, 2, ME_BOOL, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 ```
 
 **Method 2: ME_AUTO output (auto-infers ME_BOOL for comparisons)**
 ```c
 me_variable vars[] = {{"x", ME_FLOAT64}, {"y", ME_FLOAT64}};
-me_expr *expr = me_compile("x < y", vars, 2, ME_AUTO, &error);
+me_expr *expr = NULL;
+if (me_compile("x < y", vars, 2, ME_AUTO, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 // me_get_dtype(expr) == ME_BOOL  (automatically inferred)
 ```
 
@@ -329,16 +312,11 @@ int main() {
 
     // Explicit variable types + explicit output dtype
     int error;
-    me_expr *expr = me_compile("a + b", vars, 2, ME_FLOAT32, &error);
-
-    if (!expr) {
-        printf("Parse error at position %d\n", error);
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("a + b", vars, 2, ME_FLOAT32, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     const void *var_ptrs[] = {a, b};
-    me_eval(expr, var_ptrs, 2, result, 5);
-
+    if (me_eval(expr, var_ptrs, 2, result, 5, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
     printf("Mixed Types with FLOAT32 Output:\n");
     for (int i = 0; i < 5; i++) {
         printf("a=%d + b=%.1f = %.2f (FLOAT32)\n", a[i], b[i], result[i]);

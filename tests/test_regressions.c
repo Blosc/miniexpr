@@ -1,8 +1,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <complex.h>
 #include <string.h>
+#include <stdint.h>
 #include "miniexpr.h"
+#include "minctest.h"
+
+#if defined(_MSC_VER) && defined(__clang__)
+#define ME_CREAL(x) __builtin_creal(x)
+#define ME_CIMAG(x) __builtin_cimag(x)
+#else
+#define ME_CREAL(x) creal(x)
+#define ME_CIMAG(x) cimag(x)
+#endif
+
+
 
 #define SMALL_SIZE 10
 #define LARGE_SIZE 100
@@ -30,9 +43,10 @@ int test_arctan2_with_scalar_constant(const char *description, int size, float s
     me_variable vars[] = {{"x", ME_FLOAT32}};
     int err;
     // Use ME_AUTO - following NumPy conventions, float constants match variable type (FLOAT32)
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 1, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("✗ COMPILATION FAILED with error code: %d\n", err);
         free(input);
         return 0;
@@ -41,7 +55,7 @@ int test_arctan2_with_scalar_constant(const char *description, int size, float s
     // Following NumPy conventions, float constants match variable type, so result is FLOAT32
     const void *var_ptrs[] = {input};
     float *result = malloc(size * sizeof(float));
-    me_eval(expr, var_ptrs, 1, result, size);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, size);
 
     float *expected = malloc(size * sizeof(float));
     for (int i = 0; i < size; i++) {
@@ -50,10 +64,15 @@ int test_arctan2_with_scalar_constant(const char *description, int size, float s
 
     int passed = 1;
     float max_diff = 0.0f;
+#ifdef __FAST_MATH__
+    const float tolerance = 1e-4f;
+#else
+    const float tolerance = 1e-5f;
+#endif
     for (int i = 0; i < size; i++) {
         float diff = fabsf(result[i] - expected[i]);
         if (diff > max_diff) max_diff = diff;
-        if (diff > 1e-5f) {
+        if (diff > tolerance) {
             passed = 0;
         }
     }
@@ -102,9 +121,10 @@ int test_arctan2_with_two_arrays(const char *description, int size, float scalar
 
     me_variable vars[] = {{"x", ME_FLOAT32}, {"y", ME_FLOAT32}};
     int err;
-    me_expr *expr = me_compile("arctan2(x, y)", vars, 2, ME_FLOAT32, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("arctan2(x, y)", vars, 2, ME_FLOAT32, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("✗ COMPILATION FAILED with error code: %d\n", err);
         free(input1);
         free(input2);
@@ -114,7 +134,7 @@ int test_arctan2_with_two_arrays(const char *description, int size, float scalar
     const void *var_ptrs[] = {input1, input2};
     float *result = malloc(size * sizeof(float));
 
-    me_eval(expr, var_ptrs, 2, result, size);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, size);
 
     float *expected = malloc(size * sizeof(float));
     for (int i = 0; i < size; i++) {
@@ -123,10 +143,15 @@ int test_arctan2_with_two_arrays(const char *description, int size, float scalar
 
     int passed = 1;
     float max_diff = 0.0f;
+#ifdef __FAST_MATH__
+    const float tolerance = 1e-4f;
+#else
+    const float tolerance = 1e-5f;
+#endif
     for (int i = 0; i < size; i++) {
         float diff = fabsf(result[i] - expected[i]);
         if (diff > max_diff) max_diff = diff;
-        if (diff > 1e-5f) {
+        if (diff > tolerance) {
             passed = 0;
         }
     }
@@ -168,9 +193,10 @@ int test_arctan2_array_scalar_f64(const char *description, const char *expr_str,
 
     me_variable vars[] = {{"y", ME_FLOAT64}, {"x", ME_FLOAT64}};
     int err;
-    me_expr *expr = me_compile(expr_str, invert ? vars + 1 : vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, invert ? vars + 1 : vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error %d\n", err);
         return 0;
     }
@@ -178,7 +204,7 @@ int test_arctan2_array_scalar_f64(const char *description, const char *expr_str,
     const void *var_ptrs[] = {data};
     double result[CHUNK_SIZE];
 
-    me_eval(expr, var_ptrs, 1, result, CHUNK_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, CHUNK_SIZE);
 
     printf("  Results:\n");
     int passed = 1;
@@ -209,9 +235,10 @@ int test_pow_array_scalar_f64(const char *description, const char *expr_str,
 
     me_variable vars[] = {{"x", ME_FLOAT64}};
     int err;
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 1, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error %d\n", err);
         return 0;
     }
@@ -219,7 +246,7 @@ int test_pow_array_scalar_f64(const char *description, const char *expr_str,
     const void *var_ptrs[] = {data};
     double result[CHUNK_SIZE];
 
-    me_eval(expr, var_ptrs, 1, result, CHUNK_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, CHUNK_SIZE);
 
     printf("  Results:\n");
     int passed = 1;
@@ -255,9 +282,10 @@ int test_arctan2_complex_expr(const char *description, const char *expr_str,
 
     me_variable vars[] = {{"x", ME_FLOAT64}, {"y", ME_FLOAT64}};
     int err;
-    me_expr *expr = me_compile(expr_str, vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: Compilation error %d\n", err);
         return 0;
     }
@@ -265,7 +293,7 @@ int test_arctan2_complex_expr(const char *description, const char *expr_str,
     const void *var_ptrs[] = {x_data, y_data};
     double result[CHUNK_SIZE];
 
-    me_eval(expr, var_ptrs, 2, result, CHUNK_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, CHUNK_SIZE);
 
     printf("  Results:\n");
     int passed = 1;
@@ -308,9 +336,10 @@ int test_constant_type_f32(const char *description, const char *expr_str,
 
     me_variable vars[] = {{"a", ME_FLOAT32}};
     int err;
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 1, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("❌ COMPILATION FAILED (error %d)\n", err);
         return 0;
     }
@@ -333,7 +362,7 @@ int test_constant_type_f32(const char *description, const char *expr_str,
     const void *var_ptrs[] = {input};
     float result[SMALL_SIZE];  // Use float buffer for FLOAT32 result
 
-    me_eval(expr, var_ptrs, 1, result, SMALL_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, SMALL_SIZE);
 
     int passed = 1;
     printf("\nFirst 5 results:\n");
@@ -375,9 +404,10 @@ int test_scalar_constant(const char *description, const char *expr_str,
     me_variable vars[] = {{"a", ME_FLOAT32}};
     int err;
     // Use ME_AUTO - following NumPy conventions, float constants match variable type (FLOAT32)
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 1, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ COMPILATION FAILED (error %d)\n", err);
         return 0;
     }
@@ -388,7 +418,7 @@ int test_scalar_constant(const char *description, const char *expr_str,
 
     const void *var_ptrs[] = {input};
     float result[SMALL_SIZE];
-    me_eval(expr, var_ptrs, 1, result, SMALL_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, SMALL_SIZE);
 
     int passed = 1;
     printf("  Input     Result    Expected  Status\n");
@@ -446,9 +476,10 @@ int test_int64_large_constant(const char *description, int size) {
     me_variable vars[] = {{"a", ME_INT64}};
     int err;
     const char *expr_str = "(a + 90000.00001) + 1";
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 1, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ COMPILATION FAILED (error %d)\n", err);
         free(input);
         return 0;
@@ -473,7 +504,7 @@ int test_int64_large_constant(const char *description, int size) {
             free(input);
             return 0;
         }
-        me_eval(expr, var_ptrs, 1, result, size);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, result, size);
 
         // Compute expected values using double arithmetic.
         for (int i = 0; i < size; i++) {
@@ -504,7 +535,7 @@ int test_int64_large_constant(const char *description, int size) {
             free(input);
             return 0;
         }
-        me_eval(expr, var_ptrs, 1, result, size);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, result, size);
 
         for (int i = 0; i < size; i++) {
             float expected = (float)(((double)input[i] + 90000.00001) + 1.0);
@@ -537,7 +568,7 @@ int test_int64_large_constant(const char *description, int size) {
             free(input);
             return 0;
         }
-        me_eval(expr, var_ptrs, 1, result, size);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, result, size);
 
         for (int i = 0; i < size; i++) {
             double expected = ((double)input[i] + 90000.00001) + 1.0;
@@ -558,10 +589,6 @@ int test_int64_large_constant(const char *description, int size) {
         printf("  ❌ FAIL (max diff: %.12f)\n", max_diff);
     }
 
-    // The caller expects this test to surface the reported problem; return the
-    // actual pass/fail so it shows up in the overall summary. The external app
-    // that reported the issue used this expression and observed incorrect
-    // behaviour, so a failure here indicates the bug is present.
     return passed;
 }
 
@@ -588,9 +615,10 @@ int test_float32_array_float64_constants(const char *description, int size) {
     me_variable vars[] = {{"o0", ME_FLOAT32}};
     int err;
     const char *expr_str = "((o0 + 1067.3366832990887) + 0.2901221513748169)";
-    me_expr *expr = me_compile(expr_str, vars, 1, ME_AUTO, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 1, ME_AUTO, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ COMPILATION FAILED (error %d)\n", err);
         free(input);
         return 0;
@@ -606,6 +634,11 @@ int test_float32_array_float64_constants(const char *description, int size) {
 
     int passed = 1;
     float max_diff = 0.0f;
+#ifdef __FAST_MATH__
+    const float tolerance = 1e-4f;
+#else
+    const float tolerance = 1e-5f;
+#endif
 
     const void *var_ptrs[] = {input};
 
@@ -618,14 +651,14 @@ int test_float32_array_float64_constants(const char *description, int size) {
             free(input);
             return 0;
         }
-        me_eval(expr, var_ptrs, 1, result, size);
+        ME_EVAL_CHECK(expr, var_ptrs, 1, result, size);
 
         // Compute expected values using float32 arithmetic (NumPy behavior - constants converted to float32)
         for (int i = 0; i < size; i++) {
             float expected = ((float)input[i] + (float)1067.3366832990887) + (float)0.2901221513748169;
             float diff = fabsf(result[i] - expected);
             if (diff > max_diff) max_diff = diff;
-            if (diff > 1e-5f) passed = 0; // tolerance for float32
+            if (diff > tolerance) passed = 0; // tolerance for float32
         }
 
         printf("  Result (first 5):   ");
@@ -661,6 +694,177 @@ int test_float32_array_float64_constants(const char *description, int size) {
 }
 
 // ============================================================================
+// MIXED INT64 + FLOAT64 ADD
+// ============================================================================
+int test_mixed_int64_float64_add() {
+    printf("\nTest: mixed int64/float64 add returns float64 without NaNs\n");
+    printf("======================================================================\n");
+
+    int64_t a[SMALL_SIZE];
+    double b[SMALL_SIZE];
+    for (int i = 0; i < SMALL_SIZE; i++) {
+        a[i] = (int64_t)(i - 5);
+        b[i] = 1000.5 + (double)i * 0.25;
+    }
+
+    me_variable vars[] = {{"a", ME_INT64}, {"b", ME_FLOAT64}};
+    int err;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a + b", vars, 2, ME_FLOAT64, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ COMPILATION FAILED (error %d)\n", err);
+        return 0;
+    }
+
+    me_dtype out_dtype = me_get_dtype(expr);
+    if (out_dtype != ME_FLOAT64) {
+        printf("  ❌ FAILED: expected ME_FLOAT64 output, got %d\n", out_dtype);
+        me_free(expr);
+        return 0;
+    }
+
+    const void *var_ptrs[] = {a, b};
+    double result[SMALL_SIZE];
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, SMALL_SIZE);
+
+    int passed1 = 1;
+    double max_diff = 0.0;
+    for (int i = 0; i < SMALL_SIZE; i++) {
+        double expected = (double)a[i] + b[i];
+        if (isnan(result[i])) {
+            passed1 = 0;
+            continue;
+        }
+        double diff = fabs(result[i] - expected);
+        if (diff > max_diff) max_diff = diff;
+        if (diff > 1e-12) {
+            passed1 = 0;
+        }
+    }
+
+    if (passed1) {
+        printf("  ✅ PASS\n");
+    } else {
+        printf("  ❌ FAIL (max diff: %.12f)\n", max_diff);
+    }
+
+    me_free(expr);
+
+    return passed1;
+}
+
+int test_mixed_int64_float64_nested_add() {
+    printf("\nTest: float64 + (int64 + int64) nested add\n");
+    printf("======================================================================\n");
+
+    int64_t a[SMALL_SIZE];
+    double b[SMALL_SIZE];
+    for (int i = 0; i < SMALL_SIZE; i++) {
+        a[i] = (int64_t)(i - 5);
+        b[i] = 1000.5 + (double)i * 0.25;
+    }
+
+    me_variable vars[] = {{"a", ME_INT64}, {"b", ME_FLOAT64}};
+    int err = 0;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("b + (a + a)", vars, 2, ME_FLOAT64, &err, &expr);
+
+    int passed = 0;
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAIL: Compilation failed with error %d\n", rc_expr);
+    } else {
+        const void *var_ptrs[] = {a, b};
+        double result[SMALL_SIZE];
+        ME_EVAL_CHECK(expr, var_ptrs, 2, result, SMALL_SIZE);
+
+        int all_correct = 1;
+        double max_diff = 0.0;
+        for (int i = 0; i < SMALL_SIZE; i++) {
+            double expected = b[i] + (double)(a[i] + a[i]);
+            if (isnan(result[i])) {
+                all_correct = 0;
+                continue;
+            }
+            double diff = fabs(result[i] - expected);
+            if (diff > max_diff) max_diff = diff;
+            if (diff > 1e-12) {
+                all_correct = 0;
+            }
+        }
+
+        if (all_correct) {
+            printf("  ✅ PASS: Mixed-type nested expression works correctly\n");
+            passed = 1;
+        } else {
+            printf("  ❌ FAIL: Results incorrect (max diff: %.12f)\n", max_diff);
+        }
+        me_free(expr);
+    }
+
+    return passed;
+}
+
+int test_float32_int32_nested_add() {
+    printf("\nTest: float32 + (int32 + int32) nested add\n");
+    printf("======================================================================\n");
+
+    float a[SMALL_SIZE];
+    int32_t b[SMALL_SIZE];
+    int32_t c[SMALL_SIZE];
+    for (int i = 0; i < SMALL_SIZE; i++) {
+        a[i] = 10.5f + (float)i * 0.125f;
+        b[i] = i - 3;
+        c[i] = 2 * i + 1;
+    }
+
+    me_variable vars[] = {{"a", ME_FLOAT32}, {"b", ME_INT32}, {"c", ME_INT32}};
+    int err = 0;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a + (b + c)", vars, 3, ME_AUTO, &err, &expr);
+
+    int passed = 0;
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAIL: Compilation failed with error %d\n", rc_expr);
+    } else {
+        me_dtype out_dtype = me_get_dtype(expr);
+        if (out_dtype != ME_FLOAT64) {
+            printf("  ❌ FAIL: expected ME_FLOAT64 output, got %d\n", out_dtype);
+            me_free(expr);
+            return 0;
+        }
+
+        const void *var_ptrs[] = {a, b, c};
+        double result[SMALL_SIZE];
+        ME_EVAL_CHECK(expr, var_ptrs, 3, result, SMALL_SIZE);
+
+        int all_correct = 1;
+        double max_diff = 0.0;
+        for (int i = 0; i < SMALL_SIZE; i++) {
+            double expected = (double)a[i] + (double)(b[i] + c[i]);
+            if (isnan(result[i])) {
+                all_correct = 0;
+                continue;
+            }
+            double diff = fabs(result[i] - expected);
+            if (diff > max_diff) max_diff = diff;
+            if (diff > 1e-12) {
+                all_correct = 0;
+            }
+        }
+
+        if (all_correct) {
+            printf("  ✅ PASS: Mixed-type nested expression works correctly\n");
+            passed = 1;
+        } else {
+            printf("  ❌ FAIL: Results incorrect (max diff: %.12f)\n", max_diff);
+        }
+        me_free(expr);
+    }
+
+    return passed;
+}
+
+// ============================================================================
 // CONJ WITH REAL INPUT SHOULD PRESERVE FLOAT32
 // ============================================================================
 int test_conj_real_preserves_dtype() {
@@ -673,14 +877,15 @@ int test_conj_real_preserves_dtype() {
     me_variable vars[] = {{"a", ME_FLOAT32}};
 
     int err;
-    me_expr *expr = me_compile("conj(a)", vars, 1, ME_AUTO, &err);
-    if (!expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("conj(a)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  ❌ COMPILATION FAILED at position %d\n", err);
         return 0;
     }
 
     const void *var_ptrs[] = {a};
-    me_eval(expr, var_ptrs, 1, result, SMALL_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, SMALL_SIZE);
 
     int passed = 1;
     float max_diff = 0.0f;
@@ -704,6 +909,631 @@ int test_conj_real_preserves_dtype() {
 }
 
 // ============================================================================
+// REDUCTION + COMPARISON (EXPLICIT OUTPUT DTYPE)
+// ============================================================================
+
+static int test_sum_comparison_explicit_output(void) {
+    printf("\n=== Regression: sum(x != 0) with explicit output dtype ===\n");
+
+    int32_t data[] = {0, 1, 2, 0, 3, 0, 4, 5};
+    const int nitems = (int)(sizeof(data) / sizeof(data[0]));
+    me_variable vars[] = {{"x", ME_INT32}};
+    const void *var_ptrs[] = {data};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int rc_expr = me_compile("sum(x != 0)", vars, 1, ME_INT64, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 0;
+    }
+
+    int64_t output = 0;
+    ME_EVAL_CHECK(expr, var_ptrs, 1, &output, nitems);
+
+    int passed = 1;
+    if (output != 5) {
+        printf("  ❌ FAILED: expected 5, got %lld\n", (long long)output);
+        passed = 0;
+    } else {
+        printf("  ✅ PASS\n");
+    }
+
+    me_free(expr);
+    return passed;
+}
+
+static int test_sum_where_select(void) {
+    printf("\nTest: sum(where(a < b, b, a)) with float32 inputs\n");
+    printf("======================================================================\n");
+
+    const int nitems = 1000;
+    float *a = (float *)malloc((size_t)nitems * sizeof(float));
+    float *b = (float *)malloc((size_t)nitems * sizeof(float));
+    if (!a || !b) {
+        printf("  ❌ FAILED: malloc failed\n");
+        free(a);
+        free(b);
+        return 0;
+    }
+
+    double expected = 0.0;
+    for (int i = 0; i < nitems; i++) {
+        a[i] = (float)i / (float)(nitems - 1);
+        b[i] = (float)(nitems - 1 - i) / (float)(nitems - 1);
+        expected += (a[i] < b[i]) ? b[i] : a[i];
+    }
+
+    me_variable vars[] = {
+        {"a", ME_FLOAT32},
+        {"b", ME_FLOAT32},
+    };
+    int err = 0;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("sum(where(a < b, b, a))", vars, 2, ME_FLOAT64, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        free(a);
+        free(b);
+        return 0;
+    }
+
+    const void *var_ptrs[] = {a, b};
+    double output = 0.0;
+    ME_EVAL_CHECK(expr, var_ptrs, 2, &output, nitems);
+
+    double diff = fabs(output - expected);
+#ifdef __FAST_MATH__
+    const double tolerance = 1e-4;
+#else
+    const double tolerance = 1e-5;
+#endif
+
+    int passed = 1;
+    if (diff > tolerance) {
+        printf("  ❌ FAILED: output=%.9f expected=%.9f diff=%.9e\n", output, expected, diff);
+        passed = 0;
+    } else {
+        printf("  ✅ PASS\n");
+    }
+
+    me_free(expr);
+    free(a);
+    free(b);
+    return passed;
+}
+
+static int test_sum_where_select_mixed_types(void) {
+    printf("\nTest: sum(where(b < a, b, a)) with float32/int32 inputs (ME_AUTO)\n");
+    printf("======================================================================\n");
+
+    const int nitems = 1000;
+    float *a = (float *)malloc((size_t)nitems * sizeof(float));
+    int32_t *b = (int32_t *)malloc((size_t)nitems * sizeof(int32_t));
+    if (!a || !b) {
+        printf("  ❌ FAILED: malloc failed\n");
+        free(a);
+        free(b);
+        return 0;
+    }
+
+    double expected = 0.0;
+    for (int i = 0; i < nitems; i++) {
+        int r = i % 10;
+        a[i] = (float)r + 0.25f;
+        b[i] = (int32_t)(9 - r);
+        expected += ((double)b[i] < (double)a[i]) ? (double)b[i] : (double)a[i];
+    }
+
+    me_variable vars[] = {
+        {"a", ME_FLOAT32},
+        {"b", ME_INT32},
+    };
+    int err = 0;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("sum(where(b < a, b, a))", vars, 2, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        free(a);
+        free(b);
+        return 0;
+    }
+
+    me_dtype out_dtype = me_get_dtype(expr);
+    if (out_dtype != ME_FLOAT64) {
+        printf("  ❌ FAILED: expected output dtype ME_FLOAT64, got %d\n", out_dtype);
+        me_free(expr);
+        free(a);
+        free(b);
+        return 0;
+    }
+
+    const void *var_ptrs[] = {a, b};
+    double output = 0.0;
+    ME_EVAL_CHECK(expr, var_ptrs, 2, &output, nitems);
+
+    double diff = fabs(output - expected);
+#ifdef __FAST_MATH__
+    const double tolerance = 1e-4;
+#else
+    const double tolerance = 1e-6;
+#endif
+    int passed = 1;
+    if (diff > tolerance) {
+        printf("  ❌ FAILED: output=%.9f expected=%.9f diff=%.9e\n", output, expected, diff);
+        passed = 0;
+    } else {
+        printf("  ✅ PASS\n");
+    }
+
+    me_free(expr);
+    free(a);
+    free(b);
+    return passed;
+}
+
+static int test_where_select(void) {
+    printf("\nTest: where(a < b, b, a) with float32 inputs (ME_AUTO)\n");
+    printf("======================================================================\n");
+
+    const int nitems = 1000;
+    float *a = (float *)malloc((size_t)nitems * sizeof(float));
+    float *b = (float *)malloc((size_t)nitems * sizeof(float));
+    float *expected = (float *)malloc((size_t)nitems * sizeof(float));
+    if (!a || !b || !expected) {
+        printf("  ❌ FAILED: malloc failed\n");
+        free(a);
+        free(b);
+        free(expected);
+        return 0;
+    }
+
+    for (int i = 0; i < nitems; i++) {
+        a[i] = (float)i / (float)(nitems - 1);
+        b[i] = (float)(nitems - 1 - i) / (float)(nitems - 1);
+        expected[i] = (a[i] < b[i]) ? b[i] : a[i];
+    }
+
+    me_variable vars[] = {
+        {"a", ME_FLOAT32},
+        {"b", ME_FLOAT32},
+    };
+    int err = 0;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("where(a < b, b, a)", vars, 2, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        free(a);
+        free(b);
+        free(expected);
+        return 0;
+    }
+
+    me_dtype out_dtype = me_get_dtype(expr);
+    if (out_dtype != ME_FLOAT32) {
+        printf("  ❌ FAILED: expected output dtype ME_FLOAT32, got %d\n", out_dtype);
+        me_free(expr);
+        free(a);
+        free(b);
+        free(expected);
+        return 0;
+    }
+
+    const void *var_ptrs[] = {a, b};
+    float *output = (float *)malloc((size_t)nitems * sizeof(float));
+    if (!output) {
+        printf("  ❌ FAILED: malloc failed\n");
+        me_free(expr);
+        free(a);
+        free(b);
+        free(expected);
+        return 0;
+    }
+
+    ME_EVAL_CHECK(expr, var_ptrs, 2, output, nitems);
+
+    int passed = 1;
+    float max_diff = 0.0f;
+#ifdef __FAST_MATH__
+    const float tolerance = 1e-4f;
+#else
+    const float tolerance = 1e-6f;
+#endif
+    for (int i = 0; i < nitems; i++) {
+        float diff = fabsf(output[i] - expected[i]);
+        if (diff > max_diff) max_diff = diff;
+        if (diff > tolerance) {
+            passed = 0;
+        }
+    }
+
+    if (passed) {
+        printf("  ✅ PASS\n");
+    } else {
+        printf("  ❌ FAIL (max diff: %.9f)\n", max_diff);
+    }
+
+    me_free(expr);
+    free(a);
+    free(b);
+    free(expected);
+    free(output);
+    return passed;
+}
+
+static int test_where_float32_math(void) {
+    printf("\nTest: where(a < b, a + b, a - b) with float32 inputs (ME_AUTO)\n");
+    printf("======================================================================\n");
+
+    const int nitems = 512;
+    float *a = (float *)malloc((size_t)nitems * sizeof(float));
+    float *b = (float *)malloc((size_t)nitems * sizeof(float));
+    float *expected = (float *)malloc((size_t)nitems * sizeof(float));
+    if (!a || !b || !expected) {
+        printf("  ❌ FAILED: malloc failed\n");
+        free(a);
+        free(b);
+        free(expected);
+        return 0;
+    }
+
+    for (int i = 0; i < nitems; i++) {
+        a[i] = (float)i * 0.25f;
+        b[i] = (float)(nitems - 1 - i) * 0.125f;
+        expected[i] = (a[i] < b[i]) ? (a[i] + b[i]) : (a[i] - b[i]);
+    }
+
+    me_variable vars[] = {
+        {"a", ME_FLOAT32},
+        {"b", ME_FLOAT32},
+    };
+    int err = 0;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("where(a < b, a + b, a - b)", vars, 2, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        free(a);
+        free(b);
+        free(expected);
+        return 0;
+    }
+
+    me_dtype out_dtype = me_get_dtype(expr);
+    if (out_dtype != ME_FLOAT32) {
+        printf("  ❌ FAILED: expected output dtype ME_FLOAT32, got %d\n", out_dtype);
+        me_free(expr);
+        free(a);
+        free(b);
+        free(expected);
+        return 0;
+    }
+
+    const void *var_ptrs[] = {a, b};
+    float *output = (float *)malloc((size_t)nitems * sizeof(float));
+    if (!output) {
+        printf("  ❌ FAILED: malloc failed\n");
+        me_free(expr);
+        free(a);
+        free(b);
+        free(expected);
+        return 0;
+    }
+
+    ME_EVAL_CHECK(expr, var_ptrs, 2, output, nitems);
+
+    int passed = 1;
+    float max_diff = 0.0f;
+#ifdef __FAST_MATH__
+    const float tolerance = 1e-4f;
+#else
+    const float tolerance = 1e-6f;
+#endif
+    for (int i = 0; i < nitems; i++) {
+        float diff = fabsf(output[i] - expected[i]);
+        if (diff > max_diff) max_diff = diff;
+        if (diff > tolerance) {
+            passed = 0;
+        }
+    }
+
+    if (passed) {
+        printf("  ✅ PASS\n");
+    } else {
+        printf("  ❌ FAIL (max diff: %.9f)\n", max_diff);
+    }
+
+    me_free(expr);
+    free(a);
+    free(b);
+    free(expected);
+    free(output);
+    return passed;
+}
+
+static int test_log_int_promotes_output(void) {
+    printf("\nTest: log(int) promotes to float output (ME_AUTO)\n");
+    printf("======================================================================\n");
+
+    int32_t data[] = {1, 2, 3, 4, 5};
+    const int nitems = (int)(sizeof(data) / sizeof(data[0]));
+    me_variable vars[] = {{"x", ME_INT32}};
+    const void *var_ptrs[] = {data};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int rc_expr = me_compile("log(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 0;
+    }
+
+    me_dtype dtype = me_get_dtype(expr);
+    if (dtype != ME_FLOAT64) {
+        printf("  ❌ FAILED: expected output dtype ME_FLOAT64, got %d\n", dtype);
+        me_free(expr);
+        return 0;
+    }
+
+    double output[5];
+    ME_EVAL_CHECK(expr, var_ptrs, 1, output, nitems);
+
+    int passed = 1;
+    double max_diff = 0.0;
+    const double tolerance = 1e-12;
+    for (int i = 0; i < nitems; i++) {
+        double expected = log((double)data[i]);
+        double diff = fabs(output[i] - expected);
+        if (diff > max_diff) max_diff = diff;
+        if (diff > tolerance) {
+            passed = 0;
+        }
+    }
+
+    if (passed) {
+        printf("  ✅ PASS\n");
+    } else {
+        printf("  ❌ FAIL (max diff: %.12g)\n", max_diff);
+    }
+
+    me_free(expr);
+    return passed;
+}
+
+static int test_invalid_dtype_compile(void) {
+    printf("\nTest: invalid dtype returns ME_COMPILE_ERR_INVALID_ARG_TYPE\n");
+    printf("======================================================================\n");
+
+    int err = 0;
+    me_expr *expr = NULL;
+    me_variable vars[] = {{"x", (me_dtype)-1}};
+
+    int rc = me_compile("x + 1", vars, 1, ME_AUTO, &err, &expr);
+    int passed = 1;
+    if (rc != ME_COMPILE_ERR_INVALID_ARG_TYPE) {
+        printf("  ❌ FAILED: invalid variable dtype rc=%d\n", rc);
+        passed = 0;
+    } else {
+        printf("  ✅ PASS: invalid variable dtype\n");
+    }
+
+    vars[0].dtype = ME_INT32;
+    rc = me_compile("x + 1", vars, 1, (me_dtype)-1, &err, &expr);
+    if (rc != ME_COMPILE_ERR_INVALID_ARG_TYPE) {
+        printf("  ❌ FAILED: invalid output dtype rc=%d\n", rc);
+        passed = 0;
+    } else {
+        printf("  ✅ PASS: invalid output dtype\n");
+    }
+
+    return passed;
+}
+
+static int test_ceil_int_identity(void) {
+    printf("\nTest: ceil(int) preserves values and dtype\n");
+    printf("======================================================================\n");
+
+    int32_t data[] = {1, 2, 3, 4, 5};
+    const int nitems = (int)(sizeof(data) / sizeof(data[0]));
+    me_variable vars[] = {{"x", ME_INT32}};
+    const void *var_ptrs[] = {data};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int rc = me_compile("ceil(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", rc);
+        return 0;
+    }
+
+    if (me_get_dtype(expr) != ME_INT32) {
+        printf("  ❌ FAILED: expected output dtype ME_INT32, got %d\n", me_get_dtype(expr));
+        me_free(expr);
+        return 0;
+    }
+
+    int32_t output[5];
+    ME_EVAL_CHECK(expr, var_ptrs, 1, output, nitems);
+
+    int passed = 1;
+    for (int i = 0; i < nitems; i++) {
+        if (output[i] != data[i]) {
+            printf("  ❌ FAILED: output[%d]=%d expected %d\n", i, output[i], data[i]);
+            passed = 0;
+            break;
+        }
+    }
+
+    if (passed) {
+        printf("  ✅ PASS\n");
+    }
+
+    me_free(expr);
+    return passed;
+}
+
+static int test_sign_nan_propagation(void) {
+    printf("\nTest: sign(NaN) propagates NaN\n");
+    printf("======================================================================\n");
+
+    float data[] = {1.0f, NAN, -2.0f};
+    const int nitems = (int)(sizeof(data) / sizeof(data[0]));
+    me_variable vars[] = {{"x", ME_FLOAT32}};
+    const void *var_ptrs[] = {data};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int rc = me_compile("sign(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", rc);
+        return 0;
+    }
+
+    float output[3];
+    ME_EVAL_CHECK(expr, var_ptrs, 1, output, nitems);
+
+    int passed = 1;
+    if (!(output[0] == 1.0f && isnan(output[1]) && output[2] == -1.0f)) {
+        printf("  ❌ FAILED: output=[%g, %g, %g]\n", output[0], output[1], output[2]);
+        passed = 0;
+    } else {
+        printf("  ✅ PASS\n");
+    }
+
+    me_free(expr);
+    return passed;
+}
+
+#if !defined(_WIN32)
+static int test_abs_complex_output(void) {
+    printf("\nTest: abs(complex) returns real magnitude\n");
+    printf("======================================================================\n");
+
+    double _Complex data[] = {1.0 + 1.0*(double _Complex)I,
+                              3.0 + 4.0*(double _Complex)I,
+                              NAN + NAN*(double _Complex)I};
+    const int nitems = 3;
+    me_variable vars[] = {{"x", ME_COMPLEX128}};
+    const void *var_ptrs[] = {data};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int rc = me_compile("abs(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", rc);
+        return 0;
+    }
+
+    if (me_get_dtype(expr) != ME_FLOAT64) {
+        printf("  ❌ FAILED: expected output dtype ME_FLOAT64, got %d\n", me_get_dtype(expr));
+        me_free(expr);
+        return 0;
+    }
+
+    double output[3];
+    ME_EVAL_CHECK(expr, var_ptrs, 1, output, nitems);
+
+    int passed = 1;
+    if (!(fabs(output[0] - sqrt(2.0)) < 1e-12 &&
+          fabs(output[1] - 5.0) < 1e-12 &&
+          isnan(output[2]))) {
+        printf("  ❌ FAILED: output=[%g, %g, %g]\n", output[0], output[1], output[2]);
+        passed = 0;
+    } else {
+        printf("  ✅ PASS\n");
+    }
+
+    me_free(expr);
+    return passed;
+}
+
+static int test_complex_unsupported_function_rejected(void) {
+    printf("\nTest: complex unsupported function is rejected\n");
+    printf("======================================================================\n");
+
+    double _Complex data[] = {1.0 + 1.0*(double _Complex)I};
+    me_variable vars[] = {{"x", ME_COMPLEX128}};
+    const void *var_ptrs[] = {data};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int rc = me_compile("sin(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_ERR_INVALID_ARG_TYPE) {
+        printf("  ❌ FAILED: expected invalid arg type, rc=%d\n", rc);
+        return 0;
+    }
+
+    rc = me_compile("x != 0", vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_ERR_INVALID_ARG_TYPE) {
+        printf("  ❌ FAILED: expected invalid arg type for comparison, rc=%d\n", rc);
+        return 0;
+    }
+
+    rc = me_compile("sum(x != 0)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_ERR_INVALID_ARG_TYPE) {
+        printf("  ❌ FAILED: expected invalid arg type for reduction comparison, rc=%d\n", rc);
+        return 0;
+    }
+
+    // sanity: supported complex op should compile
+    rc = me_compile("x + 1", vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: expected complex add to compile, rc=%d\n", rc);
+        return 0;
+    }
+    me_free(expr);
+    (void)var_ptrs;
+
+    printf("  ✅ PASS\n");
+    return 1;
+}
+
+static int test_complex_negation_via_sub(void) {
+    printf("\nTest: complex negation via (0 - x)\n");
+    printf("======================================================================\n");
+
+    double _Complex data[] = {1.0 + 2.0*(double _Complex)I,
+                              -3.0 + 4.0*(double _Complex)I,
+                              NAN + NAN*(double _Complex)I};
+    const int nitems = 3;
+    me_variable vars[] = {{"x", ME_COMPLEX128}};
+    const void *var_ptrs[] = {data};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    int rc = me_compile("0 - x", vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", rc);
+        return 0;
+    }
+
+    if (me_get_dtype(expr) != ME_COMPLEX128) {
+        printf("  ❌ FAILED: expected output dtype ME_COMPLEX128, got %d\n", me_get_dtype(expr));
+        me_free(expr);
+        return 0;
+    }
+
+    double _Complex output[3];
+    ME_EVAL_CHECK(expr, var_ptrs, 1, output, nitems);
+
+    int passed = 1;
+    if (!(ME_CREAL(output[0]) == -1.0 && ME_CIMAG(output[0]) == -2.0 &&
+          ME_CREAL(output[1]) == 3.0 && ME_CIMAG(output[1]) == -4.0 &&
+          isnan(ME_CREAL(output[2])) && isnan(ME_CIMAG(output[2])))) {
+        printf("  ❌ FAILED: output=[%g%+gj, %g%+gj, %g%+gj]\n",
+               ME_CREAL(output[0]), ME_CIMAG(output[0]),
+               ME_CREAL(output[1]), ME_CIMAG(output[1]),
+               ME_CREAL(output[2]), ME_CIMAG(output[2]));
+        passed = 0;
+    } else {
+        printf("  ✅ PASS\n");
+    }
+
+    me_free(expr);
+    return passed;
+}
+#endif
+
+// ============================================================================
 // MAIN TEST RUNNER
 // ============================================================================
 
@@ -717,6 +1547,20 @@ int main() {
     printf("  - constant type inference\n");
     printf("  - scalar constant operations\n");
     printf("  - conj on real inputs preserves dtype\n");
+    printf("  - sum(comparison) with explicit output dtype\n");
+    printf("  - sum(where(condition, x, y)) with comparison predicate\n");
+    printf("  - sum(where(condition, x, y)) with mixed input dtypes\n");
+    printf("  - where(condition, x, y) returns array output\n");
+    printf("  - where(condition, a + b, a - b) preserves float32 output\n");
+    printf("  - log(int) promotes to float output\n");
+    printf("  - invalid dtype returns explicit error\n");
+    printf("  - ceil(int) preserves values\n");
+    printf("  - sign propagates NaN\n");
+#if !defined(_WIN32)
+    printf("  - abs(complex) returns magnitude\n");
+    printf("  - complex unsupported functions rejected\n");
+    printf("  - complex negation via subtraction\n");
+#endif
     printf("========================================================================\n");
 
     int total = 0;
@@ -750,10 +1594,55 @@ int main() {
                                            SMALL_SIZE, 10.0f)) passed++;
 
     // ========================================================================
+    // REDUCTION + COMPARISON TEST
+    // ========================================================================
+    printf("\n\n========================================================================\n");
+    printf("SECTION 2: REDUCTION + COMPARISON\n");
+    printf("========================================================================\n");
+
+    total++;
+    if (test_sum_comparison_explicit_output()) passed++;
+
+    total++;
+    if (test_sum_where_select()) passed++;
+
+    total++;
+    if (test_sum_where_select_mixed_types()) passed++;
+
+    total++;
+    if (test_where_select()) passed++;
+
+    total++;
+    if (test_where_float32_math()) passed++;
+
+    total++;
+    if (test_log_int_promotes_output()) passed++;
+
+    total++;
+    if (test_invalid_dtype_compile()) passed++;
+
+    total++;
+    if (test_ceil_int_identity()) passed++;
+
+    total++;
+    if (test_sign_nan_propagation()) passed++;
+
+#if !defined(_WIN32)
+    total++;
+    if (test_abs_complex_output()) passed++;
+
+    total++;
+    if (test_complex_unsupported_function_rejected()) passed++;
+
+    total++;
+    if (test_complex_negation_via_sub()) passed++;
+#endif
+
+    // ========================================================================
     // ARCTAN2 BUG TESTS
     // ========================================================================
     printf("\n\n========================================================================\n");
-    printf("SECTION 2: ARCTAN2 MIXED ARRAY/SCALAR OPERAND TESTS\n");
+    printf("SECTION 3: ARCTAN2 MIXED ARRAY/SCALAR OPERAND TESTS\n");
     printf("========================================================================\n");
 
     double y_data[CHUNK_SIZE] = {0.0, 1.0, -1.0, 2.0, -2.0};
@@ -781,7 +1670,7 @@ int main() {
     // ARCTAN2 COMPLEX EXPRESSION TESTS
     // ========================================================================
     printf("\n\n========================================================================\n");
-    printf("SECTION 3: ARCTAN2 WITH COMPLEX EXPRESSIONS\n");
+    printf("SECTION 4: ARCTAN2 WITH COMPLEX EXPRESSIONS\n");
     printf("========================================================================\n");
 
     double x_data4[CHUNK_SIZE] = {0.0, 1.0, 2.0, -1.0, 0.5};
@@ -804,7 +1693,7 @@ int main() {
     // CONSTANT TYPE INFERENCE TESTS
     // ========================================================================
     printf("\n\n========================================================================\n");
-    printf("SECTION 4: CONSTANT TYPE INFERENCE TESTS\n");
+    printf("SECTION 5: CONSTANT TYPE INFERENCE TESTS\n");
     printf("========================================================================\n");
 
     total++;
@@ -823,7 +1712,7 @@ int main() {
     // SCALAR CONSTANT BUG TESTS
     // ========================================================================
     printf("\n\n========================================================================\n");
-    printf("SECTION 5: SCALAR CONSTANT OPERATIONS\n");
+    printf("SECTION 6: SCALAR CONSTANT OPERATIONS\n");
     printf("========================================================================\n");
 
     total++;
@@ -845,10 +1734,10 @@ int main() {
     if (test_scalar_constant("Test 5.6: a / 4", "a / 4", div_4_f32)) passed++;
 
     // ========================================================================
-    // SECTION 6: LARGE INT64 + FLOAT CONSTANT (expected to fail)
+    // SECTION 7: LARGE INT64 + FLOAT CONSTANT (expected to fail)
     // ========================================================================
     printf("\n\n========================================================================\n");
-    printf("SECTION 6: LARGE INT64 + FLOAT CONSTANT\n");
+    printf("SECTION 7: LARGE INT64 + FLOAT CONSTANT\n");
     printf("========================================================================\n");
 
     total++;
@@ -856,10 +1745,10 @@ int main() {
                                   1000)) passed++;
 
     // ========================================================================
-    // SECTION 7: FLOAT32 ARRAY + FLOAT64 CONSTANTS
+    // SECTION 8: FLOAT32 ARRAY + FLOAT64 CONSTANTS
     // ========================================================================
     printf("\n\n========================================================================\n");
-    printf("SECTION 7: FLOAT32 ARRAY + FLOAT64 CONSTANTS\n");
+    printf("SECTION 8: FLOAT32 ARRAY + FLOAT64 CONSTANTS\n");
     printf("========================================================================\n");
 
     total++;
@@ -867,10 +1756,24 @@ int main() {
                                              SMALL_SIZE)) passed++;
 
     // ========================================================================
-    // SECTION 8: CONJ ON REAL INPUTS (FLOAT32)
+    // SECTION 9: MIXED INT64 + FLOAT64 ADD
     // ========================================================================
     printf("\n\n========================================================================\n");
-    printf("SECTION 8: CONJ ON REAL INPUTS (FLOAT32)\n");
+    printf("SECTION 9: MIXED INT64 + FLOAT64 ADD\n");
+    printf("========================================================================\n");
+
+    total++;
+    if (test_mixed_int64_float64_add()) passed++;
+    total++;
+    if (test_mixed_int64_float64_nested_add()) passed++;
+    total++;
+    if (test_float32_int32_nested_add()) passed++;
+
+    // ========================================================================
+    // SECTION 10: CONJ ON REAL INPUTS (FLOAT32)
+    // ========================================================================
+    printf("\n\n========================================================================\n");
+    printf("SECTION 10: CONJ ON REAL INPUTS (FLOAT32)\n");
     printf("========================================================================\n");
 
     total++;

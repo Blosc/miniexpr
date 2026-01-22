@@ -25,19 +25,14 @@ int main() {
 
     // Compile the expression
     int error;
-    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error);
-
-    if (!expr) {
-        printf("Parse error at position %d\n", error);
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     // Prepare variable pointers
     const void *var_ptrs[] = {a, b};
 
     // Evaluate the expression (thread-safe)
-    me_eval(expr, var_ptrs, 2, result, n);
-
+    if (me_eval(expr, var_ptrs, 2, result, n, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
     // Print results
     printf("Computing sqrt(a*a + b*b):\n");
     for (int i = 0; i < n; i++) {
@@ -84,6 +79,14 @@ a=1.0, b=1.0 -> distance=1.41
    - Number of variables
    - Output buffer pointer
    - Number of items to process
+   - Optional SIMD params (`NULL` for defaults)
+
+   Example override:
+   ```c
+   me_eval_params params = ME_EVAL_PARAMS_DEFAULTS;
+   params.disable_simd = true;
+   if (me_eval(expr, var_ptrs, 2, result, n, &params) != ME_EVAL_SUCCESS) { /* handle error */ }
+   ```
 
 5. **Clean up**: Always call `me_free()` to release the compiled expression.
 
@@ -92,11 +95,20 @@ a=1.0, b=1.0 -> distance=1.41
 If you have the miniexpr source files in your project:
 
 ```bash
-gcc -o distance example.c miniexpr.c -lm
+gcc -o distance example.c src/miniexpr.c src/functions.c -lm
 ./distance
 ```
 
 The `-lm` flag links the math library for functions like `sqrt()`.
+
+With CMake (recommended):
+```bash
+mkdir -p build
+cd build
+cmake ..
+make -j
+ctest
+```
 
 ## Next Steps
 

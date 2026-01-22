@@ -46,14 +46,7 @@ For log = natural log do nothing (NumPy compatible)
 For log = base 10 log comment the next line. */
 #define ME_NAT_LOG
 
-#if defined(_MSC_VER) && !defined(__clang__)
-// Enable C99 complex support on MSVC
-#ifndef _CRT_USE_C99_COMPLEX
-#define _CRT_USE_C99_COMPLEX
-#endif
-#endif
-
-#include "miniexpr.h"
+#include "functions.h"
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
@@ -62,113 +55,19 @@ For log = base 10 log comment the next line. */
 #include <limits.h>
 #include <stdint.h>
 #include <stdbool.h>
-#if defined(_MSC_VER) && !defined(__clang__)
-#define IVDEP
-#else
-#define IVDEP _Pragma("GCC ivdep")
-#endif
-
 #include <complex.h>
-
-#if defined(_MSC_VER) && !defined(__clang__)
-// MSVC uses different names for complex types in C
-#define float_complex _Fcomplex
-#define double_complex _Dcomplex
-// And it doesn't support standard operators for them in C
-static inline _Fcomplex add_c64(_Fcomplex a, _Fcomplex b) { return _FCbuild(crealf(a) + crealf(b), cimagf(a) + cimagf(b)); }
-static inline _Fcomplex sub_c64(_Fcomplex a, _Fcomplex b) { return _FCbuild(crealf(a) - crealf(b), cimagf(a) - cimagf(b)); }
-static inline _Fcomplex neg_c64(_Fcomplex a) { return _FCbuild(-crealf(a), -cimagf(a)); }
-static inline _Fcomplex mul_c64(_Fcomplex a, _Fcomplex b) {
-    return _FCbuild(crealf(a) * crealf(b) - cimagf(a) * cimagf(b), crealf(a) * cimagf(b) + cimagf(a) * crealf(b));
-}
-static inline _Fcomplex div_c64(_Fcomplex a, _Fcomplex b) {
-    float denom = crealf(b) * crealf(b) + cimagf(b) * cimagf(b);
-    return _FCbuild((crealf(a) * crealf(b) + cimagf(a) * cimagf(b)) / denom, (cimagf(a) * crealf(b) - crealf(a) * cimagf(b)) / denom);
-}
-static inline _Dcomplex add_c128(_Dcomplex a, _Dcomplex b) { return _Cbuild(creal(a) + creal(b), cimag(a) + cimag(b)); }
-static inline _Dcomplex sub_c128(_Dcomplex a, _Dcomplex b) { return _Cbuild(creal(a) - creal(b), cimag(a) - cimag(b)); }
-static inline _Dcomplex neg_c128(_Dcomplex a) { return _Cbuild(-creal(a), -cimag(a)); }
-static inline _Dcomplex mul_c128(_Dcomplex a, _Dcomplex b) {
-    return _Cbuild(creal(a) * creal(b) - cimag(a) * cimag(b), creal(a) * cimag(b) + cimag(a) * creal(b));
-}
-static inline _Dcomplex div_c128(_Dcomplex a, _Dcomplex b) {
-    double denom = creal(b) * creal(b) + cimag(b) * cimag(b);
-    return _Cbuild((creal(a) * creal(b) + cimag(a) * cimag(b)) / denom, (cimag(a) * creal(b) - creal(a) * cimag(b)) / denom);
-}
-#else
-#define float_complex float complex
-#define double_complex double complex
-#define add_c64(a, b) ((a) + (b))
-#define sub_c64(a, b) ((a) - (b))
-#define neg_c64(a) (-(a))
-#define mul_c64(a, b) ((a) * (b))
-#define div_c64(a, b) ((a) / (b))
-#define add_c128(a, b) ((a) + (b))
-#define sub_c128(a, b) ((a) - (b))
-#define neg_c128(a) (-(a))
-#define mul_c128(a, b) ((a) * (b))
-#define div_c128(a, b) ((a) / (b))
-#endif
-
-/* Type-specific cast and comparison macros to handle MSVC complex structs */
-#define TO_TYPE_bool(x) (bool)(x)
-#define TO_TYPE_i8(x) (int8_t)(x)
-#define TO_TYPE_i16(x) (int16_t)(x)
-#define TO_TYPE_i32(x) (int32_t)(x)
-#define TO_TYPE_i64(x) (int64_t)(x)
-#define TO_TYPE_u8(x) (uint8_t)(x)
-#define TO_TYPE_u16(x) (uint16_t)(x)
-#define TO_TYPE_u32(x) (uint32_t)(x)
-#define TO_TYPE_u64(x) (uint64_t)(x)
-#define TO_TYPE_f32(x) (float)(x)
-#define TO_TYPE_f64(x) (double)(x)
-
-#define FROM_TYPE_bool(x) (double)(x)
-#define FROM_TYPE_i8(x) (double)(x)
-#define FROM_TYPE_i16(x) (double)(x)
-#define FROM_TYPE_i32(x) (double)(x)
-#define FROM_TYPE_i64(x) (double)(x)
-#define FROM_TYPE_u8(x) (double)(x)
-#define FROM_TYPE_u16(x) (double)(x)
-#define FROM_TYPE_u32(x) (double)(x)
-#define FROM_TYPE_u64(x) (double)(x)
-#define FROM_TYPE_f32(x) (double)(x)
-#define FROM_TYPE_f64(x) (double)(x)
-
-#define IS_NONZERO_bool(x) (x)
-#define IS_NONZERO_i8(x) ((x) != 0)
-#define IS_NONZERO_i16(x) ((x) != 0)
-#define IS_NONZERO_i32(x) ((x) != 0)
-#define IS_NONZERO_i64(x) ((x) != 0)
-#define IS_NONZERO_u8(x) ((x) != 0)
-#define IS_NONZERO_u16(x) ((x) != 0)
-#define IS_NONZERO_u32(x) ((x) != 0)
-#define IS_NONZERO_u64(x) ((x) != 0)
-#define IS_NONZERO_f32(x) ((x) != 0.0f)
-#define IS_NONZERO_f64(x) ((x) != 0.0)
-
-#if defined(_MSC_VER) && !defined(__clang__)
-#define TO_TYPE_c64(x) _FCbuild((float)(x), 0.0f)
-#define TO_TYPE_c128(x) _Cbuild((double)(x), 0.0)
-#define FROM_TYPE_c64(x) (double)crealf(x)
-#define FROM_TYPE_c128(x) (double)creal(x)
-#define IS_NONZERO_c64(x) (crealf(x) != 0.0f || cimagf(x) != 0.0f)
-#define IS_NONZERO_c128(x) (creal(x) != 0.0 || cimag(x) != 0.0)
-
-/* Helper macros for complex-to-complex conversions */
-#define CONV_c64_to_c128(x) _Cbuild((double)crealf(x), (double)cimagf(x))
-#define TO_TYPE_c128_from_c64(x) CONV_c64_to_c128(x)
-#else
-#define TO_TYPE_c64(x) (float_complex)(x)
-#define TO_TYPE_c128(x) (double_complex)(x)
-#define FROM_TYPE_c64(x) (double)(x)
-#define FROM_TYPE_c128(x) (double)(x)
-#define IS_NONZERO_c64(x) ((x) != 0)
-#define IS_NONZERO_c128(x) ((x) != 0)
-#define TO_TYPE_c128_from_c64(x) (double_complex)(x)
-#endif
-
 #include <assert.h>
+
+/* ND metadata attached to compiled expressions (used by me_eval_nd). */
+typedef struct {
+    int ndims;
+    /* Layout: shape[ndims], chunkshape[ndims], blockshape[ndims] (all int64_t). */
+    int64_t data[1];
+} me_nd_info;
+
+static int64_t ceil_div64(int64_t a, int64_t b) {
+    return (b == 0) ? 0 : (a + b - 1) / b;
+}
 
 #ifndef NAN
 #define NAN (0.0/0.0)
@@ -177,37 +76,6 @@ static inline _Dcomplex div_c128(_Dcomplex a, _Dcomplex b) {
 #ifndef INFINITY
 #define INFINITY (1.0/0.0)
 #endif
-
-
-typedef double (*me_fun2)(double, double);
-
-enum {
-    TOK_NULL = ME_CLOSURE7 + 1, TOK_ERROR, TOK_END, TOK_SEP,
-    TOK_OPEN, TOK_CLOSE, TOK_NUMBER, TOK_VARIABLE, TOK_INFIX,
-    TOK_BITWISE, TOK_SHIFT, TOK_COMPARE, TOK_POW
-};
-
-/* Internal definition of me_expr (opaque to users) */
-struct me_expr {
-    int type;
-
-    union {
-        double value;
-        const void *bound;
-        const void *function;
-    };
-
-    /* Vector operation info */
-    void *output; // Generic pointer (can be float* or double*)
-    int nitems;
-    me_dtype dtype; // Data type for this expression (result type after promotion)
-    me_dtype input_dtype; // Original input type (for variables/constants)
-    /* Bytecode info (for fused evaluation) */
-    void *bytecode; // Pointer to compiled bytecode
-    int ncode; // Number of instructions
-    void *parameters[1]; // Must be last (flexible array member)
-};
-
 
 /* Type promotion table following NumPy rules */
 /* Note: ME_AUTO (0) should never appear in type promotion, so we index from 1 */
@@ -290,121 +158,939 @@ static me_dtype promote_types(me_dtype a, me_dtype b) {
     return ME_FLOAT64; // Fallback for out-of-range types
 }
 
-static bool is_integer_dtype(me_dtype dt) {
-    return dt >= ME_INT8 && dt <= ME_UINT64;
+static bool is_integral_or_bool(me_dtype dtype) {
+    return dtype == ME_BOOL || (dtype >= ME_INT8 && dtype <= ME_UINT64);
 }
 
-static bool is_float_dtype(me_dtype dt) {
-    return dt == ME_FLOAT32 || dt == ME_FLOAT64;
+static bool is_valid_dtype(me_dtype dtype) {
+    return dtype >= ME_AUTO && dtype <= ME_COMPLEX128;
 }
 
-static bool is_complex_dtype(me_dtype dt) {
-    return dt == ME_COMPLEX64 || dt == ME_COMPLEX128;
+static me_dtype promote_float_math_result(me_dtype param_type) {
+    if (param_type == ME_COMPLEX64 || param_type == ME_COMPLEX128) {
+        return param_type;
+    }
+    if (param_type == ME_FLOAT32) {
+        return ME_FLOAT32;
+    }
+    if (param_type == ME_FLOAT64) {
+        return ME_FLOAT64;
+    }
+    if (is_integral_or_bool(param_type)) {
+        return ME_FLOAT64;
+    }
+    return param_type;
 }
 
-/* Get size of a type in bytes */
-static size_t dtype_size(me_dtype dtype) {
-    switch (dtype) {
-        case ME_BOOL: return sizeof(bool);
-        case ME_INT8: return sizeof(int8_t);
-        case ME_INT16: return sizeof(int16_t);
-        case ME_INT32: return sizeof(int32_t);
-        case ME_INT64: return sizeof(int64_t);
-        case ME_UINT8: return sizeof(uint8_t);
-        case ME_UINT16: return sizeof(uint16_t);
-        case ME_UINT32: return sizeof(uint32_t);
-        case ME_UINT64: return sizeof(uint64_t);
-        case ME_FLOAT32: return sizeof(float);
-        case ME_FLOAT64: return sizeof(double);
-        case ME_COMPLEX64: return sizeof(float_complex);
-        case ME_COMPLEX128: return sizeof(double_complex);
-        default: return 0;
+
+static bool contains_reduction(const me_expr* n) {
+    if (!n) return false;
+    if (is_reduction_node(n)) return true;
+
+    switch (TYPE_MASK(n->type)) {
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
+            const int arity = ARITY(n->type);
+            for (int i = 0; i < arity; i++) {
+                if (contains_reduction((const me_expr*)n->parameters[i])) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    default:
+        return false;
     }
 }
 
+// Synthetic addresses for ordinal matching (when user provides NULL addresses)
+static char synthetic_var_addresses[ME_MAX_VARS];
 
-enum { ME_CONSTANT = 1 };
+static bool output_is_scalar(const me_expr* n) {
+    if (!n) return true;
+    if (is_reduction_node(n)) return true;
 
+    switch (TYPE_MASK(n->type)) {
+    case ME_CONSTANT:
+        return true;
+    case ME_VARIABLE:
+        return false;
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
+            const int arity = ARITY(n->type);
+            for (int i = 0; i < arity; i++) {
+                if (!output_is_scalar((const me_expr*)n->parameters[i])) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    default:
+        return true;
+    }
+}
 
-typedef struct state {
-    const char *start;
-    const char *next;
-    int type;
+typedef union {
+    bool b;
+    int64_t i64;
+    uint64_t u64;
+    float f32;
+    double f64;
+    float _Complex c64;
+    double _Complex c128;
+} me_scalar;
 
-    union {
-        double value;
-        const double *bound;
-        const void *function;
-    };
+static float me_crealf(float _Complex v) {
+#if defined(_MSC_VER)
+    return __real__ v;
+#else
+    return crealf(v);
+#endif
+}
 
-    void *context;
-    me_dtype dtype; // Type of current token
-    me_dtype target_dtype; // Target dtype for the overall expression
+static float me_cimagf(float _Complex v) {
+#if defined(_MSC_VER)
+    return __imag__ v;
+#else
+    return cimagf(v);
+#endif
+}
 
-    const me_variable *lookup;
-    int lookup_len;
-} state;
+static double me_creal(double _Complex v) {
+#if defined(_MSC_VER)
+    return __real__ v;
+#else
+    return creal(v);
+#endif
+}
 
+static double me_cimag(double _Complex v) {
+#if defined(_MSC_VER)
+    return __imag__ v;
+#else
+    return cimag(v);
+#endif
+}
 
-#define TYPE_MASK(TYPE) ((TYPE)&0x0000001F)
+static float _Complex me_cmplxf(float re, float im) {
+#if defined(_MSC_VER)
+    float _Complex v;
+    __real__ v = re;
+    __imag__ v = im;
+    return v;
+#else
+    return re + im * I;
+#endif
+}
 
-#define IS_PURE(TYPE) (((TYPE) & ME_FLAG_PURE) != 0)
-#define IS_FUNCTION(TYPE) (((TYPE) & ME_FUNCTION0) != 0)
-#define IS_CLOSURE(TYPE) (((TYPE) & ME_CLOSURE0) != 0)
-#define ARITY(TYPE) ( ((TYPE) & (ME_FUNCTION0 | ME_CLOSURE0)) ? ((TYPE) & 0x00000007) : 0 )
-#define NEW_EXPR(type, ...) new_expr((type), (const me_expr*[]){__VA_ARGS__})
-#define CHECK_NULL(ptr, ...) if ((ptr) == NULL) { __VA_ARGS__; return NULL; }
+static double _Complex me_cmplx(double re, double im) {
+#if defined(_MSC_VER)
+    double _Complex v;
+    __real__ v = re;
+    __imag__ v = im;
+    return v;
+#else
+    return re + im * I;
+#endif
+}
 
-/* Forward declarations */
-static me_expr *new_expr(const int type, const me_expr *parameters[]);
-static double conj_wrapper(double x);
-static double imag_wrapper(double x);
-static double real_wrapper(double x);
-static double round_wrapper(double x);
-static double sign(double x);
-static double square(double x);
-static double trunc_wrapper(double x);
-static double where_scalar(double c, double x, double y);
+static void write_scalar(void* out, me_dtype out_type, me_dtype in_type, const me_scalar* v) {
+    if (out_type == in_type) {
+        switch (out_type) {
+        case ME_BOOL: *(bool*)out = v->b; return;
+        case ME_INT8: *(int8_t*)out = (int8_t)v->i64; return;
+        case ME_INT16: *(int16_t*)out = (int16_t)v->i64; return;
+        case ME_INT32: *(int32_t*)out = (int32_t)v->i64; return;
+        case ME_INT64: *(int64_t*)out = v->i64; return;
+        case ME_UINT8: *(uint8_t*)out = (uint8_t)v->u64; return;
+        case ME_UINT16: *(uint16_t*)out = (uint16_t)v->u64; return;
+        case ME_UINT32: *(uint32_t*)out = (uint32_t)v->u64; return;
+        case ME_UINT64: *(uint64_t*)out = v->u64; return;
+        case ME_FLOAT32: *(float*)out = v->f32; return;
+        case ME_FLOAT64: *(double*)out = v->f64; return;
+        case ME_COMPLEX64: *(float _Complex*)out = v->c64; return;
+        case ME_COMPLEX128: *(double _Complex*)out = v->c128; return;
+        default: return;
+        }
+    }
+
+    switch (out_type) {
+    case ME_BOOL:
+        switch (in_type) {
+        case ME_BOOL: *(bool*)out = v->b; break;
+        case ME_INT8:
+        case ME_INT16:
+        case ME_INT32:
+        case ME_INT64: *(bool*)out = v->i64 != 0; break;
+        case ME_UINT8:
+        case ME_UINT16:
+        case ME_UINT32:
+        case ME_UINT64: *(bool*)out = v->u64 != 0; break;
+        case ME_FLOAT32: *(bool*)out = v->f32 != 0.0f; break;
+        case ME_FLOAT64: *(bool*)out = v->f64 != 0.0; break;
+        case ME_COMPLEX64: *(bool*)out = (me_crealf(v->c64) != 0.0f || me_cimagf(v->c64) != 0.0f); break;
+        case ME_COMPLEX128: *(bool*)out = (me_creal(v->c128) != 0.0 || me_cimag(v->c128) != 0.0); break;
+        default: *(bool*)out = false; break;
+        }
+        break;
+    case ME_INT8:
+    case ME_INT16:
+    case ME_INT32:
+    case ME_INT64:
+        switch (in_type) {
+        case ME_BOOL: *(int64_t*)out = v->b ? 1 : 0; break;
+        case ME_INT8:
+        case ME_INT16:
+        case ME_INT32:
+        case ME_INT64: *(int64_t*)out = v->i64; break;
+        case ME_UINT8:
+        case ME_UINT16:
+        case ME_UINT32:
+        case ME_UINT64: *(int64_t*)out = (int64_t)v->u64; break;
+        case ME_FLOAT32: *(int64_t*)out = (int64_t)v->f32; break;
+        case ME_FLOAT64: *(int64_t*)out = (int64_t)v->f64; break;
+        default: *(int64_t*)out = 0; break;
+        }
+        break;
+    case ME_UINT8:
+    case ME_UINT16:
+    case ME_UINT32:
+    case ME_UINT64:
+        switch (in_type) {
+        case ME_BOOL: *(uint64_t*)out = v->b ? 1 : 0; break;
+        case ME_INT8:
+        case ME_INT16:
+        case ME_INT32:
+        case ME_INT64: *(uint64_t*)out = (uint64_t)v->i64; break;
+        case ME_UINT8:
+        case ME_UINT16:
+        case ME_UINT32:
+        case ME_UINT64: *(uint64_t*)out = v->u64; break;
+        case ME_FLOAT32: *(uint64_t*)out = (uint64_t)v->f32; break;
+        case ME_FLOAT64: *(uint64_t*)out = (uint64_t)v->f64; break;
+        default: *(uint64_t*)out = 0; break;
+        }
+        break;
+    case ME_FLOAT32:
+        switch (in_type) {
+        case ME_BOOL: *(float*)out = v->b ? 1.0f : 0.0f; break;
+        case ME_INT8:
+        case ME_INT16:
+        case ME_INT32:
+        case ME_INT64: *(float*)out = (float)v->i64; break;
+        case ME_UINT8:
+        case ME_UINT16:
+        case ME_UINT32:
+        case ME_UINT64: *(float*)out = (float)v->u64; break;
+        case ME_FLOAT32: *(float*)out = v->f32; break;
+        case ME_FLOAT64: *(float*)out = (float)v->f64; break;
+        default: *(float*)out = 0.0f; break;
+        }
+        break;
+    case ME_FLOAT64:
+        switch (in_type) {
+        case ME_BOOL: *(double*)out = v->b ? 1.0 : 0.0; break;
+        case ME_INT8:
+        case ME_INT16:
+        case ME_INT32:
+        case ME_INT64: *(double*)out = (double)v->i64; break;
+        case ME_UINT8:
+        case ME_UINT16:
+        case ME_UINT32:
+        case ME_UINT64: *(double*)out = (double)v->u64; break;
+        case ME_FLOAT32: *(double*)out = (double)v->f32; break;
+        case ME_FLOAT64: *(double*)out = v->f64; break;
+        default: *(double*)out = 0.0; break;
+        }
+        break;
+    case ME_COMPLEX64:
+        switch (in_type) {
+        case ME_COMPLEX64: *(float _Complex*)out = v->c64; break;
+        case ME_COMPLEX128: *(float _Complex*)out = (float _Complex)v->c128; break;
+        case ME_FLOAT32: *(float _Complex*)out = me_cmplxf(v->f32, 0.0f); break;
+        case ME_FLOAT64: *(float _Complex*)out = me_cmplxf((float)v->f64, 0.0f); break;
+        case ME_INT8:
+        case ME_INT16:
+        case ME_INT32:
+        case ME_INT64: *(float _Complex*)out = me_cmplxf((float)v->i64, 0.0f); break;
+        case ME_UINT8:
+        case ME_UINT16:
+        case ME_UINT32:
+        case ME_UINT64: *(float _Complex*)out = me_cmplxf((float)v->u64, 0.0f); break;
+        case ME_BOOL: *(float _Complex*)out = me_cmplxf(v->b ? 1.0f : 0.0f, 0.0f); break;
+        default: *(float _Complex*)out = me_cmplxf(0.0f, 0.0f); break;
+        }
+        break;
+    case ME_COMPLEX128:
+        switch (in_type) {
+        case ME_COMPLEX64: *(double _Complex*)out = (double _Complex)v->c64; break;
+        case ME_COMPLEX128: *(double _Complex*)out = v->c128; break;
+        case ME_FLOAT32: *(double _Complex*)out = me_cmplx((double)v->f32, 0.0); break;
+        case ME_FLOAT64: *(double _Complex*)out = me_cmplx(v->f64, 0.0); break;
+        case ME_INT8:
+        case ME_INT16:
+        case ME_INT32:
+        case ME_INT64: *(double _Complex*)out = me_cmplx((double)v->i64, 0.0); break;
+        case ME_UINT8:
+        case ME_UINT16:
+        case ME_UINT32:
+        case ME_UINT64: *(double _Complex*)out = me_cmplx((double)v->u64, 0.0); break;
+        case ME_BOOL: *(double _Complex*)out = me_cmplx(v->b ? 1.0 : 0.0, 0.0); break;
+        default: *(double _Complex*)out = me_cmplx(0.0, 0.0); break;
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+static void read_scalar(const void* in, me_dtype in_type, me_scalar* v) {
+    switch (in_type) {
+    case ME_BOOL: v->b = *(const bool*)in; break;
+    case ME_INT8: v->i64 = *(const int8_t*)in; break;
+    case ME_INT16: v->i64 = *(const int16_t*)in; break;
+    case ME_INT32: v->i64 = *(const int32_t*)in; break;
+    case ME_INT64: v->i64 = *(const int64_t*)in; break;
+    case ME_UINT8: v->u64 = *(const uint8_t*)in; break;
+    case ME_UINT16: v->u64 = *(const uint16_t*)in; break;
+    case ME_UINT32: v->u64 = *(const uint32_t*)in; break;
+    case ME_UINT64: v->u64 = *(const uint64_t*)in; break;
+    case ME_FLOAT32: v->f32 = *(const float*)in; break;
+    case ME_FLOAT64: v->f64 = *(const double*)in; break;
+    case ME_COMPLEX64: v->c64 = *(const float _Complex*)in; break;
+    case ME_COMPLEX128: v->c128 = *(const double _Complex*)in; break;
+    default: break;
+    }
+}
+
+static bool read_as_bool(const void* base, int64_t off, me_dtype type, bool* out) {
+    switch (type) {
+    case ME_BOOL: *out = ((const bool*)base)[off]; return true;
+    case ME_INT8: *out = ((const int8_t*)base)[off] != 0; return true;
+    case ME_INT16: *out = ((const int16_t*)base)[off] != 0; return true;
+    case ME_INT32: *out = ((const int32_t*)base)[off] != 0; return true;
+    case ME_INT64: *out = ((const int64_t*)base)[off] != 0; return true;
+    case ME_UINT8: *out = ((const uint8_t*)base)[off] != 0; return true;
+    case ME_UINT16: *out = ((const uint16_t*)base)[off] != 0; return true;
+    case ME_UINT32: *out = ((const uint32_t*)base)[off] != 0; return true;
+    case ME_UINT64: *out = ((const uint64_t*)base)[off] != 0; return true;
+    case ME_FLOAT32: *out = ((const float*)base)[off] != 0.0f; return true;
+    case ME_FLOAT64: *out = ((const double*)base)[off] != 0.0; return true;
+    default:
+        return false;
+    }
+}
+
+static bool read_as_int64(const void* base, int64_t off, me_dtype type, int64_t* out) {
+    switch (type) {
+    case ME_BOOL: *out = ((const bool*)base)[off] ? 1 : 0; return true;
+    case ME_INT8: *out = ((const int8_t*)base)[off]; return true;
+    case ME_INT16: *out = ((const int16_t*)base)[off]; return true;
+    case ME_INT32: *out = ((const int32_t*)base)[off]; return true;
+    case ME_INT64: *out = ((const int64_t*)base)[off]; return true;
+    case ME_UINT8: *out = (int64_t)((const uint8_t*)base)[off]; return true;
+    case ME_UINT16: *out = (int64_t)((const uint16_t*)base)[off]; return true;
+    case ME_UINT32: *out = (int64_t)((const uint32_t*)base)[off]; return true;
+    case ME_UINT64: *out = (int64_t)((const uint64_t*)base)[off]; return true;
+    case ME_FLOAT32: *out = (int64_t)((const float*)base)[off]; return true;
+    case ME_FLOAT64: *out = (int64_t)((const double*)base)[off]; return true;
+    default:
+        return false;
+    }
+}
+
+static bool read_as_uint64(const void* base, int64_t off, me_dtype type, uint64_t* out) {
+    switch (type) {
+    case ME_BOOL: *out = ((const bool*)base)[off] ? 1 : 0; return true;
+    case ME_INT8: *out = (uint64_t)((const int8_t*)base)[off]; return true;
+    case ME_INT16: *out = (uint64_t)((const int16_t*)base)[off]; return true;
+    case ME_INT32: *out = (uint64_t)((const int32_t*)base)[off]; return true;
+    case ME_INT64: *out = (uint64_t)((const int64_t*)base)[off]; return true;
+    case ME_UINT8: *out = ((const uint8_t*)base)[off]; return true;
+    case ME_UINT16: *out = ((const uint16_t*)base)[off]; return true;
+    case ME_UINT32: *out = ((const uint32_t*)base)[off]; return true;
+    case ME_UINT64: *out = ((const uint64_t*)base)[off]; return true;
+    case ME_FLOAT32: *out = (uint64_t)((const float*)base)[off]; return true;
+    case ME_FLOAT64: *out = (uint64_t)((const double*)base)[off]; return true;
+    default:
+        return false;
+    }
+}
+
+static bool read_as_float(const void* base, int64_t off, me_dtype type, float* out) {
+    switch (type) {
+    case ME_BOOL: *out = ((const bool*)base)[off] ? 1.0f : 0.0f; return true;
+    case ME_INT8: *out = (float)((const int8_t*)base)[off]; return true;
+    case ME_INT16: *out = (float)((const int16_t*)base)[off]; return true;
+    case ME_INT32: *out = (float)((const int32_t*)base)[off]; return true;
+    case ME_INT64: *out = (float)((const int64_t*)base)[off]; return true;
+    case ME_UINT8: *out = (float)((const uint8_t*)base)[off]; return true;
+    case ME_UINT16: *out = (float)((const uint16_t*)base)[off]; return true;
+    case ME_UINT32: *out = (float)((const uint32_t*)base)[off]; return true;
+    case ME_UINT64: *out = (float)((const uint64_t*)base)[off]; return true;
+    case ME_FLOAT32: *out = ((const float*)base)[off]; return true;
+    case ME_FLOAT64: *out = (float)((const double*)base)[off]; return true;
+    default:
+        return false;
+    }
+}
+
+static bool read_as_double(const void* base, int64_t off, me_dtype type, double* out) {
+    switch (type) {
+    case ME_BOOL: *out = ((const bool*)base)[off] ? 1.0 : 0.0; return true;
+    case ME_INT8: *out = (double)((const int8_t*)base)[off]; return true;
+    case ME_INT16: *out = (double)((const int16_t*)base)[off]; return true;
+    case ME_INT32: *out = (double)((const int32_t*)base)[off]; return true;
+    case ME_INT64: *out = (double)((const int64_t*)base)[off]; return true;
+    case ME_UINT8: *out = (double)((const uint8_t*)base)[off]; return true;
+    case ME_UINT16: *out = (double)((const uint16_t*)base)[off]; return true;
+    case ME_UINT32: *out = (double)((const uint32_t*)base)[off]; return true;
+    case ME_UINT64: *out = (double)((const uint64_t*)base)[off]; return true;
+    case ME_FLOAT32: *out = (double)((const float*)base)[off]; return true;
+    case ME_FLOAT64: *out = ((const double*)base)[off]; return true;
+    default:
+        return false;
+    }
+}
+
+static bool cmp_int64(me_cmp_kind cmp, int64_t a, int64_t b) {
+    switch (cmp) {
+    case ME_CMP_EQ: return a == b;
+    case ME_CMP_NE: return a != b;
+    case ME_CMP_LT: return a < b;
+    case ME_CMP_LE: return a <= b;
+    case ME_CMP_GT: return a > b;
+    case ME_CMP_GE: return a >= b;
+    default: return false;
+    }
+}
+
+static bool cmp_uint64(me_cmp_kind cmp, uint64_t a, uint64_t b) {
+    switch (cmp) {
+    case ME_CMP_EQ: return a == b;
+    case ME_CMP_NE: return a != b;
+    case ME_CMP_LT: return a < b;
+    case ME_CMP_LE: return a <= b;
+    case ME_CMP_GT: return a > b;
+    case ME_CMP_GE: return a >= b;
+    default: return false;
+    }
+}
+
+static bool cmp_float(me_cmp_kind cmp, float a, float b) {
+    switch (cmp) {
+    case ME_CMP_EQ: return a == b;
+    case ME_CMP_NE: return a != b;
+    case ME_CMP_LT: return a < b;
+    case ME_CMP_LE: return a <= b;
+    case ME_CMP_GT: return a > b;
+    case ME_CMP_GE: return a >= b;
+    default: return false;
+    }
+}
+
+static bool cmp_double(me_cmp_kind cmp, double a, double b) {
+    switch (cmp) {
+    case ME_CMP_EQ: return a == b;
+    case ME_CMP_NE: return a != b;
+    case ME_CMP_LT: return a < b;
+    case ME_CMP_LE: return a <= b;
+    case ME_CMP_GT: return a > b;
+    case ME_CMP_GE: return a >= b;
+    default: return false;
+    }
+}
+
+static me_cmp_kind invert_cmp_kind(me_cmp_kind cmp) {
+    switch (cmp) {
+    case ME_CMP_LT: return ME_CMP_GT;
+    case ME_CMP_LE: return ME_CMP_GE;
+    case ME_CMP_GT: return ME_CMP_LT;
+    case ME_CMP_GE: return ME_CMP_LE;
+    case ME_CMP_EQ: return ME_CMP_EQ;
+    case ME_CMP_NE: return ME_CMP_NE;
+    default: return ME_CMP_NONE;
+    }
+}
+
+static bool reduce_strided_variable(const me_expr* expr, const void** vars_block, int n_vars,
+                                    const int64_t* valid_len, const int64_t* stride, int nd,
+                                    int64_t valid_items, void* output_block) {
+    if (!expr || !is_reduction_node(expr) || valid_items <= 0) {
+        return false;
+    }
+    const me_expr* arg = (const me_expr*)expr->parameters[0];
+    if (!arg || TYPE_MASK(arg->type) != ME_VARIABLE || !is_synthetic_address(arg->bound)) {
+        return false;
+    }
+    int idx = (int)((const char*)arg->bound - synthetic_var_addresses);
+    if (idx < 0 || idx >= n_vars) {
+        return false;
+    }
+
+    const me_reduce_kind rkind = reduction_kind(expr->function);
+    if (rkind == ME_REDUCE_NONE) {
+        return false;
+    }
+
+    const me_dtype arg_type = infer_result_type(arg);
+    const me_dtype result_type = reduction_output_dtype(arg_type, expr->function);
+    const me_dtype output_type = expr->dtype;
+
+    int64_t indices[64] = {0};
+    int64_t total_iters = 1;
+    for (int i = 0; i < nd; i++) total_iters *= valid_len[i];
+
+    me_scalar acc;
+    switch (result_type) {
+    case ME_BOOL: acc.b = (rkind == ME_REDUCE_ALL); break;
+    case ME_INT64: acc.i64 = (rkind == ME_REDUCE_PROD) ? 1 : 0; break;
+    case ME_UINT64: acc.u64 = (rkind == ME_REDUCE_PROD) ? 1 : 0; break;
+    case ME_FLOAT32: acc.f64 = (rkind == ME_REDUCE_PROD) ? 1.0 : 0.0; break;
+    case ME_FLOAT64: acc.f64 = (rkind == ME_REDUCE_PROD) ? 1.0 : 0.0; break;
+    case ME_COMPLEX64: acc.c64 = (rkind == ME_REDUCE_PROD) ? (float _Complex)1.0f : (float _Complex)0.0f; break;
+    case ME_COMPLEX128: acc.c128 = (rkind == ME_REDUCE_PROD) ? (double _Complex)1.0 : (double _Complex)0.0; break;
+    default: break;
+    }
+
+    const unsigned char* base = (const unsigned char*)vars_block[idx];
+    for (int64_t it = 0; it < total_iters; it++) {
+        int64_t off = 0;
+        for (int i = 0; i < nd; i++) {
+            off += indices[i] * stride[i];
+        }
+
+        switch (arg_type) {
+        case ME_BOOL: {
+            bool v = ((const bool*)base)[off];
+            if (rkind == ME_REDUCE_ANY) { if (v) { acc.b = true; goto done_reduce; } }
+            else if (rkind == ME_REDUCE_ALL) { if (!v) { acc.b = false; goto done_reduce; } }
+            else if (rkind == ME_REDUCE_PROD) acc.i64 *= v ? 1 : 0;
+            else acc.i64 += v ? 1 : 0;
+            break;
+        }
+        case ME_INT8: {
+            int8_t v = ((const int8_t*)base)[off];
+            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (int8_t)acc.i64) acc.i64 = v; }
+            else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > (int8_t)acc.i64) acc.i64 = v; }
+            else if (rkind == ME_REDUCE_PROD) acc.i64 *= v;
+            else if (rkind == ME_REDUCE_ANY) { if (v != 0) { acc.b = true; goto done_reduce; } }
+            else if (rkind == ME_REDUCE_ALL) { if (v == 0) { acc.b = false; goto done_reduce; } }
+            else acc.i64 += v;
+            break;
+        }
+        case ME_INT16: {
+            int16_t v = ((const int16_t*)base)[off];
+            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (int16_t)acc.i64) acc.i64 = v; }
+            else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > (int16_t)acc.i64) acc.i64 = v; }
+            else if (rkind == ME_REDUCE_PROD) acc.i64 *= v;
+            else if (rkind == ME_REDUCE_ANY) { if (v != 0) { acc.b = true; goto done_reduce; } }
+            else if (rkind == ME_REDUCE_ALL) { if (v == 0) { acc.b = false; goto done_reduce; } }
+            else acc.i64 += v;
+            break;
+        }
+        case ME_INT32: {
+            int32_t v = ((const int32_t*)base)[off];
+            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (int32_t)acc.i64) acc.i64 = v; }
+            else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > (int32_t)acc.i64) acc.i64 = v; }
+            else if (rkind == ME_REDUCE_PROD) acc.i64 *= v;
+            else if (rkind == ME_REDUCE_ANY) { if (v != 0) { acc.b = true; goto done_reduce; } }
+            else if (rkind == ME_REDUCE_ALL) { if (v == 0) { acc.b = false; goto done_reduce; } }
+            else acc.i64 += v;
+            break;
+        }
+        case ME_INT64: {
+            int64_t v = ((const int64_t*)base)[off];
+            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < acc.i64) acc.i64 = v; }
+            else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > acc.i64) acc.i64 = v; }
+            else if (rkind == ME_REDUCE_PROD) acc.i64 *= v;
+            else if (rkind == ME_REDUCE_ANY) { if (v != 0) { acc.b = true; goto done_reduce; } }
+            else if (rkind == ME_REDUCE_ALL) { if (v == 0) { acc.b = false; goto done_reduce; } }
+            else acc.i64 += v;
+            break;
+        }
+        case ME_UINT8: {
+            uint8_t v = ((const uint8_t*)base)[off];
+            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (uint8_t)acc.u64) acc.u64 = v; }
+            else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > (uint8_t)acc.u64) acc.u64 = v; }
+            else if (rkind == ME_REDUCE_PROD) acc.u64 *= v;
+            else if (rkind == ME_REDUCE_ANY) { if (v != 0) { acc.b = true; goto done_reduce; } }
+            else if (rkind == ME_REDUCE_ALL) { if (v == 0) { acc.b = false; goto done_reduce; } }
+            else acc.u64 += v;
+            break;
+        }
+        case ME_UINT16: {
+            uint16_t v = ((const uint16_t*)base)[off];
+            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (uint16_t)acc.u64) acc.u64 = v; }
+            else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > (uint16_t)acc.u64) acc.u64 = v; }
+            else if (rkind == ME_REDUCE_PROD) acc.u64 *= v;
+            else if (rkind == ME_REDUCE_ANY) { if (v != 0) { acc.b = true; goto done_reduce; } }
+            else if (rkind == ME_REDUCE_ALL) { if (v == 0) { acc.b = false; goto done_reduce; } }
+            else acc.u64 += v;
+            break;
+        }
+        case ME_UINT32: {
+            uint32_t v = ((const uint32_t*)base)[off];
+            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (uint32_t)acc.u64) acc.u64 = v; }
+            else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > (uint32_t)acc.u64) acc.u64 = v; }
+            else if (rkind == ME_REDUCE_PROD) acc.u64 *= v;
+            else if (rkind == ME_REDUCE_ANY) { if (v != 0) { acc.b = true; goto done_reduce; } }
+            else if (rkind == ME_REDUCE_ALL) { if (v == 0) { acc.b = false; goto done_reduce; } }
+            else acc.u64 += v;
+            break;
+        }
+        case ME_UINT64: {
+            uint64_t v = ((const uint64_t*)base)[off];
+            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < acc.u64) acc.u64 = v; }
+            else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > acc.u64) acc.u64 = v; }
+            else if (rkind == ME_REDUCE_PROD) acc.u64 *= v;
+            else if (rkind == ME_REDUCE_ANY) { if (v != 0) { acc.b = true; goto done_reduce; } }
+            else if (rkind == ME_REDUCE_ALL) { if (v == 0) { acc.b = false; goto done_reduce; } }
+            else acc.u64 += v;
+            break;
+        }
+        case ME_FLOAT32: {
+            float v = ((const float*)base)[off];
+            if (v != v) { acc.f64 = NAN; goto done_reduce; }
+            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (float)acc.f64) acc.f64 = v; }
+            else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > (float)acc.f64) acc.f64 = v; }
+            else if (rkind == ME_REDUCE_PROD) acc.f64 *= (double)v;
+            else if (rkind == ME_REDUCE_ANY) { if (v != 0.0f) { acc.b = true; goto done_reduce; } }
+            else if (rkind == ME_REDUCE_ALL) { if (v == 0.0f) { acc.b = false; goto done_reduce; } }
+            else acc.f64 += (double)v;
+            break;
+        }
+        case ME_FLOAT64: {
+            double v = ((const double*)base)[off];
+            if (v != v) { acc.f64 = NAN; goto done_reduce; }
+            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < acc.f64) acc.f64 = v; }
+            else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > acc.f64) acc.f64 = v; }
+            else if (rkind == ME_REDUCE_PROD) acc.f64 *= v;
+            else if (rkind == ME_REDUCE_ANY) { if (v != 0.0) { acc.b = true; goto done_reduce; } }
+            else if (rkind == ME_REDUCE_ALL) { if (v == 0.0) { acc.b = false; goto done_reduce; } }
+            else acc.f64 += v;
+            break;
+        }
+        case ME_COMPLEX64: {
+            float _Complex v = ((const float _Complex*)base)[off];
+            bool nonzero = (me_crealf(v) != 0.0f || me_cimagf(v) != 0.0f);
+            if (rkind == ME_REDUCE_ANY) { if (nonzero) { acc.b = true; goto done_reduce; } }
+            else if (rkind == ME_REDUCE_ALL) { if (!nonzero) { acc.b = false; goto done_reduce; } }
+            else if (rkind == ME_REDUCE_PROD) acc.c64 *= v;
+            else acc.c64 += v;
+            break;
+        }
+        case ME_COMPLEX128: {
+            double _Complex v = ((const double _Complex*)base)[off];
+            bool nonzero = (me_creal(v) != 0.0 || me_cimag(v) != 0.0);
+            if (rkind == ME_REDUCE_ANY) { if (nonzero) { acc.b = true; goto done_reduce; } }
+            else if (rkind == ME_REDUCE_ALL) { if (!nonzero) { acc.b = false; goto done_reduce; } }
+            else if (rkind == ME_REDUCE_PROD) acc.c128 *= v;
+            else acc.c128 += v;
+            break;
+        }
+        default:
+            break;
+        }
+
+        for (int i = nd - 1; i >= 0; i--) {
+            indices[i]++;
+            if (indices[i] < valid_len[i]) break;
+            indices[i] = 0;
+        }
+    }
+
+done_reduce:
+    if (result_type == ME_FLOAT32) {
+        acc.f32 = (float)acc.f64;
+    }
+    write_scalar(output_block, output_type, result_type, &acc);
+    return true;
+}
+
+static bool reduce_strided_predicate(const me_expr* expr, const void** vars_block, int n_vars,
+                                     const int64_t* valid_len, const int64_t* stride, int nd,
+                                     int64_t valid_items, void* output_block) {
+    if (!expr || !is_reduction_node(expr) || valid_items <= 0) {
+        return false;
+    }
+    const me_expr* arg = (const me_expr*)expr->parameters[0];
+    if (!arg || !is_comparison_node(arg)) {
+        return false;
+    }
+
+    me_reduce_kind rkind = reduction_kind(expr->function);
+    if (!(rkind == ME_REDUCE_ANY || rkind == ME_REDUCE_ALL)) {
+        /* Keep only any/all predicate reductions; sum(x == c) uses pack path. */
+        return false;
+    }
+
+    const me_expr* left = (const me_expr*)arg->parameters[0];
+    const me_expr* right = (const me_expr*)arg->parameters[1];
+    if (!left || !right) {
+        return false;
+    }
+
+    const me_expr* var_node = NULL;
+    const me_expr* const_node = NULL;
+    bool const_on_left = false;
+
+    if (TYPE_MASK(left->type) == ME_VARIABLE && right->type == ME_CONSTANT) {
+        var_node = left;
+        const_node = right;
+    }
+    else if (TYPE_MASK(right->type) == ME_VARIABLE && left->type == ME_CONSTANT) {
+        var_node = right;
+        const_node = left;
+        const_on_left = true;
+    }
+    else {
+        return false;
+    }
+
+    if (!is_synthetic_address(var_node->bound)) {
+        return false;
+    }
+    int idx = (int)((const char*)var_node->bound - synthetic_var_addresses);
+    if (idx < 0 || idx >= n_vars) {
+        return false;
+    }
+
+    me_cmp_kind cmp = comparison_kind(arg->function);
+    if (cmp == ME_CMP_NONE) {
+        return false;
+    }
+    if (const_on_left) {
+        cmp = invert_cmp_kind(cmp);
+        if (cmp == ME_CMP_NONE) {
+            return false;
+        }
+    }
+
+    const me_dtype eval_type = infer_result_type(arg);
+    if (eval_type == ME_COMPLEX64 || eval_type == ME_COMPLEX128) {
+        return false;
+    }
+
+    const me_dtype output_type = expr->dtype;
+    const me_dtype result_type = reduction_output_dtype(ME_BOOL, expr->function);
+
+    int64_t indices[64] = {0};
+    int64_t total_iters = 1;
+    for (int i = 0; i < nd; i++) total_iters *= valid_len[i];
+
+    me_scalar acc;
+    acc.b = (rkind == ME_REDUCE_ALL);
+
+    const unsigned char* base = (const unsigned char*)vars_block[idx];
+    const double cval = const_node->value;
+
+    for (int64_t it = 0; it < total_iters; it++) {
+        int64_t off = 0;
+        for (int i = 0; i < nd; i++) {
+            off += indices[i] * stride[i];
+        }
+
+        bool pred = false;
+        switch (eval_type) {
+        case ME_BOOL: {
+            bool v = false;
+            if (!read_as_bool(base, off, var_node->input_dtype, &v)) return false;
+            bool c = (cval != 0.0);
+            pred = cmp_int64(cmp, v ? 1 : 0, c ? 1 : 0);
+            break;
+        }
+        case ME_INT8:
+        case ME_INT16:
+        case ME_INT32:
+        case ME_INT64: {
+            int64_t v = 0;
+            if (!read_as_int64(base, off, var_node->input_dtype, &v)) return false;
+            int64_t c = (int64_t)cval;
+            pred = cmp_int64(cmp, v, c);
+            break;
+        }
+        case ME_UINT8:
+        case ME_UINT16:
+        case ME_UINT32:
+        case ME_UINT64: {
+            uint64_t v = 0;
+            if (!read_as_uint64(base, off, var_node->input_dtype, &v)) return false;
+            uint64_t c = (uint64_t)cval;
+            pred = cmp_uint64(cmp, v, c);
+            break;
+        }
+        case ME_FLOAT32: {
+            float v = 0.0f;
+            if (!read_as_float(base, off, var_node->input_dtype, &v)) return false;
+            float c = (float)cval;
+            pred = cmp_float(cmp, v, c);
+            break;
+        }
+        case ME_FLOAT64: {
+            double v = 0.0;
+            if (!read_as_double(base, off, var_node->input_dtype, &v)) return false;
+            pred = cmp_double(cmp, v, cval);
+            break;
+        }
+        default:
+            return false;
+        }
+
+        if (rkind == ME_REDUCE_ANY) {
+            if (pred) { acc.b = true; goto done_pred; }
+        }
+        else if (rkind == ME_REDUCE_ALL) {
+            if (!pred) { acc.b = false; goto done_pred; }
+        }
+
+        for (int i = nd - 1; i >= 0; i--) {
+            indices[i]++;
+            if (indices[i] < valid_len[i]) break;
+            indices[i] = 0;
+        }
+    }
+
+done_pred:
+    write_scalar(output_block, output_type, result_type, &acc);
+    return true;
+}
+static bool reduction_usage_is_valid(const me_expr* n) {
+    if (!n) return true;
+    if (is_reduction_node(n)) {
+        me_expr* arg = (me_expr*)n->parameters[0];
+        if (!arg) return false;
+        if (contains_reduction(arg)) return false;
+        me_dtype arg_type = infer_output_type(arg);
+        if (n->function == (void*)min_reduce || n->function == (void*)max_reduce) {
+            if (arg_type == ME_COMPLEX64 || arg_type == ME_COMPLEX128) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    switch (TYPE_MASK(n->type)) {
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
+            const int arity = ARITY(n->type);
+            for (int i = 0; i < arity; i++) {
+                if (!reduction_usage_is_valid((const me_expr*)n->parameters[i])) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    default:
+        return true;
+    }
+}
 
 /* Infer computation type from expression tree (for evaluation) */
-static me_dtype infer_result_type(const me_expr *n) {
+me_dtype infer_result_type(const me_expr* n) {
     if (!n) return ME_FLOAT64;
 
     switch (TYPE_MASK(n->type)) {
-        case ME_CONSTANT:
-            return n->dtype;
+    case ME_CONSTANT:
+        return n->dtype;
 
-        case ME_VARIABLE:
-            return n->dtype;
+    case ME_VARIABLE:
+        return n->dtype;
 
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
+            if (is_reduction_node(n)) {
+                me_dtype param_type = infer_result_type((const me_expr*)n->parameters[0]);
+                return reduction_output_dtype(param_type, n->function);
+            }
             // Special case: imag() and real() return real type from complex input
             if (IS_FUNCTION(n->type) && ARITY(n->type) == 1) {
                 if (n->function == (void*)imag_wrapper || n->function == (void*)real_wrapper) {
-                    me_dtype param_type = infer_result_type((const me_expr *) n->parameters[0]);
+                    me_dtype param_type = infer_result_type((const me_expr*)n->parameters[0]);
                     if (param_type == ME_COMPLEX64) {
                         return ME_FLOAT32;
-                    } else if (param_type == ME_COMPLEX128) {
+                    }
+                    else if (param_type == ME_COMPLEX128) {
                         return ME_FLOAT64;
                     }
                     // If input is not complex, return as-is (shouldn't happen, but be safe)
                     return param_type;
                 }
+                if (n->function == (void*)fabs) {
+                    me_dtype param_type = infer_result_type((const me_expr*)n->parameters[0]);
+                    if (param_type == ME_COMPLEX64) {
+                        return ME_FLOAT32;
+                    }
+                    if (param_type == ME_COMPLEX128) {
+                        return ME_FLOAT64;
+                    }
+                    return param_type;
+                }
+            }
+
+            if (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && is_float_math_function(n->function)) {
+                me_dtype param_type = infer_result_type((const me_expr*)n->parameters[0]);
+                return promote_float_math_result(param_type);
             }
 
             // For comparisons with ME_BOOL output, we still need to infer the
@@ -416,7 +1102,7 @@ static me_dtype infer_result_type(const me_expr *n) {
             me_dtype result = ME_BOOL;
 
             for (int i = 0; i < arity; i++) {
-                me_dtype param_type = infer_result_type((const me_expr *) n->parameters[i]);
+                me_dtype param_type = infer_result_type((const me_expr*)n->parameters[i]);
                 result = promote_types(result, param_type);
             }
 
@@ -428,42 +1114,58 @@ static me_dtype infer_result_type(const me_expr *n) {
 }
 
 /* Infer logical output type from expression tree (for compilation with ME_AUTO) */
-static me_dtype infer_output_type(const me_expr *n) {
+me_dtype infer_output_type(const me_expr* n) {
     if (!n) return ME_FLOAT64;
 
     switch (TYPE_MASK(n->type)) {
-        case ME_CONSTANT:
-            return n->dtype;
+    case ME_CONSTANT:
+        return n->dtype;
 
-        case ME_VARIABLE:
-            return n->dtype;
+    case ME_VARIABLE:
+        return n->dtype;
 
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
+            if (is_reduction_node(n)) {
+                me_dtype param_type = infer_output_type((const me_expr*)n->parameters[0]);
+                return reduction_output_dtype(param_type, n->function);
+            }
             // Special case: imag() and real() return real type from complex input
             if (IS_FUNCTION(n->type) && ARITY(n->type) == 1) {
                 if (n->function == (void*)imag_wrapper || n->function == (void*)real_wrapper) {
-                    me_dtype param_type = infer_output_type((const me_expr *) n->parameters[0]);
+                    me_dtype param_type = infer_output_type((const me_expr*)n->parameters[0]);
                     if (param_type == ME_COMPLEX64) {
                         return ME_FLOAT32;
-                    } else if (param_type == ME_COMPLEX128) {
+                    }
+                    else if (param_type == ME_COMPLEX128) {
                         return ME_FLOAT64;
                     }
                     // If input is not complex, return as-is (shouldn't happen, but be safe)
+                    return param_type;
+                }
+                if (n->function == (void*)fabs) {
+                    me_dtype param_type = infer_output_type((const me_expr*)n->parameters[0]);
+                    if (param_type == ME_COMPLEX64) {
+                        return ME_FLOAT32;
+                    }
+                    if (param_type == ME_COMPLEX128) {
+                        return ME_FLOAT64;
+                    }
                     return param_type;
                 }
             }
@@ -471,9 +1173,14 @@ static me_dtype infer_output_type(const me_expr *n) {
             // Special case: where(cond, x, y) -> promote(x, y), regardless of cond type.
             if (IS_FUNCTION(n->type) && ARITY(n->type) == 3 &&
                 n->function == (void*)where_scalar) {
-                me_dtype x_type = infer_output_type((const me_expr *) n->parameters[1]);
-                me_dtype y_type = infer_output_type((const me_expr *) n->parameters[2]);
+                me_dtype x_type = infer_output_type((const me_expr*)n->parameters[1]);
+                me_dtype y_type = infer_output_type((const me_expr*)n->parameters[2]);
                 return promote_types(x_type, y_type);
+            }
+
+            if (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && is_float_math_function(n->function)) {
+                me_dtype param_type = infer_output_type((const me_expr*)n->parameters[0]);
+                return promote_float_math_result(param_type);
             }
 
             // If this node is a comparison (dtype == ME_BOOL set during parsing),
@@ -487,7 +1194,7 @@ static me_dtype infer_output_type(const me_expr *n) {
             me_dtype result = ME_BOOL;
 
             for (int i = 0; i < arity; i++) {
-                me_dtype param_type = infer_output_type((const me_expr *) n->parameters[i]);
+                me_dtype param_type = infer_output_type((const me_expr*)n->parameters[i]);
                 result = promote_types(result, param_type);
             }
 
@@ -499,9 +1206,9 @@ static me_dtype infer_output_type(const me_expr *n) {
 }
 
 /* Apply type promotion to a binary operation node */
-static me_expr *create_conversion_node(me_expr *source, me_dtype target_dtype) {
+static me_expr* create_conversion_node(me_expr* source, me_dtype target_dtype) {
     /* Create a unary conversion node that converts source to target_dtype */
-    me_expr *conv = NEW_EXPR(ME_FUNCTION1 | ME_FLAG_PURE, source);
+    me_expr* conv = NEW_EXPR(ME_FUNCTION1 | ME_FLAG_PURE, source);
     if (conv) {
         conv->function = NULL; // Mark as conversion
         conv->dtype = target_dtype;
@@ -510,11 +1217,11 @@ static me_expr *create_conversion_node(me_expr *source, me_dtype target_dtype) {
     return conv;
 }
 
-static void apply_type_promotion(me_expr *node) {
+void apply_type_promotion(me_expr* node) {
     if (!node || ARITY(node->type) < 2) return;
 
-    me_expr *left = (me_expr *) node->parameters[0];
-    me_expr *right = (me_expr *) node->parameters[1];
+    me_expr* left = (me_expr*)node->parameters[0];
+    me_expr* right = (me_expr*)node->parameters[1];
 
     if (left && right) {
         me_dtype left_type = left->dtype;
@@ -524,32 +1231,95 @@ static void apply_type_promotion(me_expr *node) {
         // Store the promoted output type
         node->dtype = promoted;
 
-        // TODO: Conversion nodes not fully implemented yet
-        // See TYPE_PROMOTION_IMPLEMENTATION.md for details
-        /*
-        // Insert conversion nodes if needed
-        if (left_type != promoted) {
-            me_expr *conv_left = creame_conversion_node(left, promoted);
+        // Insert conversion nodes if needed for nested expressions with different dtype
+        if (left_type != promoted && TYPE_MASK(left->type) >= ME_FUNCTION0) {
+            me_expr *conv_left = create_conversion_node(left, promoted);
             if (conv_left) {
                 node->parameters[0] = conv_left;
             }
         }
 
-        if (right_type != promoted) {
-            me_expr *conv_right = creame_conversion_node(right, promoted);
+        if (right_type != promoted && TYPE_MASK(right->type) >= ME_FUNCTION0) {
+            me_expr *conv_right = create_conversion_node(right, promoted);
             if (conv_right) {
                 node->parameters[1] = conv_right;
             }
         }
-        */
     }
 }
 
-static me_expr *new_expr(const int type, const me_expr *parameters[]) {
+/* Check for mixed-type nested expressions (currently not supported) */
+static int check_mixed_type_nested(const me_expr* node, me_dtype parent_dtype) {
+    if (!node) return 0;
+
+    switch (TYPE_MASK(node->type)) {
+    case ME_CONSTANT:
+    case ME_VARIABLE:
+        return 0;
+
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        /* Skip reduction nodes - they handle their own type conversions */
+        if (is_reduction_node(node)) {
+            return 0;
+        }
+
+        /* Skip comparison nodes - they naturally have different output type (bool) than operands */
+        if (is_comparison_node(node)) {
+            return 0;
+        }
+
+        /* Only check binary operations (arity 2) for mixed-type nested expressions */
+        /* Unary operations are fine */
+        const int arity = ARITY(node->type);
+        if (arity == 2 && IS_FUNCTION(node->type)) {
+            me_expr* left = (me_expr*)node->parameters[0];
+            me_expr* right = (me_expr*)node->parameters[1];
+
+            /* If either operand is a nested expression (not constant/variable) with different dtype, flag it */
+            if (left && TYPE_MASK(left->type) >= ME_FUNCTION0 &&
+                left->dtype != ME_AUTO && node->dtype != ME_AUTO &&
+                left->dtype != node->dtype) {
+                return 1;
+            }
+            if (right && TYPE_MASK(right->type) >= ME_FUNCTION0 &&
+                right->dtype != ME_AUTO && node->dtype != ME_AUTO &&
+                right->dtype != node->dtype) {
+                return 1;
+            }
+        }
+
+        /* Recursively check children */
+        for (int i = 0; i < arity; i++) {
+            if (check_mixed_type_nested((const me_expr*)node->parameters[i], node->dtype)) {
+                return 1;
+            }
+        }
+        break;
+    }
+
+    return 0;
+}
+
+me_expr* new_expr(const int type, const me_expr* parameters[]) {
     const int arity = ARITY(type);
-    const int psize = sizeof(void *) * arity;
-    const int size = (sizeof(me_expr) - sizeof(void *)) + psize + (IS_CLOSURE(type) ? sizeof(void *) : 0);
-    me_expr *ret = malloc(size);
+    const int psize = sizeof(void*) * arity;
+    const int size = (sizeof(me_expr) - sizeof(void*)) + psize + (IS_CLOSURE(type) ? sizeof(void*) : 0);
+    me_expr* ret = malloc(size);
     CHECK_NULL(ret);
 
     memset(ret, 0, size);
@@ -567,63 +1337,63 @@ static me_expr *new_expr(const int type, const me_expr *parameters[]) {
 }
 
 
-void me_free_parameters(me_expr *n) {
+void me_free_parameters(me_expr* n) {
     if (!n) return;
     switch (TYPE_MASK(n->type)) {
-        case ME_FUNCTION7:
-        case ME_CLOSURE7:
-            if (n->parameters[6] && ((me_expr *) n->parameters[6])->output &&
-                ((me_expr *) n->parameters[6])->output != n->output) {
-                free(((me_expr *) n->parameters[6])->output);
-            }
-            me_free(n->parameters[6]);
-        case ME_FUNCTION6:
-        case ME_CLOSURE6:
-            if (n->parameters[5] && ((me_expr *) n->parameters[5])->output &&
-                ((me_expr *) n->parameters[5])->output != n->output) {
-                free(((me_expr *) n->parameters[5])->output);
-            }
-            me_free(n->parameters[5]);
-        case ME_FUNCTION5:
-        case ME_CLOSURE5:
-            if (n->parameters[4] && ((me_expr *) n->parameters[4])->output &&
-                ((me_expr *) n->parameters[4])->output != n->output) {
-                free(((me_expr *) n->parameters[4])->output);
-            }
-            me_free(n->parameters[4]);
-        case ME_FUNCTION4:
-        case ME_CLOSURE4:
-            if (n->parameters[3] && ((me_expr *) n->parameters[3])->output &&
-                ((me_expr *) n->parameters[3])->output != n->output) {
-                free(((me_expr *) n->parameters[3])->output);
-            }
-            me_free(n->parameters[3]);
-        case ME_FUNCTION3:
-        case ME_CLOSURE3:
-            if (n->parameters[2] && ((me_expr *) n->parameters[2])->output &&
-                ((me_expr *) n->parameters[2])->output != n->output) {
-                free(((me_expr *) n->parameters[2])->output);
-            }
-            me_free(n->parameters[2]);
-        case ME_FUNCTION2:
-        case ME_CLOSURE2:
-            if (n->parameters[1] && ((me_expr *) n->parameters[1])->output &&
-                ((me_expr *) n->parameters[1])->output != n->output) {
-                free(((me_expr *) n->parameters[1])->output);
-            }
-            me_free(n->parameters[1]);
-        case ME_FUNCTION1:
-        case ME_CLOSURE1:
-            if (n->parameters[0] && ((me_expr *) n->parameters[0])->output &&
-                ((me_expr *) n->parameters[0])->output != n->output) {
-                free(((me_expr *) n->parameters[0])->output);
-            }
-            me_free(n->parameters[0]);
+    case ME_FUNCTION7:
+    case ME_CLOSURE7:
+        if (n->parameters[6] && ((me_expr*)n->parameters[6])->output &&
+            ((me_expr*)n->parameters[6])->output != n->output) {
+            free(((me_expr*)n->parameters[6])->output);
+        }
+        me_free(n->parameters[6]);
+    case ME_FUNCTION6:
+    case ME_CLOSURE6:
+        if (n->parameters[5] && ((me_expr*)n->parameters[5])->output &&
+            ((me_expr*)n->parameters[5])->output != n->output) {
+            free(((me_expr*)n->parameters[5])->output);
+        }
+        me_free(n->parameters[5]);
+    case ME_FUNCTION5:
+    case ME_CLOSURE5:
+        if (n->parameters[4] && ((me_expr*)n->parameters[4])->output &&
+            ((me_expr*)n->parameters[4])->output != n->output) {
+            free(((me_expr*)n->parameters[4])->output);
+        }
+        me_free(n->parameters[4]);
+    case ME_FUNCTION4:
+    case ME_CLOSURE4:
+        if (n->parameters[3] && ((me_expr*)n->parameters[3])->output &&
+            ((me_expr*)n->parameters[3])->output != n->output) {
+            free(((me_expr*)n->parameters[3])->output);
+        }
+        me_free(n->parameters[3]);
+    case ME_FUNCTION3:
+    case ME_CLOSURE3:
+        if (n->parameters[2] && ((me_expr*)n->parameters[2])->output &&
+            ((me_expr*)n->parameters[2])->output != n->output) {
+            free(((me_expr*)n->parameters[2])->output);
+        }
+        me_free(n->parameters[2]);
+    case ME_FUNCTION2:
+    case ME_CLOSURE2:
+        if (n->parameters[1] && ((me_expr*)n->parameters[1])->output &&
+            ((me_expr*)n->parameters[1])->output != n->output) {
+            free(((me_expr*)n->parameters[1])->output);
+        }
+        me_free(n->parameters[1]);
+    case ME_FUNCTION1:
+    case ME_CLOSURE1:
+        if (n->parameters[0] && ((me_expr*)n->parameters[0])->output &&
+            ((me_expr*)n->parameters[0])->output != n->output) {
+            free(((me_expr*)n->parameters[0])->output);
+        }
+        me_free(n->parameters[0]);
     }
 }
 
 
-void me_free(me_expr *n) {
+void me_free(me_expr* n) {
     if (!n) return;
     me_free_parameters(n);
     if (n->bytecode) {
@@ -632,2835 +1402,28 @@ void me_free(me_expr *n) {
     free(n);
 }
 
-
-static double pi(void) { return 3.14159265358979323846; }
-static double e(void) { return 2.71828182845904523536; }
-
-/* Wrapper for expm1: exp(x) - 1, more accurate for small x */
-static double expm1_wrapper(double x) { return expm1(x); }
-
-/* Wrapper for log1p: log(1 + x), more accurate for small x */
-static double log1p_wrapper(double x) { return log1p(x); }
-
-/* Wrapper for log2: base-2 logarithm */
-static double log2_wrapper(double x) { return log2(x); }
-
-/* logaddexp: log(exp(a) + exp(b)), numerically stable */
-static double logaddexp(double a, double b) {
-    if (a == b) {
-        return a + log1p(1.0);  // log(2*exp(a)) = a + log(2)
-    }
-    double max_val = (a > b) ? a : b;
-    double min_val = (a > b) ? b : a;
-    return max_val + log1p(exp(min_val - max_val));
-}
-
-/* Forward declarations for complex operations */
-/* (Already declared above) */
-
-/* Wrapper functions for complex operations (for function pointer compatibility) */
-/* These are placeholders - actual implementation is in vector functions */
-static double conj_wrapper(double x) {
-    /* This should never be called for real numbers */
-    (void)x;
-    return NAN;
-}
-
-static double imag_wrapper(double x) {
-    /* This should never be called for real numbers */
-    (void)x;
-    return NAN;
-}
-
-/* Wrapper for round: round to nearest integer */
-static double round_wrapper(double x) { return round(x); }
-
-/* sign: returns -1.0, 0.0, or 1.0 based on sign of x */
-static double sign(double x) {
-    if (x > 0.0) return 1.0;
-    if (x < 0.0) return -1.0;
-    return 0.0;
-}
-
-/* square: x * x */
-static double square(double x) { return x * x; }
-
-/* Wrapper for trunc: truncate towards zero */
-static double trunc_wrapper(double x) { return trunc(x); }
-
-/* Scalar helper for where(), used only in generic slow path */
-static double where_scalar(double c, double x, double y) {
-    return (c != 0.0) ? x : y;
-}
-
-static double real_wrapper(double x) {
-    /* This should never be called for real numbers */
-    (void)x;
-    return NAN;
-}
-
-static double fac(double a) {
-    /* simplest version of fac */
-    if (a < 0.0)
-        return NAN;
-    if (a > UINT_MAX)
-        return INFINITY;
-    unsigned int ua = (unsigned int) (a);
-    unsigned long int result = 1, i;
-    for (i = 1; i <= ua; i++) {
-        if (i > ULONG_MAX / result)
-            return INFINITY;
-        result *= i;
-    }
-    return (double) result;
-}
-
-static double ncr(double n, double r) {
-    if (n < 0.0 || r < 0.0 || n < r) return NAN;
-    if (n > UINT_MAX || r > UINT_MAX) return INFINITY;
-    unsigned long int un = (unsigned int) (n), ur = (unsigned int) (r), i;
-    unsigned long int result = 1;
-    if (ur > un / 2) ur = un - ur;
-    for (i = 1; i <= ur; i++) {
-        if (result > ULONG_MAX / (un - ur + i))
-            return INFINITY;
-        result *= un - ur + i;
-        result /= i;
-    }
-    return result;
-}
-
-static double npr(double n, double r) { return ncr(n, r) * fac(r); }
-
-#ifdef _MSC_VER
-#pragma function (ceil)
-#pragma function (floor)
-#endif
-
-static const me_variable functions[] = {
-    /* must be in alphabetical order */
-    /* Format: {name, dtype, address, type, context} */
-    {"abs", 0, fabs, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"acos", 0, acos, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"acosh", 0, acosh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"arccos", 0, acos, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"arccosh", 0, acosh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"arcsin", 0, asin, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"arcsinh", 0, asinh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"arctan", 0, atan, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"arctan2", 0, atan2, ME_FUNCTION2 | ME_FLAG_PURE, 0},
-    {"arctanh", 0, atanh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"asin", 0, asin, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"asinh", 0, asinh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"atan", 0, atan, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"atan2", 0, atan2, ME_FUNCTION2 | ME_FLAG_PURE, 0},
-    {"atanh", 0, atanh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"ceil", 0, ceil, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"conj", 0, conj_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"cos", 0, cos, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"cosh", 0, cosh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"e", 0, e, ME_FUNCTION0 | ME_FLAG_PURE, 0},
-    {"exp", 0, exp, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"expm1", 0, expm1_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"fac", 0, fac, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"floor", 0, floor, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"imag", 0, imag_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"ln", 0, log, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-#ifdef ME_NAT_LOG
-    {"log", 0, log, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-#else
-    {"log", 0, log10, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-#endif
-    {"log10", 0, log10, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"log1p", 0, log1p_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"log2", 0, log2_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"logaddexp", 0, logaddexp, ME_FUNCTION2 | ME_FLAG_PURE, 0},
-    {"ncr", 0, ncr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
-    {"npr", 0, npr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
-    {"pi", 0, pi, ME_FUNCTION0 | ME_FLAG_PURE, 0},
-    {"pow", 0, pow, ME_FUNCTION2 | ME_FLAG_PURE, 0},
-    {"real", 0, real_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"round", 0, round_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"sign", 0, sign, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"sin", 0, sin, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"sinh", 0, sinh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"sqrt", 0, sqrt, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"square", 0, square, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"tan", 0, tan, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"tanh", 0, tanh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"trunc", 0, trunc_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
-    {"where", 0, where_scalar, ME_FUNCTION3 | ME_FLAG_PURE, 0},
-    {0, 0, 0, 0, 0}
-};
-
-static const me_variable *find_builtin(const char *name, int len) {
-    int imin = 0;
-    int imax = sizeof(functions) / sizeof(me_variable) - 2;
-
-    /*Binary search.*/
-    while (imax >= imin) {
-        const int i = (imin + ((imax - imin) / 2));
-        int c = strncmp(name, functions[i].name, len);
-        if (!c) c = '\0' - functions[i].name[len];
-        if (c == 0) {
-            return functions + i;
-        } else if (c > 0) {
-            imin = i + 1;
-        } else {
-            imax = i - 1;
-        }
-    }
-
-    return 0;
-}
-
-static const me_variable *find_lookup(const state *s, const char *name, int len) {
-    int iters;
-    const me_variable *var;
-    if (!s->lookup) return 0;
-
-    for (var = s->lookup, iters = s->lookup_len; iters; ++var, --iters) {
-        if (strncmp(name, var->name, len) == 0 && var->name[len] == '\0') {
-            return var;
-        }
-    }
-    return 0;
-}
-
-
-static double add(double a, double b) { return a + b; }
-static double sub(double a, double b) { return a - b; }
-static double mul(double a, double b) { return a * b; }
-static double divide(double a, double b) { return a / b; }
-static double negate(double a) { return -a; }
-
-static double comma(double a, double b) {
-    (void) a;
-    return b;
-}
-
-/* Bitwise operators (for integer types) */
-static double bit_and(double a, double b) { return (double) ((int64_t) a & (int64_t) b); }
-static double bit_or(double a, double b) { return (double) ((int64_t) a | (int64_t) b); }
-static double bit_xor(double a, double b) { return (double) ((int64_t) a ^ (int64_t) b); }
-static double bit_not(double a) { return (double) (~(int64_t) a); }
-static double bit_shl(double a, double b) { return (double) ((int64_t) a << (int64_t) b); }
-static double bit_shr(double a, double b) { return (double) ((int64_t) a >> (int64_t) b); }
-
-/* Comparison operators (return 1.0 for true, 0.0 for false) */
-static double cmp_eq(double a, double b) { return a == b ? 1.0 : 0.0; }
-static double cmp_ne(double a, double b) { return a != b ? 1.0 : 0.0; }
-static double cmp_lt(double a, double b) { return a < b ? 1.0 : 0.0; }
-static double cmp_le(double a, double b) { return a <= b ? 1.0 : 0.0; }
-static double cmp_gt(double a, double b) { return a > b ? 1.0 : 0.0; }
-static double cmp_ge(double a, double b) { return a >= b ? 1.0 : 0.0; }
-
-/* Logical operators (for bool type) - short-circuit via OR/AND */
-static double logical_and(double a, double b) { return ((int) a) && ((int) b) ? 1.0 : 0.0; }
-static double logical_or(double a, double b) { return ((int) a) || ((int) b) ? 1.0 : 0.0; }
-static double logical_not(double a) { return !(int) a ? 1.0 : 0.0; }
-static double logical_xor(double a, double b) { return ((int) a) != ((int) b) ? 1.0 : 0.0; }
-
-static bool is_identifier_start(char c) {
-    return isalpha((unsigned char) c) || c == '_';
-}
-
-static bool is_identifier_char(char c) {
-    return isalnum((unsigned char) c) || c == '_';
-}
-
-static void skip_whitespace(state *s) {
-    while (*s->next && isspace((unsigned char) *s->next)) {
-        s->next++;
-    }
-}
-
-static void read_number_token(state *s) {
-    const char *start = s->next;
-    s->value = strtod(s->next, (char **) &s->next);
-    s->type = TOK_NUMBER;
-
-    // Determine if it is a floating point or integer constant
-    bool is_float = false;
-    for (const char *p = start; p < s->next; p++) {
-        if (*p == '.' || *p == 'e' || *p == 'E') {
-            is_float = true;
-            break;
-        }
-    }
-
-    if (is_float) {
-        // Match NumPy conventions: float constants match target_dtype when it's a float type
-        // This ensures FLOAT32 arrays + float constants -> FLOAT32 (NumPy behavior)
-        if (s->target_dtype == ME_FLOAT32) {
-            s->dtype = ME_FLOAT32;
-        } else {
-            s->dtype = ME_FLOAT64;
-        }
-    } else {
-        // For integers, we use a heuristic
-        if (s->value > INT_MAX || s->value < INT_MIN) {
-            s->dtype = ME_INT64;
-        } else {
-            // Use target_dtype if it's an integer type, otherwise default to INT32
-            if (is_integer_dtype(s->target_dtype)) {
-                s->dtype = s->target_dtype;
-            } else {
-                s->dtype = ME_INT32;
-            }
-        }
-    }
-}
-
-static void read_identifier_token(state *s) {
-    const char *start = s->next;
-    while (is_identifier_char(*s->next)) {
-        s->next++;
-    }
-
-    const me_variable *var = find_lookup(s, start, s->next - start);
-    if (!var) {
-        var = find_builtin(start, s->next - start);
-    }
-
-    if (!var) {
-        s->type = TOK_ERROR;
-        return;
-    }
-
-    switch (TYPE_MASK(var->type)) {
-        case ME_VARIABLE:
-            s->type = TOK_VARIABLE;
-            s->bound = var->address;
-            s->dtype = var->dtype;
-            break;
-
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7:
-            s->context = var->context;
-        /* Falls through. */
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-            s->type = var->type;
-            s->function = var->address;
-            break;
-    }
-}
-
-typedef struct {
-    const char *literal;
-    int token_type;
-    me_fun2 function;
-} operator_spec;
-
-static bool handle_multi_char_operator(state *s) {
-    static const operator_spec multi_ops[] = {
-        {"**", TOK_POW, pow},
-        {"<<", TOK_SHIFT, bit_shl},
-        {">>", TOK_SHIFT, bit_shr},
-        {"==", TOK_COMPARE, cmp_eq},
-        {"!=", TOK_COMPARE, cmp_ne},
-        {"<=", TOK_COMPARE, cmp_le},
-        {">=", TOK_COMPARE, cmp_ge},
-    };
-
-    for (size_t i = 0; i < sizeof(multi_ops) / sizeof(multi_ops[0]); i++) {
-        const operator_spec *op = &multi_ops[i];
-        size_t len = strlen(op->literal);
-        if (strncmp(s->next, op->literal, len) == 0) {
-            s->type = op->token_type;
-            s->function = op->function;
-            s->next += len;
-            return true;
-        }
-    }
-    return false;
-}
-
-static void handle_single_char_operator(state *s, char c) {
-    s->next++;
-    switch (c) {
-        case '+': s->type = TOK_INFIX;
-            s->function = add;
-            break;
-        case '-': s->type = TOK_INFIX;
-            s->function = sub;
-            break;
-        case '*': s->type = TOK_INFIX;
-            s->function = mul;
-            break;
-        case '/': s->type = TOK_INFIX;
-            s->function = divide;
-            break;
-        case '%': s->type = TOK_INFIX;
-            s->function = fmod;
-            break;
-        case '&': s->type = TOK_BITWISE;
-            s->function = bit_and;
-            break;
-        case '|': s->type = TOK_BITWISE;
-            s->function = bit_or;
-            break;
-        case '^': s->type = TOK_BITWISE;
-            s->function = bit_xor;
-            break;
-        case '~': s->type = TOK_BITWISE;
-            s->function = bit_not;
-            break;
-        case '<': s->type = TOK_COMPARE;
-            s->function = cmp_lt;
-            break;
-        case '>': s->type = TOK_COMPARE;
-            s->function = cmp_gt;
-            break;
-        case '(': s->type = TOK_OPEN;
-            break;
-        case ')': s->type = TOK_CLOSE;
-            break;
-        case ',': s->type = TOK_SEP;
-            break;
-        default: s->type = TOK_ERROR;
-            break;
-    }
-}
-
-static void read_operator_token(state *s) {
-    if (handle_multi_char_operator(s)) {
-        return;
-    }
-
-    if (!*s->next) {
-        s->type = TOK_END;
-        return;
-    }
-
-    handle_single_char_operator(s, *s->next);
-}
-
-void next_token(state *s) {
-    s->type = TOK_NULL;
-
-    do {
-        skip_whitespace(s);
-
-        if (!*s->next) {
-            s->type = TOK_END;
-            return;
-        }
-
-        if ((s->next[0] >= '0' && s->next[0] <= '9') || s->next[0] == '.') {
-            read_number_token(s);
-        } else if (is_identifier_start(s->next[0])) {
-            read_identifier_token(s);
-        } else {
-            read_operator_token(s);
-        }
-    } while (s->type == TOK_NULL);
-}
-
-
-static me_expr *list(state *s);
-
-static me_expr *expr(state *s);
-
-static me_expr *power(state *s);
-
-static me_expr *shift_expr(state *s);
-
-static me_expr *bitwise_and(state *s);
-
-static me_expr *bitwise_xor(state *s);
-
-static me_expr *bitwise_or(state *s);
-
-static me_expr *comparison(state *s);
-
-
-static me_expr *base(state *s) {
-    /* <base>      =    <constant> | <variable> | <function-0> {"(" ")"} | <function-1> <power> | <function-X> "(" <expr> {"," <expr>} ")" | "(" <list> ")" */
-    me_expr *ret;
-    int arity;
-
-    switch (TYPE_MASK(s->type)) {
-        case TOK_NUMBER:
-            ret = new_expr(ME_CONSTANT, 0);
-            CHECK_NULL(ret);
-
-            ret->value = s->value;
-            // Use inferred type for constants (floating point vs integer)
-            if (s->target_dtype == ME_AUTO) {
-                ret->dtype = s->dtype;
-            } else {
-                // If target_dtype is integer but constant is float/complex, we must use float/complex
-                if (is_integer_dtype(s->target_dtype)) {
-                    if (is_float_dtype(s->dtype) || is_complex_dtype(s->dtype)) {
-                        ret->dtype = s->dtype;
-                    } else if (is_integer_dtype(s->dtype) && dtype_size(s->dtype) > dtype_size(s->target_dtype)) {
-                        // Use larger integer type if needed
-                        ret->dtype = s->dtype;
-                    } else {
-                        ret->dtype = s->target_dtype;
-                    }
-                } else {
-                    // For float/complex target types, use target_dtype to match NumPy conventions
-                    // Float constants are typed based on target_dtype (FLOAT32 or FLOAT64)
-                    // This ensures FLOAT32 arrays + float constants -> FLOAT32 (NumPy behavior)
-                    ret->dtype = s->target_dtype;
-                }
-            }
-            next_token(s);
-            break;
-
-        case TOK_VARIABLE:
-            ret = new_expr(ME_VARIABLE, 0);
-            CHECK_NULL(ret);
-
-            ret->bound = s->bound;
-            ret->dtype = s->dtype; // Set the variable's type
-            ret->input_dtype = s->dtype;
-            next_token(s);
-            break;
-
-        case ME_FUNCTION0:
-        case ME_CLOSURE0:
-            ret = new_expr(s->type, 0);
-            CHECK_NULL(ret);
-
-            ret->function = s->function;
-            if (IS_CLOSURE(s->type)) ret->parameters[0] = s->context;
-            next_token(s);
-            if (s->type == TOK_OPEN) {
-                next_token(s);
-                if (s->type != TOK_CLOSE) {
-                    s->type = TOK_ERROR;
-                } else {
-                    next_token(s);
-                }
-            }
-            break;
-
-        case ME_FUNCTION1:
-        case ME_CLOSURE1:
-            ret = new_expr(s->type, 0);
-            CHECK_NULL(ret);
-
-            ret->function = s->function;
-            if (IS_CLOSURE(s->type)) ret->parameters[1] = s->context;
-            next_token(s);
-            ret->parameters[0] = power(s);
-            CHECK_NULL(ret->parameters[0], me_free(ret));
-            break;
-
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7:
-            arity = ARITY(s->type);
-
-            ret = new_expr(s->type, 0);
-            CHECK_NULL(ret);
-
-            ret->function = s->function;
-            if (IS_CLOSURE(s->type)) ret->parameters[arity] = s->context;
-            next_token(s);
-
-            if (s->type != TOK_OPEN) {
-                s->type = TOK_ERROR;
-            } else {
-                int i;
-                for (i = 0; i < arity; i++) {
-                    next_token(s);
-                    ret->parameters[i] = expr(s);
-                    CHECK_NULL(ret->parameters[i], me_free(ret));
-
-                    if (s->type != TOK_SEP) {
-                        break;
-                    }
-                }
-                if (s->type != TOK_CLOSE || i != arity - 1) {
-                    s->type = TOK_ERROR;
-                } else {
-                    next_token(s);
-                }
-            }
-
-            break;
-
-        case TOK_OPEN:
-            next_token(s);
-            ret = list(s);
-            CHECK_NULL(ret);
-
-            if (s->type != TOK_CLOSE) {
-                s->type = TOK_ERROR;
-            } else {
-                next_token(s);
-            }
-            break;
-
-        default:
-            ret = new_expr(0, 0);
-            CHECK_NULL(ret);
-
-            s->type = TOK_ERROR;
-            ret->value = NAN;
-            break;
-    }
-
-    return ret;
-}
-
-
-static me_expr *power(state *s) {
-    /* <power>     =    {("-" | "+")} <base> */
-    int sign = 1;
-    while (s->type == TOK_INFIX && (s->function == add || s->function == sub)) {
-        if (s->function == sub) sign = -sign;
-        next_token(s);
-    }
-
-    me_expr *ret;
-
-    if (sign == 1) {
-        ret = base(s);
-    } else {
-        me_expr *b = base(s);
-        CHECK_NULL(b);
-
-        ret = NEW_EXPR(ME_FUNCTION1 | ME_FLAG_PURE, b);
-        CHECK_NULL(ret, me_free(b));
-
-        ret->function = negate;
-    }
-
-    return ret;
-}
-
-#ifdef ME_POW_FROM_RIGHT
-static me_expr *factor(state *s) {
-    /* <factor>    =    <power> {"**" <factor>}  (right associative) */
-    me_expr *ret = power(s);
-    CHECK_NULL(ret);
-
-    if (s->type == TOK_POW) {
-        me_fun2 t = s->function;
-        next_token(s);
-        me_expr *f = factor(s); /* Right associative: recurse */
-        CHECK_NULL(f, me_free(ret));
-
-        me_expr *prev = ret;
-        ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, f);
-        CHECK_NULL(ret, me_free(f), me_free(prev));
-
-        ret->function = t;
-        apply_type_promotion(ret);
-    }
-
-    return ret;
-}
-#else
-static me_expr *factor(state *s) {
-    /* <factor>    =    <power> {"**" <power>}  (left associative) */
-    me_expr *ret = power(s);
-    CHECK_NULL(ret);
-
-    while (s->type == TOK_POW) {
-        me_fun2 t = (me_fun2)s->function;
-        next_token(s);
-        me_expr *f = power(s);
-        CHECK_NULL(f, me_free(ret));
-
-        me_expr *prev = ret;
-        ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, f);
-        CHECK_NULL(ret, me_free(f), me_free(prev));
-
-        ret->function = (void *)t;
-        apply_type_promotion(ret);
-    }
-
-    return ret;
-}
-#endif
-
-
-static me_expr *term(state *s) {
-    /* <term>      =    <factor> {("*" | "/" | "%") <factor>} */
-    me_expr *ret = factor(s);
-    CHECK_NULL(ret);
-
-    while (s->type == TOK_INFIX && (s->function == mul || s->function == divide || s->function == fmod)) {
-        me_fun2 t = (me_fun2)s->function;
-        next_token(s);
-        me_expr *f = factor(s);
-        CHECK_NULL(f, me_free(ret));
-
-        me_expr *prev = ret;
-        ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, f);
-        CHECK_NULL(ret, me_free(f), me_free(prev));
-
-        ret->function = (void *)t;
-        apply_type_promotion(ret);
-    }
-
-    return ret;
-}
-
-
-static me_expr *expr(state *s) {
-    /* <expr>      =    <term> {("+" | "-") <term>} */
-    me_expr *ret = term(s);
-    CHECK_NULL(ret);
-
-    while (s->type == TOK_INFIX && (s->function == add || s->function == sub)) {
-        me_fun2 t = (me_fun2)s->function;
-        next_token(s);
-        me_expr *te = term(s);
-        CHECK_NULL(te, me_free(ret));
-
-        me_expr *prev = ret;
-        ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, te);
-        CHECK_NULL(ret, me_free(te), me_free(prev));
-
-        ret->function = (void *)t;
-        apply_type_promotion(ret); // Apply type promotion
-    }
-
-    return ret;
-}
-
-
-static me_expr *shift_expr(state *s) {
-    /* <shift_expr> =    <expr> {("<<" | ">>") <expr>} */
-    me_expr *ret = expr(s);
-    CHECK_NULL(ret);
-
-    while (s->type == TOK_SHIFT) {
-        me_fun2 t = (me_fun2)s->function;
-        next_token(s);
-        me_expr *e = expr(s);
-        CHECK_NULL(e, me_free(ret));
-
-        me_expr *prev = ret;
-        ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
-        CHECK_NULL(ret, me_free(e), me_free(prev));
-
-        ret->function = (void *)t;
-        apply_type_promotion(ret);
-    }
-
-    return ret;
-}
-
-
-static me_expr *bitwise_and(state *s) {
-    /* <bitwise_and> =    <shift_expr> {"&" <shift_expr>} */
-    me_expr *ret = shift_expr(s);
-    CHECK_NULL(ret);
-
-    while (s->type == TOK_BITWISE && s->function == bit_and) {
-        next_token(s);
-        me_expr *e = shift_expr(s);
-        CHECK_NULL(e, me_free(ret));
-
-        me_expr *prev = ret;
-        ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
-        CHECK_NULL(ret, me_free(e), me_free(prev));
-
-        ret->function = bit_and;
-        apply_type_promotion(ret);
-    }
-
-    return ret;
-}
-
-
-static me_expr *bitwise_xor(state *s) {
-    /* <bitwise_xor> =    <bitwise_and> {"^" <bitwise_and>} */
-    /* Note: ^ is XOR for integers/bools. Use ** for power */
-    me_expr *ret = bitwise_and(s);
-    CHECK_NULL(ret);
-
-    while (s->type == TOK_BITWISE && s->function == bit_xor) {
-        next_token(s);
-        me_expr *e = bitwise_and(s);
-        CHECK_NULL(e, me_free(ret));
-
-        me_expr *prev = ret;
-        ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
-        CHECK_NULL(ret, me_free(e), me_free(prev));
-
-        ret->function = bit_xor;
-        apply_type_promotion(ret);
-    }
-
-    return ret;
-}
-
-
-static me_expr *bitwise_or(state *s) {
-    /* <bitwise_or> =    <bitwise_xor> {"|" <bitwise_xor>} */
-    me_expr *ret = bitwise_xor(s);
-    CHECK_NULL(ret);
-
-    while (s->type == TOK_BITWISE && (s->function == bit_or)) {
-        me_fun2 t = (me_fun2)s->function;
-        next_token(s);
-        me_expr *e = bitwise_xor(s);
-        CHECK_NULL(e, me_free(ret));
-
-        me_expr *prev = ret;
-        ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
-        CHECK_NULL(ret, me_free(e), me_free(prev));
-
-        ret->function = (void *)t;
-        apply_type_promotion(ret);
-    }
-
-    return ret;
-}
-
-
-static me_expr *comparison(state *s) {
-    /* <comparison> =    <bitwise_or> {("<" | ">" | "<=" | ">=" | "==" | "!=") <bitwise_or>} */
-    me_expr *ret = bitwise_or(s);
-    CHECK_NULL(ret);
-
-    while (s->type == TOK_COMPARE) {
-        me_fun2 t = (me_fun2)s->function;
-        next_token(s);
-        me_expr *e = bitwise_or(s);
-        CHECK_NULL(e, me_free(ret));
-
-        me_expr *prev = ret;
-        ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
-        CHECK_NULL(ret, me_free(e), me_free(prev));
-
-        ret->function = (void *)t;
-        apply_type_promotion(ret);
-        /* Comparisons always return bool */
-        ret->dtype = ME_BOOL;
-    }
-
-    return ret;
-}
-
-
-static me_expr *list(state *s) {
-    /* <list>      =    <comparison> {"," <comparison>} */
-    me_expr *ret = comparison(s);
-    CHECK_NULL(ret);
-
-    while (s->type == TOK_SEP) {
-        next_token(s);
-        me_expr *e = comparison(s);
-        CHECK_NULL(e, me_free(ret));
-
-        me_expr *prev = ret;
-        ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
-        CHECK_NULL(ret, me_free(e), me_free(prev));
-
-        ret->function = comma;
-        apply_type_promotion(ret);
-    }
-
-    return ret;
-}
-
-
-#define ME_FUN(...) ((double(*)(__VA_ARGS__))n->function)
-#define M(e) me_eval_scalar(n->parameters[e])
-
-static double me_eval_scalar(const me_expr *n) {
-    if (!n) return NAN;
-
-    switch (TYPE_MASK(n->type)) {
-        case ME_CONSTANT: return n->value;
-        case ME_VARIABLE: return *(const double *) n->bound;
-
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-            switch (ARITY(n->type)) {
-                case 0: return ME_FUN(void)();
-                case 1: return ME_FUN(double)(M(0));
-                case 2: return ME_FUN(double, double)(M(0), M(1));
-                case 3: return ME_FUN(double, double, double)(M(0), M(1), M(2));
-                case 4: return ME_FUN(double, double, double, double)(M(0), M(1), M(2), M(3));
-                case 5: return ME_FUN(double, double, double, double, double)(M(0), M(1), M(2), M(3), M(4));
-                case 6: return ME_FUN(double, double, double, double, double, double)(
-                        M(0), M(1), M(2), M(3), M(4), M(5));
-                case 7: return ME_FUN(double, double, double, double, double, double, double)(
-                        M(0), M(1), M(2), M(3), M(4), M(5), M(6));
-                default: return NAN;
-            }
-
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7:
-            switch (ARITY(n->type)) {
-                case 0: return ME_FUN(void*)(n->parameters[0]);
-                case 1: return ME_FUN(void*, double)(n->parameters[1], M(0));
-                case 2: return ME_FUN(void*, double, double)(n->parameters[2], M(0), M(1));
-                case 3: return ME_FUN(void*, double, double, double)(n->parameters[3], M(0), M(1), M(2));
-                case 4: return ME_FUN(void*, double, double, double, double)(n->parameters[4], M(0), M(1), M(2), M(3));
-                case 5: return ME_FUN(void*, double, double, double, double, double)(
-                        n->parameters[5], M(0), M(1), M(2), M(3), M(4));
-                case 6: return ME_FUN(void*, double, double, double, double, double, double)(
-                        n->parameters[6], M(0), M(1), M(2), M(3), M(4), M(5));
-                case 7: return ME_FUN(void*, double, double, double, double, double, double, double)(
-                        n->parameters[7], M(0), M(1), M(2), M(3), M(4), M(5), M(6));
-                default: return NAN;
-            }
-
-        default: return NAN;
-    }
-}
-
-#undef ME_FUN
-#undef M
-
-/* Specialized vector operations for better performance */
-static void vec_add(const double *a, const double *b, double *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = a[i] + b[i];
-    }
-}
-
-static void vec_sub(const double *a, const double *b, double *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = a[i] - b[i];
-    }
-}
-
-static void vec_mul(const double *a, const double *b, double *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = a[i] * b[i];
-    }
-}
-
-static void vec_div(const double *a, const double *b, double *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = a[i] / b[i];
-    }
-}
-
-static void vec_add_scalar(const double *a, double b, double *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = a[i] + b;
-    }
-}
-
-static void vec_mul_scalar(const double *a, double b, double *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = a[i] * b;
-    }
-}
-
-static void vec_pow(const double *a, const double *b, double *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = pow(a[i], b[i]);
-    }
-}
-
-static void vec_pow_scalar(const double *a, double b, double *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = pow(a[i], b);
-    }
-}
-
-static void vec_sqrt(const double *a, double *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = sqrt(a[i]);
-    }
-}
-
-static void vec_sin(const double *a, double *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = sin(a[i]);
-    }
-}
-
-static void vec_cos(const double *a, double *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = cos(a[i]);
-    }
-}
-
-static void vec_negate(const double *a, double *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = -a[i];
-    }
-}
-
-/* ============================================================================
- * FLOAT32 VECTOR OPERATIONS
- * ============================================================================ */
-
-static void vec_add_f32(const float *a, const float *b, float *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = a[i] + b[i];
-    }
-}
-
-static void vec_sub_f32(const float *a, const float *b, float *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = a[i] - b[i];
-    }
-}
-
-static void vec_mul_f32(const float *a, const float *b, float *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = a[i] * b[i];
-    }
-}
-
-static void vec_div_f32(const float *a, const float *b, float *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = a[i] / b[i];
-    }
-}
-
-static void vec_add_scalar_f32(const float *a, float b, float *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = a[i] + b;
-    }
-}
-
-static void vec_mul_scalar_f32(const float *a, float b, float *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = a[i] * b;
-    }
-}
-
-static void vec_pow_f32(const float *a, const float *b, float *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = powf(a[i], b[i]);
-    }
-}
-
-static void vec_pow_scalar_f32(const float *a, float b, float *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = powf(a[i], b);
-    }
-}
-
-static void vec_sqrt_f32(const float *a, float *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = sqrtf(a[i]);
-    }
-}
-
-static void vec_sin_f32(const float *a, float *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = sinf(a[i]);
-    }
-}
-
-static void vec_cos_f32(const float *a, float *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = cosf(a[i]);
-    }
-}
-
-static void vec_negame_f32(const float *a, float *out, int n) {
-    int i;
-#pragma GCC ivdep
-    for (i = 0; i < n; i++) {
-        out[i] = -a[i];
-    }
-}
-
-/* ============================================================================
- * INTEGER VECTOR OPERATIONS (int8_t through uint64_t)
- * ============================================================================ */
-
-/* Macros to generate integer vector operations */
-#define DEFINE_INT_VEC_OPS(SUFFIX, TYPE) \
-static void vec_add_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
-    int i; \
-    _Pragma("GCC ivdep") \
-    for (i = 0; i < n; i++) out[i] = a[i] + b[i]; \
-} \
-static void vec_sub_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
-    int i; \
-    _Pragma("GCC ivdep") \
-    for (i = 0; i < n; i++) out[i] = a[i] - b[i]; \
-} \
-static void vec_mul_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
-    int i; \
-    _Pragma("GCC ivdep") \
-    for (i = 0; i < n; i++) out[i] = a[i] * b[i]; \
-} \
-static void vec_div_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
-    int i; \
-    _Pragma("GCC ivdep") \
-    for (i = 0; i < n; i++) out[i] = (b[i] != 0) ? (a[i] / b[i]) : 0; \
-} \
-static void vec_add_scalar_##SUFFIX(const TYPE *a, TYPE b, TYPE *out, int n) { \
-    int i; \
-    _Pragma("GCC ivdep") \
-    for (i = 0; i < n; i++) out[i] = a[i] + b; \
-} \
-static void vec_mul_scalar_##SUFFIX(const TYPE *a, TYPE b, TYPE *out, int n) { \
-    int i; \
-    _Pragma("GCC ivdep") \
-    for (i = 0; i < n; i++) out[i] = a[i] * b; \
-} \
-static void vec_pow_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
-    int i; \
-    _Pragma("GCC ivdep") \
-    for (i = 0; i < n; i++) out[i] = (TYPE)pow((double)a[i], (double)b[i]); \
-} \
-static void vec_pow_scalar_##SUFFIX(const TYPE *a, TYPE b, TYPE *out, int n) { \
-    int i; \
-    _Pragma("GCC ivdep") \
-    for (i = 0; i < n; i++) out[i] = (TYPE)pow((double)a[i], (double)b); \
-} \
-static void vec_sqrt_##SUFFIX(const TYPE *a, TYPE *out, int n) { \
-    int i; \
-    _Pragma("GCC ivdep") \
-    for (i = 0; i < n; i++) out[i] = (TYPE)sqrt((double)a[i]); \
-} \
-static void vec_negame_##SUFFIX(const TYPE *a, TYPE *out, int n) { \
-    int i; \
-    _Pragma("GCC ivdep") \
-    for (i = 0; i < n; i++) out[i] = -a[i]; \
-} \
-static void vec_and_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
-    int i; \
-    _Pragma("GCC ivdep") \
-    for (i = 0; i < n; i++) out[i] = a[i] & b[i]; \
-} \
-static void vec_or_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
-    int i; \
-    _Pragma("GCC ivdep") \
-    for (i = 0; i < n; i++) out[i] = a[i] | b[i]; \
-} \
-static void vec_xor_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
-    int i; \
-    _Pragma("GCC ivdep") \
-    for (i = 0; i < n; i++) out[i] = a[i] ^ b[i]; \
-} \
-static void vec_not_##SUFFIX(const TYPE *a, TYPE *out, int n) { \
-    int i; \
-    _Pragma("GCC ivdep") \
-    for (i = 0; i < n; i++) out[i] = ~a[i]; \
-} \
-static void vec_shl_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
-    int i; \
-    _Pragma("GCC ivdep") \
-    for (i = 0; i < n; i++) out[i] = a[i] << b[i]; \
-} \
-static void vec_shr_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
-    int i; \
-    _Pragma("GCC ivdep") \
-    for (i = 0; i < n; i++) out[i] = a[i] >> b[i]; \
-}
-
-/* Generate ops for all integer types */
-DEFINE_INT_VEC_OPS(i8, int8_t)
-DEFINE_INT_VEC_OPS(i16, int16_t)
-DEFINE_INT_VEC_OPS(i32, int32_t)
-DEFINE_INT_VEC_OPS(i64, int64_t)
-DEFINE_INT_VEC_OPS(u8, uint8_t)
-DEFINE_INT_VEC_OPS(u16, uint16_t)
-DEFINE_INT_VEC_OPS(u32, uint32_t)
-DEFINE_INT_VEC_OPS(u64, uint64_t)
-
-/* Boolean logical operations */
-static void vec_and_bool(const bool *a, const bool *b, bool *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = a[i] && b[i];
-}
-
-static void vec_or_bool(const bool *a, const bool *b, bool *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = a[i] || b[i];
-}
-
-static void vec_xor_bool(const bool *a, const bool *b, bool *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = a[i] != b[i];
-}
-
-static void vec_not_bool(const bool *a, bool *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = !a[i];
-}
-
-/* Comparison operations - generate for all numeric types */
-/* Note: These return bool arrays, but we'll store them as the same type for simplicity */
-#define DEFINE_COMPARE_OPS(SUFFIX, TYPE) \
-static void vec_cmp_eq_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
-    int i; \
-    IVDEP \
-    for (i = 0; i < n; i++) out[i] = (a[i] == b[i]) ? 1 : 0; \
-} \
-static void vec_cmp_ne_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
-    int i; \
-    IVDEP \
-    for (i = 0; i < n; i++) out[i] = (a[i] != b[i]) ? 1 : 0; \
-} \
-static void vec_cmp_lt_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
-    int i; \
-    IVDEP \
-    for (i = 0; i < n; i++) out[i] = (a[i] < b[i]) ? 1 : 0; \
-} \
-static void vec_cmp_le_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
-    int i; \
-    IVDEP \
-    for (i = 0; i < n; i++) out[i] = (a[i] <= b[i]) ? 1 : 0; \
-} \
-static void vec_cmp_gt_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
-    int i; \
-    IVDEP \
-    for (i = 0; i < n; i++) out[i] = (a[i] > b[i]) ? 1 : 0; \
-} \
-static void vec_cmp_ge_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
-    int i; \
-    IVDEP \
-    for (i = 0; i < n; i++) out[i] = (a[i] >= b[i]) ? 1 : 0; \
-}
-
-/* Generate comparison ops for all types */
-DEFINE_COMPARE_OPS(i8, int8_t)
-DEFINE_COMPARE_OPS(i16, int16_t)
-DEFINE_COMPARE_OPS(i32, int32_t)
-DEFINE_COMPARE_OPS(i64, int64_t)
-DEFINE_COMPARE_OPS(u8, uint8_t)
-DEFINE_COMPARE_OPS(u16, uint16_t)
-DEFINE_COMPARE_OPS(u32, uint32_t)
-DEFINE_COMPARE_OPS(u64, uint64_t)
-DEFINE_COMPARE_OPS(f32, float)
-DEFINE_COMPARE_OPS(f64, double)
-
-/* Complex operations */
-static void vec_add_c64(const float_complex *a, const float_complex *b, float_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = add_c64(a[i], b[i]);
-}
-
-static void vec_sub_c64(const float_complex *a, const float_complex *b, float_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = sub_c64(a[i], b[i]);
-}
-
-static void vec_mul_c64(const float_complex *a, const float_complex *b, float_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = mul_c64(a[i], b[i]);
-}
-
-static void vec_div_c64(const float_complex *a, const float_complex *b, float_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = div_c64(a[i], b[i]);
-}
-
-static void vec_add_scalar_c64(const float_complex *a, float_complex b, float_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = add_c64(a[i], b);
-}
-
-static void vec_mul_scalar_c64(const float_complex *a, float_complex b, float_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = mul_c64(a[i], b);
-}
-
-#if defined(_MSC_VER) && !defined(__clang__)
-// MSVC complex functions in C take struct by value and return struct by value,
-// but they might need specific headers or have different calling conventions.
-// The errors suggest 'too few arguments' which is weird for cpow(a, b).
-// Maybe it's because it's expecting _Dcomplex but getting something else?
-// Actually, MSVC's cpow is defined in complex.h as:
-// _Dcomplex cpow(_Dcomplex _Left, _Dcomplex _Right);
-// The error "too few arguments for call" often happens if it's misidentified.
-#endif
-
-static void vec_pow_c64(const float_complex *a, const float_complex *b, float_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = cpowf(a[i], b[i]);
-}
-
-static void vec_pow_scalar_c64(const float_complex *a, float_complex b, float_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = cpowf(a[i], b);
-}
-
-static void vec_sqrt_c64(const float_complex *a, float_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = csqrtf(a[i]);
-}
-
-static void vec_negame_c64(const float_complex *a, float_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = neg_c64(a[i]);
-}
-
-static void vec_conj_c64(const float_complex *a, float_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = conjf(a[i]);
-}
-
-static void vec_imag_c64(const float_complex *a, float *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = cimagf(a[i]);
-}
-
-static void vec_add_c128(const double_complex *a, const double_complex *b, double_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = add_c128(a[i], b[i]);
-}
-
-static void vec_sub_c128(const double_complex *a, const double_complex *b, double_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = sub_c128(a[i], b[i]);
-}
-
-static void vec_mul_c128(const double_complex *a, const double_complex *b, double_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = mul_c128(a[i], b[i]);
-}
-
-static void vec_div_c128(const double_complex *a, const double_complex *b, double_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = div_c128(a[i], b[i]);
-}
-
-static void vec_add_scalar_c128(const double_complex *a, double_complex b, double_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = add_c128(a[i], b);
-}
-
-static void vec_mul_scalar_c128(const double_complex *a, double_complex b, double_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = mul_c128(a[i], b);
-}
-
-static void vec_pow_c128(const double_complex *a, const double_complex *b, double_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = cpow(a[i], b[i]);
-}
-
-static void vec_pow_scalar_c128(const double_complex *a, double_complex b, double_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = cpow(a[i], b);
-}
-
-static void vec_sqrt_c128(const double_complex *a, double_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = csqrt(a[i]);
-}
-
-static void vec_negame_c128(const double_complex *a, double_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = neg_c128(a[i]);
-}
-
-static void vec_conj_c128(const double_complex *a, double_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = conj(a[i]);
-}
-
-static void vec_imag_c128(const double_complex *a, double *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = cimag(a[i]);
-}
-
-/* ============================================================================
- * TYPE CONVERSION FUNCTIONS
- * ============================================================================
- * These functions convert between different data types for mixed-type expressions.
- */
-
-#define DEFINE_VEC_CONVERT(FROM_SUFFIX, TO_SUFFIX, FROM_TYPE, TO_TYPE) \
-static void vec_convert_##FROM_SUFFIX##_to_##TO_SUFFIX(const FROM_TYPE *in, TO_TYPE *out, int n) { \
-    int i; \
-    IVDEP \
-    for (i = 0; i < n; i++) out[i] = TO_TYPE_##TO_SUFFIX(in[i]); \
-}
-
-static void vec_convert_c64_to_c128(const float_complex *in, double_complex *out, int n) {
-    int i;
-    IVDEP
-    for (i = 0; i < n; i++) out[i] = TO_TYPE_c128_from_c64(in[i]);
-}
-
-/* Generate all conversion functions */
-/* Conversions FROM bool TO other types */
-DEFINE_VEC_CONVERT(bool, i8, bool, int8_t)
-DEFINE_VEC_CONVERT(bool, i16, bool, int16_t)
-DEFINE_VEC_CONVERT(bool, i32, bool, int32_t)
-DEFINE_VEC_CONVERT(bool, i64, bool, int64_t)
-DEFINE_VEC_CONVERT(bool, u8, bool, uint8_t)
-DEFINE_VEC_CONVERT(bool, u16, bool, uint16_t)
-DEFINE_VEC_CONVERT(bool, u32, bool, uint32_t)
-DEFINE_VEC_CONVERT(bool, u64, bool, uint64_t)
-DEFINE_VEC_CONVERT(bool, f32, bool, float)
-DEFINE_VEC_CONVERT(bool, f64, bool, double)
-
-/* Conversions FROM other types TO bool */
-DEFINE_VEC_CONVERT(i8, bool, int8_t, bool)
-DEFINE_VEC_CONVERT(i16, bool, int16_t, bool)
-DEFINE_VEC_CONVERT(i32, bool, int32_t, bool)
-DEFINE_VEC_CONVERT(i64, bool, int64_t, bool)
-DEFINE_VEC_CONVERT(u8, bool, uint8_t, bool)
-DEFINE_VEC_CONVERT(u16, bool, uint16_t, bool)
-DEFINE_VEC_CONVERT(u32, bool, uint32_t, bool)
-DEFINE_VEC_CONVERT(u64, bool, uint64_t, bool)
-DEFINE_VEC_CONVERT(f32, bool, float, bool)
-DEFINE_VEC_CONVERT(f64, bool, double, bool)
-DEFINE_VEC_CONVERT(f64, f32, double, float)
-
-DEFINE_VEC_CONVERT(i8, i16, int8_t, int16_t)
-DEFINE_VEC_CONVERT(i8, i32, int8_t, int32_t)
-DEFINE_VEC_CONVERT(i8, i64, int8_t, int64_t)
-DEFINE_VEC_CONVERT(i8, f32, int8_t, float)
-DEFINE_VEC_CONVERT(i8, f64, int8_t, double)
-
-DEFINE_VEC_CONVERT(i16, i32, int16_t, int32_t)
-DEFINE_VEC_CONVERT(i16, i64, int16_t, int64_t)
-DEFINE_VEC_CONVERT(i16, f32, int16_t, float)
-DEFINE_VEC_CONVERT(i16, f64, int16_t, double)
-
-DEFINE_VEC_CONVERT(i32, i64, int32_t, int64_t)
-DEFINE_VEC_CONVERT(i32, f32, int32_t, float)
-DEFINE_VEC_CONVERT(i32, f64, int32_t, double)
-
-DEFINE_VEC_CONVERT(i64, f64, int64_t, double)
-
-DEFINE_VEC_CONVERT(u8, u16, uint8_t, uint16_t)
-DEFINE_VEC_CONVERT(u8, u32, uint8_t, uint32_t)
-DEFINE_VEC_CONVERT(u8, u64, uint8_t, uint64_t)
-DEFINE_VEC_CONVERT(u8, i16, uint8_t, int16_t)
-DEFINE_VEC_CONVERT(u8, i32, uint8_t, int32_t)
-DEFINE_VEC_CONVERT(u8, i64, uint8_t, int64_t)
-DEFINE_VEC_CONVERT(u8, f32, uint8_t, float)
-DEFINE_VEC_CONVERT(u8, f64, uint8_t, double)
-
-DEFINE_VEC_CONVERT(u16, u32, uint16_t, uint32_t)
-DEFINE_VEC_CONVERT(u16, u64, uint16_t, uint64_t)
-DEFINE_VEC_CONVERT(u16, i32, uint16_t, int32_t)
-DEFINE_VEC_CONVERT(u16, i64, uint16_t, int64_t)
-DEFINE_VEC_CONVERT(u16, f32, uint16_t, float)
-DEFINE_VEC_CONVERT(u16, f64, uint16_t, double)
-
-DEFINE_VEC_CONVERT(u32, u64, uint32_t, uint64_t)
-DEFINE_VEC_CONVERT(u32, i64, uint32_t, int64_t)
-DEFINE_VEC_CONVERT(u32, f64, uint32_t, double)
-
-DEFINE_VEC_CONVERT(u64, f64, uint64_t, double)
-
-DEFINE_VEC_CONVERT(f32, f64, float, double)
-DEFINE_VEC_CONVERT(f32, c64, float, float_complex)
-DEFINE_VEC_CONVERT(f32, c128, float, double_complex)
-
-DEFINE_VEC_CONVERT(f64, c128, double, double_complex)
-
-/* Special case for complex to complex conversion to avoid cast to double on MSVC */
-// DEFINE_VEC_CONVERT(c64, c128, float_complex, double_complex) is handled above manually
-
-/* Function to get conversion function pointer */
-typedef void (*convert_func_t)(const void *, void *, int);
-
-static convert_func_t get_convert_func(me_dtype from, me_dtype to) {
-    /* Return conversion function for a specific type pair */
-    if (from == to) return NULL; // No conversion needed
-
-#define CONV_CASE(FROM, TO, FROM_S, TO_S) \
-        if (from == FROM && to == TO) return (convert_func_t)vec_convert_##FROM_S##_to_##TO_S;
-
-    CONV_CASE(ME_BOOL, ME_INT8, bool, i8)
-    CONV_CASE(ME_BOOL, ME_INT16, bool, i16)
-    CONV_CASE(ME_BOOL, ME_INT32, bool, i32)
-    CONV_CASE(ME_BOOL, ME_INT64, bool, i64)
-    CONV_CASE(ME_BOOL, ME_UINT8, bool, u8)
-    CONV_CASE(ME_BOOL, ME_UINT16, bool, u16)
-    CONV_CASE(ME_BOOL, ME_UINT32, bool, u32)
-    CONV_CASE(ME_BOOL, ME_UINT64, bool, u64)
-    CONV_CASE(ME_BOOL, ME_FLOAT32, bool, f32)
-    CONV_CASE(ME_BOOL, ME_FLOAT64, bool, f64)
-
-    CONV_CASE(ME_INT8, ME_BOOL, i8, bool)
-    CONV_CASE(ME_INT16, ME_BOOL, i16, bool)
-    CONV_CASE(ME_INT32, ME_BOOL, i32, bool)
-    CONV_CASE(ME_INT64, ME_BOOL, i64, bool)
-    CONV_CASE(ME_UINT8, ME_BOOL, u8, bool)
-    CONV_CASE(ME_UINT16, ME_BOOL, u16, bool)
-    CONV_CASE(ME_UINT32, ME_BOOL, u32, bool)
-    CONV_CASE(ME_UINT64, ME_BOOL, u64, bool)
-    CONV_CASE(ME_FLOAT32, ME_BOOL, f32, bool)
-    CONV_CASE(ME_FLOAT64, ME_BOOL, f64, bool)
-
-    CONV_CASE(ME_INT8, ME_INT16, i8, i16)
-    CONV_CASE(ME_INT8, ME_INT32, i8, i32)
-    CONV_CASE(ME_INT8, ME_INT64, i8, i64)
-    CONV_CASE(ME_INT8, ME_FLOAT32, i8, f32)
-    CONV_CASE(ME_INT8, ME_FLOAT64, i8, f64)
-
-    CONV_CASE(ME_INT16, ME_INT32, i16, i32)
-    CONV_CASE(ME_INT16, ME_INT64, i16, i64)
-    CONV_CASE(ME_INT16, ME_FLOAT32, i16, f32)
-    CONV_CASE(ME_INT16, ME_FLOAT64, i16, f64)
-
-    CONV_CASE(ME_INT32, ME_INT64, i32, i64)
-    CONV_CASE(ME_INT32, ME_FLOAT32, i32, f32)
-    CONV_CASE(ME_INT32, ME_FLOAT64, i32, f64)
-
-    CONV_CASE(ME_INT64, ME_FLOAT64, i64, f64)
-
-    CONV_CASE(ME_UINT8, ME_UINT16, u8, u16)
-    CONV_CASE(ME_UINT8, ME_UINT32, u8, u32)
-    CONV_CASE(ME_UINT8, ME_UINT64, u8, u64)
-    CONV_CASE(ME_UINT8, ME_INT16, u8, i16)
-    CONV_CASE(ME_UINT8, ME_INT32, u8, i32)
-    CONV_CASE(ME_UINT8, ME_INT64, u8, i64)
-    CONV_CASE(ME_UINT8, ME_FLOAT32, u8, f32)
-    CONV_CASE(ME_UINT8, ME_FLOAT64, u8, f64)
-
-    CONV_CASE(ME_UINT16, ME_UINT32, u16, u32)
-    CONV_CASE(ME_UINT16, ME_UINT64, u16, u64)
-    CONV_CASE(ME_UINT16, ME_INT32, u16, i32)
-    CONV_CASE(ME_UINT16, ME_INT64, u16, i64)
-    CONV_CASE(ME_UINT16, ME_FLOAT32, u16, f32)
-    CONV_CASE(ME_UINT16, ME_FLOAT64, u16, f64)
-
-    CONV_CASE(ME_UINT32, ME_UINT64, u32, u64)
-    CONV_CASE(ME_UINT32, ME_INT64, u32, i64)
-    CONV_CASE(ME_UINT32, ME_FLOAT64, u32, f64)
-
-    CONV_CASE(ME_UINT64, ME_FLOAT64, u64, f64)
-
-    CONV_CASE(ME_FLOAT32, ME_FLOAT64, f32, f64)
-    CONV_CASE(ME_FLOAT32, ME_COMPLEX64, f32, c64)
-    CONV_CASE(ME_FLOAT32, ME_COMPLEX128, f32, c128)
-
-    CONV_CASE(ME_FLOAT64, ME_FLOAT32, f64, f32)
-    CONV_CASE(ME_FLOAT64, ME_COMPLEX128, f64, c128)
-
-    CONV_CASE(ME_COMPLEX64, ME_COMPLEX128, c64, c128)
-
-#undef CONV_CASE
-
-    return NULL; // Unsupported conversion
-}
-
-
-typedef double (*me_fun1)(double);
-
-typedef float (*me_fun1_f32)(float);
-
-/* Template for type-specific evaluator */
-#define DEFINE_ME_EVAL(SUFFIX, TYPE, VEC_ADD, VEC_SUB, VEC_MUL, VEC_DIV, VEC_POW, \
-    VEC_ADD_SCALAR, VEC_MUL_SCALAR, VEC_POW_SCALAR, \
-    VEC_SQRT, VEC_SIN, VEC_COS, VEC_NEGATE, \
-    SQRT_FUNC, SIN_FUNC, COS_FUNC, EXP_FUNC, LOG_FUNC, FABS_FUNC, POW_FUNC, \
-    VEC_CONJ) \
-static void me_eval_##SUFFIX(const me_expr *n) { \
-    if (!n || !n->output || n->nitems <= 0) return; \
-    \
-    int i, j; \
-    const int arity = ARITY(n->type); \
-    TYPE *output = (TYPE*)n->output; \
-    \
-    switch(TYPE_MASK(n->type)) { \
-        case ME_CONSTANT: \
-            { \
-                TYPE val = TO_TYPE_##SUFFIX(n->value); \
-                for (i = 0; i < n->nitems; i++) { \
-                    output[i] = val; \
-                } \
-            } \
-            break; \
-            \
-        case ME_VARIABLE: \
-            { \
-                const TYPE *src = (const TYPE*)n->bound; \
-                for (i = 0; i < n->nitems; i++) { \
-                    output[i] = src[i]; \
-                } \
-            } \
-            break; \
-        \
-        case ME_FUNCTION0: case ME_FUNCTION1: case ME_FUNCTION2: case ME_FUNCTION3: \
-        case ME_FUNCTION4: case ME_FUNCTION5: case ME_FUNCTION6: case ME_FUNCTION7: \
-        case ME_CLOSURE0: case ME_CLOSURE1: case ME_CLOSURE2: case ME_CLOSURE3: \
-        case ME_CLOSURE4: case ME_CLOSURE5: case ME_CLOSURE6: case ME_CLOSURE7: \
-            for (j = 0; j < arity; j++) { \
-                me_expr *param = (me_expr*)n->parameters[j]; \
-                if (param->type != ME_CONSTANT && param->type != ME_VARIABLE) { \
-                    if (!param->output) { \
-                        param->output = malloc(n->nitems * sizeof(TYPE)); \
-                        param->nitems = n->nitems; \
-                        param->dtype = n->dtype; \
-                    } \
-                    me_eval_##SUFFIX(param); \
-                } \
-            } \
-            \
-            if (arity == 2 && IS_FUNCTION(n->type)) { \
-                me_expr *left = (me_expr*)n->parameters[0]; \
-                me_expr *right = (me_expr*)n->parameters[1]; \
-                \
-                const TYPE *ldata = (left->type == ME_CONSTANT) ? NULL : \
-                                   (left->type == ME_VARIABLE) ? (const TYPE*)left->bound : (const TYPE*)left->output; \
-                const TYPE *rdata = (right->type == ME_CONSTANT) ? NULL : \
-                                    (right->type == ME_VARIABLE) ? (const TYPE*)right->bound : (const TYPE*)right->output; \
-                \
-                me_fun2 func = (me_fun2)n->function; \
-                \
-                if (func == add) { \
-                    if (ldata && rdata) { \
-                        VEC_ADD(ldata, rdata, output, n->nitems); \
-                    } else if (ldata && right->type == ME_CONSTANT) { \
-                        VEC_ADD_SCALAR(ldata, TO_TYPE_##SUFFIX(right->value), output, n->nitems); \
-                    } else if (left->type == ME_CONSTANT && rdata) { \
-                        VEC_ADD_SCALAR(rdata, TO_TYPE_##SUFFIX(left->value), output, n->nitems); \
-                    } else { \
-                        goto general_case_binary_##SUFFIX; \
-                    } \
-                } else if (func == sub) { \
-                    if (ldata && rdata) { \
-                        VEC_SUB(ldata, rdata, output, n->nitems); \
-                    } else { \
-                        goto general_case_binary_##SUFFIX; \
-                    } \
-                } else if (func == mul) { \
-                    if (ldata && rdata) { \
-                        VEC_MUL(ldata, rdata, output, n->nitems); \
-                    } else if (ldata && right->type == ME_CONSTANT) { \
-                        VEC_MUL_SCALAR(ldata, TO_TYPE_##SUFFIX(right->value), output, n->nitems); \
-                    } else if (left->type == ME_CONSTANT && rdata) { \
-                        VEC_MUL_SCALAR(rdata, TO_TYPE_##SUFFIX(left->value), output, n->nitems); \
-                    } else { \
-                        goto general_case_binary_##SUFFIX; \
-                    } \
-                } else if (func == divide) { \
-                    if (ldata && rdata) { \
-                        VEC_DIV(ldata, rdata, output, n->nitems); \
-                    } else { \
-                        goto general_case_binary_##SUFFIX; \
-                    } \
-                } else if (func == (me_fun2)pow) { \
-                    if (ldata && rdata) { \
-                        VEC_POW(ldata, rdata, output, n->nitems); \
-                    } else if (ldata && right->type == ME_CONSTANT) { \
-                        VEC_POW_SCALAR(ldata, TO_TYPE_##SUFFIX(right->value), output, n->nitems); \
-                    } else { \
-                        goto general_case_binary_##SUFFIX; \
-                    } \
-                } else { \
-                    general_case_binary_##SUFFIX: \
-                    for (i = 0; i < n->nitems; i++) { \
-                        double a = (left->type == ME_CONSTANT) ? left->value : \
-                                  FROM_TYPE_##SUFFIX(ldata[i]); \
-                        double b = (right->type == ME_CONSTANT) ? right->value : \
-                                  FROM_TYPE_##SUFFIX(rdata[i]); \
-                        output[i] = TO_TYPE_##SUFFIX(func(a, b)); \
-                    } \
-                } \
-            } else if (arity == 3 && IS_FUNCTION(n->type) && n->function == (void*)where_scalar) { \
-                /* where(cond, x, y) – NumPy-like semantics: cond != 0 selects x else y */ \
-                me_expr *cond = (me_expr*)n->parameters[0]; \
-                me_expr *xexpr = (me_expr*)n->parameters[1]; \
-                me_expr *yexpr = (me_expr*)n->parameters[2]; \
-                \
-                const TYPE *cdata = (const TYPE*)((cond->type == ME_VARIABLE) ? cond->bound : cond->output); \
-                const TYPE *xdata = (const TYPE*)((xexpr->type == ME_VARIABLE) ? xexpr->bound : xexpr->output); \
-                const TYPE *ydata = (const TYPE*)((yexpr->type == ME_VARIABLE) ? yexpr->bound : yexpr->output); \
-                \
-                for (i = 0; i < n->nitems; i++) { \
-                    output[i] = (IS_NONZERO_##SUFFIX(cdata[i])) ? xdata[i] : ydata[i]; \
-                } \
-            } \
-            else if (arity == 1 && IS_FUNCTION(n->type)) { \
-                me_expr *arg = (me_expr*)n->parameters[0]; \
-                \
-                const TYPE *adata = (arg->type == ME_CONSTANT) ? NULL : \
-                                   (arg->type == ME_VARIABLE) ? (const TYPE*)arg->bound : (const TYPE*)arg->output; \
-                \
-                const void *func_ptr = n->function; \
-                \
-                if (func_ptr == (void*)sqrt) { \
-                    if (adata) VEC_SQRT(adata, output, n->nitems); \
-                } else if (func_ptr == (void*)sin) { \
-                    if (adata) VEC_SIN(adata, output, n->nitems); \
-                } else if (func_ptr == (void*)cos) { \
-                    if (adata) VEC_COS(adata, output, n->nitems); \
-                } else if (func_ptr == (void*)negate) { \
-                    if (adata) VEC_NEGATE(adata, output, n->nitems); \
-                } else if (func_ptr == (void*)imag_wrapper) { \
-                    /* NumPy semantics: imag(real) == 0 with same dtype */ \
-                    if (adata) { \
-                        for (i = 0; i < n->nitems; i++) { \
-                            output[i] = TO_TYPE_##SUFFIX(0); \
-                        } \
-                    } \
-                } else if (func_ptr == (void*)real_wrapper) { \
-                    /* NumPy semantics: real(real) == real with same dtype */ \
-                    if (adata) { \
-                        for (i = 0; i < n->nitems; i++) { \
-                            output[i] = adata[i]; \
-                        } \
-                    } \
-                } else if (func_ptr == (void*)conj_wrapper) { \
-                    if (adata) VEC_CONJ(adata, output, n->nitems); \
-                } else { \
-                    me_fun1 func = (me_fun1)func_ptr; \
-                    if (arg->type == ME_CONSTANT) { \
-                        TYPE val = TO_TYPE_##SUFFIX(func(arg->value)); \
-                        for (i = 0; i < n->nitems; i++) { \
-                            output[i] = val; \
-                        } \
-                    } else { \
-                        for (i = 0; i < n->nitems; i++) { \
-                            output[i] = TO_TYPE_##SUFFIX(func(FROM_TYPE_##SUFFIX(adata[i]))); \
-                        } \
-                    } \
-                } \
-            } \
-            else { \
-                for (i = 0; i < n->nitems; i++) { \
-                    double args[7]; \
-                    \
-                    for (j = 0; j < arity; j++) { \
-                        me_expr *param = (me_expr*)n->parameters[j]; \
-                        const TYPE *pdata = (const TYPE*)((param->type == ME_VARIABLE) ? param->bound : param->output); \
-                        if (param->type == ME_CONSTANT) { \
-                            args[j] = param->value; \
-                        } else { \
-                            args[j] = FROM_TYPE_##SUFFIX(pdata[i]); \
-                        } \
-                    } \
-                    \
-                    if (IS_FUNCTION(n->type)) { \
-                        switch(arity) { \
-                            case 0: output[i] = TO_TYPE_##SUFFIX(((double(*)(void))n->function)()); break; \
-                            case 3: output[i] = TO_TYPE_##SUFFIX(((double(*)(double,double,double))n->function)(args[0], args[1], args[2])); break; \
-                            case 4: output[i] = TO_TYPE_##SUFFIX(((double(*)(double,double,double,double))n->function)(args[0], args[1], args[2], args[3])); break; \
-                            case 5: output[i] = TO_TYPE_##SUFFIX(((double(*)(double,double,double,double,double))n->function)(args[0], args[1], args[2], args[3], args[4])); break; \
-                            case 6: output[i] = TO_TYPE_##SUFFIX(((double(*)(double,double,double,double,double,double))n->function)(args[0], args[1], args[2], args[3], args[4], args[5])); break; \
-                            case 7: output[i] = TO_TYPE_##SUFFIX(((double(*)(double,double,double,double,double,double,double))n->function)(args[0], args[1], args[2], args[3], args[4], args[5], args[6])); break; \
-                        } \
-                    } else if (IS_CLOSURE(n->type)) { \
-                        void *context = n->parameters[arity]; \
-                        switch(arity) { \
-                            case 0: output[i] = TO_TYPE_##SUFFIX(((double(*)(void*))n->function)(context)); break; \
-                            case 1: output[i] = TO_TYPE_##SUFFIX(((double(*)(void*,double))n->function)(context, args[0])); break; \
-                            case 2: output[i] = TO_TYPE_##SUFFIX(((double(*)(void*,double,double))n->function)(context, args[0], args[1])); break; \
-                            case 3: output[i] = TO_TYPE_##SUFFIX(((double(*)(void*,double,double,double))n->function)(context, args[0], args[1], args[2])); break; \
-                            case 4: output[i] = TO_TYPE_##SUFFIX(((double(*)(void*,double,double,double,double))n->function)(context, args[0], args[1], args[2], args[3])); break; \
-                            case 5: output[i] = TO_TYPE_##SUFFIX(((double(*)(void*,double,double,double,double,double))n->function)(context, args[0], args[1], args[2], args[3], args[4])); break; \
-                            case 6: output[i] = TO_TYPE_##SUFFIX(((double(*)(void*,double,double,double,double,double,double))n->function)(context, args[0], args[1], args[2], args[3], args[4], args[5])); break; \
-                            case 7: output[i] = TO_TYPE_##SUFFIX(((double(*)(void*,double,double,double,double,double,double,double))n->function)(context, args[0], args[1], args[2], args[3], args[4], args[5], args[6])); break; \
-                        } \
-                    } \
-                } \
-            } \
-            break; \
-        \
-        default: \
-            for (i = 0; i < n->nitems; i++) { \
-                output[i] = TO_TYPE_##SUFFIX(NAN); \
-            } \
-            break; \
-    } \
-}
-
-/* Vector operation macros - expand to inline loops */
-#define vec_add(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = pow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = pow((a)[_i], (b)); } while(0)
-#define vec_sqrt(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = sqrt((a)[_i]); } while(0)
-#define vec_sin(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = sin((a)[_i]); } while(0)
-#define vec_cos(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cos((a)[_i]); } while(0)
-#define vec_negate(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
-#define vec_copy(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i]; } while(0)
-
-#define vec_add_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = powf((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = powf((a)[_i], (b)); } while(0)
-#define vec_sqrt_f32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = sqrtf((a)[_i]); } while(0)
-#define vec_sin_f32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = sinf((a)[_i]); } while(0)
-#define vec_cos_f32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cosf((a)[_i]); } while(0)
-#define vec_negame_f32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
-
-#define vec_add_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int8_t)pow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int8_t)pow((a)[_i], (b)); } while(0)
-#define vec_sqrt_i8(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int8_t)sqrt((a)[_i]); } while(0)
-#define vec_negame_i8(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
-
-#define vec_add_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int16_t)pow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int16_t)pow((a)[_i], (b)); } while(0)
-#define vec_sqrt_i16(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int16_t)sqrt((a)[_i]); } while(0)
-#define vec_negame_i16(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
-
-#define vec_add_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int32_t)pow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int32_t)pow((a)[_i], (b)); } while(0)
-#define vec_sqrt_i32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int32_t)sqrt((a)[_i]); } while(0)
-#define vec_negame_i32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
-
-#define vec_add_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int64_t)pow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int64_t)pow((a)[_i], (b)); } while(0)
-#define vec_sqrt_i64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int64_t)sqrt((a)[_i]); } while(0)
-#define vec_negame_i64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
-
-#define vec_add_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint8_t)pow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint8_t)pow((a)[_i], (b)); } while(0)
-#define vec_sqrt_u8(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint8_t)sqrt((a)[_i]); } while(0)
-#define vec_negame_u8(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
-
-#define vec_add_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint16_t)pow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint16_t)pow((a)[_i], (b)); } while(0)
-#define vec_sqrt_u16(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint16_t)sqrt((a)[_i]); } while(0)
-#define vec_negame_u16(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
-
-#define vec_add_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint32_t)pow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint32_t)pow((a)[_i], (b)); } while(0)
-#define vec_sqrt_u32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint32_t)sqrt((a)[_i]); } while(0)
-#define vec_negame_u32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
-
-#define vec_add_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint64_t)pow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint64_t)pow((a)[_i], (b)); } while(0)
-#define vec_sqrt_u64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint64_t)sqrt((a)[_i]); } while(0)
-#define vec_negame_u64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
-
-#if defined(_MSC_VER) && !defined(__clang__)
-#define vec_add_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = add_c64((a)[_i], (b)[_i]); } while(0)
-#define vec_sub_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = sub_c64((a)[_i], (b)[_i]); } while(0)
-#define vec_mul_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c64((a)[_i], (b)[_i]); } while(0)
-#define vec_div_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = div_c64((a)[_i], (b)[_i]); } while(0)
-#define vec_pow_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpowf((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = add_c64((a)[_i], (b)); } while(0)
-#define vec_mul_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c64((a)[_i], (b)); } while(0)
-#define vec_pow_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpowf((a)[_i], (b)); } while(0)
-#define vec_sqrt_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = csqrtf((a)[_i]); } while(0)
-#define vec_negame_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = neg_c64((a)[_i]); } while(0)
-#define vec_conj_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = conjf((a)[_i]); } while(0)
-#define vec_imag_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cimagf((a)[_i]); } while(0)
-#define vec_real_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = crealf((a)[_i]); } while(0)
-#define vec_conj_noop(a, out, n) do { (void)(a); (void)(out); (void)(n); } while(0)
-
-#define vec_add_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = add_c128((a)[_i], (b)[_i]); } while(0)
-#define vec_sub_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = sub_c128((a)[_i], (b)[_i]); } while(0)
-#define vec_mul_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c128((a)[_i], (b)[_i]); } while(0)
-#define vec_div_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = div_c128((a)[_i], (b)[_i]); } while(0)
-#define vec_pow_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = add_c128((a)[_i], (b)); } while(0)
-#define vec_mul_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c128((a)[_i], (b)); } while(0)
-#define vec_pow_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpow((a)[_i], (b)); } while(0)
-#define vec_sqrt_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = csqrt((a)[_i]); } while(0)
-#define vec_negame_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = neg_c128((a)[_i]); } while(0)
-#define vec_conj_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = conj((a)[_i]); } while(0)
-#define vec_imag_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cimag((a)[_i]); } while(0)
-#define vec_real_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = creal((a)[_i]); } while(0)
-#else
-#define vec_add_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpowf((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpowf((a)[_i], (b)); } while(0)
-#define vec_sqrt_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = csqrtf((a)[_i]); } while(0)
-#define vec_negame_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
-#define vec_conj_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = conjf((a)[_i]); } while(0)
-#define vec_imag_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cimagf((a)[_i]); } while(0)
-#define vec_real_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = crealf((a)[_i]); } while(0)
-#define vec_conj_noop(a, out, n) do { (void)(a); (void)(out); (void)(n); } while(0)
-
-#define vec_add_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpow((a)[_i], (b)); } while(0)
-#define vec_sqrt_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = csqrt((a)[_i]); } while(0)
-#define vec_negame_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
-#define vec_conj_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = conj((a)[_i]); } while(0)
-#define vec_imag_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cimag((a)[_i]); } while(0)
-#define vec_real_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = creal((a)[_i]); } while(0)
-#endif
-
-/* Generate float32 evaluator */
-DEFINE_ME_EVAL(f32, float,
-               vec_add_f32, vec_sub_f32, vec_mul_f32, vec_div_f32, vec_pow_f32,
-               vec_add_scalar_f32, vec_mul_scalar_f32, vec_pow_scalar_f32,
-               vec_sqrt_f32, vec_sin_f32, vec_cos_f32, vec_negame_f32,
-               sqrtf, sinf, cosf, expf, logf, fabsf, powf,
-               vec_copy)
-
-/* Generate float64 (double) evaluator */
-DEFINE_ME_EVAL(f64, double,
-               vec_add, vec_sub, vec_mul, vec_div, vec_pow,
-               vec_add_scalar, vec_mul_scalar, vec_pow_scalar,
-               vec_sqrt, vec_sin, vec_cos, vec_negate,
-               sqrt, sin, cos, exp, log, fabs, pow,
-               vec_copy)
-
-/* Generate integer evaluators - sin/cos cast to double and back */
-DEFINE_ME_EVAL(i8, int8_t,
-               vec_add_i8, vec_sub_i8, vec_mul_i8, vec_div_i8, vec_pow_i8,
-               vec_add_scalar_i8, vec_mul_scalar_i8, vec_pow_scalar_i8,
-               vec_sqrt_i8, vec_sqrt_i8, vec_sqrt_i8, vec_negame_i8,
-               sqrt, sin, cos, exp, log, fabs, pow,
-               vec_conj_noop)
-
-DEFINE_ME_EVAL(i16, int16_t,
-               vec_add_i16, vec_sub_i16, vec_mul_i16, vec_div_i16, vec_pow_i16,
-               vec_add_scalar_i16, vec_mul_scalar_i16, vec_pow_scalar_i16,
-               vec_sqrt_i16, vec_sqrt_i16, vec_sqrt_i16, vec_negame_i16,
-               sqrt, sin, cos, exp, log, fabs, pow,
-               vec_conj_noop)
-
-DEFINE_ME_EVAL(i32, int32_t,
-               vec_add_i32, vec_sub_i32, vec_mul_i32, vec_div_i32, vec_pow_i32,
-               vec_add_scalar_i32, vec_mul_scalar_i32, vec_pow_scalar_i32,
-               vec_sqrt_i32, vec_sqrt_i32, vec_sqrt_i32, vec_negame_i32,
-               sqrt, sin, cos, exp, log, fabs, pow,
-               vec_conj_noop)
-
-DEFINE_ME_EVAL(i64, int64_t,
-               vec_add_i64, vec_sub_i64, vec_mul_i64, vec_div_i64, vec_pow_i64,
-               vec_add_scalar_i64, vec_mul_scalar_i64, vec_pow_scalar_i64,
-               vec_sqrt_i64, vec_sqrt_i64, vec_sqrt_i64, vec_negame_i64,
-               sqrt, sin, cos, exp, log, fabs, pow,
-               vec_conj_noop)
-
-DEFINE_ME_EVAL(u8, uint8_t,
-               vec_add_u8, vec_sub_u8, vec_mul_u8, vec_div_u8, vec_pow_u8,
-               vec_add_scalar_u8, vec_mul_scalar_u8, vec_pow_scalar_u8,
-               vec_sqrt_u8, vec_sqrt_u8, vec_sqrt_u8, vec_negame_u8,
-               sqrt, sin, cos, exp, log, fabs, pow,
-               vec_conj_noop)
-
-DEFINE_ME_EVAL(u16, uint16_t,
-               vec_add_u16, vec_sub_u16, vec_mul_u16, vec_div_u16, vec_pow_u16,
-               vec_add_scalar_u16, vec_mul_scalar_u16, vec_pow_scalar_u16,
-               vec_sqrt_u16, vec_sqrt_u16, vec_sqrt_u16, vec_negame_u16,
-               sqrt, sin, cos, exp, log, fabs, pow,
-               vec_conj_noop)
-
-DEFINE_ME_EVAL(u32, uint32_t,
-               vec_add_u32, vec_sub_u32, vec_mul_u32, vec_div_u32, vec_pow_u32,
-               vec_add_scalar_u32, vec_mul_scalar_u32, vec_pow_scalar_u32,
-               vec_sqrt_u32, vec_sqrt_u32, vec_sqrt_u32, vec_negame_u32,
-               sqrt, sin, cos, exp, log, fabs, pow,
-               vec_conj_noop)
-
-DEFINE_ME_EVAL(u64, uint64_t,
-               vec_add_u64, vec_sub_u64, vec_mul_u64, vec_div_u64, vec_pow_u64,
-               vec_add_scalar_u64, vec_mul_scalar_u64, vec_pow_scalar_u64,
-               vec_sqrt_u64, vec_sqrt_u64, vec_sqrt_u64, vec_negame_u64,
-               sqrt, sin, cos, exp, log, fabs, pow,
-               vec_conj_noop)
-
-/* Generate complex evaluators */
-DEFINE_ME_EVAL(c64, float_complex,
-               vec_add_c64, vec_sub_c64, vec_mul_c64, vec_div_c64, vec_pow_c64,
-               vec_add_scalar_c64, vec_mul_scalar_c64, vec_pow_scalar_c64,
-               vec_sqrt_c64, vec_sqrt_c64, vec_sqrt_c64, vec_negame_c64,
-               csqrtf, csqrtf, csqrtf, cexpf, clogf, cabsf, cpowf,
-               vec_conj_c64)
-
-DEFINE_ME_EVAL(c128, double_complex,
-               vec_add_c128, vec_sub_c128, vec_mul_c128, vec_div_c128, vec_pow_c128,
-               vec_add_scalar_c128, vec_mul_scalar_c128, vec_pow_scalar_c128,
-               vec_sqrt_c128, vec_sqrt_c128, vec_sqrt_c128, vec_negame_c128,
-               csqrt, csqrt, csqrt, cexp, clog, cabs, cpow,
-               vec_conj_c128)
-
-/* Public API - dispatches to correct type-specific evaluator */
-/* Structure to track promoted variables */
-typedef struct {
-    void *promoted_data; // Temporary buffer for promoted data
-    me_dtype original_type;
-    bool needs_free;
-} promoted_var_t;
-
-/* Helper to save original variable bindings */
-static void save_variable_bindings(const me_expr *node,
-                                   const void **original_bounds,
-                                   me_dtype *original_types,
-                                   int *save_idx) {
-    if (!node) return;
-    switch (TYPE_MASK(node->type)) {
-        case ME_VARIABLE:
-            original_bounds[*save_idx] = node->bound;
-            original_types[*save_idx] = node->dtype;
-            (*save_idx)++;
-            break;
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
-            const int arity = ARITY(node->type);
-            for (int i = 0; i < arity; i++) {
-                save_variable_bindings((const me_expr *) node->parameters[i],
-                                       original_bounds, original_types, save_idx);
-            }
-            break;
-        }
-    }
-}
-
-/* Recursively promote variables in expression tree */
-static void promote_variables_in_tree(me_expr *n, me_dtype target_type,
-                                      promoted_var_t *promotions, int *promo_count,
-                                      int nitems) {
-    if (!n) return;
-
-    switch (TYPE_MASK(n->type)) {
-        case ME_CONSTANT:
-            // Constants are promoted on-the-fly during evaluation
-            break;
-
-        case ME_VARIABLE:
-            if (n->dtype != target_type) {
-                // Need to promote this variable
-                void *promoted = malloc(nitems * dtype_size(target_type));
-                if (promoted) {
-                    convert_func_t conv = get_convert_func(n->dtype, target_type);
-                    if (conv) {
-                        conv(n->bound, promoted, nitems);
-
-                        // Track this promotion for later cleanup
-                        promotions[*promo_count].promoted_data = promoted;
-                        promotions[*promo_count].original_type = n->dtype;
-                        promotions[*promo_count].needs_free = true;
-                        (*promo_count)++;
-
-                        // Temporarily replace bound pointer
-                        n->bound = promoted;
-                        n->dtype = target_type;
-                    } else {
-                        free(promoted);
-                    }
-                }
-            }
-            break;
-
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
-            const int arity = ARITY(n->type);
-            for (int i = 0; i < arity; i++) {
-                promote_variables_in_tree((me_expr *) n->parameters[i], target_type,
-                                          promotions, promo_count, nitems);
-            }
-            break;
-        }
-    }
-}
-
-/* Restore original variable bindings after promotion */
-static void restore_variables_in_tree(me_expr *n, const void **original_bounds,
-                                      const me_dtype *original_types, int *restore_idx) {
-    if (!n) return;
-
-    switch (TYPE_MASK(n->type)) {
-        case ME_VARIABLE:
-            if (original_bounds[*restore_idx] != NULL) {
-                n->bound = original_bounds[*restore_idx];
-                n->dtype = original_types[*restore_idx];
-                (*restore_idx)++;
-            }
-            break;
-
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
-            const int arity = ARITY(n->type);
-            for (int i = 0; i < arity; i++) {
-                restore_variables_in_tree((me_expr *) n->parameters[i], original_bounds, original_types, restore_idx);
-            }
-            break;
-        }
-    }
-}
-
-/* Check if all variables in tree match target type */
-static bool all_variables_match_type(const me_expr *n, me_dtype target_type) {
-    if (!n) return true;
-
-    switch (TYPE_MASK(n->type)) {
-        case ME_CONSTANT:
-            return true; // Constants are always OK
-
-        case ME_VARIABLE:
-            return n->dtype == target_type;
-
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
-            const int arity = ARITY(n->type);
-            for (int i = 0; i < arity; i++) {
-                if (!all_variables_match_type((const me_expr *) n->parameters[i], target_type)) {
-                    return false;
-                }
-            }
-            return true;
-        }
-    }
-
-    return true;
-}
-
-static void private_eval(const me_expr *n) {
-    if (!n) return;
-
-    // Special case: imag() and real() functions return real from complex input
-    if (IS_FUNCTION(n->type) && ARITY(n->type) == 1) {
-        if (n->function == (void*)imag_wrapper || n->function == (void*)real_wrapper) {
-            me_expr *arg = (me_expr*)n->parameters[0];
-            me_dtype arg_type = infer_result_type(arg);
-
-            if (arg_type == ME_COMPLEX64) {
-                // Evaluate argument as complex64
-                if (!arg->output) {
-                    arg->output = malloc(n->nitems * sizeof(float_complex));
-                    arg->nitems = n->nitems;
-                    ((me_expr*)arg)->dtype = ME_COMPLEX64;
-                }
-                me_eval_c64(arg);
-
-                // Extract real/imaginary part to float32 output
-                const float_complex *cdata = (const float_complex*)arg->output;
-                float *output = (float*)n->output;
-                if (n->function == (void*)imag_wrapper) {
-                    for (int i = 0; i < n->nitems; i++) {
-                        output[i] = cimagf(cdata[i]);
-                    }
-                } else { // real_wrapper
-                    for (int i = 0; i < n->nitems; i++) {
-                        output[i] = crealf(cdata[i]);
-                    }
-                }
-                return;
-            } else if (arg_type == ME_COMPLEX128) {
-                // Evaluate argument as complex128
-                if (!arg->output) {
-                    arg->output = malloc(n->nitems * sizeof(double_complex));
-                    arg->nitems = n->nitems;
-                    ((me_expr*)arg)->dtype = ME_COMPLEX128;
-                }
-                me_eval_c128(arg);
-
-                // Extract real/imaginary part to float64 output
-                const double_complex *cdata = (const double_complex*)arg->output;
-                double *output = (double*)n->output;
-                if (n->function == (void*)imag_wrapper) {
-                    for (int i = 0; i < n->nitems; i++) {
-                        output[i] = cimag(cdata[i]);
-                    }
-                } else { // real_wrapper
-                    for (int i = 0; i < n->nitems; i++) {
-                        output[i] = creal(cdata[i]);
-                    }
-                }
-                return;
-            }
-            // If not complex, fall through to normal evaluation
-        }
-    }
-
-    // Infer the result type from the expression tree
-    me_dtype result_type = infer_result_type(n);
-
-    // If all variables already match result type, use fast path
-    bool all_match = all_variables_match_type(n, result_type);
-    if (result_type == n->dtype && all_match) {
-        // Fast path: no promotion needed
-        if (n->dtype == ME_AUTO) {
-            fprintf(stderr, "FATAL: ME_AUTO dtype in evaluation. This is a bug.\n");
-#ifdef NDEBUG
-            abort(); // Release build: terminate immediately
-#else
-            assert(0 && "ME_AUTO should be resolved during compilation"); // Debug: trigger debugger
-#endif
-        }
-        switch (n->dtype) {
-            case ME_BOOL: me_eval_i8(n);
-                break;
-            case ME_INT8: me_eval_i8(n);
-                break;
-            case ME_INT16: me_eval_i16(n);
-                break;
-            case ME_INT32: me_eval_i32(n);
-                break;
-            case ME_INT64: me_eval_i64(n);
-                break;
-            case ME_UINT8: me_eval_u8(n);
-                break;
-            case ME_UINT16: me_eval_u16(n);
-                break;
-            case ME_UINT32: me_eval_u32(n);
-                break;
-            case ME_UINT64: me_eval_u64(n);
-                break;
-            case ME_FLOAT32: me_eval_f32(n);
-                break;
-            case ME_FLOAT64: me_eval_f64(n);
-                break;
-            case ME_COMPLEX64: me_eval_c64(n);
-                break;
-            case ME_COMPLEX128: me_eval_c128(n);
-                break;
-            default:
-                fprintf(stderr, "FATAL: Invalid dtype %d in evaluation.\n", n->dtype);
-#ifdef NDEBUG
-                abort(); // Release build: terminate immediately
-#else
-                assert(0 && "Invalid dtype"); // Debug: trigger debugger
-#endif
-        }
-        return;
-    }
-
-    // Slow path: need to promote variables
-    // Allocate tracking structures (max 100 variables)
-    promoted_var_t promotions[100];
-    int promo_count = 0;
-
-    // Save original variable bindings
-    const void *original_bounds[100];
-    me_dtype original_types[100];
-    int save_idx = 0;
-
-    save_variable_bindings(n, original_bounds, original_types, &save_idx);
-
-    // Promote variables
-    promote_variables_in_tree((me_expr *) n, result_type, promotions, &promo_count, n->nitems);
-
-    // Check if we need output type conversion (e.g., computation in float64, output in bool)
-    me_dtype saved_dtype = n->dtype;
-    void *original_output = n->output;
-    void *temp_output = NULL;
-
-    if (saved_dtype != result_type) {
-        // Allocate temp buffer for computation
-        temp_output = malloc(n->nitems * dtype_size(result_type));
-        if (temp_output) {
-            ((me_expr *) n)->output = temp_output;
-        }
-    }
-
-    // Update expression type for evaluation
-    ((me_expr *) n)->dtype = result_type;
-
-    // Evaluate with promoted types
-    if (result_type == ME_AUTO) {
-        fprintf(stderr, "FATAL: ME_AUTO result type in evaluation. This is a bug.\n");
-#ifdef NDEBUG
-        abort(); // Release build: terminate immediately
-#else
-        assert(0 && "ME_AUTO should be resolved during compilation"); // Debug: trigger debugger
-#endif
-    }
-    switch (result_type) {
-        case ME_BOOL: me_eval_i8(n);
-            break;
-        case ME_INT8: me_eval_i8(n);
-            break;
-        case ME_INT16: me_eval_i16(n);
-            break;
-        case ME_INT32: me_eval_i32(n);
-            break;
-        case ME_INT64: me_eval_i64(n);
-            break;
-        case ME_UINT8: me_eval_u8(n);
-            break;
-        case ME_UINT16: me_eval_u16(n);
-            break;
-        case ME_UINT32: me_eval_u32(n);
-            break;
-        case ME_UINT64: me_eval_u64(n);
-            break;
-        case ME_FLOAT32: me_eval_f32(n);
-            break;
-        case ME_FLOAT64: me_eval_f64(n);
-            break;
-        case ME_COMPLEX64: me_eval_c64(n);
-            break;
-        case ME_COMPLEX128: me_eval_c128(n);
-            break;
-        default:
-            fprintf(stderr, "FATAL: Invalid result type %d in evaluation.\n", result_type);
-#ifdef NDEBUG
-            abort(); // Release build: terminate immediately
-#else
-            assert(0 && "Invalid dtype"); // Debug: trigger debugger
-#endif
-    }
-
-    // If we used a temp buffer, convert to final output type
-    if (temp_output) {
-        convert_func_t conv = get_convert_func(result_type, saved_dtype);
-        if (conv) {
-            conv(temp_output, original_output, n->nitems);
-        }
-        // Restore original output pointer
-        ((me_expr *) n)->output = original_output;
-        free(temp_output);
-    }
-
-    // Restore original variable bindings
-    int restore_idx = 0;
-    restore_variables_in_tree((me_expr *) n, original_bounds, original_types, &restore_idx);
-
-    // Restore expression type
-    ((me_expr *) n)->dtype = saved_dtype;
-
-    // Free promoted buffers
-    for (int i = 0; i < promo_count; i++) {
-        if (promotions[i].needs_free) {
-            free(promotions[i].promoted_data);
-        }
-    }
-}
-
-/* Helper to update variable bindings and nitems in tree */
-static void save_nitems_in_tree(const me_expr *node, int *nitems_array, int *idx) {
-    if (!node) return;
-    nitems_array[(*idx)++] = node->nitems;
-
-    switch (TYPE_MASK(node->type)) {
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
-            const int arity = ARITY(node->type);
-            for (int i = 0; i < arity; i++) {
-                save_nitems_in_tree((const me_expr *) node->parameters[i], nitems_array, idx);
-            }
-            break;
-        }
-        default:
-            break;
-    }
-}
-
-static void restore_nitems_in_tree(me_expr *node, const int *nitems_array, int *idx) {
-    if (!node) return;
-    node->nitems = nitems_array[(*idx)++];
-
-    switch (TYPE_MASK(node->type)) {
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
-            const int arity = ARITY(node->type);
-            for (int i = 0; i < arity; i++) {
-                restore_nitems_in_tree((me_expr *) node->parameters[i], nitems_array, idx);
-            }
-            break;
-        }
-        default:
-            break;
-    }
-}
-
-/* Helper to free intermediate output buffers */
-static void free_intermediate_buffers(me_expr *node) {
-    if (!node) return;
-
-    switch (TYPE_MASK(node->type)) {
-        case ME_CONSTANT:
-        case ME_VARIABLE:
-            // These don't have intermediate buffers
-            break;
-
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
-            const int arity = ARITY(node->type);
-            for (int i = 0; i < arity; i++) {
-                me_expr *param = (me_expr *) node->parameters[i];
-                free_intermediate_buffers(param);
-
-                // Free intermediate buffer (but not for root or variables/constants)
-                if (param->type != ME_CONSTANT && param->type != ME_VARIABLE && param->output) {
-                    free(param->output);
-                    param->output = NULL;
-                }
-            }
-            break;
-        }
-    }
-}
-
-/* Helper to save original variable bindings with their pointers */
-static void save_variable_pointers(const me_expr *node, const void **var_pointers, int *var_count) {
-    if (!node) return;
-    switch (TYPE_MASK(node->type)) {
-        case ME_VARIABLE:
-            // Check if this pointer is already in the list
-            for (int i = 0; i < *var_count; i++) {
-                if (var_pointers[i] == node->bound) return; // Already saved
-            }
-            var_pointers[*var_count] = node->bound;
-            (*var_count)++;
-            break;
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
-            const int arity = ARITY(node->type);
-            for (int i = 0; i < arity; i++) {
-                save_variable_pointers((const me_expr *) node->parameters[i], var_pointers, var_count);
-            }
-            break;
-        }
-    }
-}
-
-/* Helper to update variable bindings by matching original pointers */
-static void update_vars_by_pointer(me_expr *node, const void **old_pointers, const void **new_pointers, int n_vars) {
-    if (!node) return;
-    switch (TYPE_MASK(node->type)) {
-        case ME_VARIABLE:
-            // Find which variable this is and update to new pointer
-            for (int i = 0; i < n_vars; i++) {
-                if (node->bound == old_pointers[i]) {
-                    node->bound = new_pointers[i];
-                    break;
-                }
-            }
-            break;
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
-            const int arity = ARITY(node->type);
-            for (int i = 0; i < arity; i++) {
-                update_vars_by_pointer((me_expr *) node->parameters[i], old_pointers, new_pointers, n_vars);
-            }
-            break;
-        }
-    }
-}
-
-/* Helper to update variable bindings and nitems in tree */
-static void update_variable_bindings(me_expr *node, const void **new_bounds, int *var_idx, int new_nitems) {
-    if (!node) return;
-
-    // Update nitems for all nodes to handle intermediate buffers
-    if (new_nitems > 0) {
-        node->nitems = new_nitems;
-    }
-
-    switch (TYPE_MASK(node->type)) {
-        case ME_VARIABLE:
-            if (new_bounds && *var_idx >= 0) {
-                node->bound = new_bounds[*var_idx];
-                (*var_idx)++;
-            }
-            break;
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7: {
-            const int arity = ARITY(node->type);
-            for (int i = 0; i < arity; i++) {
-                update_variable_bindings((me_expr *) node->parameters[i], new_bounds, var_idx, new_nitems);
-            }
-            break;
-        }
-    }
-}
-
-/* Evaluate compiled expression with new variable and output pointers */
-static me_expr *clone_expr(const me_expr *src) {
-    if (!src) return NULL;
-
-    const int arity = ARITY(src->type);
-    const int psize = sizeof(void *) * arity;
-    const int size = (sizeof(me_expr) - sizeof(void *)) + psize + (IS_CLOSURE(src->type) ? sizeof(void *) : 0);
-    me_expr *clone = malloc(size);
-    if (!clone) return NULL;
-
-    // Copy the entire structure
-    memcpy(clone, src, size);
-
-    // Clone children recursively
-    if (arity > 0) {
-        for (int i = 0; i < arity; i++) {
-            clone->parameters[i] = clone_expr((const me_expr *) src->parameters[i]);
-            if (src->parameters[i] && !clone->parameters[i]) {
-                // Clone failed, clean up
-                for (int j = 0; j < i; j++) {
-                    me_free((me_expr *) clone->parameters[j]);
-                }
-                free(clone);
-                return NULL;
+static int private_compile(const char* expression, const me_variable* variables, int var_count,
+                           void* output, int nitems, me_dtype dtype, int* error, me_expr** out) {
+    if (out) *out = NULL;
+    if (!expression || !out || var_count < 0) {
+        if (error) *error = -1;
+        return ME_COMPILE_ERR_INVALID_ARG;
+    }
+
+    if (dtype != ME_AUTO && !is_valid_dtype(dtype)) {
+        if (error) *error = -1;
+        return ME_COMPILE_ERR_INVALID_ARG_TYPE;
+    }
+
+    if (variables && var_count > 0) {
+        for (int i = 0; i < var_count; i++) {
+            if (!is_valid_dtype(variables[i].dtype)) {
+                if (error) *error = -1;
+                return ME_COMPILE_ERR_INVALID_ARG_TYPE;
             }
         }
     }
 
-    // Don't clone output buffer - it will be set by caller
-    // Don't clone bytecode - not needed for clones
-    clone->output = NULL;
-    clone->bytecode = NULL;
-    clone->ncode = 0;
-
-    return clone;
-}
-
-/* Thread-safe chunked evaluation using expression cloning.
- * This function is safe to call from multiple threads simultaneously,
- * even on the same expression object. Each call creates a temporary
- * clone of the expression tree to avoid race conditions. */
-void me_eval(const me_expr *expr, const void **vars_chunk,
-             int n_vars, void *output_chunk, int chunk_nitems) {
-    if (!expr) return;
-
-    // Verify variable count matches
-    const void *original_var_pointers[100];
-    int actual_var_count = 0;
-    save_variable_pointers(expr, original_var_pointers, &actual_var_count);
-
-    if (actual_var_count != n_vars) {
-        return;
-    }
-
-    // Clone the expression tree
-    me_expr *clone = clone_expr(expr);
-    if (!clone) return;
-
-    // Update clone's variable bindings
-    update_vars_by_pointer(clone, original_var_pointers, vars_chunk, n_vars);
-
-    // Update clone's nitems throughout the tree
-    int update_idx = 0;
-    update_variable_bindings(clone, NULL, &update_idx, chunk_nitems);
-
-    // Set output pointer
-    clone->output = output_chunk;
-
-    // Evaluate the clone
-    private_eval(clone);
-
-    // Free the clone (including any intermediate buffers it allocated)
-    me_free(clone);
-}
-
-
-static void optimize(me_expr *n) {
-    /* Evaluates as much as possible. */
-    if (!n) return;
-    if (n->type == ME_CONSTANT) return;
-    if (n->type == ME_VARIABLE) return;
-
-    /* Only optimize out functions flagged as pure. */
-    if (IS_PURE(n->type)) {
-        const int arity = ARITY(n->type);
-        int known = 1;
-        int i;
-        for (i = 0; i < arity; ++i) {
-            optimize(n->parameters[i]);
-            if (((me_expr *) (n->parameters[i]))->type != ME_CONSTANT) {
-                known = 0;
-            }
-        }
-        if (known) {
-            const double value = me_eval_scalar(n);
-            me_free_parameters(n);
-            n->type = ME_CONSTANT;
-            n->value = value;
-        }
-    }
-}
-
-
-static me_expr *private_compile(const char *expression, const me_variable *variables, int var_count,
-                                void *output, int nitems, me_dtype dtype, int *error) {
     // Validate dtype usage: either all vars are ME_AUTO (use dtype), or dtype is ME_AUTO (use var dtypes)
     if (variables && var_count > 0) {
         int auto_count = 0;
@@ -3469,7 +1432,8 @@ static me_expr *private_compile(const char *expression, const me_variable *varia
         for (int i = 0; i < var_count; i++) {
             if (variables[i].dtype == ME_AUTO) {
                 auto_count++;
-            } else {
+            }
+            else {
                 specified_count++;
             }
         }
@@ -3482,27 +1446,28 @@ static me_expr *private_compile(const char *expression, const me_variable *varia
                     stderr,
                     "Error: When output dtype is ME_AUTO, all variable dtypes must be specified (not ME_AUTO)\n");
                 if (error) *error = -1;
-                return NULL;
+                return ME_COMPILE_ERR_VAR_UNSPECIFIED;
             }
-        } else {
+        }
+        else {
             // Mode 2: Output dtype is specified
             // Two sub-modes: all ME_AUTO (homogeneous), or all explicit (heterogeneous with conversion)
             if (auto_count > 0 && specified_count > 0) {
                 // Mixed mode not allowed
                 fprintf(stderr, "Error: Variable dtypes must be all ME_AUTO or all explicitly specified\n");
                 if (error) *error = -1;
-                return NULL;
+                return ME_COMPILE_ERR_VAR_MIXED;
             }
         }
     }
 
     // Create a copy of variables with dtype filled in (if not already set)
-    me_variable *vars_copy = NULL;
+    me_variable* vars_copy = NULL;
     if (variables && var_count > 0) {
         vars_copy = malloc(var_count * sizeof(me_variable));
         if (!vars_copy) {
             if (error) *error = -1;
-            return NULL;
+            return ME_COMPILE_ERR_OOM;
         }
         for (int i = 0; i < var_count; i++) {
             vars_copy[i] = variables[i];
@@ -3521,23 +1486,73 @@ static me_expr *private_compile(const char *expression, const me_variable *varia
     // When dtype is ME_AUTO, infer target dtype from variables to avoid type mismatch
     if (dtype != ME_AUTO) {
         s.target_dtype = dtype;
-    } else if (variables && var_count > 0) {
+    }
+    else if (variables && var_count > 0) {
         // Use the first variable's dtype as the target for constants
         // This prevents type promotion issues when mixing float32 vars with float64 constants
         s.target_dtype = variables[0].dtype;
-    } else {
+    }
+    else {
         s.target_dtype = ME_AUTO;
     }
 
     next_token(&s);
-    me_expr *root = list(&s);
-
-    if (vars_copy) free(vars_copy);
+    me_expr* root = list(&s);
 
     if (root == NULL) {
         if (error) *error = -1;
-        return NULL;
+        if (vars_copy) free(vars_copy);
+        return ME_COMPILE_ERR_OOM;
     }
+
+    if (contains_reduction(root) && !reduction_usage_is_valid(root)) {
+        me_free(root);
+        if (error) *error = -1;
+        if (vars_copy) free(vars_copy);
+        return ME_COMPILE_ERR_REDUCTION_INVALID;
+    }
+
+    bool any_complex_vars = false;
+    if (variables && var_count > 0) {
+        const me_variable* vars_check = vars_copy ? vars_copy : variables;
+        for (int i = 0; i < var_count; i++) {
+            if (vars_check[i].dtype == ME_COMPLEX64 || vars_check[i].dtype == ME_COMPLEX128) {
+                any_complex_vars = true;
+                break;
+            }
+        }
+    }
+
+    if ((any_complex_vars || has_complex_input_types(root)) && has_unsupported_complex_function(root)) {
+        me_free(root);
+        if (error) *error = -1;
+        if (vars_copy) free(vars_copy);
+        return ME_COMPILE_ERR_INVALID_ARG_TYPE;
+    }
+
+#if defined(_WIN32) || defined(_WIN64)
+    {
+        const me_variable* vars_check = vars_copy ? vars_copy : variables;
+        bool complex_vars = false;
+        if (vars_check) {
+            for (int i = 0; i < var_count; i++) {
+                if (vars_check[i].dtype == ME_COMPLEX64 || vars_check[i].dtype == ME_COMPLEX128) {
+                    complex_vars = true;
+                    break;
+                }
+            }
+        }
+        if (complex_vars ||
+            dtype == ME_COMPLEX64 || dtype == ME_COMPLEX128 ||
+            has_complex_node(root) || has_complex_input(root)) {
+            fprintf(stderr, "Error: Complex expressions are not supported on Windows (no C99 complex ABI)\n");
+            me_free(root);
+            if (error) *error = -1;
+            if (vars_copy) free(vars_copy);
+            return ME_COMPILE_ERR_COMPLEX_UNSUPPORTED;
+        }
+    }
+#endif
 
     if (s.type != TOK_END) {
         me_free(root);
@@ -3545,8 +1560,10 @@ static me_expr *private_compile(const char *expression, const me_variable *varia
             *error = (s.next - s.start);
             if (*error == 0) *error = 1;
         }
-        return 0;
-    } else {
+        if (vars_copy) free(vars_copy);
+        return ME_COMPILE_ERR_PARSE;
+    }
+    else {
         optimize(root);
         root->output = output;
         root->nitems = nitems;
@@ -3554,24 +1571,39 @@ static me_expr *private_compile(const char *expression, const me_variable *varia
         // If dtype is ME_AUTO, infer from expression; otherwise use provided dtype
         if (dtype == ME_AUTO) {
             root->dtype = infer_output_type(root);
-        } else {
+        }
+        else {
             // User explicitly requested a dtype - use it (will cast if needed)
             root->dtype = dtype;
         }
 
+        // Mixed-type nested expressions now handled via conversion nodes
+        // (see apply_type_promotion which inserts conversion nodes when needed)
+
         if (error) *error = 0;
-        return root;
+        if (vars_copy) free(vars_copy);
+        *out = root;
+        return ME_COMPILE_SUCCESS;
     }
 }
 
-// Synthetic addresses for ordinal matching (when user provides NULL addresses)
-static char synthetic_var_addresses[100];
+// Check if a pointer is a synthetic address
+int is_synthetic_address(const void* ptr) {
+    const char* p = (const char*)ptr;
+    return (p >= synthetic_var_addresses && p < synthetic_var_addresses + ME_MAX_VARS);
+}
 
-me_expr *me_compile(const char *expression, const me_variable *variables,
-                    int var_count, me_dtype dtype, int *error) {
+int me_compile(const char* expression, const me_variable* variables,
+               int var_count, me_dtype dtype, int* error, me_expr** out) {
+    if (out) *out = NULL;
+    if (!out) {
+        if (error) *error = -1;
+        return ME_COMPILE_ERR_INVALID_ARG;
+    }
+
     // For chunked evaluation, we compile without specific output/nitems
     // If variables have NULL addresses, assign synthetic unique addresses for ordinal matching
-    me_variable *vars_copy = NULL;
+    me_variable* vars_copy = NULL;
     int needs_synthetic = 0;
 
     if (variables && var_count > 0) {
@@ -3588,7 +1620,7 @@ me_expr *me_compile(const char *expression, const me_variable *variables,
             vars_copy = malloc(var_count * sizeof(me_variable));
             if (!vars_copy) {
                 if (error) *error = -1;
-                return NULL;
+                return ME_COMPILE_ERR_OOM;
             }
 
             for (int i = 0; i < var_count; i++) {
@@ -3599,17 +1631,68 @@ me_expr *me_compile(const char *expression, const me_variable *variables,
                 }
             }
 
-            me_expr *result = private_compile(expression, vars_copy, var_count, NULL, 0, dtype, error);
+            int status = private_compile(expression, vars_copy, var_count, NULL, 0, dtype, error, out);
             free(vars_copy);
-            return result;
+            return status;
         }
     }
 
     // No NULL addresses, use variables as-is
-    return private_compile(expression, variables, var_count, NULL, 0, dtype, error);
+    return private_compile(expression, variables, var_count, NULL, 0, dtype, error, out);
 }
 
-static void pn(const me_expr *n, int depth) {
+int me_compile_nd(const char* expression, const me_variable* variables,
+                  int var_count, me_dtype dtype, int ndims,
+                  const int64_t* shape, const int32_t* chunkshape,
+                  const int32_t* blockshape, int* error, me_expr** out) {
+    if (out) *out = NULL;
+    if (!expression || !out || ndims <= 0 || !shape || !chunkshape || !blockshape) {
+        if (error) *error = -1;
+        return ME_COMPILE_ERR_INVALID_ARG;
+    }
+
+    for (int i = 0; i < ndims; i++) {
+        if (chunkshape[i] <= 0 || blockshape[i] <= 0) {
+            if (error) *error = -1;
+            return ME_COMPILE_ERR_INVALID_ARG;
+        }
+    }
+
+    me_expr* expr = NULL;
+    int rc = me_compile(expression, variables, var_count, dtype, error, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        return rc;
+    }
+
+    const size_t extra_items = (size_t)(3 * ndims - 1);
+    const size_t info_size = sizeof(me_nd_info) + extra_items * sizeof(int64_t);
+    me_nd_info* info = malloc(info_size);
+    if (!info) {
+        me_free(expr);
+        if (error) *error = -1;
+        return ME_COMPILE_ERR_OOM;
+    }
+
+    info->ndims = ndims;
+    int64_t* ptr = info->data;
+    for (int i = 0; i < ndims; i++) {
+        ptr[i] = shape[i];
+    }
+    ptr += ndims;
+    for (int i = 0; i < ndims; i++) {
+        ptr[i] = (int64_t)chunkshape[i];
+    }
+    ptr += ndims;
+    for (int i = 0; i < ndims; i++) {
+        ptr[i] = (int64_t)blockshape[i];
+    }
+
+    expr->bytecode = info;
+    *out = expr;
+    return rc;
+}
+
+static void pn(const me_expr* n, int depth) {
     int i, arity;
     printf("%*s", depth, "");
 
@@ -3619,44 +1702,659 @@ static void pn(const me_expr *n, int depth) {
     }
 
     switch (TYPE_MASK(n->type)) {
-        case ME_CONSTANT: printf("%f\n", n->value);
-            break;
-        case ME_VARIABLE: printf("bound %p\n", n->bound);
-            break;
+    case ME_CONSTANT: printf("%f\n", n->value);
+        break;
+    case ME_VARIABLE: printf("bound %p\n", n->bound);
+        break;
 
-        case ME_FUNCTION0:
-        case ME_FUNCTION1:
-        case ME_FUNCTION2:
-        case ME_FUNCTION3:
-        case ME_FUNCTION4:
-        case ME_FUNCTION5:
-        case ME_FUNCTION6:
-        case ME_FUNCTION7:
-        case ME_CLOSURE0:
-        case ME_CLOSURE1:
-        case ME_CLOSURE2:
-        case ME_CLOSURE3:
-        case ME_CLOSURE4:
-        case ME_CLOSURE5:
-        case ME_CLOSURE6:
-        case ME_CLOSURE7:
-            arity = ARITY(n->type);
-            printf("f%d", arity);
-            for (i = 0; i < arity; i++) {
-                printf(" %p", n->parameters[i]);
-            }
-            printf("\n");
-            for (i = 0; i < arity; i++) {
-                pn(n->parameters[i], depth + 1);
-            }
-            break;
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        arity = ARITY(n->type);
+        printf("f%d", arity);
+        for (i = 0; i < arity; i++) {
+            printf(" %p", n->parameters[i]);
+        }
+        printf("\n");
+        for (i = 0; i < arity; i++) {
+            pn(n->parameters[i], depth + 1);
+        }
+        break;
     }
 }
 
-void me_print(const me_expr *n) {
+void me_print(const me_expr* n) {
     pn(n, 0);
 }
 
-me_dtype me_get_dtype(const me_expr *expr) {
+me_dtype me_get_dtype(const me_expr* expr) {
     return expr ? expr->dtype : ME_AUTO;
+}
+
+static int compute_valid_items(const me_expr* expr, int64_t nchunk, int64_t nblock,
+                               int chunk_nitems, int64_t* valid_items, int64_t* padded_items) {
+    if (!expr || !valid_items || !padded_items) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    const me_nd_info* info = (const me_nd_info*)expr->bytecode;
+    if (!info || info->ndims <= 0) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    const int nd = info->ndims;
+    if (nd > 64) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+    const int64_t* shape = info->data;
+    const int64_t* chunkshape = shape + nd;
+    const int64_t* blockshape = chunkshape + nd;
+
+    int64_t total_chunks = 1;
+    int64_t total_blocks = 1;
+    int64_t padded = 1;
+
+    for (int i = 0; i < nd; i++) {
+        if (chunkshape[i] <= 0 || blockshape[i] <= 0) {
+            return ME_EVAL_ERR_INVALID_ARG;
+        }
+        const int64_t nchunks_d = ceil_div64(shape[i], chunkshape[i]);
+        const int64_t nblocks_d = ceil_div64(chunkshape[i], blockshape[i]);
+        if (nchunks_d <= 0 || nblocks_d <= 0) {
+            return ME_EVAL_ERR_INVALID_ARG;
+        }
+        if (total_chunks > LLONG_MAX / nchunks_d || total_blocks > LLONG_MAX / nblocks_d) {
+            return ME_EVAL_ERR_INVALID_ARG;
+        }
+        total_chunks *= nchunks_d;
+        total_blocks *= nblocks_d;
+        if (padded > LLONG_MAX / blockshape[i]) {
+            return ME_EVAL_ERR_INVALID_ARG;
+        }
+        padded *= blockshape[i];
+    }
+
+    if (nchunk < 0 || nchunk >= total_chunks || nblock < 0 || nblock >= total_blocks) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+    if (chunk_nitems > 0 && (int64_t)chunk_nitems < padded) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    int64_t chunk_idx[64];
+    int64_t block_idx[64];
+
+    int64_t tmp = nchunk;
+    for (int i = nd - 1; i >= 0; i--) {
+        const int64_t nchunks_d = ceil_div64(shape[i], chunkshape[i]);
+        chunk_idx[i] = (nchunks_d == 0) ? 0 : (tmp % nchunks_d);
+        tmp /= nchunks_d;
+    }
+
+    tmp = nblock;
+    for (int i = nd - 1; i >= 0; i--) {
+        const int64_t nblocks_d = ceil_div64(chunkshape[i], blockshape[i]);
+        block_idx[i] = (nblocks_d == 0) ? 0 : (tmp % nblocks_d);
+        tmp /= nblocks_d;
+    }
+
+    int64_t valid = 1;
+    for (int i = 0; i < nd; i++) {
+        const int64_t chunk_start = chunk_idx[i] * chunkshape[i];
+        if (shape[i] <= chunk_start) {
+            valid = 0;
+            break;
+        }
+        int64_t chunk_len = shape[i] - chunk_start;
+        if (chunk_len > chunkshape[i]) {
+            chunk_len = chunkshape[i];
+        }
+
+        const int64_t block_start = block_idx[i] * blockshape[i];
+        if (block_start >= chunk_len) {
+            valid = 0;
+            break;
+        }
+        const int64_t remain = chunk_len - block_start;
+        const int64_t len = (remain < blockshape[i]) ? remain : blockshape[i];
+        if (valid > LLONG_MAX / len) {
+            return ME_EVAL_ERR_INVALID_ARG;
+        }
+        valid *= len;
+    }
+
+    if (chunk_nitems > 0 && valid > (int64_t)chunk_nitems) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    *valid_items = valid;
+    *padded_items = padded;
+    return ME_EVAL_SUCCESS;
+}
+
+static int collect_var_sizes(const me_expr* expr, size_t* var_sizes, int n_vars) {
+    if (!expr || !var_sizes || n_vars <= 0) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    for (int i = 0; i < n_vars; i++) {
+        var_sizes[i] = 0;
+    }
+
+    /* DFS to collect sizes from variable nodes (synthetic address index). */
+    const me_expr* stack[256];
+    int top = 0;
+    stack[top++] = expr;
+    while (top) {
+        const me_expr* n = stack[--top];
+        if (!n) continue;
+        if (TYPE_MASK(n->type) == ME_VARIABLE && is_synthetic_address(n->bound)) {
+            int idx = (int)((const char*)n->bound - synthetic_var_addresses);
+            if (idx >= 0 && idx < n_vars && var_sizes[idx] == 0) {
+                var_sizes[idx] = dtype_size(n->input_dtype);
+            }
+        }
+        else if (IS_FUNCTION(n->type) || IS_CLOSURE(n->type)) {
+            const int arity = ARITY(n->type);
+            for (int i = 0; i < arity && top < 256; i++) {
+                stack[top++] = (const me_expr*)n->parameters[i];
+            }
+        }
+    }
+
+    for (int i = 0; i < n_vars; i++) {
+        if (var_sizes[i] == 0) {
+            return ME_EVAL_ERR_INVALID_ARG;
+        }
+    }
+    return ME_EVAL_SUCCESS;
+}
+
+int me_eval_nd(const me_expr* expr, const void** vars_block,
+               int n_vars, void* output_block, int block_nitems,
+               int64_t nchunk, int64_t nblock, const me_eval_params* params) {
+    if (!expr) {
+        return ME_EVAL_ERR_NULL_EXPR;
+    }
+    if (!output_block || block_nitems <= 0) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    int64_t valid_items = 0;
+    int64_t padded_items = 0;
+    int rc = compute_valid_items(expr, nchunk, nblock, block_nitems, &valid_items, &padded_items);
+    if (rc != ME_EVAL_SUCCESS) {
+        return rc;
+    }
+    if (valid_items > INT_MAX) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    const size_t item_size = dtype_size(me_get_dtype(expr));
+    if (item_size == 0) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    const bool is_reduction_output = contains_reduction(expr) && output_is_scalar(expr);
+
+    /* Fast path: no padding needed (valid == padded), single call. */
+    if (valid_items == padded_items) {
+        if (valid_items == 0) {
+            /* Scalar outputs only write the first item. */
+            if (is_reduction_output) {
+                memset(output_block, 0, item_size);
+            }
+            else {
+                memset(output_block, 0, (size_t)padded_items * item_size);
+            }
+            return ME_EVAL_SUCCESS;
+        }
+        return me_eval(expr, vars_block, n_vars, output_block, (int)valid_items, params);
+    }
+
+    const me_nd_info* info = (const me_nd_info*)expr->bytecode;
+    const int nd = info->ndims;
+    const int64_t* shape = info->data;
+    const int64_t* chunkshape = shape + nd;
+    const int64_t* blockshape = chunkshape + nd;
+
+    size_t var_sizes[ME_MAX_VARS];
+    rc = collect_var_sizes(expr, var_sizes, n_vars);
+    if (rc != ME_EVAL_SUCCESS) {
+        return rc;
+    }
+
+    /* Compute per-dim lengths for this chunk/block. */
+    int64_t chunk_idx[64];
+    int64_t block_idx[64];
+    int64_t valid_len[64];
+    if (nd > 64) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    int64_t tmp = nchunk;
+    for (int i = nd - 1; i >= 0; i--) {
+        const int64_t nchunks_d = ceil_div64(shape[i], chunkshape[i]);
+        chunk_idx[i] = (nchunks_d == 0) ? 0 : (tmp % nchunks_d);
+        tmp /= nchunks_d;
+    }
+
+    tmp = nblock;
+    for (int i = nd - 1; i >= 0; i--) {
+        const int64_t nblocks_d = ceil_div64(chunkshape[i], blockshape[i]);
+        block_idx[i] = (nblocks_d == 0) ? 0 : (tmp % nblocks_d);
+        tmp /= nblocks_d;
+    }
+
+    for (int i = 0; i < nd; i++) {
+        const int64_t chunk_start = chunk_idx[i] * chunkshape[i];
+        int64_t chunk_len = shape[i] - chunk_start;
+        if (chunk_len > chunkshape[i]) {
+            chunk_len = chunkshape[i];
+        }
+        const int64_t block_start = block_idx[i] * blockshape[i];
+        if (block_start >= chunk_len) {
+            valid_len[i] = 0;
+        }
+        else {
+            int64_t len = chunk_len - block_start;
+            if (len > blockshape[i]) {
+                len = blockshape[i];
+            }
+            valid_len[i] = len;
+        }
+    }
+
+    /* Strides inside padded block (C-order). */
+    int64_t stride[64];
+    stride[nd - 1] = 1;
+    for (int i = nd - 2; i >= 0; i--) {
+        stride[i] = stride[i + 1] * blockshape[i + 1];
+    }
+
+    /* Pack → single eval → scatter */
+    if (valid_items == 0) {
+        if (is_reduction_output) {
+            memset(output_block, 0, item_size);
+        }
+        else {
+            memset(output_block, 0, (size_t)padded_items * item_size);
+        }
+        return ME_EVAL_SUCCESS;
+    }
+
+    bool allow_repeat_reduce = false;
+    me_reduce_kind rkind = ME_REDUCE_NONE;
+    if (is_reduction_output && is_reduction_node(expr)) {
+        rkind = reduction_kind(expr->function);
+        if (rkind == ME_REDUCE_ANY || rkind == ME_REDUCE_ALL) {
+            allow_repeat_reduce = true;
+        }
+        else if (rkind == ME_REDUCE_SUM) {
+            const me_expr* arg = (const me_expr*)expr->parameters[0];
+            if (arg && TYPE_MASK(arg->type) == ME_VARIABLE) {
+                allow_repeat_reduce = true;
+            }
+        }
+    }
+
+    /* Decide whether repeat-eval is applicable, and precompute run layout. */
+    int split_dim = -2;
+    int64_t run_len = 0;
+    int64_t total_runs = 0;
+    bool repeat_eval_selected = false;
+    if (!is_reduction_output || allow_repeat_reduce) {
+        split_dim = nd - 2;
+        run_len = valid_len[nd - 1];
+        bool can_extend = (valid_len[nd - 1] == blockshape[nd - 1]);
+        for (int i = nd - 2; i >= 0; i--) {
+            if (can_extend && valid_len[i] == blockshape[i]) {
+                if (run_len > LLONG_MAX / blockshape[i]) {
+                    split_dim = -2;
+                    break;
+                }
+                run_len *= blockshape[i];
+                split_dim = i - 1;
+            }
+            else {
+                break;
+            }
+        }
+
+        if (split_dim >= -1 && run_len > 0 && run_len <= INT_MAX) {
+            total_runs = 1;
+            bool overflow = false;
+            if (split_dim >= 0) {
+                for (int i = 0; i <= split_dim; i++) {
+                    if (total_runs > LLONG_MAX / valid_len[i]) {
+                        overflow = true;
+                        break;
+                    }
+                    total_runs *= valid_len[i];
+                }
+            }
+            if (!overflow) {
+                if (!is_reduction_output) {
+                    repeat_eval_selected = true;
+                }
+                else if (rkind == ME_REDUCE_SUM) {
+                    repeat_eval_selected = (total_runs <= 16);
+                }
+                else {
+                    repeat_eval_selected = allow_repeat_reduce;
+                }
+            }
+        }
+    }
+
+    /* Reduction fast paths (skip when repeat-eval is selected). */
+    if (is_reduction_output && !repeat_eval_selected) {
+        if (reduce_strided_predicate(expr, vars_block, n_vars, valid_len, stride, nd,
+                                     valid_items, output_block)) {
+            return ME_EVAL_SUCCESS;
+        }
+        if (reduce_strided_variable(expr, vars_block, n_vars, valid_len, stride, nd,
+                                    valid_items, output_block)) {
+            return ME_EVAL_SUCCESS;
+        }
+    }
+
+    /* Repeat me_eval on contiguous valid runs instead of packing. */
+    if (repeat_eval_selected) {
+        const void* run_ptrs[ME_MAX_VARS];
+        if (is_reduction_output) {
+            me_scalar acc;
+            bool acc_init = (rkind != ME_REDUCE_MIN && rkind != ME_REDUCE_MAX);
+            const me_dtype output_type = expr->dtype;
+            switch (output_type) {
+            case ME_BOOL: acc.b = (rkind == ME_REDUCE_ALL); break;
+            case ME_INT8:
+            case ME_INT16:
+            case ME_INT32:
+            case ME_INT64: acc.i64 = (rkind == ME_REDUCE_PROD) ? 1 : 0; break;
+            case ME_UINT8:
+            case ME_UINT16:
+            case ME_UINT32:
+            case ME_UINT64: acc.u64 = (rkind == ME_REDUCE_PROD) ? 1 : 0; break;
+            case ME_FLOAT32:
+            case ME_FLOAT64: acc.f64 = (rkind == ME_REDUCE_PROD) ? 1.0 : 0.0; break;
+            case ME_COMPLEX64: acc.c64 = (rkind == ME_REDUCE_PROD) ? (float _Complex)1.0f : (float _Complex)0.0f; break;
+            case ME_COMPLEX128: acc.c128 = (rkind == ME_REDUCE_PROD) ? (double _Complex)1.0 : (double _Complex)0.0; break;
+            default: acc_init = false; break;
+            }
+
+            int64_t indices[64] = {0};
+            bool done = false;
+            for (int64_t run = 0; run < total_runs && !done; run++) {
+                int64_t off = 0;
+                if (split_dim >= 0) {
+                    for (int i = 0; i <= split_dim; i++) {
+                        off += indices[i] * stride[i];
+                    }
+                }
+                for (int v = 0; v < n_vars; v++) {
+                    run_ptrs[v] = (const unsigned char*)vars_block[v] + (size_t)off * var_sizes[v];
+                }
+                me_scalar run_out;
+                rc = me_eval(expr, run_ptrs, n_vars, &run_out, (int)run_len, params);
+                if (rc != ME_EVAL_SUCCESS) {
+                    return rc;
+                }
+
+                me_scalar run_val;
+                read_scalar(&run_out, output_type, &run_val);
+
+                if (!acc_init) {
+                    if (output_type == ME_FLOAT32) {
+                        acc.f64 = (double)run_val.f32;
+                    }
+                    else if (output_type == ME_FLOAT64) {
+                        acc.f64 = run_val.f64;
+                    }
+                    else {
+                        acc = run_val;
+                    }
+                    acc_init = true;
+                }
+                else {
+                    switch (rkind) {
+                    case ME_REDUCE_SUM:
+                        switch (output_type) {
+                        case ME_INT8:
+                        case ME_INT16:
+                        case ME_INT32:
+                        case ME_INT64: acc.i64 += run_val.i64; break;
+                        case ME_UINT8:
+                        case ME_UINT16:
+                        case ME_UINT32:
+                        case ME_UINT64: acc.u64 += run_val.u64; break;
+                        case ME_FLOAT32: acc.f64 += (double)run_val.f32; break;
+                        case ME_FLOAT64: acc.f64 += run_val.f64; break;
+                        case ME_COMPLEX64: acc.c64 += run_val.c64; break;
+                        case ME_COMPLEX128: acc.c128 += run_val.c128; break;
+                        default: break;
+                        }
+                        break;
+                    case ME_REDUCE_PROD:
+                        switch (output_type) {
+                        case ME_INT8:
+                        case ME_INT16:
+                        case ME_INT32:
+                        case ME_INT64: acc.i64 *= run_val.i64; break;
+                        case ME_UINT8:
+                        case ME_UINT16:
+                        case ME_UINT32:
+                        case ME_UINT64: acc.u64 *= run_val.u64; break;
+                        case ME_FLOAT32: acc.f64 *= (double)run_val.f32; break;
+                        case ME_FLOAT64: acc.f64 *= run_val.f64; break;
+                        case ME_COMPLEX64: acc.c64 *= run_val.c64; break;
+                        case ME_COMPLEX128: acc.c128 *= run_val.c128; break;
+                        default: break;
+                        }
+                        break;
+                    case ME_REDUCE_MIN:
+                        switch (output_type) {
+                        case ME_INT8:
+                        case ME_INT16:
+                        case ME_INT32:
+                        case ME_INT64: if (run_val.i64 < acc.i64) acc.i64 = run_val.i64; break;
+                        case ME_UINT8:
+                        case ME_UINT16:
+                        case ME_UINT32:
+                        case ME_UINT64: if (run_val.u64 < acc.u64) acc.u64 = run_val.u64; break;
+                        case ME_FLOAT32:
+                            if (run_val.f32 != run_val.f32) { acc.f64 = NAN; done = true; }
+                            else if (run_val.f32 < (float)acc.f64) acc.f64 = (double)run_val.f32;
+                            break;
+                        case ME_FLOAT64:
+                            if (run_val.f64 != run_val.f64) { acc.f64 = NAN; done = true; }
+                            else if (run_val.f64 < acc.f64) acc.f64 = run_val.f64;
+                            break;
+                        default: break;
+                        }
+                        break;
+                    case ME_REDUCE_MAX:
+                        switch (output_type) {
+                        case ME_INT8:
+                        case ME_INT16:
+                        case ME_INT32:
+                        case ME_INT64: if (run_val.i64 > acc.i64) acc.i64 = run_val.i64; break;
+                        case ME_UINT8:
+                        case ME_UINT16:
+                        case ME_UINT32:
+                        case ME_UINT64: if (run_val.u64 > acc.u64) acc.u64 = run_val.u64; break;
+                        case ME_FLOAT32:
+                            if (run_val.f32 != run_val.f32) { acc.f64 = NAN; done = true; }
+                            else if (run_val.f32 > (float)acc.f64) acc.f64 = (double)run_val.f32;
+                            break;
+                        case ME_FLOAT64:
+                            if (run_val.f64 != run_val.f64) { acc.f64 = NAN; done = true; }
+                            else if (run_val.f64 > acc.f64) acc.f64 = run_val.f64;
+                            break;
+                        default: break;
+                        }
+                        break;
+                    case ME_REDUCE_ANY:
+                        if (output_type == ME_BOOL) {
+                            acc.b = acc.b || run_val.b;
+                            if (acc.b) done = true;
+                        }
+                        break;
+                    case ME_REDUCE_ALL:
+                        if (output_type == ME_BOOL) {
+                            acc.b = acc.b && run_val.b;
+                            if (!acc.b) done = true;
+                        }
+                        break;
+                    default:
+                        break;
+                    }
+                }
+
+                if (split_dim >= 0) {
+                    for (int i = split_dim; i >= 0; i--) {
+                        indices[i]++;
+                        if (indices[i] < valid_len[i]) break;
+                        indices[i] = 0;
+                    }
+                }
+            }
+
+            if (output_type == ME_FLOAT32) {
+                acc.f32 = (float)acc.f64;
+            }
+            write_scalar(output_block, output_type, output_type, &acc);
+            return ME_EVAL_SUCCESS;
+        }
+        else {
+            memset(output_block, 0, (size_t)padded_items * item_size);
+            int64_t indices[64] = {0};
+            for (int64_t run = 0; run < total_runs; run++) {
+                int64_t off = 0;
+                if (split_dim >= 0) {
+                    for (int i = 0; i <= split_dim; i++) {
+                        off += indices[i] * stride[i];
+                    }
+                }
+                for (int v = 0; v < n_vars; v++) {
+                    run_ptrs[v] = (const unsigned char*)vars_block[v] + (size_t)off * var_sizes[v];
+                }
+                void* out_ptr = (unsigned char*)output_block + (size_t)off * item_size;
+                rc = me_eval(expr, run_ptrs, n_vars, out_ptr, (int)run_len, params);
+                if (rc != ME_EVAL_SUCCESS) {
+                    return rc;
+                }
+                if (split_dim >= 0) {
+                    for (int i = split_dim; i >= 0; i--) {
+                        indices[i]++;
+                        if (indices[i] < valid_len[i]) break;
+                        indices[i] = 0;
+                    }
+                }
+            }
+            return ME_EVAL_SUCCESS;
+        }
+    }
+
+    void* packed_vars[ME_MAX_VARS];
+    for (int v = 0; v < n_vars; v++) {
+        packed_vars[v] = malloc((size_t)valid_items * var_sizes[v]);
+        if (!packed_vars[v]) {
+            for (int u = 0; u < v; u++) free(packed_vars[u]);
+            return ME_EVAL_ERR_OOM;
+        }
+    }
+    void* packed_out = NULL;
+    if (!is_reduction_output) {
+        packed_out = malloc((size_t)valid_items * item_size);
+        if (!packed_out) {
+            for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
+            return ME_EVAL_ERR_OOM;
+        }
+    }
+
+    /* Pack valid elements */
+    int64_t indices[64] = {0};
+    int64_t write_idx = 0;
+    int64_t total_iters = 1;
+    for (int i = 0; i < nd; i++) total_iters *= valid_len[i];
+    for (int64_t it = 0; it < total_iters; it++) {
+        int64_t off = 0;
+        for (int i = 0; i < nd; i++) {
+            off += indices[i] * stride[i];
+        }
+        for (int v = 0; v < n_vars; v++) {
+            const unsigned char* src = (const unsigned char*)vars_block[v] + (size_t)off * var_sizes[v];
+            memcpy((unsigned char*)packed_vars[v] + (size_t)write_idx * var_sizes[v], src, var_sizes[v]);
+        }
+        write_idx++;
+        for (int i = nd - 1; i >= 0; i--) {
+            indices[i]++;
+            if (indices[i] < valid_len[i]) break;
+            indices[i] = 0;
+        }
+    }
+
+    if (is_reduction_output) {
+        rc = me_eval(expr, (const void**)packed_vars, n_vars, output_block, (int)valid_items, params);
+        if (rc != ME_EVAL_SUCCESS) {
+            for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
+            return rc;
+        }
+    }
+    else {
+        rc = me_eval(expr, (const void**)packed_vars, n_vars, packed_out, (int)valid_items, params);
+        if (rc != ME_EVAL_SUCCESS) {
+            for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
+            free(packed_out);
+            return rc;
+        }
+
+        /* Scatter back and zero padding */
+        memset(output_block, 0, (size_t)padded_items * item_size);
+        indices[0] = 0;
+        for (int i = 1; i < nd; i++) indices[i] = 0;
+        write_idx = 0;
+        for (int64_t it = 0; it < total_iters; it++) {
+            int64_t off = 0;
+            for (int i = 0; i < nd; i++) {
+                off += indices[i] * stride[i];
+            }
+            unsigned char* dst = (unsigned char*)output_block + (size_t)off * item_size;
+            memcpy(dst, (unsigned char*)packed_out + (size_t)write_idx * item_size, item_size);
+            write_idx++;
+            for (int i = nd - 1; i >= 0; i--) {
+                indices[i]++;
+                if (indices[i] < valid_len[i]) break;
+                indices[i] = 0;
+            }
+        }
+    }
+
+    for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
+    free(packed_out);
+
+    return ME_EVAL_SUCCESS;
+}
+
+int me_nd_valid_nitems(const me_expr* expr, int64_t nchunk, int64_t nblock, int64_t* valid_nitems) {
+    if (!valid_nitems) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+    int64_t padded = 0;
+    int rc = compute_valid_items(expr, nchunk, nblock, -1, valid_nitems, &padded);
+    return rc;
 }

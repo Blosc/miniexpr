@@ -5,6 +5,9 @@
 #include <pthread.h>
 #include <sys/time.h>
 #include "../src/miniexpr.h"
+#include "minctest.h"
+
+
 
 #define MAX_THREADS 8
 
@@ -31,7 +34,7 @@ void *eval_worker(void *arg) {
         args->b_data + args->start_idx
     };
 
-    me_eval(args->expr, vars_chunk, 2,
+    ME_EVAL_CHECK(args->expr, vars_chunk, 2,
             args->result + args->start_idx, args->chunk_size);
 
     return NULL;
@@ -40,7 +43,7 @@ void *eval_worker(void *arg) {
 void benchmark_threads(const char *expr_str, int total_size, int num_threads) {
     printf("\n=== Expression: %s ===\n", expr_str);
     printf("Total size: %d elements (%.1f MB)\n",
-           total_size, total_size * sizeof(double) * 3 / (1024.0 * 1024.0));
+           total_size, total_size * sizeof(double) * 3 / 1e6);
     printf("Number of threads: %d\n", num_threads);
 
     // Allocate data
@@ -56,8 +59,9 @@ void benchmark_threads(const char *expr_str, int total_size, int num_threads) {
     // Variables for compilation (just the names)
     me_variable vars[] = {{"a"}, {"b"}};
     int err;
-    me_expr *expr = me_compile(expr_str, vars, 2, ME_FLOAT64, &err);
-    if (!expr) {
+    me_expr *expr = NULL;
+    int rc_expr = me_compile(expr_str, vars, 2, ME_FLOAT64, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("Failed to compile\n");
         free(a);
         free(b);
@@ -71,7 +75,7 @@ void benchmark_threads(const char *expr_str, int total_size, int num_threads) {
     double serial_start = get_time();
     for (int iter = 0; iter < iterations; iter++) {
         const void *vars_full[2] = {a, b};
-        me_eval(expr, vars_full, 2, result, total_size);
+        ME_EVAL_CHECK(expr, vars_full, 2, result, total_size);
     }
     double serial_time = (get_time() - serial_start) / iterations;
 
@@ -100,7 +104,7 @@ void benchmark_threads(const char *expr_str, int total_size, int num_threads) {
     double parallel_time = (get_time() - parallel_start) / iterations;
 
     // Calculate metrics
-    double data_size_gb = (total_size * sizeof(double) * 3.0) / (1024.0 * 1024.0 * 1024.0);
+    double data_size_gb = (total_size * sizeof(double) * 3.0) / 1e9;
     double serial_throughput = data_size_gb / serial_time;
     double parallel_throughput = data_size_gb / parallel_time;
     double speedup = serial_time / parallel_time;

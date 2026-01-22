@@ -1,8 +1,11 @@
 /* Test comparisons with power operations */
 #include "../src/miniexpr.h"
+#include "minctest.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+
+
 
 #define VECTOR_SIZE 10
 #define TOLERANCE 1e-6
@@ -31,16 +34,17 @@ void test_power_equality_comparison() {
     me_variable vars[] = {{"a1"}, {"a2"}};
 
     int err;
-    me_expr *expr = me_compile("a1 ** 2 == (a1 + a2)", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a1 ** 2 == (a1 + a2)", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
     }
 
     const void *var_ptrs[] = {a1, a2};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double left = a1[i] * a1[i];
@@ -65,16 +69,17 @@ void test_power_less_than_comparison() {
     me_variable vars[] = {{"a1"}, {"a2"}};
 
     int err;
-    me_expr *expr = me_compile("a1 ** 2 < a2", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a1 ** 2 < a2", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
     }
 
     const void *var_ptrs[] = {a1, a2};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double left = a1[i] * a1[i];
@@ -98,16 +103,17 @@ void test_power_greater_equal_comparison() {
     me_variable vars[] = {{"a1"}, {"a2"}};
 
     int err;
-    me_expr *expr = me_compile("a1 ** 3 >= a2", vars, 2, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a1 ** 3 >= a2", vars, 2, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
     }
 
     const void *var_ptrs[] = {a1, a2};
-    me_eval(expr, var_ptrs, 2, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double left = a1[i] * a1[i] * a1[i];
@@ -132,22 +138,56 @@ void test_complex_power_comparison() {
     me_variable vars[] = {{"a1"}, {"a2"}, {"a3"}};
 
     int err;
-    me_expr *expr = me_compile("(a1 ** 2 + a2 ** 2) == a3", vars, 3, ME_FLOAT64, &err);
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("(a1 ** 2 + a2 ** 2) == a3", vars, 3, ME_FLOAT64, &err, &expr);
 
-    if (!expr) {
+    if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error at position %d\n", err);
         tests_failed++;
         return;
     }
 
     const void *var_ptrs[] = {a1, a2, a3};
-    me_eval(expr, var_ptrs, 3, result, VECTOR_SIZE);
+    ME_EVAL_CHECK(expr, var_ptrs, 3, result, VECTOR_SIZE);
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         double left = a1[i] * a1[i] + a2[i] * a2[i];
         double expected = (fabs(left - a3[i]) < TOLERANCE) ? 1.0 : 0.0;
         printf("  [%d] (%.6f ** 2 + %.6f ** 2) (%.6f) == %.6f -> expected: %.0f, got: %.6f\n",
                i, a1[i], a2[i], left, a3[i], expected, result[i]);
+        ASSERT_EQ(expected, result[i], i);
+    }
+
+    me_free(expr);
+    printf("  PASS\n");
+}
+
+void test_power_cube_equality() {
+    TEST("a1 ** 3 == (a1 * a1 * a1)");
+
+    double a1[VECTOR_SIZE] = {2.0, -3.0, 1.5, 0.0, 4.0, -1.0, 2.5, -2.0, 3.5, 5.0};
+    double result[VECTOR_SIZE] = {0};
+
+    me_variable vars[] = {{"a1"}};
+
+    int err;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("a1 ** 3 == (a1 * a1 * a1)", vars, 1, ME_FLOAT64, &err, &expr);
+
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs[] = {a1};
+    ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        double left = a1[i] * a1[i] * a1[i];
+        double expected = (fabs(left - left) < TOLERANCE) ? 1.0 : 0.0;
+        printf("  [%d] %.6f ** 3 (%.6f) == (%.6f * %.6f * %.6f) (%.6f) -> expected: %.0f, got: %.6f\n",
+               i, a1[i], left, a1[i], a1[i], a1[i], left, expected, result[i]);
         ASSERT_EQ(expected, result[i], i);
     }
 
@@ -162,6 +202,7 @@ int main() {
     test_power_less_than_comparison();
     test_power_greater_equal_comparison();
     test_complex_power_comparison();
+    test_power_cube_equality();
 
     printf("\n=== Test Summary ===\n");
     printf("Tests run: %d\n", tests_run);

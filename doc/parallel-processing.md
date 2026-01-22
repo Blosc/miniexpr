@@ -39,7 +39,7 @@ void* worker_thread(void *arg) {
     int chunk_size = data->end_idx - data->start_idx;
 
     // Prepare pointers to this thread's chunk
-    const void *vars_chunk[] = {
+    const void *vars_block[] = {
         &data->x[data->start_idx],
         &data->y[data->start_idx]
     };
@@ -50,8 +50,10 @@ void* worker_thread(void *arg) {
            data->thread_id, data->start_idx, data->end_idx - 1, chunk_size);
 
     // Thread-safe evaluation
-    me_eval(data->expr, vars_chunk, 2,
-            output_chunk, chunk_size);
+    if (me_eval(data->expr, vars_block, 2, output_chunk, chunk_size, NULL) != ME_EVAL_SUCCESS) {
+        printf("Thread %d: me_eval failed\n", data->thread_id);
+        return NULL;
+    }
 
     printf("Thread %d: Completed\n", data->thread_id);
 
@@ -82,16 +84,9 @@ int main() {
     me_variable vars[] = {{"x"}, {"y"}};
 
     int error;
-    me_expr *expr = me_compile("sin(x) * cos(y) + sqrt(x*x + y*y)",
-                               vars, 2, ME_FLOAT64, &error);
-
-    if (!expr) {
-        printf("Parse error at position %d\n", error);
-        free(x);
-        free(y);
-        free(result);
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("sin(x) * cos(y) + sqrt(x*x + y*y)",
+                               vars, 2, ME_FLOAT64, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     printf("Expression compiled successfully\n");
     printf("Starting parallel processing with %d threads...\n\n", NUM_THREADS);
@@ -142,7 +137,7 @@ int main() {
 ### Compilation
 
 ```bash
-gcc -o parallel parallel.c miniexpr.c -lm -lpthread
+gcc -o parallel parallel.c src/miniexpr.c src/functions.c -lm -lpthread
 ./parallel
 ```
 
@@ -217,11 +212,13 @@ void* worker_dynamic(void *arg) {
         }
 
         // Process this chunk
-        const void *vars_chunk[] = {&queue->input[start]};
+        const void *vars_block[] = {&queue->input[start]};
         void *output_chunk = &queue->output[start];
 
-        me_eval(queue->expr, vars_chunk, 1,
-                output_chunk, size);
+        if (me_eval(queue->expr, vars_block, 1, output_chunk, size, NULL) != ME_EVAL_SUCCESS) {
+            printf("Thread: me_eval failed\n");
+            return NULL;
+        }
 
         chunks_processed++;
     }
@@ -239,17 +236,13 @@ int main() {
         input[i] = (double)i;
     }
 
-    // Compile expression for chunked evaluation: x^2 + 2*x + 1
+    // Compile expression for chunked evaluation: x**2 + 2*x + 1
     // Define variable (just the name - everything else optional)
     me_variable vars[] = {{"x"}};
 
     int error;
-    me_expr *expr = me_compile("x*x + 2*x + 1", vars, 1, ME_FLOAT64, &error);
-
-    if (!expr) {
-        printf("Parse error\n");
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("x*x + 2*x + 1", vars, 1, ME_FLOAT64, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     // Set up work queue
     work_queue_t queue;
@@ -315,12 +308,8 @@ int main() {
     me_variable vars[] = {{"a"}, {"b"}};
 
     int error;
-    me_expr *expr = me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error);
-
-    if (!expr) {
-        printf("Parse error\n");
-        return 1;
-    }
+    me_expr *expr = NULL;
+    if (me_compile("sqrt(a*a + b*b)", vars, 2, ME_FLOAT64, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 
     printf("Processing %d elements with OpenMP...\n", TOTAL_SIZE);
 
@@ -330,10 +319,9 @@ int main() {
         int size = (chunk + CHUNK_SIZE > TOTAL_SIZE) ?
                    (TOTAL_SIZE - chunk) : CHUNK_SIZE;
 
-        const void *vars_chunk[] = {&a[chunk], &b[chunk]};
+        const void *vars_block[] = {&a[chunk], &b[chunk]};
 
-        me_eval(expr, vars_chunk, 2, &c[chunk], size);
-
+        if (me_eval(expr, vars_block, 2, &c[chunk], size, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
         #pragma omp critical
         {
             printf("Thread %d processed chunk at %d\n",
@@ -355,7 +343,7 @@ int main() {
 ### Compilation with OpenMP
 
 ```bash
-gcc -o parallel_omp parallel_omp.c miniexpr.c -lm -fopenmp
+gcc -o parallel_omp parallel_omp.c src/miniexpr.c src/functions.c -lm -fopenmp
 ./parallel_omp
 ```
 

@@ -83,7 +83,7 @@ static inline const char* me_numpy_type_name(int numpy_type_num) {
 /* Convert NumPy type number to miniexpr dtype
  *
  * Returns the miniexpr dtype corresponding to a NumPy dtype.num value.
- * Returns -1 and prints an error message for unsupported NumPy types.
+ * Returns -1 for unsupported NumPy types.
  *
  * Example:
  *   me_dtype dtype = me_dtype_from_numpy(7);  // Returns ME_INT64
@@ -112,8 +112,6 @@ static inline me_dtype me_dtype_from_numpy(int numpy_type_num) {
         case 14: return ME_COMPLEX64;
         case 15: return ME_COMPLEX128;
         default:
-            fprintf(stderr, "Error: Unsupported NumPy dtype.num = %d (%s)\n",
-                    numpy_type_num, me_numpy_type_name(numpy_type_num));
             return -1;  // Return -1 to indicate error
     }
 }
