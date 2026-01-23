@@ -271,6 +271,83 @@ cleanup:
     return status;
 }
 
+static int test_nd_unary_int32_to_float64_padding(void) {
+    int status = 0;
+    int err = 0;
+    me_expr* expr = NULL;
+    int64_t shape[1] = {10};
+    int32_t chunkshape[1] = {3};
+    int32_t blockshape[1] = {3};
+    me_variable vars[] = {{"x", ME_INT32}};
+
+    int rc = me_compile_nd("arccos(x)", vars, 1, ME_FLOAT64, 1,
+                           shape, chunkshape, blockshape, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("FAILED me_compile_nd unary int32->float64: %d (err=%d)\n", rc, err);
+        return 1;
+    }
+
+    const double expected = acos(0.0);
+    const int64_t nchunks = (shape[0] + chunkshape[0] - 1) / chunkshape[0];
+    const void* ptrs[] = {NULL};
+    int32_t in[3] = {0, 0, 0};
+    double out[3] = {-1.0, -1.0, -1.0};
+
+    for (int64_t nchunk = 0; nchunk < nchunks; nchunk++) {
+        int64_t valid = -1;
+        rc = me_nd_valid_nitems(expr, nchunk, 0, &valid);
+        if (rc != ME_EVAL_SUCCESS) {
+            printf("FAILED me_nd_valid_nitems int32->float64 (rc=%d, chunk=%lld)\n",
+                   rc, (long long)nchunk);
+            status = 1;
+            goto cleanup;
+        }
+
+        int64_t expected_valid = shape[0] - nchunk * chunkshape[0];
+        if (expected_valid > blockshape[0]) expected_valid = blockshape[0];
+        if (expected_valid < 0) expected_valid = 0;
+        if (valid != expected_valid) {
+            printf("FAILED valid count int32->float64 (chunk=%lld got=%lld exp=%lld)\n",
+                   (long long)nchunk, (long long)valid, (long long)expected_valid);
+            status = 1;
+            goto cleanup;
+        }
+
+        for (int i = 0; i < 3; i++) {
+            in[i] = (i < valid) ? 0 : 12345;
+            out[i] = -1.0;
+        }
+        ptrs[0] = in;
+        rc = me_eval_nd(expr, ptrs, 1, out, 3, nchunk, 0, NULL);
+        if (rc != ME_EVAL_SUCCESS) {
+            printf("FAILED me_eval_nd int32->float64 (rc=%d, chunk=%lld)\n",
+                   rc, (long long)nchunk);
+            status = 1;
+            goto cleanup;
+        }
+        for (int i = 0; i < valid; i++) {
+            if (fabs(out[i] - expected) > 1e-12) {
+                printf("FAILED int32->float64 mismatch chunk=%lld idx=%d got=%.15f exp=%.15f\n",
+                       (long long)nchunk, i, out[i], expected);
+                status = 1;
+                goto cleanup;
+            }
+        }
+        for (int i = (int)valid; i < 3; i++) {
+            if (out[i] != 0.0) {
+                printf("FAILED int32->float64 padding chunk=%lld idx=%d got=%.15f exp=0.0\n",
+                       (long long)nchunk, i, out[i]);
+                status = 1;
+                goto cleanup;
+            }
+        }
+    }
+
+cleanup:
+    me_free(expr);
+    return status;
+}
+
 static int test_3d_partial(void) {
     int status = 0;
     int err = 0;
@@ -918,6 +995,11 @@ int main(void) {
     int t11 = test_nd_unary_int32_negative_blocks();
     failed |= t11;
     printf("Result: %s\n\n", t11 ? "FAIL" : "PASS");
+
+    printf("Test 12: Unary int32->float64 with padding\n");
+    int t12 = test_nd_unary_int32_to_float64_padding();
+    failed |= t12;
+    printf("Result: %s\n\n", t12 ? "FAIL" : "PASS");
 
     printf("=====================\n");
     printf("Summary: %s\n", failed ? "FAIL" : "PASS");
