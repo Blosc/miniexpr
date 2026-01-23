@@ -168,6 +168,143 @@ int main() {
         me_free(expr_arctan2);
     }
 
+    // Test arccos on int32 (replicating python-blosc2 failure on Windows)
+    tests_total++;
+    printf("\nTest 5: arccos(int32) - linspace-like integer values\n");
+
+    // Simulate linspace(0.01, 0.99, 10) for int32
+    // When converting floats 0.01..0.99 to int32, they all become 0
+    int32_t x_int32[10];
+    for (int i = 0; i < 10; i++) {
+        double val = 0.01 + (0.99 - 0.01) * i / 9.0;
+        x_int32[i] = (int32_t)val;  // All will be 0
+    }
+
+    printf("  Input int32 values: ");
+    for (int i = 0; i < 10; i++) {
+        printf("%d ", x_int32[i]);
+    }
+    printf("\n");
+
+    double result_int32[10] = {0};
+    me_variable vars_int32[] = {{"x", ME_INT32, x_int32}};
+    me_expr *expr_arccos_int32 = NULL;
+    int rc_arccos_int32 = me_compile("arccos(x)", vars_int32, 1, ME_AUTO, &err, &expr_arccos_int32);
+
+    if (rc_arccos_int32 != ME_COMPILE_SUCCESS || !expr_arccos_int32) {
+        printf("  FAIL: Compilation failed (rc=%d, err=%d)\n", rc_arccos_int32, err);
+    } else {
+        const void *var_ptrs_int32[] = {x_int32};
+        ME_EVAL_CHECK(expr_arccos_int32, var_ptrs_int32, 1, result_int32, 10);
+
+        printf("  Output values: ");
+        int has_nan = 0;
+        for (int i = 0; i < 10; i++) {
+            if (isnan(result_int32[i])) {
+                printf("nan ");
+                has_nan = 1;
+            } else {
+                printf("%.6f ", result_int32[i]);
+            }
+        }
+        printf("\n");
+
+        // arccos(0) should be π/2 ≈ 1.570796
+        int all_valid = 1;
+        for (int i = 0; i < 10; i++) {
+            if (isnan(result_int32[i])) {
+                all_valid = 0;
+                break;
+            }
+            // Expected: arccos(0) = 1.570796...
+            double expected = acos((double)x_int32[i]);
+            if (fabs(result_int32[i] - expected) > 1e-6) {
+                all_valid = 0;
+                break;
+            }
+        }
+
+        if (all_valid && !has_nan) {
+            printf("  PASS: All values are valid (no unexpected NaN)\n");
+            tests_passed++;
+        } else {
+            printf("  FAIL: Found unexpected NaN values or incorrect results\n");
+            printf("  This replicates the python-blosc2 Windows CI failure!\n");
+        }
+
+        me_free(expr_arccos_int32);
+    }
+
+    // Test arccos on int32 with chunked evaluation (chunk size = 3)
+    tests_total++;
+    printf("\nTest 6: arccos(int32) - chunked evaluation (size 3)\n");
+
+    me_expr *expr_arccos_chunked = NULL;
+    int rc_arccos_chunked = me_compile("arccos(x)", vars_int32, 1, ME_AUTO, &err, &expr_arccos_chunked);
+
+    if (rc_arccos_chunked != ME_COMPILE_SUCCESS || !expr_arccos_chunked) {
+        printf("  FAIL: Compilation failed (rc=%d, err=%d)\n", rc_arccos_chunked, err);
+    } else {
+        double result_chunked[10] = {0};
+        const void *var_ptrs_int32[] = {x_int32};
+
+        // Evaluate in chunks of 3 (simulating python-blosc2's chunkshape)
+        printf("  Evaluating in chunks of 3:\n");
+        for (int chunk_start = 0; chunk_start < 10; chunk_start += 3) {
+            int chunk_size = (chunk_start + 3 <= 10) ? 3 : (10 - chunk_start);
+            int32_t *chunk_input = &x_int32[chunk_start];
+            double *chunk_output = &result_chunked[chunk_start];
+            const void *chunk_vars[] = {chunk_input};
+
+            ME_EVAL_CHECK(expr_arccos_chunked, chunk_vars, 1, chunk_output, chunk_size);
+
+            printf("    Chunk [%d:%d]: ", chunk_start, chunk_start + chunk_size - 1);
+            for (int i = 0; i < chunk_size; i++) {
+                if (isnan(chunk_output[i])) {
+                    printf("nan ");
+                } else {
+                    printf("%.6f ", chunk_output[i]);
+                }
+            }
+            printf("\n");
+        }
+
+        printf("  Final result: ");
+        int has_nan_chunked = 0;
+        for (int i = 0; i < 10; i++) {
+            if (isnan(result_chunked[i])) {
+                printf("nan ");
+                has_nan_chunked = 1;
+            } else {
+                printf("%.6f ", result_chunked[i]);
+            }
+        }
+        printf("\n");
+
+        int all_valid_chunked = 1;
+        for (int i = 0; i < 10; i++) {
+            if (isnan(result_chunked[i])) {
+                all_valid_chunked = 0;
+                break;
+            }
+            double expected = acos((double)x_int32[i]);
+            if (fabs(result_chunked[i] - expected) > 1e-6) {
+                all_valid_chunked = 0;
+                break;
+            }
+        }
+
+        if (all_valid_chunked && !has_nan_chunked) {
+            printf("  PASS: Chunked evaluation produces valid results\n");
+            tests_passed++;
+        } else {
+            printf("  FAIL: Chunked evaluation produced unexpected NaN\n");
+            printf("  This matches the python-blosc2 Windows CI failure pattern!\n");
+        }
+
+        me_free(expr_arccos_chunked);
+    }
+
     printf("\n=== Test Summary ===\n");
     printf("Tests passed: %d/%d\n", tests_passed, tests_total);
 
