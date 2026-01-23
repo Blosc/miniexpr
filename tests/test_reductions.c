@@ -589,9 +589,24 @@ static int test_reduction_expression_multi_vars() {
             return 1;
         }
     }
+    me_free(expr);
+
+    rc_expr = me_compile("sum(x + y + 2.5) + 0 * x", vars, 2, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 1;
+    }
+    ME_EVAL_CHECK(expr, var_ptrs, 2, output, 3);
+    for (int i = 0; i < 3; i++) {
+        if (fabs(output[i] - expected_sum) > 1e-12) {
+            printf("  ❌ FAILED: expected %.6f, got %.6f\n", expected_sum, output[i]);
+            me_free(expr);
+            return 1;
+        }
+    }
+    me_free(expr);
 
     printf("  ✅ PASSED\n");
-    me_free(expr);
     return 0;
 }
 
