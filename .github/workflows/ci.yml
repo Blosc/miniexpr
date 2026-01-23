@@ -50,7 +50,6 @@ jobs:
         if [ "$RUNNER_OS" == "Windows" ]; then
           ctest --test-dir build -C Release --output-on-failure || \
             ctest --test-dir build -C Release --rerun-failed --output-on-failure
-          ctest --test-dir build -C Release -R test_nd --output-on-failure
         else
           ctest --test-dir build --output-on-failure || \
             ctest --test-dir build --rerun-failed --output-on-failure
