@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -105,6 +106,92 @@ static int test_2d_padding(void) {
         printf("FAILED me_eval_nd 2D padded (rc=%d, out=[%g,%g,%g])\n", rc, out[0], out[1], out[2]);
         status = 1;
         goto cleanup;
+    }
+
+cleanup:
+    me_free(expr);
+    return status;
+}
+
+static int test_nd_unary_int32_float_math(void) {
+    int status = 0;
+    int err = 0;
+    me_expr* expr = NULL;
+    int64_t shape[1] = {10};
+    int32_t chunkshape[1] = {6};
+    int32_t blockshape[1] = {4};
+    me_variable vars[] = {{"x", ME_INT32}};
+
+    int rc = me_compile_nd("arccos(x)", vars, 1, ME_FLOAT64, 1,
+                           shape, chunkshape, blockshape, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("FAILED me_compile_nd unary int32: %d (err=%d)\n", rc, err);
+        return 1;
+    }
+
+    const double expected = acos(0.0);
+    const void* ptrs[] = {NULL};
+    double out[4] = {-1.0, -1.0, -1.0, -1.0};
+    int32_t in[4] = {0, 0, 0, 0};
+    ptrs[0] = in;
+
+    int64_t valid0 = -1;
+    rc = me_nd_valid_nitems(expr, 0, 0, &valid0);
+    if (rc != ME_EVAL_SUCCESS || valid0 != 4) {
+        printf("FAILED me_nd_valid_nitems unary full (rc=%d, valid=%lld)\n", rc, (long long)valid0);
+        status = 1;
+        goto cleanup;
+    }
+
+    rc = me_eval_nd(expr, ptrs, 1, out, 4, 0, 0, NULL);
+    if (rc != ME_EVAL_SUCCESS) {
+        printf("FAILED me_eval_nd unary full (rc=%d)\n", rc);
+        status = 1;
+        goto cleanup;
+    }
+    for (int i = 0; i < 4; i++) {
+        if (fabs(out[i] - expected) > 1e-12) {
+            printf("FAILED unary full mismatch at %d: got %.15f expected %.15f\n",
+                   i, out[i], expected);
+            status = 1;
+            goto cleanup;
+        }
+    }
+
+    int64_t valid1 = -1;
+    rc = me_nd_valid_nitems(expr, 0, 1, &valid1);
+    if (rc != ME_EVAL_SUCCESS || valid1 != 2) {
+        printf("FAILED me_nd_valid_nitems unary padded (rc=%d, valid=%lld)\n", rc, (long long)valid1);
+        status = 1;
+        goto cleanup;
+    }
+
+    in[0] = 0;
+    in[1] = 0;
+    in[2] = 12345;
+    in[3] = 12345;
+    out[0] = out[1] = out[2] = out[3] = -1.0;
+
+    rc = me_eval_nd(expr, ptrs, 1, out, 4, 0, 1, NULL);
+    if (rc != ME_EVAL_SUCCESS) {
+        printf("FAILED me_eval_nd unary padded (rc=%d)\n", rc);
+        status = 1;
+        goto cleanup;
+    }
+    for (int i = 0; i < (int)valid1; i++) {
+        if (fabs(out[i] - expected) > 1e-12) {
+            printf("FAILED unary padded mismatch at %d: got %.15f expected %.15f\n",
+                   i, out[i], expected);
+            status = 1;
+            goto cleanup;
+        }
+    }
+    for (int i = (int)valid1; i < 4; i++) {
+        if (out[i] != 0.0) {
+            printf("FAILED unary padded tail at %d: got %.15f expected 0.0\n", i, out[i]);
+            status = 1;
+            goto cleanup;
+        }
     }
 
 cleanup:
@@ -749,6 +836,11 @@ int main(void) {
     int t9 = test_nd_predicate_reductions();
     failed |= t9;
     printf("Result: %s\n\n", t9 ? "FAIL" : "PASS");
+
+    printf("Test 10: Unary int32 float math with padding\n");
+    int t10 = test_nd_unary_int32_float_math();
+    failed |= t10;
+    printf("Result: %s\n\n", t10 ? "FAIL" : "PASS");
 
     printf("=====================\n");
     printf("Summary: %s\n", failed ? "FAIL" : "PASS");
