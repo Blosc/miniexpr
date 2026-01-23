@@ -1,5 +1,6 @@
 #include <math.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include "miniexpr.h"
@@ -218,6 +219,68 @@ static int run_trig_f32(const char *name, float (*func)(float), int n,
     return 0;
 }
 
+static int run_trig_i32_inverse(const char *name, double (*func)(double), int n,
+                                int32_t value, double tol) {
+    int32_t *input = (int32_t *)malloc((size_t)(2 * n) * sizeof(int32_t));
+    double *out = (double *)malloc((size_t)n * sizeof(double));
+    if (!input || !out) {
+        printf("Allocation failed\n");
+        free(input);
+        free(out);
+        return 1;
+    }
+
+    for (int i = 0; i < 2 * n; i++) {
+        input[i] = value;
+    }
+
+    me_variable vars[] = {{"x", ME_INT32, input}};
+    int err = 0;
+    me_expr *expr = NULL;
+    char expr_text[32];
+
+    snprintf(expr_text, sizeof(expr_text), "%s(x)", name);
+    if (me_compile(expr_text, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("Failed to compile %s i32 (err=%d)\n", expr_text, err);
+        free(input);
+        free(out);
+        return 1;
+    }
+
+    const void *var_ptrs[] = {input};
+    int eval_rc = me_eval(expr, var_ptrs, 1, out, n, NULL);
+    if (eval_rc != ME_EVAL_SUCCESS) {
+        printf("%s i32 eval failed (err=%d)\n", expr_text, eval_rc);
+        me_free(expr);
+        free(input);
+        free(out);
+        return 1;
+    }
+
+    int failures = 0;
+    double expected = func((double)value);
+    for (int i = 0; i < n; i++) {
+        if (!nearly_equal(out[i], expected, tol)) {
+            if (failures < 5) {
+                printf("%s i32 mismatch at %d: got %.15f expected %.15f\n",
+                       expr_text, i, out[i], expected);
+            }
+            failures++;
+        }
+    }
+
+    me_free(expr);
+    free(input);
+    free(out);
+    if (failures) {
+        printf("%s i32 FAIL: %d mismatches\n", expr_text, failures);
+        return 1;
+    }
+
+    printf("%s i32 PASS\n", expr_text);
+    return 0;
+}
+
 static int run_atan2_f64(int n, bool simd_enabled) {
     double *x = (double *)malloc((size_t)n * sizeof(double));
     double *y = (double *)malloc((size_t)n * sizeof(double));
@@ -381,6 +444,8 @@ int main(void) {
 
     int rc = 0;
     rc |= test_identity(1024);
+    rc |= run_trig_i32_inverse("arccos", acos, 1024, -1, 1e-12);
+    rc |= run_trig_i32_inverse("arcsin", asin, 1024, -1, 1e-12);
 
     for (size_t i = 0; i < sizeof(f64_tests) / sizeof(f64_tests[0]); i++) {
         double min_val = (f64_tests[i].func == asin || f64_tests[i].func == acos) ? -1.0 : -0.9;

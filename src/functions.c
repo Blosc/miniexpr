@@ -4120,6 +4120,18 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                 \
                 const TYPE *adata = (arg->type == ME_CONSTANT) ? NULL : \
                                    (arg->type == ME_VARIABLE) ? (const TYPE*)arg->bound : (const TYPE*)arg->output; \
+                void *arg_temp = NULL; \
+                /* Convert variable inputs to node dtype to avoid reinterpreting buffers. */ \
+                if (arg->type == ME_VARIABLE && arg->dtype != n->dtype) { \
+                    convert_func_t conv = get_convert_func(arg->dtype, n->dtype); \
+                    if (conv) { \
+                        arg_temp = malloc((size_t)n->nitems * sizeof(TYPE)); \
+                        if (arg_temp) { \
+                            conv(arg->bound, arg_temp, n->nitems); \
+                            adata = (const TYPE*)arg_temp; \
+                        } \
+                    } \
+                } \
                 \
                 const void *func_ptr = n->function; \
                 \
@@ -4253,6 +4265,9 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                             output[i] = TO_TYPE_##SUFFIX(func(FROM_TYPE_##SUFFIX(adata[i]))); \
                         } \
                     } \
+                } \
+                if (arg_temp) { \
+                    free(arg_temp); \
                 } \
             } \
             else { \
