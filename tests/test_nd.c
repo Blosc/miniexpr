@@ -199,6 +199,78 @@ cleanup:
     return status;
 }
 
+static int test_nd_unary_int32_negative_blocks(void) {
+    int status = 0;
+    int err = 0;
+    me_expr* expr = NULL;
+    int64_t shape[1] = {10};
+    int32_t chunkshape[1] = {3};
+    int32_t blockshape[1] = {3};
+    me_variable vars[] = {{"x", ME_INT32}};
+
+    int rc = me_compile_nd("0 - x", vars, 1, ME_INT32, 1,
+                           shape, chunkshape, blockshape, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("FAILED me_compile_nd unary int32 negative: %d (err=%d)\n", rc, err);
+        return 1;
+    }
+
+    const void* ptrs[] = {NULL};
+    int32_t out[3] = {0, 0, 0};
+    int32_t in[3] = {0, 0, 0};
+
+    for (int64_t nchunk = 0; nchunk < 4; nchunk++) {
+        int64_t valid = -1;
+        rc = me_nd_valid_nitems(expr, nchunk, 0, &valid);
+        if (rc != ME_EVAL_SUCCESS) {
+            printf("FAILED me_nd_valid_nitems negative (rc=%d, chunk=%lld)\n",
+                   rc, (long long)nchunk);
+            status = 1;
+            goto cleanup;
+        }
+
+        int32_t base = (int32_t)(nchunk * 3 + 1);
+        for (int i = 0; i < 3; i++) {
+            if (i < valid) {
+                in[i] = base + i;
+            } else {
+                in[i] = 12345;
+            }
+            out[i] = 777777;
+        }
+
+        ptrs[0] = in;
+        rc = me_eval_nd(expr, ptrs, 1, out, 3, nchunk, 0, NULL);
+        if (rc != ME_EVAL_SUCCESS) {
+            printf("FAILED me_eval_nd negative (rc=%d, chunk=%lld)\n",
+                   rc, (long long)nchunk);
+            status = 1;
+            goto cleanup;
+        }
+
+        for (int i = 0; i < valid; i++) {
+            if (out[i] != -in[i]) {
+                printf("FAILED unary negative mismatch chunk=%lld idx=%d got=%d expected=%d\n",
+                       (long long)nchunk, i, out[i], -in[i]);
+                status = 1;
+                goto cleanup;
+            }
+        }
+        for (int i = (int)valid; i < 3; i++) {
+            if (out[i] != 0) {
+                printf("FAILED unary negative padding chunk=%lld idx=%d got=%d expected=0\n",
+                       (long long)nchunk, i, out[i]);
+                status = 1;
+                goto cleanup;
+            }
+        }
+    }
+
+cleanup:
+    me_free(expr);
+    return status;
+}
+
 static int test_3d_partial(void) {
     int status = 0;
     int err = 0;
@@ -841,6 +913,11 @@ int main(void) {
     int t10 = test_nd_unary_int32_float_math();
     failed |= t10;
     printf("Result: %s\n\n", t10 ? "FAIL" : "PASS");
+
+    printf("Test 11: Unary int32 negative with padding\n");
+    int t11 = test_nd_unary_int32_negative_blocks();
+    failed |= t11;
+    printf("Result: %s\n\n", t11 ? "FAIL" : "PASS");
 
     printf("=====================\n");
     printf("Summary: %s\n", failed ? "FAIL" : "PASS");
