@@ -240,8 +240,6 @@ After cloning the repository, install the Git hooks:
 
 This sets up automatic checks for code quality (e.g., trailing whitespace).
 
-See [CODE_QUALITY.md](CODE_QUALITY.md) for more details on code quality tools.
-
 ## License
 
 BSD 3-Clause License. See [LICENSE](LICENSE) for details.
