@@ -101,6 +101,10 @@ gcc -o distance example.c src/miniexpr.c src/functions.c -lm
 
 The `-lm` flag links the math library for functions like `sqrt()`.
 
+### SLEEF SIMD acceleration
+
+miniexpr can use SLEEF to accelerate SIMD math kernels. With CMake, `-DMINIEXPR_USE_SLEEF=ON` (default) fetches and enables SLEEF; set it to `OFF` to build without SLEEF. You can also disable SIMD at runtime by setting `me_eval_params.disable_simd = true`.
+
 With CMake (recommended):
 ```bash
 mkdir -p build

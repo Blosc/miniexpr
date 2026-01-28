@@ -208,6 +208,10 @@ Options:
 - `-DMINIEXPR_BUILD_BENCH=ON|OFF`
 - `-DMINIEXPR_USE_SLEEF=ON|OFF`
 
+### SLEEF SIMD acceleration
+
+miniexpr can use SLEEF to accelerate transcendentals and other math kernels via SIMD. The CMake option `-DMINIEXPR_USE_SLEEF=ON` (default) fetches SLEEF and enables the SIMD paths; set it to `OFF` to build without SLEEF. At runtime you can force scalar evaluation by setting `me_eval_params.disable_simd = true`, which disables SIMD regardless of whether SLEEF was compiled in.
+
 Windows (clang-cl):
 ```bash
 mkdir build
