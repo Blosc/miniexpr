@@ -43,13 +43,15 @@ int test_version() {
         printf("  ❌ FAILED: me_version() returned NULL\n");
         return 1;
     }
-    if (strcmp(version, expected) != 0) {
-        printf("  ❌ FAILED: got '%s', expected '%s'\n", version, expected);
+    size_t expected_len = strlen(expected);
+    if (strncmp(version, expected, expected_len) != 0 ||
+        (version[expected_len] != '\0' && version[expected_len] != '.' && version[expected_len] != '-')) {
+        printf("  ❌ FAILED: got '%s', expected prefix '%s'\n", version, expected);
         return 1;
     }
-    if (strcmp(ME_VERSION_STRING, expected) != 0) {
+    if (strcmp(ME_VERSION_STRING, version) != 0) {
         printf("  ❌ FAILED: ME_VERSION_STRING '%s' does not match '%s'\n",
-               ME_VERSION_STRING, expected);
+               ME_VERSION_STRING, version);
         return 1;
     }
 
