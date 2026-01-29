@@ -17,7 +17,7 @@ ctest
 To run a specific example:
 
 ```bash
-./build/01_simple_expression
+./build/examples/01_simple_expression
 ```
 
 ## Examples Overview
@@ -32,7 +32,7 @@ To run a specific example:
 
 **Run it:**
 ```bash
-./build/01_simple_expression
+./build/examples/01_simple_expression
 ```
 
 **Expected output:**
@@ -60,7 +60,7 @@ Results:
 
 **Run it:**
 ```bash
-./build/02_complex_expression
+./build/examples/02_complex_expression
 ```
 
 **Use cases:**
@@ -80,7 +80,7 @@ Results:
 
 **Run it:**
 ```bash
-./build/03_mixed_types
+./build/examples/03_mixed_types
 ```
 
 **Key features:**
@@ -102,7 +102,7 @@ Results:
 
 **Run it:**
 ```bash
-./build/04_large_dataset
+./build/examples/04_large_dataset
 ```
 
 **Use cases:**
@@ -132,7 +132,7 @@ Results:
 
 **Run it:**
 ```bash
-./build/05_parallel_evaluation
+./build/examples/05_parallel_evaluation
 ```
 
 **Key features:**
@@ -186,7 +186,7 @@ Chunk size matters enormously for parallel performance:
 
 **Run it:**
 ```bash
-./build/06_debug_print
+./build/examples/06_debug_print
 ```
 
 **What you'll see:**
@@ -213,7 +213,7 @@ Chunk size matters enormously for parallel performance:
 
 **Run it:**
 ```bash
-./build/07_comparison_bool_output
+./build/examples/07_comparison_bool_output
 ```
 
 **Key features:**
@@ -240,7 +240,7 @@ Chunk size matters enormously for parallel performance:
 
 **Run it:**
 ```bash
-./build/08_explicit_output_dtype
+./build/examples/08_explicit_output_dtype
 ```
 
 **Key features:**
@@ -267,7 +267,7 @@ Chunk size matters enormously for parallel performance:
 
 **Run it:**
 ```bash
-./build/09_reduction_expressions
+./build/examples/09_reduction_expressions
 ```
 
 ---
@@ -282,7 +282,7 @@ Chunk size matters enormously for parallel performance:
 
 **Run it:**
 ```bash
-./build/10_boolean_logical_ops
+./build/examples/10_boolean_logical_ops
 ```
 
 ---

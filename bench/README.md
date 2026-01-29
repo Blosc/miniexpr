@@ -10,7 +10,7 @@ Build all benchmarks:
 make bench
 ```
 
-Run a specific benchmark (examples below).
+Run a specific benchmark (examples below). CMake builds place binaries under `build/bench/`.
 
 ## Benchmarks
 
@@ -18,65 +18,65 @@ Run a specific benchmark (examples below).
 Reductions (sum/prod/min/max/any/all) vs pure C.
 
 ```bash
-./build/benchmark_reductions sum float32
-./build/benchmark_reductions sum float32 multi
+./build/bench/benchmark_reductions sum float32
+./build/bench/benchmark_reductions sum float32 multi
 ```
 
 ### benchmark_reductions_threads.c
 Multi-threaded reductions vs pure C.
 
 ```bash
-./build/benchmark_reductions_threads sum float32
-./build/benchmark_reductions_threads sum float32 multi
+./build/bench/benchmark_reductions_threads sum float32
+./build/bench/benchmark_reductions_threads sum float32 multi
 ```
 
 ### benchmark_blocksize.c
 Effect of evaluation block size on performance.
 
 ```bash
-./build/benchmark_blocksize
+./build/bench/benchmark_blocksize
 ```
 
 ### benchmark_blocksize_threads.c
 Multi-threaded block size impact.
 
 ```bash
-./build/benchmark_blocksize_threads
+./build/bench/benchmark_blocksize_threads
 ```
 
 ### benchmark_chunked.c
 Chunked evaluation throughput.
 
 ```bash
-./build/benchmark_chunked
+./build/bench/benchmark_chunked
 ```
 
 ### benchmark_chunksize.c
 Sensitivity to chunk size selection.
 
 ```bash
-./build/benchmark_chunksize
+./build/bench/benchmark_chunksize
 ```
 
 ### benchmark_comparisons.c
 Comparison operator throughput.
 
 ```bash
-./build/benchmark_comparisons
+./build/bench/benchmark_comparisons
 ```
 
 ### benchmark_logical_bool.c
 Logical operator throughput for boolean arrays.
 
 ```bash
-./build/benchmark_logical_bool
+./build/bench/benchmark_logical_bool
 ```
 
 ### benchmark_sincos.c
 sin/cos expression throughput across block sizes.
 
 ```bash
-./build/benchmark_sincos
+./build/bench/benchmark_sincos
 ```
 
 Note: This benchmark uses `sin(a) ** 2 + cos(a) ** 2`. Performance should be similar to
@@ -86,33 +86,33 @@ Note: This benchmark uses `sin(a) ** 2 + cos(a) ** 2`. Performance should be sim
 Multi-threaded sin/cos expression throughput.
 
 ```bash
-./build/benchmark_sincos_threads
+./build/bench/benchmark_sincos_threads
 ```
 
 ### benchmark_memory_efficiency.c
 Working-set size vs throughput and memory behavior.
 
 ```bash
-./build/benchmark_memory_efficiency
+./build/bench/benchmark_memory_efficiency
 ```
 
 ### benchmark_mixed_types.c
 Mixed-type expressions and type promotion overhead.
 
 ```bash
-./build/benchmark_mixed_types
+./build/bench/benchmark_mixed_types
 ```
 
 ### benchmark_nd_padding_threads.c
 Multi-threaded ND padding scenarios vs pure C (1 GB logical array).
 
 ```bash
-./build/benchmark_nd_padding_threads
+./build/bench/benchmark_nd_padding_threads
 ```
 
 ### benchmark_threadsafe.c
 Thread-safe evaluation overhead vs single-threaded.
 
 ```bash
-./build/benchmark_threadsafe
+./build/bench/benchmark_threadsafe
 ```
