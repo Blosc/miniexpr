@@ -1,7 +1,7 @@
 /*********************************************************************
   Blosc - Blocked Shuffling and Compression Library
 
-  Copyright (c) 2025  Blosc Development Team <blosc@blosc.org>
+  Copyright (c) 2025-2026  Blosc Development Team <blosc@blosc.org>
   https://blosc.org
   License: BSD 3-Clause (see LICENSE.txt)
 
@@ -1742,6 +1742,10 @@ void me_print(const me_expr* n) {
 
 me_dtype me_get_dtype(const me_expr* expr) {
     return expr ? expr->dtype : ME_AUTO;
+}
+
+const char* me_version(void) {
+    return ME_VERSION_STRING;
 }
 
 static int compute_valid_items(const me_expr* expr, int64_t nchunk, int64_t nblock,

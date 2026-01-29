@@ -11,8 +11,12 @@ miniexpr is designed to be embedded directly into larger projects, not distribut
 - Vectorized evaluation for processing arrays efficiently
 - Thread-safe operations for parallel processing
 
-**Note**: This is a pre-alpha project.
+**Note**: This is a beta project.
 **Windows note**: Complex types are not supported on Windows because the C99 complex ABI is not stable across MSVC/clang-cl. `me_compile()` will reject expressions that involve complex variables or outputs.
+
+## Versioning
+
+miniexpr follows semantic versioning. The library version is available at compile time via `ME_VERSION_*` macros and at runtime via `me_version()`.
 
 ## API Functions
 
@@ -248,7 +252,7 @@ This sets up automatic checks for code quality (e.g., trailing whitespace).
 
 BSD 3-Clause License. See [LICENSE](LICENSE) for details.
 
-Copyright (c) 2025-2025, The Blosc Development Team
+Copyright (c) 2025-2026, The Blosc Development Team
 
 ## Acknowledgments
 

@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdint.h>
+#include <string.h>
 #include "../src/miniexpr.h"
 #include "minctest.h"
 
@@ -27,8 +28,37 @@
 
 #define TEST_SIZE 100
 
+int test_version() {
+    printf("\n=== Test 1: Version string ===\n");
+
+    char expected[32];
+    if (snprintf(expected, sizeof(expected), "%d.%d.%d",
+                 ME_VERSION_MAJOR, ME_VERSION_MINOR, ME_VERSION_PATCH) < 0) {
+        printf("  ❌ FAILED: snprintf error\n");
+        return 1;
+    }
+
+    const char *version = me_version();
+    if (!version) {
+        printf("  ❌ FAILED: me_version() returned NULL\n");
+        return 1;
+    }
+    if (strcmp(version, expected) != 0) {
+        printf("  ❌ FAILED: got '%s', expected '%s'\n", version, expected);
+        return 1;
+    }
+    if (strcmp(ME_VERSION_STRING, expected) != 0) {
+        printf("  ❌ FAILED: ME_VERSION_STRING '%s' does not match '%s'\n",
+               ME_VERSION_STRING, expected);
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    return 0;
+}
+
 int test_simple_expression() {
-    printf("\n=== Test 1: Simple expression (a + b) ===\n");
+    printf("\n=== Test 2: Simple expression (a + b) ===\n");
 
     double *a = malloc(TEST_SIZE * sizeof(double));
     double *b = malloc(TEST_SIZE * sizeof(double));
@@ -77,7 +107,7 @@ int test_simple_expression() {
 }
 
 int test_complex_expression() {
-    printf("\n=== Test 2: Complex expression (sqrt(a*a + b*b)) ===\n");
+    printf("\n=== Test 3: Complex expression (sqrt(a*a + b*b)) ===\n");
 
     double *a = malloc(TEST_SIZE * sizeof(double));
     double *b = malloc(TEST_SIZE * sizeof(double));
@@ -126,7 +156,7 @@ int test_complex_expression() {
 }
 
 int test_integer_types() {
-    printf("\n=== Test 3: Integer types (int32_t) ===\n");
+    printf("\n=== Test 4: Integer types (int32_t) ===\n");
 
     int32_t *a = malloc(TEST_SIZE * sizeof(int32_t));
     int32_t *b = malloc(TEST_SIZE * sizeof(int32_t));
@@ -175,7 +205,7 @@ int test_integer_types() {
 }
 
 int test_mixed_types() {
-    printf("\n=== Test 4: Mixed types (int32 + float64) ===\n");
+    printf("\n=== Test 5: Mixed types (int32 + float64) ===\n");
 
     int32_t *a = malloc(TEST_SIZE * sizeof(int32_t));
     double *b = malloc(TEST_SIZE * sizeof(double));
@@ -224,7 +254,7 @@ int test_mixed_types() {
 }
 
 int test_fac_ln() {
-    printf("\n=== Test 5: fac and ln ===\n");
+    printf("\n=== Test 6: fac and ln ===\n");
 
     const int n = 10;
     double *a = malloc((size_t)n * sizeof(double));
@@ -299,6 +329,7 @@ int main() {
     printf("========================================\n");
 
     int failures = 0;
+    failures += test_version();
     failures += test_simple_expression();
     failures += test_complex_expression();
     failures += test_integer_types();

@@ -1,7 +1,7 @@
 /*********************************************************************
   Blosc - Blocked Shuffling and Compression Library
 
-  Copyright (c) 2025  Blosc Development Team <blosc@blosc.org>
+  Copyright (c) 2025-2026  Blosc Development Team <blosc@blosc.org>
   https://blosc.org
   License: BSD 3-Clause (see LICENSE.txt)
 
@@ -45,6 +45,12 @@ extern "C" {
 
 
 #endif
+
+/* Version information */
+#define ME_VERSION_MAJOR 0
+#define ME_VERSION_MINOR 1
+#define ME_VERSION_PATCH 0
+#define ME_VERSION_STRING "0.1.0"
 
 /* Internal eval block size (elements). Compile-time fixed. */
 #ifndef ME_EVAL_BLOCK_NITEMS
@@ -275,6 +281,9 @@ void me_free(me_expr *n);
  * Returns the dtype that will be used for the output of me_eval().
  */
 me_dtype me_get_dtype(const me_expr *expr);
+
+/* Get the library version string (e.g., "1.0.0"). */
+const char *me_version(void);
 
 
 #ifdef __cplusplus
