@@ -1,6 +1,11 @@
 Release notes for miniexpr
 ==========================
 
+Changes from 0.1.0 to 0.1.1
+===========================
+
+#XXX version-specific blurb XXX#
+
 Changes from 0.0.0 to 0.1.0
 ===========================
 
