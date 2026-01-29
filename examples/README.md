@@ -415,7 +415,7 @@ After trying these examples:
 
 ## Additional Resources
 
-- **API Reference**: `../QUICK_REFERENCE.md`
+- **Type Inference Guide**: `../doc/type-inference.md`
 - **Getting Started Guide**: `../doc/get-started.md`
 - **Data Types Guide**: `../doc/data-types.md`
 - **Parallel Processing Guide**: `../doc/parallel-processing.md`

@@ -229,9 +229,9 @@ make examples
 ## Documentation
 
 - **[examples/README.md](examples/README.md)** - Complete examples with explanations
-- **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - Complete API reference
 - **[doc/get-started.md](doc/get-started.md)** - Getting started guide
 - **[doc/data-types.md](doc/data-types.md)** - Data types guide
+- **[doc/type-inference.md](doc/type-inference.md)** - Type inference rules
 - **[doc/parallel-processing.md](doc/parallel-processing.md)** - Parallel processing patterns
 
 ## Contributing
