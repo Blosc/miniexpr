@@ -1,7 +1,15 @@
 /*
- * ND benchmark with padding scenarios for mixed-type evaluation (multi-threaded).
+ * ND benchmark with padding scenarios for mixed-type DSL evaluation (multi-threaded).
  *
- * Expression: (a + b) * c
+ * DSL:
+ *   sum = 0;
+ *   for i in range(4) {
+ *     tmp = (a + b) * c + i;
+ *     continue if tmp < -1e9;
+ *     continue if tmp > 1e12;
+ *     sum = sum + tmp;
+ *   }
+ *   sum
  *   a: float64
  *   b: float32
  *   c: int16
@@ -106,6 +114,16 @@ static const scenario_t SCENARIOS[] = {
     {.name = "block-pad", .chunkshape = {250, 250, 250}, .blockshape = {16, 16, 16}, .align_shape_to_chunk = true},
     {.name = "none", .chunkshape = {256, 256, 256}, .blockshape = {16, 16, 16}, .align_shape_to_chunk = true}
 };
+
+static const char *DSL_SOURCE =
+    "sum = 0;\n"
+    "for i in range(4) {\n"
+    "  tmp = (a + b) * c + i;\n"
+    "  continue if tmp < -1e9;\n"
+    "  continue if tmp > 1e12;\n"
+    "  sum = sum + tmp;\n"
+    "}\n"
+    "sum\n";
 
 static double get_time(void) {
     struct timeval tv;
@@ -240,7 +258,18 @@ static void *c_worker(void *arg) {
     int64_t start = args->start_idx;
     int64_t end = start + args->count;
     for (int64_t i = start; i < end; i++) {
-        args->out[i] = (args->a[i] + (double)args->b[i]) * (double)args->c[i];
+        double sum = 0.0;
+        for (int iter = 0; iter < 4; iter++) {
+            double tmp = (args->a[i] + (double)args->b[i]) * (double)args->c[i] + (double)iter;
+            if (tmp < -1e9) {
+                continue;
+            }
+            if (tmp > 1e12) {
+                continue;
+            }
+            sum += tmp;
+        }
+        args->out[i] = sum;
     }
     return NULL;
 }
@@ -319,8 +348,19 @@ static void *c_pack_worker(void *arg) {
                                       + start[2];
                     for (int64_t i2 = 0; i2 < valid[2]; i2++) {
                         int64_t off = dst_off + i2;
-                        args->buf_out[off] = (args->buf_a[off] + (double)args->buf_b[off])
-                                             * (double)args->buf_c[off];
+                        double sum = 0.0;
+                        for (int iter = 0; iter < 4; iter++) {
+                            double tmp = (args->buf_a[off] + (double)args->buf_b[off])
+                                         * (double)args->buf_c[off] + (double)iter;
+                            if (tmp < -1e9) {
+                                continue;
+                            }
+                            if (tmp > 1e12) {
+                                continue;
+                            }
+                            sum += tmp;
+                        }
+                        args->buf_out[off] = sum;
                     }
                     memcpy(args->out + src_off, args->buf_out + dst_off,
                            (size_t)valid[2] * sizeof(double));
@@ -533,7 +573,7 @@ static int setup_scenario(bench_scenario_t *bs, const scenario_t *sc, int64_t ta
     };
     int err = 0;
     me_expr *expr = NULL;
-    int rc = me_compile_nd("(a + b) * c", vars, 3, ME_AUTO, 3,
+    int rc = me_compile_nd(DSL_SOURCE, vars, 3, ME_AUTO, 3,
                            bs->shape, sc->chunkshape, sc->blockshape, &err, &expr);
     if (rc != ME_COMPILE_SUCCESS) {
         fprintf(stderr, "Compile failed (%s): rc=%d err=%d\n", sc->name, rc, err);
@@ -573,9 +613,11 @@ int main(void) {
     int64_t max_items = target_items;
 
     printf("═══════════════════════════════════════════════════════════════════\n");
-    printf("  ND Mixed-Type Padding Benchmark (Threads)\n");
+    printf("  ND Mixed-Type DSL Padding Benchmark (Threads)\n");
     printf("═══════════════════════════════════════════════════════════════════\n");
-    printf("Expression: (a + b) * c  |  a=f64, b=f32, c=i16  | output=f64\n");
+    printf("DSL: sum=0; for i in range(4) { tmp=(a+b)*c+i; continue if tmp<-1e9; ");
+    printf("continue if tmp>1e12; sum=sum+tmp; } sum\n");
+    printf("Types: a=f64, b=f32, c=i16  | output=f64\n");
     printf("Target size: %d MB output (~%lld elements)\n", TOTAL_SIZE_MB, (long long)target_items);
     printf("Threads: 1..%d\n", MAX_THREADS);
     printf("Scenarios (chunkshape -> blockshape):\n");
