@@ -157,10 +157,187 @@ static int test_nd_indices(void) {
     return rc;
 }
 
+static int test_nd_padding(void) {
+    printf("\n=== DSL Test 4: ND padding in blocks ===\n");
+
+    const char *src = "result = _i0 + _i1";
+    int64_t shape[2] = {3, 5};
+    int32_t chunks[2] = {2, 4};
+    int32_t blocks[2] = {2, 3};
+
+    me_expr *expr = NULL;
+    int err = 0;
+    if (me_compile_nd(src, NULL, 0, ME_FLOAT64, 2, shape, chunks, blocks, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compile error at %d\n", err);
+        return 1;
+    }
+
+    double out[6];
+    if (me_eval_nd(expr, NULL, 0, out, 6, 1, 0, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: eval error\n");
+        me_free(expr);
+        return 1;
+    }
+
+    double expected[6] = {4, 0, 0, 5, 0, 0};
+    int rc = check_all_close(out, expected, 6, 1e-12);
+    me_free(expr);
+    if (rc == 0) {
+        printf("  ✅ PASSED\n");
+    }
+    return rc;
+}
+
+static int test_nd_large_block(void) {
+    printf("\n=== DSL Test 5: ND larger block ===\n");
+
+    const char *src = "result = _i0 + _i1";
+    int64_t shape[2] = {6, 7};
+    int32_t chunks[2] = {4, 4};
+    int32_t blocks[2] = {2, 2};
+
+    me_expr *expr = NULL;
+    int err = 0;
+    if (me_compile_nd(src, NULL, 0, ME_FLOAT64, 2, shape, chunks, blocks, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compile error at %d\n", err);
+        return 1;
+    }
+
+    double out[4];
+    if (me_eval_nd(expr, NULL, 0, out, 4, 2, 1, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: eval error\n");
+        me_free(expr);
+        return 1;
+    }
+
+    double expected[4] = {6, 7, 7, 8};
+    int rc = check_all_close(out, expected, 4, 1e-12);
+    me_free(expr);
+    if (rc == 0) {
+        printf("  ✅ PASSED\n");
+    }
+    return rc;
+}
+
+static int test_nd_3d_indices_padding(void) {
+    printf("\n=== DSL Test 6: 3D indices + padding + _n* + _ndim ===\n");
+
+    const char *src = "result = _i0 + _i1 + _i2 + _n0 + _n1 + _n2 + _ndim";
+    int64_t shape[3] = {3, 4, 5};
+    int32_t chunks[3] = {2, 3, 4};
+    int32_t blocks[3] = {2, 2, 3};
+
+    me_expr *expr = NULL;
+    int err = 0;
+    if (me_compile_nd(src, NULL, 0, ME_FLOAT64, 3, shape, chunks, blocks, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compile error at %d\n", err);
+        return 1;
+    }
+
+    double out[12];
+    if (me_eval_nd(expr, NULL, 0, out, 12, 0, 3, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: eval error\n");
+        me_free(expr);
+        return 1;
+    }
+
+    double expected[12] = {20, 0, 0, 0, 0, 0, 21, 0, 0, 0, 0, 0};
+    int rc = check_all_close(out, expected, 12, 1e-12);
+    me_free(expr);
+    if (rc == 0) {
+        printf("  ✅ PASSED\n");
+    }
+    return rc;
+}
+
+static int test_nested_loops_and_conditionals(void) {
+    printf("\n=== DSL Test 7: nested loops + mixed-type conditions ===\n");
+
+    const char *src =
+        "sum = 0;\n"
+        "for i in range(3) {\n"
+        "  for j in range(4) {\n"
+        "    continue if ((i + 0.5) > 1.0) & (j < 2);\n"
+        "    sum = sum + i + j;\n"
+        "  }\n"
+        "}\n"
+        "result = sum;\n";
+
+    double out[5];
+    double expected[5];
+    for (int i = 0; i < 5; i++) {
+        expected[i] = 22.0;
+    }
+
+    me_expr *expr = NULL;
+    int err = 0;
+    if (me_compile(src, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compile error at %d\n", err);
+        return 1;
+    }
+    if (me_eval(expr, NULL, 0, out, 5, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: eval error\n");
+        me_free(expr);
+        return 1;
+    }
+    int rc = check_all_close(out, expected, 5, 1e-12);
+    me_free(expr);
+    if (rc == 0) {
+        printf("  ✅ PASSED\n");
+    }
+    return rc;
+}
+
+static int test_break_any_condition(void) {
+    printf("\n=== DSL Test 8: break with array condition (any) ===\n");
+
+    const char *src =
+        "sum = 0;\n"
+        "for i in range(5) {\n"
+        "  sum = sum + i;\n"
+        "  break if x > 0;\n"
+        "}\n"
+        "result = sum;\n";
+
+    double x[4] = {-1.0, 2.0, -3.0, 0.0};
+    double out[4];
+    double expected[4];
+    for (int i = 0; i < 4; i++) {
+        expected[i] = 0.0;
+    }
+
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    me_expr *expr = NULL;
+    int err = 0;
+    if (me_compile(src, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compile error at %d\n", err);
+        return 1;
+    }
+
+    const void *inputs[] = {x};
+    if (me_eval(expr, inputs, 1, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: eval error\n");
+        me_free(expr);
+        return 1;
+    }
+
+    int rc = check_all_close(out, expected, 4, 1e-12);
+    me_free(expr);
+    if (rc == 0) {
+        printf("  ✅ PASSED\n");
+    }
+    return rc;
+}
+
 int main(void) {
     int fail = 0;
     fail |= test_assign_and_result_stmt();
     fail |= test_loop_break_continue();
     fail |= test_nd_indices();
+    fail |= test_nd_padding();
+    fail |= test_nd_large_block();
+    fail |= test_nd_3d_indices_padding();
+    fail |= test_nested_loops_and_conditionals();
+    fail |= test_break_any_condition();
     return fail;
 }
