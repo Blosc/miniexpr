@@ -237,6 +237,36 @@ make examples
 - **[doc/data-types.md](doc/data-types.md)** - Data types guide
 - **[doc/type-inference.md](doc/type-inference.md)** - Type inference rules
 - **[doc/parallel-processing.md](doc/parallel-processing.md)** - Parallel processing patterns
+- **[doc/dsl-usage.md](doc/dsl-usage.md)** - DSL kernel programming guide
+
+## DSL Kernels
+
+miniexpr includes a DSL (Domain-Specific Language) for writing multi-statement computational kernels. The DSL extends single-expression evaluation with:
+
+- **Temporary variables**: Intermediate results for complex computations
+- **Conditionals**: `where(cond, then, else)` for element-wise selection
+- **Loops**: `for var in range(start, end)` iteration
+- **Control flow**: `break` and `continue` statements
+- **Index access**: Built-in `_i0`–`_i7` (position) and `_n0`–`_n7` (shape) variables
+
+### DSL Example
+
+```c
+const char *dsl_source =
+    "t1 = 1.0 * x - 2.0\n"
+    "t2 = t1 * x + 3.0\n"
+    "result = t2 * x - 1.0";
+
+me_dsl_error error;
+me_dsl_program *prog = me_dsl_parse(dsl_source, &error);
+if (!prog) {
+    printf("Parse error: %s\n", error.message);
+}
+// Compile and evaluate each statement's expression...
+me_dsl_program_free(prog);
+```
+
+See [doc/dsl-usage.md](doc/dsl-usage.md) for the complete DSL reference and [examples/11_dsl_kernel.c](examples/11_dsl_kernel.c) for a working example.
 
 ## Contributing
 

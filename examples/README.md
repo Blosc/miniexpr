@@ -287,6 +287,86 @@ Chunk size matters enormously for parallel performance:
 
 ---
 
+### 11_dsl_kernel.c
+**DSL multi-statement kernel demonstration**
+
+- **What it demonstrates**: DSL parsing for multi-statement programs
+- **Programs**: Polynomial evaluation, conditional clamping, trig identities
+- **Concepts**: Temporary variables, where() conditionals, DSL parsing API
+- **Best for**: Understanding DSL features and syntax
+
+**Run it:**
+```bash
+./build/examples/11_dsl_kernel
+```
+
+**Key features:**
+- Multi-statement programs with temporary variables
+- Conditional expressions with `where(cond, then, else)`
+- DSL parsing via `me_dsl_parse()`
+
+---
+
+### 12_mandelbrot.c
+**Mandelbrot set computation**
+
+- **What it demonstrates**: Using miniexpr for fractal computation
+- **Grid size**: 78×32 (2496 points)
+- **Iterations**: 100 max
+- **Concepts**: Complex arithmetic via components, iteration, ASCII visualization
+- **Best for**: Understanding expression-based iterative algorithms
+
+**Run it:**
+```bash
+./build/examples/12_mandelbrot
+```
+
+**Key features:**
+- Complex number arithmetic (z = z² + c)
+- Iterative evaluation with escape detection
+- ASCII art visualization
+- Performance metrics
+
+---
+
+### 13_mandelbrot_dsl.c
+**Mandelbrot set with DSL kernel**
+
+- **What it demonstrates**: Full DSL expressiveness for complex algorithms
+- **Grid size**: 78×32 (2496 points)
+- **Iterations**: 100 max
+- **Concepts**: For loops, break conditions, temporaries, where() conditionals
+- **Best for**: Understanding DSL kernel programming
+
+**Run it:**
+```bash
+./build/examples/13_mandelbrot_dsl
+```
+
+**Key features:**
+- Complete algorithm in a single DSL program
+- `for iter in range(100) { ... }` loop construct
+- `break if mag2 > 4.0` early exit
+- `where()` conditionals for element-wise selection
+- Comments with `#` syntax
+- Demonstrates parsing via `me_dsl_parse()`
+
+**DSL Kernel Preview:**
+```
+zr = 0.0; zi = 0.0; escape_iter = 100.0
+for iter in range(100) {
+    zr2 = zr * zr; zi2 = zi * zi
+    mag2 = zr2 + zi2
+    break if mag2 > 4.0
+    zr_new = zr2 - zi2 + cr
+    zi_new = 2.0 * zr * zi + ci
+    zr = zr_new; zi = zi_new
+}
+result = escape_iter
+```
+
+---
+
 ## Building Examples
 
 ### Using CMake (recommended)
@@ -433,5 +513,8 @@ After trying these examples:
 | 05 | ⭐⭐⭐ Advanced | Parallelism | ~140 | ~1s |
 | 06 | ⭐ Simple | Debugging | ~70 | <1s |
 | 07 | ⭐⭐ Moderate | Bool output | ~180 | <1s |
+| 11 | ⭐⭐ Moderate | DSL kernels | ~160 | <1s |
+| 12 | ⭐⭐⭐ Advanced | Mandelbrot | ~170 | ~1s |
+| 13 | ⭐⭐⭐ Advanced | DSL Mandelbrot | ~210 | ~1s |
 
 **Start with Example 01, then explore based on your needs!** 🚀
