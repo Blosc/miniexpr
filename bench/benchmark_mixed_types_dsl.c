@@ -1,15 +1,22 @@
 /*
- * Benchmark to find optimal chunk size for mixed-type evaluation
- * Tests expression: (a + b) * c where:
+ * Benchmark for mixed-type DSL evaluation with a loop and conditional.
+ * DSL program:
+ *   sum = 0;
+ *   for i in range(4) {
+ *     tmp = (a + b) * c + i;
+ *     continue if tmp < -1e9;
+ *     sum = sum + tmp;
+ *   }
+ *   sum
+ *
+ * Types:
  *   - a: float64 (double)
  *   - b: float32 (float)
  *   - c: int16 (short)
- *   - result: float64 (double)
+ *   - i: int64 loop variable
+ *   - result: float64 (auto-promoted)
  *
- * This benchmark explores performance with different input types,
- * which is important for real-world heterogeneous data scenarios.
- *
- * Usage: ./benchmark_mixed_types
+ * Usage: ./benchmark_mixed_types_dsl
  *
  * Output: CSV-style results showing performance for each chunk size
  */
@@ -23,10 +30,9 @@
 #include "miniexpr.h"
 #include "minctest.h"
 
-
-
 #define NUM_THREADS 4
 #define TOTAL_SIZE_MB 1024  // 1 GB total dataset (for result array)
+#define DSL_LOOP_ITERS 4
 
 typedef struct {
     // Work parameters (reset for each test)
@@ -48,7 +54,7 @@ typedef struct {
 } thread_pool_t;
 
 static void *worker_thread(void *arg) {
-    thread_pool_t *pool = (thread_pool_t *) arg;
+    thread_pool_t *pool = (thread_pool_t *)arg;
 
     while (1) {
         pthread_mutex_lock(&pool->work_mutex);
@@ -81,16 +87,16 @@ static void *worker_thread(void *arg) {
                 // Adjust pointers based on input type sizes
                 if (i == 0) {
                     // a: double (8 bytes)
-                    adjusted_inputs[i] = (const double *) pool->inputs[i] + my_chunk_idx;
+                    adjusted_inputs[i] = (const double *)pool->inputs[i] + my_chunk_idx;
                 } else if (i == 1) {
                     // b: float (4 bytes)
-                    adjusted_inputs[i] = (const float *) pool->inputs[i] + my_chunk_idx;
+                    adjusted_inputs[i] = (const float *)pool->inputs[i] + my_chunk_idx;
                 } else if (i == 2) {
                     // c: int16 (2 bytes)
-                    adjusted_inputs[i] = (const int16_t *) pool->inputs[i] + my_chunk_idx;
+                    adjusted_inputs[i] = (const int16_t *)pool->inputs[i] + my_chunk_idx;
                 }
             }
-            double *output = (double *) pool->output + my_chunk_idx;
+            double *output = (double *)pool->output + my_chunk_idx;
 
             ME_EVAL_CHECK(pool->expr, adjusted_inputs, pool->num_inputs,
                     output, chunk_size);
@@ -112,7 +118,9 @@ static void *worker_thread(void *arg) {
 
 static thread_pool_t *create_thread_pool(int num_threads, pthread_t **threads_out) {
     thread_pool_t *pool = malloc(sizeof(thread_pool_t));
-    if (!pool) return NULL;
+    if (!pool) {
+        return NULL;
+    }
 
     pool->expr = NULL;
     pool->inputs = NULL;
@@ -165,21 +173,30 @@ static double benchmark_chunksize(thread_pool_t *pool, size_t chunk_bytes,
                                   double *a, float *b, int16_t *c, double *result,
                                   size_t total_elements, double *compile_us_out) {
     const size_t chunk_elements = chunk_bytes / sizeof(double);
-    if (chunk_elements == 0) return 0.0;
+    if (chunk_elements == 0) {
+        return 0.0;
+    }
 
-    // Compile expression with mixed types
-    // When using ME_AUTO for output, we specify input types in variables
+    // Compile expression with mixed types in DSL
     me_variable vars[] = {
         {"a", ME_FLOAT64},
         {"b", ME_FLOAT32},
         {"c", ME_INT16}
     };
+    const char *src =
+        "sum = 0;\n"
+        "for i in range(4) {\n"
+        "  tmp = (a + b) * c + i;\n"
+        "  continue if tmp < -1e9;\n"
+        "  sum = sum + tmp;\n"
+        "}\n"
+        "sum\n";
     int error;
     me_expr *expr = NULL;
     struct timespec compile_start;
     struct timespec compile_end;
     clock_gettime(CLOCK_MONOTONIC, &compile_start);
-    int rc_expr = me_compile("(a + b) * c", vars, 3, ME_AUTO, &error, &expr);
+    int rc_expr = me_compile(src, vars, 3, ME_AUTO, &error, &expr);
     clock_gettime(CLOCK_MONOTONIC, &compile_end);
     if (rc_expr != ME_COMPILE_SUCCESS) {
         fprintf(stderr, "Failed to compile expression, error: %d\n", error);
@@ -235,16 +252,16 @@ static double benchmark_chunksize(thread_pool_t *pool, size_t chunk_bytes,
 
 int main() {
     printf("═══════════════════════════════════════════════════════════════════\n");
-    printf("  Mixed-Type Chunk Size Optimization Benchmark\n");
+    printf("  Mixed-Type DSL Chunk Size Optimization Benchmark\n");
     printf("═══════════════════════════════════════════════════════════════════\n");
     printf("Configuration:\n");
-    printf("  - Expression: (a + b) * c\n");
+    printf("  - DSL: sum=0; for i in range(4) { tmp=(a+b)*c+i; continue if tmp<-1e9; sum+=tmp; } sum\n");
     printf("  - Input types: a=float64, b=float32, c=int16\n");
     printf("  - Output type: float64 (auto-promoted)\n");
     printf("  - Threads: %d (single pool reused for all tests)\n", NUM_THREADS);
     printf("  - Total dataset: %d MB (%.1f M elements)\n",
            TOTAL_SIZE_MB, (TOTAL_SIZE_MB * 1024.0 * 1024.0) / sizeof(double) / 1e6);
-    printf("  - Memory per element: 8+4+2=14 bytes input, 8 bytes output (22 total)\n");
+    printf("  - Memory per element (approx): %d * (8+4+2) bytes input + 8 bytes output = 64 bytes\n", DSL_LOOP_ITERS);
     printf("  - Testing 18 chunk sizes from 1 KB to 128 MB\n");
     printf("═══════════════════════════════════════════════════════════════════\n\n");
 
@@ -267,9 +284,9 @@ int main() {
 
     // Initialize data once
     for (size_t i = 0; i < total_elements; i++) {
-        a[i] = (double) (i % 1000) / 100.0;
-        b[i] = (float) ((i + 333) % 1000) / 100.0f;
-        c[i] = (int16_t) ((i % 100) - 50); // Range: -50 to 49
+        a[i] = (double)(i % 1000) / 100.0;
+        b[i] = (float)((i + 333) % 1000) / 100.0f;
+        c[i] = (int16_t)((i % 100) - 50); // Range: -50 to 49
     }
 
     // Create thread pool once
@@ -284,8 +301,8 @@ int main() {
         return 1;
     }
 
-    printf("Chunk (KB)  Throughput (Melems/s)  Bandwidth (GB/s)   GFLOP/s  Compile Expr (us)\n");
-    printf("---------------------------------------------------------------------------------\n");
+    printf("Chunk (KB)  Throughput (Melems/s)  Bandwidth (GB/s)   GFLOP/s  Compile DSL (us)\n");
+    printf("----------------------------------------------------------------------------------\n");
 
     double best_throughput = 0.0;
     size_t best_chunk_kb = 0;
@@ -296,6 +313,9 @@ int main() {
         1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072
     };
     int num_sizes = sizeof(test_sizes_kb) / sizeof(test_sizes_kb[0]);
+
+    const double bytes_per_elem = 64.0; // Approx, see header
+    const double ops_per_elem = 20.0;   // 4 iters * (add+mul+add+sum+cmp)
 
     for (int i = 0; i < num_sizes; i++) {
         size_t chunk_kb = test_sizes_kb[i];
@@ -309,9 +329,8 @@ int main() {
             continue;
         }
 
-        // Bandwidth calculation: 8+4+2 bytes read + 8 bytes write = 22 bytes per element
-        double bandwidth = (throughput * 22.0) / 1000.0; // Melems/s * 22 bytes / 1000 = GB/s
-        double gflops = throughput * 2.0 / 1000.0; // 2 FLOP per element (1 add, 1 mul)
+        double bandwidth = (throughput * bytes_per_elem) / 1000.0; // GB/s (approx)
+        double gflops = throughput * ops_per_elem / 1000.0; // GFLOP/s (approx)
 
         printf("%10zu  %21.2f  %16.2f  %8.2f  %16.2f\n",
                chunk_kb, throughput, bandwidth, gflops, compile_us);
@@ -327,8 +346,8 @@ int main() {
     printf("Best Performance:\n");
     printf("  Chunk Size: %zu KB (%.2f MB)\n", best_chunk_kb, best_chunk_kb / 1024.0);
     printf("  Throughput: %.2f Melems/sec\n", best_throughput);
-    printf("  Bandwidth:  %.2f GB/s\n", (best_throughput * 22.0) / 1000.0);
-    printf("  GFLOP/s:    %.2f\n", best_throughput * 2.0 / 1000.0);
+    printf("  Bandwidth:  %.2f GB/s (approx)\n", (best_throughput * bytes_per_elem) / 1000.0);
+    printf("  GFLOP/s:    %.2f (approx)\n", best_throughput * ops_per_elem / 1000.0);
     printf("═══════════════════════════════════════════════════════════════════\n");
 
     // Cleanup
