@@ -35,8 +35,8 @@ EXAMPLEDIR = examples
 BUILDDIR = build
 
 # Source files
-LIB_SRCS = $(SRCDIR)/miniexpr.c $(SRCDIR)/functions.c $(SRCDIR)/functions-simd.c
-LIB_OBJS = $(BUILDDIR)/miniexpr.o $(BUILDDIR)/functions.o $(BUILDDIR)/functions-simd.o
+LIB_SRCS = $(SRCDIR)/miniexpr.c $(SRCDIR)/dsl_parser.c $(SRCDIR)/functions.c $(SRCDIR)/functions-simd.c
+LIB_OBJS = $(BUILDDIR)/miniexpr.o $(BUILDDIR)/dsl_parser.o $(BUILDDIR)/functions.o $(BUILDDIR)/functions-simd.o
 LIB_HDR = $(SRCDIR)/miniexpr.h
 
 ifeq ($(OS),Windows_NT)
@@ -56,6 +56,7 @@ ifeq ($(OS),Windows_NT)
   TEST_SRCS := $(filter-out $(TESTDIR)/test_threadsafe_chunk.c,$(TEST_SRCS))
 endif
 TEST_BINS = $(patsubst $(TESTDIR)/%.c,$(BUILDDIR)/%$(EXE),$(TEST_SRCS))
+TEST_DEFS = -DMINIEXPR_SOURCE_DIR=\"$(abspath .)\"
 
 # Example sources
 EXAMPLE_SRCS = $(wildcard $(EXAMPLEDIR)/*.c)
@@ -102,6 +103,7 @@ lib: $(LIB_OBJS)
 $(LIB_OBJS): $(LIB_SRCS) $(LIB_HDR) | $(BUILDDIR)
 	@echo "Building library..."
 	$(CC) $(CFLAGS) -c $(SRCDIR)/miniexpr.c -o $(BUILDDIR)/miniexpr.o
+	$(CC) $(CFLAGS) -c $(SRCDIR)/dsl_parser.c -o $(BUILDDIR)/dsl_parser.o
 	$(CC) $(CFLAGS) -c $(SRCDIR)/functions.c -o $(BUILDDIR)/functions.o
 	$(CC) $(CFLAGS) -c $(SRCDIR)/functions-simd.c -o $(BUILDDIR)/functions-simd.o
 	@echo "✓ Library built: $(LIB_OBJS)"
@@ -140,7 +142,7 @@ test: $(TEST_BINS)
 
 $(BUILDDIR)/%$(EXE): $(TESTDIR)/%.c $(LIB_OBJS) | $(BUILDDIR)
 	@echo "Building test: $@"
-	$(CC) $(CFLAGS) -I$(SRCDIR) $< $(LIB_OBJS) -o $@ $(LDFLAGS)
+	$(CC) $(CFLAGS) $(TEST_DEFS) -I$(SRCDIR) $< $(LIB_OBJS) -o $@ $(LDFLAGS)
 	@echo "✓ Built: $@"
 
 # Build all examples

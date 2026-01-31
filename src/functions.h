@@ -54,6 +54,7 @@ struct me_expr {
     me_dtype input_dtype;
     void* bytecode;
     int ncode;
+    void* dsl_program;
     void* parameters[1];
 };
 
@@ -122,6 +123,10 @@ me_expr* list(state* s);
 double imag_wrapper(double x);
 double real_wrapper(double x);
 double where_scalar(double c, double x, double y);
+
+int me_eval_dsl_program(const me_expr* expr, const void** vars_block,
+                        int n_vars, void* output_block, int block_nitems,
+                        const me_eval_params* params);
 
 #if defined(_WIN32) || defined(_WIN64)
 bool has_complex_node(const me_expr* n);

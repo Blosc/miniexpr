@@ -58,12 +58,82 @@ For log = base 10 log comment the next line. */
 #include <complex.h>
 #include <assert.h>
 
+#include "dsl_parser.h"
+
+#define ME_DSL_MAX_NDIM 8
+
 /* ND metadata attached to compiled expressions (used by me_eval_nd). */
 typedef struct {
     int ndims;
     /* Layout: shape[ndims], chunkshape[ndims], blockshape[ndims] (all int64_t). */
     int64_t data[1];
 } me_nd_info;
+
+static int private_compile(const char* expression, const me_variable* variables, int var_count,
+                           void* output, int nitems, me_dtype dtype, int* error, me_expr** out);
+
+typedef struct {
+    me_expr *expr;
+    int *var_indices;
+    int n_vars;
+} me_dsl_compiled_expr;
+
+typedef struct me_dsl_compiled_stmt me_dsl_compiled_stmt;
+
+typedef struct {
+    me_dsl_compiled_stmt **stmts;
+    int nstmts;
+    int capacity;
+} me_dsl_compiled_block;
+
+struct me_dsl_compiled_stmt {
+    me_dsl_stmt_kind kind;
+    int line;
+    int column;
+    union {
+        struct {
+            int local_slot;
+            me_dsl_compiled_expr value;
+        } assign;
+        struct {
+            me_dsl_compiled_expr expr;
+            bool is_result;
+        } expr_stmt;
+        struct {
+            int loop_var_slot;
+            me_dsl_compiled_expr limit;
+            me_dsl_compiled_block body;
+        } for_loop;
+        struct {
+            me_dsl_compiled_expr cond;
+        } flow;
+    } as;
+};
+
+typedef struct {
+    char **names;
+    me_dtype *dtypes;
+    int count;
+    int capacity;
+} me_dsl_var_table;
+
+typedef struct {
+    me_dsl_compiled_block block;
+    me_dsl_var_table vars;
+    int n_inputs;
+    int n_locals;
+    int *local_var_indices;
+    int *local_slots;
+    int result_var_index;
+    int idx_ndim;
+    int idx_i[ME_DSL_MAX_NDIM];
+    int idx_n[ME_DSL_MAX_NDIM];
+    int uses_i_mask;
+    int uses_n_mask;
+    bool uses_ndim;
+    bool output_is_scalar;
+    me_dtype output_dtype;
+} me_dsl_compiled_program;
 
 static int64_t ceil_div64(int64_t a, int64_t b) {
     return (b == 0) ? 0 : (a + b - 1) / b;
@@ -221,6 +291,285 @@ static bool contains_reduction(const me_expr* n) {
 // Synthetic addresses for ordinal matching (when user provides NULL addresses)
 static char synthetic_var_addresses[ME_MAX_VARS];
 
+static void dsl_var_table_init(me_dsl_var_table *table) {
+    memset(table, 0, sizeof(*table));
+}
+
+static void dsl_var_table_free(me_dsl_var_table *table) {
+    if (!table) {
+        return;
+    }
+    for (int i = 0; i < table->count; i++) {
+        free(table->names[i]);
+    }
+    free(table->names);
+    free(table->dtypes);
+    table->names = NULL;
+    table->dtypes = NULL;
+    table->count = 0;
+    table->capacity = 0;
+}
+
+static int dsl_var_table_find(const me_dsl_var_table *table, const char *name) {
+    if (!table || !name) {
+        return -1;
+    }
+    for (int i = 0; i < table->count; i++) {
+        if (strcmp(table->names[i], name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static bool dsl_var_table_grow(me_dsl_var_table *table, int min_cap) {
+    if (table->capacity >= min_cap) {
+        return true;
+    }
+    int new_cap = table->capacity ? table->capacity * 2 : 16;
+    if (new_cap < min_cap) {
+        new_cap = min_cap;
+    }
+    char **names = realloc(table->names, (size_t)new_cap * sizeof(*names));
+    if (!names) {
+        return false;
+    }
+    me_dtype *dtypes = realloc(table->dtypes, (size_t)new_cap * sizeof(*dtypes));
+    if (!dtypes) {
+        free(names);
+        return false;
+    }
+    table->names = names;
+    table->dtypes = dtypes;
+    table->capacity = new_cap;
+    return true;
+}
+
+static int dsl_var_table_add(me_dsl_var_table *table, const char *name, me_dtype dtype) {
+    if (!table || !name) {
+        return -1;
+    }
+    if (table->count >= ME_MAX_VARS) {
+        return -1;
+    }
+    if (!dsl_var_table_grow(table, table->count + 1)) {
+        return -1;
+    }
+    table->names[table->count] = strdup(name);
+    if (!table->names[table->count]) {
+        return -1;
+    }
+    table->dtypes[table->count] = dtype;
+    table->count++;
+    return table->count - 1;
+}
+
+static bool dsl_is_reserved_name(const char *name) {
+    if (!name) {
+        return false;
+    }
+    if (strcmp(name, "result") == 0) {
+        return true;
+    }
+    if (strcmp(name, "_ndim") == 0) {
+        return true;
+    }
+    if ((name[0] == '_' && (name[1] == 'i' || name[1] == 'n')) && isdigit((unsigned char)name[2])) {
+        return true;
+    }
+    return false;
+}
+
+static bool dsl_is_reserved_index_name(const char *name, int *is_index, int *dim) {
+    if (!name || name[0] != '_' || !name[1] || !name[2]) {
+        return false;
+    }
+    if (name[1] != 'i' && name[1] != 'n') {
+        return false;
+    }
+    if (!isdigit((unsigned char)name[2])) {
+        return false;
+    }
+    int d = name[2] - '0';
+    if (d < 0 || d >= ME_DSL_MAX_NDIM || name[3] != '\0') {
+        return false;
+    }
+    if (is_index) {
+        *is_index = (name[1] == 'i');
+    }
+    if (dim) {
+        *dim = d;
+    }
+    return true;
+}
+
+static bool dsl_expr_uses_identifier(const char *expr, const char *ident) {
+    if (!expr || !ident) {
+        return false;
+    }
+    size_t ident_len = strlen(ident);
+    const char *p = expr;
+    while (*p) {
+        if (isalpha((unsigned char)*p) || *p == '_') {
+            const char *start = p;
+            p++;
+            while (isalnum((unsigned char)*p) || *p == '_') {
+                p++;
+            }
+            size_t len = (size_t)(p - start);
+            if (len == ident_len && strncmp(start, ident, len) == 0) {
+                return true;
+            }
+        }
+        else {
+            p++;
+        }
+    }
+    return false;
+}
+
+static void dsl_compiled_block_free(me_dsl_compiled_block *block);
+
+static void dsl_compiled_expr_free(me_dsl_compiled_expr *expr) {
+    if (!expr) {
+        return;
+    }
+    if (expr->expr) {
+        me_free(expr->expr);
+        expr->expr = NULL;
+    }
+    free(expr->var_indices);
+    expr->var_indices = NULL;
+    expr->n_vars = 0;
+}
+
+static void dsl_compiled_stmt_free(me_dsl_compiled_stmt *stmt) {
+    if (!stmt) {
+        return;
+    }
+    switch (stmt->kind) {
+    case ME_DSL_STMT_ASSIGN:
+        dsl_compiled_expr_free(&stmt->as.assign.value);
+        break;
+    case ME_DSL_STMT_EXPR:
+        dsl_compiled_expr_free(&stmt->as.expr_stmt.expr);
+        break;
+    case ME_DSL_STMT_FOR:
+        dsl_compiled_expr_free(&stmt->as.for_loop.limit);
+        dsl_compiled_block_free(&stmt->as.for_loop.body);
+        break;
+    case ME_DSL_STMT_BREAK:
+    case ME_DSL_STMT_CONTINUE:
+        dsl_compiled_expr_free(&stmt->as.flow.cond);
+        break;
+    }
+    free(stmt);
+}
+
+static void dsl_compiled_block_free(me_dsl_compiled_block *block) {
+    if (!block) {
+        return;
+    }
+    for (int i = 0; i < block->nstmts; i++) {
+        dsl_compiled_stmt_free(block->stmts[i]);
+    }
+    free(block->stmts);
+    block->stmts = NULL;
+    block->nstmts = 0;
+    block->capacity = 0;
+}
+
+static void dsl_compiled_program_free(me_dsl_compiled_program *program) {
+    if (!program) {
+        return;
+    }
+    dsl_compiled_block_free(&program->block);
+    dsl_var_table_free(&program->vars);
+    free(program->local_var_indices);
+    free(program->local_slots);
+    free(program);
+}
+
+static bool dsl_compiled_block_push(me_dsl_compiled_block *block, me_dsl_compiled_stmt *stmt) {
+    if (!block || !stmt) {
+        return false;
+    }
+    if (block->nstmts == block->capacity) {
+        int new_cap = block->capacity ? block->capacity * 2 : 8;
+        me_dsl_compiled_stmt **next = realloc(block->stmts, (size_t)new_cap * sizeof(*next));
+        if (!next) {
+            return false;
+        }
+        block->stmts = next;
+        block->capacity = new_cap;
+    }
+    block->stmts[block->nstmts++] = stmt;
+    return true;
+}
+
+static bool dsl_collect_var_indices(const me_expr *expr, int **out_indices, int *out_count) {
+    if (!expr || !out_indices || !out_count) {
+        return false;
+    }
+    bool used[ME_MAX_VARS];
+    memset(used, 0, sizeof(used));
+    int max_idx = -1;
+
+    const me_expr *stack[512];
+    int sp = 0;
+    stack[sp++] = expr;
+
+    while (sp > 0) {
+        const me_expr *node = stack[--sp];
+        if (!node) {
+            continue;
+        }
+        if (TYPE_MASK(node->type) == ME_VARIABLE) {
+            const char *ptr = (const char *)node->bound;
+            int idx = (int)(ptr - synthetic_var_addresses);
+            if (idx >= 0 && idx < ME_MAX_VARS) {
+                used[idx] = true;
+                if (idx > max_idx) {
+                    max_idx = idx;
+                }
+            }
+        }
+        else if (IS_FUNCTION(node->type) || IS_CLOSURE(node->type)) {
+            int arity = ARITY(node->type);
+            for (int i = 0; i < arity; i++) {
+                if (sp < (int)(sizeof(stack) / sizeof(stack[0]))) {
+                    stack[sp++] = (const me_expr *)node->parameters[i];
+                }
+            }
+        }
+    }
+
+    int count = 0;
+    for (int i = 0; i <= max_idx; i++) {
+        if (used[i]) {
+            count++;
+        }
+    }
+    if (count == 0) {
+        *out_indices = NULL;
+        *out_count = 0;
+        return true;
+    }
+    int *indices = malloc((size_t)count * sizeof(*indices));
+    if (!indices) {
+        return false;
+    }
+    int pos = 0;
+    for (int i = 0; i <= max_idx; i++) {
+        if (used[i]) {
+            indices[pos++] = i;
+        }
+    }
+    *out_indices = indices;
+    *out_count = count;
+    return true;
+}
+
 static bool output_is_scalar(const me_expr* n) {
     if (!n) return true;
     if (is_reduction_node(n)) return true;
@@ -269,6 +618,156 @@ typedef union {
     float _Complex c64;
     double _Complex c128;
 } me_scalar;
+
+static bool dsl_any_nonzero(const void *data, me_dtype dtype, int nitems) {
+    if (!data || nitems <= 0) {
+        return false;
+    }
+    switch (dtype) {
+    case ME_BOOL: {
+        const bool *v = (const bool *)data;
+        for (int i = 0; i < nitems; i++) {
+            if (v[i]) return true;
+        }
+        return false;
+    }
+    case ME_INT8: {
+        const int8_t *v = (const int8_t *)data;
+        for (int i = 0; i < nitems; i++) {
+            if (v[i] != 0) return true;
+        }
+        return false;
+    }
+    case ME_INT16: {
+        const int16_t *v = (const int16_t *)data;
+        for (int i = 0; i < nitems; i++) {
+            if (v[i] != 0) return true;
+        }
+        return false;
+    }
+    case ME_INT32: {
+        const int32_t *v = (const int32_t *)data;
+        for (int i = 0; i < nitems; i++) {
+            if (v[i] != 0) return true;
+        }
+        return false;
+    }
+    case ME_INT64: {
+        const int64_t *v = (const int64_t *)data;
+        for (int i = 0; i < nitems; i++) {
+            if (v[i] != 0) return true;
+        }
+        return false;
+    }
+    case ME_UINT8: {
+        const uint8_t *v = (const uint8_t *)data;
+        for (int i = 0; i < nitems; i++) {
+            if (v[i] != 0) return true;
+        }
+        return false;
+    }
+    case ME_UINT16: {
+        const uint16_t *v = (const uint16_t *)data;
+        for (int i = 0; i < nitems; i++) {
+            if (v[i] != 0) return true;
+        }
+        return false;
+    }
+    case ME_UINT32: {
+        const uint32_t *v = (const uint32_t *)data;
+        for (int i = 0; i < nitems; i++) {
+            if (v[i] != 0) return true;
+        }
+        return false;
+    }
+    case ME_UINT64: {
+        const uint64_t *v = (const uint64_t *)data;
+        for (int i = 0; i < nitems; i++) {
+            if (v[i] != 0) return true;
+        }
+        return false;
+    }
+    case ME_FLOAT32: {
+        const float *v = (const float *)data;
+        for (int i = 0; i < nitems; i++) {
+            if (v[i] != 0.0f) return true;
+        }
+        return false;
+    }
+    case ME_FLOAT64: {
+        const double *v = (const double *)data;
+        for (int i = 0; i < nitems; i++) {
+            if (v[i] != 0.0) return true;
+        }
+        return false;
+    }
+    case ME_COMPLEX64: {
+        const float _Complex *v = (const float _Complex *)data;
+        for (int i = 0; i < nitems; i++) {
+            if (crealf(v[i]) != 0.0f || cimagf(v[i]) != 0.0f) return true;
+        }
+        return false;
+    }
+    case ME_COMPLEX128: {
+        const double _Complex *v = (const double _Complex *)data;
+        for (int i = 0; i < nitems; i++) {
+            if (creal(v[i]) != 0.0 || cimag(v[i]) != 0.0) return true;
+        }
+        return false;
+    }
+    default:
+        return false;
+    }
+}
+
+static void dsl_fill_i64(int64_t *out, int nitems, int64_t value) {
+    if (!out || nitems <= 0) {
+        return;
+    }
+    for (int i = 0; i < nitems; i++) {
+        out[i] = value;
+    }
+}
+
+static void dsl_fill_iota_i64(int64_t *out, int nitems, int64_t start) {
+    if (!out || nitems <= 0) {
+        return;
+    }
+    for (int i = 0; i < nitems; i++) {
+        out[i] = start + (int64_t)i;
+    }
+}
+
+static bool dsl_read_int64(const void *data, me_dtype dtype, int64_t *out) {
+    if (!data || !out) {
+        return false;
+    }
+    switch (dtype) {
+    case ME_BOOL: *out = ((const bool *)data)[0] ? 1 : 0; return true;
+    case ME_INT8: *out = ((const int8_t *)data)[0]; return true;
+    case ME_INT16: *out = ((const int16_t *)data)[0]; return true;
+    case ME_INT32: *out = ((const int32_t *)data)[0]; return true;
+    case ME_INT64: *out = ((const int64_t *)data)[0]; return true;
+    case ME_UINT8: *out = (int64_t)((const uint8_t *)data)[0]; return true;
+    case ME_UINT16: *out = (int64_t)((const uint16_t *)data)[0]; return true;
+    case ME_UINT32: *out = (int64_t)((const uint32_t *)data)[0]; return true;
+    case ME_UINT64: *out = (int64_t)((const uint64_t *)data)[0]; return true;
+    case ME_FLOAT32: *out = (int64_t)((const float *)data)[0]; return true;
+    case ME_FLOAT64: *out = (int64_t)((const double *)data)[0]; return true;
+    case ME_COMPLEX64: {
+        float _Complex v = ((const float _Complex *)data)[0];
+        *out = (int64_t)crealf(v);
+        return true;
+    }
+    case ME_COMPLEX128: {
+        double _Complex v = ((const double _Complex *)data)[0];
+        *out = (int64_t)creal(v);
+        return true;
+    }
+    default:
+        return false;
+    }
+}
 
 static float me_crealf(float _Complex v) {
 #if defined(_MSC_VER)
@@ -1333,6 +1832,7 @@ me_expr* new_expr(const int type, const me_expr* parameters[]) {
     ret->dtype = ME_FLOAT64; // Default to double
     ret->bytecode = NULL;
     ret->ncode = 0;
+    ret->dsl_program = NULL;
     return ret;
 }
 
@@ -1398,6 +1898,9 @@ void me_free(me_expr* n) {
     me_free_parameters(n);
     if (n->bytecode) {
         free(n->bytecode);
+    }
+    if (n->dsl_program) {
+        dsl_compiled_program_free((me_dsl_compiled_program *)n->dsl_program);
     }
     free(n);
 }
@@ -1587,6 +2090,550 @@ static int private_compile(const char* expression, const me_variable* variables,
     }
 }
 
+typedef struct {
+    const char *source;
+    me_dtype output_dtype;
+    bool output_dtype_auto;
+    int loop_depth;
+    int *error_pos;
+    me_dsl_compiled_expr *output_expr;
+    me_dsl_compiled_program *program;
+} dsl_compile_ctx;
+
+static int dsl_offset_from_linecol(const char *source, int line, int column) {
+    if (!source || line <= 0 || column <= 0) {
+        return -1;
+    }
+    int current_line = 1;
+    int current_col = 1;
+    for (int i = 0; source[i] != '\0'; i++) {
+        if (current_line == line && current_col == column) {
+            return i;
+        }
+        if (source[i] == '\n') {
+            current_line++;
+            current_col = 1;
+        }
+        else {
+            current_col++;
+        }
+    }
+    return -1;
+}
+
+static bool dsl_is_candidate(const char *source) {
+    if (!source) {
+        return false;
+    }
+    for (const char *p = source; *p; p++) {
+        if (*p == '\n' || *p == ';' || *p == '{' || *p == '}') {
+            return true;
+        }
+    }
+    for (const char *p = source; *p; p++) {
+        if (*p == '=') {
+            char prev = (p == source) ? '\0' : p[-1];
+            if (p[1] != '=' && prev != '=' && prev != '!' && prev != '<' && prev != '>') {
+                return true;
+            }
+        }
+    }
+    const char *keywords[] = {"for", "break", "continue"};
+    for (int k = 0; k < 3; k++) {
+        const char *kw = keywords[k];
+        size_t len = strlen(kw);
+        for (const char *p = source; *p; p++) {
+            if ((p == source || !isalnum((unsigned char)p[-1])) &&
+                strncmp(p, kw, len) == 0 &&
+                !isalnum((unsigned char)p[len]) && p[len] != '_') {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool dsl_program_is_dsl(const me_dsl_program *program) {
+    if (!program) {
+        return false;
+    }
+    if (program->block.nstmts != 1) {
+        return true;
+    }
+    me_dsl_stmt *stmt = program->block.stmts[0];
+    return stmt && stmt->kind != ME_DSL_STMT_EXPR;
+}
+
+static void dsl_scan_reserved_usage_block(const me_dsl_block *block, int *uses_i_mask,
+                                          int *uses_n_mask, bool *uses_ndim) {
+    if (!block) {
+        return;
+    }
+    for (int i = 0; i < block->nstmts; i++) {
+        me_dsl_stmt *stmt = block->stmts[i];
+        const char *expr_text = NULL;
+        if (!stmt) {
+            continue;
+        }
+        switch (stmt->kind) {
+        case ME_DSL_STMT_ASSIGN:
+            expr_text = stmt->as.assign.value ? stmt->as.assign.value->text : NULL;
+            break;
+        case ME_DSL_STMT_EXPR:
+            expr_text = stmt->as.expr_stmt.expr ? stmt->as.expr_stmt.expr->text : NULL;
+            break;
+        case ME_DSL_STMT_FOR:
+            expr_text = stmt->as.for_loop.limit ? stmt->as.for_loop.limit->text : NULL;
+            break;
+        case ME_DSL_STMT_BREAK:
+        case ME_DSL_STMT_CONTINUE:
+            expr_text = stmt->as.flow.cond ? stmt->as.flow.cond->text : NULL;
+            break;
+        }
+        if (expr_text) {
+            if (dsl_expr_uses_identifier(expr_text, "_ndim")) {
+                *uses_ndim = true;
+            }
+            for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
+                char name[8];
+                snprintf(name, sizeof(name), "_i%d", d);
+                if (dsl_expr_uses_identifier(expr_text, name)) {
+                    *uses_i_mask |= (1 << d);
+                }
+                snprintf(name, sizeof(name), "_n%d", d);
+                if (dsl_expr_uses_identifier(expr_text, name)) {
+                    *uses_n_mask |= (1 << d);
+                }
+            }
+        }
+        if (stmt->kind == ME_DSL_STMT_FOR) {
+            dsl_scan_reserved_usage_block(&stmt->as.for_loop.body, uses_i_mask, uses_n_mask, uses_ndim);
+        }
+    }
+}
+
+static bool dsl_build_var_lookup(const me_dsl_var_table *table, me_variable **out_vars) {
+    if (!table || !out_vars) {
+        return false;
+    }
+    me_variable *vars = calloc((size_t)table->count, sizeof(*vars));
+    if (!vars) {
+        return false;
+    }
+    for (int i = 0; i < table->count; i++) {
+        vars[i].name = table->names[i];
+        vars[i].dtype = table->dtypes[i];
+        vars[i].address = &synthetic_var_addresses[i];
+        vars[i].type = ME_VARIABLE;
+        vars[i].context = NULL;
+    }
+    *out_vars = vars;
+    return true;
+}
+
+static bool dsl_program_add_local(me_dsl_compiled_program *program, int var_index) {
+    if (!program || var_index < 0 || var_index >= ME_MAX_VARS) {
+        return false;
+    }
+    if (program->local_slots[var_index] >= 0) {
+        return true;
+    }
+    int slot = program->n_locals;
+    int *local_var_indices = realloc(program->local_var_indices,
+                                     (size_t)(slot + 1) * sizeof(*local_var_indices));
+    if (!local_var_indices) {
+        return false;
+    }
+    program->local_var_indices = local_var_indices;
+    program->local_var_indices[slot] = var_index;
+    program->local_slots[var_index] = slot;
+    program->n_locals++;
+    return true;
+}
+
+static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
+                             me_dtype expr_dtype, me_dsl_compiled_expr *out_expr) {
+    if (!ctx || !expr_node || !out_expr) {
+        return false;
+    }
+    memset(out_expr, 0, sizeof(*out_expr));
+    me_variable *lookup = NULL;
+    if (!dsl_build_var_lookup(&ctx->program->vars, &lookup)) {
+        return false;
+    }
+    me_expr *compiled = NULL;
+    int local_error = 0;
+    int rc = private_compile(expr_node->text, lookup, ctx->program->vars.count,
+                             NULL, 0, expr_dtype, &local_error, &compiled);
+    free(lookup);
+    if (rc != ME_COMPILE_SUCCESS || !compiled) {
+        if (ctx->error_pos) {
+            int offset = dsl_offset_from_linecol(ctx->source, expr_node->line, expr_node->column);
+            if (offset >= 0 && local_error > 0) {
+                *ctx->error_pos = offset + local_error - 1;
+            }
+            else {
+                *ctx->error_pos = offset >= 0 ? offset : -1;
+            }
+        }
+        if (compiled) {
+            me_free(compiled);
+        }
+        return false;
+    }
+    int *indices = NULL;
+    int count = 0;
+    if (!dsl_collect_var_indices(compiled, &indices, &count)) {
+        me_free(compiled);
+        free(indices);
+        return false;
+    }
+    out_expr->expr = compiled;
+    out_expr->var_indices = indices;
+    out_expr->n_vars = count;
+    return true;
+}
+
+static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
+                              me_dsl_compiled_block *out_block) {
+    if (!ctx || !block || !out_block) {
+        return false;
+    }
+    memset(out_block, 0, sizeof(*out_block));
+    for (int i = 0; i < block->nstmts; i++) {
+        me_dsl_stmt *stmt = block->stmts[i];
+        if (!stmt) {
+            continue;
+        }
+        me_dsl_compiled_stmt *compiled = calloc(1, sizeof(*compiled));
+        if (!compiled) {
+            return false;
+        }
+        compiled->kind = stmt->kind;
+        compiled->line = stmt->line;
+        compiled->column = stmt->column;
+
+        switch (stmt->kind) {
+        case ME_DSL_STMT_ASSIGN: {
+            const char *name = stmt->as.assign.name;
+            if (!name) {
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            if (dsl_is_reserved_name(name) && strcmp(name, "result") != 0) {
+                if (ctx->error_pos) {
+                    *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                }
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            int var_index = dsl_var_table_find(&ctx->program->vars, name);
+            if (var_index >= 0 && var_index < ctx->program->n_inputs) {
+                if (ctx->error_pos) {
+                    *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                }
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+
+            me_dtype expr_dtype = ctx->output_dtype_auto ? ME_AUTO : ctx->output_dtype;
+            if (!dsl_compile_expr(ctx, stmt->as.assign.value, expr_dtype, &compiled->as.assign.value)) {
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            me_dtype assigned_dtype = me_get_dtype(compiled->as.assign.value.expr);
+
+            if (var_index < 0) {
+                var_index = dsl_var_table_add(&ctx->program->vars, name, assigned_dtype);
+                if (var_index < 0) {
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
+            }
+            else if (ctx->program->vars.dtypes[var_index] != assigned_dtype) {
+                if (ctx->error_pos) {
+                    *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                }
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+
+            if (!dsl_program_add_local(ctx->program, var_index)) {
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            compiled->as.assign.local_slot = ctx->program->local_slots[var_index];
+            if (strcmp(name, "result") == 0) {
+                ctx->program->result_var_index = var_index;
+                ctx->output_expr = &compiled->as.assign.value;
+            }
+            break;
+        }
+        case ME_DSL_STMT_EXPR: {
+            me_dtype expr_dtype = ctx->output_dtype_auto ? ME_AUTO : ctx->output_dtype;
+            if (!dsl_compile_expr(ctx, stmt->as.expr_stmt.expr, expr_dtype, &compiled->as.expr_stmt.expr)) {
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            ctx->output_expr = &compiled->as.expr_stmt.expr;
+            compiled->as.expr_stmt.is_result = true;
+            break;
+        }
+        case ME_DSL_STMT_FOR: {
+            const char *var = stmt->as.for_loop.var;
+            if (!var || dsl_is_reserved_name(var)) {
+                if (ctx->error_pos) {
+                    *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                }
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            if (strchr(stmt->as.for_loop.limit->text, ',')) {
+                if (ctx->error_pos) {
+                    *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                }
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            int var_index = dsl_var_table_find(&ctx->program->vars, var);
+            if (var_index >= 0) {
+                if (ctx->error_pos) {
+                    *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                }
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            var_index = dsl_var_table_add(&ctx->program->vars, var, ME_INT64);
+            if (var_index < 0) {
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            if (!dsl_program_add_local(ctx->program, var_index)) {
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            compiled->as.for_loop.loop_var_slot = ctx->program->local_slots[var_index];
+
+            if (!dsl_compile_expr(ctx, stmt->as.for_loop.limit, ME_AUTO, &compiled->as.for_loop.limit)) {
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            ctx->loop_depth++;
+            if (!dsl_compile_block(ctx, &stmt->as.for_loop.body, &compiled->as.for_loop.body)) {
+                ctx->loop_depth--;
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            ctx->loop_depth--;
+            break;
+        }
+        case ME_DSL_STMT_BREAK:
+        case ME_DSL_STMT_CONTINUE: {
+            if (ctx->loop_depth <= 0) {
+                if (ctx->error_pos) {
+                    *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                }
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            if (stmt->as.flow.cond) {
+                if (!dsl_compile_expr(ctx, stmt->as.flow.cond, ME_AUTO, &compiled->as.flow.cond)) {
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
+            }
+            else {
+                memset(&compiled->as.flow.cond, 0, sizeof(compiled->as.flow.cond));
+            }
+            break;
+        }
+        }
+
+        if (!dsl_compiled_block_push(out_block, compiled)) {
+            dsl_compiled_stmt_free(compiled);
+            return false;
+        }
+    }
+    return true;
+}
+
+static me_dsl_compiled_program *dsl_compile_program(const char *source,
+                                                    const me_variable *variables,
+                                                    int var_count,
+                                                    me_dtype dtype,
+                                                    int *error_pos,
+                                                    bool *is_dsl) {
+    me_dsl_error parse_error;
+    if (is_dsl) {
+        *is_dsl = false;
+    }
+    me_dsl_program *parsed = me_dsl_parse(source, &parse_error);
+    if (!parsed) {
+        if (error_pos) {
+            int off = dsl_offset_from_linecol(source, parse_error.line, parse_error.column);
+            *error_pos = off >= 0 ? off : -1;
+        }
+        if (is_dsl) {
+            *is_dsl = true;
+        }
+        return NULL;
+    }
+    if (!dsl_program_is_dsl(parsed)) {
+        me_dsl_program_free(parsed);
+        return NULL;
+    }
+    if (is_dsl) {
+        *is_dsl = true;
+    }
+
+    me_dsl_compiled_program *program = calloc(1, sizeof(*program));
+    if (!program) {
+        me_dsl_program_free(parsed);
+        if (error_pos) {
+            *error_pos = -1;
+        }
+        return NULL;
+    }
+    dsl_var_table_init(&program->vars);
+    program->result_var_index = -1;
+    program->idx_ndim = -1;
+    for (int i = 0; i < ME_DSL_MAX_NDIM; i++) {
+        program->idx_i[i] = -1;
+        program->idx_n[i] = -1;
+    }
+    program->local_slots = malloc(ME_MAX_VARS * sizeof(*program->local_slots));
+    if (!program->local_slots) {
+        dsl_compiled_program_free(program);
+        me_dsl_program_free(parsed);
+        if (error_pos) {
+            *error_pos = -1;
+        }
+        return NULL;
+    }
+    for (int i = 0; i < ME_MAX_VARS; i++) {
+        program->local_slots[i] = -1;
+    }
+
+    for (int i = 0; i < var_count; i++) {
+        const char *name = variables[i].name;
+        if (!name || dsl_is_reserved_name(name)) {
+            if (error_pos) {
+                *error_pos = -1;
+            }
+            dsl_compiled_program_free(program);
+            me_dsl_program_free(parsed);
+            return NULL;
+        }
+        me_dtype vtype = variables[i].dtype;
+        if (vtype == ME_AUTO && dtype != ME_AUTO) {
+            vtype = dtype;
+        }
+        int idx = dsl_var_table_add(&program->vars, name, vtype);
+        if (idx < 0) {
+            dsl_compiled_program_free(program);
+            me_dsl_program_free(parsed);
+            if (error_pos) {
+                *error_pos = -1;
+            }
+            return NULL;
+        }
+    }
+    program->n_inputs = var_count;
+
+    if (dtype == ME_AUTO) {
+        for (int i = 0; i < var_count; i++) {
+            if (program->vars.dtypes[i] == ME_AUTO) {
+                if (error_pos) {
+                    *error_pos = -1;
+                }
+                dsl_compiled_program_free(program);
+                me_dsl_program_free(parsed);
+                return NULL;
+            }
+        }
+    }
+
+    int uses_i_mask = 0;
+    int uses_n_mask = 0;
+    bool uses_ndim = false;
+    dsl_scan_reserved_usage_block(&parsed->block, &uses_i_mask, &uses_n_mask, &uses_ndim);
+
+    program->uses_i_mask = uses_i_mask;
+    program->uses_n_mask = uses_n_mask;
+    program->uses_ndim = uses_ndim;
+
+    for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
+        if (uses_i_mask & (1 << d)) {
+            char name[8];
+            snprintf(name, sizeof(name), "_i%d", d);
+            program->idx_i[d] = dsl_var_table_add(&program->vars, name, ME_INT64);
+            if (program->idx_i[d] < 0) {
+                if (error_pos) {
+                    *error_pos = -1;
+                }
+                dsl_compiled_program_free(program);
+                me_dsl_program_free(parsed);
+                return NULL;
+            }
+        }
+        if (uses_n_mask & (1 << d)) {
+            char name[8];
+            snprintf(name, sizeof(name), "_n%d", d);
+            program->idx_n[d] = dsl_var_table_add(&program->vars, name, ME_INT64);
+            if (program->idx_n[d] < 0) {
+                if (error_pos) {
+                    *error_pos = -1;
+                }
+                dsl_compiled_program_free(program);
+                me_dsl_program_free(parsed);
+                return NULL;
+            }
+        }
+    }
+    if (uses_ndim) {
+        program->idx_ndim = dsl_var_table_add(&program->vars, "_ndim", ME_INT64);
+        if (program->idx_ndim < 0) {
+            if (error_pos) {
+                *error_pos = -1;
+            }
+            dsl_compiled_program_free(program);
+            me_dsl_program_free(parsed);
+            return NULL;
+        }
+    }
+
+    dsl_compile_ctx ctx;
+    ctx.source = source;
+    ctx.output_dtype = dtype;
+    ctx.output_dtype_auto = (dtype == ME_AUTO);
+    ctx.loop_depth = 0;
+    ctx.error_pos = error_pos;
+    ctx.output_expr = NULL;
+    ctx.program = program;
+
+    if (!dsl_compile_block(&ctx, &parsed->block, &program->block)) {
+        dsl_compiled_program_free(program);
+        me_dsl_program_free(parsed);
+        return NULL;
+    }
+
+    me_dsl_program_free(parsed);
+
+    if (!ctx.output_expr || !ctx.output_expr->expr) {
+        if (error_pos) {
+            *error_pos = -1;
+        }
+        dsl_compiled_program_free(program);
+        return NULL;
+    }
+
+    program->output_dtype = me_get_dtype(ctx.output_expr->expr);
+    program->output_is_scalar = contains_reduction(ctx.output_expr->expr) &&
+                                output_is_scalar(ctx.output_expr->expr);
+
+    return program;
+}
+
 // Check if a pointer is a synthetic address
 int is_synthetic_address(const void* ptr) {
     const char* p = (const char*)ptr;
@@ -1596,9 +2643,51 @@ int is_synthetic_address(const void* ptr) {
 int me_compile(const char* expression, const me_variable* variables,
                int var_count, me_dtype dtype, int* error, me_expr** out) {
     if (out) *out = NULL;
-    if (!out) {
+    if (!expression || !out) {
         if (error) *error = -1;
         return ME_COMPILE_ERR_INVALID_ARG;
+    }
+
+    if (dsl_is_candidate(expression)) {
+        me_variable *vars_dsl = NULL;
+        if (variables && var_count > 0) {
+            vars_dsl = malloc((size_t)var_count * sizeof(*vars_dsl));
+            if (!vars_dsl) {
+                if (error) *error = -1;
+                return ME_COMPILE_ERR_OOM;
+            }
+            for (int i = 0; i < var_count; i++) {
+                vars_dsl[i] = variables[i];
+                vars_dsl[i].address = &synthetic_var_addresses[i];
+                if (vars_dsl[i].type == 0) {
+                    vars_dsl[i].type = ME_VARIABLE;
+                }
+            }
+        }
+
+        bool is_dsl = false;
+        int dsl_error = -1;
+        me_dsl_compiled_program *program = dsl_compile_program(
+            expression, vars_dsl ? vars_dsl : variables, var_count, dtype, &dsl_error, &is_dsl);
+        free(vars_dsl);
+
+        if (program) {
+            me_expr *expr = new_expr(ME_CONSTANT, NULL);
+            if (!expr) {
+                dsl_compiled_program_free(program);
+                if (error) *error = -1;
+                return ME_COMPILE_ERR_OOM;
+            }
+            expr->dsl_program = program;
+            expr->dtype = program->output_dtype;
+            if (error) *error = 0;
+            *out = expr;
+            return ME_COMPILE_SUCCESS;
+        }
+        if (is_dsl) {
+            if (error) *error = dsl_error;
+            return ME_COMPILE_ERR_PARSE;
+        }
     }
 
     // For chunked evaluation, we compile without specific output/nitems
@@ -1849,6 +2938,538 @@ static int compute_valid_items(const me_expr* expr, int64_t nchunk, int64_t nblo
     return ME_EVAL_SUCCESS;
 }
 
+typedef struct {
+    const me_dsl_compiled_program *program;
+    void **var_buffers;
+    void **local_buffers;
+    int nitems;
+    const me_eval_params *params;
+    void *output_block;
+} dsl_eval_ctx;
+
+static int dsl_eval_expr_nitems(dsl_eval_ctx *ctx, const me_dsl_compiled_expr *expr,
+                                void *out, int nitems) {
+    if (!expr || !expr->expr) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+    const void *vars[ME_MAX_VARS];
+    for (int i = 0; i < expr->n_vars; i++) {
+        vars[i] = ctx->var_buffers[expr->var_indices[i]];
+    }
+    return me_eval(expr->expr, vars, expr->n_vars, out, nitems, ctx->params);
+}
+
+static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
+                          bool *did_break, bool *did_continue) {
+    if (!block) {
+        return ME_EVAL_SUCCESS;
+    }
+    for (int i = 0; i < block->nstmts; i++) {
+        if (did_break && *did_break) {
+            break;
+        }
+        if (did_continue && *did_continue) {
+            break;
+        }
+        me_dsl_compiled_stmt *stmt = block->stmts[i];
+        if (!stmt) {
+            continue;
+        }
+        switch (stmt->kind) {
+        case ME_DSL_STMT_ASSIGN: {
+            int slot = stmt->as.assign.local_slot;
+            void *out = ctx->local_buffers[slot];
+            int rc = dsl_eval_expr_nitems(ctx, &stmt->as.assign.value, out, ctx->nitems);
+            if (rc != ME_EVAL_SUCCESS) {
+                return rc;
+            }
+            break;
+        }
+        case ME_DSL_STMT_EXPR: {
+            int rc = dsl_eval_expr_nitems(ctx, &stmt->as.expr_stmt.expr, ctx->output_block, ctx->nitems);
+            if (rc != ME_EVAL_SUCCESS) {
+                return rc;
+            }
+            break;
+        }
+        case ME_DSL_STMT_FOR: {
+            me_dsl_compiled_expr *limit = &stmt->as.for_loop.limit;
+            me_dtype limit_dtype = me_get_dtype(limit->expr);
+            size_t limit_size = dtype_size(limit_dtype);
+            void *limit_buf = malloc(limit_size ? limit_size : sizeof(int64_t));
+            if (!limit_buf) {
+                return ME_EVAL_ERR_OOM;
+            }
+            int rc = dsl_eval_expr_nitems(ctx, limit, limit_buf, 1);
+            if (rc != ME_EVAL_SUCCESS) {
+                free(limit_buf);
+                return rc;
+            }
+            int64_t limit_val = 0;
+            if (!dsl_read_int64(limit_buf, limit_dtype, &limit_val)) {
+                free(limit_buf);
+                return ME_EVAL_ERR_INVALID_ARG;
+            }
+            free(limit_buf);
+            if (limit_val <= 0) {
+                break;
+            }
+            int slot = stmt->as.for_loop.loop_var_slot;
+            int64_t *loop_buf = (int64_t *)ctx->local_buffers[slot];
+            for (int64_t iter = 0; iter < limit_val; iter++) {
+                dsl_fill_i64(loop_buf, ctx->nitems, iter);
+                bool inner_break = false;
+                bool inner_continue = false;
+                rc = dsl_eval_block(ctx, &stmt->as.for_loop.body, &inner_break, &inner_continue);
+                if (rc != ME_EVAL_SUCCESS) {
+                    return rc;
+                }
+                if (inner_break) {
+                    break;
+                }
+            }
+            break;
+        }
+        case ME_DSL_STMT_BREAK:
+        case ME_DSL_STMT_CONTINUE: {
+            bool trigger = true;
+            if (stmt->as.flow.cond.expr) {
+                me_dtype cond_dtype = me_get_dtype(stmt->as.flow.cond.expr);
+                size_t cond_size = dtype_size(cond_dtype);
+                void *cond_buf = malloc((size_t)ctx->nitems * cond_size);
+                if (!cond_buf) {
+                    return ME_EVAL_ERR_OOM;
+                }
+                int rc = dsl_eval_expr_nitems(ctx, &stmt->as.flow.cond, cond_buf, ctx->nitems);
+                if (rc != ME_EVAL_SUCCESS) {
+                    free(cond_buf);
+                    return rc;
+                }
+                trigger = dsl_any_nonzero(cond_buf, cond_dtype, ctx->nitems);
+                free(cond_buf);
+            }
+            if (trigger) {
+                if (stmt->kind == ME_DSL_STMT_BREAK && did_break) {
+                    *did_break = true;
+                }
+                if (stmt->kind == ME_DSL_STMT_CONTINUE && did_continue) {
+                    *did_continue = true;
+                }
+            }
+            break;
+        }
+        }
+    }
+    return ME_EVAL_SUCCESS;
+}
+
+static int dsl_eval_program(const me_dsl_compiled_program *program,
+                            const void **vars_block, int n_vars,
+                            void *output_block, int nitems,
+                            const me_eval_params *params,
+                            int ndim, const int64_t *shape,
+                            int64_t **idx_buffers) {
+    if (!program || !output_block || nitems < 0) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+    if (n_vars != program->n_inputs) {
+        return ME_EVAL_ERR_VAR_MISMATCH;
+    }
+
+    void **var_buffers = calloc((size_t)program->vars.count, sizeof(*var_buffers));
+    void **local_buffers = calloc((size_t)program->n_locals, sizeof(*local_buffers));
+    if (!var_buffers || !local_buffers) {
+        free(var_buffers);
+        free(local_buffers);
+        return ME_EVAL_ERR_OOM;
+    }
+
+    for (int i = 0; i < program->n_inputs; i++) {
+        var_buffers[i] = (void *)vars_block[i];
+    }
+
+    for (int i = 0; i < program->n_locals; i++) {
+        int var_index = program->local_var_indices[i];
+        if (var_index == program->result_var_index) {
+            local_buffers[i] = output_block;
+            var_buffers[var_index] = output_block;
+            continue;
+        }
+        size_t sz = dtype_size(program->vars.dtypes[var_index]);
+        if (sz == 0) {
+            free(var_buffers);
+            free(local_buffers);
+            return ME_EVAL_ERR_INVALID_ARG;
+        }
+        local_buffers[i] = malloc((size_t)nitems * sz);
+        if (!local_buffers[i]) {
+            for (int j = 0; j < i; j++) {
+                if (local_buffers[j] && program->local_var_indices[j] != program->result_var_index) {
+                    free(local_buffers[j]);
+                }
+            }
+            free(var_buffers);
+            free(local_buffers);
+            return ME_EVAL_ERR_OOM;
+        }
+        var_buffers[var_index] = local_buffers[i];
+    }
+
+    void *reserved_buffers[ME_DSL_MAX_NDIM * 2 + 1];
+    int reserved_count = 0;
+    if (program->uses_ndim && program->idx_ndim >= 0) {
+        int64_t *buf = malloc((size_t)nitems * sizeof(int64_t));
+        if (!buf) {
+            reserved_count = -1;
+        }
+        else {
+            dsl_fill_i64(buf, nitems, (int64_t)ndim);
+            var_buffers[program->idx_ndim] = buf;
+            reserved_buffers[reserved_count++] = buf;
+        }
+    }
+    for (int d = 0; d < ME_DSL_MAX_NDIM && reserved_count >= 0; d++) {
+        if ((program->uses_n_mask & (1 << d)) && program->idx_n[d] >= 0) {
+            int64_t *buf = malloc((size_t)nitems * sizeof(int64_t));
+            if (!buf) {
+                reserved_count = -1;
+                break;
+            }
+            int64_t val = 1;
+            if (shape && d < ndim) {
+                val = shape[d];
+            }
+            else if (d == 0) {
+                val = nitems;
+            }
+            dsl_fill_i64(buf, nitems, val);
+            var_buffers[program->idx_n[d]] = buf;
+            reserved_buffers[reserved_count++] = buf;
+        }
+        if ((program->uses_i_mask & (1 << d)) && program->idx_i[d] >= 0) {
+            if (idx_buffers && idx_buffers[d]) {
+                var_buffers[program->idx_i[d]] = idx_buffers[d];
+            }
+            else {
+                int64_t *buf = malloc((size_t)nitems * sizeof(int64_t));
+                if (!buf) {
+                    reserved_count = -1;
+                    break;
+                }
+                if (d == 0) {
+                    dsl_fill_iota_i64(buf, nitems, 0);
+                }
+                else {
+                    dsl_fill_i64(buf, nitems, 0);
+                }
+                var_buffers[program->idx_i[d]] = buf;
+                reserved_buffers[reserved_count++] = buf;
+            }
+        }
+    }
+
+    if (reserved_count < 0) {
+        for (int i = 0; i < program->n_locals; i++) {
+            if (local_buffers[i] && program->local_var_indices[i] != program->result_var_index) {
+                free(local_buffers[i]);
+            }
+        }
+        free(var_buffers);
+        free(local_buffers);
+        return ME_EVAL_ERR_OOM;
+    }
+
+    dsl_eval_ctx ctx;
+    ctx.program = program;
+    ctx.var_buffers = var_buffers;
+    ctx.local_buffers = local_buffers;
+    ctx.nitems = nitems;
+    ctx.params = params;
+    ctx.output_block = output_block;
+
+    bool did_break = false;
+    bool did_continue = false;
+    int rc = dsl_eval_block(&ctx, &program->block, &did_break, &did_continue);
+
+    for (int i = 0; i < reserved_count; i++) {
+        free(reserved_buffers[i]);
+    }
+    for (int i = 0; i < program->n_locals; i++) {
+        if (local_buffers[i] && program->local_var_indices[i] != program->result_var_index) {
+            free(local_buffers[i]);
+        }
+    }
+    free(var_buffers);
+    free(local_buffers);
+
+    return rc;
+}
+
+int me_eval_dsl_program(const me_expr *expr, const void **vars_block,
+                        int n_vars, void *output_block, int block_nitems,
+                        const me_eval_params *params) {
+    if (!expr || !expr->dsl_program) {
+        return ME_EVAL_ERR_NULL_EXPR;
+    }
+    if (!output_block || block_nitems < 0) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+    const me_dsl_compiled_program *program = (const me_dsl_compiled_program *)expr->dsl_program;
+    return dsl_eval_program(program, vars_block, n_vars, output_block, block_nitems, params,
+                            1, NULL, NULL);
+}
+
+static int me_eval_dsl_nd(const me_expr *expr, const void **vars_block,
+                          int n_vars, void *output_block, int block_nitems,
+                          int64_t nchunk, int64_t nblock,
+                          const me_eval_params *params) {
+    if (!expr || !expr->dsl_program) {
+        return ME_EVAL_ERR_NULL_EXPR;
+    }
+    const me_dsl_compiled_program *program = (const me_dsl_compiled_program *)expr->dsl_program;
+    if (!output_block || block_nitems <= 0) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    int64_t valid_items = 0;
+    int64_t padded_items = 0;
+    int rc = compute_valid_items(expr, nchunk, nblock, block_nitems, &valid_items, &padded_items);
+    if (rc != ME_EVAL_SUCCESS) {
+        return rc;
+    }
+    if (valid_items > INT_MAX) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    const me_nd_info *info = (const me_nd_info *)expr->bytecode;
+    if (!info || info->ndims <= 0) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+    const int nd = info->ndims;
+    const int64_t *shape = info->data;
+    const int64_t *chunkshape = shape + nd;
+    const int64_t *blockshape = chunkshape + nd;
+
+    const size_t item_size = dtype_size(me_get_dtype(expr));
+    if (item_size == 0) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    if (valid_items == 0) {
+        if (program->output_is_scalar) {
+            memset(output_block, 0, item_size);
+        }
+        else {
+            memset(output_block, 0, (size_t)padded_items * item_size);
+        }
+        return ME_EVAL_SUCCESS;
+    }
+
+    int64_t chunk_idx[64];
+    int64_t block_idx[64];
+    if (nd > 64) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+
+    int64_t tmp = nchunk;
+    for (int i = nd - 1; i >= 0; i--) {
+        const int64_t nchunks_d = ceil_div64(shape[i], chunkshape[i]);
+        chunk_idx[i] = (nchunks_d == 0) ? 0 : (tmp % nchunks_d);
+        tmp /= nchunks_d;
+    }
+
+    tmp = nblock;
+    for (int i = nd - 1; i >= 0; i--) {
+        const int64_t nblocks_d = ceil_div64(chunkshape[i], blockshape[i]);
+        block_idx[i] = (nblocks_d == 0) ? 0 : (tmp % nblocks_d);
+        tmp /= nblocks_d;
+    }
+
+    int64_t base_idx[64];
+    for (int i = 0; i < nd; i++) {
+        base_idx[i] = chunk_idx[i] * chunkshape[i] + block_idx[i] * blockshape[i];
+    }
+
+    int64_t *idx_buffers[ME_DSL_MAX_NDIM];
+    for (int i = 0; i < ME_DSL_MAX_NDIM; i++) {
+        idx_buffers[i] = NULL;
+    }
+
+    if (valid_items == padded_items) {
+        if (program->uses_i_mask) {
+            for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
+                if (program->uses_i_mask & (1 << d)) {
+                    idx_buffers[d] = malloc((size_t)valid_items * sizeof(int64_t));
+                    if (!idx_buffers[d]) {
+                        for (int j = 0; j < ME_DSL_MAX_NDIM; j++) free(idx_buffers[j]);
+                        return ME_EVAL_ERR_OOM;
+                    }
+                }
+            }
+            int64_t indices[64] = {0};
+            int64_t total_iters = padded_items;
+            for (int64_t it = 0; it < total_iters; it++) {
+                for (int d = 0; d < ME_DSL_MAX_NDIM && d < nd; d++) {
+                    if (idx_buffers[d]) {
+                        idx_buffers[d][it] = base_idx[d] + indices[d];
+                    }
+                }
+                for (int i = nd - 1; i >= 0; i--) {
+                    indices[i]++;
+                    if (indices[i] < blockshape[i]) break;
+                    indices[i] = 0;
+                }
+            }
+        }
+
+        rc = dsl_eval_program(program, vars_block, n_vars, output_block,
+                              (int)valid_items, params, nd, shape, idx_buffers);
+        for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
+            free(idx_buffers[d]);
+        }
+        return rc;
+    }
+
+    int64_t valid_len[64];
+    for (int i = 0; i < nd; i++) {
+        const int64_t chunk_start = chunk_idx[i] * chunkshape[i];
+        int64_t chunk_len = shape[i] - chunk_start;
+        if (chunk_len > chunkshape[i]) {
+            chunk_len = chunkshape[i];
+        }
+        const int64_t block_start = block_idx[i] * blockshape[i];
+        if (block_start >= chunk_len) {
+            valid_len[i] = 0;
+        }
+        else {
+            int64_t len = chunk_len - block_start;
+            if (len > blockshape[i]) {
+                len = blockshape[i];
+            }
+            valid_len[i] = len;
+        }
+    }
+
+    int64_t stride[64];
+    stride[nd - 1] = 1;
+    for (int i = nd - 2; i >= 0; i--) {
+        stride[i] = stride[i + 1] * blockshape[i + 1];
+    }
+
+    size_t var_sizes[ME_MAX_VARS];
+    for (int v = 0; v < n_vars; v++) {
+        var_sizes[v] = dtype_size(program->vars.dtypes[v]);
+        if (var_sizes[v] == 0) {
+            return ME_EVAL_ERR_INVALID_ARG;
+        }
+    }
+
+    void *packed_vars[ME_MAX_VARS];
+    for (int v = 0; v < n_vars; v++) {
+        packed_vars[v] = malloc((size_t)valid_items * var_sizes[v]);
+        if (!packed_vars[v]) {
+            for (int u = 0; u < v; u++) free(packed_vars[u]);
+            return ME_EVAL_ERR_OOM;
+        }
+    }
+
+    void *packed_out = NULL;
+    if (!program->output_is_scalar) {
+        packed_out = malloc((size_t)valid_items * item_size);
+        if (!packed_out) {
+            for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
+            return ME_EVAL_ERR_OOM;
+        }
+    }
+
+    for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
+        if (program->uses_i_mask & (1 << d)) {
+            idx_buffers[d] = malloc((size_t)valid_items * sizeof(int64_t));
+            if (!idx_buffers[d]) {
+                for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
+                free(packed_out);
+                for (int j = 0; j < ME_DSL_MAX_NDIM; j++) free(idx_buffers[j]);
+                return ME_EVAL_ERR_OOM;
+            }
+        }
+    }
+
+    int64_t indices[64] = {0};
+    int64_t write_idx = 0;
+    int64_t total_iters = 1;
+    for (int i = 0; i < nd; i++) total_iters *= valid_len[i];
+    for (int64_t it = 0; it < total_iters; it++) {
+        int64_t off = 0;
+        for (int i = 0; i < nd; i++) {
+            off += indices[i] * stride[i];
+        }
+        for (int v = 0; v < n_vars; v++) {
+            const unsigned char *src = (const unsigned char *)vars_block[v] + (size_t)off * var_sizes[v];
+            memcpy((unsigned char *)packed_vars[v] + (size_t)write_idx * var_sizes[v], src, var_sizes[v]);
+        }
+        for (int d = 0; d < ME_DSL_MAX_NDIM && d < nd; d++) {
+            if (idx_buffers[d]) {
+                idx_buffers[d][write_idx] = base_idx[d] + indices[d];
+            }
+        }
+        write_idx++;
+        for (int i = nd - 1; i >= 0; i--) {
+            indices[i]++;
+            if (indices[i] < valid_len[i]) break;
+            indices[i] = 0;
+        }
+    }
+
+    void *dsl_out = program->output_is_scalar ? malloc((size_t)valid_items * item_size) : packed_out;
+    if (!dsl_out) {
+        for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
+        free(packed_out);
+        for (int j = 0; j < ME_DSL_MAX_NDIM; j++) free(idx_buffers[j]);
+        return ME_EVAL_ERR_OOM;
+    }
+
+    rc = dsl_eval_program(program, (const void **)packed_vars, n_vars, dsl_out,
+                          (int)valid_items, params, nd, shape, idx_buffers);
+    if (rc != ME_EVAL_SUCCESS) {
+        for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
+        if (program->output_is_scalar) free(dsl_out);
+        free(packed_out);
+        for (int j = 0; j < ME_DSL_MAX_NDIM; j++) free(idx_buffers[j]);
+        return rc;
+    }
+
+    if (program->output_is_scalar) {
+        memcpy(output_block, dsl_out, item_size);
+        memset((unsigned char *)output_block + item_size, 0, (size_t)(padded_items - 1) * item_size);
+        free(dsl_out);
+    }
+    else {
+        memset(output_block, 0, (size_t)padded_items * item_size);
+        memset(indices, 0, sizeof(indices));
+        write_idx = 0;
+        for (int64_t it = 0; it < total_iters; it++) {
+            int64_t off = 0;
+            for (int i = 0; i < nd; i++) {
+                off += indices[i] * stride[i];
+            }
+            unsigned char *dst = (unsigned char *)output_block + (size_t)off * item_size;
+            memcpy(dst, (unsigned char *)packed_out + (size_t)write_idx * item_size, item_size);
+            write_idx++;
+            for (int i = nd - 1; i >= 0; i--) {
+                indices[i]++;
+                if (indices[i] < valid_len[i]) break;
+                indices[i] = 0;
+            }
+        }
+    }
+
+    for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
+    if (packed_out) free(packed_out);
+    for (int j = 0; j < ME_DSL_MAX_NDIM; j++) free(idx_buffers[j]);
+
+    return ME_EVAL_SUCCESS;
+}
+
 static int collect_var_sizes(const me_expr* expr, size_t* var_sizes, int n_vars) {
     if (!expr || !var_sizes || n_vars <= 0) {
         return ME_EVAL_ERR_INVALID_ARG;
@@ -1892,6 +3513,9 @@ int me_eval_nd(const me_expr* expr, const void** vars_block,
                int64_t nchunk, int64_t nblock, const me_eval_params* params) {
     if (!expr) {
         return ME_EVAL_ERR_NULL_EXPR;
+    }
+    if (expr->dsl_program) {
+        return me_eval_dsl_nd(expr, vars_block, n_vars, output_block, block_nitems, nchunk, nblock, params);
     }
     if (!output_block || block_nitems <= 0) {
         return ME_EVAL_ERR_INVALID_ARG;

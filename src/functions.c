@@ -6690,6 +6690,7 @@ static me_expr* clone_expr(const me_expr* src) {
     clone->output = NULL;
     clone->bytecode = NULL;
     clone->ncode = 0;
+    clone->dsl_program = NULL;
 
     return clone;
 }
@@ -6702,6 +6703,9 @@ int me_eval(const me_expr* expr, const void** vars_block,
             int n_vars, void* output_block, int block_nitems,
             const me_eval_params* params) {
     if (!expr) return ME_EVAL_ERR_NULL_EXPR;
+    if (expr->dsl_program) {
+        return me_eval_dsl_program(expr, vars_block, n_vars, output_block, block_nitems, params);
+    }
 
     // Verify variable count matches
     const void* original_var_pointers[ME_MAX_VARS];
