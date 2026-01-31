@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 #include "../src/miniexpr.h"
 #include "minctest.h"
 
@@ -329,6 +330,58 @@ static int test_break_any_condition(void) {
     return rc;
 }
 
+static int test_dsl_function_calls(void) {
+    printf("\n=== DSL Test 9: assorted function calls ===\n");
+
+    const char *src =
+        "t0 = sin(a) + cos(a);\n"
+        "t1 = expm1(b) + log1p(abs(b));\n"
+        "t2 = sqrt(abs(a)) + hypot(a, b);\n"
+        "t3 = atan2(a, b) + pow(a, 2);\n"
+        "t4 = floor(d) + ceil(d) + trunc(d) + round(d);\n"
+        "result = t0 + t1 + t2 + t3 + t4;\n";
+
+    double a[8] = {0.0, 0.5, 1.0, -1.5, 2.0, -2.5, 3.0, -3.5};
+    float b[8] = {1.0f, -0.5f, 2.0f, -2.0f, 0.25f, -0.25f, 4.0f, -4.0f};
+    double d[8] = {0.2, -0.7, 1.4, -1.6, 2.2, -2.8, 3.0, -3.2};
+
+    double expected[8];
+    for (int i = 0; i < 8; i++) {
+        double av = a[i];
+        double bv = (double)b[i];
+        double dv = d[i];
+        double t0 = sin(av) + cos(av);
+        double t1 = expm1(bv) + log1p(fabs(bv));
+        double t2 = sqrt(fabs(av)) + hypot(av, bv);
+        double t3 = atan2(av, bv) + pow(av, 2.0);
+        double t4 = floor(dv) + ceil(dv) + trunc(dv) + round(dv);
+        expected[i] = t0 + t1 + t2 + t3 + t4;
+    }
+
+    me_variable vars[] = {{"a", ME_FLOAT64}, {"b", ME_FLOAT32}, {"d", ME_FLOAT64}};
+    me_expr *expr = NULL;
+    int err = 0;
+    if (me_compile(src, vars, 3, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compile error at %d\n", err);
+        return 1;
+    }
+
+    const void *inputs[] = {a, b, d};
+    double out[8];
+    if (me_eval(expr, inputs, 3, out, 8, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: eval error\n");
+        me_free(expr);
+        return 1;
+    }
+
+    int rc = check_all_close(out, expected, 8, 1e-6);
+    me_free(expr);
+    if (rc == 0) {
+        printf("  ✅ PASSED\n");
+    }
+    return rc;
+}
+
 int main(void) {
     int fail = 0;
     fail |= test_assign_and_result_stmt();
@@ -339,5 +392,6 @@ int main(void) {
     fail |= test_nd_3d_indices_padding();
     fail |= test_nested_loops_and_conditionals();
     fail |= test_break_any_condition();
+    fail |= test_dsl_function_calls();
     return fail;
 }
