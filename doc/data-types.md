@@ -293,7 +293,8 @@ Both methods require explicit variable dtypes when the computation type differs 
 `ME_STRING` represents fixed-size UCS4 (`uint32_t`) strings. Each element is a
 NUL-terminated array of codepoints with no embedded NULs. You must provide the
 per-element byte size via `me_variable_ex` (`itemsize` must be a multiple of 4
-and include the terminator).
+and include the terminator). The maximum string length in codepoints is
+`itemsize / 4 - 1`.
 
 String expressions support comparisons (`==`, `!=`) and string predicates
 (`startswith`, `endswith`, `contains`). These operations always yield boolean
@@ -316,6 +317,10 @@ int error;
 me_expr *expr = NULL;
 if (me_compile_ex("startswith(name, \"alp\")", vars, 1, ME_BOOL, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 ```
+
+String literals are UTF-8 and support escapes like `\n`, `\t`, `\\`, `\"`, `\'`,
+and Unicode escapes (`\uXXXX`, `\UXXXXXXXX`) that map to UCS4 codepoints. For
+example, `"\u03B1"` matches U+03B1 (Greek alpha).
 
 ## Example 6: Explicit Variable Types with Explicit Output Dtype
 

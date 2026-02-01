@@ -238,6 +238,7 @@ make examples
 - **[doc/type-inference.md](doc/type-inference.md)** - Type inference rules
 - **[doc/parallel-processing.md](doc/parallel-processing.md)** - Parallel processing patterns
 - **[doc/dsl-usage.md](doc/dsl-usage.md)** - DSL kernel programming guide
+- **[doc/strings.md](doc/strings.md)** - UCS4 string support and string operators
 
 ## DSL Kernels
 

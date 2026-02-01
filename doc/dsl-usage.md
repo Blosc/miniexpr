@@ -122,6 +122,14 @@ String variables must be provided with dtype `ME_STRING` and a fixed `itemsize`
 via `me_variable_ex` (itemsize is bytes per element and must be a multiple of 4).
 String expressions always yield boolean output.
 
+Example (element-wise string match with a scalar control):
+```
+for i in range(n):
+    if any(startswith(tag, "pre")):
+        break
+    mask = contains(tag, "\u03B1")
+```
+
 ### Mathematical Functions
 
 **Trigonometric:**
