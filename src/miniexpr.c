@@ -113,6 +113,7 @@ struct me_dsl_compiled_stmt {
 typedef struct {
     char **names;
     me_dtype *dtypes;
+    bool *uniform;
     int count;
     int capacity;
 } me_dsl_var_table;
@@ -304,8 +305,10 @@ static void dsl_var_table_free(me_dsl_var_table *table) {
     }
     free(table->names);
     free(table->dtypes);
+    free(table->uniform);
     table->names = NULL;
     table->dtypes = NULL;
+    table->uniform = NULL;
     table->count = 0;
     table->capacity = 0;
 }
@@ -330,22 +333,32 @@ static bool dsl_var_table_grow(me_dsl_var_table *table, int min_cap) {
     if (new_cap < min_cap) {
         new_cap = min_cap;
     }
-    char **names = realloc(table->names, (size_t)new_cap * sizeof(*names));
-    if (!names) {
-        return false;
-    }
-    me_dtype *dtypes = realloc(table->dtypes, (size_t)new_cap * sizeof(*dtypes));
-    if (!dtypes) {
+    char **names = malloc((size_t)new_cap * sizeof(*names));
+    me_dtype *dtypes = malloc((size_t)new_cap * sizeof(*dtypes));
+    bool *uniform = malloc((size_t)new_cap * sizeof(*uniform));
+    if (!names || !dtypes || !uniform) {
         free(names);
+        free(dtypes);
+        free(uniform);
         return false;
     }
+    if (table->count > 0) {
+        memcpy(names, table->names, (size_t)table->count * sizeof(*names));
+        memcpy(dtypes, table->dtypes, (size_t)table->count * sizeof(*dtypes));
+        memcpy(uniform, table->uniform, (size_t)table->count * sizeof(*uniform));
+    }
+    free(table->names);
+    free(table->dtypes);
+    free(table->uniform);
     table->names = names;
     table->dtypes = dtypes;
+    table->uniform = uniform;
     table->capacity = new_cap;
     return true;
 }
 
-static int dsl_var_table_add(me_dsl_var_table *table, const char *name, me_dtype dtype) {
+static int dsl_var_table_add_with_uniform(me_dsl_var_table *table, const char *name, me_dtype dtype,
+                                          bool uniform) {
     if (!table || !name) {
         return -1;
     }
@@ -360,8 +373,13 @@ static int dsl_var_table_add(me_dsl_var_table *table, const char *name, me_dtype
         return -1;
     }
     table->dtypes[table->count] = dtype;
+    table->uniform[table->count] = uniform;
     table->count++;
     return table->count - 1;
+}
+
+static int dsl_var_table_add(me_dsl_var_table *table, const char *name, me_dtype dtype) {
+    return dsl_var_table_add_with_uniform(table, name, dtype, false);
 }
 
 static bool dsl_is_reserved_name(const char *name) {
@@ -599,6 +617,57 @@ static bool output_is_scalar(const me_expr* n) {
             const int arity = ARITY(n->type);
             for (int i = 0; i < arity; i++) {
                 if (!output_is_scalar((const me_expr*)n->parameters[i])) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    default:
+        return true;
+    }
+}
+
+static bool dsl_expr_is_uniform(const me_expr* n, const bool *uniform, int nvars) {
+    if (!n) {
+        return true;
+    }
+    if (is_reduction_node(n)) {
+        return true;
+    }
+
+    switch (TYPE_MASK(n->type)) {
+    case ME_CONSTANT:
+        return true;
+    case ME_VARIABLE: {
+        if (!is_synthetic_address(n->bound)) {
+            return false;
+        }
+        int idx = (int)((const char *)n->bound - synthetic_var_addresses);
+        if (idx < 0 || idx >= nvars) {
+            return false;
+        }
+        return uniform[idx];
+    }
+    case ME_FUNCTION0:
+    case ME_FUNCTION1:
+    case ME_FUNCTION2:
+    case ME_FUNCTION3:
+    case ME_FUNCTION4:
+    case ME_FUNCTION5:
+    case ME_FUNCTION6:
+    case ME_FUNCTION7:
+    case ME_CLOSURE0:
+    case ME_CLOSURE1:
+    case ME_CLOSURE2:
+    case ME_CLOSURE3:
+    case ME_CLOSURE4:
+    case ME_CLOSURE5:
+    case ME_CLOSURE6:
+    case ME_CLOSURE7:
+        {
+            const int arity = ARITY(n->type);
+            for (int i = 0; i < arity; i++) {
+                if (!dsl_expr_is_uniform((const me_expr*)n->parameters[i], uniform, nvars)) {
                     return false;
                 }
             }
@@ -2342,9 +2411,13 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 return false;
             }
             me_dtype assigned_dtype = me_get_dtype(compiled->as.assign.value.expr);
+            bool is_uniform = dsl_expr_is_uniform(compiled->as.assign.value.expr,
+                                                  ctx->program->vars.uniform,
+                                                  ctx->program->vars.count);
 
             if (var_index < 0) {
-                var_index = dsl_var_table_add(&ctx->program->vars, name, assigned_dtype);
+                var_index = dsl_var_table_add_with_uniform(&ctx->program->vars, name,
+                                                           assigned_dtype, is_uniform);
                 if (var_index < 0) {
                     dsl_compiled_stmt_free(compiled);
                     return false;
@@ -2356,6 +2429,9 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 }
                 dsl_compiled_stmt_free(compiled);
                 return false;
+            }
+            else {
+                ctx->program->vars.uniform[var_index] = is_uniform;
             }
 
             if (!dsl_program_add_local(ctx->program, var_index)) {
@@ -2403,7 +2479,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
-            var_index = dsl_var_table_add(&ctx->program->vars, var, ME_INT64);
+            var_index = dsl_var_table_add_with_uniform(&ctx->program->vars, var, ME_INT64, true);
             if (var_index < 0) {
                 dsl_compiled_stmt_free(compiled);
                 return false;
@@ -2441,7 +2517,9 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
-                if (!output_is_scalar(compiled->as.flow.cond.expr)) {
+                if (!dsl_expr_is_uniform(compiled->as.flow.cond.expr,
+                                         ctx->program->vars.uniform,
+                                         ctx->program->vars.count)) {
                     if (ctx->error_pos) {
                         *ctx->error_pos = dsl_offset_from_linecol(ctx->source,
                                                                  stmt->as.flow.cond->line,
@@ -2588,7 +2666,8 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
         if (uses_n_mask & (1 << d)) {
             char name[8];
             snprintf(name, sizeof(name), "_n%d", d);
-            program->idx_n[d] = dsl_var_table_add(&program->vars, name, ME_INT64);
+            program->idx_n[d] = dsl_var_table_add_with_uniform(&program->vars, name, ME_INT64,
+                                                               true);
             if (program->idx_n[d] < 0) {
                 if (error_pos) {
                     *error_pos = -1;
@@ -2600,7 +2679,8 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
         }
     }
     if (uses_ndim) {
-        program->idx_ndim = dsl_var_table_add(&program->vars, "_ndim", ME_INT64);
+        program->idx_ndim = dsl_var_table_add_with_uniform(&program->vars, "_ndim", ME_INT64,
+                                                           true);
         if (program->idx_ndim < 0) {
             if (error_pos) {
                 *error_pos = -1;

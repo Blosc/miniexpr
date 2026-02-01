@@ -79,14 +79,14 @@ static int test_loop_break_continue(void) {
         "sum = 0\n"
         "for i in range(5):\n"
         "    sum = sum + i\n"
-        "    if any(i == 2):\n"
+        "    if i == 2:\n"
         "        break\n"
         "result = sum\n";
 
     const char *src_continue =
         "sum = 0\n"
         "for i in range(4):\n"
-        "    if any(i == 1):\n"
+        "    if i == 1:\n"
         "        continue\n"
         "    sum = sum + i\n"
         "result = sum\n";
@@ -137,7 +137,7 @@ static int test_invalid_conditionals(void) {
     const char *src_non_scalar =
         "sum = 0\n"
         "for i in range(3):\n"
-        "    if i == 2:\n"
+        "    if x > 0:\n"
         "        break\n"
         "result = sum\n";
 
@@ -151,7 +151,8 @@ static int test_invalid_conditionals(void) {
     }
 
     expr = NULL;
-    if (me_compile(src_non_scalar, NULL, 0, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    if (me_compile(src_non_scalar, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: non-scalar if condition accepted\n");
         me_free(expr);
         return 1;

@@ -91,6 +91,8 @@ for i in range(n):
 Conditional blocks are only supported for loop control (`break`/`continue`), and
 the condition must be scalar. Use reductions like `any()`/`all()` to turn an
 element-wise predicate into a scalar condition.
+Conditions that are uniform across the block (e.g., loop variables like `i`,
+`_n*`, `_ndim`, or reductions) are accepted directly, so `if i == 2:` is valid.
 
 ## Available Functions
 
