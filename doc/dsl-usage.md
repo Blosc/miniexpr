@@ -75,16 +75,22 @@ for i in range(n):
 With early exit:
 ```
 for i in range(100):
-    break if converged > 0.99
+    if any(converged > 0.99):
+        break
     value = iterate(value)
 ```
 
 With conditional continue:
 ```
 for i in range(n):
-    continue if mask == 0
+    if any(mask == 0):
+        continue
     result = result + compute(i)
 ```
+
+Conditional blocks are only supported for loop control (`break`/`continue`), and
+the condition must be scalar. Use reductions like `any()`/`all()` to turn an
+element-wise predicate into a scalar condition.
 
 ## Available Functions
 
@@ -177,7 +183,8 @@ for iter in range(100):
     zr_new = zr * zr - zi * zi + cr
     zi = 2 * zr * zi + ci
     zr = zr_new
-    break if zr * zr + zi * zi > 4.0
+    if any(zr * zr + zi * zi > 4.0):
+        break
 result = iter
 ```
 
@@ -232,8 +239,8 @@ typedef enum {
     ME_DSL_STMT_ASSIGN,   // variable = expression
     ME_DSL_STMT_EXPR,     // bare expression (result)
     ME_DSL_STMT_FOR,      // for loop
-    ME_DSL_STMT_BREAK,    // break [if cond]
-    ME_DSL_STMT_CONTINUE  // continue [if cond]
+    ME_DSL_STMT_BREAK,    // break
+    ME_DSL_STMT_CONTINUE  // continue
 } me_dsl_stmt_kind;
 ```
 

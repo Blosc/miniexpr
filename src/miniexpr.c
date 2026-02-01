@@ -2441,6 +2441,15 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
+                if (!output_is_scalar(compiled->as.flow.cond.expr)) {
+                    if (ctx->error_pos) {
+                        *ctx->error_pos = dsl_offset_from_linecol(ctx->source,
+                                                                 stmt->as.flow.cond->line,
+                                                                 stmt->as.flow.cond->column);
+                    }
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
             }
             else {
                 memset(&compiled->as.flow.cond, 0, sizeof(compiled->as.flow.cond));

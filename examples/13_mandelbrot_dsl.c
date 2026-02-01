@@ -7,7 +7,8 @@
  *
  * The DSL kernel performs the complete iteration:
  *   for iter in range(max_iter):
- *       break if escaped
+ *       if escaped:
+ *           break
  *       z = z^2 + c
  */
 
@@ -62,7 +63,8 @@ int main() {
         "    mag2 = zr2 + zi2\n"
         "    \n"
         "    # Early exit if escaped (|z|^2 > 4)\n"
-        "    break if mag2 > 4.0\n"
+        "    if any(mag2 > 4.0):\n"
+        "        break\n"
         "    \n"
         "    # Record iteration count (only updates if not escaped yet)\n"
         "    escape_iter = where(mag2 <= 4.0, iter, escape_iter)\n"
@@ -158,7 +160,7 @@ int main() {
             double zi2 = zi * zi;
             double mag2 = zr2 + zi2;
 
-            /* DSL: break if mag2 > 4.0 */
+            /* DSL: if any(mag2 > 4.0): break */
             if (mag2 > 4.0) {
                 escape_iter = iter;
                 break;
@@ -210,7 +212,7 @@ int main() {
     printf("DSL Features Demonstrated:\n");
     printf("  ✓ Temporary variables: zr, zi, zr2, zi2, mag2, zr_new, zi_new\n");
     printf("  ✓ For loop: for iter in range(100)\n");
-    printf("  ✓ Conditional break: break if mag2 > 4.0\n");
+    printf("  ✓ Conditional break: if any(mag2 > 4.0): break\n");
     printf("  ✓ Where conditional: where(mag2 <= 4.0, iter, escape_iter)\n");
     printf("  ✓ Comments: # style comments\n");
     printf("  ✓ Multi-line program structure\n");

@@ -79,13 +79,15 @@ static int test_loop_break_continue(void) {
         "sum = 0\n"
         "for i in range(5):\n"
         "    sum = sum + i\n"
-        "    break if i == 2\n"
+        "    if any(i == 2):\n"
+        "        break\n"
         "result = sum\n";
 
     const char *src_continue =
         "sum = 0\n"
         "for i in range(4):\n"
-        "    continue if i == 1\n"
+        "    if any(i == 1):\n"
+        "        continue\n"
         "    sum = sum + i\n"
         "result = sum\n";
 
@@ -125,8 +127,42 @@ static int test_loop_break_continue(void) {
     return rc;
 }
 
+static int test_invalid_conditionals(void) {
+    printf("\n=== DSL Test 3: invalid conditionals ===\n");
+
+    const char *src_deprecated =
+        "for i in range(2):\n"
+        "    break if i == 0\n";
+
+    const char *src_non_scalar =
+        "sum = 0\n"
+        "for i in range(3):\n"
+        "    if i == 2:\n"
+        "        break\n"
+        "result = sum\n";
+
+    int err = 0;
+    me_expr *expr = NULL;
+
+    if (me_compile(src_deprecated, NULL, 0, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: deprecated break if syntax accepted\n");
+        me_free(expr);
+        return 1;
+    }
+
+    expr = NULL;
+    if (me_compile(src_non_scalar, NULL, 0, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: non-scalar if condition accepted\n");
+        me_free(expr);
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    return 0;
+}
+
 static int test_nd_indices(void) {
-    printf("\n=== DSL Test 3: ND indices ===\n");
+    printf("\n=== DSL Test 4: ND indices ===\n");
 
     const char *src = "result = _i0 + _i1";
     int64_t shape[2] = {2, 3};
@@ -157,7 +193,7 @@ static int test_nd_indices(void) {
 }
 
 static int test_nd_padding(void) {
-    printf("\n=== DSL Test 4: ND padding in blocks ===\n");
+    printf("\n=== DSL Test 5: ND padding in blocks ===\n");
 
     const char *src = "result = _i0 + _i1";
     int64_t shape[2] = {3, 5};
@@ -188,7 +224,7 @@ static int test_nd_padding(void) {
 }
 
 static int test_nd_large_block(void) {
-    printf("\n=== DSL Test 5: ND larger block ===\n");
+    printf("\n=== DSL Test 6: ND larger block ===\n");
 
     const char *src = "result = _i0 + _i1";
     int64_t shape[2] = {6, 7};
@@ -219,7 +255,7 @@ static int test_nd_large_block(void) {
 }
 
 static int test_nd_3d_indices_padding(void) {
-    printf("\n=== DSL Test 6: 3D indices + padding + _n* + _ndim ===\n");
+    printf("\n=== DSL Test 7: 3D indices + padding + _n* + _ndim ===\n");
 
     const char *src = "result = _i0 + _i1 + _i2 + _n0 + _n1 + _n2 + _ndim";
     int64_t shape[3] = {3, 4, 5};
@@ -250,13 +286,14 @@ static int test_nd_3d_indices_padding(void) {
 }
 
 static int test_nested_loops_and_conditionals(void) {
-    printf("\n=== DSL Test 7: nested loops + mixed-type conditions ===\n");
+    printf("\n=== DSL Test 8: nested loops + mixed-type conditions ===\n");
 
     const char *src =
         "sum = 0\n"
         "for i in range(3):\n"
         "    for j in range(4):\n"
-        "        continue if ((i + 0.5) > 1.0) & (j < 2)\n"
+        "        if any(((i + 0.5) > 1.0) & (j < 2)):\n"
+        "            continue\n"
         "        sum = sum + i + j\n"
         "result = sum\n";
 
@@ -286,13 +323,14 @@ static int test_nested_loops_and_conditionals(void) {
 }
 
 static int test_break_any_condition(void) {
-    printf("\n=== DSL Test 8: break with array condition (any) ===\n");
+    printf("\n=== DSL Test 9: break with array condition (any) ===\n");
 
     const char *src =
         "sum = 0\n"
         "for i in range(5):\n"
         "    sum = sum + i\n"
-        "    break if x > 0\n"
+        "    if any(x > 0):\n"
+        "        break\n"
         "result = sum\n";
 
     double x[4] = {-1.0, 2.0, -3.0, 0.0};
@@ -326,7 +364,7 @@ static int test_break_any_condition(void) {
 }
 
 static int test_dsl_function_calls(void) {
-    printf("\n=== DSL Test 9: assorted function calls ===\n");
+    printf("\n=== DSL Test 10: assorted function calls ===\n");
 
     const char *src =
         "t0 = sin(a) + cos(a);\n"
@@ -381,6 +419,7 @@ int main(void) {
     int fail = 0;
     fail |= test_assign_and_result_stmt();
     fail |= test_loop_break_continue();
+    fail |= test_invalid_conditionals();
     fail |= test_nd_indices();
     fail |= test_nd_padding();
     fail |= test_nd_large_block();

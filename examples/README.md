@@ -345,23 +345,27 @@ Chunk size matters enormously for parallel performance:
 
 **Key features:**
 - Complete algorithm in a single DSL program
-- `for iter in range(100) { ... }` loop construct
-- `break if mag2 > 4.0` early exit
+- `for iter in range(100): ...` loop construct
+- `if any(mag2 > 4.0): break` early exit
 - `where()` conditionals for element-wise selection
 - Comments with `#` syntax
 - Demonstrates parsing via `me_dsl_parse()`
 
 **DSL Kernel Preview:**
 ```
-zr = 0.0; zi = 0.0; escape_iter = 100.0
-for iter in range(100) {
-    zr2 = zr * zr; zi2 = zi * zi
+zr = 0.0
+zi = 0.0
+escape_iter = 100.0
+for iter in range(100):
+    zr2 = zr * zr
+    zi2 = zi * zi
     mag2 = zr2 + zi2
-    break if mag2 > 4.0
+    if any(mag2 > 4.0):
+        break
     zr_new = zr2 - zi2 + cr
     zi_new = 2.0 * zr * zi + ci
-    zr = zr_new; zi = zi_new
-}
+    zr = zr_new
+    zi = zi_new
 result = escape_iter
 ```
 
