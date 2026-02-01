@@ -316,6 +316,35 @@ static char *parse_expression_until_stmt_end(me_dsl_lexer *lex, me_dsl_error *er
 
     while (*lex->current) {
         char c = *lex->current;
+        if (c == '"' || c == '\'') {
+            char quote = c;
+            lexer_advance(lex);
+            while (*lex->current) {
+                if (*lex->current == '\\') {
+                    lexer_advance(lex);
+                    if (!*lex->current || *lex->current == '\n') {
+                        dsl_set_error(error, line, column, "unterminated string literal");
+                        return NULL;
+                    }
+                    lexer_advance(lex);
+                    continue;
+                }
+                if (*lex->current == quote) {
+                    lexer_advance(lex);
+                    break;
+                }
+                if (*lex->current == '\n') {
+                    dsl_set_error(error, line, column, "unterminated string literal");
+                    return NULL;
+                }
+                lexer_advance(lex);
+            }
+            if (!*lex->current && *(lex->current - 1) != quote) {
+                dsl_set_error(error, line, column, "unterminated string literal");
+                return NULL;
+            }
+            continue;
+        }
         if (c == '(') {
             depth++;
         }
@@ -359,6 +388,35 @@ static char *parse_expression_in_parens(me_dsl_lexer *lex, me_dsl_error *error, 
 
     while (*lex->current) {
         char c = *lex->current;
+        if (c == '"' || c == '\'') {
+            char quote = c;
+            lexer_advance(lex);
+            while (*lex->current) {
+                if (*lex->current == '\\') {
+                    lexer_advance(lex);
+                    if (!*lex->current || *lex->current == '\n') {
+                        dsl_set_error(error, line, column, "unterminated string literal");
+                        return NULL;
+                    }
+                    lexer_advance(lex);
+                    continue;
+                }
+                if (*lex->current == quote) {
+                    lexer_advance(lex);
+                    break;
+                }
+                if (*lex->current == '\n') {
+                    dsl_set_error(error, line, column, "unterminated string literal");
+                    return NULL;
+                }
+                lexer_advance(lex);
+            }
+            if (!*lex->current && *(lex->current - 1) != quote) {
+                dsl_set_error(error, line, column, "unterminated string literal");
+                return NULL;
+            }
+            continue;
+        }
         if (c == '(') {
             depth++;
         }

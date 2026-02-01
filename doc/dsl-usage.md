@@ -112,6 +112,16 @@ Conditions that are uniform across the block (e.g., loop variables like `i`,
 Logical operator precedence matches Python: `not` binds tighter than `and`, which binds tighter than `or`
 (comparisons bind tighter than all three).
 
+### String Operators
+- String literals: `"..."` or `'...'`
+- Escapes: `\\`, `\"`, `\'`, `\n`, `\t`, `\uXXXX`, `\UXXXXXXXX`
+- Comparisons: `==`, `!=` (string-to-string only)
+- Predicates: `startswith(a, b)`, `endswith(a, b)`, `contains(a, b)` (string-to-string)
+
+String variables must be provided with dtype `ME_STRING` and a fixed `itemsize`
+via `me_variable_ex` (itemsize is bytes per element and must be a multiple of 4).
+String expressions always yield boolean output.
+
 ### Mathematical Functions
 
 **Trigonometric:**
@@ -282,7 +292,7 @@ Common errors:
 
 ## Limitations
 
-- **No string operations** - DSL is numeric-only
+- **No string output** - String expressions only produce boolean results
 - **No recursion** - Functions cannot call themselves
 - **Fixed loop limits** - Loop bounds must be known at parse time
 - **No user-defined functions** - Use built-in functions only

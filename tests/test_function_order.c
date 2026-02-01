@@ -26,7 +26,8 @@ int main(void) {
 
     while (fgets(line, sizeof(line), fp)) {
         if (!in_functions) {
-            if (strstr(line, "static const me_variable functions[]")) {
+            if (strstr(line, "static const me_variable functions[]") ||
+                strstr(line, "static const me_variable_ex functions[]")) {
                 in_functions = 1;
             }
             continue;

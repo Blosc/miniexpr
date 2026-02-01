@@ -69,8 +69,8 @@ typedef struct {
     int64_t data[1];
 } me_nd_info;
 
-static int private_compile(const char* expression, const me_variable* variables, int var_count,
-                           void* output, int nitems, me_dtype dtype, int* error, me_expr** out);
+static int private_compile_ex(const char* expression, const me_variable_ex* variables, int var_count,
+                              void* output, int nitems, me_dtype dtype, int* error, me_expr** out);
 
 typedef struct {
     me_expr *expr;
@@ -113,6 +113,7 @@ struct me_dsl_compiled_stmt {
 typedef struct {
     char **names;
     me_dtype *dtypes;
+    size_t *itemsizes;
     bool *uniform;
     int count;
     int capacity;
@@ -219,6 +220,10 @@ static me_dtype promote_types(me_dtype a, me_dtype b) {
 #endif
     }
 
+    if (a == ME_STRING || b == ME_STRING) {
+        return ME_STRING;
+    }
+
     // Adjust indices since table starts at ME_BOOL (index 1), not ME_AUTO (index 0)
     int a_idx = a - 1;
     int b_idx = b - 1;
@@ -234,10 +239,19 @@ static bool is_integral_or_bool(me_dtype dtype) {
 }
 
 static bool is_valid_dtype(me_dtype dtype) {
-    return dtype >= ME_AUTO && dtype <= ME_COMPLEX128;
+    return dtype >= ME_AUTO && dtype <= ME_STRING;
+}
+
+static bool is_string_operand_node(const me_expr* n) {
+    if (!n) return false;
+    if (TYPE_MASK(n->type) == ME_STRING_CONSTANT) return true;
+    return TYPE_MASK(n->type) == ME_VARIABLE && n->dtype == ME_STRING;
 }
 
 static me_dtype promote_float_math_result(me_dtype param_type) {
+    if (param_type == ME_STRING) {
+        return ME_STRING;
+    }
     if (param_type == ME_COMPLEX64 || param_type == ME_COMPLEX128) {
         return param_type;
     }
@@ -305,9 +319,11 @@ static void dsl_var_table_free(me_dsl_var_table *table) {
     }
     free(table->names);
     free(table->dtypes);
+    free(table->itemsizes);
     free(table->uniform);
     table->names = NULL;
     table->dtypes = NULL;
+    table->itemsizes = NULL;
     table->uniform = NULL;
     table->count = 0;
     table->capacity = 0;
@@ -335,30 +351,35 @@ static bool dsl_var_table_grow(me_dsl_var_table *table, int min_cap) {
     }
     char **names = malloc((size_t)new_cap * sizeof(*names));
     me_dtype *dtypes = malloc((size_t)new_cap * sizeof(*dtypes));
+    size_t *itemsizes = malloc((size_t)new_cap * sizeof(*itemsizes));
     bool *uniform = malloc((size_t)new_cap * sizeof(*uniform));
-    if (!names || !dtypes || !uniform) {
+    if (!names || !dtypes || !itemsizes || !uniform) {
         free(names);
         free(dtypes);
+        free(itemsizes);
         free(uniform);
         return false;
     }
     if (table->count > 0) {
         memcpy(names, table->names, (size_t)table->count * sizeof(*names));
         memcpy(dtypes, table->dtypes, (size_t)table->count * sizeof(*dtypes));
+        memcpy(itemsizes, table->itemsizes, (size_t)table->count * sizeof(*itemsizes));
         memcpy(uniform, table->uniform, (size_t)table->count * sizeof(*uniform));
     }
     free(table->names);
     free(table->dtypes);
+    free(table->itemsizes);
     free(table->uniform);
     table->names = names;
     table->dtypes = dtypes;
+    table->itemsizes = itemsizes;
     table->uniform = uniform;
     table->capacity = new_cap;
     return true;
 }
 
 static int dsl_var_table_add_with_uniform(me_dsl_var_table *table, const char *name, me_dtype dtype,
-                                          bool uniform) {
+                                          size_t itemsize, bool uniform) {
     if (!table || !name) {
         return -1;
     }
@@ -373,13 +394,14 @@ static int dsl_var_table_add_with_uniform(me_dsl_var_table *table, const char *n
         return -1;
     }
     table->dtypes[table->count] = dtype;
+    table->itemsizes[table->count] = itemsize;
     table->uniform[table->count] = uniform;
     table->count++;
     return table->count - 1;
 }
 
 static int dsl_var_table_add(me_dsl_var_table *table, const char *name, me_dtype dtype) {
-    return dsl_var_table_add_with_uniform(table, name, dtype, false);
+    return dsl_var_table_add_with_uniform(table, name, dtype, 0, false);
 }
 
 static bool dsl_is_reserved_name(const char *name) {
@@ -594,6 +616,7 @@ static bool output_is_scalar(const me_expr* n) {
 
     switch (TYPE_MASK(n->type)) {
     case ME_CONSTANT:
+    case ME_STRING_CONSTANT:
         return true;
     case ME_VARIABLE:
         return false;
@@ -637,6 +660,7 @@ static bool dsl_expr_is_uniform(const me_expr* n, const bool *uniform, int nvars
 
     switch (TYPE_MASK(n->type)) {
     case ME_CONSTANT:
+    case ME_STRING_CONSTANT:
         return true;
     case ME_VARIABLE: {
         if (!is_synthetic_address(n->bound)) {
@@ -784,6 +808,8 @@ static bool dsl_any_nonzero(const void *data, me_dtype dtype, int nitems) {
         }
         return false;
     }
+    case ME_STRING:
+        return false;
     default:
         return false;
     }
@@ -833,6 +859,8 @@ static bool dsl_read_int64(const void *data, me_dtype dtype, int64_t *out) {
         *out = (int64_t)creal(v);
         return true;
     }
+    case ME_STRING:
+        return false;
     default:
         return false;
     }
@@ -1074,6 +1102,7 @@ static bool read_as_bool(const void* base, int64_t off, me_dtype type, bool* out
     case ME_UINT64: *out = ((const uint64_t*)base)[off] != 0; return true;
     case ME_FLOAT32: *out = ((const float*)base)[off] != 0.0f; return true;
     case ME_FLOAT64: *out = ((const double*)base)[off] != 0.0; return true;
+    case ME_STRING: return false;
     default:
         return false;
     }
@@ -1092,6 +1121,7 @@ static bool read_as_int64(const void* base, int64_t off, me_dtype type, int64_t*
     case ME_UINT64: *out = (int64_t)((const uint64_t*)base)[off]; return true;
     case ME_FLOAT32: *out = (int64_t)((const float*)base)[off]; return true;
     case ME_FLOAT64: *out = (int64_t)((const double*)base)[off]; return true;
+    case ME_STRING: return false;
     default:
         return false;
     }
@@ -1110,6 +1140,7 @@ static bool read_as_uint64(const void* base, int64_t off, me_dtype type, uint64_
     case ME_UINT64: *out = ((const uint64_t*)base)[off]; return true;
     case ME_FLOAT32: *out = (uint64_t)((const float*)base)[off]; return true;
     case ME_FLOAT64: *out = (uint64_t)((const double*)base)[off]; return true;
+    case ME_STRING: return false;
     default:
         return false;
     }
@@ -1128,6 +1159,7 @@ static bool read_as_float(const void* base, int64_t off, me_dtype type, float* o
     case ME_UINT64: *out = (float)((const uint64_t*)base)[off]; return true;
     case ME_FLOAT32: *out = ((const float*)base)[off]; return true;
     case ME_FLOAT64: *out = (float)((const double*)base)[off]; return true;
+    case ME_STRING: return false;
     default:
         return false;
     }
@@ -1146,6 +1178,7 @@ static bool read_as_double(const void* base, int64_t off, me_dtype type, double*
     case ME_UINT64: *out = (double)((const uint64_t*)base)[off]; return true;
     case ME_FLOAT32: *out = (double)((const float*)base)[off]; return true;
     case ME_FLOAT64: *out = ((const double*)base)[off]; return true;
+    case ME_STRING: return false;
     default:
         return false;
     }
@@ -1607,6 +1640,9 @@ me_dtype infer_result_type(const me_expr* n) {
     case ME_CONSTANT:
         return n->dtype;
 
+    case ME_STRING_CONSTANT:
+        return ME_STRING;
+
     case ME_VARIABLE:
         return n->dtype;
 
@@ -1661,6 +1697,14 @@ me_dtype infer_result_type(const me_expr* n) {
                 return promote_float_math_result(param_type);
             }
 
+            if (ARITY(n->type) == 2) {
+                const me_expr* left = (const me_expr*)n->parameters[0];
+                const me_expr* right = (const me_expr*)n->parameters[1];
+                if (is_string_operand_node(left) && is_string_operand_node(right)) {
+                    return ME_BOOL;
+                }
+            }
+
             // For comparisons with ME_BOOL output, we still need to infer the
             // computation type from operands (e.g., float64 for float inputs).
             // Don't return ME_BOOL early - let the operand types determine
@@ -1688,6 +1732,9 @@ me_dtype infer_output_type(const me_expr* n) {
     switch (TYPE_MASK(n->type)) {
     case ME_CONSTANT:
         return n->dtype;
+
+    case ME_STRING_CONSTANT:
+        return ME_STRING;
 
     case ME_VARIABLE:
         return n->dtype;
@@ -1822,6 +1869,7 @@ static int check_mixed_type_nested(const me_expr* node, me_dtype parent_dtype) {
 
     switch (TYPE_MASK(node->type)) {
     case ME_CONSTANT:
+    case ME_STRING_CONSTANT:
     case ME_VARIABLE:
         return 0;
 
@@ -1971,18 +2019,30 @@ void me_free(me_expr* n) {
     if (n->dsl_program) {
         dsl_compiled_program_free((me_dsl_compiled_program *)n->dsl_program);
     }
+    if (TYPE_MASK(n->type) == ME_STRING_CONSTANT &&
+        (n->flags & ME_EXPR_FLAG_OWNS_STRING) != 0) {
+        free((void*)n->bound);
+    }
     free(n);
 }
 
-static int private_compile(const char* expression, const me_variable* variables, int var_count,
-                           void* output, int nitems, me_dtype dtype, int* error, me_expr** out) {
+static int private_compile_ex(const char* expression, const me_variable_ex* variables, int var_count,
+                              void* output, int nitems, me_dtype dtype, int* error, me_expr** out) {
     if (out) *out = NULL;
     if (!expression || !out || var_count < 0) {
         if (error) *error = -1;
         return ME_COMPILE_ERR_INVALID_ARG;
     }
+    if (!variables && var_count > 0) {
+        if (error) *error = -1;
+        return ME_COMPILE_ERR_INVALID_ARG;
+    }
 
     if (dtype != ME_AUTO && !is_valid_dtype(dtype)) {
+        if (error) *error = -1;
+        return ME_COMPILE_ERR_INVALID_ARG_TYPE;
+    }
+    if (dtype == ME_STRING) {
         if (error) *error = -1;
         return ME_COMPILE_ERR_INVALID_ARG_TYPE;
     }
@@ -1992,6 +2052,12 @@ static int private_compile(const char* expression, const me_variable* variables,
             if (!is_valid_dtype(variables[i].dtype)) {
                 if (error) *error = -1;
                 return ME_COMPILE_ERR_INVALID_ARG_TYPE;
+            }
+            if (variables[i].dtype == ME_STRING) {
+                if (variables[i].itemsize == 0 || (variables[i].itemsize % 4) != 0) {
+                    if (error) *error = -1;
+                    return ME_COMPILE_ERR_INVALID_ARG_TYPE;
+                }
             }
         }
     }
@@ -2034,9 +2100,9 @@ static int private_compile(const char* expression, const me_variable* variables,
     }
 
     // Create a copy of variables with dtype filled in (if not already set)
-    me_variable* vars_copy = NULL;
+    me_variable_ex* vars_copy = NULL;
     if (variables && var_count > 0) {
-        vars_copy = malloc(var_count * sizeof(me_variable));
+        vars_copy = malloc(var_count * sizeof(me_variable_ex));
         if (!vars_copy) {
             if (error) *error = -1;
             return ME_COMPILE_ERR_OOM;
@@ -2055,6 +2121,9 @@ static int private_compile(const char* expression, const me_variable* variables,
     s.start = s.next = expression;
     s.lookup = vars_copy ? vars_copy : variables;
     s.lookup_len = var_count;
+    s.itemsize = 0;
+    s.str_data = NULL;
+    s.str_len = 0;
     // When dtype is ME_AUTO, infer target dtype from variables to avoid type mismatch
     if (dtype != ME_AUTO) {
         s.target_dtype = dtype;
@@ -2062,7 +2131,13 @@ static int private_compile(const char* expression, const me_variable* variables,
     else if (variables && var_count > 0) {
         // Use the first variable's dtype as the target for constants
         // This prevents type promotion issues when mixing float32 vars with float64 constants
-        s.target_dtype = variables[0].dtype;
+        s.target_dtype = ME_AUTO;
+        for (int i = 0; i < var_count; i++) {
+            if (variables[i].dtype != ME_STRING) {
+                s.target_dtype = variables[i].dtype;
+                break;
+            }
+        }
     }
     else {
         s.target_dtype = ME_AUTO;
@@ -2074,7 +2149,20 @@ static int private_compile(const char* expression, const me_variable* variables,
     if (root == NULL) {
         if (error) *error = -1;
         if (vars_copy) free(vars_copy);
+        if (s.str_data) {
+            free((void*)s.str_data);
+        }
         return ME_COMPILE_ERR_OOM;
+    }
+
+    if (!validate_string_usage(root)) {
+        me_free(root);
+        if (error) *error = -1;
+        if (vars_copy) free(vars_copy);
+        if (s.str_data) {
+            free((void*)s.str_data);
+        }
+        return ME_COMPILE_ERR_INVALID_ARG_TYPE;
     }
 
     if (contains_reduction(root) && !reduction_usage_is_valid(root)) {
@@ -2086,7 +2174,7 @@ static int private_compile(const char* expression, const me_variable* variables,
 
     bool any_complex_vars = false;
     if (variables && var_count > 0) {
-        const me_variable* vars_check = vars_copy ? vars_copy : variables;
+        const me_variable_ex* vars_check = vars_copy ? vars_copy : variables;
         for (int i = 0; i < var_count; i++) {
             if (vars_check[i].dtype == ME_COMPLEX64 || vars_check[i].dtype == ME_COMPLEX128) {
                 any_complex_vars = true;
@@ -2104,7 +2192,7 @@ static int private_compile(const char* expression, const me_variable* variables,
 
 #if defined(_WIN32) || defined(_WIN64)
     {
-        const me_variable* vars_check = vars_copy ? vars_copy : variables;
+        const me_variable_ex* vars_check = vars_copy ? vars_copy : variables;
         bool complex_vars = false;
         if (vars_check) {
             for (int i = 0; i < var_count; i++) {
@@ -2133,6 +2221,9 @@ static int private_compile(const char* expression, const me_variable* variables,
             if (*error == 0) *error = 1;
         }
         if (vars_copy) free(vars_copy);
+        if (s.str_data) {
+            free((void*)s.str_data);
+        }
         return ME_COMPILE_ERR_PARSE;
     }
     else {
@@ -2281,11 +2372,11 @@ static void dsl_scan_reserved_usage_block(const me_dsl_block *block, int *uses_i
     }
 }
 
-static bool dsl_build_var_lookup(const me_dsl_var_table *table, me_variable **out_vars) {
+static bool dsl_build_var_lookup(const me_dsl_var_table *table, me_variable_ex **out_vars) {
     if (!table || !out_vars) {
         return false;
     }
-    me_variable *vars = calloc((size_t)table->count, sizeof(*vars));
+    me_variable_ex *vars = calloc((size_t)table->count, sizeof(*vars));
     if (!vars) {
         return false;
     }
@@ -2295,6 +2386,7 @@ static bool dsl_build_var_lookup(const me_dsl_var_table *table, me_variable **ou
         vars[i].address = &synthetic_var_addresses[i];
         vars[i].type = ME_VARIABLE;
         vars[i].context = NULL;
+        vars[i].itemsize = table->itemsizes ? table->itemsizes[i] : 0;
     }
     *out_vars = vars;
     return true;
@@ -2326,14 +2418,14 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
         return false;
     }
     memset(out_expr, 0, sizeof(*out_expr));
-    me_variable *lookup = NULL;
+    me_variable_ex *lookup = NULL;
     if (!dsl_build_var_lookup(&ctx->program->vars, &lookup)) {
         return false;
     }
     me_expr *compiled = NULL;
     int local_error = 0;
-    int rc = private_compile(expr_node->text, lookup, ctx->program->vars.count,
-                             NULL, 0, expr_dtype, &local_error, &compiled);
+    int rc = private_compile_ex(expr_node->text, lookup, ctx->program->vars.count,
+                                NULL, 0, expr_dtype, &local_error, &compiled);
     free(lookup);
     if (rc != ME_COMPILE_SUCCESS || !compiled) {
         if (ctx->error_pos) {
@@ -2417,7 +2509,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
 
             if (var_index < 0) {
                 var_index = dsl_var_table_add_with_uniform(&ctx->program->vars, name,
-                                                           assigned_dtype, is_uniform);
+                                                           assigned_dtype, 0, is_uniform);
                 if (var_index < 0) {
                     dsl_compiled_stmt_free(compiled);
                     return false;
@@ -2479,7 +2571,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
-            var_index = dsl_var_table_add_with_uniform(&ctx->program->vars, var, ME_INT64, true);
+            var_index = dsl_var_table_add_with_uniform(&ctx->program->vars, var, ME_INT64, 0, true);
             if (var_index < 0) {
                 dsl_compiled_stmt_free(compiled);
                 return false;
@@ -2545,7 +2637,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
 }
 
 static me_dsl_compiled_program *dsl_compile_program(const char *source,
-                                                    const me_variable *variables,
+                                                    const me_variable_ex *variables,
                                                     int var_count,
                                                     me_dtype dtype,
                                                     int *error_pos,
@@ -2615,7 +2707,11 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
         if (vtype == ME_AUTO && dtype != ME_AUTO) {
             vtype = dtype;
         }
-        int idx = dsl_var_table_add(&program->vars, name, vtype);
+        size_t itemsize = 0;
+        if (variables[i].dtype == ME_STRING) {
+            itemsize = variables[i].itemsize;
+        }
+        int idx = dsl_var_table_add_with_uniform(&program->vars, name, vtype, itemsize, false);
         if (idx < 0) {
             dsl_compiled_program_free(program);
             me_dsl_program_free(parsed);
@@ -2667,7 +2763,7 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
             char name[8];
             snprintf(name, sizeof(name), "_n%d", d);
             program->idx_n[d] = dsl_var_table_add_with_uniform(&program->vars, name, ME_INT64,
-                                                               true);
+                                                               0, true);
             if (program->idx_n[d] < 0) {
                 if (error_pos) {
                     *error_pos = -1;
@@ -2680,7 +2776,7 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     }
     if (uses_ndim) {
         program->idx_ndim = dsl_var_table_add_with_uniform(&program->vars, "_ndim", ME_INT64,
-                                                           true);
+                                                           0, true);
         if (program->idx_ndim < 0) {
             if (error_pos) {
                 *error_pos = -1;
@@ -2729,8 +2825,8 @@ int is_synthetic_address(const void* ptr) {
     return (p >= synthetic_var_addresses && p < synthetic_var_addresses + ME_MAX_VARS);
 }
 
-int me_compile(const char* expression, const me_variable* variables,
-               int var_count, me_dtype dtype, int* error, me_expr** out) {
+int me_compile_ex(const char* expression, const me_variable_ex* variables,
+                  int var_count, me_dtype dtype, int* error, me_expr** out) {
     if (out) *out = NULL;
     if (!expression || !out) {
         if (error) *error = -1;
@@ -2738,7 +2834,7 @@ int me_compile(const char* expression, const me_variable* variables,
     }
 
     if (dsl_is_candidate(expression)) {
-        me_variable *vars_dsl = NULL;
+        me_variable_ex *vars_dsl = NULL;
         if (variables && var_count > 0) {
             vars_dsl = malloc((size_t)var_count * sizeof(*vars_dsl));
             if (!vars_dsl) {
@@ -2781,7 +2877,7 @@ int me_compile(const char* expression, const me_variable* variables,
 
     // For chunked evaluation, we compile without specific output/nitems
     // If variables have NULL addresses, assign synthetic unique addresses for ordinal matching
-    me_variable* vars_copy = NULL;
+    me_variable_ex* vars_copy = NULL;
     int needs_synthetic = 0;
 
     if (variables && var_count > 0) {
@@ -2795,7 +2891,7 @@ int me_compile(const char* expression, const me_variable* variables,
 
         if (needs_synthetic) {
             // Create copy with synthetic addresses
-            vars_copy = malloc(var_count * sizeof(me_variable));
+            vars_copy = malloc(var_count * sizeof(me_variable_ex));
             if (!vars_copy) {
                 if (error) *error = -1;
                 return ME_COMPILE_ERR_OOM;
@@ -2809,20 +2905,45 @@ int me_compile(const char* expression, const me_variable* variables,
                 }
             }
 
-            int status = private_compile(expression, vars_copy, var_count, NULL, 0, dtype, error, out);
+            int status = private_compile_ex(expression, vars_copy, var_count, NULL, 0, dtype, error, out);
             free(vars_copy);
             return status;
         }
     }
 
     // No NULL addresses, use variables as-is
-    return private_compile(expression, variables, var_count, NULL, 0, dtype, error, out);
+    return private_compile_ex(expression, variables, var_count, NULL, 0, dtype, error, out);
 }
 
-int me_compile_nd(const char* expression, const me_variable* variables,
-                  int var_count, me_dtype dtype, int ndims,
-                  const int64_t* shape, const int32_t* chunkshape,
-                  const int32_t* blockshape, int* error, me_expr** out) {
+int me_compile(const char* expression, const me_variable* variables,
+               int var_count, me_dtype dtype, int* error, me_expr** out) {
+    if (!variables || var_count <= 0) {
+        return me_compile_ex(expression, NULL, var_count, dtype, error, out);
+    }
+
+    me_variable_ex* vars_ex = malloc((size_t)var_count * sizeof(*vars_ex));
+    if (!vars_ex) {
+        if (error) *error = -1;
+        return ME_COMPILE_ERR_OOM;
+    }
+    for (int i = 0; i < var_count; i++) {
+        vars_ex[i].name = variables[i].name;
+        vars_ex[i].dtype = variables[i].dtype;
+        vars_ex[i].address = variables[i].address;
+        vars_ex[i].type = variables[i].type;
+        vars_ex[i].context = variables[i].context;
+        vars_ex[i].itemsize = 0;
+    }
+
+    int rc = me_compile_ex(expression, vars_ex, var_count, dtype, error, out);
+    free(vars_ex);
+    return rc;
+}
+
+int me_compile_nd_ex(const char* expression, const me_variable_ex* variables,
+                     int var_count, me_dtype dtype, int ndims,
+                     const int64_t* shape, const int32_t* chunkshape,
+                     const int32_t* blockshape, int* error, me_expr** out) {
     if (out) *out = NULL;
     if (!expression || !out || ndims <= 0 || !shape || !chunkshape || !blockshape) {
         if (error) *error = -1;
@@ -2837,7 +2958,7 @@ int me_compile_nd(const char* expression, const me_variable* variables,
     }
 
     me_expr* expr = NULL;
-    int rc = me_compile(expression, variables, var_count, dtype, error, &expr);
+    int rc = me_compile_ex(expression, variables, var_count, dtype, error, &expr);
     if (rc != ME_COMPILE_SUCCESS) {
         return rc;
     }
@@ -2870,6 +2991,35 @@ int me_compile_nd(const char* expression, const me_variable* variables,
     return rc;
 }
 
+int me_compile_nd(const char* expression, const me_variable* variables,
+                  int var_count, me_dtype dtype, int ndims,
+                  const int64_t* shape, const int32_t* chunkshape,
+                  const int32_t* blockshape, int* error, me_expr** out) {
+    if (!variables || var_count <= 0) {
+        return me_compile_nd_ex(expression, NULL, var_count, dtype, ndims,
+                                shape, chunkshape, blockshape, error, out);
+    }
+
+    me_variable_ex* vars_ex = malloc((size_t)var_count * sizeof(*vars_ex));
+    if (!vars_ex) {
+        if (error) *error = -1;
+        return ME_COMPILE_ERR_OOM;
+    }
+    for (int i = 0; i < var_count; i++) {
+        vars_ex[i].name = variables[i].name;
+        vars_ex[i].dtype = variables[i].dtype;
+        vars_ex[i].address = variables[i].address;
+        vars_ex[i].type = variables[i].type;
+        vars_ex[i].context = variables[i].context;
+        vars_ex[i].itemsize = 0;
+    }
+
+    int rc = me_compile_nd_ex(expression, vars_ex, var_count, dtype, ndims,
+                              shape, chunkshape, blockshape, error, out);
+    free(vars_ex);
+    return rc;
+}
+
 static void pn(const me_expr* n, int depth) {
     int i, arity;
     printf("%*s", depth, "");
@@ -2881,6 +3031,8 @@ static void pn(const me_expr* n, int depth) {
 
     switch (TYPE_MASK(n->type)) {
     case ME_CONSTANT: printf("%f\n", n->value);
+        break;
+    case ME_STRING_CONSTANT: printf("<string>\n");
         break;
     case ME_VARIABLE: printf("bound %p\n", n->bound);
         break;
@@ -3602,6 +3754,9 @@ int me_eval_nd(const me_expr* expr, const void** vars_block,
                int64_t nchunk, int64_t nblock, const me_eval_params* params) {
     if (!expr) {
         return ME_EVAL_ERR_NULL_EXPR;
+    }
+    if (expr->dtype == ME_STRING) {
+        return ME_EVAL_ERR_INVALID_ARG;
     }
     if (expr->dsl_program) {
         return me_eval_dsl_nd(expr, vars_block, n_vars, output_block, block_nitems, nchunk, nblock, params);

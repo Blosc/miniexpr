@@ -435,6 +435,7 @@ size_t dtype_size(me_dtype dtype) {
     case ME_FLOAT64: return sizeof(double);
     case ME_COMPLEX64: return sizeof(float _Complex);
     case ME_COMPLEX128: return sizeof(double _Complex);
+    case ME_STRING: return 0;
     default: return 0;
     }
 }
@@ -565,6 +566,10 @@ double where_scalar(double c, double x, double y) {
 
 double real_wrapper(double x) { return x; }
 
+static double str_startswith(double a, double b);
+static double str_endswith(double a, double b);
+static double str_contains(double a, double b);
+
 static double fac(double a) {
     /* simplest version of fac */
     if (a < 0.0)
@@ -603,7 +608,7 @@ static double npr(double n, double r) { return ncr(n, r) * fac(r); }
 #pragma function (floor)
 #endif
 
-static const me_variable functions[] = {
+static const me_variable_ex functions[] = {
     /* must be in alphabetical order */
     /* Format: {name, dtype, address, type, context} */
     {"abs", 0, fabs, ME_FUNCTION1 | ME_FLAG_PURE, 0},
@@ -626,11 +631,13 @@ static const me_variable functions[] = {
     {"cbrt", 0, cbrt, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"ceil", 0, ceil, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"conj", 0, conj_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"contains", 0, str_contains, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"copysign", 0, copysign, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"cos", 0, cos, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"cosh", 0, cosh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"cospi", 0, cospi_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"e", 0, e, ME_FUNCTION0 | ME_FLAG_PURE, 0},
+    {"endswith", 0, str_endswith, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"erf", 0, erf, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"erfc", 0, erfc, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"exp", 0, exp, ME_FUNCTION1 | ME_FLAG_PURE, 0},
@@ -676,6 +683,7 @@ static const me_variable functions[] = {
     {"sinpi", 0, sinpi_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"sqrt", 0, sqrt, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"square", 0, square, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"startswith", 0, str_startswith, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"sum", 0, sum_reduce, ME_FUNCTION1, 0},
     {"tan", 0, tan, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"tanh", 0, tanh, ME_FUNCTION1 | ME_FLAG_PURE, 0},
@@ -685,9 +693,9 @@ static const me_variable functions[] = {
     {0, 0, 0, 0, 0}
 };
 
-static const me_variable* find_builtin(const char* name, int len) {
+static const me_variable_ex* find_builtin(const char* name, int len) {
     int imin = 0;
-    int imax = sizeof(functions) / sizeof(me_variable) - 2;
+    int imax = sizeof(functions) / sizeof(me_variable_ex) - 2;
 
     /*Binary search.*/
     while (imax >= imin) {
@@ -708,9 +716,9 @@ static const me_variable* find_builtin(const char* name, int len) {
     return 0;
 }
 
-static const me_variable* find_lookup(const state* s, const char* name, int len) {
+static const me_variable_ex* find_lookup(const state* s, const char* name, int len) {
     int iters;
-    const me_variable* var;
+    const me_variable_ex* var;
     if (!s->lookup) return 0;
 
     for (var = s->lookup, iters = s->lookup_len; iters; ++var, --iters) {
@@ -2149,15 +2157,161 @@ static double cmp_le(double a, double b) { return a <= b ? 1.0 : 0.0; }
 static double cmp_gt(double a, double b) { return a > b ? 1.0 : 0.0; }
 static double cmp_ge(double a, double b) { return a >= b ? 1.0 : 0.0; }
 
+static double str_startswith(double a, double b) { (void)a; (void)b; return 0.0; }
+static double str_endswith(double a, double b) { (void)a; (void)b; return 0.0; }
+static double str_contains(double a, double b) { (void)a; (void)b; return 0.0; }
+
 static bool is_comparison_function(const void* func) {
     return func == (void*)cmp_eq || func == (void*)cmp_ne ||
         func == (void*)cmp_lt || func == (void*)cmp_le ||
         func == (void*)cmp_gt || func == (void*)cmp_ge;
 }
 
+static bool is_string_function(const void* func) {
+    return func == (void*)str_startswith || func == (void*)str_endswith ||
+        func == (void*)str_contains;
+}
+
 bool is_comparison_node(const me_expr* n) {
     return n && IS_FUNCTION(n->type) && ARITY(n->type) == 2 &&
         is_comparison_function(n->function);
+}
+
+static bool is_string_node(const me_expr* n) {
+    if (!n) return false;
+    if (TYPE_MASK(n->type) == ME_STRING_CONSTANT) return true;
+    return TYPE_MASK(n->type) == ME_VARIABLE && n->dtype == ME_STRING;
+}
+
+static size_t string_len_u32(const uint32_t* s, size_t max_units) {
+    size_t len = 0;
+    if (!s) return 0;
+    while (len < max_units && s[len] != 0) {
+        len++;
+    }
+    return len;
+}
+
+static bool string_view_at(const me_expr* n, int idx, const uint32_t** data, size_t* len) {
+    if (!n || !data || !len) return false;
+    if (TYPE_MASK(n->type) == ME_STRING_CONSTANT) {
+        *data = (const uint32_t*)n->bound;
+        *len = n->str_len;
+        return *data != NULL;
+    }
+    if (TYPE_MASK(n->type) == ME_VARIABLE && n->dtype == ME_STRING) {
+        if (n->itemsize == 0 || (n->itemsize % sizeof(uint32_t)) != 0) {
+            return false;
+        }
+        const char* base = (const char*)n->bound + (size_t)idx * n->itemsize;
+        const uint32_t* s = (const uint32_t*)base;
+        size_t max_units = n->itemsize / sizeof(uint32_t);
+        *data = s;
+        *len = string_len_u32(s, max_units);
+        return true;
+    }
+    return false;
+}
+
+static bool string_equals(const uint32_t* a, size_t alen, const uint32_t* b, size_t blen) {
+    if (alen != blen) return false;
+    if (alen == 0) return true;
+    return memcmp(a, b, alen * sizeof(uint32_t)) == 0;
+}
+
+static bool string_starts_with(const uint32_t* s, size_t slen, const uint32_t* prefix, size_t plen) {
+    if (plen > slen) return false;
+    if (plen == 0) return true;
+    return memcmp(s, prefix, plen * sizeof(uint32_t)) == 0;
+}
+
+static bool string_ends_with(const uint32_t* s, size_t slen, const uint32_t* suffix, size_t plen) {
+    if (plen > slen) return false;
+    if (plen == 0) return true;
+    return memcmp(s + (slen - plen), suffix, plen * sizeof(uint32_t)) == 0;
+}
+
+static bool string_contains(const uint32_t* s, size_t slen, const uint32_t* needle, size_t nlen) {
+    if (nlen == 0) return true;
+    if (nlen > slen) return false;
+    for (size_t i = 0; i + nlen <= slen; i++) {
+        if (memcmp(s + i, needle, nlen * sizeof(uint32_t)) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool contains_string_node(const me_expr* n) {
+    if (!n) return false;
+    if (is_string_node(n)) return true;
+    if (IS_FUNCTION(n->type) || IS_CLOSURE(n->type)) {
+        const int arity = ARITY(n->type);
+        for (int i = 0; i < arity; i++) {
+            if (contains_string_node((const me_expr*)n->parameters[i])) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool validate_string_usage_node(const me_expr* n) {
+    if (!n) return true;
+    if (is_string_node(n)) return true;
+
+    if (IS_FUNCTION(n->type) || IS_CLOSURE(n->type)) {
+        const int arity = ARITY(n->type);
+
+        if (is_reduction_node(n)) {
+            const me_expr* arg = (const me_expr*)n->parameters[0];
+            if (arg && contains_string_node(arg)) {
+                return false;
+            }
+        }
+
+        if (is_string_function(n->function)) {
+            if (arity != 2) return false;
+            const me_expr* left = (const me_expr*)n->parameters[0];
+            const me_expr* right = (const me_expr*)n->parameters[1];
+            return is_string_node(left) && is_string_node(right);
+        }
+
+        if (is_comparison_node(n)) {
+            const me_expr* left = (const me_expr*)n->parameters[0];
+            const me_expr* right = (const me_expr*)n->parameters[1];
+            const bool left_str = is_string_node(left);
+            const bool right_str = is_string_node(right);
+            if (left_str || right_str) {
+                if (!left_str || !right_str) {
+                    return false;
+                }
+                return n->function == (void*)cmp_eq || n->function == (void*)cmp_ne;
+            }
+        }
+
+        for (int i = 0; i < arity; i++) {
+            const me_expr* child = (const me_expr*)n->parameters[i];
+            if (is_string_node(child)) {
+                return false;
+            }
+            if (!validate_string_usage_node(child)) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+bool validate_string_usage(const me_expr* n) {
+    if (!validate_string_usage_node(n)) {
+        return false;
+    }
+    if (infer_output_type(n) == ME_STRING) {
+        return false;
+    }
+    return true;
 }
 
 /* Logical operators (for bool type) - short-circuit via OR/AND */
@@ -2205,6 +2359,10 @@ static bool eval_operand_to_type(me_expr* expr, me_dtype eval_type, int nitems,
     *temp = NULL;
     *is_const = false;
     *const_val = 0.0;
+
+    if (expr->type == ME_STRING_CONSTANT || expr->dtype == ME_STRING) {
+        return false;
+    }
 
     if (expr->type == ME_CONSTANT) {
         *is_const = true;
@@ -2334,6 +2492,93 @@ static bool compare_to_bool_output(const me_expr* n, me_dtype eval_type,
     return true;
 }
 
+static bool eval_string_predicate(const me_expr* n, bool* out, int nitems) {
+    if (!n || !out) return false;
+    if (!IS_FUNCTION(n->type) || ARITY(n->type) != 2) return false;
+
+    const me_expr* left = (const me_expr*)n->parameters[0];
+    const me_expr* right = (const me_expr*)n->parameters[1];
+    if (!is_string_node(left) || !is_string_node(right)) {
+        return false;
+    }
+
+    bool is_cmp = is_comparison_node(n);
+    bool is_func = is_string_function(n->function);
+    if (!is_cmp && !is_func) {
+        return false;
+    }
+
+    const uint32_t* lconst = NULL;
+    const uint32_t* rconst = NULL;
+    size_t lconst_len = 0;
+    size_t rconst_len = 0;
+    const bool left_const = (TYPE_MASK(left->type) == ME_STRING_CONSTANT);
+    const bool right_const = (TYPE_MASK(right->type) == ME_STRING_CONSTANT);
+
+    if (left_const) {
+        lconst = (const uint32_t*)left->bound;
+        lconst_len = left->str_len;
+    }
+    if (right_const) {
+        rconst = (const uint32_t*)right->bound;
+        rconst_len = right->str_len;
+    }
+
+    for (int i = 0; i < nitems; i++) {
+        const uint32_t* ldata = NULL;
+        const uint32_t* rdata = NULL;
+        size_t llen = 0;
+        size_t rlen = 0;
+
+        if (left_const) {
+            ldata = lconst;
+            llen = lconst_len;
+        }
+        else if (!string_view_at(left, i, &ldata, &llen)) {
+            return false;
+        }
+
+        if (right_const) {
+            rdata = rconst;
+            rlen = rconst_len;
+        }
+        else if (!string_view_at(right, i, &rdata, &rlen)) {
+            return false;
+        }
+
+        bool result = false;
+        if (is_cmp) {
+            if (n->function == (void*)cmp_eq) {
+                result = string_equals(ldata, llen, rdata, rlen);
+            }
+            else if (n->function == (void*)cmp_ne) {
+                result = !string_equals(ldata, llen, rdata, rlen);
+            }
+            else {
+                return false;
+            }
+        }
+        else {
+            if (n->function == (void*)str_startswith) {
+                result = string_starts_with(ldata, llen, rdata, rlen);
+            }
+            else if (n->function == (void*)str_endswith) {
+                result = string_ends_with(ldata, llen, rdata, rlen);
+            }
+            else if (n->function == (void*)str_contains) {
+                result = string_contains(ldata, llen, rdata, rlen);
+            }
+            else {
+                return false;
+            }
+        }
+
+        out[i] = result;
+    }
+
+    return true;
+}
+
 static bool eval_bool_expr(me_expr* n) {
     if (!n || !n->output) return false;
 
@@ -2348,6 +2593,9 @@ static bool eval_bool_expr(me_expr* n) {
 
     if (n->type == ME_VARIABLE) {
         bool* out = (bool*)n->output;
+        if (n->dtype == ME_STRING) {
+            return false;
+        }
         if (n->dtype == ME_BOOL) {
             const bool* src = (const bool*)n->bound;
             for (int i = 0; i < n->nitems; i++) {
@@ -2363,6 +2611,9 @@ static bool eval_bool_expr(me_expr* n) {
     }
 
     if (IS_FUNCTION(n->type) && is_comparison_node(n)) {
+        if (eval_string_predicate(n, (bool*)n->output, n->nitems)) {
+            return true;
+        }
         me_expr* left = (me_expr*)n->parameters[0];
         me_expr* right = (me_expr*)n->parameters[1];
         if (!left || !right) return false;
@@ -2391,6 +2642,10 @@ static bool eval_bool_expr(me_expr* n) {
         free(ltemp);
         free(rtemp);
         return ok;
+    }
+
+    if (IS_FUNCTION(n->type) && is_string_function(n->function)) {
+        return eval_string_predicate(n, (bool*)n->output, n->nitems);
     }
 
     if (IS_FUNCTION(n->type) && is_logical_function(n->function)) {
@@ -2443,6 +2698,10 @@ static bool eval_bool_expr(me_expr* n) {
             }
             return true;
         }
+    }
+
+    if (IS_FUNCTION(n->type) && is_string_function(n->function)) {
+        return eval_string_predicate(n, (bool*)n->output, n->nitems);
     }
 
     return false;
@@ -2503,6 +2762,153 @@ static void read_number_token(state* s) {
     }
 }
 
+static bool read_hex_codepoint(const char** p, int digits, uint32_t* out) {
+    uint32_t value = 0;
+    for (int i = 0; i < digits; i++) {
+        char c = (*p)[i];
+        uint32_t v;
+        if (c >= '0' && c <= '9') v = (uint32_t)(c - '0');
+        else if (c >= 'a' && c <= 'f') v = (uint32_t)(10 + c - 'a');
+        else if (c >= 'A' && c <= 'F') v = (uint32_t)(10 + c - 'A');
+        else return false;
+        value = (value << 4) | v;
+    }
+    *p += digits;
+    if (value > 0x10FFFFu || (value >= 0xD800u && value <= 0xDFFFu)) {
+        return false;
+    }
+    *out = value;
+    return true;
+}
+
+static bool read_utf8_codepoint(const char** p, uint32_t* out) {
+    const unsigned char* s = (const unsigned char*)*p;
+    if (s[0] < 0x80) {
+        *out = s[0];
+        (*p)++;
+        return true;
+    }
+    if ((s[0] & 0xE0) == 0xC0) {
+        if ((s[1] & 0xC0) != 0x80) return false;
+        uint32_t cp = ((uint32_t)(s[0] & 0x1F) << 6) | (uint32_t)(s[1] & 0x3F);
+        if (cp < 0x80) return false;
+        *out = cp;
+        *p += 2;
+        return true;
+    }
+    if ((s[0] & 0xF0) == 0xE0) {
+        if ((s[1] & 0xC0) != 0x80 || (s[2] & 0xC0) != 0x80) return false;
+        uint32_t cp = ((uint32_t)(s[0] & 0x0F) << 12) |
+                      ((uint32_t)(s[1] & 0x3F) << 6) |
+                      (uint32_t)(s[2] & 0x3F);
+        if (cp < 0x800 || (cp >= 0xD800u && cp <= 0xDFFFu)) return false;
+        *out = cp;
+        *p += 3;
+        return true;
+    }
+    if ((s[0] & 0xF8) == 0xF0) {
+        if ((s[1] & 0xC0) != 0x80 || (s[2] & 0xC0) != 0x80 || (s[3] & 0xC0) != 0x80) return false;
+        uint32_t cp = ((uint32_t)(s[0] & 0x07) << 18) |
+                      ((uint32_t)(s[1] & 0x3F) << 12) |
+                      ((uint32_t)(s[2] & 0x3F) << 6) |
+                      (uint32_t)(s[3] & 0x3F);
+        if (cp < 0x10000 || cp > 0x10FFFFu) return false;
+        *out = cp;
+        *p += 4;
+        return true;
+    }
+    return false;
+}
+
+static void read_string_token(state* s) {
+    const char quote = *s->next;
+    const char* p = s->next + 1;
+    size_t cap = 16;
+    size_t len = 0;
+    uint32_t* buf = malloc(cap * sizeof(uint32_t));
+    if (!buf) {
+        s->type = TOK_ERROR;
+        return;
+    }
+
+    bool closed = false;
+    while (*p) {
+        if (*p == quote) {
+            p++;
+            closed = true;
+            break;
+        }
+
+        uint32_t cp = 0;
+        if (*p == '\\') {
+            p++;
+            if (!*p) {
+                free(buf);
+                s->type = TOK_ERROR;
+                return;
+            }
+            char esc = *p++;
+            switch (esc) {
+            case '\\': cp = '\\'; break;
+            case '"': cp = '"'; break;
+            case '\'': cp = '\''; break;
+            case 'n': cp = '\n'; break;
+            case 't': cp = '\t'; break;
+            case 'u':
+                if (!read_hex_codepoint(&p, 4, &cp)) {
+                    free(buf);
+                    s->type = TOK_ERROR;
+                    return;
+                }
+                break;
+            case 'U':
+                if (!read_hex_codepoint(&p, 8, &cp)) {
+                    free(buf);
+                    s->type = TOK_ERROR;
+                    return;
+                }
+                break;
+            default:
+                free(buf);
+                s->type = TOK_ERROR;
+                return;
+            }
+        }
+        else {
+            if (!read_utf8_codepoint(&p, &cp)) {
+                free(buf);
+                s->type = TOK_ERROR;
+                return;
+            }
+        }
+
+        if (len + 1 >= cap) {
+            size_t next_cap = cap * 2;
+            uint32_t* next_buf = realloc(buf, next_cap * sizeof(uint32_t));
+            if (!next_buf) {
+                free(buf);
+                s->type = TOK_ERROR;
+                return;
+            }
+            buf = next_buf;
+            cap = next_cap;
+        }
+        buf[len++] = cp;
+    }
+
+    if (!closed) {
+        free(buf);
+        s->type = TOK_ERROR;
+        return;
+    }
+
+    buf[len++] = 0;
+    s->str_data = buf;
+    s->str_len = len - 1;
+    s->type = TOK_STRING;
+    s->next = p;
+}
+
 static void read_identifier_token(state* s) {
     const char* start = s->next;
     while (is_identifier_char(*s->next)) {
@@ -2513,20 +2919,23 @@ static void read_identifier_token(state* s) {
     if (len == 3 && strncmp(start, "and", len) == 0) {
         s->type = TOK_LOGICAL_AND;
         s->function = logical_and;
+        s->itemsize = 0;
         return;
     }
     if (len == 2 && strncmp(start, "or", len) == 0) {
         s->type = TOK_LOGICAL_OR;
         s->function = logical_or;
+        s->itemsize = 0;
         return;
     }
     if (len == 3 && strncmp(start, "not", len) == 0) {
         s->type = TOK_LOGICAL_NOT;
         s->function = logical_not;
+        s->itemsize = 0;
         return;
     }
 
-    const me_variable* var = find_lookup(s, start, s->next - start);
+    const me_variable_ex* var = find_lookup(s, start, s->next - start);
     if (!var) {
         var = find_builtin(start, s->next - start);
     }
@@ -2541,6 +2950,7 @@ static void read_identifier_token(state* s) {
         s->type = TOK_VARIABLE;
         s->bound = var->address;
         s->dtype = var->dtype;
+        s->itemsize = var->itemsize;
         break;
 
     case ME_CLOSURE0:
@@ -2563,6 +2973,7 @@ static void read_identifier_token(state* s) {
     case ME_FUNCTION7:
         s->type = var->type;
         s->function = var->address;
+        s->itemsize = 0;
         break;
     }
 }
@@ -2673,7 +3084,10 @@ void next_token(state* s) {
             return;
         }
 
-        if ((s->next[0] >= '0' && s->next[0] <= '9') || s->next[0] == '.') {
+        if (s->next[0] == '"' || s->next[0] == '\'') {
+            read_string_token(s);
+        }
+        else if ((s->next[0] >= '0' && s->next[0] <= '9') || s->next[0] == '.') {
             read_number_token(s);
         }
         else if (is_identifier_start(s->next[0])) {
@@ -2712,10 +3126,10 @@ static me_expr* logical_or_expr(state* s);
 
 static me_expr* base(state* s) {
     /* <base>      =    <constant> | <variable> | <function-0> {"(" ")"} | <function-1> <power> | <function-X> "(" <expr> {"," <expr>} ")" | "(" <list> ")" */
-    me_expr* ret;
+    me_expr* ret = NULL;
     int arity;
 
-    switch (TYPE_MASK(s->type)) {
+    switch (s->type) {
     case TOK_NUMBER:
         ret = new_expr(ME_CONSTANT, 0);
         CHECK_NULL(ret);
@@ -2749,6 +3163,21 @@ static me_expr* base(state* s) {
         next_token(s);
         break;
 
+    case TOK_STRING:
+        ret = new_expr(ME_STRING_CONSTANT, 0);
+        CHECK_NULL(ret);
+
+        ret->bound = s->str_data;
+        ret->dtype = ME_STRING;
+        ret->input_dtype = ME_STRING;
+        ret->itemsize = (s->str_len + 1) * sizeof(uint32_t);
+        ret->str_len = s->str_len;
+        ret->flags |= ME_EXPR_FLAG_OWNS_STRING;
+        s->str_data = NULL;
+        s->str_len = 0;
+        next_token(s);
+        break;
+
     case TOK_VARIABLE:
         ret = new_expr(ME_VARIABLE, 0);
         CHECK_NULL(ret);
@@ -2756,84 +3185,8 @@ static me_expr* base(state* s) {
         ret->bound = s->bound;
         ret->dtype = s->dtype; // Set the variable's type
         ret->input_dtype = s->dtype;
+        ret->itemsize = s->itemsize;
         next_token(s);
-        break;
-
-    case ME_FUNCTION0:
-    case ME_CLOSURE0:
-        ret = new_expr(s->type, 0);
-        CHECK_NULL(ret);
-
-        ret->function = s->function;
-        if (IS_CLOSURE(s->type)) ret->parameters[0] = s->context;
-        next_token(s);
-        if (s->type == TOK_OPEN) {
-            next_token(s);
-            if (s->type != TOK_CLOSE) {
-                s->type = TOK_ERROR;
-            }
-            else {
-                next_token(s);
-            }
-        }
-        break;
-
-    case ME_FUNCTION1:
-    case ME_CLOSURE1:
-        ret = new_expr(s->type, 0);
-        CHECK_NULL(ret);
-
-        ret->function = s->function;
-        if (IS_CLOSURE(s->type)) ret->parameters[1] = s->context;
-        next_token(s);
-        ret->parameters[0] = power(s);
-        CHECK_NULL(ret->parameters[0], me_free(ret));
-        break;
-
-    case ME_FUNCTION2:
-    case ME_FUNCTION3:
-    case ME_FUNCTION4:
-    case ME_FUNCTION5:
-    case ME_FUNCTION6:
-    case ME_FUNCTION7:
-    case ME_CLOSURE2:
-    case ME_CLOSURE3:
-    case ME_CLOSURE4:
-    case ME_CLOSURE5:
-    case ME_CLOSURE6:
-    case ME_CLOSURE7:
-        arity = ARITY(s->type);
-
-        ret = new_expr(s->type, 0);
-        CHECK_NULL(ret);
-
-        ret->function = s->function;
-        if (IS_CLOSURE(s->type)) ret->parameters[arity] = s->context;
-        next_token(s);
-
-        if (s->type != TOK_OPEN) {
-            s->type = TOK_ERROR;
-        }
-        else {
-            int i;
-            for (i = 0; i < arity; i++) {
-                next_token(s);
-                /* Allow full comparison expressions inside multi-arg function calls. */
-                ret->parameters[i] = comparison(s);
-                CHECK_NULL(ret->parameters[i], me_free(ret));
-
-                if (s->type != TOK_SEP) {
-                    break;
-                }
-            }
-            if (s->type != TOK_CLOSE || i != arity - 1) {
-                s->type = TOK_ERROR;
-            }
-            else {
-                next_token(s);
-            }
-        }
-
         break;
 
     case TOK_OPEN:
@@ -2850,14 +3203,112 @@ static me_expr* base(state* s) {
         break;
 
     default:
-        ret = new_expr(0, 0);
-        CHECK_NULL(ret);
-
-        s->type = TOK_ERROR;
-        ret->value = NAN;
         break;
     }
 
+    if (ret) {
+        return ret;
+    }
+
+    if (IS_FUNCTION(s->type) || IS_CLOSURE(s->type)) {
+        switch (TYPE_MASK(s->type)) {
+        case ME_FUNCTION0:
+        case ME_CLOSURE0:
+            ret = new_expr(s->type, 0);
+            CHECK_NULL(ret);
+
+            ret->function = s->function;
+            if (IS_CLOSURE(s->type)) ret->parameters[0] = s->context;
+            next_token(s);
+            if (s->type == TOK_OPEN) {
+                next_token(s);
+                if (s->type != TOK_CLOSE) {
+                    s->type = TOK_ERROR;
+                }
+                else {
+                    next_token(s);
+                }
+            }
+            break;
+
+        case ME_FUNCTION1:
+        case ME_CLOSURE1:
+            ret = new_expr(s->type, 0);
+            CHECK_NULL(ret);
+
+            ret->function = s->function;
+            if (IS_CLOSURE(s->type)) ret->parameters[1] = s->context;
+            next_token(s);
+            ret->parameters[0] = power(s);
+            CHECK_NULL(ret->parameters[0], me_free(ret));
+            break;
+
+        case ME_FUNCTION2:
+        case ME_FUNCTION3:
+        case ME_FUNCTION4:
+        case ME_FUNCTION5:
+        case ME_FUNCTION6:
+        case ME_FUNCTION7:
+        case ME_CLOSURE2:
+        case ME_CLOSURE3:
+        case ME_CLOSURE4:
+        case ME_CLOSURE5:
+        case ME_CLOSURE6:
+        case ME_CLOSURE7:
+            arity = ARITY(s->type);
+
+            ret = new_expr(s->type, 0);
+            CHECK_NULL(ret);
+
+            ret->function = s->function;
+            if (IS_CLOSURE(s->type)) ret->parameters[arity] = s->context;
+            next_token(s);
+
+            if (s->type != TOK_OPEN) {
+                s->type = TOK_ERROR;
+            }
+            else {
+                int i;
+                for (i = 0; i < arity; i++) {
+                    next_token(s);
+                    /* Allow full comparison expressions inside multi-arg function calls. */
+                    ret->parameters[i] = comparison(s);
+                    CHECK_NULL(ret->parameters[i], me_free(ret));
+
+                    if (s->type != TOK_SEP) {
+                        break;
+                    }
+                }
+                if (s->type != TOK_CLOSE || i != arity - 1) {
+                    s->type = TOK_ERROR;
+                }
+                else {
+                    next_token(s);
+                }
+            }
+
+            if (is_string_function(ret->function)) {
+                ret->dtype = ME_BOOL;
+            }
+
+            break;
+
+        default:
+            ret = new_expr(0, 0);
+            CHECK_NULL(ret);
+
+            s->type = TOK_ERROR;
+            ret->value = NAN;
+            break;
+        }
+        return ret;
+    }
+
+    ret = new_expr(0, 0);
+    CHECK_NULL(ret);
+
+    s->type = TOK_ERROR;
+    ret->value = NAN;
     return ret;
 }
 
@@ -3201,7 +3652,10 @@ static double me_eval_scalar(const me_expr* n) {
 
     switch (TYPE_MASK(n->type)) {
     case ME_CONSTANT: return n->value;
-    case ME_VARIABLE: return *(const double*)n->bound;
+    case ME_STRING_CONSTANT: return NAN;
+    case ME_VARIABLE:
+        if (n->dtype == ME_STRING) return NAN;
+        return *(const double*)n->bound;
 
     case ME_FUNCTION0:
     case ME_FUNCTION1:
@@ -3836,6 +4290,7 @@ DEFINE_VEC_CONVERT(c64, c128, float _Complex, double _Complex)
 static convert_func_t get_convert_func(me_dtype from, me_dtype to) {
     /* Return conversion function for a specific type pair */
     if (from == to) return NULL; // No conversion needed
+    if (from == ME_STRING || to == ME_STRING) return NULL;
 
 #define CONV_CASE(FROM, TO, FROM_S, TO_S) \
         if (from == FROM && to == TO) return (convert_func_t)vec_convert_##FROM_S##_to_##TO_S;
@@ -4008,6 +4463,46 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                     } \
                 } \
                 break; \
+            } \
+            \
+            if (IS_FUNCTION(n->type) && arity == 2 && \
+                (is_comparison_node(n) || is_string_function(n->function))) { \
+                me_expr *left = (me_expr*)n->parameters[0]; \
+                me_expr *right = (me_expr*)n->parameters[1]; \
+                if (is_string_node(left) && is_string_node(right)) { \
+                    for (i = 0; i < n->nitems; i++) { \
+                        const uint32_t *ldata = NULL; \
+                        const uint32_t *rdata = NULL; \
+                        size_t llen = 0; \
+                        size_t rlen = 0; \
+                        if (!string_view_at(left, i, &ldata, &llen) || \
+                            !string_view_at(right, i, &rdata, &rlen)) { \
+                            return; \
+                        } \
+                        bool result = false; \
+                        if (is_comparison_node(n)) { \
+                            if (n->function == (void*)cmp_eq) { \
+                                result = string_equals(ldata, llen, rdata, rlen); \
+                            } else if (n->function == (void*)cmp_ne) { \
+                                result = !string_equals(ldata, llen, rdata, rlen); \
+                            } else { \
+                                return; \
+                            } \
+                        } else { \
+                            if (n->function == (void*)str_startswith) { \
+                                result = string_starts_with(ldata, llen, rdata, rlen); \
+                            } else if (n->function == (void*)str_endswith) { \
+                                result = string_ends_with(ldata, llen, rdata, rlen); \
+                            } else if (n->function == (void*)str_contains) { \
+                                result = string_contains(ldata, llen, rdata, rlen); \
+                            } else { \
+                                return; \
+                            } \
+                        } \
+                        output[i] = result ? TO_TYPE_##SUFFIX(1) : TO_TYPE_##SUFFIX(0); \
+                    } \
+                    break; \
+                } \
             } \
             \
             for (j = 0; j < arity; j++) { \
@@ -6248,20 +6743,32 @@ static void private_eval(const me_expr* n) {
 
     // Infer the result type from the expression tree
     me_dtype result_type = infer_result_type(n);
+    const bool has_string = contains_string_node(n);
 
     // Fast path for boolean expressions: compute directly into bool output
     if (n->dtype == ME_BOOL && infer_output_type(n) == ME_BOOL) {
-        promoted_var_t promotions[ME_MAX_VARS];
-        int promo_count = 0;
+        if (!has_string) {
+            promoted_var_t promotions[ME_MAX_VARS];
+            int promo_count = 0;
 
-        const void* original_bounds[ME_MAX_VARS];
-        me_dtype original_types[ME_MAX_VARS];
-        int save_idx = 0;
+            const void* original_bounds[ME_MAX_VARS];
+            me_dtype original_types[ME_MAX_VARS];
+            int save_idx = 0;
 
-        save_variable_bindings(n, original_bounds, original_types, &save_idx);
-        promote_variables_in_tree((me_expr*)n, result_type, promotions, &promo_count, n->nitems);
+            save_variable_bindings(n, original_bounds, original_types, &save_idx);
+            promote_variables_in_tree((me_expr*)n, result_type, promotions, &promo_count, n->nitems);
 
-        if (!eval_bool_expr((me_expr*)n)) {
+            if (!eval_bool_expr((me_expr*)n)) {
+                int restore_idx = 0;
+                restore_variables_in_tree((me_expr*)n, original_bounds, original_types, &restore_idx);
+                for (int i = 0; i < promo_count; i++) {
+                    if (promotions[i].needs_free) {
+                        free(promotions[i].promoted_data);
+                    }
+                }
+                goto fallback_eval;
+            }
+
             int restore_idx = 0;
             restore_variables_in_tree((me_expr*)n, original_bounds, original_types, &restore_idx);
             for (int i = 0; i < promo_count; i++) {
@@ -6269,17 +6776,46 @@ static void private_eval(const me_expr* n) {
                     free(promotions[i].promoted_data);
                 }
             }
-            goto fallback_eval;
+            return;
         }
 
-        int restore_idx = 0;
-        restore_variables_in_tree((me_expr*)n, original_bounds, original_types, &restore_idx);
-        for (int i = 0; i < promo_count; i++) {
-            if (promotions[i].needs_free) {
-                free(promotions[i].promoted_data);
-            }
+        if (eval_bool_expr((me_expr*)n)) {
+            return;
         }
-        return;
+        goto fallback_eval;
+    }
+
+    if (has_string) {
+        switch (n->dtype) {
+        case ME_BOOL: me_eval_i8(n);
+            return;
+        case ME_INT8: me_eval_i8(n);
+            return;
+        case ME_INT16: me_eval_i16(n);
+            return;
+        case ME_INT32: me_eval_i32(n);
+            return;
+        case ME_INT64: me_eval_i64(n);
+            return;
+        case ME_UINT8: me_eval_u8(n);
+            return;
+        case ME_UINT16: me_eval_u16(n);
+            return;
+        case ME_UINT32: me_eval_u32(n);
+            return;
+        case ME_UINT64: me_eval_u64(n);
+            return;
+        case ME_FLOAT32: me_eval_f32(n);
+            return;
+        case ME_FLOAT64: me_eval_f64(n);
+            return;
+        case ME_COMPLEX64: me_eval_c64(n);
+            return;
+        case ME_COMPLEX128: me_eval_c128(n);
+            return;
+        default:
+            return;
+        }
     }
 
 fallback_eval:
@@ -6556,7 +7092,12 @@ static void save_variable_metadata(const me_expr* node, const void** var_pointer
             if (var_pointers[i] == node->bound) return; // Already saved
         }
         var_pointers[*var_count] = node->bound;
-        var_sizes[*var_count] = dtype_size(node->input_dtype);
+        if (node->dtype == ME_STRING && node->itemsize > 0) {
+            var_sizes[*var_count] = node->itemsize;
+        }
+        else {
+            var_sizes[*var_count] = dtype_size(node->input_dtype);
+        }
         (*var_count)++;
         break;
     case ME_FUNCTION0:
@@ -6780,6 +7321,9 @@ static me_expr* clone_expr(const me_expr* src) {
     clone->bytecode = NULL;
     clone->ncode = 0;
     clone->dsl_program = NULL;
+    if (TYPE_MASK(clone->type) == ME_STRING_CONSTANT) {
+        clone->flags &= ~ME_EXPR_FLAG_OWNS_STRING;
+    }
 
     return clone;
 }
@@ -6792,6 +7336,7 @@ int me_eval(const me_expr* expr, const void** vars_block,
             int n_vars, void* output_block, int block_nitems,
             const me_eval_params* params) {
     if (!expr) return ME_EVAL_ERR_NULL_EXPR;
+    if (expr->dtype == ME_STRING) return ME_EVAL_ERR_INVALID_ARG;
     if (expr->dsl_program) {
         return me_eval_dsl_program(expr, vars_block, n_vars, output_block, block_nitems, params);
     }
@@ -6943,6 +7488,7 @@ void optimize(me_expr* n) {
     /* Evaluates as much as possible. */
     if (!n) return;
     if (n->type == ME_CONSTANT) return;
+    if (n->type == ME_STRING_CONSTANT) return;
     if (n->type == ME_VARIABLE) return;
 
     /* Only optimize out functions flagged as pure. */

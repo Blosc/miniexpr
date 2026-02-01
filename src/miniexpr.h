@@ -38,6 +38,7 @@
 #define MINIEXPR_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -94,7 +95,10 @@ typedef enum {
 
     /* Complex (C99) */
     ME_COMPLEX64, /* float complex */
-    ME_COMPLEX128 /* double complex */
+    ME_COMPLEX128, /* double complex */
+
+    /* Fixed-size UCS4 strings (NUL-terminated, no embedded NULs) */
+    ME_STRING
 } me_dtype;
 
 /* Opaque type for compiled expressions */
@@ -120,6 +124,18 @@ typedef struct me_variable {
     int type; // ME_VARIABLE for user variables (0 = auto-set to ME_VARIABLE)
     void *context; // For closures/functions (NULL for normal variables)
 } me_variable;
+
+/* Extended variable definition with per-element byte size (required for ME_STRING).
+ * For numeric types, itemsize can be 0 to use the default dtype size.
+ */
+typedef struct me_variable_ex {
+    const char *name;
+    me_dtype dtype; // Data type of this variable (ME_AUTO = use output dtype)
+    const void *address; // Pointer to data (NULL for me_compile_ex)
+    int type; // ME_VARIABLE for user variables (0 = auto-set to ME_VARIABLE)
+    void *context; // For closures/functions (NULL for normal variables)
+    size_t itemsize; // Bytes per element (required for ME_STRING; 0 = default dtype size)
+} me_variable_ex;
 
 /* Note: When initializing variables, only name/dtype/address are typically needed.
  * Unspecified fields default to 0/NULL, which is correct for normal use:
@@ -171,6 +187,13 @@ typedef struct me_variable {
 int me_compile(const char *expression, const me_variable *variables,
                int var_count, me_dtype dtype, int *error, me_expr **out);
 
+/* Compile expression with extended variable metadata (itemsize for ME_STRING).
+ * For ME_STRING, itemsize must be a multiple of 4 (UCS4 codepoints) and include
+ * space for a trailing NUL codepoint.
+ */
+int me_compile_ex(const char *expression, const me_variable_ex *variables,
+                  int var_count, me_dtype dtype, int *error, me_expr **out);
+
 /* Compile expression with multidimensional metadata (b2nd-aware).
  * Additional parameters describe the logical array shape, chunkshape and
  * blockshape (all C-order). Padding is implied by these shapes.
@@ -187,6 +210,12 @@ int me_compile_nd(const char *expression, const me_variable *variables,
                   int var_count, me_dtype dtype, int ndims,
                   const int64_t *shape, const int32_t *chunkshape,
                   const int32_t *blockshape, int *error, me_expr **out);
+
+/* Compile expression with multidimensional metadata and extended variables. */
+int me_compile_nd_ex(const char *expression, const me_variable_ex *variables,
+                     int var_count, me_dtype dtype, int ndims,
+                     const int64_t *shape, const int32_t *chunkshape,
+                     const int32_t *blockshape, int *error, me_expr **out);
 
 /* Status codes for me_compile(). */
 typedef enum {
