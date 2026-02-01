@@ -40,7 +40,7 @@ int main() {
      *
      * This kernel demonstrates:
      * - Temporary variables (zr, zi, zr2, zi2, mag2)
-     * - For loop with iteration counter
+     * - For loop with iteration counter (Python-style syntax)
      * - Conditional break for early escape
      * - Complex arithmetic decomposed into real/imaginary parts
      *
@@ -54,8 +54,8 @@ int main() {
         "zi = 0.0\n"
         "escape_iter = 100.0\n"
         "\n"
-        "# Main iteration loop\n"
-        "for iter in range(100) {\n"
+        "# Main iteration loop (Python-style syntax)\n"
+        "for iter in range(100):\n"
         "    # Compute |z|^2 for escape test\n"
         "    zr2 = zr * zr\n"
         "    zi2 = zi * zi\n"
@@ -74,7 +74,6 @@ int main() {
         "    zi_new = 2.0 * zr * zi + ci\n"
         "    zr = zr_new\n"
         "    zi = zi_new\n"
-        "}\n"
         "\n"
         "# Output is the iteration count at escape\n"
         "result = escape_iter";

@@ -76,20 +76,18 @@ static int test_loop_break_continue(void) {
     }
 
     const char *src_break =
-        "sum = 0;\n"
-        "for i in range(5) {\n"
-        "  sum = sum + i;\n"
-        "  break if i == 2;\n"
-        "}\n"
-        "result = sum;\n";
+        "sum = 0\n"
+        "for i in range(5):\n"
+        "    sum = sum + i\n"
+        "    break if i == 2\n"
+        "result = sum\n";
 
     const char *src_continue =
-        "sum = 0;\n"
-        "for i in range(4) {\n"
-        "  continue if i == 1;\n"
-        "  sum = sum + i;\n"
-        "}\n"
-        "result = sum;\n";
+        "sum = 0\n"
+        "for i in range(4):\n"
+        "    continue if i == 1\n"
+        "    sum = sum + i\n"
+        "result = sum\n";
 
     int err = 0;
     me_expr *expr = NULL;
@@ -255,14 +253,12 @@ static int test_nested_loops_and_conditionals(void) {
     printf("\n=== DSL Test 7: nested loops + mixed-type conditions ===\n");
 
     const char *src =
-        "sum = 0;\n"
-        "for i in range(3) {\n"
-        "  for j in range(4) {\n"
-        "    continue if ((i + 0.5) > 1.0) & (j < 2);\n"
-        "    sum = sum + i + j;\n"
-        "  }\n"
-        "}\n"
-        "result = sum;\n";
+        "sum = 0\n"
+        "for i in range(3):\n"
+        "    for j in range(4):\n"
+        "        continue if ((i + 0.5) > 1.0) & (j < 2)\n"
+        "        sum = sum + i + j\n"
+        "result = sum\n";
 
     double out[5];
     double expected[5];
@@ -293,12 +289,11 @@ static int test_break_any_condition(void) {
     printf("\n=== DSL Test 8: break with array condition (any) ===\n");
 
     const char *src =
-        "sum = 0;\n"
-        "for i in range(5) {\n"
-        "  sum = sum + i;\n"
-        "  break if x > 0;\n"
-        "}\n"
-        "result = sum;\n";
+        "sum = 0\n"
+        "for i in range(5):\n"
+        "    sum = sum + i\n"
+        "    break if x > 0\n"
+        "result = sum\n";
 
     double x[4] = {-1.0, 2.0, -3.0, 0.0};
     double out[4];

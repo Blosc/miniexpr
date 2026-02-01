@@ -1,0 +1,277 @@
+# DSL Kernel Programming Guide
+
+This guide explains how to use the miniexpr Domain-Specific Language (DSL) for writing multi-statement expression kernels.
+
+## Overview
+
+The DSL extends single expressions to full programs with:
+- **Temporary variables** - Store intermediate results
+- **Multi-statement programs** - Combine multiple computations
+- **Element-wise conditionals** - Using `where(cond, true_val, false_val)`
+- **Loop constructs** - `for` loops with `break` and `continue`
+- **Index access** - Reference element positions via `_i0`, `_i1`, etc.
+
+## Basic Syntax
+
+### Statements
+
+A DSL program consists of one or more statements, separated by semicolons or newlines:
+
+```
+temp = sin(x) ** 2
+result = temp + cos(x) ** 2
+```
+
+The last statement's value becomes the output (or assign to `result` explicitly).
+
+### Temporary Variables
+
+Use any identifier to store intermediate values:
+
+```
+squared = x * x
+cubed = squared * x
+result = squared + cubed
+```
+
+Variables are element-wise arrays matching the input dimensions.
+
+### Element-wise Conditionals
+
+The `where()` function provides element-wise selection:
+
+```
+where(condition, value_if_true, value_if_false)
+```
+
+Example - clamping values:
+```
+clamped = where(x < 0, 0, where(x > 1, 1, x))
+```
+
+### Index Variables
+
+Access element positions using special variables:
+
+| Variable | Description |
+|----------|-------------|
+| `_i0`, `_i1`, ..., `_i7` | Current index in each dimension |
+| `_n0`, `_n1`, ..., `_n7` | Array shape in each dimension |
+| `_ndim` | Number of dimensions |
+
+Example - position-dependent computation:
+```
+normalized = x * _i0 / _n0
+```
+
+### Loops
+
+Basic loop syntax (Python-style indentation):
+```
+for i in range(n):
+    accumulator = accumulator + i
+```
+
+With early exit:
+```
+for i in range(100):
+    break if converged > 0.99
+    value = iterate(value)
+```
+
+With conditional continue:
+```
+for i in range(n):
+    continue if mask == 0
+    result = result + compute(i)
+```
+
+## Available Functions
+
+### Arithmetic Operators
+- `+`, `-`, `*`, `/`, `%` (modulo)
+- `**` (power)
+- Unary `-` (negation)
+
+### Comparison Operators
+- `==`, `!=`, `<`, `<=`, `>`, `>=`
+
+### Logical Operators
+- `&&` or `and`
+- `||` or `or`
+- `!` or `not`
+
+### Mathematical Functions
+
+**Trigonometric:**
+- `sin`, `cos`, `tan`
+- `asin`, `acos`, `atan`, `atan2`
+- `sinpi`, `cospi` (sin/cos of π·x)
+
+**Hyperbolic:**
+- `sinh`, `cosh`, `tanh`
+- `asinh`, `acosh`, `atanh`
+
+**Exponential/Logarithmic:**
+- `exp`, `exp2`, `exp10`, `expm1`
+- `log`, `log2`, `log10`, `log1p`
+
+**Power/Root:**
+- `sqrt`, `cbrt`, `pow`, `hypot`
+
+**Rounding:**
+- `floor`, `ceil`, `round`, `trunc`, `rint`
+
+**Other:**
+- `abs`, `copysign`, `fmax`, `fmin`, `fmod`
+- `erf`, `erfc`, `tgamma`, `lgamma`
+- `fma` (fused multiply-add)
+
+### Reductions
+
+Reduce arrays to scalars:
+- `sum(x)` - Sum of elements
+- `prod(x)` - Product of elements
+- `min(x)`, `max(x)` - Minimum/maximum
+- `any(x)`, `all(x)` - Logical reductions
+
+Reductions can appear in expressions:
+```
+centered = x - sum(x) / _n0
+```
+
+## Examples
+
+### Example 1: Polynomial Evaluation
+
+Horner's method for `ax³ + bx² + cx + d`:
+```
+t1 = a * x + b
+t2 = t1 * x + c
+result = t2 * x + d
+```
+
+### Example 2: Softmax Normalization
+
+```
+max_val = max(x)
+shifted = x - max_val
+exp_vals = exp(shifted)
+result = exp_vals / sum(exp_vals)
+```
+
+### Example 3: Distance from Center
+
+```
+cx = _i0 - _n0 / 2
+cy = _i1 - _n1 / 2
+result = sqrt(cx * cx + cy * cy)
+```
+
+### Example 4: Mandelbrot Iteration
+
+```
+zr = 0.0
+zi = 0.0
+for iter in range(100):
+    zr_new = zr * zr - zi * zi + cr
+    zi = 2 * zr * zi + ci
+    zr = zr_new
+    break if zr * zr + zi * zi > 4.0
+result = iter
+```
+
+### Example 5: Conditional Thresholding
+
+```
+magnitude = sqrt(x * x + y * y)
+result = where(magnitude > threshold, magnitude, 0.0)
+```
+
+## API Usage
+
+### Parsing DSL Programs
+
+```c
+#include "dsl_parser.h"
+
+const char *source = "temp = sin(x)**2; result = temp + cos(x)**2";
+me_dsl_error error;
+me_dsl_program *prog = me_dsl_parse(source, &error);
+
+if (!prog) {
+    printf("Parse error at line %d, col %d: %s\n",
+           error.line, error.column, error.message);
+    return;
+}
+
+// Use the program...
+
+me_dsl_program_free(prog);
+```
+
+### Program Structure
+
+The parsed program contains a block of statements:
+
+```c
+typedef struct {
+    me_dsl_block block;  // Contains array of statements
+} me_dsl_program;
+
+typedef struct {
+    me_dsl_stmt **stmts;
+    int nstmts;
+} me_dsl_block;
+```
+
+Each statement has a kind and associated data:
+
+```c
+typedef enum {
+    ME_DSL_STMT_ASSIGN,   // variable = expression
+    ME_DSL_STMT_EXPR,     // bare expression (result)
+    ME_DSL_STMT_FOR,      // for loop
+    ME_DSL_STMT_BREAK,    // break [if cond]
+    ME_DSL_STMT_CONTINUE  // continue [if cond]
+} me_dsl_stmt_kind;
+```
+
+## Performance Tips
+
+1. **Minimize temporaries** - Each temporary uses memory for the full block.
+
+2. **Use `where()` instead of branching** - Element-wise conditionals are SIMD-friendly.
+
+3. **Leverage sincos optimization** - When using both `sin(x)` and `cos(x)` on the same input, miniexpr automatically uses a combined sincos computation.
+
+4. **Process in blocks** - The default 4096-element block size is optimized for cache efficiency.
+
+5. **Avoid nested reductions** - `sum(sum(x))` is not supported; compute in stages if needed.
+
+## Error Handling
+
+The parser reports errors with line and column information:
+
+```c
+me_dsl_error error;
+me_dsl_program *prog = me_dsl_parse(source, &error);
+
+if (!prog) {
+    fprintf(stderr, "DSL error at %d:%d - %s\n",
+            error.line, error.column, error.message);
+}
+```
+
+Common errors:
+- Syntax errors (missing operators, unmatched parentheses)
+- Unknown function names
+- Invalid loop syntax
+
+## Limitations
+
+- **No string operations** - DSL is numeric-only
+- **No recursion** - Functions cannot call themselves
+- **Fixed loop limits** - Loop bounds must be known at parse time
+- **No user-defined functions** - Use built-in functions only
+- **Max 8 dimensions** - Index variables `_i0` through `_i7`

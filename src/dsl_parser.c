@@ -20,6 +20,8 @@ typedef struct {
     const char *current;
     int line;
     int column;
+    int indent_stack[32];  /* Stack of indentation levels */
+    int indent_depth;      /* Current depth in indent stack */
 } me_dsl_lexer;
 
 static void dsl_set_error(me_dsl_error *error, int line, int column, const char *message) {
@@ -36,6 +38,8 @@ static void lexer_init(me_dsl_lexer *lex, const char *source) {
     lex->current = lex->source;
     lex->line = 1;
     lex->column = 1;
+    lex->indent_stack[0] = 0;  /* Base indentation is 0 */
+    lex->indent_depth = 0;
 }
 
 static void lexer_advance(me_dsl_lexer *lex) {
@@ -52,6 +56,7 @@ static void lexer_advance(me_dsl_lexer *lex) {
     lex->current++;
 }
 
+/* Skip spaces and tabs only (not newlines) */
 static void lexer_skip_space(me_dsl_lexer *lex) {
     while (*lex->current) {
         char c = *lex->current;
@@ -63,17 +68,88 @@ static void lexer_skip_space(me_dsl_lexer *lex) {
     }
 }
 
+/* Skip comment starting with # until end of line */
+static void lexer_skip_comment(me_dsl_lexer *lex) {
+    if (*lex->current == '#') {
+        while (*lex->current && *lex->current != '\n') {
+            lexer_advance(lex);
+        }
+    }
+}
+
+/* Skip whitespace, newlines, and comments between statements at same level */
 static void lexer_skip_separators(me_dsl_lexer *lex) {
     bool progressed = true;
     while (progressed) {
         progressed = false;
         lexer_skip_space(lex);
+        lexer_skip_comment(lex);
         while (*lex->current == ';' || *lex->current == '\n') {
             lexer_advance(lex);
             progressed = true;
             lexer_skip_space(lex);
+            lexer_skip_comment(lex);
         }
     }
+}
+
+/* Measure indentation at start of current line (spaces only, tabs = 4 spaces) */
+static int measure_indent(me_dsl_lexer *lex) {
+    const char *p = lex->current;
+    int indent = 0;
+    while (*p == ' ' || *p == '\t') {
+        if (*p == ' ') {
+            indent++;
+        } else {
+            indent += 4;  /* Tab = 4 spaces */
+        }
+        p++;
+    }
+    return indent;
+}
+
+/* Skip to next non-blank, non-comment line and measure its indentation */
+static int peek_next_line_indent(me_dsl_lexer *lex) {
+    me_dsl_lexer snapshot = *lex;
+
+    /* Skip to end of current line */
+    while (*lex->current && *lex->current != '\n') {
+        lexer_advance(lex);
+    }
+    if (*lex->current == '\n') {
+        lexer_advance(lex);
+    }
+
+    /* Skip blank lines and comment-only lines */
+    while (*lex->current) {
+        int indent = measure_indent(lex);
+        /* Skip the whitespace */
+        while (*lex->current == ' ' || *lex->current == '\t') {
+            lexer_advance(lex);
+        }
+        /* Check if it's a blank line or comment-only line */
+        if (*lex->current == '\n') {
+            lexer_advance(lex);
+            continue;
+        }
+        if (*lex->current == '#') {
+            /* Skip comment line */
+            while (*lex->current && *lex->current != '\n') {
+                lexer_advance(lex);
+            }
+            if (*lex->current == '\n') {
+                lexer_advance(lex);
+            }
+            continue;
+        }
+        /* Found a real line, restore and return its indent */
+        *lex = snapshot;
+        return indent;
+    }
+
+    /* End of file */
+    *lex = snapshot;
+    return 0;
 }
 
 static bool is_ident_start(char c) {
@@ -250,7 +326,8 @@ static char *parse_expression_until_stmt_end(me_dsl_lexer *lex, me_dsl_error *er
             }
             depth--;
         }
-        if (depth == 0 && (c == ';' || c == '\n' || c == '}')) {
+        /* Stop at statement end: semicolon, newline, or comment */
+        if (depth == 0 && (c == ';' || c == '\n' || c == '#')) {
             break;
         }
         lexer_advance(lex);
@@ -311,7 +388,7 @@ static char *parse_expression_in_parens(me_dsl_lexer *lex, me_dsl_error *error, 
     return text;
 }
 
-static bool parse_block(me_dsl_lexer *lex, me_dsl_block *block, me_dsl_error *error);
+static bool parse_indented_block(me_dsl_lexer *lex, me_dsl_block *block, int min_indent, me_dsl_error *error);
 
 static bool parse_break_or_continue(me_dsl_lexer *lex, me_dsl_block *block,
                                     me_dsl_stmt_kind kind, int line, int column,
@@ -378,11 +455,23 @@ static bool parse_for(me_dsl_lexer *lex, me_dsl_block *block, int line, int colu
         return false;
     }
 
+    /* Expect colon for Python-style syntax */
     lexer_skip_space(lex);
-    if (!consume_char(lex, '{')) {
+    if (!consume_char(lex, ':')) {
         free(var);
         free(limit_text);
-        dsl_set_error(error, line, column, "expected '{' to start loop body");
+        dsl_set_error(error, line, column, "expected ':' after range()");
+        return false;
+    }
+
+    /* Check for body indentation */
+    int body_indent = peek_next_line_indent(lex);
+    int current_indent = lex->indent_stack[lex->indent_depth];
+
+    if (body_indent <= current_indent) {
+        free(var);
+        free(limit_text);
+        dsl_set_error(error, lex->line, lex->column, "expected indented block after ':'");
         return false;
     }
 
@@ -401,10 +490,24 @@ static bool parse_for(me_dsl_lexer *lex, me_dsl_block *block, int line, int colu
         return false;
     }
 
-    if (!parse_block(lex, &stmt->as.for_loop.body, error)) {
+    /* Push new indentation level */
+    if (lex->indent_depth >= 31) {
+        dsl_set_error(error, line, column, "too many nested blocks");
         dsl_stmt_free(stmt);
         return false;
     }
+    lex->indent_depth++;
+    lex->indent_stack[lex->indent_depth] = body_indent;
+
+    /* Parse the indented block */
+    if (!parse_indented_block(lex, &stmt->as.for_loop.body, body_indent, error)) {
+        lex->indent_depth--;
+        dsl_stmt_free(stmt);
+        return false;
+    }
+
+    /* Pop indentation level */
+    lex->indent_depth--;
 
     if (!dsl_block_push(block, stmt, error)) {
         dsl_stmt_free(stmt);
@@ -483,7 +586,7 @@ static bool parse_expression_stmt(me_dsl_lexer *lex, me_dsl_block *block, me_dsl
 
 static bool parse_statement(me_dsl_lexer *lex, me_dsl_block *block, me_dsl_error *error) {
     lexer_skip_separators(lex);
-    if (*lex->current == '\0' || *lex->current == '}') {
+    if (*lex->current == '\0') {
         return false;
     }
 
@@ -514,35 +617,138 @@ static bool parse_statement(me_dsl_lexer *lex, me_dsl_block *block, me_dsl_error
     return parse_expression_stmt(lex, block, error);
 }
 
-static bool parse_block(me_dsl_lexer *lex, me_dsl_block *block, me_dsl_error *error) {
+/* Skip to the start of the next line and consume leading whitespace up to expected indent */
+static void skip_to_line_start(me_dsl_lexer *lex) {
+    /* Skip rest of current line */
+    while (*lex->current && *lex->current != '\n') {
+        lexer_advance(lex);
+    }
+    if (*lex->current == '\n') {
+        lexer_advance(lex);
+    }
+}
+
+/* Get line indentation from current position (must be at start of line content or whitespace) */
+static int measure_line_indent_from_start(const char *line_start) {
+    const char *p = line_start;
+    int indent = 0;
+    while (*p == ' ' || *p == '\t') {
+        if (*p == ' ') {
+            indent++;
+        } else {
+            indent += 4;
+        }
+        p++;
+    }
+    return indent;
+}
+
+/* Skip whitespace at current position (spaces/tabs only) */
+static void skip_line_whitespace(me_dsl_lexer *lex) {
+    while (*lex->current == ' ' || *lex->current == '\t') {
+        lexer_advance(lex);
+    }
+}
+
+/* Parse an indented block (Python-style) */
+static bool parse_indented_block(me_dsl_lexer *lex, me_dsl_block *block, int min_indent, me_dsl_error *error) {
     memset(block, 0, sizeof(*block));
-    lexer_skip_separators(lex);
-    while (*lex->current && *lex->current != '}') {
+
+    /* Skip to the first line of the block */
+    skip_to_line_start(lex);
+
+    while (*lex->current) {
+        /* Remember position at start of line */
+        me_dsl_lexer line_snapshot = *lex;
+        const char *line_start = lex->current;
+
+        /* Get this line's indentation */
+        int line_indent = measure_line_indent_from_start(line_start);
+
+        /* Skip the leading whitespace */
+        skip_line_whitespace(lex);
+
+        /* Blank line? */
+        if (*lex->current == '\n') {
+            lexer_advance(lex);
+            continue;
+        }
+
+        /* Comment-only line? */
+        if (*lex->current == '#') {
+            while (*lex->current && *lex->current != '\n') {
+                lexer_advance(lex);
+            }
+            if (*lex->current == '\n') {
+                lexer_advance(lex);
+            }
+            continue;
+        }
+
+        /* End of file? */
+        if (*lex->current == '\0') {
+            return true;
+        }
+
+        /* Check if indentation is enough for this block */
+        if (line_indent < min_indent) {
+            /* Dedent - block is done. Restore to start of this line. */
+            *lex = line_snapshot;
+            return true;
+        }
+
+        /* Indentation is sufficient, parse the statement */
         if (!parse_statement(lex, block, error)) {
             return false;
         }
-        lexer_skip_separators(lex);
+
+        /* After statement, move to next line if we haven't already.
+         * But if we're already at a line start (column 1), the statement
+         * parser (e.g., for-loop) already positioned us correctly. */
+        if (lex->column != 1) {
+            while (*lex->current && *lex->current != '\n') {
+                lexer_advance(lex);
+            }
+            if (*lex->current == '\n') {
+                lexer_advance(lex);
+            }
+        }
     }
-    if (*lex->current != '}') {
-        dsl_set_error(error, lex->line, lex->column, "expected '}' to end block");
-        return false;
-    }
-    lexer_advance(lex);
+
     return true;
 }
 
 static bool parse_program(me_dsl_lexer *lex, me_dsl_program *program, me_dsl_error *error) {
     memset(program, 0, sizeof(*program));
-    lexer_skip_separators(lex);
+
     while (*lex->current) {
-        if (*lex->current == '}') {
-            dsl_set_error(error, lex->line, lex->column, "unexpected '}'");
-            return false;
+        lexer_skip_separators(lex);
+        if (*lex->current == '\0') {
+            break;
         }
+
+        /* Skip leading whitespace for top-level */
+        while (*lex->current == ' ' || *lex->current == '\t') {
+            lexer_advance(lex);
+        }
+
+        /* Skip comment-only lines */
+        if (*lex->current == '#') {
+            while (*lex->current && *lex->current != '\n') {
+                lexer_advance(lex);
+            }
+            continue;
+        }
+
+        /* Skip blank lines */
+        if (*lex->current == '\n') {
+            lexer_advance(lex);
+            continue;
+        }
+
         if (!parse_statement(lex, &program->block, error)) {
             return false;
         }
-        lexer_skip_separators(lex);
     }
     return true;
 }
