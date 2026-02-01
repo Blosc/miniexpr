@@ -42,7 +42,7 @@ int main() {
      * This kernel demonstrates:
      * - Temporary variables (zr, zi, zr2, zi2, mag2)
      * - For loop with iteration counter (Python-style syntax)
-     * - Conditional break for early escape
+     * - Conditional break for block-level early escape
      * - Complex arithmetic decomposed into real/imaginary parts
      *
      * The kernel computes iteration count until escape (|z|² > 4)
@@ -62,12 +62,13 @@ int main() {
         "    zi2 = zi * zi\n"
         "    mag2 = zr2 + zi2\n"
         "    \n"
-        "    # Early exit if escaped (|z|^2 > 4)\n"
-        "    if any(mag2 > 4.0):\n"
-        "        break\n"
+        "    # Record iteration count on first escape (per element)\n"
+        "    just_escaped = mag2 > 4.0 and escape_iter == 100.0\n"
+        "    escape_iter = where(just_escaped, iter, escape_iter)\n"
         "    \n"
-        "    # Record iteration count (only updates if not escaped yet)\n"
-        "    escape_iter = where(mag2 <= 4.0, iter, escape_iter)\n"
+        "    # Early exit when all points escaped (block-level)\n"
+        "    if all(escape_iter != 100.0):\n"
+        "        break\n"
         "    \n"
         "    # Compute z = z^2 + c\n"
         "    # Real: zr_new = zr^2 - zi^2 + cr\n"
@@ -106,22 +107,12 @@ int main() {
     }
     printf("✓ Total statements (including loop body): %d\n\n", total_stmts);
 
-    /*
-     * Note: Full DSL execution requires a DSL interpreter/compiler
-     * that is not yet implemented. For demonstration, we manually
-     * execute the logic to show what the DSL would compute.
-     *
-     * In a complete implementation, you would call:
-     *   me_dsl_compile(prog, vars, nvars, &compiled_kernel);
-     *   me_dsl_eval(compiled_kernel, var_ptrs, output, nitems);
-     */
-
     int n = WIDTH * HEIGHT;
 
     /* Allocate arrays */
     double *cr = malloc(n * sizeof(double));
     double *ci = malloc(n * sizeof(double));
-    int *iterations = malloc(n * sizeof(int));
+    double *iterations = malloc(n * sizeof(double));
 
     if (!cr || !ci || !iterations) {
         printf("Memory allocation failed!\n");
@@ -139,44 +130,32 @@ int main() {
         }
     }
 
-    /*
-     * Execute the DSL logic manually (simulating what the DSL would do)
-     * This is what the DSL kernel above expresses declaratively.
-     */
-    printf("Executing Mandelbrot computation (simulating DSL)...\n");
+    /* Compile the DSL program */
+    me_variable vars[] = {
+        {"cr", ME_FLOAT64},
+        {"ci", ME_FLOAT64}
+    };
+    me_expr *expr = NULL;
+    int err = 0;
+    if (me_compile(mandelbrot_dsl, vars, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("❌ Compile error at position %d\n", err);
+        me_dsl_program_free(prog);
+        free(cr);
+        free(ci);
+        free(iterations);
+        return 1;
+    }
 
-    for (int idx = 0; idx < n; idx++) {
-        double c_real = cr[idx];
-        double c_imag = ci[idx];
-
-        /* DSL: zr = 0.0; zi = 0.0; escape_iter = 100.0 */
-        double zr = 0.0, zi = 0.0;
-        int escape_iter = MAX_ITER;
-
-        /* DSL: for iter in range(100): */
-        for (int iter = 0; iter < MAX_ITER; iter++) {
-            /* DSL: zr2 = zr * zr; zi2 = zi * zi; mag2 = zr2 + zi2 */
-            double zr2 = zr * zr;
-            double zi2 = zi * zi;
-            double mag2 = zr2 + zi2;
-
-            /* DSL: if any(mag2 > 4.0): break */
-            if (mag2 > 4.0) {
-                escape_iter = iter;
-                break;
-            }
-
-            /* DSL: zr_new = zr2 - zi2 + cr; zi_new = 2.0 * zr * zi + ci */
-            double zr_new = zr2 - zi2 + c_real;
-            double zi_new = 2.0 * zr * zi + c_imag;
-
-            /* DSL: zr = zr_new; zi = zi_new */
-            zr = zr_new;
-            zi = zi_new;
-        }
-
-        /* DSL: result = escape_iter */
-        iterations[idx] = escape_iter;
+    printf("Executing Mandelbrot computation (DSL eval)...\n");
+    const void *inputs[] = {cr, ci};
+    if (me_eval(expr, inputs, 2, iterations, n, NULL) != ME_EVAL_SUCCESS) {
+        printf("❌ DSL evaluation failed\n");
+        me_free(expr);
+        me_dsl_program_free(prog);
+        free(cr);
+        free(ci);
+        free(iterations);
+        return 1;
     }
 
     /* Render the result as ASCII art */
@@ -186,7 +165,7 @@ int main() {
     for (int y = 0; y < HEIGHT; y++) {
         for (int x = 0; x < WIDTH; x++) {
             int idx = y * WIDTH + x;
-            int iter = iterations[idx];
+            int iter = (int)iterations[idx];
             char ch;
             if (iter == MAX_ITER) {
                 ch = '@';  /* Point is in the Mandelbrot set */
@@ -202,7 +181,7 @@ int main() {
     /* Statistics */
     int in_set = 0;
     for (int i = 0; i < n; i++) {
-        if (iterations[i] == MAX_ITER) in_set++;
+        if ((int)iterations[i] == MAX_ITER) in_set++;
     }
     printf("\nPoints in set: %d / %d (%.1f%%)\n",
            in_set, n, 100.0 * in_set / n);
@@ -212,12 +191,13 @@ int main() {
     printf("DSL Features Demonstrated:\n");
     printf("  ✓ Temporary variables: zr, zi, zr2, zi2, mag2, zr_new, zi_new\n");
     printf("  ✓ For loop: for iter in range(100)\n");
-    printf("  ✓ Conditional break: if any(mag2 > 4.0): break\n");
-    printf("  ✓ Where conditional: where(mag2 <= 4.0, iter, escape_iter)\n");
+    printf("  ✓ Conditional break: if all(escape_iter != 100.0): break\n");
+    printf("  ✓ Where conditional: where(just_escaped, iter, escape_iter)\n");
     printf("  ✓ Comments: # style comments\n");
     printf("  ✓ Multi-line program structure\n");
 
     /* Cleanup */
+    me_free(expr);
     me_dsl_program_free(prog);
     free(cr);
     free(ci);

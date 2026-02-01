@@ -61,7 +61,8 @@ struct me_expr {
 enum {
     TOK_NULL = ME_CLOSURE7 + 1, TOK_ERROR, TOK_END, TOK_SEP,
     TOK_OPEN, TOK_CLOSE, TOK_NUMBER, TOK_VARIABLE, TOK_INFIX,
-    TOK_BITWISE, TOK_SHIFT, TOK_COMPARE, TOK_POW
+    TOK_BITWISE, TOK_SHIFT, TOK_COMPARE, TOK_POW,
+    TOK_LOGICAL_OR, TOK_LOGICAL_AND, TOK_LOGICAL_NOT
 };
 
 /* Check if a pointer is a synthetic address (used internally for chunked evaluation).

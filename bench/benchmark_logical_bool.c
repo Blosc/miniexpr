@@ -1,7 +1,7 @@
 /*
  * Benchmark for boolean logical operators.
  *
- * Measures throughput for &, |, ^, and ~ on boolean arrays.
+ * Measures throughput for and, or, ^, and not on boolean arrays.
  *
  * Usage: ./benchmark_logical_bool
  */
@@ -97,10 +97,10 @@ int main() {
     const void *ptrs_a[] = {a};
 
     bench_result_t results[4];
-    benchmark_logical("a & b", vars_ab, 2, ptrs_ab, TOTAL_SIZE, &results[0]);
-    benchmark_logical("a | b", vars_ab, 2, ptrs_ab, TOTAL_SIZE, &results[1]);
+    benchmark_logical("a and b", vars_ab, 2, ptrs_ab, TOTAL_SIZE, &results[0]);
+    benchmark_logical("a or b", vars_ab, 2, ptrs_ab, TOTAL_SIZE, &results[1]);
     benchmark_logical("a ^ b", vars_ab, 2, ptrs_ab, TOTAL_SIZE, &results[2]);
-    benchmark_logical("~a", vars_a, 1, ptrs_a, TOTAL_SIZE, &results[3]);
+    benchmark_logical("not a", vars_a, 1, ptrs_a, TOTAL_SIZE, &results[3]);
 
     printf("═══════════════════════════════════════════════════════════════════════\n");
     printf("Results:\n");

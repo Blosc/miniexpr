@@ -2509,6 +2509,23 @@ static void read_identifier_token(state* s) {
         s->next++;
     }
 
+    size_t len = (size_t)(s->next - start);
+    if (len == 3 && strncmp(start, "and", len) == 0) {
+        s->type = TOK_LOGICAL_AND;
+        s->function = logical_and;
+        return;
+    }
+    if (len == 2 && strncmp(start, "or", len) == 0) {
+        s->type = TOK_LOGICAL_OR;
+        s->function = logical_or;
+        return;
+    }
+    if (len == 3 && strncmp(start, "not", len) == 0) {
+        s->type = TOK_LOGICAL_NOT;
+        s->function = logical_not;
+        return;
+    }
+
     const me_variable* var = find_lookup(s, start, s->next - start);
     if (!var) {
         var = find_builtin(start, s->next - start);
@@ -2559,6 +2576,8 @@ typedef struct {
 static bool handle_multi_char_operator(state* s) {
     static const operator_spec multi_ops[] = {
         {"**", TOK_POW, pow},
+        {"&&", TOK_LOGICAL_AND, logical_and},
+        {"||", TOK_LOGICAL_OR, logical_or},
         {"<<", TOK_SHIFT, bit_shl},
         {">>", TOK_SHIFT, bit_shr},
         {"==", TOK_COMPARE, cmp_eq},
@@ -2609,6 +2628,9 @@ static void handle_single_char_operator(state* s, char c) {
         break;
     case '~': s->type = TOK_BITWISE;
         s->function = bit_not;
+        break;
+    case '!': s->type = TOK_LOGICAL_NOT;
+        s->function = logical_not;
         break;
     case '<': s->type = TOK_COMPARE;
         s->function = cmp_lt;
@@ -2680,6 +2702,12 @@ static me_expr* bitwise_xor(state* s);
 static me_expr* bitwise_or(state* s);
 
 static me_expr* comparison(state* s);
+
+static me_expr* logical_not_expr(state* s);
+
+static me_expr* logical_and_expr(state* s);
+
+static me_expr* logical_or_expr(state* s);
 
 
 static me_expr* base(state* s) {
@@ -3081,15 +3109,76 @@ static me_expr* comparison(state* s) {
     return ret;
 }
 
+static me_expr* logical_not_expr(state* s) {
+    /* <logical_not> = ["not" | "!"] <logical_not> | <comparison> */
+    if (s->type == TOK_LOGICAL_NOT) {
+        next_token(s);
+        me_expr* inner = logical_not_expr(s);
+        CHECK_NULL(inner);
+
+        me_expr* ret = NEW_EXPR(ME_FUNCTION1 | ME_FLAG_PURE, inner);
+        CHECK_NULL(ret, me_free(inner));
+
+        ret->function = logical_not;
+        ret->dtype = ME_BOOL;
+        return ret;
+    }
+
+    return comparison(s);
+}
+
+static me_expr* logical_and_expr(state* s) {
+    /* <logical_and> = <logical_not> {("and" | "&&") <logical_not>} */
+    me_expr* ret = logical_not_expr(s);
+    CHECK_NULL(ret);
+
+    while (s->type == TOK_LOGICAL_AND) {
+        next_token(s);
+        me_expr* e = logical_not_expr(s);
+        CHECK_NULL(e, me_free(ret));
+
+        me_expr* prev = ret;
+        ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
+        CHECK_NULL(ret, me_free(e), me_free(prev));
+
+        ret->function = logical_and;
+        apply_type_promotion(ret);
+        ret->dtype = ME_BOOL;
+    }
+
+    return ret;
+}
+
+static me_expr* logical_or_expr(state* s) {
+    /* <logical_or> = <logical_and> {("or" | "||") <logical_and>} */
+    me_expr* ret = logical_and_expr(s);
+    CHECK_NULL(ret);
+
+    while (s->type == TOK_LOGICAL_OR) {
+        next_token(s);
+        me_expr* e = logical_and_expr(s);
+        CHECK_NULL(e, me_free(ret));
+
+        me_expr* prev = ret;
+        ret = NEW_EXPR(ME_FUNCTION2 | ME_FLAG_PURE, ret, e);
+        CHECK_NULL(ret, me_free(e), me_free(prev));
+
+        ret->function = logical_or;
+        apply_type_promotion(ret);
+        ret->dtype = ME_BOOL;
+    }
+
+    return ret;
+}
 
 me_expr* list(state* s) {
-    /* <list>      =    <comparison> {"," <comparison>} */
-    me_expr* ret = comparison(s);
+    /* <list>      =    <logical_or> {"," <logical_or>} */
+    me_expr* ret = logical_or_expr(s);
     CHECK_NULL(ret);
 
     while (s->type == TOK_SEP) {
         next_token(s);
-        me_expr* e = comparison(s);
+        me_expr* e = logical_or_expr(s);
         CHECK_NULL(e, me_free(ret));
 
         me_expr* prev = ret;

@@ -275,8 +275,8 @@ Chunk size matters enormously for parallel performance:
 ### 10_boolean_logical_ops.c
 **Logical operators on boolean arrays**
 
-- **What it demonstrates**: Logical semantics for `&`, `|`, `^`, and `~` on bool arrays
-- **Expressions**: `a & b`, `a | b`, `a ^ b`, `~a`, `(o0 > 0.5) & (o1 > 10000)`
+- **What it demonstrates**: Logical semantics for `and`/`or`/`not` (plus `&`, `|`, `^`, `~`) on bool arrays
+- **Expressions**: `a and b`, `a or b`, `a ^ b`, `not a`, `o0 > 0.5 and o1 > 10000 or o1 == 42`
 - **Concepts**: ME_BOOL output, boolean masks, comparison composition
 - **Best for**: Masking, filtering, conditional logic
 
@@ -346,7 +346,7 @@ Chunk size matters enormously for parallel performance:
 **Key features:**
 - Complete algorithm in a single DSL program
 - `for iter in range(100): ...` loop construct
-- `if any(mag2 > 4.0): break` early exit
+- `if all(escape_iter != 100.0): break` early exit
 - `where()` conditionals for element-wise selection
 - Comments with `#` syntax
 - Demonstrates parsing via `me_dsl_parse()`
@@ -360,7 +360,9 @@ for iter in range(100):
     zr2 = zr * zr
     zi2 = zi * zi
     mag2 = zr2 + zi2
-    if any(mag2 > 4.0):
+    just_escaped = mag2 > 4.0 and escape_iter == 100.0
+    escape_iter = where(just_escaped, iter, escape_iter)
+    if all(escape_iter != 100.0):
         break
     zr_new = zr2 - zi2 + cr
     zi_new = 2.0 * zr * zi + ci

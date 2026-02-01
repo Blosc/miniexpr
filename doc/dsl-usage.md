@@ -109,6 +109,9 @@ Conditions that are uniform across the block (e.g., loop variables like `i`,
 - `||` or `or`
 - `!` or `not`
 
+Logical operator precedence matches Python: `not` binds tighter than `and`, which binds tighter than `or`
+(comparisons bind tighter than all three).
+
 ### Mathematical Functions
 
 **Trigonometric:**
