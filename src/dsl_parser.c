@@ -290,6 +290,18 @@ static void dsl_stmt_free(me_dsl_stmt *stmt) {
     case ME_DSL_STMT_PRINT:
         dsl_expr_free(stmt->as.print_stmt.call);
         break;
+    case ME_DSL_STMT_IF:
+        dsl_expr_free(stmt->as.if_stmt.cond);
+        dsl_block_free(&stmt->as.if_stmt.then_block);
+        for (int i = 0; i < stmt->as.if_stmt.n_elifs; i++) {
+            dsl_expr_free(stmt->as.if_stmt.elif_branches[i].cond);
+            dsl_block_free(&stmt->as.if_stmt.elif_branches[i].block);
+        }
+        free(stmt->as.if_stmt.elif_branches);
+        if (stmt->as.if_stmt.has_else) {
+            dsl_block_free(&stmt->as.if_stmt.else_block);
+        }
+        break;
     case ME_DSL_STMT_FOR:
         free(stmt->as.for_loop.var);
         dsl_expr_free(stmt->as.for_loop.limit);
@@ -451,6 +463,8 @@ static char *parse_expression_in_parens(me_dsl_lexer *lex, me_dsl_error *error, 
 
 static bool parse_indented_block(me_dsl_lexer *lex, me_dsl_block *block, int min_indent,
                                  bool in_loop, me_dsl_error *error);
+static int measure_line_indent_from_start(const char *line_start);
+static void skip_line_whitespace(me_dsl_lexer *lex);
 
 static bool parse_break_or_continue(me_dsl_lexer *lex, me_dsl_block *block,
                                     me_dsl_stmt_kind kind, int line, int column,
@@ -482,13 +496,9 @@ static bool parse_break_or_continue(me_dsl_lexer *lex, me_dsl_block *block,
     return true;
 }
 
-static bool parse_if(me_dsl_lexer *lex, me_dsl_block *block, int line, int column,
-                     bool in_loop, me_dsl_error *error) {
-    if (!in_loop) {
-        dsl_set_error(error, line, column, "if only allowed inside loops");
-        return false;
-    }
-
+static bool parse_if_condition(me_dsl_lexer *lex, int line, int column,
+                               const char *keyword, me_dsl_expr **out_expr,
+                               me_dsl_error *error) {
     char *cond_text = parse_expression_until_stmt_end(lex, error, line, column);
     if (!cond_text) {
         return false;
@@ -499,7 +509,7 @@ static bool parse_if(me_dsl_lexer *lex, me_dsl_block *block, int line, int colum
         len--;
     }
     if (len == 0 || cond_text[len - 1] != ':') {
-        dsl_set_error(error, line, column, "expected ':' after if condition");
+        dsl_set_error(error, line, column, "expected ':' after condition");
         free(cond_text);
         return false;
     }
@@ -510,69 +520,200 @@ static bool parse_if(me_dsl_lexer *lex, me_dsl_block *block, int line, int colum
         len--;
     }
     if (len == 0) {
-        dsl_set_error(error, line, column, "expected condition after 'if'");
+        char msg[64];
+        snprintf(msg, sizeof(msg), "expected condition after '%s'", keyword);
+        dsl_set_error(error, line, column, msg);
         free(cond_text);
         return false;
     }
 
+    *out_expr = dsl_expr_new(cond_text, line, column);
+    if (!*out_expr) {
+        dsl_set_error(error, line, column, "out of memory");
+        return false;
+    }
+    return true;
+}
+
+static bool parse_else_header(me_dsl_lexer *lex, int line, int column, me_dsl_error *error) {
+    char *tail = parse_expression_until_stmt_end(lex, error, line, column);
+    if (!tail) {
+        return false;
+    }
+    char *p = tail;
+    while (*p && isspace((unsigned char)*p)) {
+        p++;
+    }
+    size_t len = strlen(p);
+    while (len > 0 && isspace((unsigned char)p[len - 1])) {
+        len--;
+    }
+    if (len != 1 || p[0] != ':') {
+        dsl_set_error(error, line, column, "expected ':' after else");
+        free(tail);
+        return false;
+    }
+    free(tail);
+    return true;
+}
+
+static bool parse_if_body(me_dsl_lexer *lex, me_dsl_block *out_block, int line, int column,
+                          bool in_loop, me_dsl_error *error) {
     int body_indent = peek_next_line_indent(lex);
     int current_indent = lex->indent_stack[lex->indent_depth];
     if (body_indent <= current_indent) {
         dsl_set_error(error, lex->line, lex->column, "expected indented block after ':'");
-        free(cond_text);
-        return false;
-    }
-
-    me_dsl_expr *cond = dsl_expr_new(cond_text, line, column);
-    if (!cond) {
-        dsl_set_error(error, line, column, "out of memory");
         return false;
     }
 
     if (lex->indent_depth >= 31) {
         dsl_set_error(error, line, column, "too many nested blocks");
-        dsl_expr_free(cond);
         return false;
     }
 
     lex->indent_depth++;
     lex->indent_stack[lex->indent_depth] = body_indent;
 
-    me_dsl_block inner;
-    if (!parse_indented_block(lex, &inner, body_indent, true, error)) {
+    if (!parse_indented_block(lex, out_block, body_indent, in_loop, error)) {
         lex->indent_depth--;
-        dsl_expr_free(cond);
-        dsl_block_free(&inner);
+        dsl_block_free(out_block);
         return false;
     }
 
     lex->indent_depth--;
+    return true;
+}
 
-    if (inner.nstmts != 1) {
-        dsl_set_error(error, line, column, "if block must contain exactly one statement");
-        dsl_expr_free(cond);
-        dsl_block_free(&inner);
-        return false;
+static bool dsl_if_add_elif(me_dsl_stmt *stmt, me_dsl_expr *cond, me_dsl_block *block, me_dsl_error *error) {
+    if (stmt->as.if_stmt.n_elifs == stmt->as.if_stmt.elif_capacity) {
+        int new_cap = stmt->as.if_stmt.elif_capacity ? stmt->as.if_stmt.elif_capacity * 2 : 2;
+        me_dsl_if_branch *next = realloc(stmt->as.if_stmt.elif_branches, (size_t)new_cap * sizeof(*next));
+        if (!next) {
+            dsl_set_error(error, stmt->line, stmt->column, "out of memory");
+            return false;
+        }
+        stmt->as.if_stmt.elif_branches = next;
+        stmt->as.if_stmt.elif_capacity = new_cap;
     }
-    me_dsl_stmt *stmt = inner.stmts[0];
-    if (!stmt || (stmt->kind != ME_DSL_STMT_BREAK && stmt->kind != ME_DSL_STMT_CONTINUE)) {
-        dsl_set_error(error, line, column, "if block must contain break or continue");
-        dsl_expr_free(cond);
-        dsl_block_free(&inner);
-        return false;
-    }
-    if (stmt->as.flow.cond) {
-        dsl_set_error(error, line, column, "break/continue inside if cannot have a condition");
-        dsl_expr_free(cond);
-        dsl_block_free(&inner);
-        return false;
-    }
-    stmt->as.flow.cond = cond;
+    stmt->as.if_stmt.elif_branches[stmt->as.if_stmt.n_elifs].cond = cond;
+    stmt->as.if_stmt.elif_branches[stmt->as.if_stmt.n_elifs].block = *block;
+    stmt->as.if_stmt.n_elifs++;
+    return true;
+}
 
-    free(inner.stmts);
-    inner.stmts = NULL;
-    inner.nstmts = 0;
-    inner.capacity = 0;
+static bool parse_if(me_dsl_lexer *lex, me_dsl_block *block, int line, int column,
+                     bool in_loop, me_dsl_error *error) {
+    me_dsl_expr *cond = NULL;
+    if (!parse_if_condition(lex, line, column, "if", &cond, error)) {
+        return false;
+    }
+
+    me_dsl_block then_block;
+    if (!parse_if_body(lex, &then_block, line, column, in_loop, error)) {
+        dsl_expr_free(cond);
+        return false;
+    }
+
+    me_dsl_stmt *stmt = dsl_stmt_new(ME_DSL_STMT_IF, line, column);
+    if (!stmt) {
+        dsl_set_error(error, line, column, "out of memory");
+        dsl_expr_free(cond);
+        dsl_block_free(&then_block);
+        return false;
+    }
+    stmt->as.if_stmt.cond = cond;
+    stmt->as.if_stmt.then_block = then_block;
+    stmt->as.if_stmt.elif_branches = NULL;
+    stmt->as.if_stmt.n_elifs = 0;
+    stmt->as.if_stmt.elif_capacity = 0;
+    stmt->as.if_stmt.has_else = 0;
+
+    int stmt_indent = lex->indent_stack[lex->indent_depth];
+    for (;;) {
+        me_dsl_lexer line_snapshot = *lex;
+        const char *line_start = lex->current;
+        if (*line_start == '\0') {
+            break;
+        }
+        int line_indent = measure_line_indent_from_start(line_start);
+        skip_line_whitespace(lex);
+        if (*lex->current == '\n') {
+            lexer_advance(lex);
+            continue;
+        }
+        if (*lex->current == '#') {
+            while (*lex->current && *lex->current != '\n') {
+                lexer_advance(lex);
+            }
+            if (*lex->current == '\n') {
+                lexer_advance(lex);
+            }
+            continue;
+        }
+        if (line_indent != stmt_indent) {
+            *lex = line_snapshot;
+            break;
+        }
+        if (!is_ident_start(*lex->current)) {
+            *lex = line_snapshot;
+            break;
+        }
+        me_dsl_lexer ident_snapshot = *lex;
+        const char *ident_start = NULL;
+        size_t ident_len = 0;
+        lexer_read_identifier(lex, &ident_start, &ident_len);
+
+        if (ident_len == 4 && strncmp(ident_start, "elif", ident_len) == 0) {
+            if (stmt->as.if_stmt.has_else) {
+                dsl_set_error(error, ident_snapshot.line, ident_snapshot.column,
+                              "elif not allowed after else");
+                dsl_stmt_free(stmt);
+                return false;
+            }
+            me_dsl_expr *elif_cond = NULL;
+            if (!parse_if_condition(lex, ident_snapshot.line, ident_snapshot.column,
+                                    "elif", &elif_cond, error)) {
+                dsl_stmt_free(stmt);
+                return false;
+            }
+            me_dsl_block elif_block;
+            if (!parse_if_body(lex, &elif_block, ident_snapshot.line, ident_snapshot.column,
+                               in_loop, error)) {
+                dsl_expr_free(elif_cond);
+                dsl_stmt_free(stmt);
+                return false;
+            }
+            if (!dsl_if_add_elif(stmt, elif_cond, &elif_block, error)) {
+                dsl_expr_free(elif_cond);
+                dsl_block_free(&elif_block);
+                dsl_stmt_free(stmt);
+                return false;
+            }
+            continue;
+        }
+        if (ident_len == 4 && strncmp(ident_start, "else", ident_len) == 0) {
+            if (stmt->as.if_stmt.has_else) {
+                dsl_set_error(error, ident_snapshot.line, ident_snapshot.column,
+                              "else already defined");
+                dsl_stmt_free(stmt);
+                return false;
+            }
+            if (!parse_else_header(lex, ident_snapshot.line, ident_snapshot.column, error)) {
+                dsl_stmt_free(stmt);
+                return false;
+            }
+            if (!parse_if_body(lex, &stmt->as.if_stmt.else_block, ident_snapshot.line,
+                               ident_snapshot.column, in_loop, error)) {
+                dsl_stmt_free(stmt);
+                return false;
+            }
+            stmt->as.if_stmt.has_else = 1;
+            break;
+        }
+
+        *lex = line_snapshot;
+        break;
+    }
 
     if (!dsl_block_push(block, stmt, error)) {
         dsl_stmt_free(stmt);
@@ -786,6 +927,14 @@ static bool parse_statement(me_dsl_lexer *lex, me_dsl_block *block, bool in_loop
         }
         if (ident_len == 2 && strncmp(ident_start, "if", ident_len) == 0) {
             return parse_if(lex, block, snapshot.line, snapshot.column, in_loop, error);
+        }
+        if (ident_len == 4 && strncmp(ident_start, "elif", ident_len) == 0) {
+            dsl_set_error(error, snapshot.line, snapshot.column, "unexpected 'elif' without matching 'if'");
+            return false;
+        }
+        if (ident_len == 4 && strncmp(ident_start, "else", ident_len) == 0) {
+            dsl_set_error(error, snapshot.line, snapshot.column, "unexpected 'else' without matching 'if'");
+            return false;
         }
         if (ident_len == 5 && strncmp(ident_start, "print", ident_len) == 0) {
             *lex = snapshot;

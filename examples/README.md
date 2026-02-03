@@ -433,6 +433,21 @@ result = escape_iter
 
 ---
 
+### 18_dsl_if_elif_else.c
+**Scalar if/elif/else and flow-only loop control**
+
+- **What it demonstrates**: DSL `if/elif/else` blocks with scalar conditions
+- **Programs**: Result assignment branches and flow-only loop control
+- **Concepts**: Uniform conditions, required `result` assignment, `break`/`continue` chains
+- **Best for**: Using structured control flow in DSL kernels
+
+**Run it:**
+```bash
+./build/examples/18_dsl_if_elif_else
+```
+
+---
+
 ## Building Examples
 
 ### Using CMake (recommended)

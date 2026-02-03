@@ -137,8 +137,23 @@ The DSL (`dsl_parser.c`) extends single expressions to multi-statement programs:
 
 3. **Conditionals in DSL** ✅
    - Element-wise conditions via `where(cond, true_val, false_val)`
-   - Block-level conditionals: `if condition:` with `break`/`continue`
+   - Block-level conditionals: `if/elif/else` with scalar conditions and `result` assignment
+   - Flow-only loop control: `if/elif` chains with `break`/`continue`
    - Early exit optimizations: `if all(escape_iter != 100.0): break`
+
+4. **Basic string support** ✅
+   - String constants (UTF-8 literals, decoded to UCS4)
+   - String comparisons for categorical data filtering (`==`, `!=`)
+   - String predicates (`startswith`, `endswith`, `contains`)
+   - Format strings for debugging (`print("value = {}", x)`)
+   - Note: Full string manipulation is out of scope; current support is fixed-size UCS4 only
+
+5. **Reduction operations** ✅
+   - `sum()`, `mean()`, `min()`, `max()`, `any()`, `all()`, `prod()`
+
+6. **User-defined functions** ✅
+   - Register custom C functions callable from DSL
+   - Enable domain-specific extensions without modifying core
 
 ---
 
@@ -147,23 +162,11 @@ The DSL (`dsl_parser.c`) extends single expressions to multi-statement programs:
 ### High Priority
 
 ### Medium Priority
+1. **String interop with Blosc2 variable-length types**
+   - interop with Blosc2 variable-length string types
 
-4. **Basic string support**
-   - **Implemented**: String constants (UTF-8 literals, decoded to UCS4)
-   - **Implemented**: String comparisons for categorical data filtering (`==`, `!=`)
-   - **Implemented**: String predicates (`startswith`, `endswith`, `contains`)
-   - **Implemented**: Format strings for debugging (`print("value = {}", x)`)
-   - **Not implemented**: Interop with Blosc2 variable-length string types
-   - Note: Full string manipulation is out of scope; current support is fixed-size UCS4 only
-
-5. **Reduction operations**
-   - **Implemented**: `sum()`, `mean()`, `min()`, `max()`, `any()`, `all()`, `prod()`
-   - **Not implemented**: Partial reductions along axes
-   - Would enable aggregation within expressions
-
-6. **User-defined functions**
-   - Register custom C functions callable from DSL
-   - Enable domain-specific extensions without modifying core
+2. **Partial reductions along axes**
+   - reductions along axes for N-D data
 
 ### Low Priority / Research
 

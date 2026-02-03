@@ -135,11 +135,30 @@ static int test_invalid_conditionals(void) {
         "    break if i == 0\n";
 
     const char *src_non_scalar =
-        "sum = 0\n"
-        "for i in range(3):\n"
-        "    if x > 0:\n"
-        "        break\n"
-        "result = sum\n";
+        "if x > 0:\n"
+        "    result = 1\n"
+        "else:\n"
+        "    result = 0\n";
+
+    const char *src_missing_else =
+        "if any(x > 0):\n"
+        "    result = 1\n";
+
+    const char *src_two_results =
+        "if any(x > 0):\n"
+        "    result = 1\n"
+        "    result = 2\n"
+        "else:\n"
+        "    result = 3\n";
+
+    const char *src_new_local =
+        "y = 1\n"
+        "if any(x > 0):\n"
+        "    y = 2\n"
+        "    result = y\n"
+        "else:\n"
+        "    z = 3\n"
+        "    result = z\n";
 
     int err = 0;
     me_expr *expr = NULL;
@@ -158,8 +177,94 @@ static int test_invalid_conditionals(void) {
         return 1;
     }
 
+    expr = NULL;
+    if (me_compile(src_missing_else, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: missing else accepted\n");
+        me_free(expr);
+        return 1;
+    }
+
+    expr = NULL;
+    if (me_compile(src_two_results, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: multiple result assignments accepted\n");
+        me_free(expr);
+        return 1;
+    }
+
+    expr = NULL;
+    if (me_compile(src_new_local, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: new local inside branch accepted\n");
+        me_free(expr);
+        return 1;
+    }
+
     printf("  ✅ PASSED\n");
     return 0;
+}
+
+static int test_if_elif_else(void) {
+    printf("\n=== DSL Test 3b: if/elif/else ===\n");
+
+    const char *src =
+        "if any(x > 0):\n"
+        "    result = 1\n"
+        "elif any(x < 0):\n"
+        "    result = 2\n"
+        "else:\n"
+        "    result = 3\n";
+
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    double out[4];
+    me_expr *expr = NULL;
+    int err = 0;
+
+    if (me_compile(src, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compile error at %d\n", err);
+        return 1;
+    }
+
+    double x_case1[4] = {-1.0, 2.0, -3.0, 0.0};
+    const void *vars_case1[] = {x_case1};
+    if (me_eval(expr, vars_case1, 1, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: eval error (case 1)\n");
+        me_free(expr);
+        return 1;
+    }
+    double expected_case1[4] = {1.0, 1.0, 1.0, 1.0};
+    if (check_all_close(out, expected_case1, 4, 1e-12) != 0) {
+        printf("  ❌ FAILED: unexpected output (case 1)\n");
+        me_free(expr);
+        return 1;
+    }
+
+    double x_case2[4] = {-1.0, -2.0, -3.0, -4.0};
+    const void *vars_case2[] = {x_case2};
+    if (me_eval(expr, vars_case2, 1, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: eval error (case 2)\n");
+        me_free(expr);
+        return 1;
+    }
+    double expected_case2[4] = {2.0, 2.0, 2.0, 2.0};
+    if (check_all_close(out, expected_case2, 4, 1e-12) != 0) {
+        printf("  ❌ FAILED: unexpected output (case 2)\n");
+        me_free(expr);
+        return 1;
+    }
+
+    double x_case3[4] = {0.0, 0.0, 0.0, 0.0};
+    const void *vars_case3[] = {x_case3};
+    if (me_eval(expr, vars_case3, 1, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: eval error (case 3)\n");
+        me_free(expr);
+        return 1;
+    }
+    double expected_case3[4] = {3.0, 3.0, 3.0, 3.0};
+    int rc = check_all_close(out, expected_case3, 4, 1e-12);
+    me_free(expr);
+    if (rc == 0) {
+        printf("  ✅ PASSED\n");
+    }
+    return rc;
 }
 
 static int test_nd_indices(void) {
@@ -454,6 +559,7 @@ int main(void) {
     fail |= test_assign_and_result_stmt();
     fail |= test_loop_break_continue();
     fail |= test_invalid_conditionals();
+    fail |= test_if_elif_else();
     fail |= test_nd_indices();
     fail |= test_nd_padding();
     fail |= test_nd_large_block();

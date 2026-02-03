@@ -8,6 +8,7 @@ The DSL extends single expressions to full programs with:
 - **Temporary variables** - Store intermediate results
 - **Multi-statement programs** - Combine multiple computations
 - **Element-wise conditionals** - Using `where(cond, true_val, false_val)`
+- **Conditional blocks** - `if/elif/else` with scalar conditions
 - **Loop constructs** - `for` loops with `break` and `continue`
 - **Index access** - Reference element positions via `_i0`, `_i1`, etc.
 
@@ -88,11 +89,38 @@ for i in range(n):
     result = result + compute(i)
 ```
 
-Conditional blocks are only supported for loop control (`break`/`continue`), and
-the condition must be scalar. Use reductions like `any()`/`all()` to turn an
-element-wise predicate into a scalar condition.
+### Conditionals
+
+General `if/elif/else` blocks are supported. Conditions must be scalar/uniform.
+Use reductions like `any()`/`all()` to turn an element-wise predicate into a scalar.
 Conditions that are uniform across the block (e.g., loop variables like `i`,
 `_n*`, `_ndim`, or reductions) are accepted directly, so `if i == 2:` is valid.
+
+Rules:
+- Each `if` chain must include an `else` block.
+- No new locals are allowed inside branches.
+- Each branch must assign `result` exactly once.
+- If a conditional is used only for loop control (each branch has a single `break`/`continue`),
+  `else` is optional and `result` assignment is not required.
+
+Example:
+```
+if any(mask == 0):
+    result = 0
+elif _n0 > 10:
+    result = sum(x)
+else:
+    result = mean(x)
+```
+
+Flow-only loop control:
+```
+for i in range(10):
+    if any(mask == 0):
+        break
+    elif i == 3:
+        continue
+```
 
 ## Available Functions
 
@@ -320,6 +348,8 @@ Each statement has a kind and associated data:
 typedef enum {
     ME_DSL_STMT_ASSIGN,   // variable = expression
     ME_DSL_STMT_EXPR,     // bare expression (result)
+    ME_DSL_STMT_PRINT,    // print(...)
+    ME_DSL_STMT_IF,       // if/elif/else
     ME_DSL_STMT_FOR,      // for loop
     ME_DSL_STMT_BREAK,    // break
     ME_DSL_STMT_CONTINUE  // continue

@@ -103,6 +103,11 @@ typedef struct {
     int capacity;
 } me_dsl_compiled_block;
 
+typedef struct {
+    me_dsl_compiled_expr cond;
+    me_dsl_compiled_block block;
+} me_dsl_compiled_if_branch;
+
 struct me_dsl_compiled_stmt {
     me_dsl_stmt_kind kind;
     int line;
@@ -121,6 +126,15 @@ struct me_dsl_compiled_stmt {
             me_dsl_compiled_expr *args;
             int nargs;
         } print_stmt;
+        struct {
+            me_dsl_compiled_expr cond;
+            me_dsl_compiled_block then_block;
+            me_dsl_compiled_if_branch *elif_branches;
+            int n_elifs;
+            int elif_capacity;
+            me_dsl_compiled_block else_block;
+            bool has_else;
+        } if_stmt;
         struct {
             int loop_var_slot;
             me_dsl_compiled_expr limit;
@@ -527,6 +541,18 @@ static void dsl_compiled_stmt_free(me_dsl_compiled_stmt *stmt) {
             }
         }
         free(stmt->as.print_stmt.args);
+        break;
+    case ME_DSL_STMT_IF:
+        dsl_compiled_expr_free(&stmt->as.if_stmt.cond);
+        dsl_compiled_block_free(&stmt->as.if_stmt.then_block);
+        for (int i = 0; i < stmt->as.if_stmt.n_elifs; i++) {
+            dsl_compiled_expr_free(&stmt->as.if_stmt.elif_branches[i].cond);
+            dsl_compiled_block_free(&stmt->as.if_stmt.elif_branches[i].block);
+        }
+        free(stmt->as.if_stmt.elif_branches);
+        if (stmt->as.if_stmt.has_else) {
+            dsl_compiled_block_free(&stmt->as.if_stmt.else_block);
+        }
         break;
     case ME_DSL_STMT_FOR:
         dsl_compiled_expr_free(&stmt->as.for_loop.limit);
@@ -2345,8 +2371,11 @@ typedef struct {
     me_dtype output_dtype;
     bool output_dtype_auto;
     int loop_depth;
+    bool allow_new_locals;
+    bool allow_result_new;
     int *error_pos;
     me_dsl_compiled_expr *output_expr;
+    me_dsl_compiled_expr **output_expr_slot;
     me_dsl_compiled_program *program;
     const me_variable_ex *funcs;
     int func_count;
@@ -2390,8 +2419,8 @@ static bool dsl_is_candidate(const char *source) {
             }
         }
     }
-    const char *keywords[] = {"for", "break", "continue", "print"};
-    for (int k = 0; k < 4; k++) {
+    const char *keywords[] = {"for", "break", "continue", "print", "if", "elif", "else"};
+    for (int k = 0; k < 7; k++) {
         const char *kw = keywords[k];
         size_t len = strlen(kw);
         for (const char *p = source; *p; p++) {
@@ -2437,6 +2466,9 @@ static void dsl_scan_reserved_usage_block(const me_dsl_block *block, int *uses_i
         case ME_DSL_STMT_PRINT:
             expr_text = stmt->as.print_stmt.call ? stmt->as.print_stmt.call->text : NULL;
             break;
+        case ME_DSL_STMT_IF:
+            expr_text = stmt->as.if_stmt.cond ? stmt->as.if_stmt.cond->text : NULL;
+            break;
         case ME_DSL_STMT_FOR:
             expr_text = stmt->as.for_loop.limit ? stmt->as.for_loop.limit->text : NULL;
             break;
@@ -2459,6 +2491,36 @@ static void dsl_scan_reserved_usage_block(const me_dsl_block *block, int *uses_i
                 if (dsl_expr_uses_identifier(expr_text, name)) {
                     *uses_n_mask |= (1 << d);
                 }
+            }
+        }
+        if (stmt->kind == ME_DSL_STMT_IF) {
+            dsl_scan_reserved_usage_block(&stmt->as.if_stmt.then_block, uses_i_mask, uses_n_mask, uses_ndim);
+            for (int j = 0; j < stmt->as.if_stmt.n_elifs; j++) {
+                dsl_scan_reserved_usage_block(&stmt->as.if_stmt.elif_branches[j].block,
+                                              uses_i_mask, uses_n_mask, uses_ndim);
+                const char *elif_text = stmt->as.if_stmt.elif_branches[j].cond
+                                            ? stmt->as.if_stmt.elif_branches[j].cond->text
+                                            : NULL;
+                if (elif_text) {
+                    if (dsl_expr_uses_identifier(elif_text, "_ndim")) {
+                        *uses_ndim = true;
+                    }
+                    for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
+                        char name[8];
+                        snprintf(name, sizeof(name), "_i%d", d);
+                        if (dsl_expr_uses_identifier(elif_text, name)) {
+                            *uses_i_mask |= (1 << d);
+                        }
+                        snprintf(name, sizeof(name), "_n%d", d);
+                        if (dsl_expr_uses_identifier(elif_text, name)) {
+                            *uses_n_mask |= (1 << d);
+                        }
+                    }
+                }
+            }
+            if (stmt->as.if_stmt.has_else) {
+                dsl_scan_reserved_usage_block(&stmt->as.if_stmt.else_block,
+                                              uses_i_mask, uses_n_mask, uses_ndim);
             }
         }
         if (stmt->kind == ME_DSL_STMT_FOR) {
@@ -2852,6 +2914,74 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
     return true;
 }
 
+static int dsl_count_result_assignments_block(const me_dsl_block *block) {
+    if (!block) {
+        return 0;
+    }
+    int count = 0;
+    for (int i = 0; i < block->nstmts; i++) {
+        me_dsl_stmt *stmt = block->stmts[i];
+        if (!stmt) {
+            continue;
+        }
+        switch (stmt->kind) {
+        case ME_DSL_STMT_ASSIGN:
+            if (stmt->as.assign.name && strcmp(stmt->as.assign.name, "result") == 0) {
+                count++;
+            }
+            break;
+        case ME_DSL_STMT_IF:
+            count += dsl_count_result_assignments_block(&stmt->as.if_stmt.then_block);
+            for (int j = 0; j < stmt->as.if_stmt.n_elifs; j++) {
+                count += dsl_count_result_assignments_block(&stmt->as.if_stmt.elif_branches[j].block);
+            }
+            if (stmt->as.if_stmt.has_else) {
+                count += dsl_count_result_assignments_block(&stmt->as.if_stmt.else_block);
+            }
+            break;
+        case ME_DSL_STMT_FOR:
+            count += dsl_count_result_assignments_block(&stmt->as.for_loop.body);
+            break;
+        case ME_DSL_STMT_EXPR:
+        case ME_DSL_STMT_PRINT:
+        case ME_DSL_STMT_BREAK:
+        case ME_DSL_STMT_CONTINUE:
+            break;
+        }
+    }
+    return count;
+}
+
+static bool dsl_block_is_single_flow_stmt(const me_dsl_block *block) {
+    if (!block || block->nstmts != 1) {
+        return false;
+    }
+    me_dsl_stmt *stmt = block->stmts[0];
+    if (!stmt) {
+        return false;
+    }
+    return (stmt->kind == ME_DSL_STMT_BREAK || stmt->kind == ME_DSL_STMT_CONTINUE);
+}
+
+static bool dsl_if_is_flow_only(const me_dsl_stmt *stmt) {
+    if (!stmt) {
+        return false;
+    }
+    if (!dsl_block_is_single_flow_stmt(&stmt->as.if_stmt.then_block)) {
+        return false;
+    }
+    for (int i = 0; i < stmt->as.if_stmt.n_elifs; i++) {
+        if (!dsl_block_is_single_flow_stmt(&stmt->as.if_stmt.elif_branches[i].block)) {
+            return false;
+        }
+    }
+    if (stmt->as.if_stmt.has_else &&
+        !dsl_block_is_single_flow_stmt(&stmt->as.if_stmt.else_block)) {
+        return false;
+    }
+    return true;
+}
+
 static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                               me_dsl_compiled_block *out_block) {
     if (!ctx || !block || !out_block) {
@@ -2905,6 +3035,14 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                                                   ctx->program->vars.count);
 
             if (var_index < 0) {
+                if (!ctx->allow_new_locals &&
+                    !(ctx->allow_result_new && strcmp(name, "result") == 0)) {
+                    if (ctx->error_pos) {
+                        *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                    }
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
                 var_index = dsl_var_table_add_with_uniform(&ctx->program->vars, name,
                                                            assigned_dtype, 0, is_uniform);
                 if (var_index < 0) {
@@ -2930,7 +3068,9 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             compiled->as.assign.local_slot = ctx->program->local_slots[var_index];
             if (strcmp(name, "result") == 0) {
                 ctx->program->result_var_index = var_index;
-                ctx->output_expr = &compiled->as.assign.value;
+                if (ctx->output_expr_slot) {
+                    *ctx->output_expr_slot = &compiled->as.assign.value;
+                }
             }
             break;
         }
@@ -2940,7 +3080,9 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
-            ctx->output_expr = &compiled->as.expr_stmt.expr;
+            if (ctx->output_expr_slot) {
+                *ctx->output_expr_slot = &compiled->as.expr_stmt.expr;
+            }
             compiled->as.expr_stmt.is_result = true;
             break;
         }
@@ -3112,9 +3254,120 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             free(args);
             break;
         }
+        case ME_DSL_STMT_IF: {
+            bool flow_only = dsl_if_is_flow_only(stmt);
+            if (!flow_only) {
+                if (!stmt->as.if_stmt.has_else) {
+                    if (ctx->error_pos) {
+                        *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                    }
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
+                if (dsl_count_result_assignments_block(&stmt->as.if_stmt.then_block) != 1) {
+                    if (ctx->error_pos) {
+                        *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                    }
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
+                for (int i = 0; i < stmt->as.if_stmt.n_elifs; i++) {
+                    if (dsl_count_result_assignments_block(&stmt->as.if_stmt.elif_branches[i].block) != 1) {
+                        if (ctx->error_pos) {
+                            *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                        }
+                        dsl_compiled_stmt_free(compiled);
+                        return false;
+                    }
+                }
+                if (dsl_count_result_assignments_block(&stmt->as.if_stmt.else_block) != 1) {
+                    if (ctx->error_pos) {
+                        *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                    }
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
+            }
+            if (!dsl_compile_expr(ctx, stmt->as.if_stmt.cond, ME_AUTO, &compiled->as.if_stmt.cond)) {
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            if (!dsl_expr_is_uniform(compiled->as.if_stmt.cond.expr,
+                                     ctx->program->vars.uniform,
+                                     ctx->program->vars.count)) {
+                if (ctx->error_pos) {
+                    *ctx->error_pos = dsl_offset_from_linecol(ctx->source,
+                                                             stmt->as.if_stmt.cond->line,
+                                                             stmt->as.if_stmt.cond->column);
+                }
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+
+            dsl_compile_ctx branch_ctx = *ctx;
+            branch_ctx.allow_new_locals = false;
+            branch_ctx.allow_result_new = true;
+
+            if (!dsl_compile_block(&branch_ctx, &stmt->as.if_stmt.then_block,
+                                   &compiled->as.if_stmt.then_block)) {
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+
+            compiled->as.if_stmt.n_elifs = stmt->as.if_stmt.n_elifs;
+            compiled->as.if_stmt.elif_capacity = stmt->as.if_stmt.n_elifs;
+            if (compiled->as.if_stmt.n_elifs > 0) {
+                compiled->as.if_stmt.elif_branches = calloc((size_t)compiled->as.if_stmt.n_elifs,
+                                                            sizeof(*compiled->as.if_stmt.elif_branches));
+                if (!compiled->as.if_stmt.elif_branches) {
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
+            }
+            for (int i = 0; i < stmt->as.if_stmt.n_elifs; i++) {
+                me_dsl_if_branch *elif_branch = &stmt->as.if_stmt.elif_branches[i];
+                me_dsl_compiled_if_branch *out_branch = &compiled->as.if_stmt.elif_branches[i];
+                if (!dsl_compile_expr(ctx, elif_branch->cond, ME_AUTO, &out_branch->cond)) {
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
+                if (!dsl_expr_is_uniform(out_branch->cond.expr,
+                                         ctx->program->vars.uniform,
+                                         ctx->program->vars.count)) {
+                    if (ctx->error_pos) {
+                        *ctx->error_pos = dsl_offset_from_linecol(ctx->source,
+                                                                 elif_branch->cond->line,
+                                                                 elif_branch->cond->column);
+                    }
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
+                if (!dsl_compile_block(&branch_ctx, &elif_branch->block, &out_branch->block)) {
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
+            }
+
+            if (stmt->as.if_stmt.has_else) {
+                if (!dsl_compile_block(&branch_ctx, &stmt->as.if_stmt.else_block,
+                                       &compiled->as.if_stmt.else_block)) {
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
+                compiled->as.if_stmt.has_else = true;
+            }
+            break;
+        }
         case ME_DSL_STMT_FOR: {
             const char *var = stmt->as.for_loop.var;
             if (!var || dsl_is_reserved_name(var)) {
+                if (ctx->error_pos) {
+                    *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                }
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            if (!ctx->allow_new_locals) {
                 if (ctx->error_pos) {
                     *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
                 }
@@ -3466,8 +3719,11 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     ctx.output_dtype = dtype;
     ctx.output_dtype_auto = (dtype == ME_AUTO);
     ctx.loop_depth = 0;
+    ctx.allow_new_locals = true;
+    ctx.allow_result_new = true;
     ctx.error_pos = error_pos;
     ctx.output_expr = NULL;
+    ctx.output_expr_slot = &ctx.output_expr;
     ctx.program = program;
     ctx.funcs = funcs;
     ctx.func_count = func_count;
@@ -4056,6 +4312,59 @@ static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
             }
             free(arg_bufs);
             free(arg_strs);
+            break;
+        }
+        case ME_DSL_STMT_IF: {
+            bool matched = false;
+            me_dtype cond_dtype = me_get_dtype(stmt->as.if_stmt.cond.expr);
+            size_t cond_size = dtype_size(cond_dtype);
+            void *cond_buf = malloc((size_t)ctx->nitems * cond_size);
+            if (!cond_buf) {
+                return ME_EVAL_ERR_OOM;
+            }
+            int rc = dsl_eval_expr_nitems(ctx, &stmt->as.if_stmt.cond, cond_buf, ctx->nitems);
+            if (rc != ME_EVAL_SUCCESS) {
+                free(cond_buf);
+                return rc;
+            }
+            matched = dsl_any_nonzero(cond_buf, cond_dtype, ctx->nitems);
+            free(cond_buf);
+            if (matched) {
+                rc = dsl_eval_block(ctx, &stmt->as.if_stmt.then_block, did_break, did_continue);
+                if (rc != ME_EVAL_SUCCESS) {
+                    return rc;
+                }
+                break;
+            }
+            for (int i = 0; i < stmt->as.if_stmt.n_elifs; i++) {
+                me_dsl_compiled_if_branch *branch = &stmt->as.if_stmt.elif_branches[i];
+                cond_dtype = me_get_dtype(branch->cond.expr);
+                cond_size = dtype_size(cond_dtype);
+                cond_buf = malloc((size_t)ctx->nitems * cond_size);
+                if (!cond_buf) {
+                    return ME_EVAL_ERR_OOM;
+                }
+                rc = dsl_eval_expr_nitems(ctx, &branch->cond, cond_buf, ctx->nitems);
+                if (rc != ME_EVAL_SUCCESS) {
+                    free(cond_buf);
+                    return rc;
+                }
+                matched = dsl_any_nonzero(cond_buf, cond_dtype, ctx->nitems);
+                free(cond_buf);
+                if (matched) {
+                    rc = dsl_eval_block(ctx, &branch->block, did_break, did_continue);
+                    if (rc != ME_EVAL_SUCCESS) {
+                        return rc;
+                    }
+                    return ME_EVAL_SUCCESS;
+                }
+            }
+            if (stmt->as.if_stmt.has_else) {
+                rc = dsl_eval_block(ctx, &stmt->as.if_stmt.else_block, did_break, did_continue);
+                if (rc != ME_EVAL_SUCCESS) {
+                    return rc;
+                }
+            }
             break;
         }
         case ME_DSL_STMT_FOR: {

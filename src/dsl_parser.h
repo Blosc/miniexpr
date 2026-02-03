@@ -17,6 +17,7 @@ typedef enum {
     ME_DSL_STMT_ASSIGN = 0,
     ME_DSL_STMT_EXPR,
     ME_DSL_STMT_PRINT,
+    ME_DSL_STMT_IF,
     ME_DSL_STMT_FOR,
     ME_DSL_STMT_BREAK,
     ME_DSL_STMT_CONTINUE
@@ -36,6 +37,11 @@ typedef struct {
     int capacity;
 } me_dsl_block;
 
+typedef struct {
+    me_dsl_expr *cond;
+    me_dsl_block block;
+} me_dsl_if_branch;
+
 struct me_dsl_stmt {
     me_dsl_stmt_kind kind;
     int line;
@@ -51,6 +57,15 @@ struct me_dsl_stmt {
         struct {
             me_dsl_expr *call;
         } print_stmt;
+        struct {
+            me_dsl_expr *cond;
+            me_dsl_block then_block;
+            me_dsl_if_branch *elif_branches;
+            int n_elifs;
+            int elif_capacity;
+            me_dsl_block else_block;
+            int has_else;
+        } if_stmt;
         struct {
             char *var;
             me_dsl_expr *limit;
