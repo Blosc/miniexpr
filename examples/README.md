@@ -373,6 +373,51 @@ result = escape_iter
 
 ---
 
+### 14_string_ops.c
+**String-aware expressions with dynamic dispatch**
+
+- **What it demonstrates**: String operations in expressions
+- **Expressions**: Comparisons, concatenation, and selection involving strings
+- **Concepts**: String literals, string variables, and mixed-type expressions
+- **Best for**: Working with text data and metadata-driven logic
+
+**Run it:**
+```bash
+./build/examples/14_string_ops
+```
+
+---
+
+### 15_dsl_print.c
+**Printing from DSL programs**
+
+- **What it demonstrates**: DSL `print()` statements for debugging
+- **Programs**: Simple expressions with intermediate printouts
+- **Concepts**: DSL I/O and debugging helpers
+- **Best for**: Understanding and validating DSL program flow
+
+**Run it:**
+```bash
+./build/examples/15_dsl_print
+```
+
+---
+
+### 16_nd_padding_example.c
+**N-dimensional padding for array expressions**
+
+- **What it demonstrates**: Padding N-D arrays before evaluation
+- **Expressions**: N-D input with padding-aware evaluation
+- **Concepts**: N-D metadata, padding configuration, and boundary handling
+- **Best for**: Image/volume processing and stencil-style operations
+
+**Run it:**
+```bash
+./build/examples/16_nd_padding_example
+```
+
+---
+
 ## Building Examples
 
 ### Using CMake (recommended)
@@ -519,8 +564,14 @@ After trying these examples:
 | 05 | ⭐⭐⭐ Advanced | Parallelism | ~140 | ~1s |
 | 06 | ⭐ Simple | Debugging | ~70 | <1s |
 | 07 | ⭐⭐ Moderate | Bool output | ~180 | <1s |
+| 08 | ⭐⭐ Moderate | Explicit output dtype | ~110 | <1s |
+| 09 | ⭐⭐ Moderate | Reductions | ~80 | <1s |
+| 10 | ⭐⭐ Moderate | Boolean logic | ~110 | <1s |
 | 11 | ⭐⭐ Moderate | DSL kernels | ~160 | <1s |
 | 12 | ⭐⭐⭐ Advanced | Mandelbrot | ~170 | ~1s |
 | 13 | ⭐⭐⭐ Advanced | DSL Mandelbrot | ~210 | ~1s |
+| 14 | ⭐⭐ Moderate | String ops | ~120 | <1s |
+| 15 | ⭐ Simple | DSL print | ~40 | <1s |
+| 16 | ⭐⭐ Moderate | N-D padding | ~90 | <1s |
 
 **Start with Example 01, then explore based on your needs!** 🚀
