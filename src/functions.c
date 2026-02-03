@@ -385,6 +385,7 @@ static bool is_complex_dtype(me_dtype dt) {
 }
 
 static double sum_reduce(double x);
+static double mean_reduce(double x);
 static double prod_reduce(double x);
 static double any_reduce(double x);
 static double all_reduce(double x);
@@ -394,6 +395,12 @@ double max_reduce(double x);
 me_dtype reduction_output_dtype(me_dtype dt, const void* func) {
     if (func == (void*)any_reduce || func == (void*)all_reduce) {
         return ME_BOOL;
+    }
+    if (func == (void*)mean_reduce) {
+        if (dt == ME_COMPLEX64 || dt == ME_COMPLEX128) {
+            return ME_COMPLEX128;
+        }
+        return ME_FLOAT64;
     }
     if (func == (void*)sum_reduce || func == (void*)prod_reduce) {
         if (dt == ME_BOOL) {
@@ -411,6 +418,7 @@ me_dtype reduction_output_dtype(me_dtype dt, const void* func) {
 
 me_reduce_kind reduction_kind(const void* func) {
     if (func == (void*)sum_reduce) return ME_REDUCE_SUM;
+    if (func == (void*)mean_reduce) return ME_REDUCE_MEAN;
     if (func == (void*)prod_reduce) return ME_REDUCE_PROD;
     if (func == (void*)min_reduce) return ME_REDUCE_MIN;
     if (func == (void*)max_reduce) return ME_REDUCE_MAX;
@@ -441,9 +449,10 @@ size_t dtype_size(me_dtype dtype) {
 }
 
 static bool is_reduction_function(const void* func) {
-    return func == (void*)sum_reduce || func == (void*)prod_reduce ||
-        func == (void*)min_reduce || func == (void*)max_reduce ||
-        func == (void*)any_reduce || func == (void*)all_reduce;
+    return func == (void*)sum_reduce || func == (void*)mean_reduce ||
+        func == (void*)prod_reduce || func == (void*)min_reduce ||
+        func == (void*)max_reduce || func == (void*)any_reduce ||
+        func == (void*)all_reduce;
 }
 
 bool is_reduction_node(const me_expr* n) {
@@ -666,6 +675,7 @@ static const me_variable_ex functions[] = {
     {"log2", 0, log2_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"logaddexp", 0, logaddexp, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"max", 0, max_reduce, ME_FUNCTION1, 0},
+    {"mean", 0, mean_reduce, ME_FUNCTION1, 0},
     {"min", 0, min_reduce, ME_FUNCTION1, 0},
     {"ncr", 0, ncr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"nextafter", 0, nextafter, ME_FUNCTION2 | ME_FLAG_PURE, 0},
@@ -736,12 +746,14 @@ static double mul(double a, double b) { return a * b; }
 static double divide(double a, double b) { return a / b; }
 static double negate(double a) { return -a; }
 static volatile double sum_salt = 0.0;
+static volatile double mean_salt = 0.0;
 static volatile double prod_salt = 1.0;
 static volatile double min_salt = 0.0;
 static volatile double max_salt = 0.0;
 static volatile double any_salt = 0.0;
 static volatile double all_salt = 0.0;
 static double sum_reduce(double x) { return x + sum_salt; }
+static double mean_reduce(double x) { return x + mean_salt; }
 static double prod_reduce(double x) { return x * prod_salt; }
 static double any_reduce(double x) { return x + any_salt; }
 static double all_reduce(double x) { return x * (1.0 + all_salt); }
@@ -5824,6 +5836,7 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
     me_dtype result_type = reduction_output_dtype(arg_type, n->function);
     me_dtype output_type = n->dtype;
     bool is_prod = n->function == (void*)prod_reduce;
+    bool is_mean = n->function == (void*)mean_reduce;
     bool is_min = n->function == (void*)min_reduce;
     bool is_max = n->function == (void*)max_reduce;
     bool is_any = n->function == (void*)any_reduce;
@@ -5839,7 +5852,18 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
 
     if (arg->type == ME_CONSTANT) {
         double val = arg->value;
-        if (is_any || is_all) {
+        if (is_mean) {
+            if (result_type == ME_COMPLEX128) {
+                double _Complex acc = (nitems == 0) ? (double _Complex)(NAN + NAN * I) :
+                    (double _Complex)val;
+                ((double _Complex*)write_ptr)[0] = acc;
+            }
+            else {
+                double acc = (nitems == 0) ? NAN : val;
+                ((double*)write_ptr)[0] = acc;
+            }
+        }
+        else if (is_any || is_all) {
             bool acc = is_all;
             if (nitems == 0) {
                 acc = is_all;
@@ -6087,7 +6111,18 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
         case ME_BOOL:
             {
                 const bool* data = (const bool*)arg->bound;
-                if (is_any || is_all) {
+                if (is_mean) {
+                    double acc = NAN;
+                    if (nitems > 0) {
+                        int64_t sum = 0;
+                        for (int i = 0; i < nitems; i++) {
+                            sum += data[i] ? 1 : 0;
+                        }
+                        acc = (double)sum / (double)nitems;
+                    }
+                    ((double*)write_ptr)[0] = acc;
+                }
+                else if (is_any || is_all) {
                     bool acc = is_all;
                     if (nitems > 0) {
                         acc = is_all;
@@ -6130,7 +6165,18 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
         case ME_INT8:
             {
                 const int8_t* data = (const int8_t*)arg->bound;
-                if (is_any || is_all) {
+                if (is_mean) {
+                    double acc = NAN;
+                    if (nitems > 0) {
+                        int64_t sum = 0;
+                        for (int i = 0; i < nitems; i++) {
+                            sum += data[i];
+                        }
+                        acc = (double)sum / (double)nitems;
+                    }
+                    ((double*)write_ptr)[0] = acc;
+                }
+                else if (is_any || is_all) {
                     bool acc = is_all;
                     if (nitems > 0) {
                         acc = is_all;
@@ -6168,7 +6214,18 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
         case ME_INT16:
             {
                 const int16_t* data = (const int16_t*)arg->bound;
-                if (is_any || is_all) {
+                if (is_mean) {
+                    double acc = NAN;
+                    if (nitems > 0) {
+                        int64_t sum = 0;
+                        for (int i = 0; i < nitems; i++) {
+                            sum += data[i];
+                        }
+                        acc = (double)sum / (double)nitems;
+                    }
+                    ((double*)write_ptr)[0] = acc;
+                }
+                else if (is_any || is_all) {
                     bool acc = is_all;
                     if (nitems > 0) {
                         acc = is_all;
@@ -6206,7 +6263,18 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
         case ME_INT32:
             {
                 const int32_t* data = (const int32_t*)arg->bound;
-                if (is_any || is_all) {
+                if (is_mean) {
+                    double acc = NAN;
+                    if (nitems > 0) {
+                        int64_t sum = 0;
+                        for (int i = 0; i < nitems; i++) {
+                            sum += data[i];
+                        }
+                        acc = (double)sum / (double)nitems;
+                    }
+                    ((double*)write_ptr)[0] = acc;
+                }
+                else if (is_any || is_all) {
                     bool acc = is_all;
                     if (nitems > 0) {
                         acc = is_all;
@@ -6244,7 +6312,18 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
         case ME_INT64:
             {
                 const int64_t* data = (const int64_t*)arg->bound;
-                if (is_any || is_all) {
+                if (is_mean) {
+                    double acc = NAN;
+                    if (nitems > 0) {
+                        int64_t sum = 0;
+                        for (int i = 0; i < nitems; i++) {
+                            sum += data[i];
+                        }
+                        acc = (double)sum / (double)nitems;
+                    }
+                    ((double*)write_ptr)[0] = acc;
+                }
+                else if (is_any || is_all) {
                     bool acc = is_all;
                     if (nitems > 0) {
                         acc = is_all;
@@ -6282,7 +6361,18 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
         case ME_UINT8:
             {
                 const uint8_t* data = (const uint8_t*)arg->bound;
-                if (is_any || is_all) {
+                if (is_mean) {
+                    double acc = NAN;
+                    if (nitems > 0) {
+                        uint64_t sum = 0;
+                        for (int i = 0; i < nitems; i++) {
+                            sum += data[i];
+                        }
+                        acc = (double)sum / (double)nitems;
+                    }
+                    ((double*)write_ptr)[0] = acc;
+                }
+                else if (is_any || is_all) {
                     bool acc = is_all;
                     if (nitems > 0) {
                         acc = is_all;
@@ -6320,7 +6410,18 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
         case ME_UINT16:
             {
                 const uint16_t* data = (const uint16_t*)arg->bound;
-                if (is_any || is_all) {
+                if (is_mean) {
+                    double acc = NAN;
+                    if (nitems > 0) {
+                        uint64_t sum = 0;
+                        for (int i = 0; i < nitems; i++) {
+                            sum += data[i];
+                        }
+                        acc = (double)sum / (double)nitems;
+                    }
+                    ((double*)write_ptr)[0] = acc;
+                }
+                else if (is_any || is_all) {
                     bool acc = is_all;
                     if (nitems > 0) {
                         acc = is_all;
@@ -6358,7 +6459,18 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
         case ME_UINT32:
             {
                 const uint32_t* data = (const uint32_t*)arg->bound;
-                if (is_any || is_all) {
+                if (is_mean) {
+                    double acc = NAN;
+                    if (nitems > 0) {
+                        uint64_t sum = 0;
+                        for (int i = 0; i < nitems; i++) {
+                            sum += data[i];
+                        }
+                        acc = (double)sum / (double)nitems;
+                    }
+                    ((double*)write_ptr)[0] = acc;
+                }
+                else if (is_any || is_all) {
                     bool acc = is_all;
                     if (nitems > 0) {
                         acc = is_all;
@@ -6396,7 +6508,18 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
         case ME_UINT64:
             {
                 const uint64_t* data = (const uint64_t*)arg->bound;
-                if (is_any || is_all) {
+                if (is_mean) {
+                    double acc = NAN;
+                    if (nitems > 0) {
+                        uint64_t sum = 0;
+                        for (int i = 0; i < nitems; i++) {
+                            sum += data[i];
+                        }
+                        acc = (double)sum / (double)nitems;
+                    }
+                    ((double*)write_ptr)[0] = acc;
+                }
+                else if (is_any || is_all) {
                     bool acc = is_all;
                     if (nitems > 0) {
                         acc = is_all;
@@ -6434,7 +6557,14 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
         case ME_FLOAT32:
             {
                 const float* data = (const float*)arg->bound;
-                if (is_any || is_all) {
+                if (is_mean) {
+                    double acc = NAN;
+                    if (nitems > 0) {
+                        acc = reduce_sum_float32_nan_safe(data, nitems) / (double)nitems;
+                    }
+                    ((double*)write_ptr)[0] = acc;
+                }
+                else if (is_any || is_all) {
                     bool acc = is_all;
                     if (nitems > 0) {
                         acc = is_all;
@@ -6480,7 +6610,14 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
         case ME_FLOAT64:
             {
                 const double* data = (const double*)arg->bound;
-                if (is_any || is_all) {
+                if (is_mean) {
+                    double acc = NAN;
+                    if (nitems > 0) {
+                        acc = reduce_sum_float64_nan_safe(data, nitems) / (double)nitems;
+                    }
+                    ((double*)write_ptr)[0] = acc;
+                }
+                else if (is_any || is_all) {
                     bool acc = is_all;
                     if (nitems > 0) {
                         acc = is_all;
@@ -6521,6 +6658,18 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
         case ME_COMPLEX64:
             {
                 const float _Complex* data = (const float _Complex*)arg->bound;
+                if (is_mean) {
+                    double _Complex acc = (double _Complex)(NAN + NAN * I);
+                    if (nitems > 0) {
+                        acc = (double _Complex)0.0;
+                        for (int i = 0; i < nitems; i++) {
+                            acc += (double _Complex)data[i];
+                        }
+                        acc /= (double)nitems;
+                    }
+                    ((double _Complex*)write_ptr)[0] = acc;
+                    break;
+                }
                 if (is_any || is_all) {
                     bool acc = is_all;
                     if (nitems > 0) {
@@ -6558,6 +6707,16 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
         case ME_COMPLEX128:
             {
                 const double _Complex* data = (const double _Complex*)arg->bound;
+                if (is_mean) {
+                    double _Complex acc = (double _Complex)(NAN + NAN * I);
+                    if (nitems > 0) {
+                        acc = (double _Complex)0.0;
+                        for (int i = 0; i < nitems; i++) acc += data[i];
+                        acc /= (double)nitems;
+                    }
+                    ((double _Complex*)write_ptr)[0] = acc;
+                    break;
+                }
                 if (is_any || is_all) {
                     bool acc = is_all;
                     if (nitems > 0) {

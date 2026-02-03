@@ -160,6 +160,7 @@ for i in range(n):
 
 Reduce arrays to scalars:
 - `sum(x)` - Sum of elements
+- `mean(x)` - Mean of elements (returns float64; NaN for empty input)
 - `prod(x)` - Product of elements
 - `min(x)`, `max(x)` - Minimum/maximum
 - `any(x)`, `all(x)` - Logical reductions

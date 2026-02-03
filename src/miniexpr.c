@@ -1280,6 +1280,7 @@ static bool reduce_strided_variable(const me_expr* expr, const void** vars_block
     if (rkind == ME_REDUCE_NONE) {
         return false;
     }
+    const bool is_mean = (rkind == ME_REDUCE_MEAN);
 
     const me_dtype arg_type = infer_result_type(arg);
     const me_dtype result_type = reduction_output_dtype(arg_type, expr->function);
@@ -1311,7 +1312,10 @@ static bool reduce_strided_variable(const me_expr* expr, const void** vars_block
         switch (arg_type) {
         case ME_BOOL: {
             bool v = ((const bool*)base)[off];
-            if (rkind == ME_REDUCE_ANY) { if (v) { acc.b = true; goto done_reduce; } }
+            if (is_mean) {
+                acc.f64 += v ? 1.0 : 0.0;
+            }
+            else if (rkind == ME_REDUCE_ANY) { if (v) { acc.b = true; goto done_reduce; } }
             else if (rkind == ME_REDUCE_ALL) { if (!v) { acc.b = false; goto done_reduce; } }
             else if (rkind == ME_REDUCE_PROD) acc.i64 *= v ? 1 : 0;
             else acc.i64 += v ? 1 : 0;
@@ -1319,7 +1323,8 @@ static bool reduce_strided_variable(const me_expr* expr, const void** vars_block
         }
         case ME_INT8: {
             int8_t v = ((const int8_t*)base)[off];
-            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (int8_t)acc.i64) acc.i64 = v; }
+            if (is_mean) { acc.f64 += (double)v; }
+            else if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (int8_t)acc.i64) acc.i64 = v; }
             else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > (int8_t)acc.i64) acc.i64 = v; }
             else if (rkind == ME_REDUCE_PROD) acc.i64 *= v;
             else if (rkind == ME_REDUCE_ANY) { if (v != 0) { acc.b = true; goto done_reduce; } }
@@ -1329,7 +1334,8 @@ static bool reduce_strided_variable(const me_expr* expr, const void** vars_block
         }
         case ME_INT16: {
             int16_t v = ((const int16_t*)base)[off];
-            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (int16_t)acc.i64) acc.i64 = v; }
+            if (is_mean) { acc.f64 += (double)v; }
+            else if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (int16_t)acc.i64) acc.i64 = v; }
             else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > (int16_t)acc.i64) acc.i64 = v; }
             else if (rkind == ME_REDUCE_PROD) acc.i64 *= v;
             else if (rkind == ME_REDUCE_ANY) { if (v != 0) { acc.b = true; goto done_reduce; } }
@@ -1339,7 +1345,8 @@ static bool reduce_strided_variable(const me_expr* expr, const void** vars_block
         }
         case ME_INT32: {
             int32_t v = ((const int32_t*)base)[off];
-            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (int32_t)acc.i64) acc.i64 = v; }
+            if (is_mean) { acc.f64 += (double)v; }
+            else if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (int32_t)acc.i64) acc.i64 = v; }
             else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > (int32_t)acc.i64) acc.i64 = v; }
             else if (rkind == ME_REDUCE_PROD) acc.i64 *= v;
             else if (rkind == ME_REDUCE_ANY) { if (v != 0) { acc.b = true; goto done_reduce; } }
@@ -1349,7 +1356,8 @@ static bool reduce_strided_variable(const me_expr* expr, const void** vars_block
         }
         case ME_INT64: {
             int64_t v = ((const int64_t*)base)[off];
-            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < acc.i64) acc.i64 = v; }
+            if (is_mean) { acc.f64 += (double)v; }
+            else if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < acc.i64) acc.i64 = v; }
             else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > acc.i64) acc.i64 = v; }
             else if (rkind == ME_REDUCE_PROD) acc.i64 *= v;
             else if (rkind == ME_REDUCE_ANY) { if (v != 0) { acc.b = true; goto done_reduce; } }
@@ -1359,7 +1367,8 @@ static bool reduce_strided_variable(const me_expr* expr, const void** vars_block
         }
         case ME_UINT8: {
             uint8_t v = ((const uint8_t*)base)[off];
-            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (uint8_t)acc.u64) acc.u64 = v; }
+            if (is_mean) { acc.f64 += (double)v; }
+            else if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (uint8_t)acc.u64) acc.u64 = v; }
             else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > (uint8_t)acc.u64) acc.u64 = v; }
             else if (rkind == ME_REDUCE_PROD) acc.u64 *= v;
             else if (rkind == ME_REDUCE_ANY) { if (v != 0) { acc.b = true; goto done_reduce; } }
@@ -1369,7 +1378,8 @@ static bool reduce_strided_variable(const me_expr* expr, const void** vars_block
         }
         case ME_UINT16: {
             uint16_t v = ((const uint16_t*)base)[off];
-            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (uint16_t)acc.u64) acc.u64 = v; }
+            if (is_mean) { acc.f64 += (double)v; }
+            else if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (uint16_t)acc.u64) acc.u64 = v; }
             else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > (uint16_t)acc.u64) acc.u64 = v; }
             else if (rkind == ME_REDUCE_PROD) acc.u64 *= v;
             else if (rkind == ME_REDUCE_ANY) { if (v != 0) { acc.b = true; goto done_reduce; } }
@@ -1379,7 +1389,8 @@ static bool reduce_strided_variable(const me_expr* expr, const void** vars_block
         }
         case ME_UINT32: {
             uint32_t v = ((const uint32_t*)base)[off];
-            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (uint32_t)acc.u64) acc.u64 = v; }
+            if (is_mean) { acc.f64 += (double)v; }
+            else if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (uint32_t)acc.u64) acc.u64 = v; }
             else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > (uint32_t)acc.u64) acc.u64 = v; }
             else if (rkind == ME_REDUCE_PROD) acc.u64 *= v;
             else if (rkind == ME_REDUCE_ANY) { if (v != 0) { acc.b = true; goto done_reduce; } }
@@ -1389,7 +1400,8 @@ static bool reduce_strided_variable(const me_expr* expr, const void** vars_block
         }
         case ME_UINT64: {
             uint64_t v = ((const uint64_t*)base)[off];
-            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < acc.u64) acc.u64 = v; }
+            if (is_mean) { acc.f64 += (double)v; }
+            else if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < acc.u64) acc.u64 = v; }
             else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > acc.u64) acc.u64 = v; }
             else if (rkind == ME_REDUCE_PROD) acc.u64 *= v;
             else if (rkind == ME_REDUCE_ANY) { if (v != 0) { acc.b = true; goto done_reduce; } }
@@ -1400,7 +1412,8 @@ static bool reduce_strided_variable(const me_expr* expr, const void** vars_block
         case ME_FLOAT32: {
             float v = ((const float*)base)[off];
             if (v != v) { acc.f64 = NAN; goto done_reduce; }
-            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (float)acc.f64) acc.f64 = v; }
+            if (is_mean) { acc.f64 += (double)v; }
+            else if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < (float)acc.f64) acc.f64 = v; }
             else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > (float)acc.f64) acc.f64 = v; }
             else if (rkind == ME_REDUCE_PROD) acc.f64 *= (double)v;
             else if (rkind == ME_REDUCE_ANY) { if (v != 0.0f) { acc.b = true; goto done_reduce; } }
@@ -1411,7 +1424,8 @@ static bool reduce_strided_variable(const me_expr* expr, const void** vars_block
         case ME_FLOAT64: {
             double v = ((const double*)base)[off];
             if (v != v) { acc.f64 = NAN; goto done_reduce; }
-            if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < acc.f64) acc.f64 = v; }
+            if (is_mean) { acc.f64 += v; }
+            else if (rkind == ME_REDUCE_MIN) { if (it == 0 || v < acc.f64) acc.f64 = v; }
             else if (rkind == ME_REDUCE_MAX) { if (it == 0 || v > acc.f64) acc.f64 = v; }
             else if (rkind == ME_REDUCE_PROD) acc.f64 *= v;
             else if (rkind == ME_REDUCE_ANY) { if (v != 0.0) { acc.b = true; goto done_reduce; } }
@@ -1422,7 +1436,8 @@ static bool reduce_strided_variable(const me_expr* expr, const void** vars_block
         case ME_COMPLEX64: {
             float _Complex v = ((const float _Complex*)base)[off];
             bool nonzero = (me_crealf(v) != 0.0f || me_cimagf(v) != 0.0f);
-            if (rkind == ME_REDUCE_ANY) { if (nonzero) { acc.b = true; goto done_reduce; } }
+            if (is_mean) { acc.c128 += (double _Complex)v; }
+            else if (rkind == ME_REDUCE_ANY) { if (nonzero) { acc.b = true; goto done_reduce; } }
             else if (rkind == ME_REDUCE_ALL) { if (!nonzero) { acc.b = false; goto done_reduce; } }
             else if (rkind == ME_REDUCE_PROD) acc.c64 *= v;
             else acc.c64 += v;
@@ -1431,7 +1446,8 @@ static bool reduce_strided_variable(const me_expr* expr, const void** vars_block
         case ME_COMPLEX128: {
             double _Complex v = ((const double _Complex*)base)[off];
             bool nonzero = (me_creal(v) != 0.0 || me_cimag(v) != 0.0);
-            if (rkind == ME_REDUCE_ANY) { if (nonzero) { acc.b = true; goto done_reduce; } }
+            if (is_mean) { acc.c128 += v; }
+            else if (rkind == ME_REDUCE_ANY) { if (nonzero) { acc.b = true; goto done_reduce; } }
             else if (rkind == ME_REDUCE_ALL) { if (!nonzero) { acc.b = false; goto done_reduce; } }
             else if (rkind == ME_REDUCE_PROD) acc.c128 *= v;
             else acc.c128 += v;
@@ -1449,6 +1465,14 @@ static bool reduce_strided_variable(const me_expr* expr, const void** vars_block
     }
 
 done_reduce:
+    if (is_mean) {
+        if (result_type == ME_COMPLEX128) {
+            acc.c128 /= (double)valid_items;
+        }
+        else {
+            acc.f64 /= (double)valid_items;
+        }
+    }
     if (result_type == ME_FLOAT32) {
         acc.f32 = (float)acc.f64;
     }
@@ -4481,7 +4505,22 @@ int me_eval_nd(const me_expr* expr, const void** vars_block,
     /* Pack → single eval → scatter */
     if (valid_items == 0) {
         if (is_reduction_output) {
-            memset(output_block, 0, item_size);
+            if (is_reduction_node(expr) && reduction_kind(expr->function) == ME_REDUCE_MEAN) {
+                const me_expr* arg = (const me_expr*)expr->parameters[0];
+                me_dtype arg_type = arg ? infer_result_type(arg) : ME_FLOAT64;
+                me_dtype result_type = reduction_output_dtype(arg_type, expr->function);
+                me_scalar acc;
+                if (result_type == ME_COMPLEX128) {
+                    acc.c128 = (double _Complex)(NAN + NAN * I);
+                }
+                else {
+                    acc.f64 = NAN;
+                }
+                write_scalar(output_block, expr->dtype, result_type, &acc);
+            }
+            else {
+                memset(output_block, 0, item_size);
+            }
         }
         else {
             memset(output_block, 0, (size_t)padded_items * item_size);

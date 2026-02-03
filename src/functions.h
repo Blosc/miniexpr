@@ -109,6 +109,7 @@ bool validate_string_usage(const me_expr* n);
 typedef enum {
     ME_REDUCE_NONE = 0,
     ME_REDUCE_SUM,
+    ME_REDUCE_MEAN,
     ME_REDUCE_PROD,
     ME_REDUCE_MIN,
     ME_REDUCE_MAX,

@@ -1,5 +1,5 @@
 /*
- * Tests for sum(), prod(), min(), and max() reductions.
+ * Tests for sum(), mean(), prod(), min(), and max() reductions.
  */
 
 #include <stdio.h>
@@ -121,6 +121,76 @@ static int test_sum_uint64() {
 
     if (output != 10) {
         printf("  ❌ FAILED: expected 10, got %llu\n", (unsigned long long)output);
+        me_free(expr);
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    me_free(expr);
+    return 0;
+}
+
+static int test_mean_int32() {
+    printf("\n=== mean(int32) -> float64 ===\n");
+
+    int32_t data[] = {1, 2, 3, 4};
+    double output = 0.0;
+
+    me_variable vars[] = {{"x", ME_INT32, data}};
+    int err = 0;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("mean(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 1;
+    }
+
+    if (me_get_dtype(expr) != ME_FLOAT64) {
+        printf("  ❌ FAILED: expected dtype ME_FLOAT64, got %d\n", me_get_dtype(expr));
+        me_free(expr);
+        return 1;
+    }
+
+    const void *var_ptrs[] = {data};
+    ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 4);
+
+    if (fabs(output - 2.5) > 1e-12) {
+        printf("  ❌ FAILED: expected 2.5, got %.12f\n", output);
+        me_free(expr);
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    me_free(expr);
+    return 0;
+}
+
+static int test_mean_float32() {
+    printf("\n=== mean(float32) -> float64 ===\n");
+
+    float data[] = {1.0f, 2.0f, 3.0f, 4.0f};
+    double output = 0.0;
+
+    me_variable vars[] = {{"x", ME_FLOAT32, data}};
+    int err = 0;
+    me_expr *expr = NULL;
+    int rc_expr = me_compile("mean(x)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compilation error %d\n", err);
+        return 1;
+    }
+
+    if (me_get_dtype(expr) != ME_FLOAT64) {
+        printf("  ❌ FAILED: expected dtype ME_FLOAT64, got %d\n", me_get_dtype(expr));
+        me_free(expr);
+        return 1;
+    }
+
+    const void *var_ptrs[] = {data};
+    ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 4);
+
+    if (fabs(output - 2.5) > 1e-12) {
+        printf("  ❌ FAILED: expected 2.5, got %.12f\n", output);
         me_free(expr);
         return 1;
     }
@@ -1057,6 +1127,25 @@ static int test_empty_inputs() {
 
     {
         int err = 0;
+        double output = 0.0;
+        me_variable vars[] = {{"x", ME_INT32, i32_data}};
+        me_expr *expr = NULL;
+        int rc_expr = me_compile("mean(x)", vars, 1, ME_AUTO, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
+            printf("  ❌ FAILED: mean(int32) compile error %d\n", err);
+            return 1;
+        }
+        const void *var_ptrs[] = {i32_data};
+        ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);
+        if (!isnan(output)) {
+            printf("  ❌ FAILED: mean(int32) empty expected NaN, got %.6f\n", output);
+            failures++;
+        }
+        me_free(expr);
+    }
+
+    {
+        int err = 0;
         int32_t output = -1;
         me_variable vars[] = {{"x", ME_INT32, i32_data}};
         me_expr *expr = NULL;
@@ -1327,6 +1416,8 @@ int main(void) {
 
     failures += test_sum_int64();
     failures += test_sum_uint64();
+    failures += test_mean_int32();
+    failures += test_mean_float32();
     failures += test_sum_float32();
     failures += test_sum_single_output_chunk();
     failures += test_prod_complex64();
