@@ -169,6 +169,23 @@ Reductions can appear in expressions:
 centered = x - sum(x) / _n0
 ```
 
+### Debug Print
+
+Use `print()` for scalar debugging output:
+
+```
+print("value = {}", x)
+print("min={} max={}", min(a), max(a))
+print("sum =", sum(a))
+print(sum(a))
+```
+
+- `{}` placeholders are replaced left-to-right by arguments.
+- Use `{{` and `}}` for literal braces.
+- If the first argument is not a string literal, `print` inserts `{}` for each argument, separated by spaces.
+- If the first argument is a string literal with no `{}`, placeholders are appended for the remaining arguments (with a single space separator).
+- Arguments must be scalar or uniform across the block (use reductions like `min/max/any/all`).
+
 ## Examples
 
 ### Example 1: Polynomial Evaluation

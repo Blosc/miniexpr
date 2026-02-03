@@ -287,6 +287,9 @@ static void dsl_stmt_free(me_dsl_stmt *stmt) {
     case ME_DSL_STMT_EXPR:
         dsl_expr_free(stmt->as.expr_stmt.expr);
         break;
+    case ME_DSL_STMT_PRINT:
+        dsl_expr_free(stmt->as.print_stmt.call);
+        break;
     case ME_DSL_STMT_FOR:
         free(stmt->as.for_loop.var);
         dsl_expr_free(stmt->as.for_loop.limit);
@@ -742,6 +745,30 @@ static bool parse_expression_stmt(me_dsl_lexer *lex, me_dsl_block *block, me_dsl
     return true;
 }
 
+static bool parse_print_stmt(me_dsl_lexer *lex, me_dsl_block *block, int line, int column, me_dsl_error *error) {
+    char *expr_text = parse_expression_until_stmt_end(lex, error, line, column);
+    if (!expr_text) {
+        return false;
+    }
+    me_dsl_stmt *stmt = dsl_stmt_new(ME_DSL_STMT_PRINT, line, column);
+    if (!stmt) {
+        free(expr_text);
+        dsl_set_error(error, line, column, "out of memory");
+        return false;
+    }
+    stmt->as.print_stmt.call = dsl_expr_new(expr_text, line, column);
+    if (!stmt->as.print_stmt.call) {
+        dsl_set_error(error, line, column, "out of memory");
+        dsl_stmt_free(stmt);
+        return false;
+    }
+    if (!dsl_block_push(block, stmt, error)) {
+        dsl_stmt_free(stmt);
+        return false;
+    }
+    return true;
+}
+
 static bool parse_statement(me_dsl_lexer *lex, me_dsl_block *block, bool in_loop, me_dsl_error *error) {
     lexer_skip_separators(lex);
     if (*lex->current == '\0') {
@@ -759,6 +786,10 @@ static bool parse_statement(me_dsl_lexer *lex, me_dsl_block *block, bool in_loop
         }
         if (ident_len == 2 && strncmp(ident_start, "if", ident_len) == 0) {
             return parse_if(lex, block, snapshot.line, snapshot.column, in_loop, error);
+        }
+        if (ident_len == 5 && strncmp(ident_start, "print", ident_len) == 0) {
+            *lex = snapshot;
+            return parse_print_stmt(lex, block, snapshot.line, snapshot.column, error);
         }
         if (ident_len == 5 && strncmp(ident_start, "break", ident_len) == 0) {
             return parse_break_or_continue(lex, block, ME_DSL_STMT_BREAK,

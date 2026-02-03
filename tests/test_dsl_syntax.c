@@ -416,6 +416,39 @@ static int test_dsl_function_calls(void) {
     return rc;
 }
 
+static int test_dsl_print_stmt(void) {
+    printf("\n=== DSL Test 11: print statement ===\n");
+
+    const char *src =
+        "print(\"value = {}\", 1 + 2)\n"
+        "print(\"sum =\", 1 + 2)\n"
+        "print(1 + 2)\n"
+        "print(\"sum =\", 1 + 2, 3 + 4)\n"
+        "result = 0\n";
+
+    me_expr *expr = NULL;
+    int err = 0;
+    if (me_compile(src, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compile error at %d\n", err);
+        return 1;
+    }
+
+    double out[4];
+    if (me_eval(expr, NULL, 0, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: eval error\n");
+        me_free(expr);
+        return 1;
+    }
+
+    double expected[4] = {0.0, 0.0, 0.0, 0.0};
+    int rc = check_all_close(out, expected, 4, 1e-12);
+    me_free(expr);
+    if (rc == 0) {
+        printf("  ✅ PASSED\n");
+    }
+    return rc;
+}
+
 int main(void) {
     int fail = 0;
     fail |= test_assign_and_result_stmt();
@@ -428,5 +461,6 @@ int main(void) {
     fail |= test_nested_loops_and_conditionals();
     fail |= test_break_any_condition();
     fail |= test_dsl_function_calls();
+    fail |= test_dsl_print_stmt();
     return fail;
 }

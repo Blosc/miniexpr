@@ -100,6 +100,11 @@ struct me_dsl_compiled_stmt {
             bool is_result;
         } expr_stmt;
         struct {
+            char *format;
+            me_dsl_compiled_expr *args;
+            int nargs;
+        } print_stmt;
+        struct {
             int loop_var_slot;
             me_dsl_compiled_expr limit;
             me_dsl_compiled_block body;
@@ -411,6 +416,9 @@ static bool dsl_is_reserved_name(const char *name) {
     if (strcmp(name, "result") == 0) {
         return true;
     }
+    if (strcmp(name, "print") == 0) {
+        return true;
+    }
     if (strcmp(name, "_ndim") == 0) {
         return true;
     }
@@ -493,6 +501,15 @@ static void dsl_compiled_stmt_free(me_dsl_compiled_stmt *stmt) {
         break;
     case ME_DSL_STMT_EXPR:
         dsl_compiled_expr_free(&stmt->as.expr_stmt.expr);
+        break;
+    case ME_DSL_STMT_PRINT:
+        free(stmt->as.print_stmt.format);
+        if (stmt->as.print_stmt.args) {
+            for (int i = 0; i < stmt->as.print_stmt.nargs; i++) {
+                dsl_compiled_expr_free(&stmt->as.print_stmt.args[i]);
+            }
+        }
+        free(stmt->as.print_stmt.args);
         break;
     case ME_DSL_STMT_FOR:
         dsl_compiled_expr_free(&stmt->as.for_loop.limit);
@@ -2298,8 +2315,8 @@ static bool dsl_is_candidate(const char *source) {
             }
         }
     }
-    const char *keywords[] = {"for", "break", "continue"};
-    for (int k = 0; k < 3; k++) {
+    const char *keywords[] = {"for", "break", "continue", "print"};
+    for (int k = 0; k < 4; k++) {
         const char *kw = keywords[k];
         size_t len = strlen(kw);
         for (const char *p = source; *p; p++) {
@@ -2342,6 +2359,9 @@ static void dsl_scan_reserved_usage_block(const me_dsl_block *block, int *uses_i
         case ME_DSL_STMT_EXPR:
             expr_text = stmt->as.expr_stmt.expr ? stmt->as.expr_stmt.expr->text : NULL;
             break;
+        case ME_DSL_STMT_PRINT:
+            expr_text = stmt->as.print_stmt.call ? stmt->as.print_stmt.call->text : NULL;
+            break;
         case ME_DSL_STMT_FOR:
             expr_text = stmt->as.for_loop.limit ? stmt->as.for_loop.limit->text : NULL;
             break;
@@ -2370,6 +2390,295 @@ static void dsl_scan_reserved_usage_block(const me_dsl_block *block, int *uses_i
             dsl_scan_reserved_usage_block(&stmt->as.for_loop.body, uses_i_mask, uses_n_mask, uses_ndim);
         }
     }
+}
+
+static const char *dsl_skip_space_inline(const char *p) {
+    while (p && *p && isspace((unsigned char)*p)) {
+        p++;
+    }
+    return p;
+}
+
+static bool dsl_is_ident_char(char c) {
+    return isalnum((unsigned char)c) || c == '_';
+}
+
+static char *dsl_trim_copy(const char *start, const char *end) {
+    if (!start || !end || end <= start) {
+        return NULL;
+    }
+    while (start < end && isspace((unsigned char)*start)) {
+        start++;
+    }
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+    size_t len = (size_t)(end - start);
+    char *out = malloc(len + 1);
+    if (!out) {
+        return NULL;
+    }
+    memcpy(out, start, len);
+    out[len] = '\0';
+    return out;
+}
+
+static int dsl_utf8_encode(uint32_t cp, char *out, int cap) {
+    if (cap < 1) return 0;
+    if (cp <= 0x7F) {
+        out[0] = (char)cp;
+        return 1;
+    }
+    if (cp <= 0x7FF && cap >= 2) {
+        out[0] = (char)(0xC0 | (cp >> 6));
+        out[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    }
+    if (cp <= 0xFFFF && cap >= 3) {
+        out[0] = (char)(0xE0 | (cp >> 12));
+        out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    }
+    if (cp <= 0x10FFFF && cap >= 4) {
+        out[0] = (char)(0xF0 | (cp >> 18));
+        out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+        out[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[3] = (char)(0x80 | (cp & 0x3F));
+        return 4;
+    }
+    return 0;
+}
+
+static bool dsl_parse_hex_digits(const char **p, int digits, uint32_t *out) {
+    uint32_t value = 0;
+    for (int i = 0; i < digits; i++) {
+        char c = (*p)[i];
+        uint32_t v;
+        if (c >= '0' && c <= '9') v = (uint32_t)(c - '0');
+        else if (c >= 'a' && c <= 'f') v = (uint32_t)(10 + c - 'a');
+        else if (c >= 'A' && c <= 'F') v = (uint32_t)(10 + c - 'A');
+        else return false;
+        value = (value << 4) | v;
+    }
+    *p += digits;
+    *out = value;
+    return true;
+}
+
+static char *dsl_unescape_string_literal(const char *text) {
+    if (!text) {
+        return NULL;
+    }
+    const char *p = dsl_skip_space_inline(text);
+    if (!p || (*p != '"' && *p != '\'')) {
+        return NULL;
+    }
+    char quote = *p++;
+    size_t cap = 64;
+    size_t len = 0;
+    char *out = malloc(cap);
+    if (!out) {
+        return NULL;
+    }
+    while (*p && *p != quote) {
+        uint32_t cp = 0;
+        if (*p == '\\') {
+            p++;
+            if (!*p) {
+                free(out);
+                return NULL;
+            }
+            char esc = *p++;
+            switch (esc) {
+            case '\\': cp = '\\'; break;
+            case '"': cp = '"'; break;
+            case '\'': cp = '\''; break;
+            case 'n': cp = '\n'; break;
+            case 't': cp = '\t'; break;
+            case 'u':
+                if (!dsl_parse_hex_digits(&p, 4, &cp)) {
+                    free(out);
+                    return NULL;
+                }
+                break;
+            case 'U':
+                if (!dsl_parse_hex_digits(&p, 8, &cp)) {
+                    free(out);
+                    return NULL;
+                }
+                break;
+            default:
+                free(out);
+                return NULL;
+            }
+        }
+        else {
+            cp = (unsigned char)*p++;
+        }
+
+        char utf8[4];
+        int wrote = dsl_utf8_encode(cp, utf8, (int)sizeof(utf8));
+        if (wrote <= 0) {
+            free(out);
+            return NULL;
+        }
+        if (len + (size_t)wrote + 1 > cap) {
+            size_t next_cap = cap * 2;
+            while (len + (size_t)wrote + 1 > next_cap) {
+                next_cap *= 2;
+            }
+            char *next = realloc(out, next_cap);
+            if (!next) {
+                free(out);
+                return NULL;
+            }
+            out = next;
+            cap = next_cap;
+        }
+        memcpy(out + len, utf8, (size_t)wrote);
+        len += (size_t)wrote;
+    }
+    if (*p != quote) {
+        free(out);
+        return NULL;
+    }
+    out[len] = '\0';
+    return out;
+}
+
+static int dsl_count_placeholders(const char *fmt) {
+    int count = 0;
+    if (!fmt) return -1;
+    for (size_t i = 0; fmt[i] != '\0'; i++) {
+        if (fmt[i] == '{') {
+            if (fmt[i + 1] == '{') {
+                i++;
+                continue;
+            }
+            if (fmt[i + 1] == '}') {
+                count++;
+                i++;
+                continue;
+            }
+            return -1;
+        }
+        if (fmt[i] == '}') {
+            if (fmt[i + 1] == '}') {
+                i++;
+                continue;
+            }
+            return -1;
+        }
+    }
+    return count;
+}
+
+static bool dsl_split_print_args(const char *text, char ***out_args, int *out_nargs) {
+    if (!text || !out_args || !out_nargs) {
+        return false;
+    }
+    *out_args = NULL;
+    *out_nargs = 0;
+
+    const char *p = dsl_skip_space_inline(text);
+    const char *ident = "print";
+    size_t ident_len = strlen(ident);
+    if (strncmp(p, ident, ident_len) != 0 || dsl_is_ident_char(p[ident_len])) {
+        return false;
+    }
+    p += ident_len;
+    p = dsl_skip_space_inline(p);
+    if (*p != '(') {
+        return false;
+    }
+    p++;
+
+    const char *arg_start = p;
+    int depth = 0;
+    bool in_string = false;
+    char quote = '\0';
+    char **args = NULL;
+    int nargs = 0;
+
+    bool closed = false;
+    for (; *p; p++) {
+        char c = *p;
+        if (in_string) {
+            if (c == '\\' && p[1]) {
+                p++;
+                continue;
+            }
+            if (c == quote) {
+                in_string = false;
+            }
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            in_string = true;
+            quote = c;
+            continue;
+        }
+        if (c == '(') {
+            depth++;
+            continue;
+        }
+        if (c == ')') {
+            if (depth == 0) {
+                char *arg = dsl_trim_copy(arg_start, p);
+                if (!arg) {
+                    goto fail;
+                }
+                char **next_args = realloc(args, (size_t)(nargs + 1) * sizeof(*next_args));
+                if (!next_args) {
+                    free(arg);
+                    goto fail;
+                }
+                args = next_args;
+                args[nargs++] = arg;
+                p++;
+                closed = true;
+                break;
+            }
+            depth--;
+            continue;
+        }
+        if (c == ',' && depth == 0) {
+            char *arg = dsl_trim_copy(arg_start, p);
+            if (!arg) {
+                goto fail;
+            }
+            char **next_args = realloc(args, (size_t)(nargs + 1) * sizeof(*next_args));
+            if (!next_args) {
+                free(arg);
+                goto fail;
+            }
+            args = next_args;
+            args[nargs++] = arg;
+            arg_start = p + 1;
+        }
+    }
+
+    if (!closed) {
+        goto fail;
+    }
+    p = dsl_skip_space_inline(p);
+    if (*p != '\0') {
+        goto fail;
+    }
+
+    *out_args = args;
+    *out_nargs = nargs;
+    return true;
+
+fail:
+    if (args) {
+        for (int i = 0; i < nargs; i++) {
+            free(args[i]);
+        }
+    }
+    free(args);
+    return false;
 }
 
 static bool dsl_build_var_lookup(const me_dsl_var_table *table, me_variable_ex **out_vars) {
@@ -2545,6 +2854,174 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             }
             ctx->output_expr = &compiled->as.expr_stmt.expr;
             compiled->as.expr_stmt.is_result = true;
+            break;
+        }
+        case ME_DSL_STMT_PRINT: {
+            const char *call = stmt->as.print_stmt.call ? stmt->as.print_stmt.call->text : NULL;
+            char **args = NULL;
+            int nargs = 0;
+            if (!call || !dsl_split_print_args(call, &args, &nargs) || nargs < 1) {
+                if (ctx->error_pos) {
+                    *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                }
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            char *format = NULL;
+            int arg_count = nargs - 1;
+            bool first_is_string = false;
+            if (args[0][0] == '"' || args[0][0] == '\'') {
+                format = dsl_unescape_string_literal(args[0]);
+                if (!format) {
+                    if (ctx->error_pos) {
+                        *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                    }
+                    for (int i = 0; i < nargs; i++) {
+                        free(args[i]);
+                    }
+                    free(args);
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
+                first_is_string = true;
+            }
+            if (!first_is_string) {
+                size_t fmt_len = 0;
+                for (int i = 0; i < nargs; i++) {
+                    fmt_len += (i == 0) ? 2 : 3;
+                }
+                format = malloc(fmt_len + 1);
+                if (!format) {
+                    for (int i = 0; i < nargs; i++) {
+                        free(args[i]);
+                    }
+                    free(args);
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
+                char *out = format;
+                for (int i = 0; i < nargs; i++) {
+                    if (i > 0) {
+                        *out++ = ' ';
+                    }
+                    *out++ = '{';
+                    *out++ = '}';
+                }
+                *out = '\0';
+                arg_count = nargs;
+            }
+            int placeholder_count = dsl_count_placeholders(format);
+            if (placeholder_count < 0) {
+                if (ctx->error_pos) {
+                    *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                }
+                free(format);
+                for (int i = 0; i < nargs; i++) {
+                    free(args[i]);
+                }
+                free(args);
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            if (first_is_string && placeholder_count == 0 && arg_count > 0) {
+                bool needs_space = format[0] != '\0' && !isspace((unsigned char)format[strlen(format) - 1]);
+                size_t fmt_len = strlen(format);
+                size_t extra = (needs_space ? 1 : 0) + (size_t)(arg_count * 2) + (size_t)(arg_count - 1);
+                char *expanded = malloc(fmt_len + extra + 1);
+                if (!expanded) {
+                    if (ctx->error_pos) {
+                        *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                    }
+                    free(format);
+                    for (int i = 0; i < nargs; i++) {
+                        free(args[i]);
+                    }
+                    free(args);
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
+                memcpy(expanded, format, fmt_len);
+                char *out = expanded + fmt_len;
+                if (needs_space) {
+                    *out++ = ' ';
+                }
+                for (int i = 0; i < arg_count; i++) {
+                    if (i > 0) {
+                        *out++ = ' ';
+                    }
+                    *out++ = '{';
+                    *out++ = '}';
+                }
+                *out = '\0';
+                free(format);
+                format = expanded;
+                placeholder_count = arg_count;
+            }
+            if (placeholder_count != arg_count) {
+                if (ctx->error_pos) {
+                    *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                }
+                free(format);
+                for (int i = 0; i < nargs; i++) {
+                    free(args[i]);
+                }
+                free(args);
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+
+            if (arg_count > 0) {
+                compiled->as.print_stmt.args = calloc((size_t)arg_count, sizeof(*compiled->as.print_stmt.args));
+                if (!compiled->as.print_stmt.args) {
+                    free(format);
+                    for (int i = 0; i < nargs; i++) {
+                        free(args[i]);
+                    }
+                    free(args);
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
+            }
+            compiled->as.print_stmt.format = format;
+            compiled->as.print_stmt.nargs = arg_count;
+
+            for (int i = 0; i < arg_count; i++) {
+                int arg_index = first_is_string ? (i + 1) : i;
+                me_dsl_expr temp_expr = {
+                    .text = args[arg_index],
+                    .line = stmt->line,
+                    .column = stmt->column
+                };
+                me_dtype expr_dtype = ctx->output_dtype_auto ? ME_AUTO : ctx->output_dtype;
+                if (!dsl_compile_expr(ctx, &temp_expr, expr_dtype, &compiled->as.print_stmt.args[i])) {
+                    if (ctx->error_pos) {
+                        *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                    }
+                    dsl_compiled_stmt_free(compiled);
+                    for (int j = 0; j < nargs; j++) {
+                        free(args[j]);
+                    }
+                    free(args);
+                    return false;
+                }
+                if (!dsl_expr_is_uniform(compiled->as.print_stmt.args[i].expr,
+                                         ctx->program->vars.uniform,
+                                         ctx->program->vars.count)) {
+                    if (ctx->error_pos) {
+                        *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                    }
+                    dsl_compiled_stmt_free(compiled);
+                    for (int j = 0; j < nargs; j++) {
+                        free(args[j]);
+                    }
+                    free(args);
+                    return false;
+                }
+            }
+            for (int i = 0; i < nargs; i++) {
+                free(args[i]);
+            }
+            free(args);
             break;
         }
         case ME_DSL_STMT_FOR: {
@@ -3200,6 +3677,89 @@ static int dsl_eval_expr_nitems(dsl_eval_ctx *ctx, const me_dsl_compiled_expr *e
     return me_eval(expr->expr, vars, expr->n_vars, out, nitems, ctx->params);
 }
 
+static void dsl_format_value(char *buf, size_t cap, me_dtype dtype, const void *data) {
+    if (!buf || cap == 0 || !data) {
+        return;
+    }
+    switch (dtype) {
+    case ME_BOOL:
+        snprintf(buf, cap, "%s", (*(const bool *)data) ? "true" : "false");
+        break;
+    case ME_INT8:
+        snprintf(buf, cap, "%lld", (long long)*(const int8_t *)data);
+        break;
+    case ME_INT16:
+        snprintf(buf, cap, "%lld", (long long)*(const int16_t *)data);
+        break;
+    case ME_INT32:
+        snprintf(buf, cap, "%lld", (long long)*(const int32_t *)data);
+        break;
+    case ME_INT64:
+        snprintf(buf, cap, "%lld", (long long)*(const int64_t *)data);
+        break;
+    case ME_UINT8:
+        snprintf(buf, cap, "%llu", (unsigned long long)*(const uint8_t *)data);
+        break;
+    case ME_UINT16:
+        snprintf(buf, cap, "%llu", (unsigned long long)*(const uint16_t *)data);
+        break;
+    case ME_UINT32:
+        snprintf(buf, cap, "%llu", (unsigned long long)*(const uint32_t *)data);
+        break;
+    case ME_UINT64:
+        snprintf(buf, cap, "%llu", (unsigned long long)*(const uint64_t *)data);
+        break;
+    case ME_FLOAT32:
+        snprintf(buf, cap, "%.9g", (double)*(const float *)data);
+        break;
+    case ME_FLOAT64:
+        snprintf(buf, cap, "%.17g", *(const double *)data);
+        break;
+    case ME_COMPLEX64: {
+        float _Complex v = *(const float _Complex *)data;
+        snprintf(buf, cap, "%.9g%+.9gj", (double)crealf(v), (double)cimagf(v));
+        break;
+    }
+    case ME_COMPLEX128: {
+        double _Complex v = *(const double _Complex *)data;
+        snprintf(buf, cap, "%.17g%+.17gj", creal(v), cimag(v));
+        break;
+    }
+    default:
+        snprintf(buf, cap, "<unsupported>");
+        break;
+    }
+}
+
+static void dsl_print_formatted(const char *fmt, char **arg_strs, int nargs) {
+    int arg_idx = 0;
+    for (size_t i = 0; fmt && fmt[i] != '\0'; i++) {
+        if (fmt[i] == '{') {
+            if (fmt[i + 1] == '{') {
+                fputc('{', stdout);
+                i++;
+                continue;
+            }
+            if (fmt[i + 1] == '}') {
+                if (arg_idx < nargs) {
+                    fputs(arg_strs[arg_idx], stdout);
+                }
+                arg_idx++;
+                i++;
+                continue;
+            }
+        }
+        if (fmt[i] == '}' && fmt[i + 1] == '}') {
+            fputc('}', stdout);
+            i++;
+            continue;
+        }
+        fputc(fmt[i], stdout);
+    }
+    fputc('\n', stdout);
+    fflush(stdout);
+}
+
 static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
                           bool *did_break, bool *did_continue) {
     if (!block) {
@@ -3231,6 +3791,67 @@ static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
             if (rc != ME_EVAL_SUCCESS) {
                 return rc;
             }
+            break;
+        }
+        case ME_DSL_STMT_PRINT: {
+            int nargs = stmt->as.print_stmt.nargs;
+            char **arg_strs = NULL;
+            void **arg_bufs = NULL;
+            if (nargs > 0) {
+                arg_strs = calloc((size_t)nargs, sizeof(*arg_strs));
+                arg_bufs = calloc((size_t)nargs, sizeof(*arg_bufs));
+                if (!arg_strs || !arg_bufs) {
+                    free(arg_strs);
+                    free(arg_bufs);
+                    return ME_EVAL_ERR_OOM;
+                }
+            }
+            for (int i = 0; i < nargs; i++) {
+                me_dsl_compiled_expr *arg = &stmt->as.print_stmt.args[i];
+                me_dtype dtype = me_get_dtype(arg->expr);
+                size_t size = dtype_size(dtype);
+                if (size == 0) {
+                    size = sizeof(double);
+                }
+                arg_bufs[i] = calloc(1, size);
+                if (!arg_bufs[i]) {
+                    for (int j = 0; j < i; j++) {
+                        free(arg_bufs[j]);
+                        free(arg_strs[j]);
+                    }
+                    free(arg_bufs);
+                    free(arg_strs);
+                    return ME_EVAL_ERR_OOM;
+                }
+                int rc = dsl_eval_expr_nitems(ctx, arg, arg_bufs[i], 1);
+                if (rc != ME_EVAL_SUCCESS) {
+                    for (int j = 0; j <= i; j++) {
+                        free(arg_bufs[j]);
+                        free(arg_strs[j]);
+                    }
+                    free(arg_bufs);
+                    free(arg_strs);
+                    return rc;
+                }
+                arg_strs[i] = calloc(1, 64);
+                if (!arg_strs[i]) {
+                    for (int j = 0; j <= i; j++) {
+                        free(arg_bufs[j]);
+                        free(arg_strs[j]);
+                    }
+                    free(arg_bufs);
+                    free(arg_strs);
+                    return ME_EVAL_ERR_OOM;
+                }
+                dsl_format_value(arg_strs[i], 64, dtype, arg_bufs[i]);
+            }
+            dsl_print_formatted(stmt->as.print_stmt.format, arg_strs, nargs);
+            for (int i = 0; i < nargs; i++) {
+                free(arg_bufs[i]);
+                free(arg_strs[i]);
+            }
+            free(arg_bufs);
+            free(arg_strs);
             break;
         }
         case ME_DSL_STMT_FOR: {

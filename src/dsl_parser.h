@@ -16,6 +16,7 @@
 typedef enum {
     ME_DSL_STMT_ASSIGN = 0,
     ME_DSL_STMT_EXPR,
+    ME_DSL_STMT_PRINT,
     ME_DSL_STMT_FOR,
     ME_DSL_STMT_BREAK,
     ME_DSL_STMT_CONTINUE
@@ -47,6 +48,9 @@ struct me_dsl_stmt {
         struct {
             me_dsl_expr *expr;
         } expr_stmt;
+        struct {
+            me_dsl_expr *call;
+        } print_stmt;
         struct {
             char *var;
             me_dsl_expr *limit;
