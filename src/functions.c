@@ -726,6 +726,13 @@ static const me_variable_ex* find_builtin(const char* name, int len) {
     return 0;
 }
 
+bool me_is_builtin_function_name(const char* name, size_t len) {
+    if (!name || len == 0) {
+        return false;
+    }
+    return find_builtin(name, (int)len) != NULL;
+}
+
 static const me_variable_ex* find_lookup(const state* s, const char* name, int len) {
     int iters;
     const me_variable_ex* var;
@@ -2985,6 +2992,7 @@ static void read_identifier_token(state* s) {
     case ME_FUNCTION7:
         s->type = var->type;
         s->function = var->address;
+        s->dtype = var->dtype;
         s->itemsize = 0;
         break;
     }
@@ -3223,6 +3231,7 @@ static me_expr* base(state* s) {
     }
 
     if (IS_FUNCTION(s->type) || IS_CLOSURE(s->type)) {
+        me_dtype func_dtype = s->dtype;
         switch (TYPE_MASK(s->type)) {
         case ME_FUNCTION0:
         case ME_CLOSURE0:
@@ -3230,6 +3239,10 @@ static me_expr* base(state* s) {
             CHECK_NULL(ret);
 
             ret->function = s->function;
+            if (func_dtype != ME_AUTO) {
+                ret->dtype = func_dtype;
+                ret->flags |= ME_EXPR_FLAG_EXPLICIT_DTYPE;
+            }
             if (IS_CLOSURE(s->type)) ret->parameters[0] = s->context;
             next_token(s);
             if (s->type == TOK_OPEN) {
@@ -3249,6 +3262,10 @@ static me_expr* base(state* s) {
             CHECK_NULL(ret);
 
             ret->function = s->function;
+            if (func_dtype != ME_AUTO) {
+                ret->dtype = func_dtype;
+                ret->flags |= ME_EXPR_FLAG_EXPLICIT_DTYPE;
+            }
             if (IS_CLOSURE(s->type)) ret->parameters[1] = s->context;
             next_token(s);
             ret->parameters[0] = power(s);
@@ -3273,6 +3290,10 @@ static me_expr* base(state* s) {
             CHECK_NULL(ret);
 
             ret->function = s->function;
+            if (func_dtype != ME_AUTO) {
+                ret->dtype = func_dtype;
+                ret->flags |= ME_EXPR_FLAG_EXPLICIT_DTYPE;
+            }
             if (IS_CLOSURE(s->type)) ret->parameters[arity] = s->context;
             next_token(s);
 

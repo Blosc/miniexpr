@@ -418,6 +418,21 @@ result = escape_iter
 
 ---
 
+### 17_dsl_user_function.c
+**User-defined functions in DSL programs**
+
+- **What it demonstrates**: Registering a custom C function for DSL evaluation
+- **Expressions**: Calling a user-defined function from a DSL program
+- **Concepts**: `me_variable_ex` function entries, explicit return dtype
+- **Best for**: Extending DSL with domain-specific helpers
+
+**Run it:**
+```bash
+./build/examples/17_dsl_user_function
+```
+
+---
+
 ## Building Examples
 
 ### Using CMake (recommended)
@@ -573,5 +588,6 @@ After trying these examples:
 | 14 | ⭐⭐ Moderate | String ops | ~120 | <1s |
 | 15 | ⭐ Simple | DSL print | ~40 | <1s |
 | 16 | ⭐⭐ Moderate | N-D padding | ~90 | <1s |
+| 17 | ⭐ Simple | DSL UDFs | ~70 | <1s |
 
 **Start with Example 01, then explore based on your needs!** 🚀

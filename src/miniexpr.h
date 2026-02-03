@@ -127,10 +127,11 @@ typedef struct me_variable {
 
 /* Extended variable definition with per-element byte size (required for ME_STRING).
  * For numeric types, itemsize can be 0 to use the default dtype size.
+ * For function/closure entries (ME_FUNCTION* / ME_CLOSURE*), dtype is the return type.
  */
 typedef struct me_variable_ex {
     const char *name;
-    me_dtype dtype; // Data type of this variable (ME_AUTO = use output dtype)
+    me_dtype dtype; // Data type of this variable or function return (ME_AUTO = use output dtype)
     const void *address; // Pointer to data (NULL for me_compile_ex)
     int type; // ME_VARIABLE for user variables (0 = auto-set to ME_VARIABLE)
     void *context; // For closures/functions (NULL for normal variables)

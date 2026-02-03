@@ -187,6 +187,47 @@ print(sum(a))
 - If the first argument is a string literal with no `{}`, placeholders are appended for the remaining arguments (with a single space separator).
 - Arguments must be scalar or uniform across the block (use reductions like `min/max/any/all`).
 
+### User-defined Functions
+
+You can register custom C functions or closures and call them from DSL by
+including them in the `me_variable_ex` list passed to `me_compile_ex()`.
+
+Rules:
+- Function/closure entries must use `ME_FUNCTION*` or `ME_CLOSURE*` in `type`.
+- The return dtype must be explicit (not `ME_AUTO`).
+- Names cannot shadow built-ins (`sin`, `sum`, etc.) or reserved identifiers
+  (`result`, `print`, `_i0`, `_n0`, `_ndim`).
+- String return types are not supported.
+
+Example (pure function):
+```
+static double clamp01(double x) {
+    return x < 0.0 ? 0.0 : (x > 1.0 ? 1.0 : x);
+}
+
+me_variable_ex vars[] = {
+    {"x", ME_FLOAT64, x, ME_VARIABLE, NULL, 0},
+    {"clamp01", ME_FLOAT64, clamp01, ME_FUNCTION1 | ME_FLAG_PURE, NULL, 0},
+};
+
+me_expr *expr = NULL;
+int err = 0;
+me_compile_ex("result = clamp01(x)", vars, 2, ME_FLOAT64, &err, &expr);
+```
+
+Example (closure with context):
+```
+static double scale(void *ctx, double x) {
+    return (*(double *)ctx) * x;
+}
+
+double factor = 2.0;
+me_variable_ex vars[] = {
+    {"x", ME_FLOAT64, x, ME_VARIABLE, NULL, 0},
+    {"scale", ME_FLOAT64, scale, ME_CLOSURE1 | ME_FLAG_PURE, &factor, 0},
+};
+```
+
 ## Examples
 
 ### Example 1: Polynomial Evaluation

@@ -72,6 +72,23 @@ typedef struct {
 static int private_compile_ex(const char* expression, const me_variable_ex* variables, int var_count,
                               void* output, int nitems, me_dtype dtype, int* error, me_expr** out);
 
+static bool is_function_entry(const me_variable_ex *var) {
+    if (!var) {
+        return false;
+    }
+    return IS_FUNCTION(var->type) || IS_CLOSURE(var->type);
+}
+
+static bool is_variable_entry(const me_variable_ex *var) {
+    if (!var) {
+        return false;
+    }
+    if (var->type == 0) {
+        return true;
+    }
+    return TYPE_MASK(var->type) == ME_VARIABLE;
+}
+
 typedef struct {
     me_expr *expr;
     int *var_indices;
@@ -1704,6 +1721,9 @@ me_dtype infer_result_type(const me_expr* n) {
     case ME_CLOSURE6:
     case ME_CLOSURE7:
         {
+            if ((n->flags & ME_EXPR_FLAG_EXPLICIT_DTYPE) != 0) {
+                return n->dtype;
+            }
             if (is_reduction_node(n)) {
                 me_dtype param_type = infer_result_type((const me_expr*)n->parameters[0]);
                 return reduction_output_dtype(param_type, n->function);
@@ -1797,6 +1817,9 @@ me_dtype infer_output_type(const me_expr* n) {
     case ME_CLOSURE6:
     case ME_CLOSURE7:
         {
+            if ((n->flags & ME_EXPR_FLAG_EXPLICIT_DTYPE) != 0) {
+                return n->dtype;
+            }
             if (is_reduction_node(n)) {
                 me_dtype param_type = infer_output_type((const me_expr*)n->parameters[0]);
                 return reduction_output_dtype(param_type, n->function);
@@ -2090,11 +2113,25 @@ static int private_compile_ex(const char* expression, const me_variable_ex* vari
 
     if (variables && var_count > 0) {
         for (int i = 0; i < var_count; i++) {
+            if (!is_variable_entry(&variables[i]) && !is_function_entry(&variables[i])) {
+                if (error) *error = -1;
+                return ME_COMPILE_ERR_INVALID_ARG_TYPE;
+            }
+            if (is_function_entry(&variables[i])) {
+                if (!variables[i].address) {
+                    if (error) *error = -1;
+                    return ME_COMPILE_ERR_INVALID_ARG;
+                }
+                if (variables[i].dtype == ME_STRING) {
+                    if (error) *error = -1;
+                    return ME_COMPILE_ERR_INVALID_ARG_TYPE;
+                }
+            }
             if (!is_valid_dtype(variables[i].dtype)) {
                 if (error) *error = -1;
                 return ME_COMPILE_ERR_INVALID_ARG_TYPE;
             }
-            if (variables[i].dtype == ME_STRING) {
+            if (is_variable_entry(&variables[i]) && variables[i].dtype == ME_STRING) {
                 if (variables[i].itemsize == 0 || (variables[i].itemsize % 4) != 0) {
                     if (error) *error = -1;
                     return ME_COMPILE_ERR_INVALID_ARG_TYPE;
@@ -2109,6 +2146,9 @@ static int private_compile_ex(const char* expression, const me_variable_ex* vari
         int specified_count = 0;
 
         for (int i = 0; i < var_count; i++) {
+            if (!is_variable_entry(&variables[i])) {
+                continue;
+            }
             if (variables[i].dtype == ME_AUTO) {
                 auto_count++;
             }
@@ -2174,6 +2214,9 @@ static int private_compile_ex(const char* expression, const me_variable_ex* vari
         // This prevents type promotion issues when mixing float32 vars with float64 constants
         s.target_dtype = ME_AUTO;
         for (int i = 0; i < var_count; i++) {
+            if (!is_variable_entry(&variables[i])) {
+                continue;
+            }
             if (variables[i].dtype != ME_STRING) {
                 s.target_dtype = variables[i].dtype;
                 break;
@@ -2217,6 +2260,9 @@ static int private_compile_ex(const char* expression, const me_variable_ex* vari
     if (variables && var_count > 0) {
         const me_variable_ex* vars_check = vars_copy ? vars_copy : variables;
         for (int i = 0; i < var_count; i++) {
+            if (!is_variable_entry(&vars_check[i])) {
+                continue;
+            }
             if (vars_check[i].dtype == ME_COMPLEX64 || vars_check[i].dtype == ME_COMPLEX128) {
                 any_complex_vars = true;
                 break;
@@ -2237,6 +2283,9 @@ static int private_compile_ex(const char* expression, const me_variable_ex* vari
         bool complex_vars = false;
         if (vars_check) {
             for (int i = 0; i < var_count; i++) {
+                if (!is_variable_entry(&vars_check[i])) {
+                    continue;
+                }
                 if (vars_check[i].dtype == ME_COMPLEX64 || vars_check[i].dtype == ME_COMPLEX128) {
                     complex_vars = true;
                     break;
@@ -2299,6 +2348,8 @@ typedef struct {
     int *error_pos;
     me_dsl_compiled_expr *output_expr;
     me_dsl_compiled_program *program;
+    const me_variable_ex *funcs;
+    int func_count;
 } dsl_compile_ctx;
 
 static int dsl_offset_from_linecol(const char *source, int line, int column) {
@@ -2705,11 +2756,18 @@ fail:
     return false;
 }
 
-static bool dsl_build_var_lookup(const me_dsl_var_table *table, me_variable_ex **out_vars) {
-    if (!table || !out_vars) {
+static bool dsl_build_var_lookup(const me_dsl_var_table *table, const me_variable_ex *funcs,
+                                 int n_funcs, me_variable_ex **out_vars, int *out_count) {
+    if (!table || !out_vars || !out_count || n_funcs < 0) {
         return false;
     }
-    me_variable_ex *vars = calloc((size_t)table->count, sizeof(*vars));
+    int total = table->count + n_funcs;
+    if (total == 0) {
+        *out_vars = NULL;
+        *out_count = 0;
+        return true;
+    }
+    me_variable_ex *vars = calloc((size_t)total, sizeof(*vars));
     if (!vars) {
         return false;
     }
@@ -2721,7 +2779,11 @@ static bool dsl_build_var_lookup(const me_dsl_var_table *table, me_variable_ex *
         vars[i].context = NULL;
         vars[i].itemsize = table->itemsizes ? table->itemsizes[i] : 0;
     }
+    for (int i = 0; i < n_funcs; i++) {
+        vars[table->count + i] = funcs[i];
+    }
     *out_vars = vars;
+    *out_count = total;
     return true;
 }
 
@@ -2752,12 +2814,14 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
     }
     memset(out_expr, 0, sizeof(*out_expr));
     me_variable_ex *lookup = NULL;
-    if (!dsl_build_var_lookup(&ctx->program->vars, &lookup)) {
+    int lookup_count = 0;
+    if (!dsl_build_var_lookup(&ctx->program->vars, ctx->funcs, ctx->func_count,
+                              &lookup, &lookup_count)) {
         return false;
     }
     me_expr *compiled = NULL;
     int local_error = 0;
-    int rc = private_compile_ex(expr_node->text, lookup, ctx->program->vars.count,
+    int rc = private_compile_ex(expr_node->text, lookup, lookup_count,
                                 NULL, 0, expr_dtype, &local_error, &compiled);
     free(lookup);
     if (rc != ME_COMPILE_SUCCESS || !compiled) {
@@ -3194,26 +3258,130 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
         program->local_slots[i] = -1;
     }
 
+    me_variable_ex *funcs = NULL;
+    int func_count = 0;
+    int func_capacity = 0;
+    int input_count = 0;
+
     for (int i = 0; i < var_count; i++) {
-        const char *name = variables[i].name;
-        if (!name || dsl_is_reserved_name(name)) {
+        const me_variable_ex *entry = &variables[i];
+        const char *name = entry->name;
+        if (!name) {
             if (error_pos) {
                 *error_pos = -1;
             }
+            free(funcs);
             dsl_compiled_program_free(program);
             me_dsl_program_free(parsed);
             return NULL;
         }
-        me_dtype vtype = variables[i].dtype;
+        if (!is_variable_entry(entry) && !is_function_entry(entry)) {
+            dsl_compiled_program_free(program);
+            me_dsl_program_free(parsed);
+            if (error_pos) {
+                *error_pos = -1;
+            }
+            free(funcs);
+            return NULL;
+        }
+        if (is_function_entry(entry)) {
+            size_t name_len = strlen(name);
+            if (dsl_is_reserved_name(name) || me_is_builtin_function_name(name, name_len)) {
+                if (error_pos) {
+                    *error_pos = -1;
+                }
+                free(funcs);
+                dsl_compiled_program_free(program);
+                me_dsl_program_free(parsed);
+                return NULL;
+            }
+            if (entry->dtype == ME_AUTO || !is_valid_dtype(entry->dtype) || entry->dtype == ME_STRING) {
+                if (error_pos) {
+                    *error_pos = -1;
+                }
+                free(funcs);
+                dsl_compiled_program_free(program);
+                me_dsl_program_free(parsed);
+                return NULL;
+            }
+            if (!entry->address) {
+                if (error_pos) {
+                    *error_pos = -1;
+                }
+                free(funcs);
+                dsl_compiled_program_free(program);
+                me_dsl_program_free(parsed);
+                return NULL;
+            }
+            if (dsl_var_table_find(&program->vars, name) >= 0) {
+                if (error_pos) {
+                    *error_pos = -1;
+                }
+                free(funcs);
+                dsl_compiled_program_free(program);
+                me_dsl_program_free(parsed);
+                return NULL;
+            }
+            for (int j = 0; j < func_count; j++) {
+                if (strcmp(funcs[j].name, name) == 0) {
+                    if (error_pos) {
+                        *error_pos = -1;
+                    }
+                    free(funcs);
+                    dsl_compiled_program_free(program);
+                    me_dsl_program_free(parsed);
+                    return NULL;
+                }
+            }
+            if (func_count == func_capacity) {
+                int new_cap = func_capacity ? func_capacity * 2 : 8;
+                me_variable_ex *next = realloc(funcs, (size_t)new_cap * sizeof(*next));
+                if (!next) {
+                    if (error_pos) {
+                        *error_pos = -1;
+                    }
+                    free(funcs);
+                    dsl_compiled_program_free(program);
+                    me_dsl_program_free(parsed);
+                    return NULL;
+                }
+                funcs = next;
+                func_capacity = new_cap;
+            }
+            funcs[func_count++] = *entry;
+            continue;
+        }
+        if (dsl_is_reserved_name(name)) {
+            if (error_pos) {
+                *error_pos = -1;
+            }
+            free(funcs);
+            dsl_compiled_program_free(program);
+            me_dsl_program_free(parsed);
+            return NULL;
+        }
+        for (int j = 0; j < func_count; j++) {
+            if (strcmp(funcs[j].name, name) == 0) {
+                if (error_pos) {
+                    *error_pos = -1;
+                }
+                free(funcs);
+                dsl_compiled_program_free(program);
+                me_dsl_program_free(parsed);
+                return NULL;
+            }
+        }
+        me_dtype vtype = entry->dtype;
         if (vtype == ME_AUTO && dtype != ME_AUTO) {
             vtype = dtype;
         }
         size_t itemsize = 0;
-        if (variables[i].dtype == ME_STRING) {
-            itemsize = variables[i].itemsize;
+        if (entry->dtype == ME_STRING) {
+            itemsize = entry->itemsize;
         }
         int idx = dsl_var_table_add_with_uniform(&program->vars, name, vtype, itemsize, false);
         if (idx < 0) {
+            free(funcs);
             dsl_compiled_program_free(program);
             me_dsl_program_free(parsed);
             if (error_pos) {
@@ -3221,15 +3389,17 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
             }
             return NULL;
         }
+        input_count++;
     }
-    program->n_inputs = var_count;
+    program->n_inputs = input_count;
 
     if (dtype == ME_AUTO) {
-        for (int i = 0; i < var_count; i++) {
+        for (int i = 0; i < program->vars.count; i++) {
             if (program->vars.dtypes[i] == ME_AUTO) {
                 if (error_pos) {
                     *error_pos = -1;
                 }
+                free(funcs);
                 dsl_compiled_program_free(program);
                 me_dsl_program_free(parsed);
                 return NULL;
@@ -3255,6 +3425,7 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
                 if (error_pos) {
                     *error_pos = -1;
                 }
+                free(funcs);
                 dsl_compiled_program_free(program);
                 me_dsl_program_free(parsed);
                 return NULL;
@@ -3269,6 +3440,7 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
                 if (error_pos) {
                     *error_pos = -1;
                 }
+                free(funcs);
                 dsl_compiled_program_free(program);
                 me_dsl_program_free(parsed);
                 return NULL;
@@ -3282,6 +3454,7 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
             if (error_pos) {
                 *error_pos = -1;
             }
+            free(funcs);
             dsl_compiled_program_free(program);
             me_dsl_program_free(parsed);
             return NULL;
@@ -3296,14 +3469,18 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     ctx.error_pos = error_pos;
     ctx.output_expr = NULL;
     ctx.program = program;
+    ctx.funcs = funcs;
+    ctx.func_count = func_count;
 
     if (!dsl_compile_block(&ctx, &parsed->block, &program->block)) {
+        free(funcs);
         dsl_compiled_program_free(program);
         me_dsl_program_free(parsed);
         return NULL;
     }
 
     me_dsl_program_free(parsed);
+    free(funcs);
 
     if (!ctx.output_expr || !ctx.output_expr->expr) {
         if (error_pos) {
@@ -3344,6 +3521,9 @@ int me_compile_ex(const char* expression, const me_variable_ex* variables,
             }
             for (int i = 0; i < var_count; i++) {
                 vars_dsl[i] = variables[i];
+                if (is_function_entry(&vars_dsl[i])) {
+                    continue;
+                }
                 vars_dsl[i].address = &synthetic_var_addresses[i];
                 if (vars_dsl[i].type == 0) {
                     vars_dsl[i].type = ME_VARIABLE;
@@ -3384,7 +3564,7 @@ int me_compile_ex(const char* expression, const me_variable_ex* variables,
     if (variables && var_count > 0) {
         // Check if any variables have NULL addresses
         for (int i = 0; i < var_count; i++) {
-            if (variables[i].address == NULL) {
+            if (variables[i].address == NULL && is_variable_entry(&variables[i])) {
                 needs_synthetic = 1;
                 break;
             }
@@ -3400,7 +3580,7 @@ int me_compile_ex(const char* expression, const me_variable_ex* variables,
 
             for (int i = 0; i < var_count; i++) {
                 vars_copy[i] = variables[i];
-                if (vars_copy[i].address == NULL) {
+                if (vars_copy[i].address == NULL && is_variable_entry(&vars_copy[i])) {
                     // Use address in synthetic array (each index is unique)
                     vars_copy[i].address = &synthetic_var_addresses[i];
                 }

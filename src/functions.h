@@ -73,7 +73,8 @@ enum {
 };
 
 enum {
-    ME_EXPR_FLAG_OWNS_STRING = 1u << 0
+    ME_EXPR_FLAG_OWNS_STRING = 1u << 0,
+    ME_EXPR_FLAG_EXPLICIT_DTYPE = 1u << 1
 };
 
 /* Check if a pointer is a synthetic address (used internally for chunked evaluation).
@@ -105,6 +106,7 @@ me_dtype reduction_output_dtype(me_dtype dt, const void* func);
 double min_reduce(double x);
 double max_reduce(double x);
 bool validate_string_usage(const me_expr* n);
+bool me_is_builtin_function_name(const char* name, size_t len);
 
 typedef enum {
     ME_REDUCE_NONE = 0,
