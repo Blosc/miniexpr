@@ -164,6 +164,10 @@ static void test_invalid_string_usage(void) {
         tests_failed++;
         local_failures++;
     }
+    if (expr) {
+        me_free(expr);
+        expr = NULL;
+    }
 
     me_variable_ex vars_mixed[] = {
         {"name", ME_STRING, names, ME_VARIABLE, NULL, sizeof(names[0])},
@@ -179,6 +183,11 @@ static void test_invalid_string_usage(void) {
     if (local_failures == 0) {
         printf("  PASS invalid string usage\n");
     }
+    if (expr) {
+        me_free(expr);
+        expr = NULL;
+    }
+    printf("  PASS invalid string usage\n");
 }
 
 int main(void) {
