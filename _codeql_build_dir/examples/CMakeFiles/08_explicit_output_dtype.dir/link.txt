@@ -1,0 +1,1 @@
+/home/runner/work/miniexpr/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/08_explicit_output_dtype.dir/link.d CMakeFiles/08_explicit_output_dtype.dir/08_explicit_output_dtype.c.o -o 08_explicit_output_dtype  -Wl,-rpath,/home/runner/work/miniexpr/miniexpr/_codeql_build_dir ../libminiexpr.so -lm
