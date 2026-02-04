@@ -1,0 +1,1 @@
+/home/runner/work/miniexpr/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/06_debug_print.dir/link.d CMakeFiles/06_debug_print.dir/06_debug_print.c.o -o 06_debug_print  -Wl,-rpath,/home/runner/work/miniexpr/miniexpr/_codeql_build_dir ../libminiexpr.so -lm

@@ -1,0 +1,1 @@
+/home/runner/work/miniexpr/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/test_function_order.dir/link.d CMakeFiles/test_function_order.dir/test_function_order.c.o -o test_function_order  -Wl,-rpath,/home/runner/work/miniexpr/miniexpr/_codeql_build_dir ../libminiexpr.so -lm
