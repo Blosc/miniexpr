@@ -175,10 +175,13 @@ String expressions always yield boolean output.
 
 Example (element-wise string match with a scalar control):
 ```
-for i in range(n):
-    if any(startswith(tag, "pre")):
-        break
-    mask = contains(tag, "\u03B1")
+def kernel(tag, n):
+    mask = 0
+    for i in range(n):
+        if any(startswith(tag, "pre")):
+            break
+        mask = contains(tag, "\u03B1")
+    return mask
 ```
 
 ### Mathematical Functions
