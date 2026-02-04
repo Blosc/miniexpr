@@ -2188,9 +2188,24 @@ static double cmp_le(double a, double b) { return a <= b ? 1.0 : 0.0; }
 static double cmp_gt(double a, double b) { return a > b ? 1.0 : 0.0; }
 static double cmp_ge(double a, double b) { return a >= b ? 1.0 : 0.0; }
 
-static double str_startswith(double a, double b) { (void)a; (void)b; return 0.0; }
-static double str_endswith(double a, double b) { (void)a; (void)b; return 0.0; }
-static double str_contains(double a, double b) { (void)a; (void)b; return 0.0; }
+/* Keep these stubs distinct to avoid identical code folding (ICF) on some linkers. */
+static double str_startswith(double a, double b) {
+    (void)a;
+    (void)b;
+    return 1.0;
+}
+
+static double str_endswith(double a, double b) {
+    (void)a;
+    (void)b;
+    return 2.0;
+}
+
+static double str_contains(double a, double b) {
+    (void)a;
+    (void)b;
+    return 3.0;
+}
 
 static bool is_comparison_function(const void* func) {
     return func == (void*)cmp_eq || func == (void*)cmp_ne ||
