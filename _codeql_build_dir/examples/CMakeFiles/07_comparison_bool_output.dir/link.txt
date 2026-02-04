@@ -1,0 +1,1 @@
+/home/runner/work/miniexpr/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/07_comparison_bool_output.dir/link.d CMakeFiles/07_comparison_bool_output.dir/07_comparison_bool_output.c.o -o 07_comparison_bool_output  -Wl,-rpath,/home/runner/work/miniexpr/miniexpr/_codeql_build_dir ../libminiexpr.so -lm
