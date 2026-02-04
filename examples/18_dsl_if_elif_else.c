@@ -2,7 +2,7 @@
  * Example 18: DSL if/elif/else
  *
  * Demonstrates scalar conditionals in DSL kernels, including
- * result-assignment branches and flow-only loop control.
+ * return branches and flow-only loop control.
  */
 
 #include <stdio.h>
@@ -21,15 +21,16 @@ static void print_array(const char *name, const double *arr, int n) {
 }
 
 static int run_result_branches(void) {
-    printf("--- Example 1: if/elif/else result branches ---\n");
+    printf("--- Example 1: if/elif/else return branches ---\n");
 
     const char *dsl_source =
-        "if any(x > 0):\n"
-        "    result = 1\n"
-        "elif any(x < 0):\n"
-        "    result = 2\n"
-        "else:\n"
-        "    result = 3\n";
+        "def kernel(x):\n"
+        "    if any(x > 0):\n"
+        "        return 1\n"
+        "    elif any(x < 0):\n"
+        "        return 2\n"
+        "    else:\n"
+        "        return 3\n";
 
     me_variable vars[] = {{"x", ME_FLOAT64}};
     me_expr *expr = NULL;
@@ -79,14 +80,15 @@ static int run_flow_only_loop(void) {
     printf("\n--- Example 2: flow-only loop control ---\n");
 
     const char *dsl_source =
-        "sum = 0\n"
-        "for i in range(10):\n"
-        "    if i == 3:\n"
-        "        continue\n"
-        "    elif i == 7:\n"
-        "        break\n"
-        "    sum = sum + i\n"
-        "result = sum\n";
+        "def kernel():\n"
+        "    sum = 0\n"
+        "    for i in range(10):\n"
+        "        if i == 3:\n"
+        "            continue\n"
+        "        elif i == 7:\n"
+        "            break\n"
+        "        sum = sum + i\n"
+        "    return sum\n";
 
     me_expr *expr = NULL;
     int err = 0;

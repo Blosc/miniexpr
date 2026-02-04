@@ -353,22 +353,23 @@ Chunk size matters enormously for parallel performance:
 
 **DSL Kernel Preview:**
 ```
-zr = 0.0
-zi = 0.0
-escape_iter = 100.0
-for iter in range(100):
-    zr2 = zr * zr
-    zi2 = zi * zi
-    mag2 = zr2 + zi2
-    just_escaped = mag2 > 4.0 and escape_iter == 100.0
-    escape_iter = where(just_escaped, iter, escape_iter)
-    if all(escape_iter != 100.0):
-        break
-    zr_new = zr2 - zi2 + cr
-    zi_new = 2.0 * zr * zi + ci
-    zr = zr_new
-    zi = zi_new
-result = escape_iter
+def mandelbrot(cr, ci):
+    zr = 0.0
+    zi = 0.0
+    escape_iter = 100.0
+    for iter in range(100):
+        zr2 = zr * zr
+        zi2 = zi * zi
+        mag2 = zr2 + zi2
+        just_escaped = mag2 > 4.0 and escape_iter == 100.0
+        escape_iter = where(just_escaped, iter, escape_iter)
+        if all(escape_iter != 100.0):
+            break
+        zr_new = zr2 - zi2 + cr
+        zi_new = 2.0 * zr * zi + ci
+        zr = zr_new
+        zi = zi_new
+    return escape_iter
 ```
 
 ---

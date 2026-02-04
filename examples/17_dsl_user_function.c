@@ -28,7 +28,9 @@ static void print_array(const char *name, const double *arr, int n) {
 int main(void) {
     printf("=== DSL User-defined Function Example ===\n\n");
 
-    const char *dsl_source = "result = clamp01(x)";
+    const char *dsl_source =
+        "def kernel(x):\n"
+        "    return clamp01(x)\n";
     printf("DSL Program:\n%s\n\n", dsl_source);
 
     double x[] = {-0.5, 0.0, 0.25, 1.0, 1.5};

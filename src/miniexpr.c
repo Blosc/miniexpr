@@ -119,8 +119,10 @@ struct me_dsl_compiled_stmt {
         } assign;
         struct {
             me_dsl_compiled_expr expr;
-            bool is_result;
         } expr_stmt;
+        struct {
+            me_dsl_compiled_expr expr;
+        } return_stmt;
         struct {
             char *format;
             me_dsl_compiled_expr *args;
@@ -162,7 +164,6 @@ typedef struct {
     int n_locals;
     int *local_var_indices;
     int *local_slots;
-    int result_var_index;
     int idx_ndim;
     int idx_i[ME_DSL_MAX_NDIM];
     int idx_n[ME_DSL_MAX_NDIM];
@@ -444,10 +445,10 @@ static bool dsl_is_reserved_name(const char *name) {
     if (!name) {
         return false;
     }
-    if (strcmp(name, "result") == 0) {
+    if (strcmp(name, "print") == 0) {
         return true;
     }
-    if (strcmp(name, "print") == 0) {
+    if (strcmp(name, "def") == 0 || strcmp(name, "return") == 0) {
         return true;
     }
     if (strcmp(name, "_ndim") == 0) {
@@ -532,6 +533,9 @@ static void dsl_compiled_stmt_free(me_dsl_compiled_stmt *stmt) {
         break;
     case ME_DSL_STMT_EXPR:
         dsl_compiled_expr_free(&stmt->as.expr_stmt.expr);
+        break;
+    case ME_DSL_STMT_RETURN:
+        dsl_compiled_expr_free(&stmt->as.return_stmt.expr);
         break;
     case ME_DSL_STMT_PRINT:
         free(stmt->as.print_stmt.format);
@@ -2372,10 +2376,10 @@ typedef struct {
     bool output_dtype_auto;
     int loop_depth;
     bool allow_new_locals;
-    bool allow_result_new;
     int *error_pos;
     me_dsl_compiled_expr *output_expr;
-    me_dsl_compiled_expr **output_expr_slot;
+    bool has_return;
+    me_dtype return_dtype;
     me_dsl_compiled_program *program;
     const me_variable_ex *funcs;
     int func_count;
@@ -2419,8 +2423,8 @@ static bool dsl_is_candidate(const char *source) {
             }
         }
     }
-    const char *keywords[] = {"for", "break", "continue", "print", "if", "elif", "else"};
-    for (int k = 0; k < 7; k++) {
+    const char *keywords[] = {"def", "return", "for", "break", "continue", "print", "if", "elif", "else"};
+    for (int k = 0; k < 9; k++) {
         const char *kw = keywords[k];
         size_t len = strlen(kw);
         for (const char *p = source; *p; p++) {
@@ -2438,11 +2442,7 @@ static bool dsl_program_is_dsl(const me_dsl_program *program) {
     if (!program) {
         return false;
     }
-    if (program->block.nstmts != 1) {
-        return true;
-    }
-    me_dsl_stmt *stmt = program->block.stmts[0];
-    return stmt && stmt->kind != ME_DSL_STMT_EXPR;
+    return program->name != NULL;
 }
 
 static void dsl_scan_reserved_usage_block(const me_dsl_block *block, int *uses_i_mask,
@@ -2462,6 +2462,9 @@ static void dsl_scan_reserved_usage_block(const me_dsl_block *block, int *uses_i
             break;
         case ME_DSL_STMT_EXPR:
             expr_text = stmt->as.expr_stmt.expr ? stmt->as.expr_stmt.expr->text : NULL;
+            break;
+        case ME_DSL_STMT_RETURN:
+            expr_text = stmt->as.return_stmt.expr ? stmt->as.return_stmt.expr->text : NULL;
             break;
         case ME_DSL_STMT_PRINT:
             expr_text = stmt->as.print_stmt.call ? stmt->as.print_stmt.call->text : NULL;
@@ -2914,72 +2917,70 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
     return true;
 }
 
-static int dsl_count_result_assignments_block(const me_dsl_block *block) {
-    if (!block) {
-        return 0;
-    }
-    int count = 0;
-    for (int i = 0; i < block->nstmts; i++) {
-        me_dsl_stmt *stmt = block->stmts[i];
-        if (!stmt) {
-            continue;
-        }
-        switch (stmt->kind) {
-        case ME_DSL_STMT_ASSIGN:
-            if (stmt->as.assign.name && strcmp(stmt->as.assign.name, "result") == 0) {
-                count++;
-            }
-            break;
-        case ME_DSL_STMT_IF:
-            count += dsl_count_result_assignments_block(&stmt->as.if_stmt.then_block);
-            for (int j = 0; j < stmt->as.if_stmt.n_elifs; j++) {
-                count += dsl_count_result_assignments_block(&stmt->as.if_stmt.elif_branches[j].block);
-            }
-            if (stmt->as.if_stmt.has_else) {
-                count += dsl_count_result_assignments_block(&stmt->as.if_stmt.else_block);
-            }
-            break;
-        case ME_DSL_STMT_FOR:
-            count += dsl_count_result_assignments_block(&stmt->as.for_loop.body);
-            break;
-        case ME_DSL_STMT_EXPR:
-        case ME_DSL_STMT_PRINT:
-        case ME_DSL_STMT_BREAK:
-        case ME_DSL_STMT_CONTINUE:
-            break;
-        }
-    }
-    return count;
-}
+static bool dsl_block_guarantees_return(const me_dsl_block *block);
 
-static bool dsl_block_is_single_flow_stmt(const me_dsl_block *block) {
-    if (!block || block->nstmts != 1) {
-        return false;
-    }
-    me_dsl_stmt *stmt = block->stmts[0];
+static bool dsl_stmt_guarantees_return(const me_dsl_stmt *stmt) {
     if (!stmt) {
         return false;
     }
-    return (stmt->kind == ME_DSL_STMT_BREAK || stmt->kind == ME_DSL_STMT_CONTINUE);
-}
-
-static bool dsl_if_is_flow_only(const me_dsl_stmt *stmt) {
-    if (!stmt) {
-        return false;
-    }
-    if (!dsl_block_is_single_flow_stmt(&stmt->as.if_stmt.then_block)) {
-        return false;
-    }
-    for (int i = 0; i < stmt->as.if_stmt.n_elifs; i++) {
-        if (!dsl_block_is_single_flow_stmt(&stmt->as.if_stmt.elif_branches[i].block)) {
+    switch (stmt->kind) {
+    case ME_DSL_STMT_RETURN:
+        return true;
+    case ME_DSL_STMT_IF:
+        if (!stmt->as.if_stmt.has_else) {
             return false;
         }
-    }
-    if (stmt->as.if_stmt.has_else &&
-        !dsl_block_is_single_flow_stmt(&stmt->as.if_stmt.else_block)) {
+        if (!dsl_block_guarantees_return(&stmt->as.if_stmt.then_block)) {
+            return false;
+        }
+        for (int i = 0; i < stmt->as.if_stmt.n_elifs; i++) {
+            if (!dsl_block_guarantees_return(&stmt->as.if_stmt.elif_branches[i].block)) {
+                return false;
+            }
+        }
+        if (!dsl_block_guarantees_return(&stmt->as.if_stmt.else_block)) {
+            return false;
+        }
+        return true;
+    case ME_DSL_STMT_FOR:
+    case ME_DSL_STMT_ASSIGN:
+    case ME_DSL_STMT_EXPR:
+    case ME_DSL_STMT_PRINT:
+    case ME_DSL_STMT_BREAK:
+    case ME_DSL_STMT_CONTINUE:
         return false;
     }
-    return true;
+    return false;
+}
+
+static bool dsl_block_guarantees_return(const me_dsl_block *block) {
+    if (!block) {
+        return false;
+    }
+    for (int i = 0; i < block->nstmts; i++) {
+        if (dsl_stmt_guarantees_return(block->stmts[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void dsl_block_first_linecol(const me_dsl_block *block, int *line, int *column) {
+    if (line) {
+        *line = 0;
+    }
+    if (column) {
+        *column = 0;
+    }
+    if (!block || block->nstmts <= 0 || !block->stmts || !block->stmts[0]) {
+        return;
+    }
+    if (line) {
+        *line = block->stmts[0]->line;
+    }
+    if (column) {
+        *column = block->stmts[0]->column;
+    }
 }
 
 static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
@@ -3008,7 +3009,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
-            if (dsl_is_reserved_name(name) && strcmp(name, "result") != 0) {
+            if (dsl_is_reserved_name(name)) {
                 if (ctx->error_pos) {
                     *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
                 }
@@ -3035,8 +3036,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                                                   ctx->program->vars.count);
 
             if (var_index < 0) {
-                if (!ctx->allow_new_locals &&
-                    !(ctx->allow_result_new && strcmp(name, "result") == 0)) {
+                if (!ctx->allow_new_locals) {
                     if (ctx->error_pos) {
                         *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
                     }
@@ -3066,12 +3066,6 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 return false;
             }
             compiled->as.assign.local_slot = ctx->program->local_slots[var_index];
-            if (strcmp(name, "result") == 0) {
-                ctx->program->result_var_index = var_index;
-                if (ctx->output_expr_slot) {
-                    *ctx->output_expr_slot = &compiled->as.assign.value;
-                }
-            }
             break;
         }
         case ME_DSL_STMT_EXPR: {
@@ -3080,10 +3074,27 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
-            if (ctx->output_expr_slot) {
-                *ctx->output_expr_slot = &compiled->as.expr_stmt.expr;
+            break;
+        }
+        case ME_DSL_STMT_RETURN: {
+            me_dtype expr_dtype = ctx->output_dtype_auto ? ME_AUTO : ctx->output_dtype;
+            if (!dsl_compile_expr(ctx, stmt->as.return_stmt.expr, expr_dtype, &compiled->as.return_stmt.expr)) {
+                dsl_compiled_stmt_free(compiled);
+                return false;
             }
-            compiled->as.expr_stmt.is_result = true;
+            me_dtype return_dtype = me_get_dtype(compiled->as.return_stmt.expr.expr);
+            if (!ctx->has_return) {
+                ctx->has_return = true;
+                ctx->return_dtype = return_dtype;
+                ctx->output_expr = &compiled->as.return_stmt.expr;
+            }
+            else if (ctx->return_dtype != return_dtype) {
+                if (ctx->error_pos) {
+                    *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                }
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
             break;
         }
         case ME_DSL_STMT_PRINT: {
@@ -3255,39 +3266,6 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             break;
         }
         case ME_DSL_STMT_IF: {
-            bool flow_only = dsl_if_is_flow_only(stmt);
-            if (!flow_only) {
-                if (!stmt->as.if_stmt.has_else) {
-                    if (ctx->error_pos) {
-                        *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
-                    }
-                    dsl_compiled_stmt_free(compiled);
-                    return false;
-                }
-                if (dsl_count_result_assignments_block(&stmt->as.if_stmt.then_block) != 1) {
-                    if (ctx->error_pos) {
-                        *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
-                    }
-                    dsl_compiled_stmt_free(compiled);
-                    return false;
-                }
-                for (int i = 0; i < stmt->as.if_stmt.n_elifs; i++) {
-                    if (dsl_count_result_assignments_block(&stmt->as.if_stmt.elif_branches[i].block) != 1) {
-                        if (ctx->error_pos) {
-                            *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
-                        }
-                        dsl_compiled_stmt_free(compiled);
-                        return false;
-                    }
-                }
-                if (dsl_count_result_assignments_block(&stmt->as.if_stmt.else_block) != 1) {
-                    if (ctx->error_pos) {
-                        *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
-                    }
-                    dsl_compiled_stmt_free(compiled);
-                    return false;
-                }
-            }
             if (!dsl_compile_expr(ctx, stmt->as.if_stmt.cond, ME_AUTO, &compiled->as.if_stmt.cond)) {
                 dsl_compiled_stmt_free(compiled);
                 return false;
@@ -3304,12 +3282,12 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 return false;
             }
 
-            dsl_compile_ctx branch_ctx = *ctx;
-            branch_ctx.allow_new_locals = false;
-            branch_ctx.allow_result_new = true;
+            bool prev_allow_new = ctx->allow_new_locals;
+            ctx->allow_new_locals = false;
 
-            if (!dsl_compile_block(&branch_ctx, &stmt->as.if_stmt.then_block,
+            if (!dsl_compile_block(ctx, &stmt->as.if_stmt.then_block,
                                    &compiled->as.if_stmt.then_block)) {
+                ctx->allow_new_locals = prev_allow_new;
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
@@ -3320,6 +3298,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 compiled->as.if_stmt.elif_branches = calloc((size_t)compiled->as.if_stmt.n_elifs,
                                                             sizeof(*compiled->as.if_stmt.elif_branches));
                 if (!compiled->as.if_stmt.elif_branches) {
+                    ctx->allow_new_locals = prev_allow_new;
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
@@ -3339,23 +3318,27 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                                                                  elif_branch->cond->line,
                                                                  elif_branch->cond->column);
                     }
+                    ctx->allow_new_locals = prev_allow_new;
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
-                if (!dsl_compile_block(&branch_ctx, &elif_branch->block, &out_branch->block)) {
+                if (!dsl_compile_block(ctx, &elif_branch->block, &out_branch->block)) {
+                    ctx->allow_new_locals = prev_allow_new;
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
             }
 
             if (stmt->as.if_stmt.has_else) {
-                if (!dsl_compile_block(&branch_ctx, &stmt->as.if_stmt.else_block,
+                if (!dsl_compile_block(ctx, &stmt->as.if_stmt.else_block,
                                        &compiled->as.if_stmt.else_block)) {
+                    ctx->allow_new_locals = prev_allow_new;
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
                 compiled->as.if_stmt.has_else = true;
             }
+            ctx->allow_new_locals = prev_allow_new;
             break;
         }
         case ME_DSL_STMT_FOR: {
@@ -3482,6 +3465,17 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     if (is_dsl) {
         *is_dsl = true;
     }
+    if (!dsl_block_guarantees_return(&parsed->block)) {
+        if (error_pos) {
+            int line = 0;
+            int column = 0;
+            dsl_block_first_linecol(&parsed->block, &line, &column);
+            int off = dsl_offset_from_linecol(source, line, column);
+            *error_pos = off >= 0 ? off : -1;
+        }
+        me_dsl_program_free(parsed);
+        return NULL;
+    }
 
     me_dsl_compiled_program *program = calloc(1, sizeof(*program));
     if (!program) {
@@ -3492,7 +3486,6 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
         return NULL;
     }
     dsl_var_table_init(&program->vars);
-    program->result_var_index = -1;
     program->idx_ndim = -1;
     for (int i = 0; i < ME_DSL_MAX_NDIM; i++) {
         program->idx_i[i] = -1;
@@ -3547,6 +3540,17 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
                 dsl_compiled_program_free(program);
                 me_dsl_program_free(parsed);
                 return NULL;
+            }
+            for (int j = 0; j < parsed->nparams; j++) {
+                if (strcmp(parsed->params[j], name) == 0) {
+                    if (error_pos) {
+                        *error_pos = -1;
+                    }
+                    free(funcs);
+                    dsl_compiled_program_free(program);
+                    me_dsl_program_free(parsed);
+                    return NULL;
+                }
             }
             if (entry->dtype == ME_AUTO || !is_valid_dtype(entry->dtype) || entry->dtype == ME_STRING) {
                 if (error_pos) {
@@ -3644,6 +3648,26 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
         }
         input_count++;
     }
+    if (input_count != parsed->nparams) {
+        if (error_pos) {
+            *error_pos = -1;
+        }
+        free(funcs);
+        dsl_compiled_program_free(program);
+        me_dsl_program_free(parsed);
+        return NULL;
+    }
+    for (int i = 0; i < parsed->nparams; i++) {
+        if (dsl_var_table_find(&program->vars, parsed->params[i]) < 0) {
+            if (error_pos) {
+                *error_pos = -1;
+            }
+            free(funcs);
+            dsl_compiled_program_free(program);
+            me_dsl_program_free(parsed);
+            return NULL;
+        }
+    }
     program->n_inputs = input_count;
 
     if (dtype == ME_AUTO) {
@@ -3720,10 +3744,10 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     ctx.output_dtype_auto = (dtype == ME_AUTO);
     ctx.loop_depth = 0;
     ctx.allow_new_locals = true;
-    ctx.allow_result_new = true;
     ctx.error_pos = error_pos;
     ctx.output_expr = NULL;
-    ctx.output_expr_slot = &ctx.output_expr;
+    ctx.has_return = false;
+    ctx.return_dtype = ME_AUTO;
     ctx.program = program;
     ctx.funcs = funcs;
     ctx.func_count = func_count;
@@ -3738,7 +3762,7 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     me_dsl_program_free(parsed);
     free(funcs);
 
-    if (!ctx.output_expr || !ctx.output_expr->expr) {
+    if (!ctx.has_return || !ctx.output_expr || !ctx.output_expr->expr) {
         if (error_pos) {
             *error_pos = -1;
         }
@@ -3746,7 +3770,7 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
         return NULL;
     }
 
-    program->output_dtype = me_get_dtype(ctx.output_expr->expr);
+    program->output_dtype = ctx.return_dtype;
     program->output_is_scalar = contains_reduction(ctx.output_expr->expr) &&
                                 output_is_scalar(ctx.output_expr->expr);
 
@@ -4221,11 +4245,14 @@ static void dsl_print_formatted(const char *fmt, char **arg_strs, int nargs) {
 }
 
 static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
-                          bool *did_break, bool *did_continue) {
+                          bool *did_break, bool *did_continue, bool *did_return) {
     if (!block) {
         return ME_EVAL_SUCCESS;
     }
     for (int i = 0; i < block->nstmts; i++) {
+        if (did_return && *did_return) {
+            break;
+        }
         if (did_break && *did_break) {
             break;
         }
@@ -4250,6 +4277,17 @@ static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
             int rc = dsl_eval_expr_nitems(ctx, &stmt->as.expr_stmt.expr, ctx->output_block, ctx->nitems);
             if (rc != ME_EVAL_SUCCESS) {
                 return rc;
+            }
+            break;
+        }
+        case ME_DSL_STMT_RETURN: {
+            int rc = dsl_eval_expr_nitems(ctx, &stmt->as.return_stmt.expr,
+                                          ctx->output_block, ctx->nitems);
+            if (rc != ME_EVAL_SUCCESS) {
+                return rc;
+            }
+            if (did_return) {
+                *did_return = true;
             }
             break;
         }
@@ -4330,7 +4368,8 @@ static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
             matched = dsl_any_nonzero(cond_buf, cond_dtype, ctx->nitems);
             free(cond_buf);
             if (matched) {
-                rc = dsl_eval_block(ctx, &stmt->as.if_stmt.then_block, did_break, did_continue);
+                rc = dsl_eval_block(ctx, &stmt->as.if_stmt.then_block,
+                                    did_break, did_continue, did_return);
                 if (rc != ME_EVAL_SUCCESS) {
                     return rc;
                 }
@@ -4352,15 +4391,17 @@ static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
                 matched = dsl_any_nonzero(cond_buf, cond_dtype, ctx->nitems);
                 free(cond_buf);
                 if (matched) {
-                    rc = dsl_eval_block(ctx, &branch->block, did_break, did_continue);
+                    rc = dsl_eval_block(ctx, &branch->block,
+                                        did_break, did_continue, did_return);
                     if (rc != ME_EVAL_SUCCESS) {
                         return rc;
                     }
-                    return ME_EVAL_SUCCESS;
+                    break;
                 }
             }
-            if (stmt->as.if_stmt.has_else) {
-                rc = dsl_eval_block(ctx, &stmt->as.if_stmt.else_block, did_break, did_continue);
+            if (!matched && stmt->as.if_stmt.has_else) {
+                rc = dsl_eval_block(ctx, &stmt->as.if_stmt.else_block,
+                                    did_break, did_continue, did_return);
                 if (rc != ME_EVAL_SUCCESS) {
                     return rc;
                 }
@@ -4395,9 +4436,17 @@ static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
                 dsl_fill_i64(loop_buf, ctx->nitems, iter);
                 bool inner_break = false;
                 bool inner_continue = false;
-                rc = dsl_eval_block(ctx, &stmt->as.for_loop.body, &inner_break, &inner_continue);
+                bool inner_return = false;
+                rc = dsl_eval_block(ctx, &stmt->as.for_loop.body,
+                                    &inner_break, &inner_continue, &inner_return);
                 if (rc != ME_EVAL_SUCCESS) {
                     return rc;
+                }
+                if (inner_return) {
+                    if (did_return) {
+                        *did_return = true;
+                    }
+                    return ME_EVAL_SUCCESS;
                 }
                 if (inner_break) {
                     break;
@@ -4465,11 +4514,6 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
 
     for (int i = 0; i < program->n_locals; i++) {
         int var_index = program->local_var_indices[i];
-        if (var_index == program->result_var_index) {
-            local_buffers[i] = output_block;
-            var_buffers[var_index] = output_block;
-            continue;
-        }
         size_t sz = dtype_size(program->vars.dtypes[var_index]);
         if (sz == 0) {
             free(var_buffers);
@@ -4479,7 +4523,7 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
         local_buffers[i] = malloc((size_t)nitems * sz);
         if (!local_buffers[i]) {
             for (int j = 0; j < i; j++) {
-                if (local_buffers[j] && program->local_var_indices[j] != program->result_var_index) {
+                if (local_buffers[j]) {
                     free(local_buffers[j]);
                 }
             }
@@ -4545,7 +4589,7 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
 
     if (reserved_count < 0) {
         for (int i = 0; i < program->n_locals; i++) {
-            if (local_buffers[i] && program->local_var_indices[i] != program->result_var_index) {
+            if (local_buffers[i]) {
                 free(local_buffers[i]);
             }
         }
@@ -4564,19 +4608,23 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
 
     bool did_break = false;
     bool did_continue = false;
-    int rc = dsl_eval_block(&ctx, &program->block, &did_break, &did_continue);
+    bool did_return = false;
+    int rc = dsl_eval_block(&ctx, &program->block, &did_break, &did_continue, &did_return);
 
     for (int i = 0; i < reserved_count; i++) {
         free(reserved_buffers[i]);
     }
     for (int i = 0; i < program->n_locals; i++) {
-        if (local_buffers[i] && program->local_var_indices[i] != program->result_var_index) {
+        if (local_buffers[i]) {
             free(local_buffers[i]);
         }
     }
     free(var_buffers);
     free(local_buffers);
 
+    if (rc == ME_EVAL_SUCCESS && !did_return) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
     return rc;
 }
 

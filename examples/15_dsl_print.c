@@ -12,11 +12,12 @@ int main(void) {
     double out[6] = {0};
 
     const char *src =
-        "print(\"sum = {}\", sum(x))\n"
-        "print(\"sum =\", sum(x))\n"
-        "print(\"min = {} max = {}\", min(x), max(x))\n"
-        "print(\"sum and max =\", sum(x), max(x))\n"
-        "result = x * 2\n";
+        "def kernel(x):\n"
+        "    print(\"sum = {}\", sum(x))\n"
+        "    print(\"sum =\", sum(x))\n"
+        "    print(\"min = {} max = {}\", min(x), max(x))\n"
+        "    print(\"sum and max =\", sum(x), max(x))\n"
+        "    return x * 2\n";
 
     me_variable vars[] = {{"x", ME_FLOAT64}};
     me_expr *expr = NULL;

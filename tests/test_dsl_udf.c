@@ -41,7 +41,9 @@ static int test_udf_function(void) {
     double out[5];
     double expected[] = {0.0, 0.0, 0.25, 1.0, 1.0};
 
-    const char *src = "result = clamp01(x)";
+    const char *src =
+        "def kernel(x):\n"
+        "    return clamp01(x)\n";
     me_variable_ex vars[] = {
         {"x", ME_FLOAT64, NULL, 0, NULL, 0},
         {"clamp01", ME_FLOAT64, clamp01, ME_FUNCTION1 | ME_FLAG_PURE, NULL, 0},
@@ -77,7 +79,9 @@ static int test_udf_closure(void) {
     double expected[] = {2.5, 5.0, 7.5, 10.0};
     double factor = 2.5;
 
-    const char *src = "result = scale(x)";
+    const char *src =
+        "def kernel(x):\n"
+        "    return scale(x)\n";
     me_variable_ex vars[] = {
         {"x", ME_FLOAT64, NULL, 0, NULL, 0},
         {"scale", ME_FLOAT64, scale, ME_CLOSURE1 | ME_FLAG_PURE, &factor, 0},
@@ -116,7 +120,8 @@ static int test_udf_invalid(void) {
         {"sum", ME_FLOAT64, clamp01, ME_FUNCTION1 | ME_FLAG_PURE, NULL, 0},
     };
 
-    if (me_compile_ex("result = sum(x)", vars_builtin, 2, ME_FLOAT64, &err, &expr)
+    if (me_compile_ex("def kernel(x):\n    return sum(x)\n",
+                      vars_builtin, 2, ME_FLOAT64, &err, &expr)
         == ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: builtin name accepted\n");
         me_free(expr);
@@ -126,10 +131,11 @@ static int test_udf_invalid(void) {
     expr = NULL;
     me_variable_ex vars_reserved[] = {
         {"x", ME_FLOAT64, NULL, 0, NULL, 0},
-        {"result", ME_FLOAT64, clamp01, ME_FUNCTION1 | ME_FLAG_PURE, NULL, 0},
+        {"return", ME_FLOAT64, clamp01, ME_FUNCTION1 | ME_FLAG_PURE, NULL, 0},
     };
 
-    if (me_compile_ex("result = result(x)", vars_reserved, 2, ME_FLOAT64, &err, &expr)
+    if (me_compile_ex("def kernel(x):\n    return return(x)\n",
+                      vars_reserved, 2, ME_FLOAT64, &err, &expr)
         == ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: reserved name accepted\n");
         me_free(expr);
@@ -142,7 +148,8 @@ static int test_udf_invalid(void) {
         {"clamp01", ME_AUTO, clamp01, ME_FUNCTION1 | ME_FLAG_PURE, NULL, 0},
     };
 
-    if (me_compile_ex("result = clamp01(x)", vars_auto, 2, ME_FLOAT64, &err, &expr)
+    if (me_compile_ex("def kernel(x):\n    return clamp01(x)\n",
+                      vars_auto, 2, ME_FLOAT64, &err, &expr)
         == ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: ME_AUTO return dtype accepted\n");
         me_free(expr);

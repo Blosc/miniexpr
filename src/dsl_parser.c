@@ -287,6 +287,9 @@ static void dsl_stmt_free(me_dsl_stmt *stmt) {
     case ME_DSL_STMT_EXPR:
         dsl_expr_free(stmt->as.expr_stmt.expr);
         break;
+    case ME_DSL_STMT_RETURN:
+        dsl_expr_free(stmt->as.return_stmt.expr);
+        break;
     case ME_DSL_STMT_PRINT:
         dsl_expr_free(stmt->as.print_stmt.call);
         break;
@@ -886,6 +889,31 @@ static bool parse_expression_stmt(me_dsl_lexer *lex, me_dsl_block *block, me_dsl
     return true;
 }
 
+static bool parse_return_stmt(me_dsl_lexer *lex, me_dsl_block *block,
+                              int line, int column, me_dsl_error *error) {
+    char *expr_text = parse_expression_until_stmt_end(lex, error, line, column);
+    if (!expr_text) {
+        return false;
+    }
+    me_dsl_stmt *stmt = dsl_stmt_new(ME_DSL_STMT_RETURN, line, column);
+    if (!stmt) {
+        free(expr_text);
+        dsl_set_error(error, line, column, "out of memory");
+        return false;
+    }
+    stmt->as.return_stmt.expr = dsl_expr_new(expr_text, line, column);
+    if (!stmt->as.return_stmt.expr) {
+        dsl_set_error(error, line, column, "out of memory");
+        dsl_stmt_free(stmt);
+        return false;
+    }
+    if (!dsl_block_push(block, stmt, error)) {
+        dsl_stmt_free(stmt);
+        return false;
+    }
+    return true;
+}
+
 static bool parse_print_stmt(me_dsl_lexer *lex, me_dsl_block *block, int line, int column, me_dsl_error *error) {
     char *expr_text = parse_expression_until_stmt_end(lex, error, line, column);
     if (!expr_text) {
@@ -927,6 +955,13 @@ static bool parse_statement(me_dsl_lexer *lex, me_dsl_block *block, bool in_loop
         }
         if (ident_len == 2 && strncmp(ident_start, "if", ident_len) == 0) {
             return parse_if(lex, block, snapshot.line, snapshot.column, in_loop, error);
+        }
+        if (ident_len == 6 && strncmp(ident_start, "return", ident_len) == 0) {
+            return parse_return_stmt(lex, block, snapshot.line, snapshot.column, error);
+        }
+        if (ident_len == 3 && strncmp(ident_start, "def", ident_len) == 0) {
+            dsl_set_error(error, snapshot.line, snapshot.column, "unexpected 'def' inside function");
+            return false;
         }
         if (ident_len == 4 && strncmp(ident_start, "elif", ident_len) == 0) {
             dsl_set_error(error, snapshot.line, snapshot.column, "unexpected 'elif' without matching 'if'");
@@ -1060,38 +1095,127 @@ static bool parse_indented_block(me_dsl_lexer *lex, me_dsl_block *block, int min
     return true;
 }
 
-static bool parse_program(me_dsl_lexer *lex, me_dsl_program *program, me_dsl_error *error) {
-    memset(program, 0, sizeof(*program));
-
-    while (*lex->current) {
-        lexer_skip_separators(lex);
-        if (*lex->current == '\0') {
-            break;
+static bool dsl_program_add_param(me_dsl_program *program, const char *start, size_t len,
+                                  int line, int column, me_dsl_error *error) {
+    if (!program || !start || len == 0) {
+        dsl_set_error(error, line, column, "expected parameter name");
+        return false;
+    }
+    if (program->nparams == program->param_capacity) {
+        int new_cap = program->param_capacity ? program->param_capacity * 2 : 4;
+        char **next = realloc(program->params, (size_t)new_cap * sizeof(*next));
+        if (!next) {
+            dsl_set_error(error, line, column, "out of memory");
+            return false;
         }
-
-        /* Skip leading whitespace for top-level */
-        while (*lex->current == ' ' || *lex->current == '\t') {
-            lexer_advance(lex);
-        }
-
-        /* Skip comment-only lines */
-        if (*lex->current == '#') {
-            while (*lex->current && *lex->current != '\n') {
-                lexer_advance(lex);
-            }
-            continue;
-        }
-
-        /* Skip blank lines */
-        if (*lex->current == '\n') {
-            lexer_advance(lex);
-            continue;
-        }
-
-        if (!parse_statement(lex, &program->block, false, error)) {
+        program->params = next;
+        program->param_capacity = new_cap;
+    }
+    for (int i = 0; i < program->nparams; i++) {
+        if (strlen(program->params[i]) == len &&
+            strncmp(program->params[i], start, len) == 0) {
+            dsl_set_error(error, line, column, "duplicate parameter name");
             return false;
         }
     }
+    char *name = dsl_strndup(start, len);
+    if (!name) {
+        dsl_set_error(error, line, column, "out of memory");
+        return false;
+    }
+    program->params[program->nparams++] = name;
+    return true;
+}
+
+static bool parse_def(me_dsl_lexer *lex, me_dsl_program *program, me_dsl_error *error) {
+    int line = lex->line;
+    int column = lex->column;
+
+    if (!lexer_match_keyword(lex, "def")) {
+        dsl_set_error(error, line, column, "expected 'def'");
+        return false;
+    }
+
+    lexer_skip_space(lex);
+    const char *name_start = NULL;
+    size_t name_len = 0;
+    if (!lexer_read_identifier(lex, &name_start, &name_len)) {
+        dsl_set_error(error, line, column, "expected function name");
+        return false;
+    }
+    program->name = dsl_strndup(name_start, name_len);
+    if (!program->name) {
+        dsl_set_error(error, line, column, "out of memory");
+        return false;
+    }
+
+    lexer_skip_space(lex);
+    if (!consume_char(lex, '(')) {
+        dsl_set_error(error, line, column, "expected '(' after function name");
+        return false;
+    }
+
+    lexer_skip_space(lex);
+    if (*lex->current != ')') {
+        for (;;) {
+            const char *param_start = NULL;
+            size_t param_len = 0;
+            if (!lexer_read_identifier(lex, &param_start, &param_len)) {
+                dsl_set_error(error, line, column, "expected parameter name");
+                return false;
+            }
+            if (!dsl_program_add_param(program, param_start, param_len, line, column, error)) {
+                return false;
+            }
+            lexer_skip_space(lex);
+            if (*lex->current == ',') {
+                lexer_advance(lex);
+                lexer_skip_space(lex);
+                continue;
+            }
+            if (*lex->current == ')') {
+                break;
+            }
+            dsl_set_error(error, line, column, "expected ',' or ')' in parameter list");
+            return false;
+        }
+    }
+    if (!consume_char(lex, ')')) {
+        dsl_set_error(error, line, column, "expected ')'");
+        return false;
+    }
+    lexer_skip_space(lex);
+    if (!consume_char(lex, ':')) {
+        dsl_set_error(error, line, column, "expected ':' after signature");
+        return false;
+    }
+
+    if (!parse_if_body(lex, &program->block, line, column, false, error)) {
+        return false;
+    }
+
+    return true;
+}
+
+static bool parse_program(me_dsl_lexer *lex, me_dsl_program *program, me_dsl_error *error) {
+    memset(program, 0, sizeof(*program));
+
+    lexer_skip_separators(lex);
+    if (*lex->current == '\0') {
+        dsl_set_error(error, lex->line, lex->column, "expected 'def'");
+        return false;
+    }
+
+    if (!parse_def(lex, program, error)) {
+        return false;
+    }
+
+    lexer_skip_separators(lex);
+    if (*lex->current != '\0') {
+        dsl_set_error(error, lex->line, lex->column, "unexpected content after function");
+        return false;
+    }
+
     return true;
 }
 
@@ -1121,6 +1245,11 @@ void me_dsl_program_free(me_dsl_program *program) {
     if (!program) {
         return;
     }
+    free(program->name);
+    for (int i = 0; i < program->nparams; i++) {
+        free(program->params[i]);
+    }
+    free(program->params);
     dsl_block_free(&program->block);
     free(program);
 }

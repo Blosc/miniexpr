@@ -16,6 +16,7 @@
 typedef enum {
     ME_DSL_STMT_ASSIGN = 0,
     ME_DSL_STMT_EXPR,
+    ME_DSL_STMT_RETURN,
     ME_DSL_STMT_PRINT,
     ME_DSL_STMT_IF,
     ME_DSL_STMT_FOR,
@@ -55,6 +56,9 @@ struct me_dsl_stmt {
             me_dsl_expr *expr;
         } expr_stmt;
         struct {
+            me_dsl_expr *expr;
+        } return_stmt;
+        struct {
             me_dsl_expr *call;
         } print_stmt;
         struct {
@@ -78,6 +82,10 @@ struct me_dsl_stmt {
 };
 
 typedef struct {
+    char *name;
+    char **params;
+    int nparams;
+    int param_capacity;
     me_dsl_block block;
 } me_dsl_program;
 

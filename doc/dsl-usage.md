@@ -14,25 +14,35 @@ The DSL extends single expressions to full programs with:
 
 ## Basic Syntax
 
-### Statements
+### Kernel Definition
 
-A DSL program consists of one or more statements, separated by semicolons or newlines:
+A DSL kernel is a single function definition with an explicit input signature.
+The body uses Python-style indentation, and `return` defines the output:
 
 ```
-temp = sin(x) ** 2
-result = temp + cos(x) ** 2
+def kernel(x):
+    temp = sin(x) ** 2
+    return temp + cos(x) ** 2
 ```
 
-The last statement's value becomes the output (or assign to `result` explicitly).
+Signature arguments must match the variables you pass to `me_compile()` by name
+(order does not matter). (Callback functions registered via `me_variable_ex` are
+not listed in the signature.)
+
+Note: The order of the variables array still defines the pointer order passed to
+`me_eval()`. The signature is declarative and does not reorder inputs.
+
+A kernel must return on all control-flow paths. Missing returns are compile errors.
 
 ### Temporary Variables
 
 Use any identifier to store intermediate values:
 
 ```
-squared = x * x
-cubed = squared * x
-result = squared + cubed
+def kernel(x):
+    squared = x * x
+    cubed = squared * x
+    return squared + cubed
 ```
 
 Variables are element-wise arrays matching the input dimensions.
@@ -47,7 +57,9 @@ where(condition, value_if_true, value_if_false)
 
 Example - clamping values:
 ```
-clamped = where(x < 0, 0, where(x > 1, 1, x))
+def kernel(x):
+    clamped = where(x < 0, 0, where(x > 1, 1, x))
+    return clamped
 ```
 
 ### Index Variables
@@ -62,31 +74,40 @@ Access element positions using special variables:
 
 Example - position-dependent computation:
 ```
-normalized = x * _i0 / _n0
+def kernel(x):
+    normalized = x * _i0 / _n0
+    return normalized
 ```
 
 ### Loops
 
 Basic loop syntax (Python-style indentation):
 ```
-for i in range(n):
-    accumulator = accumulator + i
+def kernel(n):
+    accumulator = 0
+    for i in range(n):
+        accumulator = accumulator + i
+    return accumulator
 ```
 
 With early exit:
 ```
-for i in range(100):
-    if any(converged > 0.99):
-        break
-    value = iterate(value)
+def kernel(converged, value):
+    for i in range(100):
+        if any(converged > 0.99):
+            break
+        value = iterate(value)
+    return value
 ```
 
 With conditional continue:
 ```
-for i in range(n):
-    if any(mask == 0):
-        continue
-    result = result + compute(i)
+def kernel(mask, acc):
+    for i in range(n):
+        if any(mask == 0):
+            continue
+        acc = acc + compute(i)
+    return acc
 ```
 
 ### Conditionals
@@ -97,29 +118,31 @@ Conditions that are uniform across the block (e.g., loop variables like `i`,
 `_n*`, `_ndim`, or reductions) are accepted directly, so `if i == 2:` is valid.
 
 Rules:
-- Each `if` chain must include an `else` block.
 - No new locals are allowed inside branches.
-- Each branch must assign `result` exactly once.
-- If a conditional is used only for loop control (each branch has a single `break`/`continue`),
-  `else` is optional and `result` assignment is not required.
+- Use `return` to produce output; all `return` expressions must infer the same dtype.
+- Early returns are allowed, but ensure every control-flow path eventually returns.
+  Loops never guarantee a return; add a return after any loop.
 
 Example:
 ```
-if any(mask == 0):
-    result = 0
-elif _n0 > 10:
-    result = sum(x)
-else:
-    result = mean(x)
+def kernel(mask, x):
+    if any(mask == 0):
+        return 0
+    elif _n0 > 10:
+        return sum(x)
+    else:
+        return mean(x)
 ```
 
 Flow-only loop control:
 ```
-for i in range(10):
-    if any(mask == 0):
-        break
-    elif i == 3:
-        continue
+def kernel(mask):
+    for i in range(10):
+        if any(mask == 0):
+            break
+        elif i == 3:
+            continue
+    return i
 ```
 
 ## Available Functions
@@ -224,7 +247,7 @@ Rules:
 - Function/closure entries must use `ME_FUNCTION*` or `ME_CLOSURE*` in `type`.
 - The return dtype must be explicit (not `ME_AUTO`).
 - Names cannot shadow built-ins (`sin`, `sum`, etc.) or reserved identifiers
-  (`result`, `print`, `_i0`, `_n0`, `_ndim`).
+  (`def`, `return`, `print`, `_i0`, `_n0`, `_ndim`).
 - String return types are not supported.
 
 Example (pure function):
@@ -240,7 +263,7 @@ me_variable_ex vars[] = {
 
 me_expr *expr = NULL;
 int err = 0;
-me_compile_ex("result = clamp01(x)", vars, 2, ME_FLOAT64, &err, &expr);
+me_compile_ex("def kernel(x):\n    return clamp01(x)\n", vars, 2, ME_FLOAT64, &err, &expr);
 ```
 
 Example (closure with context):
@@ -262,47 +285,52 @@ me_variable_ex vars[] = {
 
 Horner's method for `ax³ + bx² + cx + d`:
 ```
-t1 = a * x + b
-t2 = t1 * x + c
-result = t2 * x + d
+def poly(a, b, c, d, x):
+    t1 = a * x + b
+    t2 = t1 * x + c
+    return t2 * x + d
 ```
 
 ### Example 2: Softmax Normalization
 
 ```
-max_val = max(x)
-shifted = x - max_val
-exp_vals = exp(shifted)
-result = exp_vals / sum(exp_vals)
+def softmax(x):
+    max_val = max(x)
+    shifted = x - max_val
+    exp_vals = exp(shifted)
+    return exp_vals / sum(exp_vals)
 ```
 
 ### Example 3: Distance from Center
 
 ```
-cx = _i0 - _n0 / 2
-cy = _i1 - _n1 / 2
-result = sqrt(cx * cx + cy * cy)
+def distance():
+    cx = _i0 - _n0 / 2
+    cy = _i1 - _n1 / 2
+    return sqrt(cx * cx + cy * cy)
 ```
 
 ### Example 4: Mandelbrot Iteration
 
 ```
-zr = 0.0
-zi = 0.0
-for iter in range(100):
-    zr_new = zr * zr - zi * zi + cr
-    zi = 2 * zr * zi + ci
-    zr = zr_new
-    if any(zr * zr + zi * zi > 4.0):
-        break
-result = iter
+def mandelbrot(cr, ci):
+    zr = 0.0
+    zi = 0.0
+    for iter in range(100):
+        zr_new = zr * zr - zi * zi + cr
+        zi = 2 * zr * zi + ci
+        zr = zr_new
+        if any(zr * zr + zi * zi > 4.0):
+            break
+    return iter
 ```
 
 ### Example 5: Conditional Thresholding
 
 ```
-magnitude = sqrt(x * x + y * y)
-result = where(magnitude > threshold, magnitude, 0.0)
+def threshold(x, y, threshold):
+    magnitude = sqrt(x * x + y * y)
+    return where(magnitude > threshold, magnitude, 0.0)
 ```
 
 ## API Usage
@@ -312,7 +340,7 @@ result = where(magnitude > threshold, magnitude, 0.0)
 ```c
 #include "dsl_parser.h"
 
-const char *source = "temp = sin(x)**2; result = temp + cos(x)**2";
+const char *source = "def kernel(x):\\n    temp = sin(x)**2\\n    return temp + cos(x)**2";
 me_dsl_error error;
 me_dsl_program *prog = me_dsl_parse(source, &error);
 
@@ -333,6 +361,9 @@ The parsed program contains a block of statements:
 
 ```c
 typedef struct {
+    char *name;
+    char **params;
+    int nparams;
     me_dsl_block block;  // Contains array of statements
 } me_dsl_program;
 
@@ -347,7 +378,8 @@ Each statement has a kind and associated data:
 ```c
 typedef enum {
     ME_DSL_STMT_ASSIGN,   // variable = expression
-    ME_DSL_STMT_EXPR,     // bare expression (result)
+    ME_DSL_STMT_EXPR,     // bare expression
+    ME_DSL_STMT_RETURN,   // return expression
     ME_DSL_STMT_PRINT,    // print(...)
     ME_DSL_STMT_IF,       // if/elif/else
     ME_DSL_STMT_FOR,      // for loop

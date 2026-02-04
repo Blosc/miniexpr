@@ -23,7 +23,7 @@ static int check_all_close(const double *out, const double *expected, int n, dou
 }
 
 static int test_assign_and_result_stmt(void) {
-    printf("\n=== DSL Test 1: assignments + final expr ===\n");
+    printf("\n=== DSL Test 1: assignments + return ===\n");
 
     double a[8];
     double b[8];
@@ -37,8 +37,9 @@ static int test_assign_and_result_stmt(void) {
     }
 
     const char *src =
-        "temp = a + b;\n"
-        "temp * 2";
+        "def kernel(a, b):\n"
+        "    temp = a + b\n"
+        "    return temp * 2\n";
 
     me_variable vars[] = {{"a", ME_FLOAT64}, {"b", ME_FLOAT64}};
     int err = 0;
@@ -76,20 +77,22 @@ static int test_loop_break_continue(void) {
     }
 
     const char *src_break =
-        "sum = 0\n"
-        "for i in range(5):\n"
-        "    sum = sum + i\n"
-        "    if i == 2:\n"
-        "        break\n"
-        "result = sum\n";
+        "def kernel():\n"
+        "    sum = 0\n"
+        "    for i in range(5):\n"
+        "        sum = sum + i\n"
+        "        if i == 2:\n"
+        "            break\n"
+        "    return sum\n";
 
     const char *src_continue =
-        "sum = 0\n"
-        "for i in range(4):\n"
-        "    if i == 1:\n"
-        "        continue\n"
-        "    sum = sum + i\n"
-        "result = sum\n";
+        "def kernel():\n"
+        "    sum = 0\n"
+        "    for i in range(4):\n"
+        "        if i == 1:\n"
+        "            continue\n"
+        "        sum = sum + i\n"
+        "    return sum\n";
 
     int err = 0;
     me_expr *expr = NULL;
@@ -131,34 +134,50 @@ static int test_invalid_conditionals(void) {
     printf("\n=== DSL Test 3: invalid conditionals ===\n");
 
     const char *src_deprecated =
-        "for i in range(2):\n"
-        "    break if i == 0\n";
+        "def kernel():\n"
+        "    for i in range(2):\n"
+        "        break if i == 0\n"
+        "    return 0\n";
 
     const char *src_non_scalar =
-        "if x > 0:\n"
-        "    result = 1\n"
-        "else:\n"
-        "    result = 0\n";
+        "def kernel(x):\n"
+        "    if x > 0:\n"
+        "        return 1\n"
+        "    else:\n"
+        "        return 0\n";
 
-    const char *src_missing_else =
-        "if any(x > 0):\n"
-        "    result = 1\n";
+    const char *src_return_mismatch =
+        "def kernel(x):\n"
+        "    if any(x > 0):\n"
+        "        return x > 0\n"
+        "    return x\n";
 
-    const char *src_two_results =
-        "if any(x > 0):\n"
-        "    result = 1\n"
-        "    result = 2\n"
-        "else:\n"
-        "    result = 3\n";
+    const char *src_missing_return =
+        "def kernel(x):\n"
+        "    if any(x > 0):\n"
+        "        return 1\n";
+
+    const char *src_missing_def =
+        "temp = x + 1\n"
+        "return temp\n";
+
+    const char *src_signature_mismatch =
+        "def kernel(x, y):\n"
+        "    return x + y\n";
+
+    const char *src_signature_order =
+        "def kernel(y, x):\n"
+        "    return x + 2 * y\n";
 
     const char *src_new_local =
-        "y = 1\n"
-        "if any(x > 0):\n"
-        "    y = 2\n"
-        "    result = y\n"
-        "else:\n"
-        "    z = 3\n"
-        "    result = z\n";
+        "def kernel(x):\n"
+        "    y = 1\n"
+        "    if any(x > 0):\n"
+        "        y = 2\n"
+        "        return y\n"
+        "    else:\n"
+        "        z = 3\n"
+        "        return z\n";
 
     int err = 0;
     me_expr *expr = NULL;
@@ -171,6 +190,7 @@ static int test_invalid_conditionals(void) {
 
     expr = NULL;
     me_variable vars[] = {{"x", ME_FLOAT64}};
+    me_variable vars_order[] = {{"x", ME_FLOAT64}, {"y", ME_FLOAT64}};
     if (me_compile(src_non_scalar, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: non-scalar if condition accepted\n");
         me_free(expr);
@@ -178,18 +198,54 @@ static int test_invalid_conditionals(void) {
     }
 
     expr = NULL;
-    if (me_compile(src_missing_else, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: missing else accepted\n");
+    if (me_compile(src_return_mismatch, vars, 1, ME_AUTO, &err, &expr) == ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: mismatched return dtypes accepted\n");
         me_free(expr);
         return 1;
     }
 
     expr = NULL;
-    if (me_compile(src_two_results, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: multiple result assignments accepted\n");
+    if (me_compile(src_missing_return, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: missing return path accepted\n");
         me_free(expr);
         return 1;
     }
+
+    expr = NULL;
+    if (me_compile(src_missing_def, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: missing def accepted\n");
+        me_free(expr);
+        return 1;
+    }
+
+    expr = NULL;
+    if (me_compile(src_signature_mismatch, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: signature mismatch accepted\n");
+        me_free(expr);
+        return 1;
+    }
+
+    expr = NULL;
+    if (me_compile(src_signature_order, vars_order, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: signature order rejected\n");
+        return 1;
+    }
+    double x_vals[4] = {1.0, 2.0, 3.0, 4.0};
+    double y_vals[4] = {10.0, 20.0, 30.0, 40.0};
+    double out_order[4];
+    const void *inputs_order[] = {x_vals, y_vals};
+    if (me_eval(expr, inputs_order, 2, out_order, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: signature order eval error\n");
+        me_free(expr);
+        return 1;
+    }
+    double expected_order[4] = {21.0, 42.0, 63.0, 84.0};
+    if (check_all_close(out_order, expected_order, 4, 1e-12) != 0) {
+        printf("  ❌ FAILED: signature order eval mismatch\n");
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
 
     expr = NULL;
     if (me_compile(src_new_local, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
@@ -206,12 +262,13 @@ static int test_if_elif_else(void) {
     printf("\n=== DSL Test 3b: if/elif/else ===\n");
 
     const char *src =
-        "if any(x > 0):\n"
-        "    result = 1\n"
-        "elif any(x < 0):\n"
-        "    result = 2\n"
-        "else:\n"
-        "    result = 3\n";
+        "def kernel(x):\n"
+        "    if any(x > 0):\n"
+        "        return 1\n"
+        "    elif any(x < 0):\n"
+        "        return 2\n"
+        "    else:\n"
+        "        return 3\n";
 
     me_variable vars[] = {{"x", ME_FLOAT64}};
     double out[4];
@@ -270,7 +327,9 @@ static int test_if_elif_else(void) {
 static int test_nd_indices(void) {
     printf("\n=== DSL Test 4: ND indices ===\n");
 
-    const char *src = "result = _i0 + _i1";
+    const char *src =
+        "def kernel():\n"
+        "    return _i0 + _i1\n";
     int64_t shape[2] = {2, 3};
     int32_t chunks[2] = {2, 3};
     int32_t blocks[2] = {2, 3};
@@ -301,7 +360,9 @@ static int test_nd_indices(void) {
 static int test_nd_padding(void) {
     printf("\n=== DSL Test 5: ND padding in blocks ===\n");
 
-    const char *src = "result = _i0 + _i1";
+    const char *src =
+        "def kernel():\n"
+        "    return _i0 + _i1\n";
     int64_t shape[2] = {3, 5};
     int32_t chunks[2] = {2, 4};
     int32_t blocks[2] = {2, 3};
@@ -332,7 +393,9 @@ static int test_nd_padding(void) {
 static int test_nd_large_block(void) {
     printf("\n=== DSL Test 6: ND larger block ===\n");
 
-    const char *src = "result = _i0 + _i1";
+    const char *src =
+        "def kernel():\n"
+        "    return _i0 + _i1\n";
     int64_t shape[2] = {6, 7};
     int32_t chunks[2] = {4, 4};
     int32_t blocks[2] = {2, 2};
@@ -363,7 +426,9 @@ static int test_nd_large_block(void) {
 static int test_nd_3d_indices_padding(void) {
     printf("\n=== DSL Test 7: 3D indices + padding + _n* + _ndim ===\n");
 
-    const char *src = "result = _i0 + _i1 + _i2 + _n0 + _n1 + _n2 + _ndim";
+    const char *src =
+        "def kernel():\n"
+        "    return _i0 + _i1 + _i2 + _n0 + _n1 + _n2 + _ndim\n";
     int64_t shape[3] = {3, 4, 5};
     int32_t chunks[3] = {2, 3, 4};
     int32_t blocks[3] = {2, 2, 3};
@@ -395,13 +460,14 @@ static int test_nested_loops_and_conditionals(void) {
     printf("\n=== DSL Test 8: nested loops + mixed-type conditions ===\n");
 
     const char *src =
-        "sum = 0\n"
-        "for i in range(3):\n"
-        "    for j in range(4):\n"
-        "        if any(((i + 0.5) > 1.0) & (j < 2)):\n"
-        "            continue\n"
-        "        sum = sum + i + j\n"
-        "result = sum\n";
+        "def kernel():\n"
+        "    sum = 0\n"
+        "    for i in range(3):\n"
+        "        for j in range(4):\n"
+        "            if any(((i + 0.5) > 1.0) & (j < 2)):\n"
+        "                continue\n"
+        "            sum = sum + i + j\n"
+        "    return sum\n";
 
     double out[5];
     double expected[5];
@@ -432,12 +498,13 @@ static int test_break_any_condition(void) {
     printf("\n=== DSL Test 9: break with array condition (any) ===\n");
 
     const char *src =
-        "sum = 0\n"
-        "for i in range(5):\n"
-        "    sum = sum + i\n"
-        "    if any(x > 0):\n"
-        "        break\n"
-        "result = sum\n";
+        "def kernel(x):\n"
+        "    sum = 0\n"
+        "    for i in range(5):\n"
+        "        sum = sum + i\n"
+        "        if any(x > 0):\n"
+        "            break\n"
+        "    return sum\n";
 
     double x[4] = {-1.0, 2.0, -3.0, 0.0};
     double out[4];
@@ -473,12 +540,13 @@ static int test_dsl_function_calls(void) {
     printf("\n=== DSL Test 10: assorted function calls ===\n");
 
     const char *src =
-        "t0 = sin(a) + cos(a);\n"
-        "t1 = expm1(b) + log1p(abs(b));\n"
-        "t2 = sqrt(abs(a)) + hypot(a, b);\n"
-        "t3 = atan2(a, b) + pow(a, 2);\n"
-        "t4 = floor(d) + ceil(d) + trunc(d) + round(d);\n"
-        "result = t0 + t1 + t2 + t3 + t4;\n";
+        "def kernel(a, b, d):\n"
+        "    t0 = sin(a) + cos(a)\n"
+        "    t1 = expm1(b) + log1p(abs(b))\n"
+        "    t2 = sqrt(abs(a)) + hypot(a, b)\n"
+        "    t3 = atan2(a, b) + pow(a, 2)\n"
+        "    t4 = floor(d) + ceil(d) + trunc(d) + round(d)\n"
+        "    return t0 + t1 + t2 + t3 + t4\n";
 
     double a[8] = {0.0, 0.5, 1.0, -1.5, 2.0, -2.5, 3.0, -3.5};
     float b[8] = {1.0f, -0.5f, 2.0f, -2.0f, 0.25f, -0.25f, 4.0f, -4.0f};
@@ -525,11 +593,12 @@ static int test_dsl_print_stmt(void) {
     printf("\n=== DSL Test 11: print statement ===\n");
 
     const char *src =
-        "print(\"value = {}\", 1 + 2)\n"
-        "print(\"sum =\", 1 + 2)\n"
-        "print(1 + 2)\n"
-        "print(\"sum =\", 1 + 2, 3 + 4)\n"
-        "result = 0\n";
+        "def kernel():\n"
+        "    print(\"value = {}\", 1 + 2)\n"
+        "    print(\"sum =\", 1 + 2)\n"
+        "    print(1 + 2)\n"
+        "    print(\"sum =\", 1 + 2, 3 + 4)\n"
+        "    return 0\n";
 
     me_expr *expr = NULL;
     int err = 0;

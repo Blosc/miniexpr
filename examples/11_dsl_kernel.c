@@ -29,9 +29,10 @@ int main() {
     printf("--- Example 1: Polynomial with temporaries ---\n");
     {
         const char *dsl_source =
-            "t1 = 1.0 * x - 2.0\n"
-            "t2 = t1 * x + 3.0\n"
-            "result = t2 * x - 1.0";
+            "def kernel(x):\n"
+            "    t1 = 1.0 * x - 2.0\n"
+            "    t2 = t1 * x + 3.0\n"
+            "    return t2 * x - 1.0";
 
         printf("DSL Program:\n%s\n\n", dsl_source);
 
@@ -71,8 +72,9 @@ int main() {
     printf("--- Example 2: Conditional clamping ---\n");
     {
         const char *dsl_source =
-            "clamped = where(x < 0, 0, where(x > 1, 1, x))\n"
-            "result = clamped";
+            "def kernel(x):\n"
+            "    clamped = where(x < 0, 0, where(x > 1, 1, x))\n"
+            "    return clamped";
 
         printf("DSL Program:\n%s\n\n", dsl_source);
 
@@ -106,9 +108,10 @@ int main() {
     printf("--- Example 3: Trigonometric identity ---\n");
     {
         const char *dsl_source =
-            "s = sin(x) ** 2\n"
-            "c = cos(x) ** 2\n"
-            "result = s + c";
+            "def kernel(x):\n"
+            "    s = sin(x) ** 2\n"
+            "    c = cos(x) ** 2\n"
+            "    return s + c";
 
         printf("DSL Program:\n%s\n\n", dsl_source);
 
@@ -147,9 +150,10 @@ int main() {
     printf("--- Example 4: Damped oscillation ---\n");
     {
         const char *dsl_source =
-            "decay = exp(-0.1 * t)\n"
-            "oscillation = sin(2 * 3.14159 * t)\n"
-            "result = amplitude * decay * oscillation";
+            "def kernel(amplitude, t):\n"
+            "    decay = exp(-0.1 * t)\n"
+            "    oscillation = sin(2 * 3.14159 * t)\n"
+            "    return amplitude * decay * oscillation";
 
         printf("DSL Program:\n%s\n\n", dsl_source);
 

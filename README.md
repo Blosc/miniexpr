@@ -249,14 +249,16 @@ miniexpr includes a DSL (Domain-Specific Language) for writing multi-statement c
 - **Loops**: `for var in range(start, end)` iteration
 - **Control flow**: `break` and `continue` statements
 - **Index access**: Built-in `_i0`–`_i7` (position) and `_n0`–`_n7` (shape) variables
+- **Function-style kernels**: `def name(args): ... return expr`
 
 ### DSL Example
 
 ```c
 const char *dsl_source =
-    "t1 = 1.0 * x - 2.0\n"
-    "t2 = t1 * x + 3.0\n"
-    "result = t2 * x - 1.0";
+    "def kernel(x):\n"
+    "    t1 = 1.0 * x - 2.0\n"
+    "    t2 = t1 * x + 3.0\n"
+    "    return t2 * x - 1.0";
 
 me_dsl_error error;
 me_dsl_program *prog = me_dsl_parse(dsl_source, &error);
