@@ -1,2 +1,0 @@
-/usr/bin/ar qc libminiexpr.a CMakeFiles/miniexpr_static.dir/src/miniexpr.c.o CMakeFiles/miniexpr_static.dir/src/dsl_parser.c.o CMakeFiles/miniexpr_static.dir/src/functions.c.o "CMakeFiles/miniexpr_static.dir/src/functions-simd.c.o"
-/usr/bin/ranlib libminiexpr.a
