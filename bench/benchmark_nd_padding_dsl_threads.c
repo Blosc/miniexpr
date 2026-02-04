@@ -2,15 +2,16 @@
  * ND benchmark with padding scenarios for mixed-type DSL evaluation (multi-threaded).
  *
  * DSL:
- *   sum = 0;
- *   for i in range(4):
- *     tmp = (a + b) * c + i
- *     if any(tmp < -1e9):
- *       continue
- *     if any(tmp > 1e12):
- *       continue
- *     sum = sum + tmp
- *   sum
+ *   def kernel(a, b, c):
+ *     sum = 0;
+ *     for i in range(4):
+ *       tmp = (a + b) * c + i
+ *       if any(tmp < -1e9):
+ *         continue
+ *       if any(tmp > 1e12):
+ *         continue
+ *       sum = sum + tmp
+ *     return sum
  *   a: float64
  *   b: float32
  *   c: int16
@@ -117,15 +118,16 @@ static const scenario_t SCENARIOS[] = {
 };
 
 static const char *DSL_SOURCE =
-    "sum = 0\n"
-    "for i in range(4):\n"
-    "    tmp = (a + b) * c + i\n"
-    "    if any(tmp < -1e9):\n"
-    "        continue\n"
-    "    if any(tmp > 1e12):\n"
-    "        continue\n"
-    "    sum = sum + tmp\n"
-    "sum\n";
+    "def kernel(a, b, c):\n"
+    "    sum = 0\n"
+    "    for i in range(4):\n"
+    "        tmp = (a + b) * c + i\n"
+    "        if any(tmp < -1e9):\n"
+    "            continue\n"
+    "        if any(tmp > 1e12):\n"
+    "            continue\n"
+    "        sum = sum + tmp\n"
+    "    return sum\n";
 
 static double get_time(void) {
     struct timeval tv;
@@ -617,8 +619,8 @@ int main(void) {
     printf("═══════════════════════════════════════════════════════════════════\n");
     printf("  ND Mixed-Type DSL Padding Benchmark (Threads)\n");
     printf("═══════════════════════════════════════════════════════════════════\n");
-    printf("DSL: sum=0; for i in range(4): tmp=(a+b)*c+i; if any(tmp<-1e9): continue; ");
-    printf("if any(tmp>1e12): continue; sum=sum+tmp; sum\n");
+    printf("DSL: def kernel(a,b,c): sum=0; for i in range(4): tmp=(a+b)*c+i; if any(tmp<-1e9): continue; ");
+    printf("if any(tmp>1e12): continue; sum=sum+tmp; return sum\n");
     printf("Types: a=f64, b=f32, c=i16  | output=f64\n");
     printf("Target size: %d MB output (~%lld elements)\n", TOTAL_SIZE_MB, (long long)target_items);
     printf("Threads: 1..%d\n", MAX_THREADS);

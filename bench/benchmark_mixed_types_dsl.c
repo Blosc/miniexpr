@@ -1,13 +1,14 @@
 /*
  * Benchmark for mixed-type DSL evaluation with a loop and conditional.
  * DSL program:
- *   sum = 0
- *   for i in range(4):
- *     tmp = (a + b) * c + i
- *     if any(tmp < -1e9):
- *       continue
- *     sum = sum + tmp
- *   sum
+ *   def kernel(a, b, c):
+ *     sum = 0
+ *     for i in range(4):
+ *       tmp = (a + b) * c + i
+ *       if any(tmp < -1e9):
+ *         continue
+ *       sum = sum + tmp
+ *     return sum
  *
  * Types:
  *   - a: float64 (double)
@@ -184,13 +185,14 @@ static double benchmark_chunksize(thread_pool_t *pool, size_t chunk_bytes,
         {"c", ME_INT16}
     };
     const char *src =
-        "sum = 0\n"
-        "for i in range(4):\n"
-        "    tmp = (a + b) * c + i\n"
-        "    if any(tmp < -1e9):\n"
-        "        continue\n"
-        "    sum = sum + tmp\n"
-        "sum\n";
+        "def kernel(a, b, c):\n"
+        "    sum = 0\n"
+        "    for i in range(4):\n"
+        "        tmp = (a + b) * c + i\n"
+        "        if any(tmp < -1e9):\n"
+        "            continue\n"
+        "        sum = sum + tmp\n"
+        "    return sum\n";
     int error;
     me_expr *expr = NULL;
     struct timespec compile_start;
@@ -255,7 +257,7 @@ int main() {
     printf("  Mixed-Type DSL Chunk Size Optimization Benchmark\n");
     printf("═══════════════════════════════════════════════════════════════════\n");
     printf("Configuration:\n");
-    printf("  - DSL: sum=0; for i in range(4): tmp=(a+b)*c+i; if any(tmp<-1e9): continue; sum+=tmp; sum\n");
+    printf("  - DSL: def kernel(a,b,c): sum=0; for i in range(4): tmp=(a+b)*c+i; if any(tmp<-1e9): continue; sum+=tmp; return sum\n");
     printf("  - Input types: a=float64, b=float32, c=int16\n");
     printf("  - Output type: float64 (auto-promoted)\n");
     printf("  - Threads: %d (single pool reused for all tests)\n", NUM_THREADS);

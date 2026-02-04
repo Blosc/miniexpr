@@ -2290,16 +2290,33 @@ static bool string_contains(const uint32_t* s, size_t slen, const uint32_t* need
 
 static bool contains_string_node(const me_expr* n) {
     if (!n) return false;
-    if (is_string_node(n)) return true;
-    if (IS_FUNCTION(n->type) || IS_CLOSURE(n->type)) {
+    if ((n->flags & ME_EXPR_FLAG_HAS_STRING_VALID) != 0) {
+        return (n->flags & ME_EXPR_FLAG_HAS_STRING) != 0;
+    }
+
+    bool has_string = false;
+    if (is_string_node(n)) {
+        has_string = true;
+    }
+    else if (IS_FUNCTION(n->type) || IS_CLOSURE(n->type)) {
         const int arity = ARITY(n->type);
         for (int i = 0; i < arity; i++) {
             if (contains_string_node((const me_expr*)n->parameters[i])) {
-                return true;
+                has_string = true;
+                break;
             }
         }
     }
-    return false;
+
+    me_expr* mut = (me_expr*)n;
+    if (has_string) {
+        mut->flags |= ME_EXPR_FLAG_HAS_STRING;
+    }
+    else {
+        mut->flags &= ~ME_EXPR_FLAG_HAS_STRING;
+    }
+    mut->flags |= ME_EXPR_FLAG_HAS_STRING_VALID;
+    return has_string;
 }
 
 static bool validate_string_usage_node(const me_expr* n) {

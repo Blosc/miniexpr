@@ -2423,30 +2423,63 @@ static bool dsl_is_candidate(const char *source) {
     if (!source) {
         return false;
     }
-    for (const char *p = source; *p; p++) {
-        if (*p == '\n' || *p == ';' || *p == '{' || *p == '}') {
+    const unsigned char *p = (const unsigned char *)source;
+    while (*p) {
+        unsigned char c = *p;
+        if (c == '\n' || c == ';' || c == '{' || c == '}') {
             return true;
         }
-    }
-    for (const char *p = source; *p; p++) {
-        if (*p == '=') {
-            char prev = (p == source) ? '\0' : p[-1];
-            if (p[1] != '=' && prev != '=' && prev != '!' && prev != '<' && prev != '>') {
+        if (c == '=') {
+            char prev = (p == (const unsigned char *)source) ? '\0' : (char)p[-1];
+            char next = (char)p[1];
+            if (next != '=' && prev != '=' && prev != '!' && prev != '<' && prev != '>') {
                 return true;
             }
         }
-    }
-    const char *keywords[] = {"def", "return", "for", "break", "continue", "print", "if", "elif", "else"};
-    for (int k = 0; k < 9; k++) {
-        const char *kw = keywords[k];
-        size_t len = strlen(kw);
-        for (const char *p = source; *p; p++) {
-            if ((p == source || !isalnum((unsigned char)p[-1])) &&
-                strncmp(p, kw, len) == 0 &&
-                !isalnum((unsigned char)p[len]) && p[len] != '_') {
-                return true;
+        if (isalpha(c) || c == '_') {
+            const unsigned char *start = p;
+            p++;
+            while (isalnum(*p) || *p == '_') {
+                p++;
             }
+            size_t len = (size_t)(p - start);
+            switch (len) {
+            case 2:
+                if (start[0] == 'i' && start[1] == 'f') return true;
+                break;
+            case 3:
+                if ((start[0] == 'd' && start[1] == 'e' && start[2] == 'f') ||
+                    (start[0] == 'f' && start[1] == 'o' && start[2] == 'r')) {
+                    return true;
+                }
+                break;
+            case 4:
+                if ((start[0] == 'e' && start[1] == 'l' && start[2] == 's' && start[3] == 'e') ||
+                    (start[0] == 'e' && start[1] == 'l' && start[2] == 'i' && start[3] == 'f')) {
+                    return true;
+                }
+                break;
+            case 5:
+                if (memcmp(start, "break", 5) == 0 || memcmp(start, "print", 5) == 0) {
+                    return true;
+                }
+                break;
+            case 6:
+                if (memcmp(start, "return", 6) == 0) {
+                    return true;
+                }
+                break;
+            case 8:
+                if (memcmp(start, "continue", 8) == 0) {
+                    return true;
+                }
+                break;
+            default:
+                break;
+            }
+            continue;
         }
+        p++;
     }
     return false;
 }
