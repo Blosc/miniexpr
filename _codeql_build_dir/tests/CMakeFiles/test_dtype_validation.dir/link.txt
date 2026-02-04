@@ -1,1 +1,0 @@
-/home/runner/work/miniexpr/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/test_dtype_validation.dir/link.d CMakeFiles/test_dtype_validation.dir/test_dtype_validation.c.o -o test_dtype_validation  -Wl,-rpath,/home/runner/work/miniexpr/miniexpr/_codeql_build_dir ../libminiexpr.so -lm
