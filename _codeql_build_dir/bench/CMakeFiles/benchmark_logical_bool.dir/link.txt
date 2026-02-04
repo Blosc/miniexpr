@@ -1,1 +1,0 @@
-/home/runner/work/miniexpr/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/benchmark_logical_bool.dir/link.d CMakeFiles/benchmark_logical_bool.dir/benchmark_logical_bool.c.o -o benchmark_logical_bool  -Wl,-rpath,/home/runner/work/miniexpr/miniexpr/_codeql_build_dir ../libminiexpr.so -lm

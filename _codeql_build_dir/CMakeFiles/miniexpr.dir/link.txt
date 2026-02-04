@@ -1,1 +1,0 @@
-/home/runner/work/miniexpr/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -fPIC -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/miniexpr.dir/link.d -shared -Wl,-soname,libminiexpr.so -o libminiexpr.so CMakeFiles/miniexpr.dir/src/miniexpr.c.o CMakeFiles/miniexpr.dir/src/dsl_parser.c.o CMakeFiles/miniexpr.dir/src/functions.c.o "CMakeFiles/miniexpr.dir/src/functions-simd.c.o"  -lm

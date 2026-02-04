@@ -1,1 +1,0 @@
-/home/runner/work/miniexpr/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/benchmark_sincos_threads.dir/link.d CMakeFiles/benchmark_sincos_threads.dir/benchmark_sincos_threads.c.o -o benchmark_sincos_threads  -Wl,-rpath,/home/runner/work/miniexpr/miniexpr/_codeql_build_dir ../libminiexpr.so -lm
