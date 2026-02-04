@@ -4369,7 +4369,9 @@ static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
             bool matched = false;
             me_dtype cond_dtype = me_get_dtype(stmt->as.if_stmt.cond.expr);
             size_t cond_size = dtype_size(cond_dtype);
-            void *cond_buf = malloc((size_t)ctx->nitems * cond_size);
+            bool cond_is_reduction = is_reduction_node(stmt->as.if_stmt.cond.expr);
+            int cond_nitems = cond_is_reduction ? 1 : ctx->nitems;
+            void *cond_buf = malloc((size_t)cond_nitems * cond_size);
             if (!cond_buf) {
                 return ME_EVAL_ERR_OOM;
             }
@@ -4378,7 +4380,7 @@ static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
                 free(cond_buf);
                 return rc;
             }
-            matched = dsl_any_nonzero(cond_buf, cond_dtype, ctx->nitems);
+            matched = dsl_any_nonzero(cond_buf, cond_dtype, cond_nitems);
             free(cond_buf);
             if (matched) {
                 rc = dsl_eval_block(ctx, &stmt->as.if_stmt.then_block,
@@ -4392,7 +4394,9 @@ static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
                 me_dsl_compiled_if_branch *branch = &stmt->as.if_stmt.elif_branches[i];
                 cond_dtype = me_get_dtype(branch->cond.expr);
                 cond_size = dtype_size(cond_dtype);
-                cond_buf = malloc((size_t)ctx->nitems * cond_size);
+                cond_is_reduction = is_reduction_node(branch->cond.expr);
+                cond_nitems = cond_is_reduction ? 1 : ctx->nitems;
+                cond_buf = malloc((size_t)cond_nitems * cond_size);
                 if (!cond_buf) {
                     return ME_EVAL_ERR_OOM;
                 }
@@ -4401,7 +4405,7 @@ static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
                     free(cond_buf);
                     return rc;
                 }
-                matched = dsl_any_nonzero(cond_buf, cond_dtype, ctx->nitems);
+                matched = dsl_any_nonzero(cond_buf, cond_dtype, cond_nitems);
                 free(cond_buf);
                 if (matched) {
                     rc = dsl_eval_block(ctx, &branch->block,
@@ -4473,7 +4477,9 @@ static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
             if (stmt->as.flow.cond.expr) {
                 me_dtype cond_dtype = me_get_dtype(stmt->as.flow.cond.expr);
                 size_t cond_size = dtype_size(cond_dtype);
-                void *cond_buf = malloc((size_t)ctx->nitems * cond_size);
+                bool cond_is_reduction = is_reduction_node(stmt->as.flow.cond.expr);
+                int cond_nitems = cond_is_reduction ? 1 : ctx->nitems;
+                void *cond_buf = malloc((size_t)cond_nitems * cond_size);
                 if (!cond_buf) {
                     return ME_EVAL_ERR_OOM;
                 }
@@ -4482,7 +4488,7 @@ static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
                     free(cond_buf);
                     return rc;
                 }
-                trigger = dsl_any_nonzero(cond_buf, cond_dtype, ctx->nitems);
+                trigger = dsl_any_nonzero(cond_buf, cond_dtype, cond_nitems);
                 free(cond_buf);
             }
             if (trigger) {
