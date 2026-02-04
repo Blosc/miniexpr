@@ -53,3 +53,8 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# Build artifacts
+build/
+_codeql_build_dir/
+_codeql_detected_source_root
