@@ -1,0 +1,1 @@
+/home/runner/work/miniexpr/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/13_mandelbrot_dsl.dir/link.d CMakeFiles/13_mandelbrot_dsl.dir/13_mandelbrot_dsl.c.o -o 13_mandelbrot_dsl  -Wl,-rpath,/home/runner/work/miniexpr/miniexpr/_codeql_build_dir ../libminiexpr.so -lm

@@ -1,0 +1,1 @@
+/home/runner/work/miniexpr/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/17_dsl_user_function.dir/link.d CMakeFiles/17_dsl_user_function.dir/17_dsl_user_function.c.o -o 17_dsl_user_function  -Wl,-rpath,/home/runner/work/miniexpr/miniexpr/_codeql_build_dir ../libminiexpr.so -lm
