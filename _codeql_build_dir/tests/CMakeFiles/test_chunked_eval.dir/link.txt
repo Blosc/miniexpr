@@ -1,1 +1,0 @@
-/home/runner/work/miniexpr/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/test_chunked_eval.dir/link.d CMakeFiles/test_chunked_eval.dir/test_chunked_eval.c.o -o test_chunked_eval  -Wl,-rpath,/home/runner/work/miniexpr/miniexpr/_codeql_build_dir ../libminiexpr.so -lm

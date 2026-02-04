@@ -1,1 +1,0 @@
-/home/runner/work/miniexpr/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/11_dsl_kernel.dir/link.d CMakeFiles/11_dsl_kernel.dir/11_dsl_kernel.c.o -o 11_dsl_kernel  -Wl,-rpath,/home/runner/work/miniexpr/miniexpr/_codeql_build_dir ../libminiexpr.so -lm

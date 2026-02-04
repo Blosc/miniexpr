@@ -1,1 +1,0 @@
-/home/runner/work/miniexpr/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/test_two_param_functions.dir/link.d CMakeFiles/test_two_param_functions.dir/test_two_param_functions.c.o -o test_two_param_functions  -Wl,-rpath,/home/runner/work/miniexpr/miniexpr/_codeql_build_dir ../libminiexpr.so -lm
