@@ -377,10 +377,10 @@ def mandelbrot(cr, ci):
 ### 14_string_ops.c
 **String-aware expressions with dynamic dispatch**
 
-- **What it demonstrates**: String operations in expressions
-- **Expressions**: Comparisons, concatenation, and selection involving strings
-- **Concepts**: String literals, string variables, and mixed-type expressions
-- **Best for**: Working with text data and metadata-driven logic
+- **What it demonstrates**: String comparisons and predicates in expressions
+- **Expressions**: Comparisons and other boolean conditions involving strings
+- **Concepts**: String literals, string variables, and boolean-valued string operations
+- **Best for**: Adding simple string-based conditions and metadata-driven logic
 
 **Run it:**
 ```bash
