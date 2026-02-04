@@ -71,7 +71,7 @@ static int test_sum_int64() {
     me_expr *expr = NULL;
     int rc_expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
 
@@ -106,7 +106,7 @@ static int test_sum_uint64() {
     me_expr *expr = NULL;
     int rc_expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
 
@@ -141,7 +141,7 @@ static int test_mean_int32() {
     me_expr *expr = NULL;
     int rc_expr = me_compile("mean(x)", vars, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
 
@@ -176,7 +176,7 @@ static int test_mean_float32() {
     me_expr *expr = NULL;
     int rc_expr = me_compile("mean(x)", vars, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
 
@@ -211,7 +211,7 @@ static int test_sum_float32() {
     me_expr *expr = NULL;
     int rc_expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
 
@@ -249,7 +249,7 @@ static int test_sum_single_output_chunk() {
     me_expr *expr = NULL;
     int rc_expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
 
@@ -288,7 +288,7 @@ static int test_prod_complex64() {
         printf("  ✅ PASSED (complex not supported on Windows)\n");
         return 0;
 #else
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
 #endif
     }
@@ -328,7 +328,7 @@ static int test_min_max_int32() {
 
     int rc_expr = me_compile("min(x)", vars, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
     if (me_get_dtype(expr) != ME_INT32) {
@@ -348,7 +348,7 @@ static int test_min_max_int32() {
     output = 0;
     rc_expr = me_compile("max(x)", vars, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
     if (me_get_dtype(expr) != ME_INT32) {
@@ -380,7 +380,7 @@ static int test_min_max_float32() {
 
     int rc_expr = me_compile("min(x)", vars, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
     if (me_get_dtype(expr) != ME_FLOAT32) {
@@ -400,7 +400,7 @@ static int test_min_max_float32() {
     output = 0.0f;
     rc_expr = me_compile("max(x)", vars, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
     if (me_get_dtype(expr) != ME_FLOAT32) {
@@ -432,7 +432,7 @@ static int test_min_max_float32_nan() {
 
     int rc_expr = me_compile("min(x)", vars, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
     const void *var_ptrs[] = {data};
@@ -447,7 +447,7 @@ static int test_min_max_float32_nan() {
     output = 0.0f;
     rc_expr = me_compile("max(x)", vars, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
     ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 3);
@@ -476,7 +476,7 @@ static int test_any_all_bool() {
 
     int rc_expr = me_compile("any(x)", vars_any, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
     if (me_get_dtype(expr) != ME_BOOL) {
@@ -496,7 +496,7 @@ static int test_any_all_bool() {
     output = false;
     rc_expr = me_compile("all(x)", vars_all, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
     if (me_get_dtype(expr) != ME_BOOL) {
@@ -531,7 +531,7 @@ static int test_any_all_int32() {
 
     int rc_expr = me_compile("any(x)", vars_any, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
     if (me_get_dtype(expr) != ME_BOOL) {
@@ -551,7 +551,7 @@ static int test_any_all_int32() {
     output = false;
     rc_expr = me_compile("all(x)", vars_all, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
     if (me_get_dtype(expr) != ME_BOOL) {
@@ -584,7 +584,7 @@ static int test_reduction_expression_args() {
     double sum_out = 0.0;
     int rc_expr = me_compile("sum(x + 1)", vars, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
     ME_EVAL_CHECK(expr, var_ptrs, 1, &sum_out, 3);
@@ -598,7 +598,7 @@ static int test_reduction_expression_args() {
     double output[3] = {0.0, 0.0, 0.0};
     rc_expr = me_compile("x + sum(x)", vars, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
     ME_EVAL_CHECK(expr, var_ptrs, 1, output, 3);
@@ -631,7 +631,7 @@ static int test_reduction_expression_multi_vars() {
     double sum_out = 0.0;
     int rc_expr = me_compile("sum(x + y + 2.5)", vars, 2, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
     ME_EVAL_CHECK(expr, var_ptrs, 2, &sum_out, 3);
@@ -645,7 +645,7 @@ static int test_reduction_expression_multi_vars() {
     double output[3] = {0.0, 0.0, 0.0};
     rc_expr = me_compile("x + sum(x + y + 2.5) + 1.5", vars, 2, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
     ME_EVAL_CHECK(expr, var_ptrs, 2, output, 3);
@@ -663,7 +663,7 @@ static int test_reduction_expression_multi_vars() {
 
     rc_expr = me_compile("sum(x + y + 2.5) + 0 * x", vars, 2, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
     ME_EVAL_CHECK(expr, var_ptrs, 2, output, 3);
@@ -693,7 +693,7 @@ static int test_reduction_expression_comparison() {
     int64_t sum_out = 0;
     int rc_expr = me_compile("sum(x + y + 2.5 > 3.5)", vars, 2, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: compilation error %d at position %d\n", rc_expr, err);
+        printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
     }
     ME_EVAL_CHECK(expr, var_ptrs, 2, &sum_out, 3);
