@@ -5067,7 +5067,7 @@ int me_eval_nd(const me_expr* expr, const void** vars_block,
                 me_dtype result_type = reduction_output_dtype(arg_type, expr->function);
                 me_scalar acc;
                 if (result_type == ME_COMPLEX128) {
-                    acc.c128 = (double _Complex)(NAN + NAN * I);
+                    acc.c128 = me_cmplx(NAN, NAN);
                 }
                 else {
                     acc.f64 = NAN;

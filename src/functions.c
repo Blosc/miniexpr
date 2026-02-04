@@ -367,6 +367,18 @@ static inline double _Complex me_conj(double _Complex a) {
 #define INFINITY (1.0/0.0)
 #endif
 
+/* Portable complex number construction for MSVC compatibility */
+static double _Complex me_cmplx(double re, double im) {
+#if defined(_MSC_VER)
+    double _Complex v;
+    __real__ v = re;
+    __imag__ v = im;
+    return v;
+#else
+    return re + im * I;
+#endif
+}
+
 
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -5875,7 +5887,7 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
         double val = arg->value;
         if (is_mean) {
             if (result_type == ME_COMPLEX128) {
-                double _Complex acc = (nitems == 0) ? (double _Complex)(NAN + NAN * I) :
+                double _Complex acc = (nitems == 0) ? me_cmplx(NAN, NAN) :
                     (double _Complex)val;
                 ((double _Complex*)write_ptr)[0] = acc;
             }
@@ -6680,7 +6692,7 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
             {
                 const float _Complex* data = (const float _Complex*)arg->bound;
                 if (is_mean) {
-                    double _Complex acc = (double _Complex)(NAN + NAN * I);
+                    double _Complex acc = me_cmplx(NAN, NAN);
                     if (nitems > 0) {
                         acc = (double _Complex)0.0;
                         for (int i = 0; i < nitems; i++) {
@@ -6729,7 +6741,7 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
             {
                 const double _Complex* data = (const double _Complex*)arg->bound;
                 if (is_mean) {
-                    double _Complex acc = (double _Complex)(NAN + NAN * I);
+                    double _Complex acc = me_cmplx(NAN, NAN);
                     if (nitems > 0) {
                         acc = (double _Complex)0.0;
                         for (int i = 0; i < nitems; i++) acc += data[i];
