@@ -1,3 +1,0 @@
-/home/runner/work/miniexpr/miniexpr/_codeql_build_dir/_deps/sleef-subbuild/CMakeFiles/sleef-populate.dir
-/home/runner/work/miniexpr/miniexpr/_codeql_build_dir/_deps/sleef-subbuild/CMakeFiles/edit_cache.dir
-/home/runner/work/miniexpr/miniexpr/_codeql_build_dir/_deps/sleef-subbuild/CMakeFiles/rebuild_cache.dir

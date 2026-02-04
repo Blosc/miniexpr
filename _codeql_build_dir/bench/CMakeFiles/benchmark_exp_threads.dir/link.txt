@@ -1,1 +1,0 @@
-/home/runner/work/miniexpr/.codeql-scratch/dbs/cpp/working/autobuild/bin/cc -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/benchmark_exp_threads.dir/link.d CMakeFiles/benchmark_exp_threads.dir/benchmark_exp_threads.c.o -o benchmark_exp_threads  -Wl,-rpath,/home/runner/work/miniexpr/miniexpr/_codeql_build_dir ../libminiexpr.so -lm
