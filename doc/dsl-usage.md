@@ -424,5 +424,4 @@ Common errors:
 - **No string output** - String expressions only produce boolean results
 - **No recursion** - Functions cannot call themselves
 - **Fixed loop limits** - Loop bounds must be known at parse time
-- **No user-defined functions** - Use built-in functions only
 - **Max 8 dimensions** - Index variables `_i0` through `_i7`
