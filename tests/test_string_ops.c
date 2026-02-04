@@ -157,6 +157,7 @@ static void test_invalid_string_usage(void) {
 
     int err;
     me_expr *expr = NULL;
+    int local_failures = 0;
     int rc = me_compile_ex("name == \"a\"", vars_bad_size, 1, ME_BOOL, &err, &expr);
     if (rc != ME_COMPILE_ERR_INVALID_ARG_TYPE) {
         printf("  FAIL: expected invalid arg type for itemsize=0, got %d\n", rc);
@@ -165,6 +166,11 @@ static void test_invalid_string_usage(void) {
             me_free(expr);
             expr = NULL;
         }
+        local_failures++;
+    }
+    if (expr) {
+        me_free(expr);
+        expr = NULL;
     }
 
     me_variable_ex vars_mixed[] = {
@@ -181,6 +187,14 @@ static void test_invalid_string_usage(void) {
             me_free(expr);
             expr = NULL;
         }
+        local_failures++;
+    }
+    if (local_failures == 0) {
+        printf("  PASS invalid string usage\n");
+    }
+    if (expr) {
+        me_free(expr);
+        expr = NULL;
     }
     printf("  PASS invalid string usage\n");
 }
