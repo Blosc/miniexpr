@@ -179,6 +179,7 @@ static void test_invalid_string_usage(void) {
     }
     if (expr) {
         me_free(expr);
+        expr = NULL;
     }
     printf("  PASS invalid string usage\n");
 }
