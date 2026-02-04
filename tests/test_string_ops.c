@@ -162,6 +162,10 @@ static void test_invalid_string_usage(void) {
         printf("  FAIL: expected invalid arg type for itemsize=0, got %d\n", rc);
         tests_failed++;
     }
+    if (expr) {
+        me_free(expr);
+        expr = NULL;
+    }
 
     me_variable_ex vars_mixed[] = {
         {"name", ME_STRING, names, ME_VARIABLE, NULL, sizeof(names[0])},
@@ -172,6 +176,9 @@ static void test_invalid_string_usage(void) {
     if (rc != ME_COMPILE_ERR_INVALID_ARG_TYPE) {
         printf("  FAIL: expected invalid arg type for string/numeric compare, got %d\n", rc);
         tests_failed++;
+    }
+    if (expr) {
+        me_free(expr);
     }
     printf("  PASS invalid string usage\n");
 }
