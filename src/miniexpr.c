@@ -69,6 +69,11 @@ typedef struct {
     int64_t data[1];
 } me_nd_info;
 
+static float me_crealf(float _Complex v);
+static float me_cimagf(float _Complex v);
+static double me_creal(double _Complex v);
+static double me_cimag(double _Complex v);
+
 static int private_compile_ex(const char* expression, const me_variable_ex* variables, int var_count,
                               void* output, int nitems, me_dtype dtype, int* error, me_expr** out);
 
@@ -415,6 +420,14 @@ static bool dsl_var_table_grow(me_dsl_var_table *table, int min_cap) {
     return true;
 }
 
+static char *me_strdup(const char *s) {
+#if defined(_MSC_VER)
+    return _strdup(s);
+#else
+    return strdup(s);
+#endif
+}
+
 static int dsl_var_table_add_with_uniform(me_dsl_var_table *table, const char *name, me_dtype dtype,
                                           size_t itemsize, bool uniform) {
     if (!table || !name) {
@@ -426,7 +439,7 @@ static int dsl_var_table_add_with_uniform(me_dsl_var_table *table, const char *n
     if (!dsl_var_table_grow(table, table->count + 1)) {
         return -1;
     }
-    table->names[table->count] = strdup(name);
+    table->names[table->count] = me_strdup(name);
     if (!table->names[table->count]) {
         return -1;
     }
@@ -861,14 +874,14 @@ static bool dsl_any_nonzero(const void *data, me_dtype dtype, int nitems) {
     case ME_COMPLEX64: {
         const float _Complex *v = (const float _Complex *)data;
         for (int i = 0; i < nitems; i++) {
-            if (crealf(v[i]) != 0.0f || cimagf(v[i]) != 0.0f) return true;
+            if (me_crealf(v[i]) != 0.0f || me_cimagf(v[i]) != 0.0f) return true;
         }
         return false;
     }
     case ME_COMPLEX128: {
         const double _Complex *v = (const double _Complex *)data;
         for (int i = 0; i < nitems; i++) {
-            if (creal(v[i]) != 0.0 || cimag(v[i]) != 0.0) return true;
+            if (me_creal(v[i]) != 0.0 || me_cimag(v[i]) != 0.0) return true;
         }
         return false;
     }
@@ -915,12 +928,12 @@ static bool dsl_read_int64(const void *data, me_dtype dtype, int64_t *out) {
     case ME_FLOAT64: *out = (int64_t)((const double *)data)[0]; return true;
     case ME_COMPLEX64: {
         float _Complex v = ((const float _Complex *)data)[0];
-        *out = (int64_t)crealf(v);
+        *out = (int64_t)me_crealf(v);
         return true;
     }
     case ME_COMPLEX128: {
         double _Complex v = ((const double _Complex *)data)[0];
-        *out = (int64_t)creal(v);
+        *out = (int64_t)me_creal(v);
         return true;
     }
     case ME_STRING:
@@ -4201,12 +4214,12 @@ static void dsl_format_value(char *buf, size_t cap, me_dtype dtype, const void *
         break;
     case ME_COMPLEX64: {
         float _Complex v = *(const float _Complex *)data;
-        snprintf(buf, cap, "%.9g%+.9gj", (double)crealf(v), (double)cimagf(v));
+        snprintf(buf, cap, "%.9g%+.9gj", (double)me_crealf(v), (double)me_cimagf(v));
         break;
     }
     case ME_COMPLEX128: {
         double _Complex v = *(const double _Complex *)data;
-        snprintf(buf, cap, "%.17g%+.17gj", creal(v), cimag(v));
+        snprintf(buf, cap, "%.17g%+.17gj", me_creal(v), me_cimag(v));
         break;
     }
     default:
