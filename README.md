@@ -271,6 +271,14 @@ me_dsl_program_free(prog);
 
 See [doc/dsl-usage.md](doc/dsl-usage.md) for the complete DSL reference and [examples/11_dsl_kernel.c](examples/11_dsl_kernel.c) for a working example.
 
+### DSL Runtime JIT Controls
+
+On Linux/macOS, DSL kernels may use runtime JIT compilation when eligible. The following environment variables control this path:
+
+- `ME_DSL_JIT=0`: Disable runtime JIT and always use interpreter fallback.
+- `ME_DSL_JIT_POS_CACHE=0`: Disable process-local positive cache reuse for loaded JIT kernels.
+- `ME_DSL_JIT_CFLAGS="..."`: Extra C compiler flags appended to runtime JIT builds.
+
 ## Contributing
 
 After cloning the repository, install the Git hooks:

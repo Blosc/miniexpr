@@ -29,13 +29,27 @@ Implemented:
    `continue` accepted, truthy non-bool scalar conditions accepted.
 7. Complex numbers:
    excluded from JIT IR/codegen in current implementation.
+8. In-process negative cache for runtime JIT failures:
+   keyed by runtime cache key, with failure class/timestamp and retry cooldown.
+9. Process-wide positive in-memory cache for loaded JIT kernels:
+   keyed by runtime cache key and reused across compilations in the process.
+10. Disk cache metadata validation:
+    runtime verifies cache metadata (target/ABI/codegen/compiler hash) before reusing artifacts.
+11. Runtime cache tests:
+    negative-cache cooldown, positive-cache reuse, and metadata mismatch rejection.
+12. Rollout guardrail:
+    `ME_DSL_JIT=0` disables runtime JIT and forces interpreter fallback.
+13. Initial stabilization benchmarks:
+    added Mandelbrot-style DSL benchmark for JIT cold/warm vs interpreter, plus optional numba baseline script.
+14. Runtime compile-flag tuning hook:
+    `ME_DSL_JIT_CFLAGS` is included in runtime compile command and cache metadata fingerprinting.
 
 Current runtime limitations (known and intentional for now):
 
 1. Runtime JIT dispatch currently targets regular per-element kernels.
 2. Kernels using `_i*`, `_n*`, or `_ndim` use interpreter fallback.
 3. Scalar-output DSL kernels use interpreter fallback.
-4. No negative-cache yet for repeated compile/load failures.
+4. Runtime cache (positive/negative) is process-local only (not persisted across processes).
 
 ## Proposed architecture
 
@@ -227,7 +241,7 @@ Success criteria:
 
 ### Milestone 4: Cache implementation
 
-Status: partial.
+Status: complete.
 
 Deliverables:
 
@@ -235,12 +249,9 @@ Deliverables:
 2. Memory cache + disk cache.
 3. Cache invalidation policy implementation.
 
-Recommended next increment:
+Next workstream:
 
-1. Add a lightweight negative cache (in-process) keyed by the same runtime key.
-2. Store failure class + timestamp + retry budget/cooldown.
-3. Skip repeated compile/load attempts for known failing keys during cooldown.
-4. Keep fallback behavior unchanged (still runs interpreter).
+1. Milestone 5 performance benchmarking/tuning and rollout stabilization.
 
 Success criteria:
 
@@ -248,6 +259,8 @@ Success criteria:
 2. Wrong-target artifacts are not reused.
 
 ### Milestone 5: Performance and stabilization
+
+Status: partial (benchmark + guardrail increment implemented).
 
 Deliverables:
 

@@ -116,3 +116,28 @@ Thread-safe evaluation overhead vs single-threaded.
 ```bash
 ./build/bench/benchmark_threadsafe
 ```
+
+### benchmark_dsl_jit_mandelbrot.c
+DSL Mandelbrot-style benchmark comparing:
+- JIT kernel: no `any()` (JIT-friendly loop body).
+- Interpreter kernel: uses `any()` early exit.
+
+```bash
+./build/bench/benchmark_dsl_jit_mandelbrot
+./build/bench/benchmark_dsl_jit_mandelbrot 1024x512 6
+./build/bench/benchmark_dsl_jit_mandelbrot 1024x512 6 24
+# Alternate form:
+./build/bench/benchmark_dsl_jit_mandelbrot 1024 512 6 24
+```
+
+### benchmark_mandelbrot_numba.py
+Optional Python/Numba baseline for the JIT-style (no `any()`) kernel.
+Requires `numpy` and `numba`.
+
+```bash
+python bench/benchmark_mandelbrot_numba.py
+python bench/benchmark_mandelbrot_numba.py 1024x512 6
+python bench/benchmark_mandelbrot_numba.py 1024x512 6 24
+# Alternate form:
+python bench/benchmark_mandelbrot_numba.py 1024 512 6 24
+```
