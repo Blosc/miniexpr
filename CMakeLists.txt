@@ -19,6 +19,8 @@ option(MINIEXPR_USE_SLEEF "Enable SLEEF SIMD acceleration" ON)
 set(MINIEXPR_SOURCES
   src/miniexpr.c
   src/dsl_parser.c
+  src/dsl_jit_ir.c
+  src/dsl_jit_cgen.c
   src/functions.c
   src/functions-simd.c
 )

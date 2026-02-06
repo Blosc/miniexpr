@@ -35,8 +35,8 @@ EXAMPLEDIR = examples
 BUILDDIR = build
 
 # Source files
-LIB_SRCS = $(SRCDIR)/miniexpr.c $(SRCDIR)/dsl_parser.c $(SRCDIR)/functions.c $(SRCDIR)/functions-simd.c
-LIB_OBJS = $(BUILDDIR)/miniexpr.o $(BUILDDIR)/dsl_parser.o $(BUILDDIR)/functions.o $(BUILDDIR)/functions-simd.o
+LIB_SRCS = $(SRCDIR)/miniexpr.c $(SRCDIR)/dsl_parser.c $(SRCDIR)/dsl_jit_ir.c $(SRCDIR)/dsl_jit_cgen.c $(SRCDIR)/functions.c $(SRCDIR)/functions-simd.c
+LIB_OBJS = $(BUILDDIR)/miniexpr.o $(BUILDDIR)/dsl_parser.o $(BUILDDIR)/dsl_jit_ir.o $(BUILDDIR)/dsl_jit_cgen.o $(BUILDDIR)/functions.o $(BUILDDIR)/functions-simd.o
 LIB_HDR = $(SRCDIR)/miniexpr.h
 
 ifeq ($(OS),Windows_NT)
@@ -104,6 +104,8 @@ $(LIB_OBJS): $(LIB_SRCS) $(LIB_HDR) | $(BUILDDIR)
 	@echo "Building library..."
 	$(CC) $(CFLAGS) -c $(SRCDIR)/miniexpr.c -o $(BUILDDIR)/miniexpr.o
 	$(CC) $(CFLAGS) -c $(SRCDIR)/dsl_parser.c -o $(BUILDDIR)/dsl_parser.o
+	$(CC) $(CFLAGS) -c $(SRCDIR)/dsl_jit_ir.c -o $(BUILDDIR)/dsl_jit_ir.o
+	$(CC) $(CFLAGS) -c $(SRCDIR)/dsl_jit_cgen.c -o $(BUILDDIR)/dsl_jit_cgen.o
 	$(CC) $(CFLAGS) -c $(SRCDIR)/functions.c -o $(BUILDDIR)/functions.o
 	$(CC) $(CFLAGS) -c $(SRCDIR)/functions-simd.c -o $(BUILDDIR)/functions-simd.o
 	@echo "✓ Library built: $(LIB_OBJS)"

@@ -59,6 +59,8 @@ For log = base 10 log comment the next line. */
 #include <assert.h>
 
 #include "dsl_parser.h"
+#include "dsl_jit_ir.h"
+#include "dsl_jit_cgen.h"
 
 #define ME_DSL_MAX_NDIM 8
 
@@ -177,6 +179,15 @@ typedef struct {
     bool uses_ndim;
     bool output_is_scalar;
     me_dtype output_dtype;
+    me_dsl_jit_ir_program *jit_ir;
+    uint64_t jit_ir_fingerprint;
+    int jit_ir_error_line;
+    int jit_ir_error_column;
+    char jit_ir_error[128];
+    char *jit_c_source;
+    int jit_c_error_line;
+    int jit_c_error_column;
+    char jit_c_error[128];
 } me_dsl_compiled_program;
 
 static int64_t ceil_div64(int64_t a, int64_t b) {
@@ -600,6 +611,8 @@ static void dsl_compiled_program_free(me_dsl_compiled_program *program) {
     if (!program) {
         return;
     }
+    free(program->jit_c_source);
+    me_dsl_jit_ir_free(program->jit_ir);
     dsl_compiled_block_free(&program->block);
     dsl_var_table_free(&program->vars);
     free(program->local_var_indices);
@@ -2963,6 +2976,121 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
     return true;
 }
 
+static bool dsl_jit_ir_resolve_dtype(void *resolve_ctx, const me_dsl_expr *expr,
+                                     me_dtype *out_dtype) {
+    dsl_compile_ctx *ctx = (dsl_compile_ctx *)resolve_ctx;
+    if (!ctx || !expr || !out_dtype) {
+        return false;
+    }
+    me_dsl_compiled_expr compiled_expr;
+    me_dtype expr_dtype = ctx->output_dtype_auto ? ME_AUTO : ctx->output_dtype;
+    int saved_error = 0;
+    if (ctx->error_pos) {
+        saved_error = *ctx->error_pos;
+    }
+    if (!dsl_compile_expr(ctx, expr, expr_dtype, &compiled_expr)) {
+        if (ctx->error_pos) {
+            *ctx->error_pos = saved_error;
+        }
+        return false;
+    }
+    *out_dtype = me_get_dtype(compiled_expr.expr);
+    dsl_compiled_expr_free(&compiled_expr);
+    if (ctx->error_pos) {
+        *ctx->error_pos = saved_error;
+    }
+    return true;
+}
+
+static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *parsed,
+                                 me_dsl_compiled_program *program) {
+    if (!ctx || !parsed || !program) {
+        return;
+    }
+
+    program->jit_ir = NULL;
+    program->jit_ir_fingerprint = 0;
+    program->jit_ir_error_line = 0;
+    program->jit_ir_error_column = 0;
+    program->jit_ir_error[0] = '\0';
+    free(program->jit_c_source);
+    program->jit_c_source = NULL;
+    program->jit_c_error_line = 0;
+    program->jit_c_error_column = 0;
+    program->jit_c_error[0] = '\0';
+
+    if (parsed->nparams < 0) {
+        snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
+                 "invalid dsl parameter metadata");
+        return;
+    }
+
+    const char **param_names = NULL;
+    me_dtype *param_dtypes = NULL;
+
+    if (parsed->nparams > 0) {
+        param_names = calloc((size_t)parsed->nparams, sizeof(*param_names));
+        param_dtypes = calloc((size_t)parsed->nparams, sizeof(*param_dtypes));
+        if (!param_names || !param_dtypes) {
+            snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
+                     "out of memory building jit ir metadata");
+            free(param_names);
+            free(param_dtypes);
+            return;
+        }
+        for (int i = 0; i < parsed->nparams; i++) {
+            int idx = dsl_var_table_find(&program->vars, parsed->params[i]);
+            if (idx < 0 || idx >= program->vars.count) {
+                snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
+                         "failed to resolve dsl parameter dtype for jit ir");
+                free(param_names);
+                free(param_dtypes);
+                return;
+            }
+            param_names[i] = parsed->params[i];
+            param_dtypes[i] = program->vars.dtypes[idx];
+        }
+    }
+
+    me_dsl_error ir_error;
+    memset(&ir_error, 0, sizeof(ir_error));
+    me_dsl_jit_ir_program *jit_ir = NULL;
+    bool ok = me_dsl_jit_ir_build(parsed, param_names, param_dtypes, parsed->nparams,
+                                  dsl_jit_ir_resolve_dtype, ctx, &jit_ir, &ir_error);
+
+    free(param_names);
+    free(param_dtypes);
+
+    if (!ok || !jit_ir) {
+        program->jit_ir_error_line = ir_error.line;
+        program->jit_ir_error_column = ir_error.column;
+        snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
+                 ir_error.message[0] ? ir_error.message : "jit ir build rejected");
+        me_dsl_jit_ir_free(jit_ir);
+        return;
+    }
+
+    program->jit_ir = jit_ir;
+    program->jit_ir_fingerprint = me_dsl_jit_ir_fingerprint(jit_ir);
+
+    me_dsl_error cg_error;
+    memset(&cg_error, 0, sizeof(cg_error));
+    me_dsl_jit_cgen_options cg_options;
+    cg_options.symbol_name = "me_dsl_jit_kernel";
+    char *generated_c = NULL;
+    bool cg_ok = me_dsl_jit_codegen_c(jit_ir, ctx->return_dtype, &cg_options,
+                                      &generated_c, &cg_error);
+    if (!cg_ok || !generated_c) {
+        program->jit_c_error_line = cg_error.line;
+        program->jit_c_error_column = cg_error.column;
+        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+                 cg_error.message[0] ? cg_error.message : "jit c codegen rejected");
+        free(generated_c);
+        return;
+    }
+    program->jit_c_source = generated_c;
+}
+
 static bool dsl_block_guarantees_return(const me_dsl_block *block);
 
 static bool dsl_stmt_guarantees_return(const me_dsl_stmt *stmt) {
@@ -3805,13 +3933,12 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
         return NULL;
     }
 
-    me_dsl_program_free(parsed);
-    free(funcs);
-
     if (!ctx.has_return || !ctx.output_expr || !ctx.output_expr->expr) {
         if (error_pos) {
             *error_pos = -1;
         }
+        free(funcs);
+        me_dsl_program_free(parsed);
         dsl_compiled_program_free(program);
         return NULL;
     }
@@ -3819,6 +3946,10 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     program->output_dtype = ctx.return_dtype;
     program->output_is_scalar = contains_reduction(ctx.output_expr->expr) &&
                                 output_is_scalar(ctx.output_expr->expr);
+    dsl_try_build_jit_ir(&ctx, parsed, program);
+
+    me_dsl_program_free(parsed);
+    free(funcs);
 
     return program;
 }
