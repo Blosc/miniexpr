@@ -24,7 +24,11 @@ ifeq ($(OS),Windows_NT)
 else
   CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG $(SLEEF_CFLAGS) $(SLEEF_DEFS)
   DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g $(SLEEF_CFLAGS) $(SLEEF_DEFS)
-  LDFLAGS = -lm
+  ifeq ($(shell uname -s),Linux)
+    LDFLAGS = -lm -ldl
+  else
+    LDFLAGS = -lm
+  endif
 endif
 
 # Directories

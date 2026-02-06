@@ -57,12 +57,23 @@ For log = base 10 log comment the next line. */
 #include <stdbool.h>
 #include <complex.h>
 #include <assert.h>
+#include <errno.h>
+
+#if !defined(_WIN32) && !defined(_WIN64)
+#include <dlfcn.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 #include "dsl_parser.h"
 #include "dsl_jit_ir.h"
 #include "dsl_jit_cgen.h"
 
 #define ME_DSL_MAX_NDIM 8
+#define ME_DSL_JIT_SYMBOL_NAME "me_dsl_jit_kernel"
+#define ME_DSL_JIT_CGEN_VERSION 1
+
+typedef int (*me_dsl_jit_kernel_fn)(const void **inputs, void *output, int64_t nitems);
 
 /* ND metadata attached to compiled expressions (used by me_eval_nd). */
 typedef struct {
@@ -188,6 +199,10 @@ typedef struct {
     int jit_c_error_line;
     int jit_c_error_column;
     char jit_c_error[128];
+    int *jit_param_input_indices;
+    int jit_nparams;
+    me_dsl_jit_kernel_fn jit_kernel_fn;
+    void *jit_dl_handle;
 } me_dsl_compiled_program;
 
 static int64_t ceil_div64(int64_t a, int64_t b) {
@@ -611,7 +626,14 @@ static void dsl_compiled_program_free(me_dsl_compiled_program *program) {
     if (!program) {
         return;
     }
+#if !defined(_WIN32) && !defined(_WIN64)
+    if (program->jit_dl_handle) {
+        dlclose(program->jit_dl_handle);
+        program->jit_dl_handle = NULL;
+    }
+#endif
     free(program->jit_c_source);
+    free(program->jit_param_input_indices);
     me_dsl_jit_ir_free(program->jit_ir);
     dsl_compiled_block_free(&program->block);
     dsl_var_table_free(&program->vars);
@@ -3002,6 +3024,204 @@ static bool dsl_jit_ir_resolve_dtype(void *resolve_ctx, const me_dsl_expr *expr,
     return true;
 }
 
+static uint64_t dsl_jit_hash_bytes(uint64_t h, const void *ptr, size_t n) {
+    const unsigned char *p = (const unsigned char *)ptr;
+    for (size_t i = 0; i < n; i++) {
+        h ^= (uint64_t)p[i];
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+static uint64_t dsl_jit_hash_i32(uint64_t h, int v) {
+    return dsl_jit_hash_bytes(h, &v, sizeof(v));
+}
+
+static uint64_t dsl_jit_hash_u64(uint64_t h, uint64_t v) {
+    return dsl_jit_hash_bytes(h, &v, sizeof(v));
+}
+
+static uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program) {
+    uint64_t h = 1469598103934665603ULL;
+    if (!program) {
+        return h;
+    }
+    h = dsl_jit_hash_u64(h, program->jit_ir_fingerprint);
+    h = dsl_jit_hash_i32(h, (int)program->output_dtype);
+    h = dsl_jit_hash_i32(h, program->jit_nparams);
+    if (program->jit_ir) {
+        for (int i = 0; i < program->jit_ir->nparams; i++) {
+            h = dsl_jit_hash_i32(h, (int)program->jit_ir->param_dtypes[i]);
+        }
+    }
+    h = dsl_jit_hash_i32(h, (int)sizeof(void *));
+    h = dsl_jit_hash_i32(h, ME_DSL_JIT_CGEN_VERSION);
+#if defined(__APPLE__)
+    h = dsl_jit_hash_i32(h, 1);
+#elif defined(__linux__)
+    h = dsl_jit_hash_i32(h, 2);
+#else
+    h = dsl_jit_hash_i32(h, 3);
+#endif
+    return h;
+}
+
+#if !defined(_WIN32) && !defined(_WIN64)
+static bool dsl_jit_ensure_dir(const char *path) {
+    if (!path || !path[0]) {
+        return false;
+    }
+    struct stat st;
+    if (stat(path, &st) == 0) {
+        return S_ISDIR(st.st_mode);
+    }
+    if (mkdir(path, 0700) == 0) {
+        return true;
+    }
+    if (errno == EEXIST) {
+        return true;
+    }
+    return false;
+}
+
+static bool dsl_jit_get_cache_dir(char *out, size_t out_size) {
+    if (!out || out_size == 0) {
+        return false;
+    }
+    const char *tmpdir = getenv("TMPDIR");
+    if (!tmpdir || tmpdir[0] == '\0') {
+        tmpdir = "/tmp";
+    }
+    if (snprintf(out, out_size, "%s/miniexpr-jit", tmpdir) >= (int)out_size) {
+        return false;
+    }
+    return dsl_jit_ensure_dir(out);
+}
+
+static bool dsl_jit_write_text_file(const char *path, const char *text) {
+    if (!path || !text) {
+        return false;
+    }
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        return false;
+    }
+    size_t n = strlen(text);
+    bool ok = (fwrite(text, 1, n, f) == n);
+    if (fclose(f) != 0) {
+        ok = false;
+    }
+    return ok;
+}
+
+static bool dsl_jit_compile_shared(const char *src_path, const char *so_path) {
+    if (!src_path || !so_path) {
+        return false;
+    }
+    const char *cc = getenv("CC");
+    if (!cc || cc[0] == '\0') {
+        cc = "cc";
+    }
+    char cmd[2048];
+#if defined(__APPLE__)
+    int n = snprintf(cmd, sizeof(cmd),
+                     "%s -std=c99 -O3 -fPIC -dynamiclib -o \"%s\" \"%s\" >/dev/null 2>&1",
+                     cc, so_path, src_path);
+#else
+    int n = snprintf(cmd, sizeof(cmd),
+                     "%s -std=c99 -O3 -fPIC -shared -o \"%s\" \"%s\" >/dev/null 2>&1",
+                     cc, so_path, src_path);
+#endif
+    if (n <= 0 || (size_t)n >= sizeof(cmd)) {
+        return false;
+    }
+    int rc = system(cmd);
+    return rc == 0;
+}
+
+static bool dsl_jit_load_kernel(me_dsl_compiled_program *program, const char *shared_path) {
+    if (!program || !shared_path) {
+        return false;
+    }
+    void *handle = dlopen(shared_path, RTLD_NOW | RTLD_LOCAL);
+    if (!handle) {
+        return false;
+    }
+    void *sym = dlsym(handle, ME_DSL_JIT_SYMBOL_NAME);
+    if (!sym) {
+        dlclose(handle);
+        return false;
+    }
+    program->jit_dl_handle = handle;
+    program->jit_kernel_fn = (me_dsl_jit_kernel_fn)sym;
+    return true;
+}
+
+static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
+    if (!program || !program->jit_ir || !program->jit_c_source) {
+        return;
+    }
+    if (program->output_is_scalar) {
+        return;
+    }
+    if (program->uses_i_mask || program->uses_n_mask || program->uses_ndim) {
+        return;
+    }
+    if (program->jit_nparams != program->jit_ir->nparams) {
+        return;
+    }
+
+    char cache_dir[1024];
+    if (!dsl_jit_get_cache_dir(cache_dir, sizeof(cache_dir))) {
+        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+                 "jit runtime cache directory unavailable");
+        return;
+    }
+
+    uint64_t key = dsl_jit_runtime_cache_key(program);
+    const char *ext = "so";
+#if defined(__APPLE__)
+    ext = "dylib";
+#endif
+    char src_path[1300];
+    char so_path[1300];
+    if (snprintf(src_path, sizeof(src_path), "%s/kernel_%016llx.c",
+                 cache_dir, (unsigned long long)key) >= (int)sizeof(src_path) ||
+        snprintf(so_path, sizeof(so_path), "%s/kernel_%016llx.%s",
+                 cache_dir, (unsigned long long)key, ext) >= (int)sizeof(so_path)) {
+        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+                 "jit runtime cache path too long");
+        return;
+    }
+
+    bool need_compile = (access(so_path, F_OK) != 0);
+    if (!need_compile) {
+        if (dsl_jit_load_kernel(program, so_path)) {
+            return;
+        }
+        need_compile = true;
+    }
+    if (!dsl_jit_write_text_file(src_path, program->jit_c_source)) {
+        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+                 "jit runtime failed to write source");
+        return;
+    }
+    if (!dsl_jit_compile_shared(src_path, so_path)) {
+        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+                 "jit runtime compilation failed");
+        return;
+    }
+    if (!dsl_jit_load_kernel(program, so_path)) {
+        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+                 "jit runtime shared object load failed");
+    }
+}
+#else
+static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
+    (void)program;
+}
+#endif
+
 static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *parsed,
                                  me_dsl_compiled_program *program) {
     if (!ctx || !parsed || !program) {
@@ -3013,6 +3233,16 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     program->jit_ir_error_line = 0;
     program->jit_ir_error_column = 0;
     program->jit_ir_error[0] = '\0';
+    free(program->jit_param_input_indices);
+    program->jit_param_input_indices = NULL;
+    program->jit_nparams = 0;
+    program->jit_kernel_fn = NULL;
+#if !defined(_WIN32) && !defined(_WIN64)
+    if (program->jit_dl_handle) {
+        dlclose(program->jit_dl_handle);
+    }
+#endif
+    program->jit_dl_handle = NULL;
     free(program->jit_c_source);
     program->jit_c_source = NULL;
     program->jit_c_error_line = 0;
@@ -3027,15 +3257,18 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
 
     const char **param_names = NULL;
     me_dtype *param_dtypes = NULL;
+    int *param_input_indices = NULL;
 
     if (parsed->nparams > 0) {
         param_names = calloc((size_t)parsed->nparams, sizeof(*param_names));
         param_dtypes = calloc((size_t)parsed->nparams, sizeof(*param_dtypes));
-        if (!param_names || !param_dtypes) {
+        param_input_indices = calloc((size_t)parsed->nparams, sizeof(*param_input_indices));
+        if (!param_names || !param_dtypes || !param_input_indices) {
             snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
                      "out of memory building jit ir metadata");
             free(param_names);
             free(param_dtypes);
+            free(param_input_indices);
             return;
         }
         for (int i = 0; i < parsed->nparams; i++) {
@@ -3045,10 +3278,12 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
                          "failed to resolve dsl parameter dtype for jit ir");
                 free(param_names);
                 free(param_dtypes);
+                free(param_input_indices);
                 return;
             }
             param_names[i] = parsed->params[i];
             param_dtypes[i] = program->vars.dtypes[idx];
+            param_input_indices[i] = idx;
         }
     }
 
@@ -3067,16 +3302,19 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
         snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
                  ir_error.message[0] ? ir_error.message : "jit ir build rejected");
         me_dsl_jit_ir_free(jit_ir);
+        free(param_input_indices);
         return;
     }
 
     program->jit_ir = jit_ir;
     program->jit_ir_fingerprint = me_dsl_jit_ir_fingerprint(jit_ir);
+    program->jit_param_input_indices = param_input_indices;
+    program->jit_nparams = parsed->nparams;
 
     me_dsl_error cg_error;
     memset(&cg_error, 0, sizeof(cg_error));
     me_dsl_jit_cgen_options cg_options;
-    cg_options.symbol_name = "me_dsl_jit_kernel";
+    cg_options.symbol_name = ME_DSL_JIT_SYMBOL_NAME;
     char *generated_c = NULL;
     bool cg_ok = me_dsl_jit_codegen_c(jit_ir, ctx->return_dtype, &cg_options,
                                       &generated_c, &cg_error);
@@ -3086,9 +3324,13 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  cg_error.message[0] ? cg_error.message : "jit c codegen rejected");
         free(generated_c);
+        free(program->jit_param_input_indices);
+        program->jit_param_input_indices = NULL;
+        program->jit_nparams = 0;
         return;
     }
     program->jit_c_source = generated_c;
+    dsl_try_prepare_jit_runtime(program);
 }
 
 static bool dsl_block_guarantees_return(const me_dsl_block *block);
@@ -4681,6 +4923,35 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
     }
     if (n_vars != program->n_inputs) {
         return ME_EVAL_ERR_VAR_MISMATCH;
+    }
+
+    /* JIT is best-effort: if kernel call fails, execution falls back to interpreter. */
+    if (program->jit_kernel_fn && program->jit_nparams >= 0 && program->jit_nparams <= ME_MAX_VARS) {
+        const void *jit_inputs_stack[ME_MAX_VARS];
+        const void **jit_inputs = vars_block;
+        bool can_run_jit = true;
+        if (program->jit_nparams > 0) {
+            if (!vars_block || !program->jit_param_input_indices) {
+                can_run_jit = false;
+            }
+            else {
+                for (int i = 0; i < program->jit_nparams; i++) {
+                    int idx = program->jit_param_input_indices[i];
+                    if (idx < 0 || idx >= n_vars) {
+                        can_run_jit = false;
+                        break;
+                    }
+                    jit_inputs_stack[i] = vars_block[idx];
+                }
+                jit_inputs = jit_inputs_stack;
+            }
+        }
+        if (can_run_jit) {
+            int jit_rc = program->jit_kernel_fn(jit_inputs, output_block, (int64_t)nitems);
+            if (jit_rc == 0) {
+                return ME_EVAL_SUCCESS;
+            }
+        }
     }
 
     void **var_buffers = calloc((size_t)program->vars.count, sizeof(*var_buffers));

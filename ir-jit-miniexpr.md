@@ -11,6 +11,32 @@ Constraints:
 3. Preserve current miniexpr behavior as a fallback.
 4. Support current DSL syntax only (no broad language expansion in MVP).
 
+## Current implementation status (as of 2026-02-06)
+
+Implemented:
+
+1. Milestone 1 complete:
+   deterministic typed IR builder, rejection diagnostics, and tests.
+2. Milestone 2 complete:
+   C codegen for all currently supported non-complex dtypes, plus compile smoke tests.
+3. Milestone 3 implemented (initial runtime cut):
+   runtime compile/load/dispatch with fallback to interpreter on failure.
+4. Runtime cache directory:
+   `$TMPDIR/miniexpr-jit`.
+5. Platform scope for runtime JIT:
+   Linux/macOS only; Windows always falls back.
+6. DSL permissiveness alignment with interpreter:
+   `continue` accepted, truthy non-bool scalar conditions accepted.
+7. Complex numbers:
+   excluded from JIT IR/codegen in current implementation.
+
+Current runtime limitations (known and intentional for now):
+
+1. Runtime JIT dispatch currently targets regular per-element kernels.
+2. Kernels using `_i*`, `_n*`, or `_ndim` use interpreter fallback.
+3. Scalar-output DSL kernels use interpreter fallback.
+4. No negative-cache yet for repeated compile/load failures.
+
 ## Proposed architecture
 
 ### 1. Frontend: parse DSL subset and validate
@@ -156,6 +182,8 @@ Fallback should be explicit and optionally logged (debug mode).
 
 ### Milestone 1: IR-compilability gate + typed IR (no JIT yet)
 
+Status: complete.
+
 Deliverables:
 
 1. DSL subset validator with clear rejection reasons.
@@ -168,6 +196,8 @@ Success criteria:
 2. Accurate rejection for unsupported constructs.
 
 ### Milestone 2: C codegen + offline compile smoke tests
+
+Status: complete.
 
 Deliverables:
 
@@ -182,6 +212,8 @@ Success criteria:
 
 ### Milestone 3: In-process JIT dispatch + fallback
 
+Status: implemented for Linux/macOS in current runtime cut.
+
 Deliverables:
 
 1. Runtime compile/load/dispatch path in miniexpr.
@@ -195,11 +227,20 @@ Success criteria:
 
 ### Milestone 4: Cache implementation
 
+Status: partial.
+
 Deliverables:
 
 1. Cache key `(dsl_hash, dtypes, ndim, target)`.
 2. Memory cache + disk cache.
 3. Cache invalidation policy implementation.
+
+Recommended next increment:
+
+1. Add a lightweight negative cache (in-process) keyed by the same runtime key.
+2. Store failure class + timestamp + retry budget/cooldown.
+3. Skip repeated compile/load attempts for known failing keys during cooldown.
+4. Keep fallback behavior unchanged (still runs interpreter).
 
 Success criteria:
 
@@ -224,3 +265,4 @@ Success criteria:
 1. Minimum supported compilers per platform.
 2. Packaging story for environments without `cc`.
 3. Whether to persist cache metadata in higher-level storage later (for example vlmeta), once ABI guarantees are defined.
+4. Whether negative-cache entries should also be persisted to disk or remain process-local.
