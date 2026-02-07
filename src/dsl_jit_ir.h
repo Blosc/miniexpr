@@ -79,6 +79,7 @@ typedef struct {
     char **params;
     me_dtype *param_dtypes;
     int nparams;
+    me_dsl_dialect dialect;
     me_dsl_jit_ir_block block;
 } me_dsl_jit_ir_program;
 

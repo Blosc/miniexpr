@@ -572,6 +572,7 @@ bool me_dsl_jit_ir_build(const me_dsl_program *program, const char **param_names
         dsl_jit_set_error(error, 0, 0, "out of memory");
         return false;
     }
+    ir->dialect = program->dialect;
 
     ir->nparams = nparams;
     if (nparams > 0) {
@@ -655,6 +656,11 @@ static uint64_t dsl_jit_hash_dtype(uint64_t h, me_dtype dtype) {
     return dsl_jit_hash_bytes(h, &v, sizeof(v));
 }
 
+static uint64_t dsl_jit_hash_dialect(uint64_t h, me_dsl_dialect dialect) {
+    int v = (int)dialect;
+    return dsl_jit_hash_bytes(h, &v, sizeof(v));
+}
+
 static uint64_t dsl_jit_ir_hash_expr(uint64_t h, const me_dsl_jit_ir_expr *expr) {
     h = dsl_jit_hash_string(h, expr ? expr->text : "");
     h = dsl_jit_hash_dtype(h, expr ? expr->dtype : ME_AUTO);
@@ -721,6 +727,7 @@ uint64_t me_dsl_jit_ir_fingerprint(const me_dsl_jit_ir_program *program) {
         return h;
     }
     h = dsl_jit_hash_string(h, program->name);
+    h = dsl_jit_hash_dialect(h, program->dialect);
     h = dsl_jit_hash_i32(h, program->nparams);
     for (int i = 0; i < program->nparams; i++) {
         h = dsl_jit_hash_string(h, program->params[i]);

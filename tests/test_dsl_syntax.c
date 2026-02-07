@@ -589,8 +589,48 @@ static int test_dsl_function_calls(void) {
     return rc;
 }
 
+static int test_dialect_loop_condition_policy(void) {
+    printf("\n=== DSL Test 11: dialect loop condition policy ===\n");
+
+    const char *src_vector =
+        "def kernel(x):\n"
+        "    acc = 0\n"
+        "    for i in range(3):\n"
+        "        if x > 0:\n"
+        "            acc = acc + 1\n"
+        "    return acc\n";
+
+    const char *src_element =
+        "# me:dialect=element\n"
+        "def kernel(x):\n"
+        "    acc = 0\n"
+        "    for i in range(3):\n"
+        "        if x > 0:\n"
+        "            acc = acc + 1\n"
+        "    return acc\n";
+
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    if (me_compile(src_vector, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: vector dialect accepted non-uniform loop condition\n");
+        me_free(expr);
+        return 1;
+    }
+
+    if (me_compile(src_element, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: element dialect rejected non-uniform loop condition at %d\n", err);
+        return 1;
+    }
+    me_free(expr);
+
+    printf("  ✅ PASSED\n");
+    return 0;
+}
+
 static int test_dsl_print_stmt(void) {
-    printf("\n=== DSL Test 11: print statement ===\n");
+    printf("\n=== DSL Test 12: print statement ===\n");
 
     const char *src =
         "def kernel():\n"
@@ -636,6 +676,7 @@ int main(void) {
     fail |= test_nested_loops_and_conditionals();
     fail |= test_break_any_condition();
     fail |= test_dsl_function_calls();
+    fail |= test_dialect_loop_condition_policy();
     fail |= test_dsl_print_stmt();
     return fail;
 }

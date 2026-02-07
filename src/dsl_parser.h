@@ -24,6 +24,11 @@ typedef enum {
     ME_DSL_STMT_CONTINUE
 } me_dsl_stmt_kind;
 
+typedef enum {
+    ME_DSL_DIALECT_VECTOR = 0,
+    ME_DSL_DIALECT_ELEMENT = 1
+} me_dsl_dialect;
+
 typedef struct me_dsl_expr {
     char *text;
     int line;
@@ -86,6 +91,7 @@ typedef struct {
     char **params;
     int nparams;
     int param_capacity;
+    me_dsl_dialect dialect;
     me_dsl_block block;
 } me_dsl_program;
 

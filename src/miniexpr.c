@@ -189,6 +189,7 @@ typedef struct {
     int uses_i_mask;
     int uses_n_mask;
     bool uses_ndim;
+    me_dsl_dialect dialect;
     bool output_is_scalar;
     me_dtype output_dtype;
     me_dsl_jit_ir_program *jit_ir;
@@ -2430,6 +2431,7 @@ typedef struct {
     me_dtype output_dtype;
     bool output_dtype_auto;
     int loop_depth;
+    me_dsl_dialect dialect;
     bool allow_new_locals;
     int *error_pos;
     me_dsl_compiled_expr *output_expr;
@@ -3085,7 +3087,7 @@ static uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program
 #define ME_DSL_JIT_NEG_CACHE_LONG_COOLDOWN_SEC 120
 #define ME_DSL_JIT_POS_CACHE_SLOTS 64
 #define ME_DSL_JIT_META_MAGIC 0x4d454a49544d4554ULL
-#define ME_DSL_JIT_META_VERSION 1
+#define ME_DSL_JIT_META_VERSION 2
 
 typedef enum {
     ME_DSL_JIT_NEG_FAIL_CACHE_DIR = 1,
@@ -3124,6 +3126,7 @@ typedef struct {
     uint64_t cache_key;
     uint64_t ir_fingerprint;
     int32_t output_dtype;
+    int32_t dialect;
     int32_t nparams;
     int32_t param_dtypes[ME_MAX_VARS];
     uint64_t cc_hash;
@@ -3327,6 +3330,7 @@ static void dsl_jit_fill_cache_meta(me_dsl_jit_cache_meta *meta,
     }
     meta->ir_fingerprint = program->jit_ir_fingerprint;
     meta->output_dtype = (int32_t)program->output_dtype;
+    meta->dialect = (int32_t)program->dialect;
     meta->nparams = (int32_t)program->jit_nparams;
     for (int i = 0; i < ME_MAX_VARS; i++) {
         meta->param_dtypes[i] = -1;
@@ -4052,11 +4056,15 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             break;
         }
         case ME_DSL_STMT_IF: {
+            /* Element dialect allows per-item loop control conditions inside loops. */
+            bool require_uniform_cond = (ctx->dialect == ME_DSL_DIALECT_VECTOR ||
+                                         ctx->loop_depth <= 0);
             if (!dsl_compile_expr(ctx, stmt->as.if_stmt.cond, ME_AUTO, &compiled->as.if_stmt.cond)) {
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
-            if (!dsl_expr_is_uniform(compiled->as.if_stmt.cond.expr,
+            if (require_uniform_cond &&
+                !dsl_expr_is_uniform(compiled->as.if_stmt.cond.expr,
                                      ctx->program->vars.uniform,
                                      ctx->program->vars.count)) {
                 if (ctx->error_pos) {
@@ -4096,7 +4104,8 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
-                if (!dsl_expr_is_uniform(out_branch->cond.expr,
+                if (require_uniform_cond &&
+                    !dsl_expr_is_uniform(out_branch->cond.expr,
                                          ctx->program->vars.uniform,
                                          ctx->program->vars.count)) {
                     if (ctx->error_pos) {
@@ -4196,7 +4205,8 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
-                if (!dsl_expr_is_uniform(compiled->as.flow.cond.expr,
+                if (ctx->dialect == ME_DSL_DIALECT_VECTOR &&
+                    !dsl_expr_is_uniform(compiled->as.flow.cond.expr,
                                          ctx->program->vars.uniform,
                                          ctx->program->vars.count)) {
                     if (ctx->error_pos) {
@@ -4271,6 +4281,7 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
         }
         return NULL;
     }
+    program->dialect = parsed->dialect;
     dsl_var_table_init(&program->vars);
     program->idx_ndim = -1;
     for (int i = 0; i < ME_DSL_MAX_NDIM; i++) {
@@ -4529,6 +4540,7 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     ctx.output_dtype = dtype;
     ctx.output_dtype_auto = (dtype == ME_AUTO);
     ctx.loop_depth = 0;
+    ctx.dialect = parsed->dialect;
     ctx.allow_new_locals = true;
     ctx.error_pos = error_pos;
     ctx.output_expr = NULL;
