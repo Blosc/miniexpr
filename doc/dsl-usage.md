@@ -52,6 +52,8 @@ def kernel(x):
 
 - `vector` is the default when the pragma is omitted.
 - `element` enables per-element loop control behavior (details below).
+- `element` is currently experimental. Set `ME_DSL_ELEMENT=0` to disable
+  element-dialect kernels process-wide during rollout/testing.
 
 For backend diagnostics, set `ME_DSL_TRACE=1` to emit compile/JIT trace lines
 to stderr (dialect, JIT accept/reject reasons, runtime cache/fallback paths).
@@ -151,6 +153,7 @@ Rules:
 - Use `return` to produce output; all `return` expressions must infer the same dtype.
 - Early returns are allowed, but ensure every control-flow path eventually returns.
   Loops never guarantee a return; add a return after any loop.
+- In `element` dialect, `return` inside a loop body is not supported yet.
 
 Example:
 ```

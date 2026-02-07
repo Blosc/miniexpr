@@ -11,7 +11,7 @@ Constraints:
 3. Preserve current miniexpr behavior as a fallback.
 4. Support current DSL syntax only (no broad language expansion in MVP).
 
-## Current implementation status (as of 2026-02-06)
+## Current implementation status (as of 2026-02-07)
 
 Implemented:
 
@@ -43,6 +43,18 @@ Implemented:
     added Mandelbrot-style DSL benchmark for JIT cold/warm vs interpreter, plus optional numba baseline script.
 14. Runtime compile-flag tuning hook:
     `ME_DSL_JIT_CFLAGS` is included in runtime compile command and cache metadata fingerprinting.
+15. Dialect pragma support:
+    `# me:dialect=vector|element` parsed and stored in DSL/JIT metadata (`vector` default).
+16. Dialect-aware compilation policy:
+    `vector` keeps uniform loop-condition checks; `element` allows per-item loop conditions.
+17. Element interpreter semantics:
+    per-item loop control (`if`/`elif`/`else`, `break`, `continue`) implemented with active masks.
+18. JIT/interpreter parity coverage:
+    element-dialect parity tests added for representative loop-control kernels.
+19. Dialect-aware cache identity:
+    JIT IR fingerprint and runtime cache metadata include dialect; cache-key differentiation tested.
+20. Dialect diagnostics and rollout controls:
+    `ME_DSL_TRACE=1` includes dialect-aware compile/JIT reasons; `ME_DSL_ELEMENT=0` disables element dialect.
 
 Current runtime limitations (known and intentional for now):
 
@@ -50,6 +62,8 @@ Current runtime limitations (known and intentional for now):
 2. Kernels using `_i*`, `_n*`, or `_ndim` use interpreter fallback.
 3. Scalar-output DSL kernels use interpreter fallback.
 4. Runtime cache (positive/negative) is process-local only (not persisted across processes).
+5. In `element` dialect, `return` inside loop bodies is currently rejected at compile time
+   (future work: per-item return masks in interpreter path).
 
 ## Proposed architecture
 
@@ -267,6 +281,7 @@ Deliverables:
 1. Benchmarks vs current miniexpr and numba for Mandelbrot and similar kernels.
 2. Tuning of compiler flags and loop codegen.
 3. Rollout guardrails and documentation.
+4. Complete remaining element-dialect control-flow edge cases.
 
 Success criteria:
 
@@ -279,3 +294,4 @@ Success criteria:
 2. Packaging story for environments without `cc`.
 3. Whether to persist cache metadata in higher-level storage later (for example vlmeta), once ABI guarantees are defined.
 4. Whether negative-cache entries should also be persisted to disk or remain process-local.
+5. Whether to implement per-item `return` semantics inside element-dialect loops (interpreter + parity hardening).

@@ -2474,6 +2474,14 @@ static void dsl_tracef(const char *fmt, ...) {
     fputc('\n', stderr);
 }
 
+static bool dsl_element_dialect_enabled(void) {
+    const char *env = getenv("ME_DSL_ELEMENT");
+    if (!env || env[0] == '\0') {
+        return true;
+    }
+    return strcmp(env, "0") != 0;
+}
+
 static int dsl_offset_from_linecol(const char *source, int line, int column) {
     if (!source || line <= 0 || column <= 0) {
         return -1;
@@ -3951,6 +3959,15 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             break;
         }
         case ME_DSL_STMT_RETURN: {
+            if (ctx->dialect == ME_DSL_DIALECT_ELEMENT && ctx->loop_depth > 0) {
+                dsl_tracef("compile reject: dialect=%s does not support return inside loops at %d:%d",
+                           dsl_dialect_name(ctx->dialect), stmt->line, stmt->column);
+                if (ctx->error_pos) {
+                    *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                }
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
             me_dtype expr_dtype = ctx->output_dtype_auto ? ME_AUTO : ctx->output_dtype;
             if (!dsl_compile_expr(ctx, stmt->as.return_stmt.expr, expr_dtype, &compiled->as.return_stmt.expr)) {
                 dsl_compiled_stmt_free(compiled);
@@ -4355,6 +4372,15 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     }
     if (is_dsl) {
         *is_dsl = true;
+    }
+    if (parsed->dialect == ME_DSL_DIALECT_ELEMENT && !dsl_element_dialect_enabled()) {
+        if (error_pos) {
+            *error_pos = -1;
+        }
+        dsl_tracef("compile reject: dialect=%s disabled by ME_DSL_ELEMENT=0",
+                   dsl_dialect_name(parsed->dialect));
+        me_dsl_program_free(parsed);
+        return NULL;
     }
     if (!dsl_block_guarantees_return(&parsed->block)) {
         if (error_pos) {

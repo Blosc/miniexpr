@@ -225,6 +225,14 @@ static int test_invalid_conditionals(void) {
         "        z = 3\n"
         "        return z\n";
 
+    const char *src_element_return_in_loop =
+        "# me:dialect=element\n"
+        "def kernel(x):\n"
+        "    for i in range(4):\n"
+        "        if x > i:\n"
+        "            return i\n"
+        "    return 0\n";
+
     int err = 0;
     me_expr *expr = NULL;
 
@@ -296,6 +304,13 @@ static int test_invalid_conditionals(void) {
     expr = NULL;
     if (me_compile(src_new_local, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: new local inside branch accepted\n");
+        me_free(expr);
+        return 1;
+    }
+
+    expr = NULL;
+    if (me_compile(src_element_return_in_loop, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: element dialect accepted return inside loop\n");
         me_free(expr);
         return 1;
     }
@@ -824,8 +839,60 @@ static int test_dialect_element_interpreter_jit_parity(void) {
     return 0;
 }
 
+static int test_dialect_element_env_gate(void) {
+    printf("\n=== DSL Test 15: element dialect env gate ===\n");
+
+    const char *src =
+        "# me:dialect=element\n"
+        "def kernel(x):\n"
+        "    acc = 0\n"
+        "    for i in range(3):\n"
+        "        if x > i:\n"
+        "            acc = acc + 1\n"
+        "    return acc\n";
+
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    char *saved_element = dup_env_value("ME_DSL_ELEMENT");
+    if (setenv("ME_DSL_ELEMENT", "0", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_ELEMENT=0 failed\n");
+        free(saved_element);
+        return 1;
+    }
+    if (me_compile(src, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: element dialect compiled while ME_DSL_ELEMENT=0\n");
+        me_free(expr);
+        restore_env_value("ME_DSL_ELEMENT", saved_element);
+        free(saved_element);
+        return 1;
+    }
+
+    expr = NULL;
+    if (setenv("ME_DSL_ELEMENT", "1", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_ELEMENT=1 failed\n");
+        restore_env_value("ME_DSL_ELEMENT", saved_element);
+        free(saved_element);
+        return 1;
+    }
+    if (me_compile(src, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: element dialect rejected with ME_DSL_ELEMENT=1 at %d\n", err);
+        restore_env_value("ME_DSL_ELEMENT", saved_element);
+        free(saved_element);
+        return 1;
+    }
+    me_free(expr);
+
+    restore_env_value("ME_DSL_ELEMENT", saved_element);
+    free(saved_element);
+
+    printf("  ✅ PASSED\n");
+    return 0;
+}
+
 static int test_dsl_print_stmt(void) {
-    printf("\n=== DSL Test 15: print statement ===\n");
+    printf("\n=== DSL Test 16: print statement ===\n");
 
     const char *src =
         "def kernel():\n"
@@ -875,6 +942,7 @@ int main(void) {
     fail |= test_dialect_element_per_item_break();
     fail |= test_dialect_element_any_remains_global();
     fail |= test_dialect_element_interpreter_jit_parity();
+    fail |= test_dialect_element_env_gate();
     fail |= test_dsl_print_stmt();
     return fail;
 }
