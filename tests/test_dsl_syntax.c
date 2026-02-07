@@ -629,8 +629,89 @@ static int test_dialect_loop_condition_policy(void) {
     return 0;
 }
 
+static int test_dialect_element_per_item_break(void) {
+    printf("\n=== DSL Test 12: element per-item break ===\n");
+
+    const char *src =
+        "# me:dialect=element\n"
+        "def kernel(x):\n"
+        "    acc = 0\n"
+        "    for i in range(5):\n"
+        "        if x > i:\n"
+        "            acc = acc + 1\n"
+        "        else:\n"
+        "            break\n"
+        "    return acc\n";
+
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    double x[4] = {-1.0, 2.0, 5.0, 0.0};
+    double out[4];
+    double expected[4] = {0.0, 2.0, 5.0, 0.0};
+
+    int err = 0;
+    me_expr *expr = NULL;
+    if (me_compile(src, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compile error at %d\n", err);
+        return 1;
+    }
+
+    const void *inputs[] = {x};
+    if (me_eval(expr, inputs, 1, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: eval error\n");
+        me_free(expr);
+        return 1;
+    }
+
+    int rc = check_all_close(out, expected, 4, 1e-12);
+    me_free(expr);
+    if (rc == 0) {
+        printf("  ✅ PASSED\n");
+    }
+    return rc;
+}
+
+static int test_dialect_element_any_remains_global(void) {
+    printf("\n=== DSL Test 13: element any() remains global ===\n");
+
+    const char *src =
+        "# me:dialect=element\n"
+        "def kernel(x):\n"
+        "    acc = 0\n"
+        "    for i in range(4):\n"
+        "        if any(x > 0):\n"
+        "            acc = acc + 1\n"
+        "            break\n"
+        "    return acc\n";
+
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    double x[4] = {-1.0, 2.0, -3.0, 0.0};
+    double out[4];
+    double expected[4] = {1.0, 1.0, 1.0, 1.0};
+
+    int err = 0;
+    me_expr *expr = NULL;
+    if (me_compile(src, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compile error at %d\n", err);
+        return 1;
+    }
+
+    const void *inputs[] = {x};
+    if (me_eval(expr, inputs, 1, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: eval error\n");
+        me_free(expr);
+        return 1;
+    }
+
+    int rc = check_all_close(out, expected, 4, 1e-12);
+    me_free(expr);
+    if (rc == 0) {
+        printf("  ✅ PASSED\n");
+    }
+    return rc;
+}
+
 static int test_dsl_print_stmt(void) {
-    printf("\n=== DSL Test 12: print statement ===\n");
+    printf("\n=== DSL Test 14: print statement ===\n");
 
     const char *src =
         "def kernel():\n"
@@ -677,6 +758,8 @@ int main(void) {
     fail |= test_break_any_condition();
     fail |= test_dsl_function_calls();
     fail |= test_dialect_loop_condition_policy();
+    fail |= test_dialect_element_per_item_break();
+    fail |= test_dialect_element_any_remains_global();
     fail |= test_dsl_print_stmt();
     return fail;
 }
