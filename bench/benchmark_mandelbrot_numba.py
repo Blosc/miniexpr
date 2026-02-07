@@ -40,17 +40,19 @@ def parse_dims_arg(arg: str) -> tuple[int, int]:
 def mandelbrot_kernel(cr, ci, max_iter, out):
     n = cr.shape[0]
     for idx in range(n):
-        zr = 0.0
-        zi = 0.0
-        acc = 0.0
-        for _ in range(max_iter):
-            zr2 = 0.5 * (zr * zr - zi * zi + cr[idx])
-            zi = 0.5 * (2.0 * zr * zi + ci[idx])
-            zr = zr2
-            acc += zr
-            if zr * zr + zi * zi > 4.0:
+        zr = np.float32(0.0)
+        zi = np.float32(0.0)
+        escape_iter = np.float32(max_iter)
+        for it in range(max_iter):
+            zr2 = zr * zr
+            zi2 = zi * zi
+            if zr2 + zi2 > np.float32(4.0):
+                escape_iter = np.float32(it)
                 break
-        out[idx] = acc
+            zr_new = zr2 - zi2 + cr[idx]
+            zi = np.float32(2.0) * zr * zi + ci[idx]
+            zr = zr_new
+        out[idx] = escape_iter
 
 
 def main():
@@ -96,8 +98,8 @@ def main():
         )
         return 1
 
-    x = np.linspace(-2.2, 1.0, width, dtype=np.float64)
-    y = np.linspace(1.5, -1.5, height, dtype=np.float64)
+    x = np.linspace(-2.0, 0.6, width, dtype=np.float32)
+    y = np.linspace(1.1, -1.1, height, dtype=np.float32)
     cr = np.tile(x, height)
     ci = np.repeat(y, width)
     out = np.empty_like(cr)
@@ -106,20 +108,24 @@ def main():
     mandelbrot_kernel(cr, ci, max_iter, out)
     t1 = time.perf_counter_ns()
 
-    warm_start = time.perf_counter_ns()
+    best_ns = None
     for _ in range(repeats):
+        run_start = time.perf_counter_ns()
         mandelbrot_kernel(cr, ci, max_iter, out)
-    warm_end = time.perf_counter_ns()
+        run_end = time.perf_counter_ns()
+        run_ns = run_end - run_start
+        if best_ns is None or run_ns < best_ns:
+            best_ns = run_ns
 
     stride = max(1, nitems // 17)
     checksum = float(out[::stride].sum())
     compile_ms = (t1 - t0) / 1.0e6
-    eval_ms = (warm_end - warm_start) / 1.0e6
-    ns_per_elem = (warm_end - warm_start) / float(nitems * repeats)
+    eval_ms = float(best_ns) / 1.0e6
+    ns_per_elem = float(best_ns) / float(nitems)
 
     print("benchmark_mandelbrot_numba")
     print(f"width={width} height={height} repeats={repeats} max_iter={max_iter}")
-    print(f"{'mode':12s} {'compile_ms':>12s} {'eval_ms_total':>14s} {'ns_per_elem':>12s} {'checksum':>12s}")
+    print(f"{'mode':12s} {'compile_ms':>12s} {'eval_ms_best':>14s} {'ns_per_elem':>12s} {'checksum':>12s}")
     print(f"{'numba-cold':12s} {compile_ms:12.3f} {compile_ms:14.3f} {(t1 - t0) / float(nitems):12.3f} {checksum:12.3f}")
     print(f"{'numba-warm':12s} {0.0:12.3f} {eval_ms:14.3f} {ns_per_elem:12.3f} {checksum:12.3f}")
     return 0

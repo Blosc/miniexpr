@@ -119,9 +119,14 @@ Thread-safe evaluation overhead vs single-threaded.
 
 ### benchmark_dsl_jit_mandelbrot.c
 DSL Mandelbrot-style benchmark comparing:
-- `vector` dialect kernel (`if any(...): break`) in JIT cold/warm + interpreter modes.
-- `element` dialect kernel (`if ...: break`) in JIT cold/warm + interpreter modes.
+- Notebook-equivalent Mandelbrot escape-iteration kernel.
+- `vector` dialect kernel (`all(active == 0)` break) in JIT cold/warm + interpreter modes.
+- `element` dialect kernel (per-item `if ...: break`) in JIT cold/warm + interpreter modes.
 - Side-by-side speed ratios for element vs vector.
+
+Notes:
+- `jit-warm` and `interp` rows report the **best single run** over `repeats`.
+- `jit-cold` runs once and includes first compile overhead separately in `compile_ms`.
 
 ```bash
 ./build/bench/benchmark_dsl_jit_mandelbrot
@@ -132,7 +137,8 @@ DSL Mandelbrot-style benchmark comparing:
 ```
 
 ### benchmark_mandelbrot_numba.py
-Optional Python/Numba baseline with regular early escape (`if zr*zr + zi*zi > 4.0: break`).
+Optional Python/Numba baseline matching notebook-style escape-iteration output
+with regular early escape (`if zr*zr + zi*zi > 4.0: break`).
 Requires `numpy` and `numba`.
 
 ```bash

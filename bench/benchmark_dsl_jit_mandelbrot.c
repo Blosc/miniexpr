@@ -2,8 +2,11 @@
  * DSL Mandelbrot benchmark for JIT cold/warm vs interpreter fallback.
  *
  * Compares two DSL kernels:
- * 1. vector dialect (default): global escape via `if any(...): break`
+ * 1. vector dialect (default): masked updates + global break via `all(active == 0)`
  * 2. element dialect: per-item escape via `if ...: break`
+ *
+ * The kernel matches the python-blosc2 notebook variant and returns
+ * per-element escape iteration counts.
  *
  * Usage:
  *   ./benchmark_dsl_jit_mandelbrot [widthxheight | width height] [repeats] [max_iter]
@@ -24,8 +27,8 @@
 
 typedef struct {
     double compile_ms;
-    double eval_ms_total;
-    double ns_per_elem;
+    double eval_ms_best;
+    double ns_per_elem_best;
     double checksum;
 } bench_result;
 
@@ -112,16 +115,16 @@ static bool parse_dims_arg(const char *arg, int *out_width, int *out_height) {
     return true;
 }
 
-static void fill_inputs(double *cr, double *ci, int width, int height) {
+static void fill_inputs(float *cr, float *ci, int width, int height) {
     if (!cr || !ci || width <= 0 || height <= 0) {
         return;
     }
     for (int y = 0; y < height; y++) {
-        double ty = (height > 1) ? ((double)y / (double)(height - 1)) : 0.0;
-        double imag = 1.5 - 3.0 * ty;
+        float ty = (height > 1) ? ((float)y / (float)(height - 1)) : 0.0f;
+        float imag = 1.1f - 2.2f * ty;
         for (int x = 0; x < width; x++) {
-            double tx = (width > 1) ? ((double)x / (double)(width - 1)) : 0.0;
-            double real = -2.2 + 3.2 * tx;
+            float tx = (width > 1) ? ((float)x / (float)(width - 1)) : 0.0f;
+            float real = -2.0f + 2.6f * tx;
             int idx = y * width + x;
             cr[idx] = real;
             ci[idx] = imag;
@@ -164,17 +167,27 @@ static bool build_dsl_source(char *out, size_t out_size, int max_iter,
                      "def kernel(cr, ci):\n"
                      "    zr = 0.0\n"
                      "    zi = 0.0\n"
-                     "    acc = 0.0\n"
+                     "    escape_iter = %.1f\n"
                      "    for i in range(%d):\n"
-                     "        zr2 = 0.5 * (zr * zr - zi * zi + cr)\n"
-                     "        zi = 0.5 * (2.0 * zr * zi + ci)\n"
-                     "        zr = zr2\n"
-                     "        acc = acc + zr\n"
-                     "        if any(zr * zr + zi * zi > 4.0):\n"
+                     "        zr2 = zr * zr\n"
+                     "        zi2 = zi * zi\n"
+                     "        mag2 = zr2 + zi2\n"
+                     "        active = escape_iter == %.1f\n"
+                     "        just_escaped = (mag2 > 4.0) & active\n"
+                     "        escape_iter = where(just_escaped, i + 0.0, escape_iter)\n"
+                     "        active = escape_iter == %.1f\n"
+                     "        if all(active == 0):\n"
                      "            break\n"
-                     "    return acc\n",
+                     "        zr_new = zr2 - zi2 + cr\n"
+                     "        zi_new = 2.0 * zr * zi + ci\n"
+                     "        zr = where(active, zr_new, zr)\n"
+                     "        zi = where(active, zi_new, zi)\n"
+                     "    return escape_iter\n",
                      prefix,
-                     max_iter);
+                     (double)max_iter,
+                     max_iter,
+                     (double)max_iter,
+                     (double)max_iter);
     }
     else {
         n = snprintf(out, out_size,
@@ -182,16 +195,17 @@ static bool build_dsl_source(char *out, size_t out_size, int max_iter,
                      "def kernel(cr, ci):\n"
                      "    zr = 0.0\n"
                      "    zi = 0.0\n"
-                     "    acc = 0.0\n"
+                     "    escape_iter = %.1f\n"
                      "    for i in range(%d):\n"
-                     "        zr2 = 0.5 * (zr * zr - zi * zi + cr)\n"
-                     "        zi = 0.5 * (2.0 * zr * zi + ci)\n"
-                     "        zr = zr2\n"
-                     "        acc = acc + zr\n"
                      "        if zr * zr + zi * zi > 4.0:\n"
+                     "            escape_iter = i + 0.0\n"
                      "            break\n"
-                     "    return acc\n",
+                     "        zr_new = zr * zr - zi * zi + cr\n"
+                     "        zi = 2.0 * zr * zi + ci\n"
+                     "        zr = zr_new\n"
+                     "    return escape_iter\n",
                      prefix,
+                     (double)max_iter,
                      max_iter);
     }
     return n > 0 && (size_t)n < out_size;
@@ -199,7 +213,7 @@ static bool build_dsl_source(char *out, size_t out_size, int max_iter,
 
 static int run_mode(const char *mode_name, const char *jit_env_value,
                     const char *source,
-                    const double *cr, const double *ci, int nitems, int repeats,
+                    const float *cr, const float *ci, int nitems, int repeats,
                     bench_result *result) {
     if (!mode_name || !source || !cr || !ci || nitems <= 0 || repeats <= 0 || !result) {
         return 1;
@@ -217,15 +231,15 @@ static int run_mode(const char *mode_name, const char *jit_env_value,
     }
 
     me_variable vars[] = {
-        {"cr", ME_FLOAT64},
-        {"ci", ME_FLOAT64}
+        {"cr", ME_FLOAT32},
+        {"ci", ME_FLOAT32}
     };
     const void *inputs[] = {cr, ci};
 
     int err = 0;
     me_expr *expr = NULL;
     uint64_t t0 = monotonic_ns();
-    int rc_compile = me_compile(source, vars, 2, ME_FLOAT64, &err, &expr);
+    int rc_compile = me_compile(source, vars, 2, ME_FLOAT32, &err, &expr);
     uint64_t t1 = monotonic_ns();
     if (rc_compile != ME_COMPILE_SUCCESS || !expr) {
         fprintf(stderr, "compile failed for mode %s (err=%d, rc=%d)\n", mode_name, err, rc_compile);
@@ -235,7 +249,7 @@ static int run_mode(const char *mode_name, const char *jit_env_value,
         return 1;
     }
 
-    double *out = malloc((size_t)nitems * sizeof(*out));
+    float *out = malloc((size_t)nitems * sizeof(*out));
     if (!out) {
         restore_env_value("ME_DSL_JIT", saved_jit);
         free(saved_jit);
@@ -243,9 +257,11 @@ static int run_mode(const char *mode_name, const char *jit_env_value,
         return 1;
     }
 
-    uint64_t eval_start = monotonic_ns();
+    uint64_t eval_ns_best = UINT64_MAX;
     for (int r = 0; r < repeats; r++) {
+        uint64_t run_start = monotonic_ns();
         int rc_eval = me_eval(expr, inputs, 2, out, nitems, NULL);
+        uint64_t run_end = monotonic_ns();
         if (rc_eval != ME_EVAL_SUCCESS) {
             fprintf(stderr, "eval failed for mode %s (rc=%d)\n", mode_name, rc_eval);
             free(out);
@@ -254,8 +270,11 @@ static int run_mode(const char *mode_name, const char *jit_env_value,
             me_free(expr);
             return 1;
         }
+        uint64_t run_ns = run_end - run_start;
+        if (run_ns < eval_ns_best) {
+            eval_ns_best = run_ns;
+        }
     }
-    uint64_t eval_end = monotonic_ns();
 
     double checksum = 0.0;
     int stride = nitems / 17;
@@ -267,8 +286,8 @@ static int run_mode(const char *mode_name, const char *jit_env_value,
     }
 
     result->compile_ms = (double)(t1 - t0) / 1.0e6;
-    result->eval_ms_total = (double)(eval_end - eval_start) / 1.0e6;
-    result->ns_per_elem = (double)(eval_end - eval_start) / (double)((uint64_t)nitems * (uint64_t)repeats);
+    result->eval_ms_best = (double)eval_ns_best / 1.0e6;
+    result->ns_per_elem_best = (double)eval_ns_best / (double)nitems;
     result->checksum = checksum;
 
     free(out);
@@ -279,7 +298,7 @@ static int run_mode(const char *mode_name, const char *jit_env_value,
 }
 
 static int run_kernel(const char *kernel_name, const char *source,
-                      const double *cr, const double *ci, int nitems, int repeats,
+                      const float *cr, const float *ci, int nitems, int repeats,
                       kernel_result *result) {
     if (!kernel_name || !source || !cr || !ci || nitems <= 0 || repeats <= 0 || !result) {
         return 1;
@@ -343,8 +362,8 @@ int main(int argc, char **argv) {
     }
     int nitems = (int)nitems64;
 
-    double *cr = malloc((size_t)nitems * sizeof(*cr));
-    double *ci = malloc((size_t)nitems * sizeof(*ci));
+    float *cr = malloc((size_t)nitems * sizeof(*cr));
+    float *ci = malloc((size_t)nitems * sizeof(*ci));
     if (!cr || !ci) {
         fprintf(stderr, "allocation failed\n");
         free(cr);
@@ -424,38 +443,40 @@ int main(int argc, char **argv) {
     printf("benchmark_dsl_jit_mandelbrot\n");
     printf("width=%d height=%d repeats=%d max_iter=%d\n",
            width, height, repeats, max_iter);
-    printf("kernels: vector(any-break) vs element(per-item-break)\n");
+    printf("kernel: notebook-equivalent escape-iteration output\n");
+    printf("kernels: vector(all-active break) vs element(per-item-break)\n");
+    printf("timing: warm modes report best single run over repeats\n");
     printf("%-10s %-10s %12s %14s %12s %12s\n",
-           "dialect", "mode", "compile_ms", "eval_ms_total", "ns_per_elem", "checksum");
+           "dialect", "mode", "compile_ms", "eval_ms_best", "ns_per_elem", "checksum");
     printf("%-10s %-10s %12.3f %14.3f %12.3f %12.3f\n",
            "vector", "jit-cold",
-           vector_res.jit_cold.compile_ms, vector_res.jit_cold.eval_ms_total,
-           vector_res.jit_cold.ns_per_elem, vector_res.jit_cold.checksum);
+           vector_res.jit_cold.compile_ms, vector_res.jit_cold.eval_ms_best,
+           vector_res.jit_cold.ns_per_elem_best, vector_res.jit_cold.checksum);
     printf("%-10s %-10s %12.3f %14.3f %12.3f %12.3f\n",
            "vector", "jit-warm",
-           vector_res.jit_warm.compile_ms, vector_res.jit_warm.eval_ms_total,
-           vector_res.jit_warm.ns_per_elem, vector_res.jit_warm.checksum);
+           vector_res.jit_warm.compile_ms, vector_res.jit_warm.eval_ms_best,
+           vector_res.jit_warm.ns_per_elem_best, vector_res.jit_warm.checksum);
     printf("%-10s %-10s %12.3f %14.3f %12.3f %12.3f\n",
            "vector", "interp",
-           vector_res.interp.compile_ms, vector_res.interp.eval_ms_total,
-           vector_res.interp.ns_per_elem, vector_res.interp.checksum);
+           vector_res.interp.compile_ms, vector_res.interp.eval_ms_best,
+           vector_res.interp.ns_per_elem_best, vector_res.interp.checksum);
     printf("%-10s %-10s %12.3f %14.3f %12.3f %12.3f\n",
            "element", "jit-cold",
-           element_res.jit_cold.compile_ms, element_res.jit_cold.eval_ms_total,
-           element_res.jit_cold.ns_per_elem, element_res.jit_cold.checksum);
+           element_res.jit_cold.compile_ms, element_res.jit_cold.eval_ms_best,
+           element_res.jit_cold.ns_per_elem_best, element_res.jit_cold.checksum);
     printf("%-10s %-10s %12.3f %14.3f %12.3f %12.3f\n",
            "element", "jit-warm",
-           element_res.jit_warm.compile_ms, element_res.jit_warm.eval_ms_total,
-           element_res.jit_warm.ns_per_elem, element_res.jit_warm.checksum);
+           element_res.jit_warm.compile_ms, element_res.jit_warm.eval_ms_best,
+           element_res.jit_warm.ns_per_elem_best, element_res.jit_warm.checksum);
     printf("%-10s %-10s %12.3f %14.3f %12.3f %12.3f\n",
            "element", "interp",
-           element_res.interp.compile_ms, element_res.interp.eval_ms_total,
-           element_res.interp.ns_per_elem, element_res.interp.checksum);
+           element_res.interp.compile_ms, element_res.interp.eval_ms_best,
+           element_res.interp.ns_per_elem_best, element_res.interp.checksum);
 
-    double vector_warm = vector_res.jit_warm.ns_per_elem;
-    double element_warm = element_res.jit_warm.ns_per_elem;
-    double vector_interp = vector_res.interp.ns_per_elem;
-    double element_interp = element_res.interp.ns_per_elem;
+    double vector_warm = vector_res.jit_warm.ns_per_elem_best;
+    double element_warm = element_res.jit_warm.ns_per_elem_best;
+    double vector_interp = vector_res.interp.ns_per_elem_best;
+    double element_interp = element_res.interp.ns_per_elem_best;
     if (element_warm > 0.0 && element_interp > 0.0) {
         printf("speedup_warm_element_vs_vector=%.3fx\n", vector_warm / element_warm);
         printf("speedup_interp_element_vs_vector=%.3fx\n", vector_interp / element_interp);
