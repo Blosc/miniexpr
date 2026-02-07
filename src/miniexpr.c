@@ -59,6 +59,7 @@ For log = base 10 log comment the next line. */
 #include <assert.h>
 #include <errno.h>
 #include <time.h>
+#include <stdarg.h>
 
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <dlfcn.h>
@@ -2442,6 +2443,37 @@ typedef struct {
     int func_count;
 } dsl_compile_ctx;
 
+static const char *dsl_dialect_name(me_dsl_dialect dialect) {
+    switch (dialect) {
+    case ME_DSL_DIALECT_VECTOR:
+        return "vector";
+    case ME_DSL_DIALECT_ELEMENT:
+        return "element";
+    default:
+        return "unknown";
+    }
+}
+
+static bool dsl_trace_enabled(void) {
+    const char *env = getenv("ME_DSL_TRACE");
+    if (!env || env[0] == '\0') {
+        return false;
+    }
+    return strcmp(env, "0") != 0;
+}
+
+static void dsl_tracef(const char *fmt, ...) {
+    if (!dsl_trace_enabled() || !fmt) {
+        return;
+    }
+    fprintf(stderr, "[me-dsl] ");
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+}
+
 static int dsl_offset_from_linecol(const char *source, int line, int column) {
     if (!source || line <= 0 || column <= 0) {
         return -1;
@@ -3489,28 +3521,42 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         return;
     }
     if (program->output_is_scalar) {
+        dsl_tracef("jit runtime skip: dialect=%s reason=scalar output",
+                   dsl_dialect_name(program->dialect));
         return;
     }
     if (program->uses_i_mask || program->uses_n_mask || program->uses_ndim) {
+        dsl_tracef("jit runtime skip: dialect=%s reason=reserved index vars used",
+                   dsl_dialect_name(program->dialect));
         return;
     }
     if (program->jit_nparams != program->jit_ir->nparams) {
+        dsl_tracef("jit runtime skip: dialect=%s reason=parameter metadata mismatch",
+                   dsl_dialect_name(program->dialect));
         return;
     }
     if (!dsl_jit_runtime_enabled()) {
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime disabled by environment");
+        dsl_tracef("jit runtime skip: dialect=%s reason=%s",
+                   dsl_dialect_name(program->dialect), program->jit_c_error);
         return;
     }
 
     uint64_t key = dsl_jit_runtime_cache_key(program);
     if (dsl_jit_pos_cache_enabled() && dsl_jit_pos_cache_bind_program(program, key)) {
+        dsl_tracef("jit runtime hit: dialect=%s source=process-cache key=%016llx",
+                   dsl_dialect_name(program->dialect),
+                   (unsigned long long)key);
         dsl_jit_neg_cache_clear(key);
         return;
     }
     if (dsl_jit_neg_cache_should_skip(key)) {
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime skipped after recent failure");
+        dsl_tracef("jit runtime skip: dialect=%s reason=%s key=%016llx",
+                   dsl_dialect_name(program->dialect), program->jit_c_error,
+                   (unsigned long long)key);
         return;
     }
 
@@ -3519,6 +3565,8 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_CACHE_DIR);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime cache directory unavailable");
+        dsl_tracef("jit runtime skip: dialect=%s reason=%s",
+                   dsl_dialect_name(program->dialect), program->jit_c_error);
         return;
     }
 
@@ -3538,6 +3586,8 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_PATH);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime cache path too long");
+        dsl_tracef("jit runtime skip: dialect=%s reason=%s",
+                   dsl_dialect_name(program->dialect), program->jit_c_error);
         return;
     }
 
@@ -3551,39 +3601,56 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
             if (dsl_jit_pos_cache_enabled()) {
                 (void)dsl_jit_pos_cache_store_program(program, key);
             }
+            dsl_tracef("jit runtime hit: dialect=%s source=disk-cache key=%016llx",
+                       dsl_dialect_name(program->dialect),
+                       (unsigned long long)key);
             dsl_jit_neg_cache_clear(key);
             return;
         }
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_LOAD);
+        dsl_tracef("jit runtime cache reload failed: dialect=%s key=%016llx",
+                   dsl_dialect_name(program->dialect),
+                   (unsigned long long)key);
     }
 
     if (!dsl_jit_write_text_file(src_path, program->jit_c_source)) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_WRITE);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime failed to write source");
+        dsl_tracef("jit runtime skip: dialect=%s reason=%s",
+                   dsl_dialect_name(program->dialect), program->jit_c_error);
         return;
     }
     if (!dsl_jit_compile_shared(src_path, so_path)) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime compilation failed");
+        dsl_tracef("jit runtime skip: dialect=%s reason=%s",
+                   dsl_dialect_name(program->dialect), program->jit_c_error);
         return;
     }
     if (!dsl_jit_write_meta_file(meta_path, &expected_meta)) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_METADATA);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime failed to write cache metadata");
+        dsl_tracef("jit runtime skip: dialect=%s reason=%s",
+                   dsl_dialect_name(program->dialect), program->jit_c_error);
         return;
     }
     if (!dsl_jit_load_kernel(program, so_path)) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_LOAD);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime shared object load failed");
+        dsl_tracef("jit runtime skip: dialect=%s reason=%s",
+                   dsl_dialect_name(program->dialect), program->jit_c_error);
         return;
     }
     if (dsl_jit_pos_cache_enabled()) {
         (void)dsl_jit_pos_cache_store_program(program, key);
     }
+    dsl_tracef("jit runtime built: dialect=%s key=%016llx",
+               dsl_dialect_name(program->dialect),
+               (unsigned long long)key);
     dsl_jit_neg_cache_clear(key);
 }
 #else
@@ -3626,6 +3693,8 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     if (parsed->nparams < 0) {
         snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
                  "invalid dsl parameter metadata");
+        dsl_tracef("jit ir skip: dialect=%s reason=%s",
+                   dsl_dialect_name(program->dialect), program->jit_ir_error);
         return;
     }
 
@@ -3640,6 +3709,8 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
         if (!param_names || !param_dtypes || !param_input_indices) {
             snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
                      "out of memory building jit ir metadata");
+            dsl_tracef("jit ir skip: dialect=%s reason=%s",
+                       dsl_dialect_name(program->dialect), program->jit_ir_error);
             free(param_names);
             free(param_dtypes);
             free(param_input_indices);
@@ -3650,6 +3721,8 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
             if (idx < 0 || idx >= program->vars.count) {
                 snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
                          "failed to resolve dsl parameter dtype for jit ir");
+                dsl_tracef("jit ir skip: dialect=%s reason=%s",
+                           dsl_dialect_name(program->dialect), program->jit_ir_error);
                 free(param_names);
                 free(param_dtypes);
                 free(param_input_indices);
@@ -3675,6 +3748,10 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
         program->jit_ir_error_column = ir_error.column;
         snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
                  ir_error.message[0] ? ir_error.message : "jit ir build rejected");
+        dsl_tracef("jit ir reject: dialect=%s at %d:%d reason=%s",
+                   dsl_dialect_name(program->dialect),
+                   program->jit_ir_error_line, program->jit_ir_error_column,
+                   program->jit_ir_error);
         me_dsl_jit_ir_free(jit_ir);
         free(param_input_indices);
         return;
@@ -3697,6 +3774,10 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
         program->jit_c_error_column = cg_error.column;
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  cg_error.message[0] ? cg_error.message : "jit c codegen rejected");
+        dsl_tracef("jit codegen reject: dialect=%s at %d:%d reason=%s",
+                   dsl_dialect_name(program->dialect),
+                   program->jit_c_error_line, program->jit_c_error_column,
+                   program->jit_c_error);
         free(generated_c);
         free(program->jit_param_input_indices);
         program->jit_param_input_indices = NULL;
@@ -3704,6 +3785,9 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
         return;
     }
     program->jit_c_source = generated_c;
+    dsl_tracef("jit ir built: dialect=%s fingerprint=%016llx",
+               dsl_dialect_name(program->dialect),
+               (unsigned long long)program->jit_ir_fingerprint);
     dsl_try_prepare_jit_runtime(program);
 }
 
@@ -4067,6 +4151,10 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 !dsl_expr_is_uniform(compiled->as.if_stmt.cond.expr,
                                      ctx->program->vars.uniform,
                                      ctx->program->vars.count)) {
+                dsl_tracef("compile reject: dialect=%s requires uniform loop condition at %d:%d; "
+                           "use '# me:dialect=element' for per-item loop conditions",
+                           dsl_dialect_name(ctx->dialect),
+                           stmt->as.if_stmt.cond->line, stmt->as.if_stmt.cond->column);
                 if (ctx->error_pos) {
                     *ctx->error_pos = dsl_offset_from_linecol(ctx->source,
                                                              stmt->as.if_stmt.cond->line,
@@ -4108,6 +4196,10 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                     !dsl_expr_is_uniform(out_branch->cond.expr,
                                          ctx->program->vars.uniform,
                                          ctx->program->vars.count)) {
+                    dsl_tracef("compile reject: dialect=%s requires uniform loop condition at %d:%d; "
+                               "use '# me:dialect=element' for per-item loop conditions",
+                               dsl_dialect_name(ctx->dialect),
+                               elif_branch->cond->line, elif_branch->cond->column);
                     if (ctx->error_pos) {
                         *ctx->error_pos = dsl_offset_from_linecol(ctx->source,
                                                                  elif_branch->cond->line,
@@ -4209,6 +4301,9 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                     !dsl_expr_is_uniform(compiled->as.flow.cond.expr,
                                          ctx->program->vars.uniform,
                                          ctx->program->vars.count)) {
+                    dsl_tracef("compile reject: dialect=%s requires uniform break/continue condition at %d:%d",
+                               dsl_dialect_name(ctx->dialect),
+                               stmt->as.flow.cond->line, stmt->as.flow.cond->column);
                     if (ctx->error_pos) {
                         *ctx->error_pos = dsl_offset_from_linecol(ctx->source,
                                                                  stmt->as.flow.cond->line,

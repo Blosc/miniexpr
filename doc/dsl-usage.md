@@ -53,6 +53,9 @@ def kernel(x):
 - `vector` is the default when the pragma is omitted.
 - `element` enables per-element loop control behavior (details below).
 
+For backend diagnostics, set `ME_DSL_TRACE=1` to emit compile/JIT trace lines
+to stderr (dialect, JIT accept/reject reasons, runtime cache/fallback paths).
+
 ### Temporary Variables
 
 Use any identifier to store intermediate values:
