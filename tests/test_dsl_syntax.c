@@ -22,6 +22,52 @@ static int check_all_close(const double *out, const double *expected, int n, dou
     return 0;
 }
 
+static char *dup_env_value(const char *name) {
+    const char *value = getenv(name);
+    if (!value) {
+        return NULL;
+    }
+    size_t n = strlen(value) + 1;
+    char *copy = malloc(n);
+    if (!copy) {
+        return NULL;
+    }
+    memcpy(copy, value, n);
+    return copy;
+}
+
+static void restore_env_value(const char *name, const char *value) {
+    if (!name) {
+        return;
+    }
+    if (value) {
+        (void)setenv(name, value, 1);
+    }
+    else {
+        (void)unsetenv(name);
+    }
+}
+
+static int compile_eval_double(const char *src, me_variable *vars, int nvars,
+                               const void **inputs, int nitems, double *out) {
+    if (!src || !out || nitems <= 0) {
+        return 1;
+    }
+    me_expr *expr = NULL;
+    int err = 0;
+    if (me_compile(src, vars, nvars, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compile error at %d\n", err);
+        return 1;
+    }
+    int rc = me_eval(expr, inputs, nvars, out, nitems, NULL);
+    me_free(expr);
+    if (rc != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: eval error (%d)\n", rc);
+        return 1;
+    }
+    return 0;
+}
+
 static int test_assign_and_result_stmt(void) {
     printf("\n=== DSL Test 1: assignments + return ===\n");
 
@@ -710,8 +756,76 @@ static int test_dialect_element_any_remains_global(void) {
     return rc;
 }
 
+static int test_dialect_element_interpreter_jit_parity(void) {
+    printf("\n=== DSL Test 14: element interpreter/JIT parity ===\n");
+
+    const char *src =
+        "# me:dialect=element\n"
+        "def kernel(x):\n"
+        "    acc = 0\n"
+        "    for i in range(8):\n"
+        "        if i == 0:\n"
+        "            continue\n"
+        "        if x > i:\n"
+        "            acc = acc + i\n"
+        "        else:\n"
+        "            break\n"
+        "    return acc\n";
+
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    double x[4] = {0.0, 2.0, 5.0, 10.0};
+    const void *inputs[] = {x};
+    double out_interp[4] = {0.0, 0.0, 0.0, 0.0};
+    double out_jit[4] = {0.0, 0.0, 0.0, 0.0};
+
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+
+    if (setenv("ME_DSL_JIT", "0", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=0 failed\n");
+        free(saved_jit);
+        return 1;
+    }
+    if (compile_eval_double(src, vars, 1, inputs, 4, out_interp) != 0) {
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=1 failed\n");
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+    if (compile_eval_double(src, vars, 1, inputs, 4, out_jit) != 0) {
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    free(saved_jit);
+
+    for (int i = 0; i < 4; i++) {
+        if (out_interp[i] != out_jit[i]) {
+            printf("  ❌ FAILED: mismatch at %d (interp=%.17g jit=%.17g)\n",
+                   i, out_interp[i], out_jit[i]);
+            return 1;
+        }
+    }
+
+    double expected[4] = {0.0, 1.0, 10.0, 28.0};
+    if (check_all_close(out_interp, expected, 4, 1e-12) != 0) {
+        printf("  ❌ FAILED: unexpected element parity output\n");
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    return 0;
+}
+
 static int test_dsl_print_stmt(void) {
-    printf("\n=== DSL Test 14: print statement ===\n");
+    printf("\n=== DSL Test 15: print statement ===\n");
 
     const char *src =
         "def kernel():\n"
@@ -760,6 +874,7 @@ int main(void) {
     fail |= test_dialect_loop_condition_policy();
     fail |= test_dialect_element_per_item_break();
     fail |= test_dialect_element_any_remains_global();
+    fail |= test_dialect_element_interpreter_jit_parity();
     fail |= test_dsl_print_stmt();
     return fail;
 }
