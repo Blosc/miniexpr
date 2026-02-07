@@ -10,6 +10,7 @@
 
 #include "dsl_jit_ir.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -294,6 +295,77 @@ static bool dsl_jit_expr_has_comma(const char *text) {
     return false;
 }
 
+static bool dsl_jit_ident_is_reduction(const char *ident, size_t len) {
+    if (!ident || len == 0) {
+        return false;
+    }
+    return (len == 3 && strncmp(ident, "any", 3) == 0) ||
+           (len == 3 && strncmp(ident, "all", 3) == 0) ||
+           (len == 3 && strncmp(ident, "sum", 3) == 0) ||
+           (len == 4 && strncmp(ident, "mean", 4) == 0) ||
+           (len == 3 && strncmp(ident, "min", 3) == 0) ||
+           (len == 3 && strncmp(ident, "max", 3) == 0) ||
+           (len == 4 && strncmp(ident, "prod", 4) == 0);
+}
+
+static bool dsl_jit_expr_has_reduction_call(const char *text) {
+    bool in_string = false;
+    char quote = '\0';
+    if (!text) {
+        return false;
+    }
+    for (const char *p = text; *p; p++) {
+        char c = *p;
+        if (in_string) {
+            if (c == '\\' && p[1]) {
+                p++;
+                continue;
+            }
+            if (c == quote) {
+                in_string = false;
+            }
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            in_string = true;
+            quote = c;
+            continue;
+        }
+        if (isalpha((unsigned char)c) || c == '_') {
+            const char *start = p;
+            p++;
+            while (isalnum((unsigned char)*p) || *p == '_') {
+                p++;
+            }
+            size_t len = (size_t)(p - start);
+            const char *q = p;
+            while (*q == ' ' || *q == '\t' || *q == '\r' || *q == '\n') {
+                q++;
+            }
+            if (*q == '(' && dsl_jit_ident_is_reduction(start, len)) {
+                return true;
+            }
+            p--;
+        }
+    }
+    return false;
+}
+
+static bool dsl_jit_expr_validate_subset(me_dsl_jit_build_ctx *ctx, const me_dsl_expr *expr,
+                                         int line, int column) {
+    if (!ctx || !expr || !expr->text) {
+        dsl_jit_set_error(ctx ? ctx->error : NULL, line, column,
+                          "invalid expression in jit ir");
+        return false;
+    }
+    if (dsl_jit_expr_has_reduction_call(expr->text)) {
+        dsl_jit_set_error(ctx->error, line, column,
+                          "reduction functions are not supported by jit ir");
+        return false;
+    }
+    return true;
+}
+
 static bool dsl_jit_build_block(me_dsl_jit_build_ctx *ctx, const me_dsl_block *in,
                                 me_dsl_jit_ir_block *out, bool in_loop) {
     if (!ctx || !in || !out) {
@@ -317,6 +389,12 @@ static bool dsl_jit_build_block(me_dsl_jit_build_ctx *ctx, const me_dsl_block *i
         case ME_DSL_STMT_ASSIGN: {
             if (!stmt->as.assign.name || !stmt->as.assign.value) {
                 dsl_jit_set_error(ctx->error, stmt->line, stmt->column, "invalid assignment in dsl");
+                dsl_jit_ir_stmt_free(ir_stmt);
+                return false;
+            }
+            if (!dsl_jit_expr_validate_subset(ctx, stmt->as.assign.value,
+                                              stmt->as.assign.value->line,
+                                              stmt->as.assign.value->column)) {
                 dsl_jit_ir_stmt_free(ir_stmt);
                 return false;
             }
@@ -367,6 +445,12 @@ static bool dsl_jit_build_block(me_dsl_jit_build_ctx *ctx, const me_dsl_block *i
                 dsl_jit_ir_stmt_free(ir_stmt);
                 return false;
             }
+            if (!dsl_jit_expr_validate_subset(ctx, stmt->as.return_stmt.expr,
+                                              stmt->as.return_stmt.expr->line,
+                                              stmt->as.return_stmt.expr->column)) {
+                dsl_jit_ir_stmt_free(ir_stmt);
+                return false;
+            }
             me_dtype ret_dtype = ME_AUTO;
             if (!dsl_jit_resolve_expr_dtype(ctx, stmt->as.return_stmt.expr, stmt->line, stmt->column,
                                             &ret_dtype)) {
@@ -384,6 +468,12 @@ static bool dsl_jit_build_block(me_dsl_jit_build_ctx *ctx, const me_dsl_block *i
         case ME_DSL_STMT_IF: {
             if (!stmt->as.if_stmt.cond) {
                 dsl_jit_set_error(ctx->error, stmt->line, stmt->column, "invalid if condition");
+                dsl_jit_ir_stmt_free(ir_stmt);
+                return false;
+            }
+            if (!dsl_jit_expr_validate_subset(ctx, stmt->as.if_stmt.cond,
+                                              stmt->as.if_stmt.cond->line,
+                                              stmt->as.if_stmt.cond->column)) {
                 dsl_jit_ir_stmt_free(ir_stmt);
                 return false;
             }
@@ -420,6 +510,12 @@ static bool dsl_jit_build_block(me_dsl_jit_build_ctx *ctx, const me_dsl_block *i
                 me_dsl_jit_ir_if_branch *out_branch = &ir_stmt->as.if_stmt.elif_branches[j];
                 if (!in_branch->cond) {
                     dsl_jit_set_error(ctx->error, stmt->line, stmt->column, "invalid elif condition");
+                    dsl_jit_ir_stmt_free(ir_stmt);
+                    return false;
+                }
+                if (!dsl_jit_expr_validate_subset(ctx, in_branch->cond,
+                                                  in_branch->cond->line,
+                                                  in_branch->cond->column)) {
                     dsl_jit_ir_stmt_free(ir_stmt);
                     return false;
                 }
@@ -465,6 +561,12 @@ static bool dsl_jit_build_block(me_dsl_jit_build_ctx *ctx, const me_dsl_block *i
             if (dsl_jit_expr_has_comma(stmt->as.for_loop.limit->text)) {
                 dsl_jit_set_error(ctx->error, stmt->line, stmt->column,
                                   "range() with start/stop/step is not supported by jit ir");
+                dsl_jit_ir_stmt_free(ir_stmt);
+                return false;
+            }
+            if (!dsl_jit_expr_validate_subset(ctx, stmt->as.for_loop.limit,
+                                              stmt->as.for_loop.limit->line,
+                                              stmt->as.for_loop.limit->column)) {
                 dsl_jit_ir_stmt_free(ir_stmt);
                 return false;
             }

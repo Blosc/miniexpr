@@ -48,6 +48,8 @@ def mandelbrot_kernel(cr, ci, max_iter, out):
             zi = 0.5 * (2.0 * zr * zi + ci[idx])
             zr = zr2
             acc += zr
+            if zr * zr + zi * zi > 4.0:
+                break
         out[idx] = acc
 
 

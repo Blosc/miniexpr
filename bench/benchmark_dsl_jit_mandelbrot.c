@@ -1,8 +1,9 @@
 /*
  * DSL Mandelbrot benchmark for JIT cold/warm vs interpreter fallback.
  *
- * Uses element dialect with per-item escape (`if ...: break`) to model
- * Mandelbrot early-exit behavior directly.
+ * Compares two DSL kernels:
+ * 1. vector dialect (default): global escape via `if any(...): break`
+ * 2. element dialect: per-item escape via `if ...: break`
  *
  * Usage:
  *   ./benchmark_dsl_jit_mandelbrot [widthxheight | width height] [repeats] [max_iter]
@@ -27,6 +28,12 @@ typedef struct {
     double ns_per_elem;
     double checksum;
 } bench_result;
+
+typedef struct {
+    bench_result jit_cold;
+    bench_result jit_warm;
+    bench_result interp;
+} kernel_result;
 
 static uint64_t monotonic_ns(void) {
     struct timespec ts;
@@ -271,6 +278,27 @@ static int run_mode(const char *mode_name, const char *jit_env_value,
     return 0;
 }
 
+static int run_kernel(const char *kernel_name, const char *source,
+                      const double *cr, const double *ci, int nitems, int repeats,
+                      kernel_result *result) {
+    if (!kernel_name || !source || !cr || !ci || nitems <= 0 || repeats <= 0 || !result) {
+        return 1;
+    }
+
+    memset(result, 0, sizeof(*result));
+
+    if (run_mode(kernel_name, "1", source, cr, ci, nitems, 1, &result->jit_cold) != 0) {
+        return 1;
+    }
+    if (run_mode(kernel_name, "1", source, cr, ci, nitems, repeats, &result->jit_warm) != 0) {
+        return 1;
+    }
+    if (run_mode(kernel_name, "0", source, cr, ci, nitems, repeats, &result->interp) != 0) {
+        return 1;
+    }
+    return 0;
+}
+
 int main(int argc, char **argv) {
     int width = 1200;
     int height = 800;
@@ -354,16 +382,13 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    bench_result jit_cold;
-    bench_result jit_warm;
-    bench_result interp;
-    char jit_source[1024];
-    char interp_source[1024];
-    memset(&jit_cold, 0, sizeof(jit_cold));
-    memset(&jit_warm, 0, sizeof(jit_warm));
-    memset(&interp, 0, sizeof(interp));
-    if (!build_dsl_source(jit_source, sizeof(jit_source), max_iter, true, false) ||
-        !build_dsl_source(interp_source, sizeof(interp_source), max_iter, true, false)) {
+    kernel_result vector_res;
+    kernel_result element_res;
+    char vector_source[1024];
+    char element_source[1024];
+
+    if (!build_dsl_source(vector_source, sizeof(vector_source), max_iter, false, true) ||
+        !build_dsl_source(element_source, sizeof(element_source), max_iter, true, false)) {
         fprintf(stderr, "failed to build benchmark DSL source\n");
         restore_env_value("TMPDIR", saved_tmpdir);
         free(saved_tmpdir);
@@ -375,7 +400,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    if (run_mode("jit-cold", "1", jit_source, cr, ci, nitems, 1, &jit_cold) != 0) {
+    if (run_kernel("vector", vector_source, cr, ci, nitems, repeats, &vector_res) != 0) {
         restore_env_value("TMPDIR", saved_tmpdir);
         free(saved_tmpdir);
         free(cr);
@@ -385,17 +410,7 @@ int main(int argc, char **argv) {
         (void)rmdir(tmp_root);
         return 1;
     }
-    if (run_mode("jit-warm", "1", jit_source, cr, ci, nitems, repeats, &jit_warm) != 0) {
-        restore_env_value("TMPDIR", saved_tmpdir);
-        free(saved_tmpdir);
-        free(cr);
-        free(ci);
-        remove_files_in_dir(cache_dir);
-        (void)rmdir(cache_dir);
-        (void)rmdir(tmp_root);
-        return 1;
-    }
-    if (run_mode("interp", "0", interp_source, cr, ci, nitems, repeats, &interp) != 0) {
+    if (run_kernel("element", element_source, cr, ci, nitems, repeats, &element_res) != 0) {
         restore_env_value("TMPDIR", saved_tmpdir);
         free(saved_tmpdir);
         free(cr);
@@ -409,15 +424,42 @@ int main(int argc, char **argv) {
     printf("benchmark_dsl_jit_mandelbrot\n");
     printf("width=%d height=%d repeats=%d max_iter=%d\n",
            width, height, repeats, max_iter);
-    printf("kernel=element-dialect-per-item-break\n");
-    printf("%-12s %12s %14s %12s %12s\n",
-           "mode", "compile_ms", "eval_ms_total", "ns_per_elem", "checksum");
-    printf("%-12s %12.3f %14.3f %12.3f %12.3f\n",
-           "jit-cold", jit_cold.compile_ms, jit_cold.eval_ms_total, jit_cold.ns_per_elem, jit_cold.checksum);
-    printf("%-12s %12.3f %14.3f %12.3f %12.3f\n",
-           "jit-warm", jit_warm.compile_ms, jit_warm.eval_ms_total, jit_warm.ns_per_elem, jit_warm.checksum);
-    printf("%-12s %12.3f %14.3f %12.3f %12.3f\n",
-           "interp", interp.compile_ms, interp.eval_ms_total, interp.ns_per_elem, interp.checksum);
+    printf("kernels: vector(any-break) vs element(per-item-break)\n");
+    printf("%-10s %-10s %12s %14s %12s %12s\n",
+           "dialect", "mode", "compile_ms", "eval_ms_total", "ns_per_elem", "checksum");
+    printf("%-10s %-10s %12.3f %14.3f %12.3f %12.3f\n",
+           "vector", "jit-cold",
+           vector_res.jit_cold.compile_ms, vector_res.jit_cold.eval_ms_total,
+           vector_res.jit_cold.ns_per_elem, vector_res.jit_cold.checksum);
+    printf("%-10s %-10s %12.3f %14.3f %12.3f %12.3f\n",
+           "vector", "jit-warm",
+           vector_res.jit_warm.compile_ms, vector_res.jit_warm.eval_ms_total,
+           vector_res.jit_warm.ns_per_elem, vector_res.jit_warm.checksum);
+    printf("%-10s %-10s %12.3f %14.3f %12.3f %12.3f\n",
+           "vector", "interp",
+           vector_res.interp.compile_ms, vector_res.interp.eval_ms_total,
+           vector_res.interp.ns_per_elem, vector_res.interp.checksum);
+    printf("%-10s %-10s %12.3f %14.3f %12.3f %12.3f\n",
+           "element", "jit-cold",
+           element_res.jit_cold.compile_ms, element_res.jit_cold.eval_ms_total,
+           element_res.jit_cold.ns_per_elem, element_res.jit_cold.checksum);
+    printf("%-10s %-10s %12.3f %14.3f %12.3f %12.3f\n",
+           "element", "jit-warm",
+           element_res.jit_warm.compile_ms, element_res.jit_warm.eval_ms_total,
+           element_res.jit_warm.ns_per_elem, element_res.jit_warm.checksum);
+    printf("%-10s %-10s %12.3f %14.3f %12.3f %12.3f\n",
+           "element", "interp",
+           element_res.interp.compile_ms, element_res.interp.eval_ms_total,
+           element_res.interp.ns_per_elem, element_res.interp.checksum);
+
+    double vector_warm = vector_res.jit_warm.ns_per_elem;
+    double element_warm = element_res.jit_warm.ns_per_elem;
+    double vector_interp = vector_res.interp.ns_per_elem;
+    double element_interp = element_res.interp.ns_per_elem;
+    if (element_warm > 0.0 && element_interp > 0.0) {
+        printf("speedup_warm_element_vs_vector=%.3fx\n", vector_warm / element_warm);
+        printf("speedup_interp_element_vs_vector=%.3fx\n", vector_interp / element_interp);
+    }
 
     restore_env_value("TMPDIR", saved_tmpdir);
     free(saved_tmpdir);

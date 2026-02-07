@@ -119,8 +119,9 @@ Thread-safe evaluation overhead vs single-threaded.
 
 ### benchmark_dsl_jit_mandelbrot.c
 DSL Mandelbrot-style benchmark comparing:
-- JIT kernel: `element` dialect with per-item `if ...: break` escape.
-- Interpreter kernel: same `element` dialect kernel with JIT disabled.
+- `vector` dialect kernel (`if any(...): break`) in JIT cold/warm + interpreter modes.
+- `element` dialect kernel (`if ...: break`) in JIT cold/warm + interpreter modes.
+- Side-by-side speed ratios for element vs vector.
 
 ```bash
 ./build/bench/benchmark_dsl_jit_mandelbrot
@@ -131,7 +132,7 @@ DSL Mandelbrot-style benchmark comparing:
 ```
 
 ### benchmark_mandelbrot_numba.py
-Optional Python/Numba baseline for the JIT-style (no `any()`) kernel.
+Optional Python/Numba baseline with regular early escape (`if zr*zr + zi*zi > 4.0: break`).
 Requires `numpy` and `numba`.
 
 ```bash

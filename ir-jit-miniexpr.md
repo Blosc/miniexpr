@@ -282,6 +282,10 @@ Deliverables:
 2. Tuning of compiler flags and loop codegen.
 3. Rollout guardrails and documentation.
 4. Complete remaining element-dialect control-flow edge cases.
+5. Define and implement constrained FP mode pragma (`# me:fp=strict|contract|fast`)
+   with deterministic cache-key integration.
+6. Keep vector-dialect reduction control (`any/all` in loop flow) as explicit JIT-IR reject
+   unless/until a dedicated block-synchronous vector JIT backend milestone is approved.
 
 Success criteria:
 
@@ -295,3 +299,7 @@ Success criteria:
 3. Whether to persist cache metadata in higher-level storage later (for example vlmeta), once ABI guarantees are defined.
 4. Whether negative-cache entries should also be persisted to disk or remain process-local.
 5. Whether to implement per-item `return` semantics inside element-dialect loops (interpreter + parity hardening).
+6. Whether to add a constrained FP pragma (`# me:fp=strict|contract|fast`) with
+   profile-to-flag mapping in runtime JIT, instead of exposing raw compiler flags in DSL source.
+7. Whether to fund a separate major milestone for vector-dialect JIT support of reduction
+   functions in control flow (`any/all`), which requires a block-synchronous execution model.

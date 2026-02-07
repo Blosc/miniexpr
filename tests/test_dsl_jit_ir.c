@@ -104,6 +104,12 @@ static int test_ir_rejects_unsupported_statements(void) {
         "    print(x)\n"
         "    return x\n";
 
+    const char *src_reduction_cond =
+        "def kernel(x):\n"
+        "    if any(x > 0):\n"
+        "        return x\n"
+        "    return x\n";
+
     const char *param_names[] = {"x"};
     me_dtype param_dtypes[] = {ME_FLOAT64};
     me_dsl_error error;
@@ -132,6 +138,26 @@ static int test_ir_rejects_unsupported_statements(void) {
                             mock_resolve_dtype, NULL, &ir, &error)) {
         printf("  FAILED: print should be rejected by jit ir subset\n");
         me_dsl_jit_ir_free(ir);
+        me_dsl_program_free(program);
+        return 1;
+    }
+    me_dsl_program_free(program);
+
+    program = me_dsl_parse(src_reduction_cond, &error);
+    if (!program) {
+        printf("  FAILED: parse error for reduction-condition source\n");
+        return 1;
+    }
+    if (me_dsl_jit_ir_build(program, param_names, param_dtypes, 1,
+                            mock_resolve_dtype, NULL, &ir, &error)) {
+        printf("  FAILED: reduction calls should be rejected by jit ir subset\n");
+        me_dsl_jit_ir_free(ir);
+        me_dsl_program_free(program);
+        return 1;
+    }
+    if (strstr(error.message, "reduction") == NULL) {
+        printf("  FAILED: expected explicit reduction rejection reason (got '%s')\n",
+               error.message);
         me_dsl_program_free(program);
         return 1;
     }
