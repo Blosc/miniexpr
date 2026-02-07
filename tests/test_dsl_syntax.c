@@ -891,8 +891,71 @@ static int test_dialect_element_env_gate(void) {
     return 0;
 }
 
+static int test_fp_pragma_modes(void) {
+    printf("\n=== DSL Test 16: fp pragma modes ===\n");
+
+    const char *src_strict =
+        "# me:fp=strict\n"
+        "def kernel(x):\n"
+        "    return x * x + 1\n";
+    const char *src_contract =
+        "# me:fp=contract\n"
+        "def kernel(x):\n"
+        "    return x * x + 1\n";
+    const char *src_fast =
+        "# me:fp=fast\n"
+        "def kernel(x):\n"
+        "    return x * x + 1\n";
+    const char *src_invalid =
+        "# me:fp=ultra\n"
+        "def kernel(x):\n"
+        "    return x\n";
+
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    double x[4] = {1.0, 2.0, -3.0, 0.5};
+    const void *inputs[] = {x};
+    double out[4];
+    int err = 0;
+    me_expr *expr = NULL;
+
+    if (me_compile(src_strict, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: strict fp pragma compile error at %d\n", err);
+        return 1;
+    }
+    if (me_eval(expr, inputs, 1, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: strict fp pragma eval error\n");
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+
+    expr = NULL;
+    if (me_compile(src_contract, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: contract fp pragma compile error at %d\n", err);
+        return 1;
+    }
+    me_free(expr);
+
+    expr = NULL;
+    if (me_compile(src_fast, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: fast fp pragma compile error at %d\n", err);
+        return 1;
+    }
+    me_free(expr);
+
+    expr = NULL;
+    if (me_compile(src_invalid, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: invalid fp pragma compiled successfully\n");
+        me_free(expr);
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    return 0;
+}
+
 static int test_dsl_print_stmt(void) {
-    printf("\n=== DSL Test 16: print statement ===\n");
+    printf("\n=== DSL Test 17: print statement ===\n");
 
     const char *src =
         "def kernel():\n"
@@ -943,6 +1006,7 @@ int main(void) {
     fail |= test_dialect_element_any_remains_global();
     fail |= test_dialect_element_interpreter_jit_parity();
     fail |= test_dialect_element_env_gate();
+    fail |= test_fp_pragma_modes();
     fail |= test_dsl_print_stmt();
     return fail;
 }

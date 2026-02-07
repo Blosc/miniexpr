@@ -80,6 +80,7 @@ typedef struct {
     me_dtype *param_dtypes;
     int nparams;
     me_dsl_dialect dialect;
+    me_dsl_fp_mode fp_mode;
     me_dsl_jit_ir_block block;
 } me_dsl_jit_ir_program;
 

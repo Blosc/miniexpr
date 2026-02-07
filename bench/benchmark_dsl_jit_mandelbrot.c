@@ -154,13 +154,36 @@ static void remove_files_in_dir(const char *dir_path) {
     closedir(dir);
 }
 
+static bool valid_fp_mode(const char *fp_mode) {
+    if (!fp_mode) {
+        return false;
+    }
+    return strcmp(fp_mode, "strict") == 0 ||
+           strcmp(fp_mode, "contract") == 0 ||
+           strcmp(fp_mode, "fast") == 0;
+}
+
 static bool build_dsl_source(char *out, size_t out_size, int max_iter,
-                             bool element_dialect, bool use_any_break) {
+                             bool element_dialect, bool use_any_break,
+                             const char *fp_mode) {
     if (!out || out_size == 0 || max_iter <= 0) {
         return false;
     }
+    if (!valid_fp_mode(fp_mode)) {
+        return false;
+    }
     int n = 0;
-    const char *prefix = element_dialect ? "# me:dialect=element\n" : "";
+    char prefix[64];
+    if (element_dialect) {
+        if (snprintf(prefix, sizeof(prefix), "# me:dialect=element\n# me:fp=%s\n", fp_mode) >= (int)sizeof(prefix)) {
+            return false;
+        }
+    }
+    else {
+        if (snprintf(prefix, sizeof(prefix), "# me:fp=%s\n", fp_mode) >= (int)sizeof(prefix)) {
+            return false;
+        }
+    }
     if (use_any_break) {
         n = snprintf(out, out_size,
                      "%s"
@@ -324,6 +347,14 @@ int main(int argc, char **argv) {
     int repeats = 6;
     int max_iter = 200;
     int argi = 1;
+    const char *fp_mode = getenv("ME_BENCH_FP_MODE");
+    if (!fp_mode || fp_mode[0] == '\0') {
+        fp_mode = "strict";
+    }
+    if (!valid_fp_mode(fp_mode)) {
+        fprintf(stderr, "invalid ME_BENCH_FP_MODE=%s (expected strict|contract|fast)\n", fp_mode);
+        return 1;
+    }
 
     if (argc > 1) {
         if (strchr(argv[1], 'x') || strchr(argv[1], 'X')) {
@@ -406,8 +437,8 @@ int main(int argc, char **argv) {
     char vector_source[1024];
     char element_source[1024];
 
-    if (!build_dsl_source(vector_source, sizeof(vector_source), max_iter, false, true) ||
-        !build_dsl_source(element_source, sizeof(element_source), max_iter, true, false)) {
+    if (!build_dsl_source(vector_source, sizeof(vector_source), max_iter, false, true, fp_mode) ||
+        !build_dsl_source(element_source, sizeof(element_source), max_iter, true, false, fp_mode)) {
         fprintf(stderr, "failed to build benchmark DSL source\n");
         restore_env_value("TMPDIR", saved_tmpdir);
         free(saved_tmpdir);
@@ -445,6 +476,7 @@ int main(int argc, char **argv) {
            width, height, repeats, max_iter);
     printf("kernel: notebook-equivalent escape-iteration output\n");
     printf("kernels: vector(all-active break) vs element(per-item-break)\n");
+    printf("fp_pragma=%s\n", fp_mode);
     printf("timing: warm modes report best single run over repeats\n");
     printf("%-10s %-10s %12s %14s %12s %12s\n",
            "dialect", "mode", "compile_ms", "eval_ms_best", "ns_per_elem", "checksum");

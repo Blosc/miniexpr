@@ -675,6 +675,7 @@ bool me_dsl_jit_ir_build(const me_dsl_program *program, const char **param_names
         return false;
     }
     ir->dialect = program->dialect;
+    ir->fp_mode = program->fp_mode;
 
     ir->nparams = nparams;
     if (nparams > 0) {
@@ -763,6 +764,11 @@ static uint64_t dsl_jit_hash_dialect(uint64_t h, me_dsl_dialect dialect) {
     return dsl_jit_hash_bytes(h, &v, sizeof(v));
 }
 
+static uint64_t dsl_jit_hash_fp_mode(uint64_t h, me_dsl_fp_mode fp_mode) {
+    int v = (int)fp_mode;
+    return dsl_jit_hash_bytes(h, &v, sizeof(v));
+}
+
 static uint64_t dsl_jit_ir_hash_expr(uint64_t h, const me_dsl_jit_ir_expr *expr) {
     h = dsl_jit_hash_string(h, expr ? expr->text : "");
     h = dsl_jit_hash_dtype(h, expr ? expr->dtype : ME_AUTO);
@@ -830,6 +836,7 @@ uint64_t me_dsl_jit_ir_fingerprint(const me_dsl_jit_ir_program *program) {
     }
     h = dsl_jit_hash_string(h, program->name);
     h = dsl_jit_hash_dialect(h, program->dialect);
+    h = dsl_jit_hash_fp_mode(h, program->fp_mode);
     h = dsl_jit_hash_i32(h, program->nparams);
     for (int i = 0; i < program->nparams; i++) {
         h = dsl_jit_hash_string(h, program->params[i]);

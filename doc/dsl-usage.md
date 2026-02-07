@@ -58,6 +58,25 @@ def kernel(x):
 For backend diagnostics, set `ME_DSL_TRACE=1` to emit compile/JIT trace lines
 to stderr (dialect, JIT accept/reject reasons, runtime cache/fallback paths).
 
+### Floating-Point Pragma
+
+For JIT-eligible kernels, you can choose the floating-point optimization mode:
+
+```
+# me:fp=strict
+def kernel(x):
+    ...
+```
+
+Supported values:
+- `strict` (default): no fast-math, no FP contraction.
+- `contract`: no fast-math, but allows FP contraction (e.g. FMA).
+- `fast`: enables fast-math for JIT compilation.
+
+Notes:
+- This pragma affects runtime JIT compilation flags. Interpreter execution is unchanged.
+- `# me:fp=...` is independent from `# me:dialect=...`; both can be used together.
+
 ### Temporary Variables
 
 Use any identifier to store intermediate values:

@@ -127,11 +127,14 @@ DSL Mandelbrot-style benchmark comparing:
 Notes:
 - `jit-warm` and `interp` rows report the **best single run** over `repeats`.
 - `jit-cold` runs once and includes first compile overhead separately in `compile_ms`.
+- Use `ME_BENCH_FP_MODE=strict|contract|fast` to emit `# me:fp=...` in benchmark kernels
+  (default: `strict`).
 
 ```bash
 ./build/bench/benchmark_dsl_jit_mandelbrot
 ./build/bench/benchmark_dsl_jit_mandelbrot 1024x512 6
 ./build/bench/benchmark_dsl_jit_mandelbrot 1024x512 6 24
+ME_BENCH_FP_MODE=fast ./build/bench/benchmark_dsl_jit_mandelbrot 1024x512 6 24
 # Alternate form:
 ./build/bench/benchmark_dsl_jit_mandelbrot 1024 512 6 24
 ```

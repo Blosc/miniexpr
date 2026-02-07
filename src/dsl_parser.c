@@ -271,19 +271,86 @@ static bool dsl_parse_dialect_pragma_line(const char *start, const char *end,
     return false;
 }
 
-static bool dsl_parse_program_dialect(const char *source, me_dsl_dialect *dialect_out,
-                                      me_dsl_error *error) {
-    if (!dialect_out) {
+static bool dsl_parse_fp_pragma_line(const char *start, const char *end,
+                                     me_dsl_fp_mode *fp_mode_out,
+                                     int line, me_dsl_error *error) {
+    const char *p = start;
+    while (p < end && (*p == ' ' || *p == '\t' || *p == '\r')) {
+        p++;
+    }
+    if (p >= end || *p != '#') {
+        return false;
+    }
+    p++;
+    while (p < end && isspace((unsigned char)*p)) {
+        p++;
+    }
+    static const char prefix[] = "me:fp";
+    size_t prefix_len = sizeof(prefix) - 1;
+    if ((size_t)(end - p) < prefix_len || strncmp(p, prefix, prefix_len) != 0) {
+        return false;
+    }
+    p += prefix_len;
+    while (p < end && isspace((unsigned char)*p)) {
+        p++;
+    }
+    if (p >= end || *p != '=') {
+        dsl_set_error(error, line, (int)(p - start) + 1, "expected '=' after me:fp");
+        return false;
+    }
+    p++;
+    while (p < end && isspace((unsigned char)*p)) {
+        p++;
+    }
+    const char *value_start = p;
+    while (p < end && is_ident_char(*p)) {
+        p++;
+    }
+    const char *value_end = p;
+    while (p < end && isspace((unsigned char)*p)) {
+        p++;
+    }
+    if (p < end) {
+        dsl_set_error(error, line, (int)(p - start) + 1, "unexpected trailing content in me:fp pragma");
+        return false;
+    }
+    if (value_start == value_end) {
+        dsl_set_error(error, line, (int)(value_start - start) + 1, "expected fp mode value after me:fp=");
+        return false;
+    }
+    size_t value_len = (size_t)(value_end - value_start);
+    if (value_len == 6 && strncmp(value_start, "strict", value_len) == 0) {
+        *fp_mode_out = ME_DSL_FP_STRICT;
+        return true;
+    }
+    if (value_len == 8 && strncmp(value_start, "contract", value_len) == 0) {
+        *fp_mode_out = ME_DSL_FP_CONTRACT;
+        return true;
+    }
+    if (value_len == 4 && strncmp(value_start, "fast", value_len) == 0) {
+        *fp_mode_out = ME_DSL_FP_FAST;
+        return true;
+    }
+    dsl_set_error(error, line, (int)(value_start - start) + 1,
+                  "unknown me:fp value (expected 'strict', 'contract', or 'fast')");
+    return false;
+}
+
+static bool dsl_parse_program_pragmas(const char *source, me_dsl_dialect *dialect_out,
+                                      me_dsl_fp_mode *fp_mode_out, me_dsl_error *error) {
+    if (!dialect_out || !fp_mode_out) {
         return false;
     }
     *dialect_out = ME_DSL_DIALECT_VECTOR;
+    *fp_mode_out = ME_DSL_FP_STRICT;
     if (!source) {
         return true;
     }
 
     const char *line_start = source;
     int line = 1;
-    bool seen_pragma = false;
+    bool seen_dialect = false;
+    bool seen_fp_mode = false;
 
     while (*line_start) {
         const char *line_end = line_start;
@@ -300,16 +367,13 @@ static bool dsl_parse_program_dialect(const char *source, me_dsl_dialect *dialec
         }
         else if (*p == '#') {
             me_dsl_dialect parsed = *dialect_out;
-            bool pragma_line = false;
+            me_dsl_fp_mode parsed_fp_mode = *fp_mode_out;
             const char *body = p + 1;
             while (body < line_end && isspace((unsigned char)*body)) {
                 body++;
             }
             if ((size_t)(line_end - body) >= 10 && strncmp(body, "me:dialect", 10) == 0) {
-                pragma_line = true;
-            }
-            if (pragma_line) {
-                if (seen_pragma) {
+                if (seen_dialect) {
                     dsl_set_error(error, line, (int)(p - line_start) + 1,
                                   "duplicate me:dialect pragma");
                     return false;
@@ -318,7 +382,19 @@ static bool dsl_parse_program_dialect(const char *source, me_dsl_dialect *dialec
                     return false;
                 }
                 *dialect_out = parsed;
-                seen_pragma = true;
+                seen_dialect = true;
+            }
+            else if ((size_t)(line_end - body) >= 5 && strncmp(body, "me:fp", 5) == 0) {
+                if (seen_fp_mode) {
+                    dsl_set_error(error, line, (int)(p - line_start) + 1,
+                                  "duplicate me:fp pragma");
+                    return false;
+                }
+                if (!dsl_parse_fp_pragma_line(line_start, line_end, &parsed_fp_mode, line, error)) {
+                    return false;
+                }
+                *fp_mode_out = parsed_fp_mode;
+                seen_fp_mode = true;
             }
         }
         else {
@@ -1324,8 +1400,10 @@ static bool parse_def(me_dsl_lexer *lex, me_dsl_program *program, me_dsl_error *
 static bool parse_program(me_dsl_lexer *lex, me_dsl_program *program, me_dsl_error *error) {
     memset(program, 0, sizeof(*program));
     program->dialect = ME_DSL_DIALECT_VECTOR;
+    program->fp_mode = ME_DSL_FP_STRICT;
 
-    if (!dsl_parse_program_dialect(lex ? lex->source : NULL, &program->dialect, error)) {
+    if (!dsl_parse_program_pragmas(lex ? lex->source : NULL,
+                                   &program->dialect, &program->fp_mode, error)) {
         return false;
     }
 

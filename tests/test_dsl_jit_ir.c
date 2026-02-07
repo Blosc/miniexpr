@@ -252,6 +252,11 @@ static int test_parser_dialect_pragma(void) {
         me_dsl_program_free(program);
         return 1;
     }
+    if (program->fp_mode != ME_DSL_FP_STRICT) {
+        printf("  FAILED: default fp mode should be strict\n");
+        me_dsl_program_free(program);
+        return 1;
+    }
     me_dsl_program_free(program);
 
     const char *src_element =
@@ -268,6 +273,27 @@ static int test_parser_dialect_pragma(void) {
         me_dsl_program_free(program);
         return 1;
     }
+    if (program->fp_mode != ME_DSL_FP_STRICT) {
+        printf("  FAILED: element source should keep default strict fp mode\n");
+        me_dsl_program_free(program);
+        return 1;
+    }
+    me_dsl_program_free(program);
+
+    const char *src_contract =
+        "# me:fp=contract\n"
+        "def kernel(x):\n"
+        "    return x\n";
+    program = me_dsl_parse(src_contract, &error);
+    if (!program) {
+        printf("  FAILED: parse error for contract fp source\n");
+        return 1;
+    }
+    if (program->fp_mode != ME_DSL_FP_CONTRACT) {
+        printf("  FAILED: contract fp pragma not detected\n");
+        me_dsl_program_free(program);
+        return 1;
+    }
     me_dsl_program_free(program);
 
     const char *src_unknown =
@@ -277,6 +303,17 @@ static int test_parser_dialect_pragma(void) {
     program = me_dsl_parse(src_unknown, &error);
     if (program) {
         printf("  FAILED: unknown dialect pragma should fail parse\n");
+        me_dsl_program_free(program);
+        return 1;
+    }
+
+    const char *src_unknown_fp =
+        "# me:fp=turbo\n"
+        "def kernel(x):\n"
+        "    return x\n";
+    program = me_dsl_parse(src_unknown_fp, &error);
+    if (program) {
+        printf("  FAILED: unknown fp pragma should fail parse\n");
         me_dsl_program_free(program);
         return 1;
     }
@@ -354,6 +391,75 @@ static int test_ir_fingerprint_includes_dialect(void) {
     return 0;
 }
 
+static int test_ir_fingerprint_includes_fp_mode(void) {
+    printf("\n=== JIT IR Test 6: fingerprint includes fp mode ===\n");
+
+    const char *src_strict =
+        "# me:fp=strict\n"
+        "def kernel(x):\n"
+        "    y = x + 1\n"
+        "    return y\n";
+    const char *src_fast =
+        "# me:fp=fast\n"
+        "def kernel(x):\n"
+        "    y = x + 1\n"
+        "    return y\n";
+
+    me_dsl_error error;
+    me_dsl_program *program_strict = me_dsl_parse(src_strict, &error);
+    if (!program_strict) {
+        printf("  FAILED: parse error for strict source\n");
+        return 1;
+    }
+    me_dsl_program *program_fast = me_dsl_parse(src_fast, &error);
+    if (!program_fast) {
+        printf("  FAILED: parse error for fast source\n");
+        me_dsl_program_free(program_strict);
+        return 1;
+    }
+
+    const char *param_names[] = {"x"};
+    me_dtype param_dtypes[] = {ME_FLOAT64};
+    me_dsl_jit_ir_program *ir_strict = NULL;
+    me_dsl_jit_ir_program *ir_fast = NULL;
+
+    if (!me_dsl_jit_ir_build(program_strict, param_names, param_dtypes, 1,
+                             mock_resolve_dtype, NULL, &ir_strict, &error) || !ir_strict) {
+        printf("  FAILED: jit ir build failed for strict program\n");
+        me_dsl_program_free(program_strict);
+        me_dsl_program_free(program_fast);
+        me_dsl_jit_ir_free(ir_strict);
+        return 1;
+    }
+    if (!me_dsl_jit_ir_build(program_fast, param_names, param_dtypes, 1,
+                             mock_resolve_dtype, NULL, &ir_fast, &error) || !ir_fast) {
+        printf("  FAILED: jit ir build failed for fast program\n");
+        me_dsl_program_free(program_strict);
+        me_dsl_program_free(program_fast);
+        me_dsl_jit_ir_free(ir_strict);
+        me_dsl_jit_ir_free(ir_fast);
+        return 1;
+    }
+
+    uint64_t fp_strict = me_dsl_jit_ir_fingerprint(ir_strict);
+    uint64_t fp_fast = me_dsl_jit_ir_fingerprint(ir_fast);
+    if (fp_strict == fp_fast) {
+        printf("  FAILED: fingerprints should differ by fp mode\n");
+        me_dsl_program_free(program_strict);
+        me_dsl_program_free(program_fast);
+        me_dsl_jit_ir_free(ir_strict);
+        me_dsl_jit_ir_free(ir_fast);
+        return 1;
+    }
+
+    me_dsl_program_free(program_strict);
+    me_dsl_program_free(program_fast);
+    me_dsl_jit_ir_free(ir_strict);
+    me_dsl_jit_ir_free(ir_fast);
+    printf("  PASSED\n");
+    return 0;
+}
+
 int main(void) {
     int fail = 0;
     fail |= test_ir_accepts_supported_subset();
@@ -361,5 +467,6 @@ int main(void) {
     fail |= test_ir_fingerprint_is_deterministic();
     fail |= test_parser_dialect_pragma();
     fail |= test_ir_fingerprint_includes_dialect();
+    fail |= test_ir_fingerprint_includes_fp_mode();
     return fail;
 }

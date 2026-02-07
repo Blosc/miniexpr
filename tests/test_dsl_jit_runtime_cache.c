@@ -591,8 +591,84 @@ cleanup:
     return rc;
 }
 
+static int test_cache_key_differentiates_fp_mode(void) {
+    printf("\n=== DSL JIT Runtime Cache Test 6: fp mode cache key differentiation ===\n");
+
+    int rc = 1;
+    char tmp_template[] = "/tmp/me_jit_fp_cache_XXXXXX";
+    char *tmp_root = mkdtemp(tmp_template);
+    char cache_dir[1024];
+    cache_dir[0] = '\0';
+    char *saved_tmpdir = dup_env_value("TMPDIR");
+    char *saved_cc = dup_env_value("CC");
+    char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
+    const char *src_strict =
+        "# me:fp=strict\n"
+        "def kernel(x):\n"
+        "    y = x + 23\n"
+        "    return y\n";
+    const char *src_fast =
+        "# me:fp=fast\n"
+        "def kernel(x):\n"
+        "    y = x + 23\n"
+        "    return y\n";
+
+    if (!tmp_root) {
+        printf("  FAILED: mkdtemp failed\n");
+        goto cleanup;
+    }
+    if (snprintf(cache_dir, sizeof(cache_dir), "%s/miniexpr-jit", tmp_root) >= (int)sizeof(cache_dir)) {
+        printf("  FAILED: cache path too long\n");
+        goto cleanup;
+    }
+    if (setenv("TMPDIR", tmp_root, 1) != 0) {
+        printf("  FAILED: setenv TMPDIR failed\n");
+        goto cleanup;
+    }
+    if (setenv("CC", "cc", 1) != 0) {
+        printf("  FAILED: setenv CC failed\n");
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT_POS_CACHE", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT_POS_CACHE failed\n");
+        goto cleanup;
+    }
+
+    if (compile_and_eval_simple_dsl(src_strict, 23.0) != 0) {
+        goto cleanup;
+    }
+    if (compile_and_eval_simple_dsl(src_fast, 23.0) != 0) {
+        goto cleanup;
+    }
+
+    int n_meta = count_kernel_files_with_suffix(cache_dir, ".meta", NULL, 0);
+    if (n_meta != 2) {
+        printf("  FAILED: expected 2 cache metadata files for strict+fast fp modes (got %d)\n", n_meta);
+        goto cleanup;
+    }
+
+    rc = 0;
+    printf("  PASSED\n");
+
+cleanup:
+    restore_env_value("TMPDIR", saved_tmpdir);
+    restore_env_value("CC", saved_cc);
+    restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
+    free(saved_tmpdir);
+    free(saved_cc);
+    free(saved_pos_cache);
+    if (cache_dir[0] != '\0') {
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+    }
+    if (tmp_root) {
+        (void)rmdir(tmp_root);
+    }
+    return rc;
+}
+
 static int test_element_interpreter_jit_parity(void) {
-    printf("\n=== DSL JIT Runtime Cache Test 6: element interpreter/JIT parity ===\n");
+    printf("\n=== DSL JIT Runtime Cache Test 7: element interpreter/JIT parity ===\n");
 
     int rc = 1;
     char tmp_template[] = "/tmp/me_jit_element_parity_XXXXXX";
@@ -703,6 +779,7 @@ int main(void) {
     fail |= test_rejects_metadata_mismatch_artifact();
     fail |= test_jit_disable_env_guardrail();
     fail |= test_cache_key_differentiates_dialect();
+    fail |= test_cache_key_differentiates_fp_mode();
     fail |= test_element_interpreter_jit_parity();
     return fail;
 #endif
