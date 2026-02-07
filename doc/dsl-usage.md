@@ -34,6 +34,25 @@ Note: The order of the variables array still defines the pointer order passed to
 
 A kernel must return on all control-flow paths. Missing returns are compile errors.
 
+### Dialect Pragma
+
+You can select control-flow semantics with an optional top-of-source pragma:
+
+```
+# me:dialect=vector
+def kernel(x):
+    ...
+```
+
+```
+# me:dialect=element
+def kernel(x):
+    ...
+```
+
+- `vector` is the default when the pragma is omitted.
+- `element` enables per-element loop control behavior (details below).
+
 ### Temporary Variables
 
 Use any identifier to store intermediate values:
@@ -112,10 +131,17 @@ def kernel(mask, acc):
 
 ### Conditionals
 
-General `if/elif/else` blocks are supported. Conditions must be scalar/uniform.
-Use reductions like `any()`/`all()` to turn an element-wise predicate into a scalar.
+General `if/elif/else` blocks are supported.
+
+Dialect behavior:
+- `vector` (default): conditions must be scalar/uniform; use `any()`/`all()` to
+  reduce element-wise predicates.
+- `element`: inside loops, non-reduction conditions can be element-wise and
+  control flow is applied per element. Reduction conditions (`any()`/`all()`)
+  remain global/block-level.
+
 Conditions that are uniform across the block (e.g., loop variables like `i`,
-`_n*`, `_ndim`, or reductions) are accepted directly, so `if i == 2:` is valid.
+`_n*`, `_ndim`, or reductions) are always accepted directly, so `if i == 2:` is valid.
 
 Rules:
 - No new locals are allowed inside branches.
@@ -132,6 +158,19 @@ def kernel(mask, x):
         return sum(x)
     else:
         return mean(x)
+```
+
+Element-dialect loop example:
+```
+# me:dialect=element
+def kernel(x):
+    acc = 0
+    for i in range(8):
+        if x > i:
+            acc = acc + 1
+        else:
+            break
+    return acc
 ```
 
 Flow-only loop control:

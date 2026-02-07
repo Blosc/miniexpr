@@ -119,8 +119,8 @@ Thread-safe evaluation overhead vs single-threaded.
 
 ### benchmark_dsl_jit_mandelbrot.c
 DSL Mandelbrot-style benchmark comparing:
-- JIT kernel: no `any()` (JIT-friendly loop body).
-- Interpreter kernel: uses `any()` early exit.
+- JIT kernel: `element` dialect with per-item `if ...: break` escape.
+- Interpreter kernel: same `element` dialect kernel with JIT disabled.
 
 ```bash
 ./build/bench/benchmark_dsl_jit_mandelbrot

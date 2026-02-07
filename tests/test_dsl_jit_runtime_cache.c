@@ -142,6 +142,29 @@ static int compile_and_eval_simple_dsl(const char *src, double expected_offset) 
     return 0;
 }
 
+static int compile_and_eval_dsl_values(const char *src, const double *in, int nitems, double *out) {
+    if (!src || !in || !out || nitems <= 0) {
+        return 1;
+    }
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    int err = 0;
+    me_expr *expr = NULL;
+    if (me_compile(src, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+        printf("  FAILED: compile error at %d\n", err);
+        me_free(expr);
+        return 1;
+    }
+
+    const void *inputs[] = {in};
+    if (me_eval(expr, inputs, 1, out, nitems, NULL) != ME_EVAL_SUCCESS) {
+        printf("  FAILED: eval failed\n");
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+    return 0;
+}
+
 static int test_negative_cache_skips_immediate_retry(void) {
     printf("\n=== DSL JIT Runtime Cache Test 1: negative cache cooldown ===\n");
 
@@ -567,6 +590,106 @@ cleanup:
     }
     return rc;
 }
+
+static int test_element_interpreter_jit_parity(void) {
+    printf("\n=== DSL JIT Runtime Cache Test 6: element interpreter/JIT parity ===\n");
+
+    int rc = 1;
+    char tmp_template[] = "/tmp/me_jit_element_parity_XXXXXX";
+    char *tmp_root = mkdtemp(tmp_template);
+    char cache_dir[1024];
+    cache_dir[0] = '\0';
+    char *saved_tmpdir = dup_env_value("TMPDIR");
+    char *saved_cc = dup_env_value("CC");
+    char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+    const char *src =
+        "# me:dialect=element\n"
+        "def kernel(x):\n"
+        "    acc = 0\n"
+        "    for i in range(6):\n"
+        "        if x > i:\n"
+        "            acc = acc + i\n"
+        "        else:\n"
+        "            break\n"
+        "    return acc\n";
+
+    const double in[4] = {0.0, 2.0, 7.0, -1.0};
+    double out_interp[4] = {0.0, 0.0, 0.0, 0.0};
+    double out_jit[4] = {0.0, 0.0, 0.0, 0.0};
+
+    if (!tmp_root) {
+        printf("  FAILED: mkdtemp failed\n");
+        goto cleanup;
+    }
+    if (snprintf(cache_dir, sizeof(cache_dir), "%s/miniexpr-jit", tmp_root) >= (int)sizeof(cache_dir)) {
+        printf("  FAILED: cache path too long\n");
+        goto cleanup;
+    }
+    if (setenv("TMPDIR", tmp_root, 1) != 0) {
+        printf("  FAILED: setenv TMPDIR failed\n");
+        goto cleanup;
+    }
+    if (setenv("CC", "cc", 1) != 0) {
+        printf("  FAILED: setenv CC failed\n");
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT_POS_CACHE", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT_POS_CACHE failed\n");
+        goto cleanup;
+    }
+
+    if (setenv("ME_DSL_JIT", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT=0 failed\n");
+        goto cleanup;
+    }
+    if (compile_and_eval_dsl_values(src, in, 4, out_interp) != 0) {
+        goto cleanup;
+    }
+
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT=1 failed\n");
+        goto cleanup;
+    }
+    if (compile_and_eval_dsl_values(src, in, 4, out_jit) != 0) {
+        goto cleanup;
+    }
+
+    for (int i = 0; i < 4; i++) {
+        if (out_interp[i] != out_jit[i]) {
+            printf("  FAILED: interpreter/JIT mismatch at %d (%.17g vs %.17g)\n",
+                   i, out_interp[i], out_jit[i]);
+            goto cleanup;
+        }
+    }
+
+    int n_meta = count_kernel_files_with_suffix(cache_dir, ".meta", NULL, 0);
+    if (n_meta < 1) {
+        printf("  FAILED: JIT parity test did not generate runtime cache metadata\n");
+        goto cleanup;
+    }
+
+    rc = 0;
+    printf("  PASSED\n");
+
+cleanup:
+    restore_env_value("TMPDIR", saved_tmpdir);
+    restore_env_value("CC", saved_cc);
+    restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    free(saved_tmpdir);
+    free(saved_cc);
+    free(saved_pos_cache);
+    free(saved_jit);
+    if (cache_dir[0] != '\0') {
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+    }
+    if (tmp_root) {
+        (void)rmdir(tmp_root);
+    }
+    return rc;
+}
 #endif
 
 int main(void) {
@@ -580,6 +703,7 @@ int main(void) {
     fail |= test_rejects_metadata_mismatch_artifact();
     fail |= test_jit_disable_env_guardrail();
     fail |= test_cache_key_differentiates_dialect();
+    fail |= test_element_interpreter_jit_parity();
     return fail;
 #endif
 }

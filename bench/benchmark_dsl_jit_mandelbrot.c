@@ -1,6 +1,9 @@
 /*
  * DSL Mandelbrot benchmark for JIT cold/warm vs interpreter fallback.
  *
+ * Uses element dialect with per-item escape (`if ...: break`) to model
+ * Mandelbrot early-exit behavior directly.
+ *
  * Usage:
  *   ./benchmark_dsl_jit_mandelbrot [widthxheight | width height] [repeats] [max_iter]
  */
@@ -141,13 +144,16 @@ static void remove_files_in_dir(const char *dir_path) {
     closedir(dir);
 }
 
-static bool build_dsl_source(char *out, size_t out_size, int max_iter, bool use_any_break) {
+static bool build_dsl_source(char *out, size_t out_size, int max_iter,
+                             bool element_dialect, bool use_any_break) {
     if (!out || out_size == 0 || max_iter <= 0) {
         return false;
     }
     int n = 0;
+    const char *prefix = element_dialect ? "# me:dialect=element\n" : "";
     if (use_any_break) {
         n = snprintf(out, out_size,
+                     "%s"
                      "def kernel(cr, ci):\n"
                      "    zr = 0.0\n"
                      "    zi = 0.0\n"
@@ -160,10 +166,12 @@ static bool build_dsl_source(char *out, size_t out_size, int max_iter, bool use_
                      "        if any(zr * zr + zi * zi > 4.0):\n"
                      "            break\n"
                      "    return acc\n",
+                     prefix,
                      max_iter);
     }
     else {
         n = snprintf(out, out_size,
+                     "%s"
                      "def kernel(cr, ci):\n"
                      "    zr = 0.0\n"
                      "    zi = 0.0\n"
@@ -173,7 +181,10 @@ static bool build_dsl_source(char *out, size_t out_size, int max_iter, bool use_
                      "        zi = 0.5 * (2.0 * zr * zi + ci)\n"
                      "        zr = zr2\n"
                      "        acc = acc + zr\n"
+                     "        if zr * zr + zi * zi > 4.0:\n"
+                     "            break\n"
                      "    return acc\n",
+                     prefix,
                      max_iter);
     }
     return n > 0 && (size_t)n < out_size;
@@ -351,8 +362,8 @@ int main(int argc, char **argv) {
     memset(&jit_cold, 0, sizeof(jit_cold));
     memset(&jit_warm, 0, sizeof(jit_warm));
     memset(&interp, 0, sizeof(interp));
-    if (!build_dsl_source(jit_source, sizeof(jit_source), max_iter, false) ||
-        !build_dsl_source(interp_source, sizeof(interp_source), max_iter, true)) {
+    if (!build_dsl_source(jit_source, sizeof(jit_source), max_iter, true, false) ||
+        !build_dsl_source(interp_source, sizeof(interp_source), max_iter, true, false)) {
         fprintf(stderr, "failed to build benchmark DSL source\n");
         restore_env_value("TMPDIR", saved_tmpdir);
         free(saved_tmpdir);
@@ -398,7 +409,7 @@ int main(int argc, char **argv) {
     printf("benchmark_dsl_jit_mandelbrot\n");
     printf("width=%d height=%d repeats=%d max_iter=%d\n",
            width, height, repeats, max_iter);
-    printf("kernel_jit=no-any kernel_interp=with-any\n");
+    printf("kernel=element-dialect-per-item-break\n");
     printf("%-12s %12s %14s %12s %12s\n",
            "mode", "compile_ms", "eval_ms_total", "ns_per_elem", "checksum");
     printf("%-12s %12.3f %14.3f %12.3f %12.3f\n",
