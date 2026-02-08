@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.16.3)
 project(miniexpr LANGUAGES C)
+include(GNUInstallDirs)
 
 if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "MSVC")
   message(FATAL_ERROR "MSVC is not supported. Use clang-cl (e.g., cmake -G \"Visual Studio 17 2022\" -T ClangCL).")
@@ -15,6 +16,7 @@ option(MINIEXPR_BUILD_TESTS "Build tests" ON)
 option(MINIEXPR_BUILD_EXAMPLES "Build examples" ON)
 option(MINIEXPR_BUILD_BENCH "Build benchmarks" ON)
 option(MINIEXPR_USE_SLEEF "Enable SLEEF SIMD acceleration" ON)
+option(MINIEXPR_USE_LIBTCC_FALLBACK "Enable optional DSL JIT libtcc in-memory fallback (when CC is unavailable)" OFF)
 
 set(MINIEXPR_SOURCES
   src/miniexpr.c
@@ -25,11 +27,14 @@ set(MINIEXPR_SOURCES
   src/functions-simd.c
 )
 
-if(MINIEXPR_USE_SLEEF)
+if(MINIEXPR_USE_SLEEF OR MINIEXPR_USE_LIBTCC_FALLBACK)
   include(FetchContent)
   if(POLICY CMP0169)
     cmake_policy(SET CMP0169 OLD)
   endif()
+endif()
+
+if(MINIEXPR_USE_SLEEF)
   FetchContent_Declare(
     sleef
     GIT_REPOSITORY https://github.com/shibatch/sleef.git
@@ -40,6 +45,62 @@ if(MINIEXPR_USE_SLEEF)
     # SOURCE_DIR "/Users/faltet/blosc/sleef"
   )
   FetchContent_Populate(sleef)
+endif()
+
+if(MINIEXPR_USE_LIBTCC_FALLBACK AND NOT WIN32)
+  FetchContent_Declare(
+    tinycc
+    SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tinycc"
+    BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/_deps/tinycc-build"
+  )
+  FetchContent_Populate(tinycc)
+
+  if(APPLE)
+    set(MINIEXPR_TINYCC_SHARED_NAME "libtcc.dylib")
+  else()
+    set(MINIEXPR_TINYCC_SHARED_NAME "libtcc.so")
+  endif()
+  set(MINIEXPR_TINYCC_RUNTIME_NAME "libtcc1.a")
+  set(MINIEXPR_TINYCC_SHARED_PATH "${tinycc_BINARY_DIR}/${MINIEXPR_TINYCC_SHARED_NAME}")
+  set(MINIEXPR_TINYCC_RUNTIME_PATH "${tinycc_BINARY_DIR}/${MINIEXPR_TINYCC_RUNTIME_NAME}")
+  set(MINIEXPR_TINYCC_STAGED_SHARED_PATH "${CMAKE_CURRENT_BINARY_DIR}/${MINIEXPR_TINYCC_SHARED_NAME}")
+  set(MINIEXPR_TINYCC_STAGED_RUNTIME_PATH "${CMAKE_CURRENT_BINARY_DIR}/${MINIEXPR_TINYCC_RUNTIME_NAME}")
+  set(MINIEXPR_TINYCC_CONFIG_STAMP "${tinycc_BINARY_DIR}/.miniexpr_tinycc_configured")
+
+  add_custom_command(
+    OUTPUT "${MINIEXPR_TINYCC_CONFIG_STAMP}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${tinycc_BINARY_DIR}"
+    COMMAND "${CMAKE_COMMAND}" -E chdir "${tinycc_BINARY_DIR}"
+            "${tinycc_SOURCE_DIR}/configure"
+            "--source-path=${tinycc_SOURCE_DIR}"
+            "--disable-static"
+            "--cc=${CMAKE_C_COMPILER}"
+    COMMAND "${CMAKE_COMMAND}" -E touch "${MINIEXPR_TINYCC_CONFIG_STAMP}"
+    DEPENDS "${tinycc_SOURCE_DIR}/configure"
+    VERBATIM
+  )
+
+  add_custom_command(
+    OUTPUT "${MINIEXPR_TINYCC_SHARED_PATH}" "${MINIEXPR_TINYCC_RUNTIME_PATH}"
+    COMMAND "${CMAKE_MAKE_PROGRAM}" -C "${tinycc_BINARY_DIR}" "${MINIEXPR_TINYCC_SHARED_NAME}" "${MINIEXPR_TINYCC_RUNTIME_NAME}"
+    DEPENDS "${MINIEXPR_TINYCC_CONFIG_STAMP}"
+    VERBATIM
+  )
+
+  add_custom_command(
+    OUTPUT "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}" "${MINIEXPR_TINYCC_STAGED_RUNTIME_PATH}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MINIEXPR_TINYCC_SHARED_PATH}" "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MINIEXPR_TINYCC_RUNTIME_PATH}" "${MINIEXPR_TINYCC_STAGED_RUNTIME_PATH}"
+    DEPENDS "${MINIEXPR_TINYCC_SHARED_PATH}" "${MINIEXPR_TINYCC_RUNTIME_PATH}"
+    VERBATIM
+  )
+
+  add_custom_target(miniexpr_tinycc ALL
+    DEPENDS "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}" "${MINIEXPR_TINYCC_STAGED_RUNTIME_PATH}")
+
+  install(FILES "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}" DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+  install(FILES "${MINIEXPR_TINYCC_STAGED_RUNTIME_PATH}" DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+  install(FILES "${tinycc_SOURCE_DIR}/libtcc.h" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 endif()
 
 function(miniexpr_setup_target target_name)
@@ -59,6 +120,15 @@ function(miniexpr_setup_target target_name)
   else()
     target_compile_definitions(${target_name} PRIVATE ME_USE_SLEEF=0)
   endif()
+  if(MINIEXPR_USE_LIBTCC_FALLBACK)
+    target_compile_definitions(${target_name} PRIVATE ME_USE_LIBTCC_FALLBACK=1)
+    if(NOT WIN32 AND DEFINED MINIEXPR_TINYCC_STAGED_SHARED_PATH)
+      target_compile_definitions(${target_name}
+        PRIVATE ME_DSL_JIT_LIBTCC_DEFAULT_PATH="${MINIEXPR_TINYCC_STAGED_SHARED_PATH}")
+    endif()
+  else()
+    target_compile_definitions(${target_name} PRIVATE ME_USE_LIBTCC_FALLBACK=0)
+  endif()
   if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang")
     target_link_libraries(${target_name} PUBLIC clang_rt.builtins-x86_64.lib)
   endif()
@@ -73,6 +143,9 @@ endfunction()
 if(MINIEXPR_BUILD_SHARED)
   add_library(miniexpr SHARED)
   miniexpr_setup_target(miniexpr)
+  if(MINIEXPR_USE_LIBTCC_FALLBACK AND NOT WIN32)
+    add_dependencies(miniexpr miniexpr_tinycc)
+  endif()
   if(WIN32)
     set_target_properties(miniexpr PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
   endif()
@@ -81,6 +154,9 @@ endif()
 if(MINIEXPR_BUILD_STATIC)
   add_library(miniexpr_static STATIC)
   miniexpr_setup_target(miniexpr_static)
+  if(MINIEXPR_USE_LIBTCC_FALLBACK AND NOT WIN32)
+    add_dependencies(miniexpr_static miniexpr_tinycc)
+  endif()
   set_target_properties(miniexpr_static PROPERTIES OUTPUT_NAME miniexpr)
 endif()
 

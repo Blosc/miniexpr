@@ -516,8 +516,93 @@ cleanup:
     return rc;
 }
 
+static int test_force_libtcc_gate_skips_cc_backend(void) {
+    printf("\n=== DSL JIT Runtime Cache Test 5: force-libtcc gate ===\n");
+
+    int rc = 1;
+    char tmp_template[] = "/tmp/me_jit_force_libtcc_XXXXXX";
+    char *tmp_root = mkdtemp(tmp_template);
+    char cache_dir[1024];
+    cache_dir[0] = '\0';
+    char *saved_tmpdir = dup_env_value("TMPDIR");
+    char *saved_cc = dup_env_value("CC");
+    char *saved_force = dup_env_value("ME_DSL_JIT_FORCE_LIBTCC");
+    char *saved_libtcc = dup_env_value("ME_DSL_JIT_LIBTCC");
+    char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
+    const char *src =
+        "def kernel(x):\n"
+        "    y = x + 29\n"
+        "    return y\n";
+
+    if (!tmp_root) {
+        printf("  FAILED: mkdtemp failed\n");
+        goto cleanup;
+    }
+    if (snprintf(cache_dir, sizeof(cache_dir), "%s/miniexpr-jit", tmp_root) >= (int)sizeof(cache_dir)) {
+        printf("  FAILED: cache path too long\n");
+        goto cleanup;
+    }
+    if (setenv("TMPDIR", tmp_root, 1) != 0) {
+        printf("  FAILED: setenv TMPDIR failed\n");
+        goto cleanup;
+    }
+    if (setenv("CC", "cc", 1) != 0) {
+        printf("  FAILED: setenv CC failed\n");
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT_FORCE_LIBTCC", "1", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT_FORCE_LIBTCC failed\n");
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT_LIBTCC", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT_LIBTCC failed\n");
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT_POS_CACHE", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT_POS_CACHE failed\n");
+        goto cleanup;
+    }
+
+    if (compile_and_eval_simple_dsl(src, 29.0) != 0) {
+        goto cleanup;
+    }
+
+    int n_files = 0;
+    n_files += count_kernel_files_with_suffix(cache_dir, ".c", NULL, 0);
+    n_files += count_kernel_files_with_suffix(cache_dir, ".so", NULL, 0);
+    n_files += count_kernel_files_with_suffix(cache_dir, ".dylib", NULL, 0);
+    n_files += count_kernel_files_with_suffix(cache_dir, ".meta", NULL, 0);
+    if (n_files != 0) {
+        printf("  FAILED: forced libtcc gate unexpectedly used cc-backed cache path\n");
+        goto cleanup;
+    }
+
+    rc = 0;
+    printf("  PASSED\n");
+
+cleanup:
+    restore_env_value("TMPDIR", saved_tmpdir);
+    restore_env_value("CC", saved_cc);
+    restore_env_value("ME_DSL_JIT_FORCE_LIBTCC", saved_force);
+    restore_env_value("ME_DSL_JIT_LIBTCC", saved_libtcc);
+    restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
+    free(saved_tmpdir);
+    free(saved_cc);
+    free(saved_force);
+    free(saved_libtcc);
+    free(saved_pos_cache);
+    if (cache_dir[0] != '\0') {
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+    }
+    if (tmp_root) {
+        (void)rmdir(tmp_root);
+    }
+    return rc;
+}
+
 static int test_cache_key_differentiates_dialect(void) {
-    printf("\n=== DSL JIT Runtime Cache Test 5: dialect cache key differentiation ===\n");
+    printf("\n=== DSL JIT Runtime Cache Test 6: dialect cache key differentiation ===\n");
 
     int rc = 1;
     char tmp_template[] = "/tmp/me_jit_dialect_cache_XXXXXX";
@@ -592,7 +677,7 @@ cleanup:
 }
 
 static int test_cache_key_differentiates_fp_mode(void) {
-    printf("\n=== DSL JIT Runtime Cache Test 6: fp mode cache key differentiation ===\n");
+    printf("\n=== DSL JIT Runtime Cache Test 7: fp mode cache key differentiation ===\n");
 
     int rc = 1;
     char tmp_template[] = "/tmp/me_jit_fp_cache_XXXXXX";
@@ -668,7 +753,7 @@ cleanup:
 }
 
 static int test_element_interpreter_jit_parity(void) {
-    printf("\n=== DSL JIT Runtime Cache Test 7: element interpreter/JIT parity ===\n");
+    printf("\n=== DSL JIT Runtime Cache Test 8: element interpreter/JIT parity ===\n");
 
     int rc = 1;
     char tmp_template[] = "/tmp/me_jit_element_parity_XXXXXX";
@@ -774,10 +859,12 @@ int main(void) {
     return 0;
 #else
     int fail = 0;
+    (void)setenv("ME_DSL_JIT_LIBTCC", "0", 1);
     fail |= test_negative_cache_skips_immediate_retry();
     fail |= test_positive_cache_reuses_loaded_kernel();
     fail |= test_rejects_metadata_mismatch_artifact();
     fail |= test_jit_disable_env_guardrail();
+    fail |= test_force_libtcc_gate_skips_cc_backend();
     fail |= test_cache_key_differentiates_dialect();
     fail |= test_cache_key_differentiates_fp_mode();
     fail |= test_element_interpreter_jit_parity();

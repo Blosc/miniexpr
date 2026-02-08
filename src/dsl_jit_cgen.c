@@ -842,9 +842,21 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         symbol = options->symbol_name;
     }
 
-    if (!me_jit_emit_line(&ctx.source, 0, "#include <stdbool.h>") ||
-        !me_jit_emit_line(&ctx.source, 0, "#include <stddef.h>") ||
-        !me_jit_emit_line(&ctx.source, 0, "#include <stdint.h>") ||
+    if (!me_jit_emit_line(&ctx.source, 0, "typedef _Bool bool;") ||
+        !me_jit_emit_line(&ctx.source, 0, "typedef signed char int8_t;") ||
+        !me_jit_emit_line(&ctx.source, 0, "typedef short int16_t;") ||
+        !me_jit_emit_line(&ctx.source, 0, "typedef int int32_t;") ||
+        !me_jit_emit_line(&ctx.source, 0, "typedef long long int64_t;") ||
+        !me_jit_emit_line(&ctx.source, 0, "typedef unsigned char uint8_t;") ||
+        !me_jit_emit_line(&ctx.source, 0, "typedef unsigned short uint16_t;") ||
+        !me_jit_emit_line(&ctx.source, 0, "typedef unsigned int uint32_t;") ||
+        !me_jit_emit_line(&ctx.source, 0, "typedef unsigned long long uint64_t;") ||
+        !me_jit_emit_line(&ctx.source, 0, "#ifndef true") ||
+        !me_jit_emit_line(&ctx.source, 0, "#define true 1") ||
+        !me_jit_emit_line(&ctx.source, 0, "#endif") ||
+        !me_jit_emit_line(&ctx.source, 0, "#ifndef false") ||
+        !me_jit_emit_line(&ctx.source, 0, "#define false 0") ||
+        !me_jit_emit_line(&ctx.source, 0, "#endif") ||
         !me_jit_emit_line(&ctx.source, 0, "")) {
         me_jit_set_error(error, 0, 0, "out of memory");
         me_jit_locals_free(&ctx.locals);
