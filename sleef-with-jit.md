@@ -172,3 +172,15 @@ Acceptance:
   - Observation: strong improvements on most matched kernels; `log` remained
     slower in this snapshot (`~4.64 ns/elem` vs `~4.61` for non-bridge JIT and
     `~2.11` interpreter), so it should be treated as provisional.
+- Unary affine lowering extension:
+  - Extended unary matcher to accept simple affine forms:
+    - `f(x + c)`, `f(x - c)`, `f(c + x)` for matched unary functions.
+  - Implemented codegen path as:
+    - prepass: `out[i] = in[i] + c`
+    - bulk vector call: `vec_f(out, out, nitems)`
+  - Added codegen test coverage for `log(x + 1.5)`.
+- Affine `log` re-check (`nitems=262144`, `repeats=6`):
+  - forced `libtcc`: `log ~4.59 ns/elem`
+  - forced `libtcc + bridge`: `log ~4.48 ns/elem`
+  - Result: slight improvement from bridge vector lowering with affine args, but
+    still slower than interpreter in this benchmark (`~2.11 ns/elem`).

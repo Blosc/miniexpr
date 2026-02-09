@@ -55,6 +55,8 @@ typedef enum {
 typedef struct {
     me_jit_vec_unary_kind kind;
     int param_index;
+    bool has_offset;
+    double offset;
 } me_jit_vec_unary_plan;
 
 typedef enum {
@@ -450,8 +452,10 @@ static bool me_jit_parse_ident(const char **pp, const char **out_start, size_t *
 
 static bool me_jit_parse_simple_unary_call(const char *expr,
                                            const char **out_fn_start, size_t *out_fn_len,
-                                           const char **out_arg_start, size_t *out_arg_len) {
-    if (!expr || !out_fn_start || !out_fn_len || !out_arg_start || !out_arg_len) {
+                                           const char **out_arg_start, size_t *out_arg_len,
+                                           bool *out_has_offset, double *out_offset) {
+    if (!expr || !out_fn_start || !out_fn_len || !out_arg_start || !out_arg_len ||
+        !out_has_offset || !out_offset) {
         return false;
     }
     const char *p = me_jit_skip_ws(expr);
@@ -465,25 +469,107 @@ static bool me_jit_parse_simple_unary_call(const char *expr,
         return false;
     }
     p++;
-    p = me_jit_skip_ws(p);
+    const char *arg_expr = me_jit_skip_ws(p);
+    const char *rparen = strrchr(arg_expr, ')');
+    if (!rparen || rparen <= arg_expr) {
+        return false;
+    }
+    const char *tail = me_jit_skip_ws(rparen + 1);
+    if (!tail || *tail != '\0') {
+        return false;
+    }
+
+    char *arg_copy = malloc((size_t)(rparen - arg_expr) + 1);
+    if (!arg_copy) {
+        return false;
+    }
+    memcpy(arg_copy, arg_expr, (size_t)(rparen - arg_expr));
+    arg_copy[rparen - arg_expr] = '\0';
+
     const char *arg_start = NULL;
     size_t arg_len = 0;
-    if (!me_jit_parse_ident(&p, &arg_start, &arg_len)) {
+    bool has_offset = false;
+    double offset = 0.0;
+
+    const char *q = me_jit_skip_ws(arg_copy);
+    const char *id0_start = NULL;
+    size_t id0_len = 0;
+    if (me_jit_parse_ident(&q, &id0_start, &id0_len)) {
+        q = me_jit_skip_ws(q);
+        if (!q || *q == '\0') {
+            arg_start = arg_expr + (id0_start - arg_copy);
+            arg_len = id0_len;
+        }
+        else if (*q == '+' || *q == '-') {
+            char op = *q++;
+            q = me_jit_skip_ws(q);
+            if (!q || *q == '\0') {
+                free(arg_copy);
+                return false;
+            }
+            char *end_num = NULL;
+            double c = strtod(q, &end_num);
+            if (!end_num) {
+                free(arg_copy);
+                return false;
+            }
+            end_num = (char *)me_jit_skip_ws(end_num);
+            if (!end_num || *end_num != '\0') {
+                free(arg_copy);
+                return false;
+            }
+            arg_start = arg_expr + (id0_start - arg_copy);
+            arg_len = id0_len;
+            has_offset = true;
+            offset = (op == '-') ? -c : c;
+        }
+        else {
+            free(arg_copy);
+            return false;
+        }
+    }
+    else {
+        char *end_num = NULL;
+        double c = strtod(q, &end_num);
+        if (!end_num) {
+            free(arg_copy);
+            return false;
+        }
+        q = me_jit_skip_ws(end_num);
+        if (!q || *q != '+') {
+            free(arg_copy);
+            return false;
+        }
+        q++;
+        q = me_jit_skip_ws(q);
+        const char *id1_start = NULL;
+        size_t id1_len = 0;
+        if (!me_jit_parse_ident(&q, &id1_start, &id1_len)) {
+            free(arg_copy);
+            return false;
+        }
+        q = me_jit_skip_ws(q);
+        if (!q || *q != '\0') {
+            free(arg_copy);
+            return false;
+        }
+        arg_start = arg_expr + (id1_start - arg_copy);
+        arg_len = id1_len;
+        has_offset = true;
+        offset = c;
+    }
+
+    free(arg_copy);
+    if (!arg_start || arg_len == 0) {
         return false;
     }
-    p = me_jit_skip_ws(p);
-    if (!p || *p != ')') {
-        return false;
-    }
-    p++;
-    p = me_jit_skip_ws(p);
-    if (!p || *p != '\0') {
-        return false;
-    }
+
     *out_fn_start = fn_start;
     *out_fn_len = fn_len;
     *out_arg_start = arg_start;
     *out_arg_len = arg_len;
+    *out_has_offset = has_offset;
+    *out_offset = offset;
     return true;
 }
 
@@ -549,6 +635,8 @@ static bool me_jit_detect_vec_unary_plan(const me_dsl_jit_ir_program *program,
     }
     out_plan->kind = ME_JIT_VEC_UNARY_NONE;
     out_plan->param_index = -1;
+    out_plan->has_offset = false;
+    out_plan->offset = 0.0;
 
     if (program->dialect != ME_DSL_DIALECT_ELEMENT || program->block.nstmts != 1) {
         return false;
@@ -569,7 +657,11 @@ static bool me_jit_detect_vec_unary_plan(const me_dsl_jit_ir_program *program,
     const char *arg_start = NULL;
     size_t fn_len = 0;
     size_t arg_len = 0;
-    if (!me_jit_parse_simple_unary_call(expr->text, &fn_start, &fn_len, &arg_start, &arg_len)) {
+    bool has_offset = false;
+    double offset = 0.0;
+    if (!me_jit_parse_simple_unary_call(expr->text, &fn_start, &fn_len,
+                                        &arg_start, &arg_len,
+                                        &has_offset, &offset)) {
         return false;
     }
 
@@ -602,11 +694,15 @@ static bool me_jit_detect_vec_unary_plan(const me_dsl_jit_ir_program *program,
         if (program->params[i] && program->param_dtypes[i] == output_dtype &&
             me_jit_ident_equals(arg_start, arg_len, program->params[i])) {
             out_plan->param_index = i;
+            out_plan->has_offset = has_offset;
+            out_plan->offset = offset;
             return true;
         }
     }
     out_plan->kind = ME_JIT_VEC_UNARY_NONE;
     out_plan->param_index = -1;
+    out_plan->has_offset = false;
+    out_plan->offset = 0.0;
     return false;
 }
 
@@ -711,6 +807,62 @@ static const char *me_jit_vec_binary_symbol(me_jit_vec_binary_kind kind, me_dtyp
         return NULL;
     }
     return NULL;
+}
+
+static bool me_jit_emit_vec_unary_call(me_jit_codegen_ctx *ctx,
+                                       me_dtype output_dtype,
+                                       const char *vec_sym,
+                                       const char *param_name,
+                                       bool has_offset,
+                                       double offset) {
+    if (!ctx || !vec_sym || !param_name) {
+        return false;
+    }
+    if (!has_offset) {
+        size_t need = strlen(vec_sym) + strlen(param_name) + 32;
+        char *line = malloc(need);
+        if (!line) {
+            return false;
+        }
+        snprintf(line, need, "%s(in_%s, out, nitems);", vec_sym, param_name);
+        bool ok = me_jit_emit_line(&ctx->source, 1, line);
+        free(line);
+        return ok;
+    }
+
+    const char *ctype = (output_dtype == ME_FLOAT32) ? "float" : "double";
+    char offset_buf[96];
+    snprintf(offset_buf, sizeof(offset_buf), "%.17g", offset);
+
+    if (!me_jit_emit_line(&ctx->source, 1, "for (int64_t __me_i = 0; __me_i < nitems; __me_i++) {")) {
+        return false;
+    }
+    size_t prep_need = strlen(ctype) * 2 + strlen(param_name) + strlen(offset_buf) + 64;
+    char *prep_line = malloc(prep_need);
+    if (!prep_line) {
+        return false;
+    }
+    snprintf(prep_line, prep_need,
+             "out[__me_i] = (%s)(in_%s[__me_i] + (%s)%s);",
+             ctype, param_name, ctype, offset_buf);
+    bool ok = me_jit_emit_line(&ctx->source, 2, prep_line);
+    free(prep_line);
+    if (!ok ||
+        !me_jit_emit_line(&ctx->source, 1, "}")) {
+        return false;
+    }
+    size_t call_need = strlen(vec_sym) + 64;
+    char *call_line = malloc(call_need);
+    if (!call_line) {
+        return false;
+    }
+    snprintf(call_line, call_need, "%s(out, out, nitems);", vec_sym);
+    ok = me_jit_emit_line(&ctx->source, 1, call_line);
+    free(call_line);
+    if (!ok) {
+        return false;
+    }
+    return true;
 }
 
 static bool me_jit_expr_to_c(const me_dsl_jit_ir_expr *expr, char **out_c,
@@ -1403,17 +1555,9 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
                 free(ctx.source.data);
                 return false;
             }
-            size_t need = strlen(vec_sym) + strlen(program->params[vec_plan.param_index]) + 32;
-            char *line = malloc(need);
-            if (!line) {
-                me_jit_set_error(error, 0, 0, "out of memory");
-                me_jit_locals_free(&ctx.locals);
-                free(ctx.source.data);
-                return false;
-            }
-            snprintf(line, need, "%s(in_%s, out, nitems);", vec_sym, program->params[vec_plan.param_index]);
-            bool ok = me_jit_emit_line(&ctx.source, 1, line);
-            free(line);
+            bool ok = me_jit_emit_vec_unary_call(&ctx, output_dtype, vec_sym,
+                                                 program->params[vec_plan.param_index],
+                                                 vec_plan.has_offset, vec_plan.offset);
             if (!ok ||
                 !me_jit_emit_line(&ctx.source, 1, "return 0;") ||
                 !me_jit_emit_line(&ctx.source, 0, "}")) {

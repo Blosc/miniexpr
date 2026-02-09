@@ -77,7 +77,7 @@ For log = base 10 log comment the next line. */
 
 #define ME_DSL_MAX_NDIM 8
 #define ME_DSL_JIT_SYMBOL_NAME "me_dsl_jit_kernel"
-#define ME_DSL_JIT_CGEN_VERSION 3
+#define ME_DSL_JIT_CGEN_VERSION 4
 #ifndef ME_USE_LIBTCC_FALLBACK
 #define ME_USE_LIBTCC_FALLBACK 0
 #endif
