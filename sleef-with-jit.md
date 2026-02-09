@@ -1,5 +1,29 @@
 # SLEEF With JIT Plan
 
+## Rationale
+
+Using SLEEF-backed math from JIT kernels is not just a link step; it requires
+lowering and runtime integration work. The key reasons are:
+
+- Linking makes symbols visible, but does not change generated JIT code shape.
+  Current JIT lowering is mostly scalar C loops.
+- SLEEF speedups come from vector/batch dispatch paths, so codegen must emit
+  bulk calls (or equivalent pre/post transforms), not per-element scalar calls.
+- JIT code should bind to a stable miniexpr bridge ABI (`me_jit_*`,
+  `me_jit_vec_*`) rather than SLEEF internals directly.
+- Backends differ:
+  - `cc` shared-object JIT can resolve linked symbols at load/link time.
+  - `libtcc` in-memory JIT requires explicit symbol registration
+    (`tcc_add_symbol`).
+- Only some IR patterns are safe and profitable for vector lowering; guarded
+  pattern detection and scalar fallback are required to preserve semantics.
+- Expression forms such as affine arguments (`f(x + c)`) need extra generated
+  transforms before vector calls.
+- Runtime cache keys/versioning must include lowering behavior changes to avoid
+  stale/incompatible artifacts.
+- Tests and numerical parity checks are needed to keep interpreter/JIT behavior
+  aligned across dtypes, FP modes, and backends.
+
 ## Goal
 
 Evaluate and stage support for using the same SLEEF-backed math path from DSL JIT kernels, while preserving current fallback behavior and portability.
