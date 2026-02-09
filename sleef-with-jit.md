@@ -143,6 +143,7 @@ Acceptance:
 | Phase 2 narrow lowering | Done | Selective lowering for simple element map unary kernels (`sinpi`, `cospi`, `exp10`) to bulk `me_jit_vec_*` calls. | Performance improved on matched kernels; tests updated. |
 | Phase 2 expansion | Done | Added unary lowering for `sin`, `cos`, `exp`, `log` and binary lowering for `atan2`, `hypot`; added bridge exports for f64/f32 unary+binary vector entrypoints. | Codegen tests for unary+binary lowering pass; benchmark shows strong wins on most matched kernels. |
 | Phase 2 binary `pow` lowering | Done | Added selective binary lowering for `pow(x, y)` and safe broadcast forms (`pow(x, c)`, `pow(c, x)`) to bulk `me_jit_vec_pow_*` bridge calls; registered `libtcc` bridge symbols for f64/f32. | `test_dsl_jit_codegen` coverage includes map + broadcast `pow` lowering marker checks. |
+| cc backend bridge-link path | Partial | Exposed real `me_jit_*` bridge symbols for `cc` runtime path and enabled bridge codegen when `ME_DSL_JIT_USE_SLEEF_BRIDGE=1` and symbols are dynamically visible; added cc-path runtime test with scalar fallback verification when bridge symbols are unavailable. | `test_dsl_jit_runtime_cache` includes cc bridge-path coverage; current local test binary falls back to scalar (no dynamic bridge symbols exported). |
 | Unary affine lowering | Done | Added matcher/emitter support for `f(x + c)`, `f(x - c)`, `f(c + x)` using prepass + bulk vector call; added codegen test for `log(x + 1.5)`. | Tests pass; `log` improved vs non-bridge JIT but remains slower than interpreter in current benchmark. |
 
 ### Latest Metrics Snapshot (`nitems=262144`, `repeats=6`)
@@ -161,5 +162,5 @@ Acceptance:
 
 1. Expand selective lowering coverage to remaining unary/binary/ternary math functions (`pow` map coverage is now included).
 2. Add stronger pattern matching (constants, affine/broadcast forms) where safe (`pow` broadcast constants now covered).
-3. Evaluate `cc` backend bridge-link path (currently bridge usage is focused on libtcc runtime flow).
+3. Harden `cc` backend bridge-link path so bridge symbols are consistently visible in packaged/runtime link modes.
 4. Keep extending benchmark matrix and parity tests as coverage grows.

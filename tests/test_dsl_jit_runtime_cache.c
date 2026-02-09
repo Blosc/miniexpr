@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <dirent.h>
@@ -352,6 +353,40 @@ static int tamper_file_first_byte(const char *path) {
         return 1;
     }
     return 0;
+}
+
+static bool file_contains_text(const char *path, const char *needle) {
+    if (!path || !needle || needle[0] == '\0') {
+        return false;
+    }
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return false;
+    }
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return false;
+    }
+    long n = ftell(f);
+    if (n <= 0 || n > (8L * 1024L * 1024L)) {
+        fclose(f);
+        return false;
+    }
+    if (fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        return false;
+    }
+    char *buf = malloc((size_t)n + 1);
+    if (!buf) {
+        fclose(f);
+        return false;
+    }
+    size_t nr = fread(buf, 1, (size_t)n, f);
+    fclose(f);
+    buf[nr] = '\0';
+    bool found = strstr(buf, needle) != NULL;
+    free(buf);
+    return found;
 }
 
 static int test_rejects_metadata_mismatch_artifact(void) {
@@ -851,6 +886,118 @@ cleanup:
     }
     return rc;
 }
+
+static int test_cc_backend_bridge_path(void) {
+    printf("\n=== DSL JIT Runtime Cache Test 9: cc backend bridge path ===\n");
+
+    int rc = 1;
+    char tmp_template[] = "/tmp/me_jit_cc_bridge_XXXXXX";
+    char *tmp_root = mkdtemp(tmp_template);
+    char cache_dir[1024];
+    cache_dir[0] = '\0';
+    char c_path[1200];
+    c_path[0] = '\0';
+    char *saved_tmpdir = dup_env_value("TMPDIR");
+    char *saved_cc = dup_env_value("CC");
+    char *saved_force = dup_env_value("ME_DSL_JIT_FORCE_LIBTCC");
+    char *saved_libtcc = dup_env_value("ME_DSL_JIT_LIBTCC");
+    char *saved_bridge = dup_env_value("ME_DSL_JIT_USE_SLEEF_BRIDGE");
+    char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
+    const char *src =
+        "# me:dialect=element\n"
+        "def kernel(x):\n"
+        "    return exp(x)\n";
+    const double in[4] = {0.0, 0.5, 1.0, -1.0};
+    double out[4] = {0.0, 0.0, 0.0, 0.0};
+
+    if (!tmp_root) {
+        printf("  FAILED: mkdtemp failed\n");
+        goto cleanup;
+    }
+    if (snprintf(cache_dir, sizeof(cache_dir), "%s/miniexpr-jit", tmp_root) >= (int)sizeof(cache_dir)) {
+        printf("  FAILED: cache path too long\n");
+        goto cleanup;
+    }
+    if (setenv("TMPDIR", tmp_root, 1) != 0) {
+        printf("  FAILED: setenv TMPDIR failed\n");
+        goto cleanup;
+    }
+    if (setenv("CC", "cc", 1) != 0) {
+        printf("  FAILED: setenv CC failed\n");
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT_FORCE_LIBTCC", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT_FORCE_LIBTCC failed\n");
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT_LIBTCC", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT_LIBTCC failed\n");
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT_USE_SLEEF_BRIDGE", "1", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT_USE_SLEEF_BRIDGE failed\n");
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT_POS_CACHE", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT_POS_CACHE failed\n");
+        goto cleanup;
+    }
+
+    if (compile_and_eval_dsl_values(src, in, 4, out) != 0) {
+        goto cleanup;
+    }
+    for (int i = 0; i < 4; i++) {
+        double expected = exp(in[i]);
+        if (fabs(out[i] - expected) > 1e-12) {
+            printf("  FAILED: exp parity mismatch at %d (%.17g vs %.17g)\n",
+                   i, out[i], expected);
+            goto cleanup;
+        }
+    }
+
+    int n_c = count_kernel_files_with_suffix(cache_dir, ".c", c_path, sizeof(c_path));
+    if (n_c != 1 || c_path[0] == '\0' || !file_exists(c_path)) {
+        printf("  FAILED: expected one generated source file for cc bridge path (got %d)\n", n_c);
+        goto cleanup;
+    }
+    bool has_bridge = file_contains_text(c_path, "me_jit_vec_exp_f64(");
+    bool has_scalar = file_contains_text(c_path, "for (int64_t idx = 0; idx < nitems; idx++) {");
+    if (has_bridge) {
+        printf("  NOTE: cc backend bridge lowering active\n");
+    }
+    else if (has_scalar) {
+        printf("  NOTE: cc backend bridge unavailable in current binary; scalar fallback active\n");
+    }
+    else {
+        printf("  FAILED: generated source had neither bridge nor scalar markers\n");
+        goto cleanup;
+    }
+
+    rc = 0;
+    printf("  PASSED\n");
+
+cleanup:
+    restore_env_value("TMPDIR", saved_tmpdir);
+    restore_env_value("CC", saved_cc);
+    restore_env_value("ME_DSL_JIT_FORCE_LIBTCC", saved_force);
+    restore_env_value("ME_DSL_JIT_LIBTCC", saved_libtcc);
+    restore_env_value("ME_DSL_JIT_USE_SLEEF_BRIDGE", saved_bridge);
+    restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
+    free(saved_tmpdir);
+    free(saved_cc);
+    free(saved_force);
+    free(saved_libtcc);
+    free(saved_bridge);
+    free(saved_pos_cache);
+    if (cache_dir[0] != '\0') {
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+    }
+    if (tmp_root) {
+        (void)rmdir(tmp_root);
+    }
+    return rc;
+}
 #endif
 
 int main(void) {
@@ -868,6 +1015,7 @@ int main(void) {
     fail |= test_cache_key_differentiates_dialect();
     fail |= test_cache_key_differentiates_fp_mode();
     fail |= test_element_interpreter_jit_parity();
+    fail |= test_cc_backend_bridge_path();
     return fail;
 #endif
 }

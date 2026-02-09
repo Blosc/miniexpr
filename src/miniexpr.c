@@ -228,6 +228,7 @@ static void dsl_jit_libtcc_delete_state(void *state);
 static bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program);
 static const char *dsl_jit_libtcc_error_message(void);
 static bool dsl_jit_c_compiler_available(void);
+static bool dsl_jit_cc_math_bridge_available(void);
 #endif
 
 static int64_t ceil_div64(int64_t a, int64_t b) {
@@ -3163,22 +3164,26 @@ static bool dsl_jit_force_libtcc(void) {
 }
 
 static bool dsl_jit_use_sleef_bridge(void) {
-#if ME_USE_LIBTCC_FALLBACK
     const char *env = getenv("ME_DSL_JIT_USE_SLEEF_BRIDGE");
     if (!env || env[0] == '\0') {
         return false;
     }
     return strcmp(env, "0") != 0;
-#else
-    return false;
-#endif
 }
 
 static int dsl_jit_backend_tag(void) {
-    if (!dsl_jit_force_libtcc()) {
+    bool force_libtcc = dsl_jit_force_libtcc();
+    bool use_bridge = dsl_jit_use_sleef_bridge();
+    if (!force_libtcc && !use_bridge) {
         return 1;
     }
-    return dsl_jit_use_sleef_bridge() ? 3 : 2;
+    if (force_libtcc && !use_bridge) {
+        return 2;
+    }
+    if (force_libtcc && use_bridge) {
+        return 3;
+    }
+    return 4;
 }
 
 static uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program) {
@@ -3949,6 +3954,122 @@ static void dsl_jit_bridge_vec_pow_f32(const float *a, const float *b, float *ou
     dsl_jit_bridge_apply_binary_vector_f32(vec_pow_f32_dispatch, a, b, out, nitems);
 }
 
+double me_jit_exp10(double x) {
+    return dsl_jit_bridge_exp10(x);
+}
+
+double me_jit_sinpi(double x) {
+    return dsl_jit_bridge_sinpi(x);
+}
+
+double me_jit_cospi(double x) {
+    return dsl_jit_bridge_cospi(x);
+}
+
+double me_jit_logaddexp(double a, double b) {
+    return dsl_jit_bridge_logaddexp(a, b);
+}
+
+double me_jit_where(double c, double x, double y) {
+    return dsl_jit_bridge_where(c, x, y);
+}
+
+void me_jit_vec_sin_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_sin_f64(in, out, nitems);
+}
+
+void me_jit_vec_cos_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_cos_f64(in, out, nitems);
+}
+
+void me_jit_vec_exp_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_exp_f64(in, out, nitems);
+}
+
+void me_jit_vec_log_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_log_f64(in, out, nitems);
+}
+
+void me_jit_vec_exp10_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_exp10_f64(in, out, nitems);
+}
+
+void me_jit_vec_sinpi_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_sinpi_f64(in, out, nitems);
+}
+
+void me_jit_vec_cospi_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_cospi_f64(in, out, nitems);
+}
+
+void me_jit_vec_atan2_f64(const double *a, const double *b, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_atan2_f64(a, b, out, nitems);
+}
+
+void me_jit_vec_hypot_f64(const double *a, const double *b, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_hypot_f64(a, b, out, nitems);
+}
+
+void me_jit_vec_pow_f64(const double *a, const double *b, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_pow_f64(a, b, out, nitems);
+}
+
+void me_jit_vec_sin_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_sin_f32(in, out, nitems);
+}
+
+void me_jit_vec_cos_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_cos_f32(in, out, nitems);
+}
+
+void me_jit_vec_exp_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_exp_f32(in, out, nitems);
+}
+
+void me_jit_vec_log_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_log_f32(in, out, nitems);
+}
+
+void me_jit_vec_exp10_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_exp10_f32(in, out, nitems);
+}
+
+void me_jit_vec_sinpi_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_sinpi_f32(in, out, nitems);
+}
+
+void me_jit_vec_cospi_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_cospi_f32(in, out, nitems);
+}
+
+void me_jit_vec_atan2_f32(const float *a, const float *b, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_atan2_f32(a, b, out, nitems);
+}
+
+void me_jit_vec_hypot_f32(const float *a, const float *b, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_hypot_f32(a, b, out, nitems);
+}
+
+void me_jit_vec_pow_f32(const float *a, const float *b, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_pow_f32(a, b, out, nitems);
+}
+
+static bool dsl_jit_cc_math_bridge_available(void) {
+    if (dlsym(RTLD_DEFAULT, "me_jit_exp10") == NULL) {
+        return false;
+    }
+    if (dlsym(RTLD_DEFAULT, "me_jit_where") == NULL) {
+        return false;
+    }
+    if (dlsym(RTLD_DEFAULT, "me_jit_vec_exp_f64") == NULL) {
+        return false;
+    }
+    if (dlsym(RTLD_DEFAULT, "me_jit_vec_pow_f64") == NULL) {
+        return false;
+    }
+    return true;
+}
+
 static bool dsl_jit_libtcc_register_math_bridge(me_tcc_state *state) {
     if (!state) {
         return false;
@@ -4286,6 +4407,22 @@ static bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
     (void)program;
     return false;
 }
+
+static bool dsl_jit_cc_math_bridge_available(void) {
+    if (dlsym(RTLD_DEFAULT, "me_jit_exp10") == NULL) {
+        return false;
+    }
+    if (dlsym(RTLD_DEFAULT, "me_jit_where") == NULL) {
+        return false;
+    }
+    if (dlsym(RTLD_DEFAULT, "me_jit_vec_exp_f64") == NULL) {
+        return false;
+    }
+    if (dlsym(RTLD_DEFAULT, "me_jit_vec_pow_f64") == NULL) {
+        return false;
+    }
+    return true;
+}
 #endif
 
 static bool dsl_jit_compile_shared(const me_dsl_compiled_program *program,
@@ -4307,16 +4444,22 @@ static bool dsl_jit_compile_shared(const me_dsl_compiled_program *program,
     }
     const char *debug_cc = getenv("ME_DSL_JIT_DEBUG_CC");
     bool show_cc_output = (debug_cc && debug_cc[0] != '\0' && strcmp(debug_cc, "0") != 0);
+    const char *bridge_ldflags = "";
+#if defined(__APPLE__)
+    if (program->jit_use_runtime_math_bridge) {
+        bridge_ldflags = " -Wl,-undefined,dynamic_lookup";
+    }
+#endif
     char cmd[2048];
 #if defined(__APPLE__)
     int n = snprintf(cmd, sizeof(cmd),
-                     "%s -std=c99 -O3 -fPIC %s %s -dynamiclib -o \"%s\" \"%s\"%s",
-                     cc, fp_cflags, jit_cflags, so_path, src_path,
+                     "%s -std=c99 -O3 -fPIC %s %s -dynamiclib -o \"%s\" \"%s\"%s%s",
+                     cc, fp_cflags, jit_cflags, so_path, src_path, bridge_ldflags,
                      show_cc_output ? "" : " >/dev/null 2>&1");
 #else
     int n = snprintf(cmd, sizeof(cmd),
-                     "%s -std=c99 -O3 -fPIC %s %s -shared -o \"%s\" \"%s\"%s",
-                     cc, fp_cflags, jit_cflags, so_path, src_path,
+                     "%s -std=c99 -O3 -fPIC %s %s -shared -o \"%s\" \"%s\"%s%s",
+                     cc, fp_cflags, jit_cflags, so_path, src_path, bridge_ldflags,
                      show_cc_output ? "" : " >/dev/null 2>&1");
 #endif
     if (n <= 0 || (size_t)n >= sizeof(cmd)) {
@@ -4655,7 +4798,20 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     me_dsl_jit_cgen_options cg_options;
     memset(&cg_options, 0, sizeof(cg_options));
     cg_options.symbol_name = ME_DSL_JIT_SYMBOL_NAME;
-    cg_options.use_runtime_math_bridge = dsl_jit_force_libtcc() && dsl_jit_use_sleef_bridge();
+    bool use_bridge_requested = dsl_jit_use_sleef_bridge();
+    bool use_bridge = false;
+    if (use_bridge_requested) {
+        if (dsl_jit_force_libtcc()) {
+            use_bridge = true;
+        }
+        else if (dsl_jit_cc_math_bridge_available()) {
+            use_bridge = true;
+        }
+        else {
+            dsl_tracef("jit codegen: runtime math bridge requested but unavailable for cc backend");
+        }
+    }
+    cg_options.use_runtime_math_bridge = use_bridge;
     char *generated_c = NULL;
     bool cg_ok = me_dsl_jit_codegen_c(jit_ir, ctx->return_dtype, &cg_options,
                                       &generated_c, &cg_error);
