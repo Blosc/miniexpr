@@ -139,6 +139,26 @@ ME_BENCH_FP_MODE=fast ./build/bench/benchmark_dsl_jit_mandelbrot 1024x512 6 24
 ./build/bench/benchmark_dsl_jit_mandelbrot 1024 512 6 24
 ```
 
+### benchmark_dsl_jit_math_kernels.c
+Element-dialect DSL JIT baseline for representative math kernels:
+- `sin`, `exp`, `log`, `pow`, `hypot`, `atan2`, `sinpi`, `cospi`
+- Per-kernel metrics:
+  - JIT cold compile latency
+  - JIT warm throughput
+  - interpreter throughput
+  - max-abs numerical diff (JIT warm vs interpreter)
+
+Notes:
+- Uses `# me:fp=strict` and `# me:dialect=element`.
+- Run once with default backend and once with forced libtcc for side-by-side baselines.
+
+```bash
+./build/bench/benchmark_dsl_jit_math_kernels
+./build/bench/benchmark_dsl_jit_math_kernels 262144 6
+ME_DSL_JIT_FORCE_LIBTCC=1 ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
+ME_DSL_JIT_FORCE_LIBTCC=1 ME_DSL_JIT_USE_SLEEF_BRIDGE=1 ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
+```
+
 ### benchmark_mandelbrot_numba.py
 Optional Python/Numba baseline matching notebook-style escape-iteration output
 with regular early escape (`if zr*zr + zi*zi > 4.0: break`).

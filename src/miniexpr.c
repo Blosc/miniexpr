@@ -47,6 +47,7 @@ For log = base 10 log comment the next line. */
 #define ME_NAT_LOG
 
 #include "functions.h"
+#include "functions-simd.h"
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
@@ -76,7 +77,7 @@ For log = base 10 log comment the next line. */
 
 #define ME_DSL_MAX_NDIM 8
 #define ME_DSL_JIT_SYMBOL_NAME "me_dsl_jit_kernel"
-#define ME_DSL_JIT_CGEN_VERSION 1
+#define ME_DSL_JIT_CGEN_VERSION 3
 #ifndef ME_USE_LIBTCC_FALLBACK
 #define ME_USE_LIBTCC_FALLBACK 0
 #endif
@@ -209,6 +210,7 @@ typedef struct {
     int jit_ir_error_column;
     char jit_ir_error[128];
     char *jit_c_source;
+    bool jit_use_runtime_math_bridge;
     int jit_c_error_line;
     int jit_c_error_column;
     char jit_c_error[128];
@@ -3160,8 +3162,23 @@ static bool dsl_jit_force_libtcc(void) {
 #endif
 }
 
+static bool dsl_jit_use_sleef_bridge(void) {
+#if ME_USE_LIBTCC_FALLBACK
+    const char *env = getenv("ME_DSL_JIT_USE_SLEEF_BRIDGE");
+    if (!env || env[0] == '\0') {
+        return false;
+    }
+    return strcmp(env, "0") != 0;
+#else
+    return false;
+#endif
+}
+
 static int dsl_jit_backend_tag(void) {
-    return dsl_jit_force_libtcc() ? 2 : 1;
+    if (!dsl_jit_force_libtcc()) {
+        return 1;
+    }
+    return dsl_jit_use_sleef_bridge() ? 3 : 2;
 }
 
 static uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program) {
@@ -3635,6 +3652,7 @@ typedef int (*me_tcc_relocate_fn)(me_tcc_state *s);
 typedef void *(*me_tcc_get_symbol_fn)(me_tcc_state *s, const char *name);
 typedef int (*me_tcc_set_options_fn)(me_tcc_state *s, const char *str);
 typedef int (*me_tcc_add_library_fn)(me_tcc_state *s, const char *libraryname);
+typedef int (*me_tcc_add_symbol_fn)(me_tcc_state *s, const char *name, const void *val);
 typedef void (*me_tcc_set_lib_path_fn)(me_tcc_state *s, const char *path);
 
 typedef struct {
@@ -3649,6 +3667,7 @@ typedef struct {
     me_tcc_get_symbol_fn tcc_get_symbol_fn;
     me_tcc_set_options_fn tcc_set_options_fn;
     me_tcc_add_library_fn tcc_add_library_fn;
+    me_tcc_add_symbol_fn tcc_add_symbol_fn;
     me_tcc_set_lib_path_fn tcc_set_lib_path_fn;
     char error[160];
 } me_dsl_tcc_api;
@@ -3742,6 +3761,332 @@ static bool dsl_jit_libtcc_runtime_dir(char *out, size_t out_size) {
     return dsl_jit_path_dirname(info.dli_fname, out, out_size);
 }
 
+static double dsl_jit_bridge_apply_unary_f64(void (*fn)(const double *, double *, int), double x) {
+    double in_buf[1];
+    double out_buf[1];
+    in_buf[0] = x;
+    out_buf[0] = 0.0;
+    fn(in_buf, out_buf, 1);
+    return out_buf[0];
+}
+
+static void dsl_jit_bridge_apply_unary_vector_f64(void (*fn)(const double *, double *, int),
+                                                   const double *in, double *out, int64_t nitems) {
+    if (!fn || !in || !out || nitems <= 0) {
+        return;
+    }
+    int64_t remaining = nitems;
+    const double *pin = in;
+    double *pout = out;
+    while (remaining > 0) {
+        int chunk = (remaining > INT_MAX) ? INT_MAX : (int)remaining;
+        fn(pin, pout, chunk);
+        pin += chunk;
+        pout += chunk;
+        remaining -= chunk;
+    }
+}
+
+static void dsl_jit_bridge_apply_unary_vector_f32(void (*fn)(const float *, float *, int),
+                                                   const float *in, float *out, int64_t nitems) {
+    if (!fn || !in || !out || nitems <= 0) {
+        return;
+    }
+    int64_t remaining = nitems;
+    const float *pin = in;
+    float *pout = out;
+    while (remaining > 0) {
+        int chunk = (remaining > INT_MAX) ? INT_MAX : (int)remaining;
+        fn(pin, pout, chunk);
+        pin += chunk;
+        pout += chunk;
+        remaining -= chunk;
+    }
+}
+
+static void dsl_jit_bridge_apply_binary_vector_f64(void (*fn)(const double *, const double *, double *, int),
+                                                    const double *a, const double *b,
+                                                    double *out, int64_t nitems) {
+    if (!fn || !a || !b || !out || nitems <= 0) {
+        return;
+    }
+    int64_t remaining = nitems;
+    const double *pa = a;
+    const double *pb = b;
+    double *pout = out;
+    while (remaining > 0) {
+        int chunk = (remaining > INT_MAX) ? INT_MAX : (int)remaining;
+        fn(pa, pb, pout, chunk);
+        pa += chunk;
+        pb += chunk;
+        pout += chunk;
+        remaining -= chunk;
+    }
+}
+
+static void dsl_jit_bridge_apply_binary_vector_f32(void (*fn)(const float *, const float *, float *, int),
+                                                    const float *a, const float *b,
+                                                    float *out, int64_t nitems) {
+    if (!fn || !a || !b || !out || nitems <= 0) {
+        return;
+    }
+    int64_t remaining = nitems;
+    const float *pa = a;
+    const float *pb = b;
+    float *pout = out;
+    while (remaining > 0) {
+        int chunk = (remaining > INT_MAX) ? INT_MAX : (int)remaining;
+        fn(pa, pb, pout, chunk);
+        pa += chunk;
+        pb += chunk;
+        pout += chunk;
+        remaining -= chunk;
+    }
+}
+
+static double dsl_jit_bridge_exp10(double x) {
+    return dsl_jit_bridge_apply_unary_f64(vec_exp10_dispatch, x);
+}
+
+static double dsl_jit_bridge_sinpi(double x) {
+    return dsl_jit_bridge_apply_unary_f64(vec_sinpi_dispatch, x);
+}
+
+static double dsl_jit_bridge_cospi(double x) {
+    return dsl_jit_bridge_apply_unary_f64(vec_cospi_dispatch, x);
+}
+
+static double dsl_jit_bridge_logaddexp(double a, double b) {
+    if (a == b) {
+        return a + log1p(1.0);
+    }
+    double hi = (a > b) ? a : b;
+    double lo = (a > b) ? b : a;
+    return hi + log1p(exp(lo - hi));
+}
+
+static double dsl_jit_bridge_where(double c, double x, double y) {
+    return (c != 0.0) ? x : y;
+}
+
+static void dsl_jit_bridge_vec_exp10_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f64(vec_exp10_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_sin_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f64(vec_sin_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_cos_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f64(vec_cos_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_exp_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f64(vec_exp_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_log_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f64(vec_log_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_sinpi_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f64(vec_sinpi_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_cospi_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f64(vec_cospi_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_exp10_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f32(vec_exp10_f32_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_sin_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f32(vec_sin_f32_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_cos_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f32(vec_cos_f32_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_exp_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f32(vec_exp_f32_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_log_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f32(vec_log_f32_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_sinpi_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f32(vec_sinpi_f32_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_cospi_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f32(vec_cospi_f32_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_atan2_f64(const double *a, const double *b, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_binary_vector_f64(vec_atan2_dispatch, a, b, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_hypot_f64(const double *a, const double *b, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_binary_vector_f64(vec_hypot_dispatch, a, b, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_atan2_f32(const float *a, const float *b, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_binary_vector_f32(vec_atan2_f32_dispatch, a, b, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_hypot_f32(const float *a, const float *b, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_binary_vector_f32(vec_hypot_f32_dispatch, a, b, out, nitems);
+}
+
+static bool dsl_jit_libtcc_register_math_bridge(me_tcc_state *state) {
+    if (!state) {
+        return false;
+    }
+    if (!g_dsl_tcc_api.tcc_add_symbol_fn) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "libtcc missing required symbol tcc_add_symbol for math bridge");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_exp10", (const void *)&dsl_jit_bridge_exp10) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_exp10");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_sinpi", (const void *)&dsl_jit_bridge_sinpi) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_sinpi");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_cospi", (const void *)&dsl_jit_bridge_cospi) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_cospi");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_logaddexp",
+                                        (const void *)&dsl_jit_bridge_logaddexp) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_logaddexp");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_where", (const void *)&dsl_jit_bridge_where) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_where");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_sin_f64",
+                                        (const void *)&dsl_jit_bridge_vec_sin_f64) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_sin_f64");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_cos_f64",
+                                        (const void *)&dsl_jit_bridge_vec_cos_f64) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_cos_f64");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_exp_f64",
+                                        (const void *)&dsl_jit_bridge_vec_exp_f64) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_exp_f64");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_log_f64",
+                                        (const void *)&dsl_jit_bridge_vec_log_f64) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_log_f64");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_exp10_f64",
+                                        (const void *)&dsl_jit_bridge_vec_exp10_f64) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_exp10_f64");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_sinpi_f64",
+                                        (const void *)&dsl_jit_bridge_vec_sinpi_f64) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_sinpi_f64");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_cospi_f64",
+                                        (const void *)&dsl_jit_bridge_vec_cospi_f64) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_cospi_f64");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_atan2_f64",
+                                        (const void *)&dsl_jit_bridge_vec_atan2_f64) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_atan2_f64");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_hypot_f64",
+                                        (const void *)&dsl_jit_bridge_vec_hypot_f64) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_hypot_f64");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_sin_f32",
+                                        (const void *)&dsl_jit_bridge_vec_sin_f32) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_sin_f32");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_cos_f32",
+                                        (const void *)&dsl_jit_bridge_vec_cos_f32) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_cos_f32");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_exp_f32",
+                                        (const void *)&dsl_jit_bridge_vec_exp_f32) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_exp_f32");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_log_f32",
+                                        (const void *)&dsl_jit_bridge_vec_log_f32) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_log_f32");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_exp10_f32",
+                                        (const void *)&dsl_jit_bridge_vec_exp10_f32) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_exp10_f32");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_sinpi_f32",
+                                        (const void *)&dsl_jit_bridge_vec_sinpi_f32) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_sinpi_f32");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_cospi_f32",
+                                        (const void *)&dsl_jit_bridge_vec_cospi_f32) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_cospi_f32");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_atan2_f32",
+                                        (const void *)&dsl_jit_bridge_vec_atan2_f32) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_atan2_f32");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_hypot_f32",
+                                        (const void *)&dsl_jit_bridge_vec_hypot_f32) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_hypot_f32");
+        return false;
+    }
+    return true;
+}
+
 static bool dsl_jit_libtcc_load_api(void) {
     if (g_dsl_tcc_api.attempted) {
         return g_dsl_tcc_api.available;
@@ -3813,6 +4158,7 @@ static bool dsl_jit_libtcc_load_api(void) {
 
     g_dsl_tcc_api.tcc_set_options_fn = (me_tcc_set_options_fn)dlsym(handle, "tcc_set_options");
     g_dsl_tcc_api.tcc_add_library_fn = (me_tcc_add_library_fn)dlsym(handle, "tcc_add_library");
+    g_dsl_tcc_api.tcc_add_symbol_fn = (me_tcc_add_symbol_fn)dlsym(handle, "tcc_add_symbol");
     g_dsl_tcc_api.tcc_set_lib_path_fn = (me_tcc_set_lib_path_fn)dlsym(handle, "tcc_set_lib_path");
     g_dsl_tcc_api.handle = handle;
     g_dsl_tcc_api.available = true;
@@ -3870,6 +4216,11 @@ static bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
         (void)g_dsl_tcc_api.tcc_add_library_fn(state, "m");
     }
 #endif
+    if (program->jit_use_runtime_math_bridge &&
+        !dsl_jit_libtcc_register_math_bridge(state)) {
+        g_dsl_tcc_api.tcc_delete_fn(state);
+        return false;
+    }
     if (g_dsl_tcc_api.tcc_compile_string_fn(state, program->jit_c_source) < 0) {
         g_dsl_tcc_api.tcc_delete_fn(state);
         snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
@@ -3934,15 +4285,19 @@ static bool dsl_jit_compile_shared(const me_dsl_compiled_program *program,
     if (!fp_cflags) {
         fp_cflags = "";
     }
+    const char *debug_cc = getenv("ME_DSL_JIT_DEBUG_CC");
+    bool show_cc_output = (debug_cc && debug_cc[0] != '\0' && strcmp(debug_cc, "0") != 0);
     char cmd[2048];
 #if defined(__APPLE__)
     int n = snprintf(cmd, sizeof(cmd),
-                     "%s -std=c99 -O3 -fPIC %s %s -dynamiclib -o \"%s\" \"%s\" >/dev/null 2>&1",
-                     cc, fp_cflags, jit_cflags, so_path, src_path);
+                     "%s -std=c99 -O3 -fPIC %s %s -dynamiclib -o \"%s\" \"%s\"%s",
+                     cc, fp_cflags, jit_cflags, so_path, src_path,
+                     show_cc_output ? "" : " >/dev/null 2>&1");
 #else
     int n = snprintf(cmd, sizeof(cmd),
-                     "%s -std=c99 -O3 -fPIC %s %s -shared -o \"%s\" \"%s\" >/dev/null 2>&1",
-                     cc, fp_cflags, jit_cflags, so_path, src_path);
+                     "%s -std=c99 -O3 -fPIC %s %s -shared -o \"%s\" \"%s\"%s",
+                     cc, fp_cflags, jit_cflags, so_path, src_path,
+                     show_cc_output ? "" : " >/dev/null 2>&1");
 #endif
     if (n <= 0 || (size_t)n >= sizeof(cmd)) {
         return false;
@@ -4194,6 +4549,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     program->jit_dl_handle_cached = false;
     free(program->jit_c_source);
     program->jit_c_source = NULL;
+    program->jit_use_runtime_math_bridge = false;
     program->jit_c_error_line = 0;
     program->jit_c_error_column = 0;
     program->jit_c_error[0] = '\0';
@@ -4277,7 +4633,9 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     me_dsl_error cg_error;
     memset(&cg_error, 0, sizeof(cg_error));
     me_dsl_jit_cgen_options cg_options;
+    memset(&cg_options, 0, sizeof(cg_options));
     cg_options.symbol_name = ME_DSL_JIT_SYMBOL_NAME;
+    cg_options.use_runtime_math_bridge = dsl_jit_force_libtcc() && dsl_jit_use_sleef_bridge();
     char *generated_c = NULL;
     bool cg_ok = me_dsl_jit_codegen_c(jit_ir, ctx->return_dtype, &cg_options,
                                       &generated_c, &cg_error);
@@ -4298,6 +4656,10 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
         return;
     }
     program->jit_c_source = generated_c;
+    program->jit_use_runtime_math_bridge = cg_options.use_runtime_math_bridge;
+    if (program->jit_use_runtime_math_bridge) {
+        dsl_tracef("jit codegen: runtime math bridge enabled");
+    }
     dsl_tracef("jit ir built: dialect=%s fp=%s fingerprint=%016llx",
                dsl_dialect_name(program->dialect),
                dsl_fp_mode_name(program->fp_mode),

@@ -41,6 +41,34 @@ typedef struct {
     me_dsl_error *error;
 } me_jit_codegen_ctx;
 
+typedef enum {
+    ME_JIT_VEC_UNARY_NONE = 0,
+    ME_JIT_VEC_UNARY_SIN,
+    ME_JIT_VEC_UNARY_COS,
+    ME_JIT_VEC_UNARY_EXP,
+    ME_JIT_VEC_UNARY_LOG,
+    ME_JIT_VEC_UNARY_EXP10,
+    ME_JIT_VEC_UNARY_SINPI,
+    ME_JIT_VEC_UNARY_COSPI
+} me_jit_vec_unary_kind;
+
+typedef struct {
+    me_jit_vec_unary_kind kind;
+    int param_index;
+} me_jit_vec_unary_plan;
+
+typedef enum {
+    ME_JIT_VEC_BINARY_NONE = 0,
+    ME_JIT_VEC_BINARY_ATAN2,
+    ME_JIT_VEC_BINARY_HYPOT
+} me_jit_vec_binary_kind;
+
+typedef struct {
+    me_jit_vec_binary_kind kind;
+    int param_index_a;
+    int param_index_b;
+} me_jit_vec_binary_plan;
+
 static void me_jit_set_error(me_dsl_error *error, int line, int column, const char *msg) {
     if (!error) {
         return;
@@ -362,6 +390,329 @@ static bool me_jit_expr_contains_unsupported_tokens(const char *expr, me_dtype d
     return false;
 }
 
+static bool me_jit_ident_equals(const char *start, size_t ident_len, const char *name) {
+    if (!start || !name) {
+        return false;
+    }
+    size_t name_len = strlen(name);
+    return ident_len == name_len && strncmp(start, name, ident_len) == 0;
+}
+
+static const char *me_jit_function_name_rewrite(const char *start, size_t ident_len) {
+    if (me_jit_ident_equals(start, ident_len, "arctan2")) {
+        return "atan2";
+    }
+    if (me_jit_ident_equals(start, ident_len, "exp10")) {
+        return "me_jit_exp10";
+    }
+    if (me_jit_ident_equals(start, ident_len, "sinpi")) {
+        return "me_jit_sinpi";
+    }
+    if (me_jit_ident_equals(start, ident_len, "cospi")) {
+        return "me_jit_cospi";
+    }
+    if (me_jit_ident_equals(start, ident_len, "logaddexp")) {
+        return "me_jit_logaddexp";
+    }
+    if (me_jit_ident_equals(start, ident_len, "where")) {
+        return "me_jit_where";
+    }
+    return NULL;
+}
+
+static const char *me_jit_skip_ws(const char *p) {
+    if (!p) {
+        return NULL;
+    }
+    while (*p && isspace((unsigned char)*p)) {
+        p++;
+    }
+    return p;
+}
+
+static bool me_jit_parse_ident(const char **pp, const char **out_start, size_t *out_len) {
+    if (!pp || !*pp || !out_start || !out_len) {
+        return false;
+    }
+    const char *p = *pp;
+    if (!(isalpha((unsigned char)*p) || *p == '_')) {
+        return false;
+    }
+    const char *start = p++;
+    while (isalnum((unsigned char)*p) || *p == '_') {
+        p++;
+    }
+    *out_start = start;
+    *out_len = (size_t)(p - start);
+    *pp = p;
+    return true;
+}
+
+static bool me_jit_parse_simple_unary_call(const char *expr,
+                                           const char **out_fn_start, size_t *out_fn_len,
+                                           const char **out_arg_start, size_t *out_arg_len) {
+    if (!expr || !out_fn_start || !out_fn_len || !out_arg_start || !out_arg_len) {
+        return false;
+    }
+    const char *p = me_jit_skip_ws(expr);
+    const char *fn_start = NULL;
+    size_t fn_len = 0;
+    if (!me_jit_parse_ident(&p, &fn_start, &fn_len)) {
+        return false;
+    }
+    p = me_jit_skip_ws(p);
+    if (!p || *p != '(') {
+        return false;
+    }
+    p++;
+    p = me_jit_skip_ws(p);
+    const char *arg_start = NULL;
+    size_t arg_len = 0;
+    if (!me_jit_parse_ident(&p, &arg_start, &arg_len)) {
+        return false;
+    }
+    p = me_jit_skip_ws(p);
+    if (!p || *p != ')') {
+        return false;
+    }
+    p++;
+    p = me_jit_skip_ws(p);
+    if (!p || *p != '\0') {
+        return false;
+    }
+    *out_fn_start = fn_start;
+    *out_fn_len = fn_len;
+    *out_arg_start = arg_start;
+    *out_arg_len = arg_len;
+    return true;
+}
+
+static bool me_jit_parse_simple_binary_call(const char *expr,
+                                            const char **out_fn_start, size_t *out_fn_len,
+                                            const char **out_arg0_start, size_t *out_arg0_len,
+                                            const char **out_arg1_start, size_t *out_arg1_len) {
+    if (!expr || !out_fn_start || !out_fn_len ||
+        !out_arg0_start || !out_arg0_len || !out_arg1_start || !out_arg1_len) {
+        return false;
+    }
+    const char *p = me_jit_skip_ws(expr);
+    const char *fn_start = NULL;
+    size_t fn_len = 0;
+    if (!me_jit_parse_ident(&p, &fn_start, &fn_len)) {
+        return false;
+    }
+    p = me_jit_skip_ws(p);
+    if (!p || *p != '(') {
+        return false;
+    }
+    p++;
+    p = me_jit_skip_ws(p);
+    const char *arg0_start = NULL;
+    size_t arg0_len = 0;
+    if (!me_jit_parse_ident(&p, &arg0_start, &arg0_len)) {
+        return false;
+    }
+    p = me_jit_skip_ws(p);
+    if (!p || *p != ',') {
+        return false;
+    }
+    p++;
+    p = me_jit_skip_ws(p);
+    const char *arg1_start = NULL;
+    size_t arg1_len = 0;
+    if (!me_jit_parse_ident(&p, &arg1_start, &arg1_len)) {
+        return false;
+    }
+    p = me_jit_skip_ws(p);
+    if (!p || *p != ')') {
+        return false;
+    }
+    p++;
+    p = me_jit_skip_ws(p);
+    if (!p || *p != '\0') {
+        return false;
+    }
+    *out_fn_start = fn_start;
+    *out_fn_len = fn_len;
+    *out_arg0_start = arg0_start;
+    *out_arg0_len = arg0_len;
+    *out_arg1_start = arg1_start;
+    *out_arg1_len = arg1_len;
+    return true;
+}
+
+static bool me_jit_detect_vec_unary_plan(const me_dsl_jit_ir_program *program,
+                                         me_dtype output_dtype,
+                                         me_jit_vec_unary_plan *out_plan) {
+    if (!program || !out_plan) {
+        return false;
+    }
+    out_plan->kind = ME_JIT_VEC_UNARY_NONE;
+    out_plan->param_index = -1;
+
+    if (program->dialect != ME_DSL_DIALECT_ELEMENT || program->block.nstmts != 1) {
+        return false;
+    }
+    if (output_dtype != ME_FLOAT64 && output_dtype != ME_FLOAT32) {
+        return false;
+    }
+    const me_dsl_jit_ir_stmt *stmt = program->block.stmts[0];
+    if (!stmt || stmt->kind != ME_DSL_JIT_IR_STMT_RETURN) {
+        return false;
+    }
+    const me_dsl_jit_ir_expr *expr = &stmt->as.return_stmt.expr;
+    if (expr->dtype != output_dtype || !expr->text) {
+        return false;
+    }
+
+    const char *fn_start = NULL;
+    const char *arg_start = NULL;
+    size_t fn_len = 0;
+    size_t arg_len = 0;
+    if (!me_jit_parse_simple_unary_call(expr->text, &fn_start, &fn_len, &arg_start, &arg_len)) {
+        return false;
+    }
+
+    if (me_jit_ident_equals(fn_start, fn_len, "sin")) {
+        out_plan->kind = ME_JIT_VEC_UNARY_SIN;
+    }
+    else if (me_jit_ident_equals(fn_start, fn_len, "cos")) {
+        out_plan->kind = ME_JIT_VEC_UNARY_COS;
+    }
+    else if (me_jit_ident_equals(fn_start, fn_len, "exp")) {
+        out_plan->kind = ME_JIT_VEC_UNARY_EXP;
+    }
+    else if (me_jit_ident_equals(fn_start, fn_len, "log")) {
+        out_plan->kind = ME_JIT_VEC_UNARY_LOG;
+    }
+    else if (me_jit_ident_equals(fn_start, fn_len, "sinpi")) {
+        out_plan->kind = ME_JIT_VEC_UNARY_SINPI;
+    }
+    else if (me_jit_ident_equals(fn_start, fn_len, "cospi")) {
+        out_plan->kind = ME_JIT_VEC_UNARY_COSPI;
+    }
+    else if (me_jit_ident_equals(fn_start, fn_len, "exp10")) {
+        out_plan->kind = ME_JIT_VEC_UNARY_EXP10;
+    }
+    else {
+        return false;
+    }
+
+    for (int i = 0; i < program->nparams; i++) {
+        if (program->params[i] && program->param_dtypes[i] == output_dtype &&
+            me_jit_ident_equals(arg_start, arg_len, program->params[i])) {
+            out_plan->param_index = i;
+            return true;
+        }
+    }
+    out_plan->kind = ME_JIT_VEC_UNARY_NONE;
+    out_plan->param_index = -1;
+    return false;
+}
+
+static bool me_jit_detect_vec_binary_plan(const me_dsl_jit_ir_program *program,
+                                          me_dtype output_dtype,
+                                          me_jit_vec_binary_plan *out_plan) {
+    if (!program || !out_plan) {
+        return false;
+    }
+    out_plan->kind = ME_JIT_VEC_BINARY_NONE;
+    out_plan->param_index_a = -1;
+    out_plan->param_index_b = -1;
+
+    if (program->dialect != ME_DSL_DIALECT_ELEMENT || program->block.nstmts != 1) {
+        return false;
+    }
+    if (output_dtype != ME_FLOAT64 && output_dtype != ME_FLOAT32) {
+        return false;
+    }
+    const me_dsl_jit_ir_stmt *stmt = program->block.stmts[0];
+    if (!stmt || stmt->kind != ME_DSL_JIT_IR_STMT_RETURN) {
+        return false;
+    }
+    const me_dsl_jit_ir_expr *expr = &stmt->as.return_stmt.expr;
+    if (expr->dtype != output_dtype || !expr->text) {
+        return false;
+    }
+
+    const char *fn_start = NULL;
+    const char *arg0_start = NULL;
+    const char *arg1_start = NULL;
+    size_t fn_len = 0;
+    size_t arg0_len = 0;
+    size_t arg1_len = 0;
+    if (!me_jit_parse_simple_binary_call(expr->text, &fn_start, &fn_len,
+                                         &arg0_start, &arg0_len, &arg1_start, &arg1_len)) {
+        return false;
+    }
+
+    if (me_jit_ident_equals(fn_start, fn_len, "atan2")) {
+        out_plan->kind = ME_JIT_VEC_BINARY_ATAN2;
+    }
+    else if (me_jit_ident_equals(fn_start, fn_len, "hypot")) {
+        out_plan->kind = ME_JIT_VEC_BINARY_HYPOT;
+    }
+    else {
+        return false;
+    }
+
+    for (int i = 0; i < program->nparams; i++) {
+        if (program->params[i] && program->param_dtypes[i] == output_dtype &&
+            me_jit_ident_equals(arg0_start, arg0_len, program->params[i])) {
+            out_plan->param_index_a = i;
+            break;
+        }
+    }
+    for (int i = 0; i < program->nparams; i++) {
+        if (program->params[i] && program->param_dtypes[i] == output_dtype &&
+            me_jit_ident_equals(arg1_start, arg1_len, program->params[i])) {
+            out_plan->param_index_b = i;
+            break;
+        }
+    }
+    if (out_plan->param_index_a >= 0 && out_plan->param_index_b >= 0) {
+        return true;
+    }
+    out_plan->kind = ME_JIT_VEC_BINARY_NONE;
+    out_plan->param_index_a = -1;
+    out_plan->param_index_b = -1;
+    return false;
+}
+
+static const char *me_jit_vec_unary_symbol(me_jit_vec_unary_kind kind, me_dtype dtype) {
+    switch (kind) {
+    case ME_JIT_VEC_UNARY_SIN:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_sin_f64" : "me_jit_vec_sin_f32";
+    case ME_JIT_VEC_UNARY_COS:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_cos_f64" : "me_jit_vec_cos_f32";
+    case ME_JIT_VEC_UNARY_EXP:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_exp_f64" : "me_jit_vec_exp_f32";
+    case ME_JIT_VEC_UNARY_LOG:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_log_f64" : "me_jit_vec_log_f32";
+    case ME_JIT_VEC_UNARY_EXP10:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_exp10_f64" : "me_jit_vec_exp10_f32";
+    case ME_JIT_VEC_UNARY_SINPI:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_sinpi_f64" : "me_jit_vec_sinpi_f32";
+    case ME_JIT_VEC_UNARY_COSPI:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_cospi_f64" : "me_jit_vec_cospi_f32";
+    case ME_JIT_VEC_UNARY_NONE:
+        return NULL;
+    }
+    return NULL;
+}
+
+static const char *me_jit_vec_binary_symbol(me_jit_vec_binary_kind kind, me_dtype dtype) {
+    switch (kind) {
+    case ME_JIT_VEC_BINARY_ATAN2:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_atan2_f64" : "me_jit_vec_atan2_f32";
+    case ME_JIT_VEC_BINARY_HYPOT:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_hypot_f64" : "me_jit_vec_hypot_f32";
+    case ME_JIT_VEC_BINARY_NONE:
+        return NULL;
+    }
+    return NULL;
+}
+
 static bool me_jit_expr_to_c(const me_dsl_jit_ir_expr *expr, char **out_c,
                              me_dsl_error *error, int line, int column) {
     if (out_c) {
@@ -448,6 +799,15 @@ static bool me_jit_expr_to_c(const me_dsl_jit_ir_expr *expr, char **out_c,
             }
             else if (ident_len == 3 && strncmp(start, "not", ident_len) == 0) {
                 rep = "!";
+            }
+            else {
+                const char *q = p;
+                while (*q == ' ' || *q == '\t' || *q == '\r' || *q == '\n') {
+                    q++;
+                }
+                if (*q == '(') {
+                    rep = me_jit_function_name_rewrite(start, ident_len);
+                }
             }
             if (rep) {
                 size_t rep_len = strlen(rep);
@@ -838,8 +1198,12 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
     }
 
     const char *symbol = "me_dsl_jit_kernel";
+    bool use_runtime_math_bridge = false;
     if (options && options->symbol_name && options->symbol_name[0] != '\0') {
         symbol = options->symbol_name;
+    }
+    if (options && options->use_runtime_math_bridge) {
+        use_runtime_math_bridge = true;
     }
 
     if (!me_jit_emit_line(&ctx.source, 0, "typedef _Bool bool;") ||
@@ -857,11 +1221,98 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         !me_jit_emit_line(&ctx.source, 0, "#ifndef false") ||
         !me_jit_emit_line(&ctx.source, 0, "#define false 0") ||
         !me_jit_emit_line(&ctx.source, 0, "#endif") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double acos(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double acosh(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double asin(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double asinh(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double atan(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double atan2(double, double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double atanh(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double cbrt(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double ceil(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double copysign(double, double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double cos(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double cosh(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double erf(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double erfc(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double exp(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double exp2(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double expm1(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double fabs(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double fdim(double, double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double floor(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double fma(double, double, double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double fmax(double, double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double fmin(double, double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double fmod(double, double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double hypot(double, double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double ldexp(double, int);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double lgamma(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double log(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double log10(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double log1p(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double log2(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double nextafter(double, double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double pow(double, double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double remainder(double, double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double rint(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double round(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double sin(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double sinh(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double sqrt(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double tan(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double tanh(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double tgamma(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern double trunc(double);") ||
         !me_jit_emit_line(&ctx.source, 0, "")) {
         me_jit_set_error(error, 0, 0, "out of memory");
         me_jit_locals_free(&ctx.locals);
         free(ctx.source.data);
         return false;
+    }
+    if (use_runtime_math_bridge) {
+        if (!me_jit_emit_line(&ctx.source, 0, "extern double me_jit_exp10(double);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_sinpi(double);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_cospi(double);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_logaddexp(double, double);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_where(double, double, double);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_sin_f64(const double *, double *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_cos_f64(const double *, double *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_exp_f64(const double *, double *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_log_f64(const double *, double *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_exp10_f64(const double *, double *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_sinpi_f64(const double *, double *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_cospi_f64(const double *, double *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_atan2_f64(const double *, const double *, double *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_hypot_f64(const double *, const double *, double *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_sin_f32(const float *, float *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_cos_f32(const float *, float *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_exp_f32(const float *, float *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_log_f32(const float *, float *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_exp10_f32(const float *, float *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_sinpi_f32(const float *, float *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_cospi_f32(const float *, float *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_atan2_f32(const float *, const float *, float *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_hypot_f32(const float *, const float *, float *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "")) {
+            me_jit_set_error(error, 0, 0, "out of memory");
+            me_jit_locals_free(&ctx.locals);
+            free(ctx.source.data);
+            return false;
+        }
+    }
+    else {
+        if (!me_jit_emit_line(&ctx.source, 0, "static double me_jit_exp10(double x) { return pow(10.0, x); }") ||
+            !me_jit_emit_line(&ctx.source, 0, "static double me_jit_sinpi(double x) { return sin(3.14159265358979323846 * x); }") ||
+            !me_jit_emit_line(&ctx.source, 0, "static double me_jit_cospi(double x) { return cos(3.14159265358979323846 * x); }") ||
+            !me_jit_emit_line(&ctx.source, 0, "static double me_jit_logaddexp(double a, double b) { double hi = (a > b) ? a : b; double lo = (a > b) ? b : a; return hi + log1p(exp(lo - hi)); }") ||
+            !me_jit_emit_line(&ctx.source, 0, "static double me_jit_where(double c, double x, double y) { return (c != 0.0) ? x : y; }") ||
+            !me_jit_emit_line(&ctx.source, 0, "")) {
+            me_jit_set_error(error, 0, 0, "out of memory");
+            me_jit_locals_free(&ctx.locals);
+            free(ctx.source.data);
+            return false;
+        }
     }
 
     size_t sig_need = strlen(symbol) + 96;
@@ -939,6 +1390,80 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
             me_jit_locals_free(&ctx.locals);
             free(ctx.source.data);
             return false;
+        }
+    }
+
+    if (use_runtime_math_bridge) {
+        me_jit_vec_unary_plan vec_plan;
+        if (me_jit_detect_vec_unary_plan(program, output_dtype, &vec_plan)) {
+            const char *vec_sym = me_jit_vec_unary_symbol(vec_plan.kind, output_dtype);
+            if (!vec_sym || vec_plan.param_index < 0 || vec_plan.param_index >= program->nparams) {
+                me_jit_set_error(error, 0, 0, "invalid vector bridge lowering state");
+                me_jit_locals_free(&ctx.locals);
+                free(ctx.source.data);
+                return false;
+            }
+            size_t need = strlen(vec_sym) + strlen(program->params[vec_plan.param_index]) + 32;
+            char *line = malloc(need);
+            if (!line) {
+                me_jit_set_error(error, 0, 0, "out of memory");
+                me_jit_locals_free(&ctx.locals);
+                free(ctx.source.data);
+                return false;
+            }
+            snprintf(line, need, "%s(in_%s, out, nitems);", vec_sym, program->params[vec_plan.param_index]);
+            bool ok = me_jit_emit_line(&ctx.source, 1, line);
+            free(line);
+            if (!ok ||
+                !me_jit_emit_line(&ctx.source, 1, "return 0;") ||
+                !me_jit_emit_line(&ctx.source, 0, "}")) {
+                me_jit_set_error(error, 0, 0, "out of memory");
+                me_jit_locals_free(&ctx.locals);
+                free(ctx.source.data);
+                return false;
+            }
+            me_jit_locals_free(&ctx.locals);
+            *out_source = ctx.source.data;
+            return true;
+        }
+        me_jit_vec_binary_plan vec_plan2;
+        if (me_jit_detect_vec_binary_plan(program, output_dtype, &vec_plan2)) {
+            const char *vec_sym = me_jit_vec_binary_symbol(vec_plan2.kind, output_dtype);
+            if (!vec_sym ||
+                vec_plan2.param_index_a < 0 || vec_plan2.param_index_a >= program->nparams ||
+                vec_plan2.param_index_b < 0 || vec_plan2.param_index_b >= program->nparams) {
+                me_jit_set_error(error, 0, 0, "invalid vector bridge lowering state");
+                me_jit_locals_free(&ctx.locals);
+                free(ctx.source.data);
+                return false;
+            }
+            size_t need = strlen(vec_sym) +
+                          strlen(program->params[vec_plan2.param_index_a]) +
+                          strlen(program->params[vec_plan2.param_index_b]) + 40;
+            char *line = malloc(need);
+            if (!line) {
+                me_jit_set_error(error, 0, 0, "out of memory");
+                me_jit_locals_free(&ctx.locals);
+                free(ctx.source.data);
+                return false;
+            }
+            snprintf(line, need, "%s(in_%s, in_%s, out, nitems);",
+                     vec_sym,
+                     program->params[vec_plan2.param_index_a],
+                     program->params[vec_plan2.param_index_b]);
+            bool ok = me_jit_emit_line(&ctx.source, 1, line);
+            free(line);
+            if (!ok ||
+                !me_jit_emit_line(&ctx.source, 1, "return 0;") ||
+                !me_jit_emit_line(&ctx.source, 0, "}")) {
+                me_jit_set_error(error, 0, 0, "out of memory");
+                me_jit_locals_free(&ctx.locals);
+                free(ctx.source.data);
+                return false;
+            }
+            me_jit_locals_free(&ctx.locals);
+            *out_source = ctx.source.data;
+            return true;
         }
     }
 

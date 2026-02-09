@@ -280,6 +280,7 @@ On Linux/macOS, DSL kernels may use runtime JIT compilation when eligible. The f
 - `ME_DSL_JIT_CFLAGS="..."`: Extra C compiler flags appended to runtime JIT builds.
 - `ME_DSL_JIT_LIBTCC=0`: Disable optional `libtcc` in-memory fallback when no C compiler is found.
 - `ME_DSL_JIT_FORCE_LIBTCC=1`: Force runtime JIT to use `libtcc` path even when `cc` is available (skip `cc` backend).
+- `ME_DSL_JIT_USE_SLEEF_BRIDGE=1`: In forced-`libtcc` mode, emit JIT code that resolves selected math wrappers via runtime bridge symbols.
 - `ME_DSL_JIT_LIBTCC_PATH=/path/to/libtcc.{so,dylib}`: Override the runtime library path used for `libtcc` fallback loading.
 - `ME_DSL_JIT_TCC_LIB_PATH=/path/to/tcc/libdir`: Override `tcc_set_lib_path()` directory (where `libtcc1.a` is searched).
 - `ME_DSL_JIT_TCC_OPTIONS="..."`: Extra options passed to `tcc_set_options()` when `libtcc` fallback is used.

@@ -19,6 +19,7 @@
 
 typedef struct {
     const char *symbol_name;
+    bool use_runtime_math_bridge;
 } me_dsl_jit_cgen_options;
 
 bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_dtype,
