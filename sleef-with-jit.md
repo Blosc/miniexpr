@@ -142,6 +142,7 @@ Acceptance:
 | Bridge runtime crash fix | Done | Fixed forced `libtcc + bridge` crash by registering bridge symbols after `tcc_set_output_type`; added specific `tcc_add_symbol` error messages. | Reproduced crash, patched, validated via benchmarks and tests. |
 | Phase 2 narrow lowering | Done | Selective lowering for simple element map unary kernels (`sinpi`, `cospi`, `exp10`) to bulk `me_jit_vec_*` calls. | Performance improved on matched kernels; tests updated. |
 | Phase 2 expansion | Done | Added unary lowering for `sin`, `cos`, `exp`, `log` and binary lowering for `atan2`, `hypot`; added bridge exports for f64/f32 unary+binary vector entrypoints. | Codegen tests for unary+binary lowering pass; benchmark shows strong wins on most matched kernels. |
+| Phase 2 binary `pow` lowering | Done | Added selective binary lowering for `pow(x, y)` and safe broadcast forms (`pow(x, c)`, `pow(c, x)`) to bulk `me_jit_vec_pow_*` bridge calls; registered `libtcc` bridge symbols for f64/f32. | `test_dsl_jit_codegen` coverage includes map + broadcast `pow` lowering marker checks. |
 | Unary affine lowering | Done | Added matcher/emitter support for `f(x + c)`, `f(x - c)`, `f(c + x)` using prepass + bulk vector call; added codegen test for `log(x + 1.5)`. | Tests pass; `log` improved vs non-bridge JIT but remains slower than interpreter in current benchmark. |
 
 ### Latest Metrics Snapshot (`nitems=262144`, `repeats=6`)
@@ -158,7 +159,7 @@ Acceptance:
 
 ### Open Items
 
-1. Expand selective lowering coverage to remaining unary/binary/ternary math functions.
-2. Add stronger pattern matching (constants, affine/broadcast forms) where safe.
+1. Expand selective lowering coverage to remaining unary/binary/ternary math functions (`pow` map coverage is now included).
+2. Add stronger pattern matching (constants, affine/broadcast forms) where safe (`pow` broadcast constants now covered).
 3. Evaluate `cc` backend bridge-link path (currently bridge usage is focused on libtcc runtime flow).
 4. Keep extending benchmark matrix and parity tests as coverage grows.

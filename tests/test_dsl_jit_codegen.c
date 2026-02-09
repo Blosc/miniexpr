@@ -522,8 +522,141 @@ static int test_codegen_runtime_math_bridge_vector_lowering_binary(void) {
     return 0;
 }
 
+static int test_codegen_runtime_math_bridge_vector_lowering_binary_pow(void) {
+    printf("\n=== JIT C Codegen Test 8: runtime math bridge vector binary pow lowering ===\n");
+
+    const char *src =
+        "# me:dialect=element\n"
+        "def kernel(x, y):\n"
+        "    return pow(x, y)\n";
+
+    me_dsl_error parse_error;
+    me_dsl_program *program = me_dsl_parse(src, &parse_error);
+    if (!program) {
+        printf("  FAILED: parse error at %d:%d (%s)\n",
+               parse_error.line, parse_error.column, parse_error.message);
+        return 1;
+    }
+
+    const char *param_names[] = {"x", "y"};
+    me_dtype param_dtypes[] = {ME_FLOAT64, ME_FLOAT64};
+    dtype_resolve_ctx rctx;
+    rctx.value_dtype = ME_FLOAT64;
+
+    me_dsl_error ir_error;
+    me_dsl_jit_ir_program *ir = NULL;
+    bool ok = me_dsl_jit_ir_build(program, param_names, param_dtypes, 2,
+                                  mock_resolve_dtype, &rctx, &ir, &ir_error);
+    me_dsl_program_free(program);
+    if (!ok || !ir) {
+        printf("  FAILED: ir build rejected source at %d:%d (%s)\n",
+               ir_error.line, ir_error.column, ir_error.message);
+        me_dsl_jit_ir_free(ir);
+        return 1;
+    }
+
+    me_dsl_error cg_error;
+    me_dsl_jit_cgen_options options;
+    memset(&options, 0, sizeof(options));
+    options.use_runtime_math_bridge = true;
+    char *c_source = NULL;
+    ok = me_dsl_jit_codegen_c(ir, ME_FLOAT64, &options, &c_source, &cg_error);
+    me_dsl_jit_ir_free(ir);
+    if (!ok || !c_source) {
+        printf("  FAILED: codegen rejected source at %d:%d (%s)\n",
+               cg_error.line, cg_error.column, cg_error.message);
+        free(c_source);
+        return 1;
+    }
+
+    if (!strstr(c_source, "me_jit_vec_pow_f64(in_x, in_y, out, nitems);") ||
+        strstr(c_source, "for (int64_t idx = 0; idx < nitems; idx++) {")) {
+        printf("  FAILED: vector binary pow bridge lowering markers not emitted as expected\n");
+        free(c_source);
+        return 1;
+    }
+
+    free(c_source);
+    printf("  PASSED\n");
+    return 0;
+}
+
+static int test_codegen_runtime_math_bridge_vector_lowering_binary_pow_broadcast(void) {
+    printf("\n=== JIT C Codegen Test 9: runtime math bridge vector binary pow broadcast lowering ===\n");
+
+    const char *src_rhs =
+        "# me:dialect=element\n"
+        "def kernel(x):\n"
+        "    return pow(x, 1.25)\n";
+    const char *src_lhs =
+        "# me:dialect=element\n"
+        "def kernel(x):\n"
+        "    return pow(1.25, x)\n";
+
+    const char *param_names[] = {"x"};
+    me_dtype param_dtypes[] = {ME_FLOAT64};
+    dtype_resolve_ctx rctx;
+    rctx.value_dtype = ME_FLOAT64;
+    me_dsl_jit_cgen_options options;
+    memset(&options, 0, sizeof(options));
+    options.use_runtime_math_bridge = true;
+
+    const char *cases[] = {src_rhs, src_lhs};
+    for (int c = 0; c < 2; c++) {
+        me_dsl_error parse_error;
+        me_dsl_program *program = me_dsl_parse(cases[c], &parse_error);
+        if (!program) {
+            printf("  FAILED: parse error at %d:%d (%s)\n",
+                   parse_error.line, parse_error.column, parse_error.message);
+            return 1;
+        }
+
+        me_dsl_error ir_error;
+        me_dsl_jit_ir_program *ir = NULL;
+        bool ok = me_dsl_jit_ir_build(program, param_names, param_dtypes, 1,
+                                      mock_resolve_dtype, &rctx, &ir, &ir_error);
+        me_dsl_program_free(program);
+        if (!ok || !ir) {
+            printf("  FAILED: ir build rejected source at %d:%d (%s)\n",
+                   ir_error.line, ir_error.column, ir_error.message);
+            me_dsl_jit_ir_free(ir);
+            return 1;
+        }
+
+        me_dsl_error cg_error;
+        char *c_source = NULL;
+        ok = me_dsl_jit_codegen_c(ir, ME_FLOAT64, &options, &c_source, &cg_error);
+        me_dsl_jit_ir_free(ir);
+        if (!ok || !c_source) {
+            printf("  FAILED: codegen rejected source at %d:%d (%s)\n",
+                   cg_error.line, cg_error.column, cg_error.message);
+            free(c_source);
+            return 1;
+        }
+
+        bool marker_ok = false;
+        if (c == 0) {
+            marker_ok = strstr(c_source, "out[__me_i] = (double)1.25;") != NULL &&
+                        strstr(c_source, "me_jit_vec_pow_f64(in_x, out, out, nitems);") != NULL;
+        }
+        else {
+            marker_ok = strstr(c_source, "out[__me_i] = (double)1.25;") != NULL &&
+                        strstr(c_source, "me_jit_vec_pow_f64(out, in_x, out, nitems);") != NULL;
+        }
+        if (!marker_ok || strstr(c_source, "for (int64_t idx = 0; idx < nitems; idx++) {")) {
+            printf("  FAILED: vector binary pow broadcast lowering markers not emitted as expected\n");
+            free(c_source);
+            return 1;
+        }
+        free(c_source);
+    }
+
+    printf("  PASSED\n");
+    return 0;
+}
+
 static int test_codegen_runtime_math_bridge_vector_lowering_unary_affine(void) {
-    printf("\n=== JIT C Codegen Test 8: runtime math bridge unary affine lowering ===\n");
+    printf("\n=== JIT C Codegen Test 10: runtime math bridge unary affine lowering ===\n");
 
     const char *src =
         "# me:dialect=element\n"
@@ -591,6 +724,8 @@ int main(void) {
     fail |= test_codegen_runtime_math_bridge_emission();
     fail |= test_codegen_runtime_math_bridge_vector_lowering();
     fail |= test_codegen_runtime_math_bridge_vector_lowering_binary();
+    fail |= test_codegen_runtime_math_bridge_vector_lowering_binary_pow();
+    fail |= test_codegen_runtime_math_bridge_vector_lowering_binary_pow_broadcast();
     fail |= test_codegen_runtime_math_bridge_vector_lowering_unary_affine();
     return fail;
 }

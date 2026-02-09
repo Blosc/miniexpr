@@ -62,13 +62,18 @@ typedef struct {
 typedef enum {
     ME_JIT_VEC_BINARY_NONE = 0,
     ME_JIT_VEC_BINARY_ATAN2,
-    ME_JIT_VEC_BINARY_HYPOT
+    ME_JIT_VEC_BINARY_HYPOT,
+    ME_JIT_VEC_BINARY_POW
 } me_jit_vec_binary_kind;
 
 typedef struct {
     me_jit_vec_binary_kind kind;
     int param_index_a;
     int param_index_b;
+    bool arg_a_const;
+    bool arg_b_const;
+    double arg_a_const_value;
+    double arg_b_const_value;
 } me_jit_vec_binary_plan;
 
 static void me_jit_set_error(me_dsl_error *error, int line, int column, const char *msg) {
@@ -450,6 +455,53 @@ static bool me_jit_parse_ident(const char **pp, const char **out_start, size_t *
     return true;
 }
 
+static bool me_jit_parse_number(const char **pp, const char **out_start, size_t *out_len,
+                                double *out_value) {
+    if (!pp || !*pp || !out_start || !out_len || !out_value) {
+        return false;
+    }
+    const char *p = *pp;
+    char *end_num = NULL;
+    double v = strtod(p, &end_num);
+    if (!end_num || end_num == p) {
+        return false;
+    }
+    *out_start = p;
+    *out_len = (size_t)(end_num - p);
+    *out_value = v;
+    *pp = end_num;
+    return true;
+}
+
+static bool me_jit_parse_ident_or_number(const char **pp,
+                                         const char **out_start, size_t *out_len,
+                                         bool *out_is_number, double *out_number) {
+    if (!pp || !*pp || !out_start || !out_len || !out_is_number || !out_number) {
+        return false;
+    }
+    const char *p = *pp;
+    const char *start = NULL;
+    size_t len = 0;
+    if (me_jit_parse_ident(&p, &start, &len)) {
+        *out_start = start;
+        *out_len = len;
+        *out_is_number = false;
+        *out_number = 0.0;
+        *pp = p;
+        return true;
+    }
+    double number = 0.0;
+    if (!me_jit_parse_number(&p, &start, &len, &number)) {
+        return false;
+    }
+    *out_start = start;
+    *out_len = len;
+    *out_is_number = true;
+    *out_number = number;
+    *pp = p;
+    return true;
+}
+
 static bool me_jit_parse_simple_unary_call(const char *expr,
                                            const char **out_fn_start, size_t *out_fn_len,
                                            const char **out_arg_start, size_t *out_arg_len,
@@ -576,9 +628,12 @@ static bool me_jit_parse_simple_unary_call(const char *expr,
 static bool me_jit_parse_simple_binary_call(const char *expr,
                                             const char **out_fn_start, size_t *out_fn_len,
                                             const char **out_arg0_start, size_t *out_arg0_len,
-                                            const char **out_arg1_start, size_t *out_arg1_len) {
+                                            const char **out_arg1_start, size_t *out_arg1_len,
+                                            bool *out_arg0_is_const, double *out_arg0_const,
+                                            bool *out_arg1_is_const, double *out_arg1_const) {
     if (!expr || !out_fn_start || !out_fn_len ||
-        !out_arg0_start || !out_arg0_len || !out_arg1_start || !out_arg1_len) {
+        !out_arg0_start || !out_arg0_len || !out_arg1_start || !out_arg1_len ||
+        !out_arg0_is_const || !out_arg0_const || !out_arg1_is_const || !out_arg1_const) {
         return false;
     }
     const char *p = me_jit_skip_ws(expr);
@@ -595,7 +650,10 @@ static bool me_jit_parse_simple_binary_call(const char *expr,
     p = me_jit_skip_ws(p);
     const char *arg0_start = NULL;
     size_t arg0_len = 0;
-    if (!me_jit_parse_ident(&p, &arg0_start, &arg0_len)) {
+    bool arg0_is_const = false;
+    double arg0_const = 0.0;
+    if (!me_jit_parse_ident_or_number(&p, &arg0_start, &arg0_len,
+                                      &arg0_is_const, &arg0_const)) {
         return false;
     }
     p = me_jit_skip_ws(p);
@@ -606,7 +664,10 @@ static bool me_jit_parse_simple_binary_call(const char *expr,
     p = me_jit_skip_ws(p);
     const char *arg1_start = NULL;
     size_t arg1_len = 0;
-    if (!me_jit_parse_ident(&p, &arg1_start, &arg1_len)) {
+    bool arg1_is_const = false;
+    double arg1_const = 0.0;
+    if (!me_jit_parse_ident_or_number(&p, &arg1_start, &arg1_len,
+                                      &arg1_is_const, &arg1_const)) {
         return false;
     }
     p = me_jit_skip_ws(p);
@@ -624,6 +685,10 @@ static bool me_jit_parse_simple_binary_call(const char *expr,
     *out_arg0_len = arg0_len;
     *out_arg1_start = arg1_start;
     *out_arg1_len = arg1_len;
+    *out_arg0_is_const = arg0_is_const;
+    *out_arg0_const = arg0_const;
+    *out_arg1_is_const = arg1_is_const;
+    *out_arg1_const = arg1_const;
     return true;
 }
 
@@ -715,6 +780,10 @@ static bool me_jit_detect_vec_binary_plan(const me_dsl_jit_ir_program *program,
     out_plan->kind = ME_JIT_VEC_BINARY_NONE;
     out_plan->param_index_a = -1;
     out_plan->param_index_b = -1;
+    out_plan->arg_a_const = false;
+    out_plan->arg_b_const = false;
+    out_plan->arg_a_const_value = 0.0;
+    out_plan->arg_b_const_value = 0.0;
 
     if (program->dialect != ME_DSL_DIALECT_ELEMENT || program->block.nstmts != 1) {
         return false;
@@ -737,8 +806,14 @@ static bool me_jit_detect_vec_binary_plan(const me_dsl_jit_ir_program *program,
     size_t fn_len = 0;
     size_t arg0_len = 0;
     size_t arg1_len = 0;
+    bool arg0_is_const = false;
+    bool arg1_is_const = false;
+    double arg0_const = 0.0;
+    double arg1_const = 0.0;
     if (!me_jit_parse_simple_binary_call(expr->text, &fn_start, &fn_len,
-                                         &arg0_start, &arg0_len, &arg1_start, &arg1_len)) {
+                                         &arg0_start, &arg0_len, &arg1_start, &arg1_len,
+                                         &arg0_is_const, &arg0_const,
+                                         &arg1_is_const, &arg1_const)) {
         return false;
     }
 
@@ -747,6 +822,9 @@ static bool me_jit_detect_vec_binary_plan(const me_dsl_jit_ir_program *program,
     }
     else if (me_jit_ident_equals(fn_start, fn_len, "hypot")) {
         out_plan->kind = ME_JIT_VEC_BINARY_HYPOT;
+    }
+    else if (me_jit_ident_equals(fn_start, fn_len, "pow")) {
+        out_plan->kind = ME_JIT_VEC_BINARY_POW;
     }
     else {
         return false;
@@ -766,12 +844,32 @@ static bool me_jit_detect_vec_binary_plan(const me_dsl_jit_ir_program *program,
             break;
         }
     }
-    if (out_plan->param_index_a >= 0 && out_plan->param_index_b >= 0) {
+    if (out_plan->kind == ME_JIT_VEC_BINARY_POW) {
+        if (out_plan->param_index_a < 0 && arg0_is_const) {
+            out_plan->arg_a_const = true;
+            out_plan->arg_a_const_value = arg0_const;
+        }
+        if (out_plan->param_index_b < 0 && arg1_is_const) {
+            out_plan->arg_b_const = true;
+            out_plan->arg_b_const_value = arg1_const;
+        }
+        if ((out_plan->param_index_a >= 0 || out_plan->arg_a_const) &&
+            (out_plan->param_index_b >= 0 || out_plan->arg_b_const) &&
+            !(out_plan->arg_a_const && out_plan->arg_b_const)) {
+            return true;
+        }
+    }
+    else if (out_plan->param_index_a >= 0 && out_plan->param_index_b >= 0 &&
+             !arg0_is_const && !arg1_is_const) {
         return true;
     }
     out_plan->kind = ME_JIT_VEC_BINARY_NONE;
     out_plan->param_index_a = -1;
     out_plan->param_index_b = -1;
+    out_plan->arg_a_const = false;
+    out_plan->arg_b_const = false;
+    out_plan->arg_a_const_value = 0.0;
+    out_plan->arg_b_const_value = 0.0;
     return false;
 }
 
@@ -803,6 +901,8 @@ static const char *me_jit_vec_binary_symbol(me_jit_vec_binary_kind kind, me_dtyp
         return (dtype == ME_FLOAT64) ? "me_jit_vec_atan2_f64" : "me_jit_vec_atan2_f32";
     case ME_JIT_VEC_BINARY_HYPOT:
         return (dtype == ME_FLOAT64) ? "me_jit_vec_hypot_f64" : "me_jit_vec_hypot_f32";
+    case ME_JIT_VEC_BINARY_POW:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_pow_f64" : "me_jit_vec_pow_f32";
     case ME_JIT_VEC_BINARY_NONE:
         return NULL;
     }
@@ -863,6 +963,84 @@ static bool me_jit_emit_vec_unary_call(me_jit_codegen_ctx *ctx,
         return false;
     }
     return true;
+}
+
+static bool me_jit_emit_vec_binary_call(me_jit_codegen_ctx *ctx,
+                                        me_dtype output_dtype,
+                                        const char *vec_sym,
+                                        const char *arg_a_param,
+                                        bool arg_a_const, double arg_a_const_value,
+                                        const char *arg_b_param,
+                                        bool arg_b_const, double arg_b_const_value) {
+    if (!ctx || !vec_sym) {
+        return false;
+    }
+    if (arg_a_const && arg_b_const) {
+        return false;
+    }
+    const char *ctype = (output_dtype == ME_FLOAT32) ? "float" : "double";
+    if (!arg_a_const && !arg_b_const) {
+        if (!arg_a_param || !arg_b_param) {
+            return false;
+        }
+        size_t need = strlen(vec_sym) + strlen(arg_a_param) + strlen(arg_b_param) + 40;
+        char *line = malloc(need);
+        if (!line) {
+            return false;
+        }
+        snprintf(line, need, "%s(in_%s, in_%s, out, nitems);",
+                 vec_sym, arg_a_param, arg_b_param);
+        bool ok = me_jit_emit_line(&ctx->source, 1, line);
+        free(line);
+        return ok;
+    }
+
+    char const_buf[96];
+    double fill_value = arg_a_const ? arg_a_const_value : arg_b_const_value;
+    snprintf(const_buf, sizeof(const_buf), "%.17g", fill_value);
+    if (!me_jit_emit_line(&ctx->source, 1, "for (int64_t __me_i = 0; __me_i < nitems; __me_i++) {")) {
+        return false;
+    }
+    size_t fill_need = strlen(ctype) + strlen(const_buf) + 48;
+    char *fill_line = malloc(fill_need);
+    if (!fill_line) {
+        return false;
+    }
+    snprintf(fill_line, fill_need, "out[__me_i] = (%s)%s;", ctype, const_buf);
+    bool ok = me_jit_emit_line(&ctx->source, 2, fill_line);
+    free(fill_line);
+    if (!ok ||
+        !me_jit_emit_line(&ctx->source, 1, "}")) {
+        return false;
+    }
+
+    if (arg_a_const) {
+        if (!arg_b_param) {
+            return false;
+        }
+        size_t need = strlen(vec_sym) + strlen(arg_b_param) + 32;
+        char *line = malloc(need);
+        if (!line) {
+            return false;
+        }
+        snprintf(line, need, "%s(out, in_%s, out, nitems);", vec_sym, arg_b_param);
+        ok = me_jit_emit_line(&ctx->source, 1, line);
+        free(line);
+        return ok;
+    }
+
+    if (!arg_a_param) {
+        return false;
+    }
+    size_t need = strlen(vec_sym) + strlen(arg_a_param) + 32;
+    char *line = malloc(need);
+    if (!line) {
+        return false;
+    }
+    snprintf(line, need, "%s(in_%s, out, out, nitems);", vec_sym, arg_a_param);
+    ok = me_jit_emit_line(&ctx->source, 1, line);
+    free(line);
+    return ok;
 }
 
 static bool me_jit_expr_to_c(const me_dsl_jit_ir_expr *expr, char **out_c,
@@ -1437,6 +1615,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_cospi_f64(const double *, double *, int64_t);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_atan2_f64(const double *, const double *, double *, int64_t);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_hypot_f64(const double *, const double *, double *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_pow_f64(const double *, const double *, double *, int64_t);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_sin_f32(const float *, float *, int64_t);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_cos_f32(const float *, float *, int64_t);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_exp_f32(const float *, float *, int64_t);") ||
@@ -1446,6 +1625,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_cospi_f32(const float *, float *, int64_t);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_atan2_f32(const float *, const float *, float *, int64_t);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_hypot_f32(const float *, const float *, float *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_pow_f32(const float *, const float *, float *, int64_t);") ||
             !me_jit_emit_line(&ctx.source, 0, "")) {
             me_jit_set_error(error, 0, 0, "out of memory");
             me_jit_locals_free(&ctx.locals);
@@ -1573,30 +1753,41 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         me_jit_vec_binary_plan vec_plan2;
         if (me_jit_detect_vec_binary_plan(program, output_dtype, &vec_plan2)) {
             const char *vec_sym = me_jit_vec_binary_symbol(vec_plan2.kind, output_dtype);
+            const char *arg_a_param = NULL;
+            const char *arg_b_param = NULL;
+            if (vec_plan2.param_index_a >= 0) {
+                if (vec_plan2.param_index_a >= program->nparams) {
+                    me_jit_set_error(error, 0, 0, "invalid vector bridge lowering state");
+                    me_jit_locals_free(&ctx.locals);
+                    free(ctx.source.data);
+                    return false;
+                }
+                arg_a_param = program->params[vec_plan2.param_index_a];
+            }
+            if (vec_plan2.param_index_b >= 0) {
+                if (vec_plan2.param_index_b >= program->nparams) {
+                    me_jit_set_error(error, 0, 0, "invalid vector bridge lowering state");
+                    me_jit_locals_free(&ctx.locals);
+                    free(ctx.source.data);
+                    return false;
+                }
+                arg_b_param = program->params[vec_plan2.param_index_b];
+            }
             if (!vec_sym ||
-                vec_plan2.param_index_a < 0 || vec_plan2.param_index_a >= program->nparams ||
-                vec_plan2.param_index_b < 0 || vec_plan2.param_index_b >= program->nparams) {
+                (!arg_a_param && !vec_plan2.arg_a_const) ||
+                (!arg_b_param && !vec_plan2.arg_b_const)) {
                 me_jit_set_error(error, 0, 0, "invalid vector bridge lowering state");
                 me_jit_locals_free(&ctx.locals);
                 free(ctx.source.data);
                 return false;
             }
-            size_t need = strlen(vec_sym) +
-                          strlen(program->params[vec_plan2.param_index_a]) +
-                          strlen(program->params[vec_plan2.param_index_b]) + 40;
-            char *line = malloc(need);
-            if (!line) {
-                me_jit_set_error(error, 0, 0, "out of memory");
-                me_jit_locals_free(&ctx.locals);
-                free(ctx.source.data);
-                return false;
-            }
-            snprintf(line, need, "%s(in_%s, in_%s, out, nitems);",
-                     vec_sym,
-                     program->params[vec_plan2.param_index_a],
-                     program->params[vec_plan2.param_index_b]);
-            bool ok = me_jit_emit_line(&ctx.source, 1, line);
-            free(line);
+            bool ok = me_jit_emit_vec_binary_call(&ctx, output_dtype, vec_sym,
+                                                  arg_a_param,
+                                                  vec_plan2.arg_a_const,
+                                                  vec_plan2.arg_a_const_value,
+                                                  arg_b_param,
+                                                  vec_plan2.arg_b_const,
+                                                  vec_plan2.arg_b_const_value);
             if (!ok ||
                 !me_jit_emit_line(&ctx.source, 1, "return 0;") ||
                 !me_jit_emit_line(&ctx.source, 0, "}")) {

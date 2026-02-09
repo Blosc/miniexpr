@@ -3941,6 +3941,14 @@ static void dsl_jit_bridge_vec_hypot_f32(const float *a, const float *b, float *
     dsl_jit_bridge_apply_binary_vector_f32(vec_hypot_f32_dispatch, a, b, out, nitems);
 }
 
+static void dsl_jit_bridge_vec_pow_f64(const double *a, const double *b, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_binary_vector_f64(vec_pow_dispatch, a, b, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_pow_f32(const float *a, const float *b, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_binary_vector_f32(vec_pow_f32_dispatch, a, b, out, nitems);
+}
+
 static bool dsl_jit_libtcc_register_math_bridge(me_tcc_state *state) {
     if (!state) {
         return false;
@@ -4030,6 +4038,12 @@ static bool dsl_jit_libtcc_register_math_bridge(me_tcc_state *state) {
                  "tcc_add_symbol failed for me_jit_vec_hypot_f64");
         return false;
     }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_pow_f64",
+                                        (const void *)&dsl_jit_bridge_vec_pow_f64) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_pow_f64");
+        return false;
+    }
     if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_sin_f32",
                                         (const void *)&dsl_jit_bridge_vec_sin_f32) < 0) {
         snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
@@ -4082,6 +4096,12 @@ static bool dsl_jit_libtcc_register_math_bridge(me_tcc_state *state) {
                                         (const void *)&dsl_jit_bridge_vec_hypot_f32) < 0) {
         snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
                  "tcc_add_symbol failed for me_jit_vec_hypot_f32");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_pow_f32",
+                                        (const void *)&dsl_jit_bridge_vec_pow_f32) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_pow_f32");
         return false;
     }
     return true;

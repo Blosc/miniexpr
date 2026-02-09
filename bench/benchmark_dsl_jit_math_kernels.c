@@ -336,7 +336,7 @@ int main(int argc, char **argv) {
         {"sin", "sin(x)"},
         {"exp", "exp(x)"},
         {"log", "log(x + 1.5)"},
-        {"pow", "pow(x + 1.1, 1.25)"},
+        {"pow", "pow(x, y)"},
         {"hypot", "hypot(x, y)"},
         {"atan2", "atan2(y, x)"},
         {"sinpi", "sinpi(x)"},
