@@ -54,7 +54,15 @@ typedef enum {
     ME_JIT_VEC_UNARY_SQRT,
     ME_JIT_VEC_UNARY_LOG1P,
     ME_JIT_VEC_UNARY_EXP2,
-    ME_JIT_VEC_UNARY_LOG2
+    ME_JIT_VEC_UNARY_LOG2,
+    ME_JIT_VEC_UNARY_EXPM1,
+    ME_JIT_VEC_UNARY_LOG10,
+    ME_JIT_VEC_UNARY_SINH,
+    ME_JIT_VEC_UNARY_COSH,
+    ME_JIT_VEC_UNARY_TANH,
+    ME_JIT_VEC_UNARY_ASINH,
+    ME_JIT_VEC_UNARY_ACOSH,
+    ME_JIT_VEC_UNARY_ATANH
 } me_jit_vec_unary_kind;
 
 typedef struct {
@@ -774,6 +782,30 @@ static bool me_jit_detect_vec_unary_plan(const me_dsl_jit_ir_program *program,
     else if (me_jit_ident_equals(fn_start, fn_len, "log2")) {
         out_plan->kind = ME_JIT_VEC_UNARY_LOG2;
     }
+    else if (me_jit_ident_equals(fn_start, fn_len, "expm1")) {
+        out_plan->kind = ME_JIT_VEC_UNARY_EXPM1;
+    }
+    else if (me_jit_ident_equals(fn_start, fn_len, "log10")) {
+        out_plan->kind = ME_JIT_VEC_UNARY_LOG10;
+    }
+    else if (me_jit_ident_equals(fn_start, fn_len, "sinh")) {
+        out_plan->kind = ME_JIT_VEC_UNARY_SINH;
+    }
+    else if (me_jit_ident_equals(fn_start, fn_len, "cosh")) {
+        out_plan->kind = ME_JIT_VEC_UNARY_COSH;
+    }
+    else if (me_jit_ident_equals(fn_start, fn_len, "tanh")) {
+        out_plan->kind = ME_JIT_VEC_UNARY_TANH;
+    }
+    else if (me_jit_ident_equals(fn_start, fn_len, "asinh")) {
+        out_plan->kind = ME_JIT_VEC_UNARY_ASINH;
+    }
+    else if (me_jit_ident_equals(fn_start, fn_len, "acosh")) {
+        out_plan->kind = ME_JIT_VEC_UNARY_ACOSH;
+    }
+    else if (me_jit_ident_equals(fn_start, fn_len, "atanh")) {
+        out_plan->kind = ME_JIT_VEC_UNARY_ATANH;
+    }
     else {
         return false;
     }
@@ -922,6 +954,22 @@ static const char *me_jit_vec_unary_symbol(me_jit_vec_unary_kind kind, me_dtype 
         return (dtype == ME_FLOAT64) ? "me_jit_vec_exp2_f64" : "me_jit_vec_exp2_f32";
     case ME_JIT_VEC_UNARY_LOG2:
         return (dtype == ME_FLOAT64) ? "me_jit_vec_log2_f64" : "me_jit_vec_log2_f32";
+    case ME_JIT_VEC_UNARY_EXPM1:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_expm1_f64" : "me_jit_vec_expm1_f32";
+    case ME_JIT_VEC_UNARY_LOG10:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_log10_f64" : "me_jit_vec_log10_f32";
+    case ME_JIT_VEC_UNARY_SINH:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_sinh_f64" : "me_jit_vec_sinh_f32";
+    case ME_JIT_VEC_UNARY_COSH:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_cosh_f64" : "me_jit_vec_cosh_f32";
+    case ME_JIT_VEC_UNARY_TANH:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_tanh_f64" : "me_jit_vec_tanh_f32";
+    case ME_JIT_VEC_UNARY_ASINH:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_asinh_f64" : "me_jit_vec_asinh_f32";
+    case ME_JIT_VEC_UNARY_ACOSH:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_acosh_f64" : "me_jit_vec_acosh_f32";
+    case ME_JIT_VEC_UNARY_ATANH:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_atanh_f64" : "me_jit_vec_atanh_f32";
     case ME_JIT_VEC_UNARY_NONE:
         return NULL;
     }
@@ -1649,6 +1697,14 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_atan2_f64(const double *, const double *, double *, int64_t);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_hypot_f64(const double *, const double *, double *, int64_t);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_pow_f64(const double *, const double *, double *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_expm1_f64(const double *, double *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_log10_f64(const double *, double *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_sinh_f64(const double *, double *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_cosh_f64(const double *, double *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_tanh_f64(const double *, double *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_asinh_f64(const double *, double *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_acosh_f64(const double *, double *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_atanh_f64(const double *, double *, int64_t);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_abs_f64(const double *, double *, int64_t);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_sqrt_f64(const double *, double *, int64_t);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_log1p_f64(const double *, double *, int64_t);") ||
@@ -1664,6 +1720,14 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_atan2_f32(const float *, const float *, float *, int64_t);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_hypot_f32(const float *, const float *, float *, int64_t);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_pow_f32(const float *, const float *, float *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_expm1_f32(const float *, float *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_log10_f32(const float *, float *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_sinh_f32(const float *, float *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_cosh_f32(const float *, float *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_tanh_f32(const float *, float *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_asinh_f32(const float *, float *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_acosh_f32(const float *, float *, int64_t);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_atanh_f32(const float *, float *, int64_t);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_abs_f32(const float *, float *, int64_t);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_sqrt_f32(const float *, float *, int64_t);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_log1p_f32(const float *, float *, int64_t);") ||

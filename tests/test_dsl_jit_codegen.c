@@ -790,6 +790,84 @@ static int test_codegen_runtime_math_bridge_vector_lowering_unary_extra(void) {
     return 0;
 }
 
+static int test_codegen_runtime_math_bridge_vector_lowering_unary_extended(void) {
+    printf("\n=== JIT C Codegen Test 12: runtime math bridge unary extended lowering ===\n");
+
+    const struct {
+        const char *name;
+        const char *marker;
+    } cases[] = {
+        {"expm1", "me_jit_vec_expm1_f64(in_x, out, nitems);"},
+        {"log10", "me_jit_vec_log10_f64(in_x, out, nitems);"},
+        {"sinh", "me_jit_vec_sinh_f64(in_x, out, nitems);"},
+        {"cosh", "me_jit_vec_cosh_f64(in_x, out, nitems);"},
+        {"tanh", "me_jit_vec_tanh_f64(in_x, out, nitems);"},
+        {"asinh", "me_jit_vec_asinh_f64(in_x, out, nitems);"},
+        {"acosh", "me_jit_vec_acosh_f64(in_x, out, nitems);"},
+        {"atanh", "me_jit_vec_atanh_f64(in_x, out, nitems);"},
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        char src[256];
+        snprintf(src, sizeof(src),
+                 "# me:dialect=element\n"
+                 "def kernel(x):\n"
+                 "    return %s(x)\n", cases[i].name);
+
+        me_dsl_error parse_error;
+        me_dsl_program *program = me_dsl_parse(src, &parse_error);
+        if (!program) {
+            printf("  FAILED: parse error at %d:%d (%s)\n",
+                   parse_error.line, parse_error.column, parse_error.message);
+            return 1;
+        }
+
+        const char *param_names[] = {"x"};
+        me_dtype param_dtypes[] = {ME_FLOAT64};
+        dtype_resolve_ctx rctx;
+        rctx.value_dtype = ME_FLOAT64;
+
+        me_dsl_error ir_error;
+        me_dsl_jit_ir_program *ir = NULL;
+        bool ok = me_dsl_jit_ir_build(program, param_names, param_dtypes, 1,
+                                      mock_resolve_dtype, &rctx, &ir, &ir_error);
+        me_dsl_program_free(program);
+        if (!ok || !ir) {
+            printf("  FAILED: ir build rejected source at %d:%d (%s)\n",
+                   ir_error.line, ir_error.column, ir_error.message);
+            me_dsl_jit_ir_free(ir);
+            return 1;
+        }
+
+        me_dsl_error cg_error;
+        me_dsl_jit_cgen_options options;
+        memset(&options, 0, sizeof(options));
+        options.use_runtime_math_bridge = true;
+        char *c_source = NULL;
+        ok = me_dsl_jit_codegen_c(ir, ME_FLOAT64, &options, &c_source, &cg_error);
+        me_dsl_jit_ir_free(ir);
+        if (!ok || !c_source) {
+            printf("  FAILED: codegen rejected source at %d:%d (%s)\n",
+                   cg_error.line, cg_error.column, cg_error.message);
+            free(c_source);
+            return 1;
+        }
+
+        bool marker_ok = strstr(c_source, cases[i].marker) != NULL;
+        bool has_scalar = strstr(c_source, "for (int64_t idx = 0; idx < nitems; idx++) {") != NULL;
+        if (!marker_ok || has_scalar) {
+            printf("  FAILED: vector extended lowering for %s not emitted as expected\n", cases[i].name);
+            free(c_source);
+            return 1;
+        }
+
+        free(c_source);
+    }
+
+    printf("  PASSED\n");
+    return 0;
+}
+
 int main(void) {
     int fail = 0;
     fail |= test_codegen_all_noncomplex_dtypes();
@@ -803,5 +881,6 @@ int main(void) {
     fail |= test_codegen_runtime_math_bridge_vector_lowering_binary_pow_broadcast();
     fail |= test_codegen_runtime_math_bridge_vector_lowering_unary_affine();
     fail |= test_codegen_runtime_math_bridge_vector_lowering_unary_extra();
+    fail |= test_codegen_runtime_math_bridge_vector_lowering_unary_extended();
     return fail;
 }

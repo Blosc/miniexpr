@@ -3985,6 +3985,70 @@ static void dsl_jit_bridge_vec_pow_f32(const float *a, const float *b, float *ou
     dsl_jit_bridge_apply_binary_vector_f32(vec_pow_f32_dispatch, a, b, out, nitems);
 }
 
+static void dsl_jit_bridge_vec_expm1_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f64(vec_expm1_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_log10_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f64(vec_log10_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_sinh_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f64(vec_sinh_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_cosh_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f64(vec_cosh_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_tanh_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f64(vec_tanh_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_asinh_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f64(vec_asinh_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_acosh_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f64(vec_acosh_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_atanh_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f64(vec_atanh_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_expm1_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f32(vec_expm1_f32_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_log10_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f32(vec_log10_f32_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_sinh_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f32(vec_sinh_f32_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_cosh_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f32(vec_cosh_f32_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_tanh_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f32(vec_tanh_f32_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_asinh_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f32(vec_asinh_f32_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_acosh_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f32(vec_acosh_f32_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_atanh_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f32(vec_atanh_f32_dispatch, in, out, nitems);
+}
+
 double me_jit_exp10(double x) {
     return dsl_jit_bridge_exp10(x);
 }
@@ -4083,6 +4147,70 @@ void me_jit_vec_hypot_f32(const float *a, const float *b, float *out, int64_t ni
 
 void me_jit_vec_pow_f32(const float *a, const float *b, float *out, int64_t nitems) {
     dsl_jit_bridge_vec_pow_f32(a, b, out, nitems);
+}
+
+void me_jit_vec_expm1_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_expm1_f64(in, out, nitems);
+}
+
+void me_jit_vec_log10_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_log10_f64(in, out, nitems);
+}
+
+void me_jit_vec_sinh_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_sinh_f64(in, out, nitems);
+}
+
+void me_jit_vec_cosh_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_cosh_f64(in, out, nitems);
+}
+
+void me_jit_vec_tanh_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_tanh_f64(in, out, nitems);
+}
+
+void me_jit_vec_asinh_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_asinh_f64(in, out, nitems);
+}
+
+void me_jit_vec_acosh_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_acosh_f64(in, out, nitems);
+}
+
+void me_jit_vec_atanh_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_atanh_f64(in, out, nitems);
+}
+
+void me_jit_vec_expm1_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_expm1_f32(in, out, nitems);
+}
+
+void me_jit_vec_log10_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_log10_f32(in, out, nitems);
+}
+
+void me_jit_vec_sinh_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_sinh_f32(in, out, nitems);
+}
+
+void me_jit_vec_cosh_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_cosh_f32(in, out, nitems);
+}
+
+void me_jit_vec_tanh_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_tanh_f32(in, out, nitems);
+}
+
+void me_jit_vec_asinh_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_asinh_f32(in, out, nitems);
+}
+
+void me_jit_vec_acosh_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_acosh_f32(in, out, nitems);
+}
+
+void me_jit_vec_atanh_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_atanh_f32(in, out, nitems);
 }
 
 void me_jit_vec_abs_f64(const double *in, double *out, int64_t nitems) {
@@ -4220,6 +4348,54 @@ static bool dsl_jit_libtcc_register_math_bridge(me_tcc_state *state) {
                  "tcc_add_symbol failed for me_jit_vec_pow_f64");
         return false;
     }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_expm1_f64",
+                                        (const void *)&dsl_jit_bridge_vec_expm1_f64) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_expm1_f64");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_log10_f64",
+                                        (const void *)&dsl_jit_bridge_vec_log10_f64) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_log10_f64");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_sinh_f64",
+                                        (const void *)&dsl_jit_bridge_vec_sinh_f64) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_sinh_f64");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_cosh_f64",
+                                        (const void *)&dsl_jit_bridge_vec_cosh_f64) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_cosh_f64");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_tanh_f64",
+                                        (const void *)&dsl_jit_bridge_vec_tanh_f64) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_tanh_f64");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_asinh_f64",
+                                        (const void *)&dsl_jit_bridge_vec_asinh_f64) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_asinh_f64");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_acosh_f64",
+                                        (const void *)&dsl_jit_bridge_vec_acosh_f64) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_acosh_f64");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_atanh_f64",
+                                        (const void *)&dsl_jit_bridge_vec_atanh_f64) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_atanh_f64");
+        return false;
+    }
     if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_sin_f32",
                                         (const void *)&dsl_jit_bridge_vec_sin_f32) < 0) {
         snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
@@ -4278,6 +4454,54 @@ static bool dsl_jit_libtcc_register_math_bridge(me_tcc_state *state) {
                                         (const void *)&dsl_jit_bridge_vec_pow_f32) < 0) {
         snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
                  "tcc_add_symbol failed for me_jit_vec_pow_f32");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_expm1_f32",
+                                        (const void *)&dsl_jit_bridge_vec_expm1_f32) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_expm1_f32");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_log10_f32",
+                                        (const void *)&dsl_jit_bridge_vec_log10_f32) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_log10_f32");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_sinh_f32",
+                                        (const void *)&dsl_jit_bridge_vec_sinh_f32) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_sinh_f32");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_cosh_f32",
+                                        (const void *)&dsl_jit_bridge_vec_cosh_f32) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_cosh_f32");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_tanh_f32",
+                                        (const void *)&dsl_jit_bridge_vec_tanh_f32) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_tanh_f32");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_asinh_f32",
+                                        (const void *)&dsl_jit_bridge_vec_asinh_f32) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_asinh_f32");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_acosh_f32",
+                                        (const void *)&dsl_jit_bridge_vec_acosh_f32) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_acosh_f32");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_atanh_f32",
+                                        (const void *)&dsl_jit_bridge_vec_atanh_f32) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_vec_atanh_f32");
         return false;
     }
     if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_abs_f64",
@@ -4545,6 +4769,30 @@ static bool dsl_jit_cc_math_bridge_available(void) {
         return false;
     }
     if (dlsym(RTLD_DEFAULT, "me_jit_vec_log2_f64") == NULL) {
+        return false;
+    }
+    if (dlsym(RTLD_DEFAULT, "me_jit_vec_expm1_f64") == NULL) {
+        return false;
+    }
+    if (dlsym(RTLD_DEFAULT, "me_jit_vec_log10_f64") == NULL) {
+        return false;
+    }
+    if (dlsym(RTLD_DEFAULT, "me_jit_vec_sinh_f64") == NULL) {
+        return false;
+    }
+    if (dlsym(RTLD_DEFAULT, "me_jit_vec_cosh_f64") == NULL) {
+        return false;
+    }
+    if (dlsym(RTLD_DEFAULT, "me_jit_vec_tanh_f64") == NULL) {
+        return false;
+    }
+    if (dlsym(RTLD_DEFAULT, "me_jit_vec_asinh_f64") == NULL) {
+        return false;
+    }
+    if (dlsym(RTLD_DEFAULT, "me_jit_vec_acosh_f64") == NULL) {
+        return false;
+    }
+    if (dlsym(RTLD_DEFAULT, "me_jit_vec_atanh_f64") == NULL) {
         return false;
     }
     return true;
