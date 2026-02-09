@@ -46,9 +46,12 @@ For log = natural log do nothing (NumPy compatible)
 For log = base 10 log comment the next line. */
 #define ME_NAT_LOG
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include "functions.h"
-#include "functions-simd.h"
 #include <stdlib.h>
+#include "functions-simd.h"
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
