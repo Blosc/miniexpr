@@ -133,78 +133,32 @@ Acceptance:
 4. Phase 2 only if speedup justifies complexity
 5. Phase 3 only if long-term DSL compiler investment is approved
 
-## Execution Status (2026-02-08)
+## Execution Status (2026-02-09)
 
-- Started Phase 1 with a low-risk parity slice.
-- Added JIT codegen function-name rewrites for DSL aliases:
-  - `arctan2 -> atan2`
-  - `exp10 -> me_jit_exp10`
-  - `sinpi -> me_jit_sinpi`
-  - `cospi -> me_jit_cospi`
-  - `logaddexp -> me_jit_logaddexp`
-  - `where -> me_jit_where`
-- Added headerless math function prototypes and helper wrapper definitions to generated JIT C source.
-- Added test coverage in `tests/test_dsl_jit_codegen.c` (`test_codegen_math_alias_rewrite`) to verify rewrite markers.
-- Validation run:
-  - `cmake --build build -j4`
-  - `ctest --test-dir build -R 'test_dsl_jit_codegen|test_dsl_jit_runtime_cache' --output-on-failure`
-- Started Phase 0 baseline harness:
-  - Added `bench/benchmark_dsl_jit_math_kernels.c` for representative math kernels
-    (`sin`, `exp`, `log`, `pow`, `hypot`, `atan2`, `sinpi`, `cospi`).
-  - Benchmark reports per-kernel compile latency, warm throughput, and max-abs diff vs interpreter.
-  - Added usage docs in `bench/README.md`, including default, forced-libTCC, and bridge-mode runs.
-- Validation/measurement snapshot (`nitems=131072`, `repeats=4`):
-  - `cc` backend: cold compile latency per kernel roughly `300-590 ms`.
-  - forced `libtcc`: cold compile latency per kernel roughly `0.4-2.0 ms`.
-  - forced `libtcc + bridge`: cold compile latency per kernel roughly `0.3-6.2 ms`.
-  - Numerical parity stayed tight in all runs (`max_abs_diff` up to `4.441e-16`).
-- Bridge runtime fix:
-  - Fixed a forced-libTCC+bridge crash by registering bridge symbols **after**
-    `tcc_set_output_type` in the libtcc compilation flow.
-  - Kept bridge symbol errors specific (`tcc_add_symbol failed for <symbol>`).
-- Started Phase 2 with a narrow selective-lowering slice:
-  - Added pattern detection for simple element map kernels of the form
-    `return sinpi(x)`, `return cospi(x)`, and `return exp10(x)`.
-  - In runtime bridge mode, codegen now emits one bulk vector bridge call
-    (no per-element loop) when the pattern matches.
-  - Added libtcc bridge exports for vector entrypoints:
-    - `me_jit_vec_{sinpi,cospi,exp10}_{f64,f32}`
-  - Added codegen test coverage:
-    - `test_codegen_runtime_math_bridge_vector_lowering`
-- Phase 2 slice benchmark check (`nitems=262144`, `repeats=6`):
-  - forced `libtcc`: `sinpi ~5.99 ns/elem`, `cospi ~6.03 ns/elem`
-  - forced `libtcc + bridge`: `sinpi ~4.35 ns/elem`, `cospi ~4.30 ns/elem`
-  - Result: bridge path moved from slower-than-interpreter to near-parity for
-    these matched kernels; non-matched kernels remain unchanged.
-- Expanded Phase 2 selective lowering slice:
-  - Unary map patterns now include `sin`, `cos`, `exp`, `log`, `exp10`,
-    `sinpi`, `cospi`.
-  - Binary map patterns now include `atan2` and `hypot`.
-  - Added vector bridge symbols and libtcc registration for:
-    - unary: `me_jit_vec_{sin,cos,exp,log,exp10,sinpi,cospi}_{f64,f32}`
-    - binary: `me_jit_vec_{atan2,hypot}_{f64,f32}`
-  - Added codegen test coverage for:
-    - unary vector lowering (`exp`)
-    - binary vector lowering (`atan2(y, x)`)
-- Expanded benchmark snapshot (`nitems=262144`, `repeats=6`):
-  - forced `libtcc`:
-    - `sin ~4.15 ns/elem`, `exp ~4.35`, `hypot ~3.05`, `atan2 ~7.10`
-    - `sinpi ~6.25`, `cospi ~6.33`
-  - forced `libtcc + bridge`:
-    - `sin ~2.29 ns/elem`, `exp ~1.62`, `hypot ~0.89`, `atan2 ~2.89`
-    - `sinpi ~4.55`, `cospi ~4.28`
-  - Observation: strong improvements on most matched kernels; `log` remained
-    slower in this snapshot (`~4.64 ns/elem` vs `~4.61` for non-bridge JIT and
-    `~2.11` interpreter), so it should be treated as provisional.
-- Unary affine lowering extension:
-  - Extended unary matcher to accept simple affine forms:
-    - `f(x + c)`, `f(x - c)`, `f(c + x)` for matched unary functions.
-  - Implemented codegen path as:
-    - prepass: `out[i] = in[i] + c`
-    - bulk vector call: `vec_f(out, out, nitems)`
-  - Added codegen test coverage for `log(x + 1.5)`.
-- Affine `log` re-check (`nitems=262144`, `repeats=6`):
-  - forced `libtcc`: `log ~4.59 ns/elem`
-  - forced `libtcc + bridge`: `log ~4.48 ns/elem`
-  - Result: slight improvement from bridge vector lowering with affine args, but
-    still slower than interpreter in this benchmark (`~2.11 ns/elem`).
+| Milestone | Status | Scope Delivered | Validation |
+|---|---|---|---|
+| Phase 0 baseline harness | Done | Added `bench/benchmark_dsl_jit_math_kernels.c` (`sin`, `exp`, `log`, `pow`, `hypot`, `atan2`, `sinpi`, `cospi`) with compile/warm/diff reporting and docs in `bench/README.md`. | Build + targeted tests pass; benchmark runnable in `cc`, forced `libtcc`, and bridge modes. |
+| Phase 1 parity bridge | Done | Alias rewrites (`arctan2`, `exp10`, `sinpi`, `cospi`, `logaddexp`, `where`), bridge declarations/definitions, runtime bridge env gate, libtcc symbol registration, backend-tag cache separation. | `test_dsl_jit_codegen`, `test_dsl_jit_runtime_cache` pass; forced bridge runtime is stable. |
+| Bridge runtime crash fix | Done | Fixed forced `libtcc + bridge` crash by registering bridge symbols after `tcc_set_output_type`; added specific `tcc_add_symbol` error messages. | Reproduced crash, patched, validated via benchmarks and tests. |
+| Phase 2 narrow lowering | Done | Selective lowering for simple element map unary kernels (`sinpi`, `cospi`, `exp10`) to bulk `me_jit_vec_*` calls. | Performance improved on matched kernels; tests updated. |
+| Phase 2 expansion | Done | Added unary lowering for `sin`, `cos`, `exp`, `log` and binary lowering for `atan2`, `hypot`; added bridge exports for f64/f32 unary+binary vector entrypoints. | Codegen tests for unary+binary lowering pass; benchmark shows strong wins on most matched kernels. |
+| Unary affine lowering | Done | Added matcher/emitter support for `f(x + c)`, `f(x - c)`, `f(c + x)` using prepass + bulk vector call; added codegen test for `log(x + 1.5)`. | Tests pass; `log` improved vs non-bridge JIT but remains slower than interpreter in current benchmark. |
+
+### Latest Metrics Snapshot (`nitems=262144`, `repeats=6`)
+
+| Kernel | forced `libtcc` ns/elem | forced `libtcc + bridge` ns/elem | Notes |
+|---|---:|---:|---|
+| `sin` | ~7.77 | ~2.18 | improved |
+| `exp` | ~5.83 | ~1.61 | improved |
+| `log` (`log(x + 1.5)`) | ~5.39 | ~3.10 | improved vs non-bridge JIT, still slower than interpreter (~2.14) |
+| `hypot` | ~2.78 | ~0.86 | improved |
+| `atan2` | ~6.44 | ~2.78 | improved |
+| `sinpi` | ~5.67 | ~4.37 | improved |
+| `cospi` | ~5.86 | ~4.28 | improved |
+
+### Open Items
+
+1. Expand selective lowering coverage to remaining unary/binary/ternary math functions.
+2. Add stronger pattern matching (constants, affine/broadcast forms) where safe.
+3. Evaluate `cc` backend bridge-link path (currently bridge usage is focused on libtcc runtime flow).
+4. Keep extending benchmark matrix and parity tests as coverage grows.
