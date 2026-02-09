@@ -74,6 +74,7 @@ For log = base 10 log comment the next line. */
 #include "dsl_parser.h"
 #include "dsl_jit_ir.h"
 #include "dsl_jit_cgen.h"
+#include "dsl_jit_test.h"
 
 #define ME_DSL_MAX_NDIM 8
 #define ME_DSL_JIT_SYMBOL_NAME "me_dsl_jit_kernel"
@@ -3569,6 +3570,40 @@ static bool dsl_jit_write_text_file(const char *path, const char *text) {
     return ok;
 }
 
+static bool dsl_jit_copy_file(const char *src, const char *dst) {
+    if (!src || !dst) {
+        return false;
+    }
+    FILE *fin = fopen(src, "rb");
+    if (!fin) {
+        return false;
+    }
+    FILE *fout = fopen(dst, "wb");
+    if (!fout) {
+        fclose(fin);
+        return false;
+    }
+    unsigned char buf[4096];
+    bool ok = true;
+    size_t n = 0;
+    while ((n = fread(buf, 1, sizeof(buf), fin)) > 0) {
+        if (fwrite(buf, 1, n, fout) != n) {
+            ok = false;
+            break;
+        }
+    }
+    if (ferror(fin)) {
+        ok = false;
+    }
+    if (fclose(fin) != 0) {
+        ok = false;
+    }
+    if (fclose(fout) != 0) {
+        ok = false;
+    }
+    return ok;
+}
+
 static bool dsl_jit_extract_command_name(const char *cmd, char *out, size_t out_size) {
     if (!cmd || !out || out_size == 0) {
         return false;
@@ -5009,6 +5044,55 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=%s",
                    dsl_dialect_name(program->dialect),
                    dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
+        return;
+    }
+    const char *jit_stub_path = getenv("ME_DSL_JIT_TEST_STUB_SO");
+    if (jit_stub_path && jit_stub_path[0] != '\0') {
+        const char *jit_cflags = getenv("ME_DSL_JIT_CFLAGS");
+        if (jit_cflags && strstr(jit_cflags, ME_DSL_JIT_TEST_NEG_CACHE_FLAG)) {
+            dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
+            snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+                     "jit runtime compilation failed");
+            dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=%s",
+                       dsl_dialect_name(program->dialect),
+                       dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
+            return;
+        }
+        if (!dsl_jit_copy_file(jit_stub_path, so_path)) {
+            dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
+            snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+                     "jit runtime stub copy failed");
+            dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=%s",
+                       dsl_dialect_name(program->dialect),
+                       dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
+            return;
+        }
+        if (!dsl_jit_write_meta_file(meta_path, &expected_meta)) {
+            dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_METADATA);
+            snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+                     "jit runtime failed to write cache metadata");
+            dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=%s",
+                       dsl_dialect_name(program->dialect),
+                       dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
+            return;
+        }
+        if (!dsl_jit_load_kernel(program, so_path)) {
+            dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_LOAD);
+            snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+                     "jit runtime shared object load failed");
+            dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=%s",
+                       dsl_dialect_name(program->dialect),
+                       dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
+            return;
+        }
+        if (dsl_jit_pos_cache_enabled()) {
+            (void)dsl_jit_pos_cache_store_program(program, key);
+        }
+        dsl_tracef("jit runtime stubbed: dialect=%s fp=%s key=%016llx",
+                   dsl_dialect_name(program->dialect),
+                   dsl_fp_mode_name(program->fp_mode),
+                   (unsigned long long)key);
+        dsl_jit_neg_cache_clear(key);
         return;
     }
     if (!dsl_jit_compile_shared(program, src_path, so_path)) {

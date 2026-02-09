@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <errno.h>
+#include <limits.h>
 
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <dirent.h>
@@ -17,7 +19,20 @@
 #endif
 
 #include "../src/miniexpr.h"
+#include "../src/dsl_jit_test.h"
 #include "minctest.h"
+
+#ifndef ME_DSL_JIT_TEST_STUB_SO_PATH
+#define ME_DSL_JIT_TEST_STUB_SO_PATH ""
+#endif
+
+static void configure_jit_stub_env(void) {
+#if !defined(_WIN32) && !defined(_WIN64)
+    if (ME_DSL_JIT_TEST_STUB_SO_PATH[0] != '\0') {
+        (void)setenv("ME_DSL_JIT_TEST_STUB_SO", ME_DSL_JIT_TEST_STUB_SO_PATH, 1);
+    }
+#endif
+}
 
 #if !defined(_WIN32) && !defined(_WIN64)
 static bool has_suffix(const char *s, const char *suffix) {
@@ -987,6 +1002,7 @@ int main(void) {
     printf("\n=== DSL JIT Runtime Cache Test: skipped on Windows ===\n");
     return 0;
 #else
+    configure_jit_stub_env();
     int fail = 0;
     fail |= test_negative_cache_skips_immediate_retry();
     fail |= test_positive_cache_reuses_loaded_kernel();
