@@ -202,6 +202,7 @@ typedef struct {
     bool uses_ndim;
     me_dsl_dialect dialect;
     me_dsl_fp_mode fp_mode;
+    me_dsl_compiler compiler;
     bool output_is_scalar;
     me_dtype output_dtype;
     me_dsl_jit_ir_program *jit_ir;
@@ -2492,6 +2493,17 @@ static const char *dsl_fp_mode_name(me_dsl_fp_mode fp_mode) {
     }
 }
 
+static const char *dsl_compiler_name(me_dsl_compiler compiler) {
+    switch (compiler) {
+    case ME_DSL_COMPILER_LIBTCC:
+        return "libtcc";
+    case ME_DSL_COMPILER_CC:
+        return "cc";
+    default:
+        return "unknown";
+    }
+}
+
 static const char *dsl_jit_fp_mode_cflags(me_dsl_fp_mode fp_mode) {
     switch (fp_mode) {
     case ME_DSL_FP_STRICT:
@@ -3151,39 +3163,14 @@ static int dsl_jit_target_tag(void) {
 #endif
 }
 
-static bool dsl_jit_force_libtcc(void) {
-#if ME_USE_LIBTCC_FALLBACK
-    const char *env = getenv("ME_DSL_JIT_FORCE_LIBTCC");
-    if (!env || env[0] == '\0') {
-        return false;
-    }
-    return strcmp(env, "0") != 0;
-#else
-    return false;
-#endif
-}
-
-static bool dsl_jit_use_sleef_bridge(void) {
-    const char *env = getenv("ME_DSL_JIT_USE_SLEEF_BRIDGE");
-    if (!env || env[0] == '\0') {
-        return false;
-    }
-    return strcmp(env, "0") != 0;
-}
-
-static int dsl_jit_backend_tag(void) {
-    bool force_libtcc = dsl_jit_force_libtcc();
-    bool use_bridge = dsl_jit_use_sleef_bridge();
-    if (!force_libtcc && !use_bridge) {
+static int dsl_jit_backend_tag(const me_dsl_compiled_program *program) {
+    if (!program) {
         return 1;
     }
-    if (force_libtcc && !use_bridge) {
-        return 2;
+    if (program->compiler == ME_DSL_COMPILER_CC) {
+        return program->jit_use_runtime_math_bridge ? 3 : 2;
     }
-    if (force_libtcc && use_bridge) {
-        return 3;
-    }
-    return 4;
+    return 1;
 }
 
 static uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program) {
@@ -3203,7 +3190,7 @@ static uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program
     h = dsl_jit_hash_i32(h, (int)sizeof(void *));
     h = dsl_jit_hash_i32(h, ME_DSL_JIT_CGEN_VERSION);
     h = dsl_jit_hash_i32(h, dsl_jit_target_tag());
-    h = dsl_jit_hash_i32(h, dsl_jit_backend_tag());
+    h = dsl_jit_hash_i32(h, dsl_jit_backend_tag(program));
     return h;
 }
 
@@ -3215,7 +3202,7 @@ static uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program
 #define ME_DSL_JIT_NEG_CACHE_LONG_COOLDOWN_SEC 120
 #define ME_DSL_JIT_POS_CACHE_SLOTS 64
 #define ME_DSL_JIT_META_MAGIC 0x4d454a49544d4554ULL
-#define ME_DSL_JIT_META_VERSION 3
+#define ME_DSL_JIT_META_VERSION 4
 
 typedef enum {
     ME_DSL_JIT_NEG_FAIL_CACHE_DIR = 1,
@@ -3256,9 +3243,10 @@ typedef struct {
     int32_t output_dtype;
     int32_t dialect;
     int32_t fp_mode;
+    int32_t compiler;
     int32_t nparams;
     int32_t param_dtypes[ME_MAX_VARS];
-    uint64_t cc_hash;
+    uint64_t toolchain_hash;
 } me_dsl_jit_cache_meta;
 
 static me_dsl_jit_pos_cache_entry g_dsl_jit_pos_cache[ME_DSL_JIT_POS_CACHE_SLOTS];
@@ -3428,10 +3416,20 @@ static uint64_t dsl_jit_hash_cstr(uint64_t h, const char *s) {
     return dsl_jit_hash_bytes(h, s, strlen(s));
 }
 
-static uint64_t dsl_jit_cc_hash(me_dsl_fp_mode fp_mode) {
+static uint64_t dsl_jit_toolchain_hash(const me_dsl_compiled_program *program) {
+    if (!program) {
+        return 1469598103934665603ULL;
+    }
+    if (program->compiler == ME_DSL_COMPILER_LIBTCC) {
+        const char *tcc_opts = getenv("ME_DSL_JIT_TCC_OPTIONS");
+        const char *tcc_lib_path = getenv("ME_DSL_JIT_TCC_LIB_PATH");
+        uint64_t h = dsl_jit_hash_cstr(1469598103934665603ULL, "libtcc");
+        h = dsl_jit_hash_cstr(h, tcc_opts ? tcc_opts : "");
+        return dsl_jit_hash_cstr(h, tcc_lib_path ? tcc_lib_path : "");
+    }
     const char *cc = getenv("CC");
     const char *jit_cflags = getenv("ME_DSL_JIT_CFLAGS");
-    const char *fp_cflags = dsl_jit_fp_mode_cflags(fp_mode);
+    const char *fp_cflags = dsl_jit_fp_mode_cflags(program->fp_mode);
     if (!cc || cc[0] == '\0') {
         cc = "cc";
     }
@@ -3466,6 +3464,7 @@ static void dsl_jit_fill_cache_meta(me_dsl_jit_cache_meta *meta,
     meta->output_dtype = (int32_t)program->output_dtype;
     meta->dialect = (int32_t)program->dialect;
     meta->fp_mode = (int32_t)program->fp_mode;
+    meta->compiler = (int32_t)program->compiler;
     meta->nparams = (int32_t)program->jit_nparams;
     for (int i = 0; i < ME_MAX_VARS; i++) {
         meta->param_dtypes[i] = -1;
@@ -3479,7 +3478,7 @@ static void dsl_jit_fill_cache_meta(me_dsl_jit_cache_meta *meta,
             meta->param_dtypes[i] = (int32_t)program->jit_ir->param_dtypes[i];
         }
     }
-    meta->cc_hash = dsl_jit_cc_hash(program->fp_mode);
+    meta->toolchain_hash = dsl_jit_toolchain_hash(program);
 }
 
 static bool dsl_jit_write_meta_file(const char *path, const me_dsl_jit_cache_meta *meta) {
@@ -3686,14 +3685,6 @@ static const char *dsl_jit_libtcc_error_message(void) {
     return "libtcc fallback unavailable";
 }
 
-static bool dsl_jit_libtcc_enabled(void) {
-    const char *env = getenv("ME_DSL_JIT_LIBTCC");
-    if (!env || env[0] == '\0') {
-        return true;
-    }
-    return strcmp(env, "0") != 0;
-}
-
 static bool dsl_jit_path_dirname(const char *path, char *out, size_t out_size) {
     if (!path || !out || out_size == 0) {
         return false;
@@ -3729,7 +3720,7 @@ static bool dsl_jit_libtcc_path_near_self(char *out, size_t out_size) {
         return false;
     }
     Dl_info info;
-    if (dladdr((void *)&dsl_jit_libtcc_enabled, &info) == 0 ||
+    if (dladdr((void *)&dsl_jit_libtcc_path_near_self, &info) == 0 ||
         !info.dli_fname || info.dli_fname[0] == '\0') {
         return false;
     }
@@ -4054,22 +4045,6 @@ void me_jit_vec_pow_f32(const float *a, const float *b, float *out, int64_t nite
     dsl_jit_bridge_vec_pow_f32(a, b, out, nitems);
 }
 
-static bool dsl_jit_cc_math_bridge_available(void) {
-    if (dlsym(RTLD_DEFAULT, "me_jit_exp10") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_where") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_vec_exp_f64") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_vec_pow_f64") == NULL) {
-        return false;
-    }
-    return true;
-}
-
 static bool dsl_jit_libtcc_register_math_bridge(me_tcc_state *state) {
     if (!state) {
         return false;
@@ -4233,11 +4208,6 @@ static bool dsl_jit_libtcc_load_api(void) {
         return g_dsl_tcc_api.available;
     }
     g_dsl_tcc_api.attempted = true;
-    if (!dsl_jit_libtcc_enabled()) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "libtcc fallback disabled by environment");
-        return false;
-    }
 
     const char *env_path = getenv("ME_DSL_JIT_LIBTCC_PATH");
     const char *default_path = ME_DSL_JIT_LIBTCC_DEFAULT_PATH;
@@ -4407,6 +4377,7 @@ static bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
     (void)program;
     return false;
 }
+#endif
 
 static bool dsl_jit_cc_math_bridge_available(void) {
     if (dlsym(RTLD_DEFAULT, "me_jit_exp10") == NULL) {
@@ -4423,7 +4394,6 @@ static bool dsl_jit_cc_math_bridge_available(void) {
     }
     return true;
 }
-#endif
 
 static bool dsl_jit_compile_shared(const me_dsl_compiled_program *program,
                                    const char *src_path, const char *so_path) {
@@ -4595,39 +4565,38 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
                    (unsigned long long)key);
     }
 
-    if (dsl_jit_force_libtcc()) {
+    if (program->compiler == ME_DSL_COMPILER_LIBTCC) {
         if (dsl_jit_compile_libtcc_in_memory(program)) {
-            dsl_tracef("jit runtime built: dialect=%s fp=%s source=libtcc-forced key=%016llx",
+            dsl_tracef("jit runtime built: dialect=%s fp=%s compiler=%s key=%016llx",
                        dsl_dialect_name(program->dialect),
                        dsl_fp_mode_name(program->fp_mode),
+                       dsl_compiler_name(program->compiler),
                        (unsigned long long)key);
             dsl_jit_neg_cache_clear(key);
             return;
         }
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
-                 "jit runtime forced libtcc compilation failed");
-        dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=%s detail=%s",
+                 "jit runtime libtcc compilation failed");
+        dsl_tracef("jit runtime skip: dialect=%s fp=%s compiler=%s reason=%s detail=%s",
                    dsl_dialect_name(program->dialect),
                    dsl_fp_mode_name(program->fp_mode),
+                   dsl_compiler_name(program->compiler),
                    program->jit_c_error,
                    dsl_jit_libtcc_error_message());
         return;
     }
 
     if (!dsl_jit_c_compiler_available()) {
-        if (dsl_jit_compile_libtcc_in_memory(program)) {
-            dsl_tracef("jit runtime built: dialect=%s fp=%s source=libtcc-in-memory key=%016llx",
-                       dsl_dialect_name(program->dialect),
-                       dsl_fp_mode_name(program->fp_mode),
-                       (unsigned long long)key);
-            dsl_jit_neg_cache_clear(key);
-            return;
-        }
-        dsl_tracef("jit runtime fallback miss: dialect=%s fp=%s reason=%s",
+        dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
+        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+                 "jit runtime c compiler unavailable");
+        dsl_tracef("jit runtime skip: dialect=%s fp=%s compiler=%s reason=%s",
                    dsl_dialect_name(program->dialect),
                    dsl_fp_mode_name(program->fp_mode),
-                   dsl_jit_libtcc_error_message());
+                   dsl_compiler_name(program->compiler),
+                   program->jit_c_error);
+        return;
     }
 
     if (!dsl_jit_write_text_file(src_path, program->jit_c_source)) {
@@ -4798,17 +4767,16 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     me_dsl_jit_cgen_options cg_options;
     memset(&cg_options, 0, sizeof(cg_options));
     cg_options.symbol_name = ME_DSL_JIT_SYMBOL_NAME;
-    bool use_bridge_requested = dsl_jit_use_sleef_bridge();
     bool use_bridge = false;
-    if (use_bridge_requested) {
-        if (dsl_jit_force_libtcc()) {
-            use_bridge = true;
-        }
-        else if (dsl_jit_cc_math_bridge_available()) {
+    if (program->compiler == ME_DSL_COMPILER_LIBTCC) {
+        use_bridge = true;
+    }
+    else if (program->compiler == ME_DSL_COMPILER_CC) {
+        if (dsl_jit_cc_math_bridge_available()) {
             use_bridge = true;
         }
         else {
-            dsl_tracef("jit codegen: runtime math bridge requested but unavailable for cc backend");
+            dsl_tracef("jit codegen: runtime math bridge unavailable for cc backend");
         }
     }
     cg_options.use_runtime_math_bridge = use_bridge;
@@ -4836,9 +4804,10 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     if (program->jit_use_runtime_math_bridge) {
         dsl_tracef("jit codegen: runtime math bridge enabled");
     }
-    dsl_tracef("jit ir built: dialect=%s fp=%s fingerprint=%016llx",
+    dsl_tracef("jit ir built: dialect=%s fp=%s compiler=%s fingerprint=%016llx",
                dsl_dialect_name(program->dialect),
                dsl_fp_mode_name(program->fp_mode),
+               dsl_compiler_name(program->compiler),
                (unsigned long long)program->jit_ir_fingerprint);
     dsl_try_prepare_jit_runtime(program);
 }
@@ -5448,6 +5417,7 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     }
     program->dialect = parsed->dialect;
     program->fp_mode = parsed->fp_mode;
+    program->compiler = parsed->compiler;
     dsl_var_table_init(&program->vars);
     program->idx_ndim = -1;
     for (int i = 0; i < ME_DSL_MAX_NDIM; i++) {

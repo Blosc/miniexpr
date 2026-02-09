@@ -35,6 +35,11 @@ typedef enum {
     ME_DSL_FP_FAST = 2
 } me_dsl_fp_mode;
 
+typedef enum {
+    ME_DSL_COMPILER_LIBTCC = 0,
+    ME_DSL_COMPILER_CC = 1
+} me_dsl_compiler;
+
 typedef struct me_dsl_expr {
     char *text;
     int line;
@@ -99,6 +104,7 @@ typedef struct {
     int param_capacity;
     me_dsl_dialect dialect;
     me_dsl_fp_mode fp_mode;
+    me_dsl_compiler compiler;
     me_dsl_block block;
 } me_dsl_program;
 

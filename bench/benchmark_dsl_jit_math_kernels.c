@@ -133,12 +133,33 @@ static bool build_dsl_source(char *out, size_t out_size, const char *expr) {
     if (!out || out_size == 0 || !expr || expr[0] == '\0') {
         return false;
     }
-    int n = snprintf(out, out_size,
+    const char *compiler = getenv("ME_BENCH_COMPILER");
+    bool use_compiler_pragma = false;
+    const char *compiler_value = NULL;
+    if (compiler && compiler[0] != '\0') {
+        if (strcmp(compiler, "libtcc") == 0 || strcmp(compiler, "cc") == 0) {
+            use_compiler_pragma = true;
+            compiler_value = compiler;
+        }
+    }
+    int n = 0;
+    if (use_compiler_pragma) {
+        n = snprintf(out, out_size,
+                     "# me:compiler=%s\n"
+                     "# me:dialect=element\n"
+                     "# me:fp=strict\n"
+                     "def kernel(x, y):\n"
+                     "    return %s\n",
+                     compiler_value, expr);
+    }
+    else {
+        n = snprintf(out, out_size,
                      "# me:dialect=element\n"
                      "# me:fp=strict\n"
                      "def kernel(x, y):\n"
                      "    return %s\n",
                      expr);
+    }
     return n > 0 && (size_t)n < out_size;
 }
 

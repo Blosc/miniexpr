@@ -77,6 +77,30 @@ Notes:
 - This pragma affects runtime JIT compilation flags. Interpreter execution is unchanged.
 - `# me:fp=...` is independent from `# me:dialect=...`; both can be used together.
 
+### Compiler Pragma
+
+For JIT-eligible kernels, you can choose which runtime JIT compiler backend to use:
+
+```
+# me:compiler=libtcc
+def kernel(x):
+    ...
+```
+
+```
+# me:compiler=cc
+def kernel(x):
+    ...
+```
+
+Supported values:
+- `libtcc` (default when omitted): in-memory JIT path.
+- `cc`: shared-object compile/load path.
+
+Notes:
+- This pragma is independent from `# me:dialect=...` and `# me:fp=...`.
+- If the selected backend is unavailable at runtime, miniexpr falls back to interpreter execution.
+
 ### Temporary Variables
 
 Use any identifier to store intermediate values:

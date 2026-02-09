@@ -409,6 +409,9 @@ static const char *me_jit_function_name_rewrite(const char *start, size_t ident_
     if (me_jit_ident_equals(start, ident_len, "arctan2")) {
         return "atan2";
     }
+    if (me_jit_ident_equals(start, ident_len, "abs")) {
+        return "fabs";
+    }
     if (me_jit_ident_equals(start, ident_len, "exp10")) {
         return "me_jit_exp10";
     }

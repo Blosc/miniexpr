@@ -257,6 +257,11 @@ static int test_parser_dialect_pragma(void) {
         me_dsl_program_free(program);
         return 1;
     }
+    if (program->compiler != ME_DSL_COMPILER_LIBTCC) {
+        printf("  FAILED: default compiler should be libtcc\n");
+        me_dsl_program_free(program);
+        return 1;
+    }
     me_dsl_program_free(program);
 
     const char *src_element =
@@ -275,6 +280,22 @@ static int test_parser_dialect_pragma(void) {
     }
     if (program->fp_mode != ME_DSL_FP_STRICT) {
         printf("  FAILED: element source should keep default strict fp mode\n");
+        me_dsl_program_free(program);
+        return 1;
+    }
+    me_dsl_program_free(program);
+
+    const char *src_cc =
+        "# me:compiler=cc\n"
+        "def kernel(x):\n"
+        "    return x\n";
+    program = me_dsl_parse(src_cc, &error);
+    if (!program) {
+        printf("  FAILED: parse error for cc compiler source\n");
+        return 1;
+    }
+    if (program->compiler != ME_DSL_COMPILER_CC) {
+        printf("  FAILED: cc compiler pragma not detected\n");
         me_dsl_program_free(program);
         return 1;
     }
@@ -314,6 +335,17 @@ static int test_parser_dialect_pragma(void) {
     program = me_dsl_parse(src_unknown_fp, &error);
     if (program) {
         printf("  FAILED: unknown fp pragma should fail parse\n");
+        me_dsl_program_free(program);
+        return 1;
+    }
+
+    const char *src_unknown_compiler =
+        "# me:compiler=magic\n"
+        "def kernel(x):\n"
+        "    return x\n";
+    program = me_dsl_parse(src_unknown_compiler, &error);
+    if (program) {
+        printf("  FAILED: unknown compiler pragma should fail parse\n");
         me_dsl_program_free(program);
         return 1;
     }

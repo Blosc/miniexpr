@@ -16,7 +16,12 @@ option(MINIEXPR_BUILD_TESTS "Build tests" ON)
 option(MINIEXPR_BUILD_EXAMPLES "Build examples" ON)
 option(MINIEXPR_BUILD_BENCH "Build benchmarks" ON)
 option(MINIEXPR_USE_SLEEF "Enable SLEEF SIMD acceleration" ON)
-option(MINIEXPR_USE_LIBTCC_FALLBACK "Enable optional DSL JIT libtcc in-memory fallback (when CC is unavailable)" OFF)
+
+if(WIN32)
+  set(MINIEXPR_USE_LIBTCC_FALLBACK OFF)
+else()
+  set(MINIEXPR_USE_LIBTCC_FALLBACK ON)
+endif()
 
 set(MINIEXPR_SOURCES
   src/miniexpr.c
@@ -48,6 +53,12 @@ if(MINIEXPR_USE_SLEEF)
 endif()
 
 if(MINIEXPR_USE_LIBTCC_FALLBACK AND NOT WIN32)
+  if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../tinycc/configure")
+    message(FATAL_ERROR
+      "libtcc support is required but TinyCC sources were not found at "
+      "${CMAKE_CURRENT_SOURCE_DIR}/../tinycc. "
+      "Please clone TinyCC there.")
+  endif()
   FetchContent_Declare(
     tinycc
     SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tinycc"
@@ -101,6 +112,11 @@ if(MINIEXPR_USE_LIBTCC_FALLBACK AND NOT WIN32)
   install(FILES "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}" DESTINATION "${CMAKE_INSTALL_LIBDIR}")
   install(FILES "${MINIEXPR_TINYCC_STAGED_RUNTIME_PATH}" DESTINATION "${CMAKE_INSTALL_LIBDIR}")
   install(FILES "${tinycc_SOURCE_DIR}/libtcc.h" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+  install(FILES "${tinycc_SOURCE_DIR}/COPYING"
+          DESTINATION "${CMAKE_INSTALL_DATADIR}/miniexpr/third_party/tinycc")
+  install(DIRECTORY "${tinycc_SOURCE_DIR}/"
+          DESTINATION "${CMAKE_INSTALL_DATADIR}/miniexpr/third_party/tinycc/source"
+          PATTERN ".git" EXCLUDE)
 endif()
 
 function(miniexpr_setup_target target_name)
@@ -159,6 +175,14 @@ if(MINIEXPR_BUILD_STATIC)
   endif()
   set_target_properties(miniexpr_static PROPERTIES OUTPUT_NAME miniexpr)
 endif()
+
+install(FILES
+  "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+  "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE-TINYEXPR"
+  "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE-SLEEF"
+  "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE-LIBTCC"
+  "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/miniexpr/licenses")
 
 find_package(Threads)
 if(Threads_FOUND)

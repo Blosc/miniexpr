@@ -336,13 +336,77 @@ static bool dsl_parse_fp_pragma_line(const char *start, const char *end,
     return false;
 }
 
+static bool dsl_parse_compiler_pragma_line(const char *start, const char *end,
+                                           me_dsl_compiler *compiler_out,
+                                           int line, me_dsl_error *error) {
+    const char *p = start;
+    while (p < end && (*p == ' ' || *p == '\t' || *p == '\r')) {
+        p++;
+    }
+    if (p >= end || *p != '#') {
+        return false;
+    }
+    p++;
+    while (p < end && isspace((unsigned char)*p)) {
+        p++;
+    }
+    static const char prefix[] = "me:compiler";
+    size_t prefix_len = sizeof(prefix) - 1;
+    if ((size_t)(end - p) < prefix_len || strncmp(p, prefix, prefix_len) != 0) {
+        return false;
+    }
+    p += prefix_len;
+    while (p < end && isspace((unsigned char)*p)) {
+        p++;
+    }
+    if (p >= end || *p != '=') {
+        dsl_set_error(error, line, (int)(p - start) + 1, "expected '=' after me:compiler");
+        return false;
+    }
+    p++;
+    while (p < end && isspace((unsigned char)*p)) {
+        p++;
+    }
+    const char *value_start = p;
+    while (p < end && is_ident_char(*p)) {
+        p++;
+    }
+    const char *value_end = p;
+    while (p < end && isspace((unsigned char)*p)) {
+        p++;
+    }
+    if (p < end) {
+        dsl_set_error(error, line, (int)(p - start) + 1, "unexpected trailing content in me:compiler pragma");
+        return false;
+    }
+    if (value_start == value_end) {
+        dsl_set_error(error, line, (int)(value_start - start) + 1, "expected compiler value after me:compiler=");
+        return false;
+    }
+    size_t value_len = (size_t)(value_end - value_start);
+    if (value_len == 6 && strncmp(value_start, "libtcc", value_len) == 0) {
+        *compiler_out = ME_DSL_COMPILER_LIBTCC;
+        return true;
+    }
+    if (value_len == 2 && strncmp(value_start, "cc", value_len) == 0) {
+        *compiler_out = ME_DSL_COMPILER_CC;
+        return true;
+    }
+    dsl_set_error(error, line, (int)(value_start - start) + 1,
+                  "unknown me:compiler value (expected 'libtcc' or 'cc')");
+    return false;
+}
+
 static bool dsl_parse_program_pragmas(const char *source, me_dsl_dialect *dialect_out,
-                                      me_dsl_fp_mode *fp_mode_out, me_dsl_error *error) {
-    if (!dialect_out || !fp_mode_out) {
+                                      me_dsl_fp_mode *fp_mode_out,
+                                      me_dsl_compiler *compiler_out,
+                                      me_dsl_error *error) {
+    if (!dialect_out || !fp_mode_out || !compiler_out) {
         return false;
     }
     *dialect_out = ME_DSL_DIALECT_VECTOR;
     *fp_mode_out = ME_DSL_FP_STRICT;
+    *compiler_out = ME_DSL_COMPILER_LIBTCC;
     if (!source) {
         return true;
     }
@@ -351,6 +415,7 @@ static bool dsl_parse_program_pragmas(const char *source, me_dsl_dialect *dialec
     int line = 1;
     bool seen_dialect = false;
     bool seen_fp_mode = false;
+    bool seen_compiler = false;
 
     while (*line_start) {
         const char *line_end = line_start;
@@ -368,6 +433,7 @@ static bool dsl_parse_program_pragmas(const char *source, me_dsl_dialect *dialec
         else if (*p == '#') {
             me_dsl_dialect parsed = *dialect_out;
             me_dsl_fp_mode parsed_fp_mode = *fp_mode_out;
+            me_dsl_compiler parsed_compiler = *compiler_out;
             const char *body = p + 1;
             while (body < line_end && isspace((unsigned char)*body)) {
                 body++;
@@ -395,6 +461,18 @@ static bool dsl_parse_program_pragmas(const char *source, me_dsl_dialect *dialec
                 }
                 *fp_mode_out = parsed_fp_mode;
                 seen_fp_mode = true;
+            }
+            else if ((size_t)(line_end - body) >= 11 && strncmp(body, "me:compiler", 11) == 0) {
+                if (seen_compiler) {
+                    dsl_set_error(error, line, (int)(p - line_start) + 1,
+                                  "duplicate me:compiler pragma");
+                    return false;
+                }
+                if (!dsl_parse_compiler_pragma_line(line_start, line_end, &parsed_compiler, line, error)) {
+                    return false;
+                }
+                *compiler_out = parsed_compiler;
+                seen_compiler = true;
             }
         }
         else {
@@ -1401,9 +1479,11 @@ static bool parse_program(me_dsl_lexer *lex, me_dsl_program *program, me_dsl_err
     memset(program, 0, sizeof(*program));
     program->dialect = ME_DSL_DIALECT_VECTOR;
     program->fp_mode = ME_DSL_FP_STRICT;
+    program->compiler = ME_DSL_COMPILER_LIBTCC;
 
     if (!dsl_parse_program_pragmas(lex ? lex->source : NULL,
-                                   &program->dialect, &program->fp_mode, error)) {
+                                   &program->dialect, &program->fp_mode,
+                                   &program->compiler, error)) {
         return false;
     }
 

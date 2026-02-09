@@ -178,8 +178,10 @@ static int test_negative_cache_skips_immediate_retry(void) {
     first_src_path[0] = '\0';
     char *saved_tmpdir = dup_env_value("TMPDIR");
     char *saved_cc = dup_env_value("CC");
+    char *saved_jit_cflags = dup_env_value("ME_DSL_JIT_CFLAGS");
     char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
     const char *src =
+        "# me:compiler=cc\n"
         "def kernel(x):\n"
         "    y = x + 11\n"
         "    return y\n";
@@ -196,8 +198,12 @@ static int test_negative_cache_skips_immediate_retry(void) {
         printf("  FAILED: setenv TMPDIR failed\n");
         goto cleanup;
     }
-    if (setenv("CC", "me_missing_cc_for_neg_cache_test", 1) != 0) {
+    if (setenv("CC", "cc", 1) != 0) {
         printf("  FAILED: setenv CC failed\n");
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT_CFLAGS", "-me_intentional_bad_flag_for_neg_cache", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT_CFLAGS failed\n");
         goto cleanup;
     }
     (void)unsetenv("ME_DSL_JIT_POS_CACHE");
@@ -232,9 +238,11 @@ static int test_negative_cache_skips_immediate_retry(void) {
 cleanup:
     restore_env_value("TMPDIR", saved_tmpdir);
     restore_env_value("CC", saved_cc);
+    restore_env_value("ME_DSL_JIT_CFLAGS", saved_jit_cflags);
     restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
     free(saved_tmpdir);
     free(saved_cc);
+    free(saved_jit_cflags);
     free(saved_pos_cache);
     if (cache_dir[0] != '\0') {
         remove_files_in_dir(cache_dir);
@@ -258,6 +266,7 @@ static int test_positive_cache_reuses_loaded_kernel(void) {
     char *saved_cc = dup_env_value("CC");
     char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
     const char *src =
+        "# me:compiler=cc\n"
         "def kernel(x):\n"
         "    y = x + 7\n"
         "    return y\n";
@@ -405,6 +414,7 @@ static int test_rejects_metadata_mismatch_artifact(void) {
     char *saved_cc = dup_env_value("CC");
     char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
     const char *src =
+        "# me:compiler=cc\n"
         "def kernel(x):\n"
         "    y = x + 13\n"
         "    return y\n";
@@ -492,6 +502,7 @@ static int test_jit_disable_env_guardrail(void) {
     char *saved_cc = dup_env_value("CC");
     char *saved_jit = dup_env_value("ME_DSL_JIT");
     const char *src =
+        "# me:compiler=cc\n"
         "def kernel(x):\n"
         "    y = x + 19\n"
         "    return y\n";
@@ -551,8 +562,8 @@ cleanup:
     return rc;
 }
 
-static int test_force_libtcc_gate_skips_cc_backend(void) {
-    printf("\n=== DSL JIT Runtime Cache Test 5: force-libtcc gate ===\n");
+static int test_default_libtcc_skips_cc_backend(void) {
+    printf("\n=== DSL JIT Runtime Cache Test 5: default libtcc backend ===\n");
 
     int rc = 1;
     char tmp_template[] = "/tmp/me_jit_force_libtcc_XXXXXX";
@@ -561,8 +572,6 @@ static int test_force_libtcc_gate_skips_cc_backend(void) {
     cache_dir[0] = '\0';
     char *saved_tmpdir = dup_env_value("TMPDIR");
     char *saved_cc = dup_env_value("CC");
-    char *saved_force = dup_env_value("ME_DSL_JIT_FORCE_LIBTCC");
-    char *saved_libtcc = dup_env_value("ME_DSL_JIT_LIBTCC");
     char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
     const char *src =
         "def kernel(x):\n"
@@ -585,14 +594,6 @@ static int test_force_libtcc_gate_skips_cc_backend(void) {
         printf("  FAILED: setenv CC failed\n");
         goto cleanup;
     }
-    if (setenv("ME_DSL_JIT_FORCE_LIBTCC", "1", 1) != 0) {
-        printf("  FAILED: setenv ME_DSL_JIT_FORCE_LIBTCC failed\n");
-        goto cleanup;
-    }
-    if (setenv("ME_DSL_JIT_LIBTCC", "0", 1) != 0) {
-        printf("  FAILED: setenv ME_DSL_JIT_LIBTCC failed\n");
-        goto cleanup;
-    }
     if (setenv("ME_DSL_JIT_POS_CACHE", "0", 1) != 0) {
         printf("  FAILED: setenv ME_DSL_JIT_POS_CACHE failed\n");
         goto cleanup;
@@ -608,7 +609,7 @@ static int test_force_libtcc_gate_skips_cc_backend(void) {
     n_files += count_kernel_files_with_suffix(cache_dir, ".dylib", NULL, 0);
     n_files += count_kernel_files_with_suffix(cache_dir, ".meta", NULL, 0);
     if (n_files != 0) {
-        printf("  FAILED: forced libtcc gate unexpectedly used cc-backed cache path\n");
+        printf("  FAILED: default libtcc path unexpectedly used cc-backed cache path\n");
         goto cleanup;
     }
 
@@ -618,13 +619,9 @@ static int test_force_libtcc_gate_skips_cc_backend(void) {
 cleanup:
     restore_env_value("TMPDIR", saved_tmpdir);
     restore_env_value("CC", saved_cc);
-    restore_env_value("ME_DSL_JIT_FORCE_LIBTCC", saved_force);
-    restore_env_value("ME_DSL_JIT_LIBTCC", saved_libtcc);
     restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
     free(saved_tmpdir);
     free(saved_cc);
-    free(saved_force);
-    free(saved_libtcc);
     free(saved_pos_cache);
     if (cache_dir[0] != '\0') {
         remove_files_in_dir(cache_dir);
@@ -648,10 +645,12 @@ static int test_cache_key_differentiates_dialect(void) {
     char *saved_cc = dup_env_value("CC");
     char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
     const char *src_vector =
+        "# me:compiler=cc\n"
         "def kernel(x):\n"
         "    y = x + 23\n"
         "    return y\n";
     const char *src_element =
+        "# me:compiler=cc\n"
         "# me:dialect=element\n"
         "def kernel(x):\n"
         "    y = x + 23\n"
@@ -723,11 +722,13 @@ static int test_cache_key_differentiates_fp_mode(void) {
     char *saved_cc = dup_env_value("CC");
     char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
     const char *src_strict =
+        "# me:compiler=cc\n"
         "# me:fp=strict\n"
         "def kernel(x):\n"
         "    y = x + 23\n"
         "    return y\n";
     const char *src_fast =
+        "# me:compiler=cc\n"
         "# me:fp=fast\n"
         "def kernel(x):\n"
         "    y = x + 23\n"
@@ -800,6 +801,7 @@ static int test_element_interpreter_jit_parity(void) {
     char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
     char *saved_jit = dup_env_value("ME_DSL_JIT");
     const char *src =
+        "# me:compiler=cc\n"
         "# me:dialect=element\n"
         "def kernel(x):\n"
         "    acc = 0\n"
@@ -899,11 +901,9 @@ static int test_cc_backend_bridge_path(void) {
     c_path[0] = '\0';
     char *saved_tmpdir = dup_env_value("TMPDIR");
     char *saved_cc = dup_env_value("CC");
-    char *saved_force = dup_env_value("ME_DSL_JIT_FORCE_LIBTCC");
-    char *saved_libtcc = dup_env_value("ME_DSL_JIT_LIBTCC");
-    char *saved_bridge = dup_env_value("ME_DSL_JIT_USE_SLEEF_BRIDGE");
     char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
     const char *src =
+        "# me:compiler=cc\n"
         "# me:dialect=element\n"
         "def kernel(x):\n"
         "    return exp(x)\n";
@@ -924,18 +924,6 @@ static int test_cc_backend_bridge_path(void) {
     }
     if (setenv("CC", "cc", 1) != 0) {
         printf("  FAILED: setenv CC failed\n");
-        goto cleanup;
-    }
-    if (setenv("ME_DSL_JIT_FORCE_LIBTCC", "0", 1) != 0) {
-        printf("  FAILED: setenv ME_DSL_JIT_FORCE_LIBTCC failed\n");
-        goto cleanup;
-    }
-    if (setenv("ME_DSL_JIT_LIBTCC", "0", 1) != 0) {
-        printf("  FAILED: setenv ME_DSL_JIT_LIBTCC failed\n");
-        goto cleanup;
-    }
-    if (setenv("ME_DSL_JIT_USE_SLEEF_BRIDGE", "1", 1) != 0) {
-        printf("  FAILED: setenv ME_DSL_JIT_USE_SLEEF_BRIDGE failed\n");
         goto cleanup;
     }
     if (setenv("ME_DSL_JIT_POS_CACHE", "0", 1) != 0) {
@@ -979,15 +967,9 @@ static int test_cc_backend_bridge_path(void) {
 cleanup:
     restore_env_value("TMPDIR", saved_tmpdir);
     restore_env_value("CC", saved_cc);
-    restore_env_value("ME_DSL_JIT_FORCE_LIBTCC", saved_force);
-    restore_env_value("ME_DSL_JIT_LIBTCC", saved_libtcc);
-    restore_env_value("ME_DSL_JIT_USE_SLEEF_BRIDGE", saved_bridge);
     restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
     free(saved_tmpdir);
     free(saved_cc);
-    free(saved_force);
-    free(saved_libtcc);
-    free(saved_bridge);
     free(saved_pos_cache);
     if (cache_dir[0] != '\0') {
         remove_files_in_dir(cache_dir);
@@ -1006,12 +988,11 @@ int main(void) {
     return 0;
 #else
     int fail = 0;
-    (void)setenv("ME_DSL_JIT_LIBTCC", "0", 1);
     fail |= test_negative_cache_skips_immediate_retry();
     fail |= test_positive_cache_reuses_loaded_kernel();
     fail |= test_rejects_metadata_mismatch_artifact();
     fail |= test_jit_disable_env_guardrail();
-    fail |= test_force_libtcc_gate_skips_cc_backend();
+    fail |= test_default_libtcc_skips_cc_backend();
     fail |= test_cache_key_differentiates_dialect();
     fail |= test_cache_key_differentiates_fp_mode();
     fail |= test_element_interpreter_jit_parity();

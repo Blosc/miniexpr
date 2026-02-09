@@ -278,19 +278,25 @@ On Linux/macOS, DSL kernels may use runtime JIT compilation when eligible. The f
 - `ME_DSL_JIT=0`: Disable runtime JIT and always use interpreter fallback.
 - `ME_DSL_JIT_POS_CACHE=0`: Disable process-local positive cache reuse for loaded JIT kernels.
 - `ME_DSL_JIT_CFLAGS="..."`: Extra C compiler flags appended to runtime JIT builds.
-- `ME_DSL_JIT_LIBTCC=0`: Disable optional `libtcc` in-memory fallback when no C compiler is found.
-- `ME_DSL_JIT_FORCE_LIBTCC=1`: Force runtime JIT to use `libtcc` path even when `cc` is available (skip `cc` backend).
-- `ME_DSL_JIT_USE_SLEEF_BRIDGE=1`: In forced-`libtcc` mode, emit JIT code that resolves selected math wrappers via runtime bridge symbols.
-- `ME_DSL_JIT_LIBTCC_PATH=/path/to/libtcc.{so,dylib}`: Override the runtime library path used for `libtcc` fallback loading.
+
+Backend selection is done in DSL source via pragma:
+
+- `# me:compiler=libtcc` (default when omitted)
+- `# me:compiler=cc`
+
+Operational `libtcc` runtime location/options remain configurable:
+
+- `ME_DSL_JIT_LIBTCC_PATH=/path/to/libtcc.{so,dylib}`: Override runtime library path used for `libtcc` loading.
 - `ME_DSL_JIT_TCC_LIB_PATH=/path/to/tcc/libdir`: Override `tcc_set_lib_path()` directory (where `libtcc1.a` is searched).
-- `ME_DSL_JIT_TCC_OPTIONS="..."`: Extra options passed to `tcc_set_options()` when `libtcc` fallback is used.
+- `ME_DSL_JIT_TCC_OPTIONS="..."`: Extra options passed to `tcc_set_options()`.
 
-Build-time toggle:
+Build-time note:
 
-- `MINIEXPR_USE_LIBTCC_FALLBACK=ON`: Compile support for runtime `libtcc` fallback (disabled by default).
-  Current CMake wiring uses `FetchContent` with local TinyCC sources at `../tinycc` and builds `libtcc` as a separate shared library.
-  When this mode is enabled via CMake, `libtcc` and `libtcc1.a` are staged in the same directory as `libminiexpr`,
-  and miniexpr embeds that staged `libtcc` path as a default runtime lookup candidate.
+- On Linux/macOS, libtcc support is built by default and required for DSL JIT's default
+  `# me:compiler=libtcc` mode.
+- CMake uses local TinyCC sources at `../tinycc` and builds `libtcc` as a separate shared library.
+  `libtcc` and `libtcc1.a` are staged in the same directory as `libminiexpr`, and miniexpr
+  embeds that staged `libtcc` path as a default runtime lookup candidate.
 
 ## Contributing
 
@@ -305,6 +311,18 @@ This sets up automatic checks for code quality (e.g., trailing whitespace).
 ## License
 
 BSD 3-Clause License. See [LICENSE](LICENSE) for details.
+
+Third-party licensing:
+
+- tinyexpr portions are under Zlib terms (see [LICENSE-TINYEXPR](LICENSE-TINYEXPR)).
+- SLEEF portions are under Boost Software License 1.0 (see [LICENSE-SLEEF](LICENSE-SLEEF)).
+- Runtime `libtcc` (TinyCC) is under LGPL-2.1-or-later (see [LICENSE-LIBTCC](LICENSE-LIBTCC)).
+
+For binary installs built with libtcc support, the corresponding TinyCC source and
+license are installed under:
+
+- `${CMAKE_INSTALL_DATADIR}/miniexpr/third_party/tinycc/source`
+- `${CMAKE_INSTALL_DATADIR}/miniexpr/third_party/tinycc/COPYING`
 
 Copyright (c) 2025-2026, The Blosc Development Team
 

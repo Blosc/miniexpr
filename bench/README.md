@@ -150,13 +150,14 @@ Element-dialect DSL JIT baseline for representative math kernels:
 
 Notes:
 - Uses `# me:fp=strict` and `# me:dialect=element`.
-- Run once with default backend and once with forced libtcc for side-by-side baselines.
+- Uses `# me:compiler=libtcc` by default (when `ME_BENCH_COMPILER` is unset).
+- Set `ME_BENCH_COMPILER=cc` to benchmark the `cc` backend explicitly.
 
 ```bash
 ./build/bench/benchmark_dsl_jit_math_kernels
 ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
-ME_DSL_JIT_FORCE_LIBTCC=1 ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
-ME_DSL_JIT_FORCE_LIBTCC=1 ME_DSL_JIT_USE_SLEEF_BRIDGE=1 ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
+ME_BENCH_COMPILER=libtcc ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
+ME_BENCH_COMPILER=cc ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
 ```
 
 ### benchmark_mandelbrot_numba.py
