@@ -61,7 +61,9 @@ if(MINIEXPR_USE_LIBTCC_FALLBACK AND NOT WIN32)
   endif()
   FetchContent_Declare(
     tinycc
-    SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tinycc"
+    GIT_REPOSITORY https://repo.or.cz/tinycc.git
+    GIT_TAG 4597a9621e70a337b241d424f4ab4729cb75b426  # latest commit as of Feb 2025
+    #SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tinycc"
     BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/_deps/tinycc-build"
   )
   FetchContent_Populate(tinycc)
