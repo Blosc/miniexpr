@@ -3349,6 +3349,17 @@ static int dsl_jit_pos_cache_find_free_slot(void) {
     return -1;
 }
 
+static void dsl_jit_pos_cache_evict(uint64_t key) {
+    int slot = dsl_jit_pos_cache_find_slot(key);
+    if (slot < 0) {
+        return;
+    }
+    if (g_dsl_jit_pos_cache[slot].handle) {
+        dlclose(g_dsl_jit_pos_cache[slot].handle);
+    }
+    memset(&g_dsl_jit_pos_cache[slot], 0, sizeof(g_dsl_jit_pos_cache[slot]));
+}
+
 static bool dsl_jit_pos_cache_enabled(void) {
     const char *env = getenv("ME_DSL_JIT_POS_CACHE");
     if (!env || env[0] == '\0') {
@@ -4987,6 +4998,11 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
 
     bool so_exists = (access(so_path, F_OK) == 0);
     bool meta_matches = so_exists && dsl_jit_meta_file_matches(meta_path, &expected_meta);
+    if (so_exists && !meta_matches) {
+        /* Evict stale positive-cache entry so the old dlopen handle is
+           closed before we overwrite the .so file on disk. */
+        dsl_jit_pos_cache_evict(key);
+    }
     if (meta_matches) {
         if (dsl_jit_load_kernel(program, so_path)) {
             if (dsl_jit_pos_cache_enabled()) {
