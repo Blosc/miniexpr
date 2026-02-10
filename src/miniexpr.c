@@ -6746,7 +6746,7 @@ static int dsl_eval_condition_masked(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
     }
     int cond_nitems = *is_reduction ? 1 : ctx->nitems;
     if (cond_nitems <= 0) {
-        if (true_mask && !*is_reduction) {
+        if (true_mask && !*is_reduction && ctx->nitems > 0) {
             memset(true_mask, 0, (size_t)ctx->nitems);
         }
         return ME_EVAL_SUCCESS;
