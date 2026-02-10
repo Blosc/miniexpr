@@ -5044,18 +5044,6 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         return;
     }
 
-    if (!dsl_jit_c_compiler_available()) {
-        dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
-        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
-                 "jit runtime c compiler unavailable");
-        dsl_tracef("jit runtime skip: dialect=%s fp=%s compiler=%s reason=%s",
-                   dsl_dialect_name(program->dialect),
-                   dsl_fp_mode_name(program->fp_mode),
-                   dsl_compiler_name(program->compiler),
-                   program->jit_c_error);
-        return;
-    }
-
     if (!dsl_jit_write_text_file(src_path, program->jit_c_source)) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_WRITE);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
@@ -5112,6 +5100,17 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
                    dsl_fp_mode_name(program->fp_mode),
                    (unsigned long long)key);
         dsl_jit_neg_cache_clear(key);
+        return;
+    }
+    if (!dsl_jit_c_compiler_available()) {
+        dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
+        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+                 "jit runtime c compiler unavailable");
+        dsl_tracef("jit runtime skip: dialect=%s fp=%s compiler=%s reason=%s",
+                   dsl_dialect_name(program->dialect),
+                   dsl_fp_mode_name(program->fp_mode),
+                   dsl_compiler_name(program->compiler),
+                   program->jit_c_error);
         return;
     }
     if (!dsl_jit_compile_shared(program, src_path, so_path)) {
