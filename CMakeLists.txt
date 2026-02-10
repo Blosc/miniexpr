@@ -53,12 +53,6 @@ if(MINIEXPR_USE_SLEEF)
 endif()
 
 if(MINIEXPR_USE_LIBTCC_FALLBACK AND NOT WIN32)
-  if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../tinycc/configure")
-    message(FATAL_ERROR
-      "libtcc support is required but TinyCC sources were not found at "
-      "${CMAKE_CURRENT_SOURCE_DIR}/../tinycc. "
-      "Please clone TinyCC there.")
-  endif()
   FetchContent_Declare(
     tinycc
     GIT_REPOSITORY https://repo.or.cz/tinycc.git
