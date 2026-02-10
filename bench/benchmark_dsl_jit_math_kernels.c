@@ -146,7 +146,6 @@ static bool build_dsl_source(char *out, size_t out_size, const char *expr) {
     if (use_compiler_pragma) {
         n = snprintf(out, out_size,
                      "# me:compiler=%s\n"
-                     "# me:dialect=element\n"
                      "# me:fp=strict\n"
                      "def kernel(x, y):\n"
                      "    return %s\n",
@@ -154,7 +153,6 @@ static bool build_dsl_source(char *out, size_t out_size, const char *expr) {
     }
     else {
         n = snprintf(out, out_size,
-                     "# me:dialect=element\n"
                      "# me:fp=strict\n"
                      "def kernel(x, y):\n"
                      "    return %s\n",
@@ -416,7 +414,7 @@ int main(int argc, char **argv) {
     if (!failed) {
         printf("benchmark_dsl_jit_math_kernels\n");
         printf("backend=%s nitems=%d repeats=%d\n", current_jit_backend_label(), nitems, repeats);
-        printf("fp_pragma=strict dialect=element\n");
+        printf("fp_pragma=strict\n");
         printf("timing: jit-warm/interp report best single eval over repeats\n");
         printf("%-8s %12s %14s %14s %14s %14s %12s %12s\n",
                "kernel", "compile_ms", "jit_warm_ms", "interp_ms", "jit_ns_elem",

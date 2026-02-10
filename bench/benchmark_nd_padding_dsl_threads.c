@@ -354,15 +354,15 @@ static void *c_pack_worker(void *arg) {
                         int64_t off = dst_off + i2;
                         double sum = 0.0;
                         for (int iter = 0; iter < 4; iter++) {
-                            double tmp = (args->buf_a[off] + (double)args->buf_b[off])
-                                         * (double)args->buf_c[off] + (double)iter;
-                            if (tmp < -1e9) {
+                            double tmp_val = (args->buf_a[off] + (double)args->buf_b[off])
+                                             * (double)args->buf_c[off] + (double)iter;
+                            if (tmp_val < -1e9) {
                                 continue;
                             }
-                            if (tmp > 1e12) {
+                            if (tmp_val > 1e12) {
                                 continue;
                             }
-                            sum += tmp;
+                            sum += tmp_val;
                         }
                         args->buf_out[off] = sum;
                     }

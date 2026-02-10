@@ -34,29 +34,17 @@ Note: The order of the variables array still defines the pointer order passed to
 
 A kernel must return on all control-flow paths. Missing returns are compile errors.
 
-### Dialect Pragma
+### Control-Flow Semantics
 
-You can select control-flow semantics with an optional top-of-source pragma:
+DSL kernels use unified per-element control-flow semantics:
+- Non-reduction boolean conditions (for example, `if x > 0`) are evaluated per element.
+- Reduction conditions (`any(...)`, `all(...)`) remain global to the active lane mask.
+- `break` and `continue` act per element inside loops.
 
-```
-# me:dialect=vector
-def kernel(x):
-    ...
-```
-
-```
-# me:dialect=element
-def kernel(x):
-    ...
-```
-
-- `vector` is the default when the pragma is omitted.
-- `element` enables per-element loop control behavior (details below).
-- `element` is currently experimental. Set `ME_DSL_ELEMENT=0` to disable
-  element-dialect kernels process-wide during rollout/testing.
+The old `# me:dialect=...` pragma is no longer supported and is now a parse error.
 
 For backend diagnostics, set `ME_DSL_TRACE=1` to emit compile/JIT trace lines
-to stderr (dialect, JIT accept/reject reasons, runtime cache/fallback paths).
+to stderr (JIT accept/reject reasons, runtime cache/fallback paths).
 
 ### Floating-Point Pragma
 
@@ -75,7 +63,6 @@ Supported values:
 
 Notes:
 - This pragma affects runtime JIT compilation flags. Interpreter execution is unchanged.
-- `# me:fp=...` is independent from `# me:dialect=...`; both can be used together.
 
 ### Compiler Pragma
 
@@ -98,7 +85,7 @@ Supported values:
 - `cc`: shared-object compile/load path.
 
 Notes:
-- This pragma is independent from `# me:dialect=...` and `# me:fp=...`.
+- This pragma is independent from `# me:fp=...`.
 - If the selected backend is unavailable at runtime, miniexpr falls back to interpreter execution.
 
 ### Temporary Variables
@@ -181,22 +168,17 @@ def kernel(mask, acc):
 
 General `if/elif/else` blocks are supported.
 
-Dialect behavior:
-- `vector` (default): conditions must be scalar/uniform; use `any()`/`all()` to
-  reduce element-wise predicates.
-- `element`: inside loops, non-reduction conditions can be element-wise and
-  control flow is applied per element. Reduction conditions (`any()`/`all()`)
-  remain global/block-level.
-
-Conditions that are uniform across the block (e.g., loop variables like `i`,
-`_n*`, `_ndim`, or reductions) are always accepted directly, so `if i == 2:` is valid.
+Condition behavior:
+- Non-reduction conditions are evaluated per element.
+- Reduction conditions (`any()`/`all()`) are evaluated globally on active lanes.
+- Uniform conditions (for example `if i == 2:`) work naturally as a special case.
 
 Rules:
 - No new locals are allowed inside branches.
 - Use `return` to produce output; all `return` expressions must infer the same dtype.
 - Early returns are allowed, but ensure every control-flow path eventually returns.
   Loops never guarantee a return; add a return after any loop.
-- In `element` dialect, `return` inside a loop body is not supported yet.
+- `return` inside a loop body is not supported.
 
 Example:
 ```
@@ -209,9 +191,8 @@ def kernel(mask, x):
         return mean(x)
 ```
 
-Element-dialect loop example:
+Per-element loop-control example:
 ```
-# me:dialect=element
 def kernel(x):
     acc = 0
     for i in range(8):

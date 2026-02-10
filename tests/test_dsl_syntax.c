@@ -226,7 +226,6 @@ static int test_invalid_conditionals(void) {
         "        return z\n";
 
     const char *src_element_return_in_loop =
-        "# me:dialect=element\n"
         "def kernel(x):\n"
         "    for i in range(4):\n"
         "        if x > i:\n"
@@ -245,11 +244,11 @@ static int test_invalid_conditionals(void) {
     expr = NULL;
     me_variable vars[] = {{"x", ME_FLOAT64}};
     me_variable vars_order[] = {{"x", ME_FLOAT64}, {"y", ME_FLOAT64}};
-    if (me_compile(src_non_scalar, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: non-scalar if condition accepted\n");
-        me_free(expr);
+    if (me_compile(src_non_scalar, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: non-reduction conditional was rejected\n");
         return 1;
     }
+    me_free(expr);
 
     expr = NULL;
     if (me_compile(src_return_mismatch, vars, 1, ME_AUTO, &err, &expr) == ME_COMPILE_SUCCESS) {
@@ -310,7 +309,7 @@ static int test_invalid_conditionals(void) {
 
     expr = NULL;
     if (me_compile(src_element_return_in_loop, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: element dialect accepted return inside loop\n");
+        printf("  ❌ FAILED: return inside loop was accepted\n");
         me_free(expr);
         return 1;
     }
@@ -650,19 +649,10 @@ static int test_dsl_function_calls(void) {
     return rc;
 }
 
-static int test_dialect_loop_condition_policy(void) {
-    printf("\n=== DSL Test 11: dialect loop condition policy ===\n");
+static int test_unified_loop_condition_policy(void) {
+    printf("\n=== DSL Test 11: unified loop condition policy ===\n");
 
-    const char *src_vector =
-        "def kernel(x):\n"
-        "    acc = 0\n"
-        "    for i in range(3):\n"
-        "        if x > 0:\n"
-        "            acc = acc + 1\n"
-        "    return acc\n";
-
-    const char *src_element =
-        "# me:dialect=element\n"
+    const char *src =
         "def kernel(x):\n"
         "    acc = 0\n"
         "    for i in range(3):\n"
@@ -671,30 +661,35 @@ static int test_dialect_loop_condition_policy(void) {
         "    return acc\n";
 
     me_variable vars[] = {{"x", ME_FLOAT64}};
+    double x[4] = {-1.0, 2.0, -3.0, 0.0};
+    double out[4];
+    double expected[4] = {0.0, 3.0, 0.0, 0.0};
+    const void *inputs[] = {x};
     int err = 0;
     me_expr *expr = NULL;
 
-    if (me_compile(src_vector, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: vector dialect accepted non-uniform loop condition\n");
+    if (me_compile(src, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compile error at %d\n", err);
+        return 1;
+    }
+    if (me_eval(expr, inputs, 1, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: eval error\n");
         me_free(expr);
         return 1;
     }
 
-    if (me_compile(src_element, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: element dialect rejected non-uniform loop condition at %d\n", err);
-        return 1;
-    }
+    int rc = check_all_close(out, expected, 4, 1e-12);
     me_free(expr);
-
-    printf("  ✅ PASSED\n");
-    return 0;
+    if (rc == 0) {
+        printf("  ✅ PASSED\n");
+    }
+    return rc;
 }
 
-static int test_dialect_element_per_item_break(void) {
-    printf("\n=== DSL Test 12: element per-item break ===\n");
+static int test_unified_per_item_break(void) {
+    printf("\n=== DSL Test 12: unified per-item break ===\n");
 
     const char *src =
-        "# me:dialect=element\n"
         "def kernel(x):\n"
         "    acc = 0\n"
         "    for i in range(5):\n"
@@ -731,11 +726,10 @@ static int test_dialect_element_per_item_break(void) {
     return rc;
 }
 
-static int test_dialect_element_any_remains_global(void) {
-    printf("\n=== DSL Test 13: element any() remains global ===\n");
+static int test_reduction_any_remains_global(void) {
+    printf("\n=== DSL Test 13: reduction any() remains global ===\n");
 
     const char *src =
-        "# me:dialect=element\n"
         "def kernel(x):\n"
         "    acc = 0\n"
         "    for i in range(4):\n"
@@ -771,11 +765,10 @@ static int test_dialect_element_any_remains_global(void) {
     return rc;
 }
 
-static int test_dialect_element_interpreter_jit_parity(void) {
-    printf("\n=== DSL Test 14: element interpreter/JIT parity ===\n");
+static int test_unified_interpreter_jit_parity(void) {
+    printf("\n=== DSL Test 14: unified interpreter/JIT parity ===\n");
 
     const char *src =
-        "# me:dialect=element\n"
         "def kernel(x):\n"
         "    acc = 0\n"
         "    for i in range(8):\n"
@@ -831,7 +824,7 @@ static int test_dialect_element_interpreter_jit_parity(void) {
 
     double expected[4] = {0.0, 1.0, 10.0, 28.0};
     if (check_all_close(out_interp, expected, 4, 1e-12) != 0) {
-        printf("  ❌ FAILED: unexpected element parity output\n");
+        printf("  ❌ FAILED: unexpected unified parity output\n");
         return 1;
     }
 
@@ -839,53 +832,23 @@ static int test_dialect_element_interpreter_jit_parity(void) {
     return 0;
 }
 
-static int test_dialect_element_env_gate(void) {
-    printf("\n=== DSL Test 15: element dialect env gate ===\n");
+static int test_dialect_pragma_rejected(void) {
+    printf("\n=== DSL Test 15: dialect pragma rejected ===\n");
 
     const char *src =
         "# me:dialect=element\n"
         "def kernel(x):\n"
-        "    acc = 0\n"
-        "    for i in range(3):\n"
-        "        if x > i:\n"
-        "            acc = acc + 1\n"
-        "    return acc\n";
+        "    return x\n";
 
     me_variable vars[] = {{"x", ME_FLOAT64}};
     int err = 0;
     me_expr *expr = NULL;
 
-    char *saved_element = dup_env_value("ME_DSL_ELEMENT");
-    if (setenv("ME_DSL_ELEMENT", "0", 1) != 0) {
-        printf("  ❌ FAILED: setenv ME_DSL_ELEMENT=0 failed\n");
-        free(saved_element);
-        return 1;
-    }
     if (me_compile(src, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: element dialect compiled while ME_DSL_ELEMENT=0\n");
+        printf("  ❌ FAILED: me:dialect pragma should be rejected\n");
         me_free(expr);
-        restore_env_value("ME_DSL_ELEMENT", saved_element);
-        free(saved_element);
         return 1;
     }
-
-    expr = NULL;
-    if (setenv("ME_DSL_ELEMENT", "1", 1) != 0) {
-        printf("  ❌ FAILED: setenv ME_DSL_ELEMENT=1 failed\n");
-        restore_env_value("ME_DSL_ELEMENT", saved_element);
-        free(saved_element);
-        return 1;
-    }
-    if (me_compile(src, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: element dialect rejected with ME_DSL_ELEMENT=1 at %d\n", err);
-        restore_env_value("ME_DSL_ELEMENT", saved_element);
-        free(saved_element);
-        return 1;
-    }
-    me_free(expr);
-
-    restore_env_value("ME_DSL_ELEMENT", saved_element);
-    free(saved_element);
 
     printf("  ✅ PASSED\n");
     return 0;
@@ -1001,11 +964,11 @@ int main(void) {
     fail |= test_nested_loops_and_conditionals();
     fail |= test_break_any_condition();
     fail |= test_dsl_function_calls();
-    fail |= test_dialect_loop_condition_policy();
-    fail |= test_dialect_element_per_item_break();
-    fail |= test_dialect_element_any_remains_global();
-    fail |= test_dialect_element_interpreter_jit_parity();
-    fail |= test_dialect_element_env_gate();
+    fail |= test_unified_loop_condition_policy();
+    fail |= test_unified_per_item_break();
+    fail |= test_reduction_any_remains_global();
+    fail |= test_unified_interpreter_jit_parity();
+    fail |= test_dialect_pragma_rejected();
     fail |= test_fp_pragma_modes();
     fail |= test_dsl_print_stmt();
     return fail;

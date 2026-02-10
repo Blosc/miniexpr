@@ -125,6 +125,7 @@ static double run_benchmark(const scenario_t *sc, int64_t target_items) {
     int64_t nblocks_dim1 = ceil_div64(sc->chunkshape[1], sc->blockshape[1]);
     int64_t nblocks_dim2 = ceil_div64(sc->chunkshape[2], sc->blockshape[2]);
     int64_t blocks_per_chunk = nblocks_dim0 * nblocks_dim1 * nblocks_dim2;
+    double throughput = 0.0;
 
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -151,8 +152,7 @@ static double run_benchmark(const scenario_t *sc, int64_t target_items) {
 
     clock_gettime(CLOCK_MONOTONIC, &t1);
     double elapsed = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) / 1e9;
-
-    double throughput = (elapsed > 0.0) ? (total_valid / elapsed) / 1e6 : 0.0;
+    throughput = (elapsed > 0.0) ? (total_valid / elapsed) / 1e6 : 0.0;
 
 cleanup:
     free(buf_a);

@@ -312,6 +312,9 @@ void me_free(me_expr *n);
  */
 me_dtype me_get_dtype(const me_expr *expr);
 
+/* Returns true when a DSL expression has a callable JIT runtime kernel bound. */
+bool me_expr_has_jit_kernel(const me_expr *expr);
+
 /* Get the library version string (e.g., "1.0.0"). */
 const char *me_version(void);
 

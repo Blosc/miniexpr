@@ -212,9 +212,7 @@ static int test_codegen_rejects_unsupported_expression_ops(void) {
 static int test_codegen_element_loop_control(void) {
     printf("\n=== JIT C Codegen Test 3: element loop control ===\n");
 
-    const char *src =
-        "# me:dialect=element\n"
-        "def kernel(x):\n"
+    const char *src =        "def kernel(x):\n"
         "    acc = 0\n"
         "    for i in range(8):\n"
         "        if i == 0:\n"
@@ -280,9 +278,7 @@ static int test_codegen_element_loop_control(void) {
 static int test_codegen_math_alias_rewrite(void) {
     printf("\n=== JIT C Codegen Test 4: math alias rewrite ===\n");
 
-    const char *src =
-        "# me:dialect=element\n"
-        "def kernel(x):\n"
+    const char *src =        "def kernel(x):\n"
         "    t0 = sinpi(x) + cospi(x)\n"
         "    t1 = exp10(x) + logaddexp(x, 1.0)\n"
         "    t2 = where(1, t0, t1)\n"
@@ -344,9 +340,7 @@ static int test_codegen_math_alias_rewrite(void) {
 static int test_codegen_runtime_math_bridge_emission(void) {
     printf("\n=== JIT C Codegen Test 5: runtime math bridge emission ===\n");
 
-    const char *src =
-        "# me:dialect=element\n"
-        "def kernel(x):\n"
+    const char *src =        "def kernel(x):\n"
         "    return sinpi(x) + exp10(x) + where(1, x, 0)\n";
 
     me_dsl_error parse_error;
@@ -407,9 +401,7 @@ static int test_codegen_runtime_math_bridge_emission(void) {
 static int test_codegen_runtime_math_bridge_vector_lowering(void) {
     printf("\n=== JIT C Codegen Test 6: runtime math bridge vector lowering ===\n");
 
-    const char *src =
-        "# me:dialect=element\n"
-        "def kernel(x):\n"
+    const char *src =        "def kernel(x):\n"
         "    return exp(x)\n";
 
     me_dsl_error parse_error;
@@ -466,9 +458,7 @@ static int test_codegen_runtime_math_bridge_vector_lowering(void) {
 static int test_codegen_runtime_math_bridge_vector_lowering_binary(void) {
     printf("\n=== JIT C Codegen Test 7: runtime math bridge vector binary lowering ===\n");
 
-    const char *src =
-        "# me:dialect=element\n"
-        "def kernel(x, y):\n"
+    const char *src =        "def kernel(x, y):\n"
         "    return atan2(y, x)\n";
 
     me_dsl_error parse_error;
@@ -525,9 +515,7 @@ static int test_codegen_runtime_math_bridge_vector_lowering_binary(void) {
 static int test_codegen_runtime_math_bridge_vector_lowering_binary_pow(void) {
     printf("\n=== JIT C Codegen Test 8: runtime math bridge vector binary pow lowering ===\n");
 
-    const char *src =
-        "# me:dialect=element\n"
-        "def kernel(x, y):\n"
+    const char *src =        "def kernel(x, y):\n"
         "    return pow(x, y)\n";
 
     me_dsl_error parse_error;
@@ -584,13 +572,9 @@ static int test_codegen_runtime_math_bridge_vector_lowering_binary_pow(void) {
 static int test_codegen_runtime_math_bridge_vector_lowering_binary_pow_broadcast(void) {
     printf("\n=== JIT C Codegen Test 9: runtime math bridge vector binary pow broadcast lowering ===\n");
 
-    const char *src_rhs =
-        "# me:dialect=element\n"
-        "def kernel(x):\n"
+    const char *src_rhs =        "def kernel(x):\n"
         "    return pow(x, 1.25)\n";
-    const char *src_lhs =
-        "# me:dialect=element\n"
-        "def kernel(x):\n"
+    const char *src_lhs =        "def kernel(x):\n"
         "    return pow(1.25, x)\n";
 
     const char *param_names[] = {"x"};
@@ -658,9 +642,7 @@ static int test_codegen_runtime_math_bridge_vector_lowering_binary_pow_broadcast
 static int test_codegen_runtime_math_bridge_vector_lowering_unary_affine(void) {
     printf("\n=== JIT C Codegen Test 10: runtime math bridge unary affine lowering ===\n");
 
-    const char *src =
-        "# me:dialect=element\n"
-        "def kernel(x):\n"
+    const char *src =        "def kernel(x):\n"
         "    return log(x + 1.5)\n";
 
     me_dsl_error parse_error;
@@ -731,9 +713,7 @@ static int test_codegen_runtime_math_bridge_vector_lowering_unary_extra(void) {
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         char src[256];
-        snprintf(src, sizeof(src),
-                 "# me:dialect=element\n"
-                 "def kernel(x):\n"
+        snprintf(src, sizeof(src),                 "def kernel(x):\n"
                  "    return %s(x)\n", cases[i].name);
 
         me_dsl_error parse_error;
@@ -809,9 +789,7 @@ static int test_codegen_runtime_math_bridge_vector_lowering_unary_extended(void)
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         char src[256];
-        snprintf(src, sizeof(src),
-                 "# me:dialect=element\n"
-                 "def kernel(x):\n"
+        snprintf(src, sizeof(src),                 "def kernel(x):\n"
                  "    return %s(x)\n", cases[i].name);
 
         me_dsl_error parse_error;

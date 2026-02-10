@@ -719,7 +719,7 @@ static bool me_jit_detect_vec_unary_plan(const me_dsl_jit_ir_program *program,
     out_plan->has_offset = false;
     out_plan->offset = 0.0;
 
-    if (program->dialect != ME_DSL_DIALECT_ELEMENT || program->block.nstmts != 1) {
+    if (program->block.nstmts != 1) {
         return false;
     }
     if (output_dtype != ME_FLOAT64 && output_dtype != ME_FLOAT32) {
@@ -840,7 +840,7 @@ static bool me_jit_detect_vec_binary_plan(const me_dsl_jit_ir_program *program,
     out_plan->arg_a_const_value = 0.0;
     out_plan->arg_b_const_value = 0.0;
 
-    if (program->dialect != ME_DSL_DIALECT_ELEMENT || program->block.nstmts != 1) {
+    if (program->block.nstmts != 1) {
         return false;
     }
     if (output_dtype != ME_FLOAT64 && output_dtype != ME_FLOAT32) {

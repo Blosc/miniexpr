@@ -2462,7 +2462,6 @@ typedef struct {
     me_dtype output_dtype;
     bool output_dtype_auto;
     int loop_depth;
-    me_dsl_dialect dialect;
     bool allow_new_locals;
     int *error_pos;
     me_dsl_compiled_expr *output_expr;
@@ -2474,14 +2473,8 @@ typedef struct {
 } dsl_compile_ctx;
 
 static const char *dsl_dialect_name(me_dsl_dialect dialect) {
-    switch (dialect) {
-    case ME_DSL_DIALECT_VECTOR:
-        return "vector";
-    case ME_DSL_DIALECT_ELEMENT:
-        return "element";
-    default:
-        return "unknown";
-    }
+    (void)dialect;
+    return "unified";
 }
 
 static const char *dsl_fp_mode_name(me_dsl_fp_mode fp_mode) {
@@ -2539,14 +2532,6 @@ static void dsl_tracef(const char *fmt, ...) {
     vfprintf(stderr, fmt, ap);
     va_end(ap);
     fputc('\n', stderr);
-}
-
-static bool dsl_element_dialect_enabled(void) {
-    const char *env = getenv("ME_DSL_ELEMENT");
-    if (!env || env[0] == '\0') {
-        return true;
-    }
-    return strcmp(env, "0") != 0;
 }
 
 static int dsl_offset_from_linecol(const char *source, int line, int column) {
@@ -5485,9 +5470,9 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             break;
         }
         case ME_DSL_STMT_RETURN: {
-            if (ctx->dialect == ME_DSL_DIALECT_ELEMENT && ctx->loop_depth > 0) {
-                dsl_tracef("compile reject: dialect=%s does not support return inside loops at %d:%d",
-                           dsl_dialect_name(ctx->dialect), stmt->line, stmt->column);
+            if (ctx->loop_depth > 0) {
+                dsl_tracef("compile reject: %s control does not support return inside loops at %d:%d",
+                           dsl_dialect_name(ME_DSL_DIALECT_ELEMENT), stmt->line, stmt->column);
                 if (ctx->error_pos) {
                     *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
                 }
@@ -5683,26 +5668,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             break;
         }
         case ME_DSL_STMT_IF: {
-            /* Element dialect allows per-item loop control conditions inside loops. */
-            bool require_uniform_cond = (ctx->dialect == ME_DSL_DIALECT_VECTOR ||
-                                         ctx->loop_depth <= 0);
             if (!dsl_compile_expr(ctx, stmt->as.if_stmt.cond, ME_AUTO, &compiled->as.if_stmt.cond)) {
-                dsl_compiled_stmt_free(compiled);
-                return false;
-            }
-            if (require_uniform_cond &&
-                !dsl_expr_is_uniform(compiled->as.if_stmt.cond.expr,
-                                     ctx->program->vars.uniform,
-                                     ctx->program->vars.count)) {
-                dsl_tracef("compile reject: dialect=%s requires uniform loop condition at %d:%d; "
-                           "use '# me:dialect=element' for per-item loop conditions",
-                           dsl_dialect_name(ctx->dialect),
-                           stmt->as.if_stmt.cond->line, stmt->as.if_stmt.cond->column);
-                if (ctx->error_pos) {
-                    *ctx->error_pos = dsl_offset_from_linecol(ctx->source,
-                                                             stmt->as.if_stmt.cond->line,
-                                                             stmt->as.if_stmt.cond->column);
-                }
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
@@ -5732,23 +5698,6 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 me_dsl_if_branch *elif_branch = &stmt->as.if_stmt.elif_branches[i];
                 me_dsl_compiled_if_branch *out_branch = &compiled->as.if_stmt.elif_branches[i];
                 if (!dsl_compile_expr(ctx, elif_branch->cond, ME_AUTO, &out_branch->cond)) {
-                    dsl_compiled_stmt_free(compiled);
-                    return false;
-                }
-                if (require_uniform_cond &&
-                    !dsl_expr_is_uniform(out_branch->cond.expr,
-                                         ctx->program->vars.uniform,
-                                         ctx->program->vars.count)) {
-                    dsl_tracef("compile reject: dialect=%s requires uniform loop condition at %d:%d; "
-                               "use '# me:dialect=element' for per-item loop conditions",
-                               dsl_dialect_name(ctx->dialect),
-                               elif_branch->cond->line, elif_branch->cond->column);
-                    if (ctx->error_pos) {
-                        *ctx->error_pos = dsl_offset_from_linecol(ctx->source,
-                                                                 elif_branch->cond->line,
-                                                                 elif_branch->cond->column);
-                    }
-                    ctx->allow_new_locals = prev_allow_new;
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
@@ -5840,21 +5789,6 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
-                if (ctx->dialect == ME_DSL_DIALECT_VECTOR &&
-                    !dsl_expr_is_uniform(compiled->as.flow.cond.expr,
-                                         ctx->program->vars.uniform,
-                                         ctx->program->vars.count)) {
-                    dsl_tracef("compile reject: dialect=%s requires uniform break/continue condition at %d:%d",
-                               dsl_dialect_name(ctx->dialect),
-                               stmt->as.flow.cond->line, stmt->as.flow.cond->column);
-                    if (ctx->error_pos) {
-                        *ctx->error_pos = dsl_offset_from_linecol(ctx->source,
-                                                                 stmt->as.flow.cond->line,
-                                                                 stmt->as.flow.cond->column);
-                    }
-                    dsl_compiled_stmt_free(compiled);
-                    return false;
-                }
             }
             else {
                 memset(&compiled->as.flow.cond, 0, sizeof(compiled->as.flow.cond));
@@ -5898,15 +5832,6 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     }
     if (is_dsl) {
         *is_dsl = true;
-    }
-    if (parsed->dialect == ME_DSL_DIALECT_ELEMENT && !dsl_element_dialect_enabled()) {
-        if (error_pos) {
-            *error_pos = -1;
-        }
-        dsl_tracef("compile reject: dialect=%s disabled by ME_DSL_ELEMENT=0",
-                   dsl_dialect_name(parsed->dialect));
-        me_dsl_program_free(parsed);
-        return NULL;
     }
     if (!dsl_block_guarantees_return(&parsed->block)) {
         if (error_pos) {
@@ -6189,7 +6114,6 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     ctx.output_dtype = dtype;
     ctx.output_dtype_auto = (dtype == ME_AUTO);
     ctx.loop_depth = 0;
-    ctx.dialect = parsed->dialect;
     ctx.allow_new_locals = true;
     ctx.error_pos = error_pos;
     ctx.output_expr = NULL;
@@ -6485,6 +6409,14 @@ me_dtype me_get_dtype(const me_expr* expr) {
     return expr ? expr->dtype : ME_AUTO;
 }
 
+bool me_expr_has_jit_kernel(const me_expr *expr) {
+    if (!expr || !expr->dsl_program) {
+        return false;
+    }
+    const me_dsl_compiled_program *program = (const me_dsl_compiled_program *)expr->dsl_program;
+    return program->jit_kernel_fn != NULL;
+}
+
 const char* me_version(void) {
     return ME_VERSION_STRING;
 }
@@ -6613,9 +6545,9 @@ static int dsl_eval_expr_nitems(dsl_eval_ctx *ctx, const me_dsl_compiled_expr *e
 
 static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
                                        uint8_t *run_mask, uint8_t *break_mask,
-                                       uint8_t *continue_mask, bool *did_return);
+                                       uint8_t *continue_mask, uint8_t *return_mask);
 static int dsl_eval_for_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_stmt *stmt,
-                                     const uint8_t *input_mask, bool *did_return);
+                                     const uint8_t *input_mask, uint8_t *return_mask);
 
 static bool dsl_mask_any(const uint8_t *mask, int nitems) {
     if (!mask || nitems <= 0) {
@@ -6630,12 +6562,15 @@ static bool dsl_mask_any(const uint8_t *mask, int nitems) {
 }
 
 static void dsl_mask_remove_flow(uint8_t *run_mask, const uint8_t *break_mask,
-                                 const uint8_t *continue_mask, int nitems) {
+                                 const uint8_t *continue_mask,
+                                 const uint8_t *return_mask, int nitems) {
     if (!run_mask || nitems <= 0) {
         return;
     }
     for (int i = 0; i < nitems; i++) {
-        if ((break_mask && break_mask[i]) || (continue_mask && continue_mask[i])) {
+        if ((break_mask && break_mask[i]) ||
+            (continue_mask && continue_mask[i]) ||
+            (return_mask && return_mask[i])) {
             run_mask[i] = 0;
         }
     }
@@ -6793,8 +6728,9 @@ static int dsl_eval_element_conditional_branch(dsl_eval_ctx *ctx,
                                                uint8_t *remaining_mask,
                                                uint8_t *break_mask,
                                                uint8_t *continue_mask,
-                                               bool *did_return) {
-    if (!ctx || !cond || !branch_block || !remaining_mask || !break_mask || !continue_mask) {
+                                               uint8_t *return_mask) {
+    if (!ctx || !cond || !branch_block || !remaining_mask ||
+        !break_mask || !continue_mask || !return_mask) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
     if (!dsl_mask_any(remaining_mask, ctx->nitems)) {
@@ -6824,7 +6760,7 @@ static int dsl_eval_element_conditional_branch(dsl_eval_ctx *ctx,
             memcpy(branch_run, remaining_mask, (size_t)ctx->nitems);
             memset(remaining_mask, 0, (size_t)ctx->nitems);
             rc = dsl_eval_block_element_loop(ctx, branch_block, branch_run,
-                                             break_mask, continue_mask, did_return);
+                                             break_mask, continue_mask, return_mask);
             free(branch_run);
         }
         free(cond_mask);
@@ -6848,7 +6784,7 @@ static int dsl_eval_element_conditional_branch(dsl_eval_ctx *ctx,
         }
     }
     rc = dsl_eval_block_element_loop(ctx, branch_block, branch_run,
-                                     break_mask, continue_mask, did_return);
+                                     break_mask, continue_mask, return_mask);
     free(branch_run);
     free(cond_mask);
     return rc;
@@ -6939,15 +6875,13 @@ static void dsl_print_formatted(const char *fmt, char **arg_strs, int nargs) {
 
 static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
                                        uint8_t *run_mask, uint8_t *break_mask,
-                                       uint8_t *continue_mask, bool *did_return) {
-    if (!ctx || !block || !run_mask || !break_mask || !continue_mask) {
+                                       uint8_t *continue_mask, uint8_t *return_mask) {
+    if (!ctx || !block || !run_mask || !break_mask || !continue_mask || !return_mask) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
 
     for (int i = 0; i < block->nstmts; i++) {
-        if (did_return && *did_return) {
-            break;
-        }
+        dsl_mask_remove_flow(run_mask, break_mask, continue_mask, return_mask, ctx->nitems);
         if (!dsl_mask_any(run_mask, ctx->nitems)) {
             break;
         }
@@ -6982,8 +6916,11 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
             if (rc != ME_EVAL_SUCCESS) {
                 return rc;
             }
-            if (did_return) {
-                *did_return = true;
+            for (int j = 0; j < ctx->nitems; j++) {
+                if (run_mask[j]) {
+                    return_mask[j] = 1;
+                    run_mask[j] = 0;
+                }
             }
             break;
         }
@@ -7061,7 +6998,7 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
             int rc = dsl_eval_element_conditional_branch(ctx, &stmt->as.if_stmt.cond,
                                                          &stmt->as.if_stmt.then_block,
                                                          remaining, break_mask,
-                                                         continue_mask, did_return);
+                                                         continue_mask, return_mask);
             if (rc != ME_EVAL_SUCCESS) {
                 free(remaining);
                 return rc;
@@ -7074,7 +7011,7 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
                 me_dsl_compiled_if_branch *branch = &stmt->as.if_stmt.elif_branches[j];
                 rc = dsl_eval_element_conditional_branch(ctx, &branch->cond, &branch->block,
                                                          remaining, break_mask,
-                                                         continue_mask, did_return);
+                                                         continue_mask, return_mask);
                 if (rc != ME_EVAL_SUCCESS) {
                     free(remaining);
                     return rc;
@@ -7090,7 +7027,7 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
                 memcpy(else_run, remaining, (size_t)ctx->nitems);
                 rc = dsl_eval_block_element_loop(ctx, &stmt->as.if_stmt.else_block,
                                                  else_run, break_mask,
-                                                 continue_mask, did_return);
+                                                 continue_mask, return_mask);
                 free(else_run);
                 if (rc != ME_EVAL_SUCCESS) {
                     free(remaining);
@@ -7099,11 +7036,11 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
             }
 
             free(remaining);
-            dsl_mask_remove_flow(run_mask, break_mask, continue_mask, ctx->nitems);
+            dsl_mask_remove_flow(run_mask, break_mask, continue_mask, return_mask, ctx->nitems);
             break;
         }
         case ME_DSL_STMT_FOR: {
-            int rc = dsl_eval_for_element_loop(ctx, stmt, run_mask, did_return);
+            int rc = dsl_eval_for_element_loop(ctx, stmt, run_mask, return_mask);
             if (rc != ME_EVAL_SUCCESS) {
                 return rc;
             }
@@ -7160,7 +7097,7 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
 }
 
 static int dsl_eval_for_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_stmt *stmt,
-                                     const uint8_t *input_mask, bool *did_return) {
+                                     const uint8_t *input_mask, uint8_t *return_mask) {
     if (!ctx || !stmt || stmt->kind != ME_DSL_STMT_FOR) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
@@ -7197,6 +7134,7 @@ static int dsl_eval_for_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_st
     else {
         memset(active_mask, 1, (size_t)ctx->nitems);
     }
+    dsl_mask_remove_flow(active_mask, NULL, NULL, return_mask, ctx->nitems);
 
     if (!dsl_mask_any(active_mask, ctx->nitems)) {
         free(active_mask);
@@ -7226,7 +7164,7 @@ static int dsl_eval_for_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_st
         memcpy(run_mask, active_mask, (size_t)ctx->nitems);
 
         rc = dsl_eval_block_element_loop(ctx, &stmt->as.for_loop.body, run_mask,
-                                         break_mask, continue_mask, did_return);
+                                         break_mask, continue_mask, return_mask);
         free(run_mask);
         if (rc != ME_EVAL_SUCCESS) {
             free(break_mask);
@@ -7234,15 +7172,9 @@ static int dsl_eval_for_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_st
             free(active_mask);
             return rc;
         }
-        if (did_return && *did_return) {
-            free(break_mask);
-            free(continue_mask);
-            free(active_mask);
-            return ME_EVAL_SUCCESS;
-        }
 
         for (int i = 0; i < ctx->nitems; i++) {
-            if (break_mask[i]) {
+            if (break_mask[i] || return_mask[i]) {
                 active_mask[i] = 0;
             }
         }
@@ -7257,258 +7189,57 @@ static int dsl_eval_for_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_st
 
 static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
                           bool *did_break, bool *did_continue, bool *did_return) {
-    if (!block) {
+    if (!ctx || !block) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+    if (ctx->nitems <= 0) {
+        if (did_break) {
+            *did_break = false;
+        }
+        if (did_continue) {
+            *did_continue = false;
+        }
+        if (did_return) {
+            *did_return = true;
+        }
         return ME_EVAL_SUCCESS;
     }
-    for (int i = 0; i < block->nstmts; i++) {
-        if (did_return && *did_return) {
-            break;
-        }
-        if (did_break && *did_break) {
-            break;
-        }
-        if (did_continue && *did_continue) {
-            break;
-        }
-        me_dsl_compiled_stmt *stmt = block->stmts[i];
-        if (!stmt) {
-            continue;
-        }
-        switch (stmt->kind) {
-        case ME_DSL_STMT_ASSIGN: {
-            int slot = stmt->as.assign.local_slot;
-            void *out = ctx->local_buffers[slot];
-            int rc = dsl_eval_expr_nitems(ctx, &stmt->as.assign.value, out, ctx->nitems);
-            if (rc != ME_EVAL_SUCCESS) {
-                return rc;
-            }
-            break;
-        }
-        case ME_DSL_STMT_EXPR: {
-            int rc = dsl_eval_expr_nitems(ctx, &stmt->as.expr_stmt.expr, ctx->output_block, ctx->nitems);
-            if (rc != ME_EVAL_SUCCESS) {
-                return rc;
-            }
-            break;
-        }
-        case ME_DSL_STMT_RETURN: {
-            int rc = dsl_eval_expr_nitems(ctx, &stmt->as.return_stmt.expr,
-                                          ctx->output_block, ctx->nitems);
-            if (rc != ME_EVAL_SUCCESS) {
-                return rc;
-            }
-            if (did_return) {
-                *did_return = true;
-            }
-            break;
-        }
-        case ME_DSL_STMT_PRINT: {
-            int nargs = stmt->as.print_stmt.nargs;
-            char **arg_strs = NULL;
-            void **arg_bufs = NULL;
-            if (nargs > 0) {
-                arg_strs = calloc((size_t)nargs, sizeof(*arg_strs));
-                arg_bufs = calloc((size_t)nargs, sizeof(*arg_bufs));
-                if (!arg_strs || !arg_bufs) {
-                    free(arg_strs);
-                    free(arg_bufs);
-                    return ME_EVAL_ERR_OOM;
-                }
-            }
-            for (int i = 0; i < nargs; i++) {
-                me_dsl_compiled_expr *arg = &stmt->as.print_stmt.args[i];
-                me_dtype dtype = me_get_dtype(arg->expr);
-                size_t size = dtype_size(dtype);
-                if (size == 0) {
-                    size = sizeof(double);
-                }
-                arg_bufs[i] = calloc(1, size);
-                if (!arg_bufs[i]) {
-                    for (int j = 0; j < i; j++) {
-                        free(arg_bufs[j]);
-                        free(arg_strs[j]);
-                    }
-                    free(arg_bufs);
-                    free(arg_strs);
-                    return ME_EVAL_ERR_OOM;
-                }
-                int rc = dsl_eval_expr_nitems(ctx, arg, arg_bufs[i], 1);
-                if (rc != ME_EVAL_SUCCESS) {
-                    for (int j = 0; j <= i; j++) {
-                        free(arg_bufs[j]);
-                        free(arg_strs[j]);
-                    }
-                    free(arg_bufs);
-                    free(arg_strs);
-                    return rc;
-                }
-                arg_strs[i] = calloc(1, 64);
-                if (!arg_strs[i]) {
-                    for (int j = 0; j <= i; j++) {
-                        free(arg_bufs[j]);
-                        free(arg_strs[j]);
-                    }
-                    free(arg_bufs);
-                    free(arg_strs);
-                    return ME_EVAL_ERR_OOM;
-                }
-                dsl_format_value(arg_strs[i], 64, dtype, arg_bufs[i]);
-            }
-            dsl_print_formatted(stmt->as.print_stmt.format, arg_strs, nargs);
-            for (int i = 0; i < nargs; i++) {
-                free(arg_bufs[i]);
-                free(arg_strs[i]);
-            }
-            free(arg_bufs);
-            free(arg_strs);
-            break;
-        }
-        case ME_DSL_STMT_IF: {
-            bool matched = false;
-            me_dtype cond_dtype = me_get_dtype(stmt->as.if_stmt.cond.expr);
-            size_t cond_size = dtype_size(cond_dtype);
-            bool cond_is_reduction = is_reduction_node(stmt->as.if_stmt.cond.expr);
-            int cond_nitems = cond_is_reduction ? 1 : ctx->nitems;
-            void *cond_buf = malloc((size_t)cond_nitems * cond_size);
-            if (!cond_buf) {
-                return ME_EVAL_ERR_OOM;
-            }
-            int rc = dsl_eval_expr_nitems(ctx, &stmt->as.if_stmt.cond, cond_buf, ctx->nitems);
-            if (rc != ME_EVAL_SUCCESS) {
-                free(cond_buf);
-                return rc;
-            }
-            matched = dsl_any_nonzero(cond_buf, cond_dtype, cond_nitems);
-            free(cond_buf);
-            if (matched) {
-                rc = dsl_eval_block(ctx, &stmt->as.if_stmt.then_block,
-                                    did_break, did_continue, did_return);
-                if (rc != ME_EVAL_SUCCESS) {
-                    return rc;
-                }
+
+    uint8_t *run_mask = malloc((size_t)ctx->nitems);
+    uint8_t *break_mask = calloc((size_t)ctx->nitems, sizeof(*break_mask));
+    uint8_t *continue_mask = calloc((size_t)ctx->nitems, sizeof(*continue_mask));
+    uint8_t *return_mask = calloc((size_t)ctx->nitems, sizeof(*return_mask));
+    if (!run_mask || !break_mask || !continue_mask || !return_mask) {
+        free(run_mask);
+        free(break_mask);
+        free(continue_mask);
+        free(return_mask);
+        return ME_EVAL_ERR_OOM;
+    }
+    memset(run_mask, 1, (size_t)ctx->nitems);
+
+    int rc = dsl_eval_block_element_loop(ctx, block, run_mask, break_mask, continue_mask, return_mask);
+    if (did_break) {
+        *did_break = dsl_mask_any(break_mask, ctx->nitems);
+    }
+    if (did_continue) {
+        *did_continue = dsl_mask_any(continue_mask, ctx->nitems);
+    }
+    if (did_return) {
+        *did_return = true;
+        for (int i = 0; i < ctx->nitems; i++) {
+            if (!return_mask[i]) {
+                *did_return = false;
                 break;
             }
-            for (int i = 0; i < stmt->as.if_stmt.n_elifs; i++) {
-                me_dsl_compiled_if_branch *branch = &stmt->as.if_stmt.elif_branches[i];
-                cond_dtype = me_get_dtype(branch->cond.expr);
-                cond_size = dtype_size(cond_dtype);
-                cond_is_reduction = is_reduction_node(branch->cond.expr);
-                cond_nitems = cond_is_reduction ? 1 : ctx->nitems;
-                cond_buf = malloc((size_t)cond_nitems * cond_size);
-                if (!cond_buf) {
-                    return ME_EVAL_ERR_OOM;
-                }
-                rc = dsl_eval_expr_nitems(ctx, &branch->cond, cond_buf, ctx->nitems);
-                if (rc != ME_EVAL_SUCCESS) {
-                    free(cond_buf);
-                    return rc;
-                }
-                matched = dsl_any_nonzero(cond_buf, cond_dtype, cond_nitems);
-                free(cond_buf);
-                if (matched) {
-                    rc = dsl_eval_block(ctx, &branch->block,
-                                        did_break, did_continue, did_return);
-                    if (rc != ME_EVAL_SUCCESS) {
-                        return rc;
-                    }
-                    break;
-                }
-            }
-            if (!matched && stmt->as.if_stmt.has_else) {
-                rc = dsl_eval_block(ctx, &stmt->as.if_stmt.else_block,
-                                    did_break, did_continue, did_return);
-                if (rc != ME_EVAL_SUCCESS) {
-                    return rc;
-                }
-            }
-            break;
-        }
-        case ME_DSL_STMT_FOR: {
-            if (ctx->program && ctx->program->dialect == ME_DSL_DIALECT_ELEMENT) {
-                int rc = dsl_eval_for_element_loop(ctx, stmt, NULL, did_return);
-                if (rc != ME_EVAL_SUCCESS) {
-                    return rc;
-                }
-                break;
-            }
-            me_dsl_compiled_expr *limit = &stmt->as.for_loop.limit;
-            me_dtype limit_dtype = me_get_dtype(limit->expr);
-            size_t limit_size = dtype_size(limit_dtype);
-            void *limit_buf = malloc(limit_size ? limit_size : sizeof(int64_t));
-            if (!limit_buf) {
-                return ME_EVAL_ERR_OOM;
-            }
-            int rc = dsl_eval_expr_nitems(ctx, limit, limit_buf, 1);
-            if (rc != ME_EVAL_SUCCESS) {
-                free(limit_buf);
-                return rc;
-            }
-            int64_t limit_val = 0;
-            if (!dsl_read_int64(limit_buf, limit_dtype, &limit_val)) {
-                free(limit_buf);
-                return ME_EVAL_ERR_INVALID_ARG;
-            }
-            free(limit_buf);
-            if (limit_val <= 0) {
-                break;
-            }
-            int slot = stmt->as.for_loop.loop_var_slot;
-            int64_t *loop_buf = (int64_t *)ctx->local_buffers[slot];
-            for (int64_t iter = 0; iter < limit_val; iter++) {
-                dsl_fill_i64(loop_buf, ctx->nitems, iter);
-                bool inner_break = false;
-                bool inner_continue = false;
-                bool inner_return = false;
-                rc = dsl_eval_block(ctx, &stmt->as.for_loop.body,
-                                    &inner_break, &inner_continue, &inner_return);
-                if (rc != ME_EVAL_SUCCESS) {
-                    return rc;
-                }
-                if (inner_return) {
-                    if (did_return) {
-                        *did_return = true;
-                    }
-                    return ME_EVAL_SUCCESS;
-                }
-                if (inner_break) {
-                    break;
-                }
-            }
-            break;
-        }
-        case ME_DSL_STMT_BREAK:
-        case ME_DSL_STMT_CONTINUE: {
-            bool trigger = true;
-            if (stmt->as.flow.cond.expr) {
-                me_dtype cond_dtype = me_get_dtype(stmt->as.flow.cond.expr);
-                size_t cond_size = dtype_size(cond_dtype);
-                bool cond_is_reduction = is_reduction_node(stmt->as.flow.cond.expr);
-                int cond_nitems = cond_is_reduction ? 1 : ctx->nitems;
-                void *cond_buf = malloc((size_t)cond_nitems * cond_size);
-                if (!cond_buf) {
-                    return ME_EVAL_ERR_OOM;
-                }
-                int rc = dsl_eval_expr_nitems(ctx, &stmt->as.flow.cond, cond_buf, ctx->nitems);
-                if (rc != ME_EVAL_SUCCESS) {
-                    free(cond_buf);
-                    return rc;
-                }
-                trigger = dsl_any_nonzero(cond_buf, cond_dtype, cond_nitems);
-                free(cond_buf);
-            }
-            if (trigger) {
-                if (stmt->kind == ME_DSL_STMT_BREAK && did_break) {
-                    *did_break = true;
-                }
-                if (stmt->kind == ME_DSL_STMT_CONTINUE && did_continue) {
-                    *did_continue = true;
-                }
-            }
-            break;
-        }
         }
     }
-    return ME_EVAL_SUCCESS;
+
+    free(run_mask);
+    free(break_mask);
+    free(continue_mask);
+    free(return_mask);
+    return rc;
 }
 
 static int dsl_eval_program(const me_dsl_compiled_program *program,

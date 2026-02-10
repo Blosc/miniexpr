@@ -211,66 +211,6 @@ static char *dsl_copy_trimmed(const char *start, const char *end) {
     return dsl_strndup(start, (size_t)(end - start));
 }
 
-static bool dsl_parse_dialect_pragma_line(const char *start, const char *end,
-                                          me_dsl_dialect *dialect_out,
-                                          int line, me_dsl_error *error) {
-    const char *p = start;
-    while (p < end && (*p == ' ' || *p == '\t' || *p == '\r')) {
-        p++;
-    }
-    if (p >= end || *p != '#') {
-        return false;
-    }
-    p++;
-    while (p < end && isspace((unsigned char)*p)) {
-        p++;
-    }
-    static const char prefix[] = "me:dialect";
-    size_t prefix_len = sizeof(prefix) - 1;
-    if ((size_t)(end - p) < prefix_len || strncmp(p, prefix, prefix_len) != 0) {
-        return false;
-    }
-    p += prefix_len;
-    while (p < end && isspace((unsigned char)*p)) {
-        p++;
-    }
-    if (p >= end || *p != '=') {
-        dsl_set_error(error, line, (int)(p - start) + 1, "expected '=' after me:dialect");
-        return false;
-    }
-    p++;
-    while (p < end && isspace((unsigned char)*p)) {
-        p++;
-    }
-    const char *value_start = p;
-    while (p < end && is_ident_char(*p)) {
-        p++;
-    }
-    const char *value_end = p;
-    while (p < end && isspace((unsigned char)*p)) {
-        p++;
-    }
-    if (p < end) {
-        dsl_set_error(error, line, (int)(p - start) + 1, "unexpected trailing content in me:dialect pragma");
-        return false;
-    }
-    if (value_start == value_end) {
-        dsl_set_error(error, line, (int)(value_start - start) + 1, "expected dialect value after me:dialect=");
-        return false;
-    }
-    size_t value_len = (size_t)(value_end - value_start);
-    if (value_len == 6 && strncmp(value_start, "vector", value_len) == 0) {
-        *dialect_out = ME_DSL_DIALECT_VECTOR;
-        return true;
-    }
-    if (value_len == 7 && strncmp(value_start, "element", value_len) == 0) {
-        *dialect_out = ME_DSL_DIALECT_ELEMENT;
-        return true;
-    }
-    dsl_set_error(error, line, (int)(value_start - start) + 1, "unknown me:dialect value (expected 'vector' or 'element')");
-    return false;
-}
-
 static bool dsl_parse_fp_pragma_line(const char *start, const char *end,
                                      me_dsl_fp_mode *fp_mode_out,
                                      int line, me_dsl_error *error) {
@@ -404,7 +344,7 @@ static bool dsl_parse_program_pragmas(const char *source, me_dsl_dialect *dialec
     if (!dialect_out || !fp_mode_out || !compiler_out) {
         return false;
     }
-    *dialect_out = ME_DSL_DIALECT_VECTOR;
+    *dialect_out = ME_DSL_DIALECT_ELEMENT;
     *fp_mode_out = ME_DSL_FP_STRICT;
     *compiler_out = ME_DSL_COMPILER_LIBTCC;
     if (!source) {
@@ -413,7 +353,6 @@ static bool dsl_parse_program_pragmas(const char *source, me_dsl_dialect *dialec
 
     const char *line_start = source;
     int line = 1;
-    bool seen_dialect = false;
     bool seen_fp_mode = false;
     bool seen_compiler = false;
 
@@ -431,7 +370,6 @@ static bool dsl_parse_program_pragmas(const char *source, me_dsl_dialect *dialec
             /* Keep scanning header section across blank lines. */
         }
         else if (*p == '#') {
-            me_dsl_dialect parsed = *dialect_out;
             me_dsl_fp_mode parsed_fp_mode = *fp_mode_out;
             me_dsl_compiler parsed_compiler = *compiler_out;
             const char *body = p + 1;
@@ -439,16 +377,9 @@ static bool dsl_parse_program_pragmas(const char *source, me_dsl_dialect *dialec
                 body++;
             }
             if ((size_t)(line_end - body) >= 10 && strncmp(body, "me:dialect", 10) == 0) {
-                if (seen_dialect) {
-                    dsl_set_error(error, line, (int)(p - line_start) + 1,
-                                  "duplicate me:dialect pragma");
-                    return false;
-                }
-                if (!dsl_parse_dialect_pragma_line(line_start, line_end, &parsed, line, error)) {
-                    return false;
-                }
-                *dialect_out = parsed;
-                seen_dialect = true;
+                dsl_set_error(error, line, (int)(p - line_start) + 1,
+                              "me:dialect pragma is no longer supported");
+                return false;
             }
             else if ((size_t)(line_end - body) >= 5 && strncmp(body, "me:fp", 5) == 0) {
                 if (seen_fp_mode) {
@@ -1477,7 +1408,7 @@ static bool parse_def(me_dsl_lexer *lex, me_dsl_program *program, me_dsl_error *
 
 static bool parse_program(me_dsl_lexer *lex, me_dsl_program *program, me_dsl_error *error) {
     memset(program, 0, sizeof(*program));
-    program->dialect = ME_DSL_DIALECT_VECTOR;
+    program->dialect = ME_DSL_DIALECT_ELEMENT;
     program->fp_mode = ME_DSL_FP_STRICT;
     program->compiler = ME_DSL_COMPILER_LIBTCC;
 

@@ -648,8 +648,8 @@ cleanup:
     return rc;
 }
 
-static int test_cache_key_differentiates_dialect(void) {
-    printf("\n=== DSL JIT Runtime Cache Test 6: dialect cache key differentiation ===\n");
+static int test_dialect_pragma_is_rejected(void) {
+    printf("\n=== DSL JIT Runtime Cache Test 6: dialect pragma rejected ===\n");
 
     int rc = 1;
     char tmp_template[] = "/tmp/me_jit_dialect_cache_XXXXXX";
@@ -659,12 +659,12 @@ static int test_cache_key_differentiates_dialect(void) {
     char *saved_tmpdir = dup_env_value("TMPDIR");
     char *saved_cc = dup_env_value("CC");
     char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
-    const char *src_vector =
+    const char *src_base =
         "# me:compiler=cc\n"
         "def kernel(x):\n"
         "    y = x + 23\n"
         "    return y\n";
-    const char *src_element =
+    const char *src_dialect =
         "# me:compiler=cc\n"
         "# me:dialect=element\n"
         "def kernel(x):\n"
@@ -692,16 +692,23 @@ static int test_cache_key_differentiates_dialect(void) {
         goto cleanup;
     }
 
-    if (compile_and_eval_simple_dsl(src_vector, 23.0) != 0) {
+    if (compile_and_eval_simple_dsl(src_base, 23.0) != 0) {
         goto cleanup;
     }
-    if (compile_and_eval_simple_dsl(src_element, 23.0) != 0) {
+
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    int err = 0;
+    me_expr *expr = NULL;
+    if (me_compile(src_dialect, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+        printf("  FAILED: me:dialect pragma should be rejected\n");
+        me_free(expr);
         goto cleanup;
     }
 
     int n_meta = count_kernel_files_with_suffix(cache_dir, ".meta", NULL, 0);
-    if (n_meta != 2) {
-        printf("  FAILED: expected 2 cache metadata files for vector+element dialects (got %d)\n", n_meta);
+    if (n_meta != 1) {
+        printf("  FAILED: rejected me:dialect pragma should not create a second cache entry (meta=%d)\n",
+               n_meta);
         goto cleanup;
     }
 
@@ -817,7 +824,6 @@ static int test_element_interpreter_jit_parity(void) {
     char *saved_jit = dup_env_value("ME_DSL_JIT");
     const char *src =
         "# me:compiler=cc\n"
-        "# me:dialect=element\n"
         "def kernel(x):\n"
         "    acc = 0\n"
         "    for i in range(6):\n"
@@ -919,7 +925,6 @@ static int test_cc_backend_bridge_path(void) {
     char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
     const char *src =
         "# me:compiler=cc\n"
-        "# me:dialect=element\n"
         "def kernel(x):\n"
         "    return exp(x)\n";
     const double in[4] = {0.0, 0.5, 1.0, -1.0};
@@ -1009,7 +1014,7 @@ int main(void) {
     fail |= test_rejects_metadata_mismatch_artifact();
     fail |= test_jit_disable_env_guardrail();
     fail |= test_default_libtcc_skips_cc_backend();
-    fail |= test_cache_key_differentiates_dialect();
+    fail |= test_dialect_pragma_is_rejected();
     fail |= test_cache_key_differentiates_fp_mode();
     fail |= test_element_interpreter_jit_parity();
     fail |= test_cc_backend_bridge_path();

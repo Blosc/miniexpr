@@ -247,8 +247,8 @@ static int test_parser_dialect_pragma(void) {
         printf("  FAILED: parse error for default dialect source\n");
         return 1;
     }
-    if (program->dialect != ME_DSL_DIALECT_VECTOR) {
-        printf("  FAILED: default dialect should be vector\n");
+    if (program->dialect != ME_DSL_DIALECT_ELEMENT) {
+        printf("  FAILED: default internal dialect should be unified/element\n");
         me_dsl_program_free(program);
         return 1;
     }
@@ -269,21 +269,11 @@ static int test_parser_dialect_pragma(void) {
         "def kernel(x):\n"
         "    return x\n";
     program = me_dsl_parse(src_element, &error);
-    if (!program) {
-        printf("  FAILED: parse error for element dialect source\n");
-        return 1;
-    }
-    if (program->dialect != ME_DSL_DIALECT_ELEMENT) {
-        printf("  FAILED: element dialect pragma not detected\n");
+    if (program) {
+        printf("  FAILED: me:dialect pragma should be rejected\n");
         me_dsl_program_free(program);
         return 1;
     }
-    if (program->fp_mode != ME_DSL_FP_STRICT) {
-        printf("  FAILED: element source should keep default strict fp mode\n");
-        me_dsl_program_free(program);
-        return 1;
-    }
-    me_dsl_program_free(program);
 
     const char *src_cc =
         "# me:compiler=cc\n"
@@ -350,75 +340,6 @@ static int test_parser_dialect_pragma(void) {
         return 1;
     }
 
-    printf("  PASSED\n");
-    return 0;
-}
-
-static int test_ir_fingerprint_includes_dialect(void) {
-    printf("\n=== JIT IR Test 5: fingerprint includes dialect ===\n");
-
-    const char *src_vector =
-        "# me:dialect=vector\n"
-        "def kernel(x):\n"
-        "    y = x + 1\n"
-        "    return y\n";
-    const char *src_element =
-        "# me:dialect=element\n"
-        "def kernel(x):\n"
-        "    y = x + 1\n"
-        "    return y\n";
-
-    me_dsl_error error;
-    me_dsl_program *program_vector = me_dsl_parse(src_vector, &error);
-    if (!program_vector) {
-        printf("  FAILED: parse error for vector source\n");
-        return 1;
-    }
-    me_dsl_program *program_element = me_dsl_parse(src_element, &error);
-    if (!program_element) {
-        printf("  FAILED: parse error for element source\n");
-        me_dsl_program_free(program_vector);
-        return 1;
-    }
-
-    const char *param_names[] = {"x"};
-    me_dtype param_dtypes[] = {ME_FLOAT64};
-    me_dsl_jit_ir_program *ir_vector = NULL;
-    me_dsl_jit_ir_program *ir_element = NULL;
-
-    if (!me_dsl_jit_ir_build(program_vector, param_names, param_dtypes, 1,
-                             mock_resolve_dtype, NULL, &ir_vector, &error) || !ir_vector) {
-        printf("  FAILED: jit ir build failed for vector program\n");
-        me_dsl_program_free(program_vector);
-        me_dsl_program_free(program_element);
-        me_dsl_jit_ir_free(ir_vector);
-        return 1;
-    }
-    if (!me_dsl_jit_ir_build(program_element, param_names, param_dtypes, 1,
-                             mock_resolve_dtype, NULL, &ir_element, &error) || !ir_element) {
-        printf("  FAILED: jit ir build failed for element program\n");
-        me_dsl_program_free(program_vector);
-        me_dsl_program_free(program_element);
-        me_dsl_jit_ir_free(ir_vector);
-        me_dsl_jit_ir_free(ir_element);
-        return 1;
-    }
-
-    uint64_t fp_vector = me_dsl_jit_ir_fingerprint(ir_vector);
-    uint64_t fp_element = me_dsl_jit_ir_fingerprint(ir_element);
-    if (fp_vector == fp_element) {
-        printf("  FAILED: fingerprints should differ by dialect\n");
-        me_dsl_program_free(program_vector);
-        me_dsl_program_free(program_element);
-        me_dsl_jit_ir_free(ir_vector);
-        me_dsl_jit_ir_free(ir_element);
-        return 1;
-    }
-
-    me_dsl_program_free(program_vector);
-    me_dsl_program_free(program_element);
-    me_dsl_jit_ir_free(ir_vector);
-    me_dsl_jit_ir_free(ir_element);
     printf("  PASSED\n");
     return 0;
 }
@@ -498,7 +419,6 @@ int main(void) {
     fail |= test_ir_rejects_unsupported_statements();
     fail |= test_ir_fingerprint_is_deterministic();
     fail |= test_parser_dialect_pragma();
-    fail |= test_ir_fingerprint_includes_dialect();
     fail |= test_ir_fingerprint_includes_fp_mode();
     return fail;
 }
