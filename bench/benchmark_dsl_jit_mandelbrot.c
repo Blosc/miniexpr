@@ -163,26 +163,52 @@ static bool valid_fp_mode(const char *fp_mode) {
            strcmp(fp_mode, "fast") == 0;
 }
 
+static bool valid_compiler_mode(const char *compiler_mode) {
+    if (!compiler_mode) {
+        return true;
+    }
+    return strcmp(compiler_mode, "cc") == 0 ||
+           strcmp(compiler_mode, "libtcc") == 0;
+}
+
 static bool build_dsl_source(char *out, size_t out_size, int max_iter,
                              bool element_dialect, bool use_any_break,
-                             const char *fp_mode) {
+                             const char *fp_mode, const char *compiler_mode) {
     if (!out || out_size == 0 || max_iter <= 0) {
         return false;
     }
     if (!valid_fp_mode(fp_mode)) {
         return false;
     }
+    if (!valid_compiler_mode(compiler_mode)) {
+        return false;
+    }
     int n = 0;
-    char prefix[64];
+    char prefix[96];
     if (element_dialect) {
-        if (snprintf(prefix, sizeof(prefix), "# me:dialect=element\n# me:fp=%s\n", fp_mode) >= (int)sizeof(prefix)) {
-            return false;
+        if (compiler_mode && compiler_mode[0] != '\0') {
+            n = snprintf(prefix, sizeof(prefix),
+                         "# me:dialect=element\n# me:fp=%s\n# me:compiler=%s\n",
+                         fp_mode, compiler_mode);
+        }
+        else {
+            n = snprintf(prefix, sizeof(prefix),
+                         "# me:dialect=element\n# me:fp=%s\n",
+                         fp_mode);
         }
     }
     else {
-        if (snprintf(prefix, sizeof(prefix), "# me:fp=%s\n", fp_mode) >= (int)sizeof(prefix)) {
-            return false;
+        if (compiler_mode && compiler_mode[0] != '\0') {
+            n = snprintf(prefix, sizeof(prefix),
+                         "# me:fp=%s\n# me:compiler=%s\n",
+                         fp_mode, compiler_mode);
         }
+        else {
+            n = snprintf(prefix, sizeof(prefix), "# me:fp=%s\n", fp_mode);
+        }
+    }
+    if (n <= 0 || (size_t)n >= sizeof(prefix)) {
+        return false;
     }
     if (use_any_break) {
         n = snprintf(out, out_size,
@@ -232,6 +258,35 @@ static bool build_dsl_source(char *out, size_t out_size, int max_iter,
                      max_iter);
     }
     return n > 0 && (size_t)n < out_size;
+}
+
+static void print_mode_result_line(const char *dialect, const char *compiler_label,
+                                   const char *mode, const bench_result *result) {
+    if (!dialect || !compiler_label || !mode || !result) {
+        return;
+    }
+    printf("%-10s %-10s %-10s %12.3f %14.3f %12.3f %12.3f\n",
+           dialect, compiler_label, mode,
+           result->compile_ms, result->eval_ms_best,
+           result->ns_per_elem_best, result->checksum);
+}
+
+static void print_speedup_lines(const char *compiler_label,
+                                const kernel_result *vector_res,
+                                const kernel_result *element_res) {
+    if (!compiler_label || !vector_res || !element_res) {
+        return;
+    }
+    double vector_warm = vector_res->jit_warm.ns_per_elem_best;
+    double element_warm = element_res->jit_warm.ns_per_elem_best;
+    double vector_interp = vector_res->interp.ns_per_elem_best;
+    double element_interp = element_res->interp.ns_per_elem_best;
+    if (element_warm > 0.0 && element_interp > 0.0) {
+        printf("speedup_warm_element_vs_vector[%s]=%.3fx\n",
+               compiler_label, vector_warm / element_warm);
+        printf("speedup_interp_element_vs_vector[%s]=%.3fx\n",
+               compiler_label, vector_interp / element_interp);
+    }
 }
 
 static int run_mode(const char *mode_name, const char *jit_env_value,
@@ -320,10 +375,12 @@ static int run_mode(const char *mode_name, const char *jit_env_value,
     return 0;
 }
 
-static int run_kernel(const char *kernel_name, const char *source,
+static int run_kernel(const char *kernel_name, const char *compiler_label,
+                      const char *source,
                       const float *cr, const float *ci, int nitems, int repeats,
                       kernel_result *result) {
-    if (!kernel_name || !source || !cr || !ci || nitems <= 0 || repeats <= 0 || !result) {
+    if (!kernel_name || !compiler_label || !source || !cr || !ci ||
+        nitems <= 0 || repeats <= 0 || !result) {
         return 1;
     }
 
@@ -332,12 +389,15 @@ static int run_kernel(const char *kernel_name, const char *source,
     if (run_mode(kernel_name, "1", source, cr, ci, nitems, 1, &result->jit_cold) != 0) {
         return 1;
     }
+    print_mode_result_line(kernel_name, compiler_label, "jit-cold", &result->jit_cold);
     if (run_mode(kernel_name, "1", source, cr, ci, nitems, repeats, &result->jit_warm) != 0) {
         return 1;
     }
+    print_mode_result_line(kernel_name, compiler_label, "jit-warm", &result->jit_warm);
     if (run_mode(kernel_name, "0", source, cr, ci, nitems, repeats, &result->interp) != 0) {
         return 1;
     }
+    print_mode_result_line(kernel_name, compiler_label, "interp", &result->interp);
     return 0;
 }
 
@@ -432,35 +492,24 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    kernel_result vector_res;
-    kernel_result element_res;
-    char vector_source[1024];
-    char element_source[1024];
+    kernel_result vector_libtcc_res;
+    kernel_result element_libtcc_res;
+    kernel_result vector_cc_res;
+    kernel_result element_cc_res;
+    char vector_libtcc_source[1024];
+    char element_libtcc_source[1024];
+    char vector_cc_source[1024];
+    char element_cc_source[1024];
 
-    if (!build_dsl_source(vector_source, sizeof(vector_source), max_iter, false, true, fp_mode) ||
-        !build_dsl_source(element_source, sizeof(element_source), max_iter, true, false, fp_mode)) {
+    if (!build_dsl_source(vector_libtcc_source, sizeof(vector_libtcc_source),
+                          max_iter, false, true, fp_mode, NULL) ||
+        !build_dsl_source(element_libtcc_source, sizeof(element_libtcc_source),
+                          max_iter, true, false, fp_mode, NULL) ||
+        !build_dsl_source(vector_cc_source, sizeof(vector_cc_source),
+                          max_iter, false, true, fp_mode, "cc") ||
+        !build_dsl_source(element_cc_source, sizeof(element_cc_source),
+                          max_iter, true, false, fp_mode, "cc")) {
         fprintf(stderr, "failed to build benchmark DSL source\n");
-        restore_env_value("TMPDIR", saved_tmpdir);
-        free(saved_tmpdir);
-        free(cr);
-        free(ci);
-        remove_files_in_dir(cache_dir);
-        (void)rmdir(cache_dir);
-        (void)rmdir(tmp_root);
-        return 1;
-    }
-
-    if (run_kernel("vector", vector_source, cr, ci, nitems, repeats, &vector_res) != 0) {
-        restore_env_value("TMPDIR", saved_tmpdir);
-        free(saved_tmpdir);
-        free(cr);
-        free(ci);
-        remove_files_in_dir(cache_dir);
-        (void)rmdir(cache_dir);
-        (void)rmdir(tmp_root);
-        return 1;
-    }
-    if (run_kernel("element", element_source, cr, ci, nitems, repeats, &element_res) != 0) {
         restore_env_value("TMPDIR", saved_tmpdir);
         free(saved_tmpdir);
         free(cr);
@@ -476,43 +525,59 @@ int main(int argc, char **argv) {
            width, height, repeats, max_iter);
     printf("kernel: notebook-equivalent escape-iteration output\n");
     printf("kernels: vector(all-active break) vs element(per-item-break)\n");
+    printf("compiler order: default-libtcc then cc\n");
     printf("fp_pragma=%s\n", fp_mode);
     printf("timing: warm modes report best single run over repeats\n");
-    printf("%-10s %-10s %12s %14s %12s %12s\n",
-           "dialect", "mode", "compile_ms", "eval_ms_best", "ns_per_elem", "checksum");
-    printf("%-10s %-10s %12.3f %14.3f %12.3f %12.3f\n",
-           "vector", "jit-cold",
-           vector_res.jit_cold.compile_ms, vector_res.jit_cold.eval_ms_best,
-           vector_res.jit_cold.ns_per_elem_best, vector_res.jit_cold.checksum);
-    printf("%-10s %-10s %12.3f %14.3f %12.3f %12.3f\n",
-           "vector", "jit-warm",
-           vector_res.jit_warm.compile_ms, vector_res.jit_warm.eval_ms_best,
-           vector_res.jit_warm.ns_per_elem_best, vector_res.jit_warm.checksum);
-    printf("%-10s %-10s %12.3f %14.3f %12.3f %12.3f\n",
-           "vector", "interp",
-           vector_res.interp.compile_ms, vector_res.interp.eval_ms_best,
-           vector_res.interp.ns_per_elem_best, vector_res.interp.checksum);
-    printf("%-10s %-10s %12.3f %14.3f %12.3f %12.3f\n",
-           "element", "jit-cold",
-           element_res.jit_cold.compile_ms, element_res.jit_cold.eval_ms_best,
-           element_res.jit_cold.ns_per_elem_best, element_res.jit_cold.checksum);
-    printf("%-10s %-10s %12.3f %14.3f %12.3f %12.3f\n",
-           "element", "jit-warm",
-           element_res.jit_warm.compile_ms, element_res.jit_warm.eval_ms_best,
-           element_res.jit_warm.ns_per_elem_best, element_res.jit_warm.checksum);
-    printf("%-10s %-10s %12.3f %14.3f %12.3f %12.3f\n",
-           "element", "interp",
-           element_res.interp.compile_ms, element_res.interp.eval_ms_best,
-           element_res.interp.ns_per_elem_best, element_res.interp.checksum);
+    printf("%-10s %-10s %-10s %12s %14s %12s %12s\n",
+           "dialect", "compiler", "mode", "compile_ms", "eval_ms_best", "ns_per_elem", "checksum");
 
-    double vector_warm = vector_res.jit_warm.ns_per_elem_best;
-    double element_warm = element_res.jit_warm.ns_per_elem_best;
-    double vector_interp = vector_res.interp.ns_per_elem_best;
-    double element_interp = element_res.interp.ns_per_elem_best;
-    if (element_warm > 0.0 && element_interp > 0.0) {
-        printf("speedup_warm_element_vs_vector=%.3fx\n", vector_warm / element_warm);
-        printf("speedup_interp_element_vs_vector=%.3fx\n", vector_interp / element_interp);
+    if (run_kernel("vector", "libtcc", vector_libtcc_source,
+                   cr, ci, nitems, repeats, &vector_libtcc_res) != 0) {
+        restore_env_value("TMPDIR", saved_tmpdir);
+        free(saved_tmpdir);
+        free(cr);
+        free(ci);
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+        (void)rmdir(tmp_root);
+        return 1;
     }
+    if (run_kernel("element", "libtcc", element_libtcc_source,
+                   cr, ci, nitems, repeats, &element_libtcc_res) != 0) {
+        restore_env_value("TMPDIR", saved_tmpdir);
+        free(saved_tmpdir);
+        free(cr);
+        free(ci);
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+        (void)rmdir(tmp_root);
+        return 1;
+    }
+    print_speedup_lines("libtcc", &vector_libtcc_res, &element_libtcc_res);
+
+    if (run_kernel("vector", "cc", vector_cc_source,
+                   cr, ci, nitems, repeats, &vector_cc_res) != 0) {
+        restore_env_value("TMPDIR", saved_tmpdir);
+        free(saved_tmpdir);
+        free(cr);
+        free(ci);
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+        (void)rmdir(tmp_root);
+        return 1;
+    }
+    if (run_kernel("element", "cc", element_cc_source,
+                   cr, ci, nitems, repeats, &element_cc_res) != 0) {
+        restore_env_value("TMPDIR", saved_tmpdir);
+        free(saved_tmpdir);
+        free(cr);
+        free(ci);
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+        (void)rmdir(tmp_root);
+        return 1;
+    }
+    print_speedup_lines("cc", &vector_cc_res, &element_cc_res);
 
     restore_env_value("TMPDIR", saved_tmpdir);
     free(saved_tmpdir);
