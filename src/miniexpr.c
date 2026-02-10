@@ -5154,6 +5154,10 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
     dsl_jit_neg_cache_clear(key);
 }
 #else
+static bool dsl_jit_cc_math_bridge_available(void) {
+    return false;
+}
+
 static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
     (void)program;
 }
