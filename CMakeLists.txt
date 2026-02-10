@@ -5,6 +5,14 @@ include(GNUInstallDirs)
 if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "MSVC")
   message(FATAL_ERROR "MSVC is not supported. Use clang-cl (e.g., cmake -G \"Visual Studio 17 2022\" -T ClangCL).")
 endif()
+if(WIN32 AND NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
+  message(FATAL_ERROR "Windows builds require clang-cl.")
+endif()
+if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang"
+   AND DEFINED CMAKE_C_COMPILER_FRONTEND_VARIANT
+   AND NOT CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+  message(FATAL_ERROR "Windows builds require clang-cl (MSVC frontend variant).")
+endif()
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)

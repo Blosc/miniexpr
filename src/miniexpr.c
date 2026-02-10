@@ -233,8 +233,8 @@ static void dsl_jit_libtcc_delete_state(void *state);
 static bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program);
 static const char *dsl_jit_libtcc_error_message(void);
 static bool dsl_jit_c_compiler_available(void);
-static bool dsl_jit_cc_math_bridge_available(void);
 #endif
+static bool dsl_jit_cc_math_bridge_available(void);
 
 static int64_t ceil_div64(int64_t a, int64_t b) {
     return (b == 0) ? 0 : (a + b - 1) / b;
@@ -4793,6 +4793,9 @@ static bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
 #endif
 
 static bool dsl_jit_cc_math_bridge_available(void) {
+#if defined(_WIN32) || defined(_WIN64)
+    return false;
+#else
     if (dlsym(RTLD_DEFAULT, "me_jit_exp10") == NULL) {
         return false;
     }
@@ -4845,6 +4848,7 @@ static bool dsl_jit_cc_math_bridge_available(void) {
         return false;
     }
     return true;
+#endif
 }
 
 static bool dsl_jit_compile_shared(const me_dsl_compiled_program *program,
