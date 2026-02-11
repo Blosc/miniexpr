@@ -114,3 +114,11 @@ jobs:
       run: |
         ctest --test-dir build-windows-libtcc-jit -C Release -R "test_dsl_jit_|test_dsl_syntax" --output-on-failure || \
           ctest --test-dir build-windows-libtcc-jit -C Release --rerun-failed --output-on-failure
+
+    - name: Assert tcc runtime JIT activation (trace)
+      shell: bash
+      run: |
+        set -o pipefail
+        ME_DSL_TRACE=1 ctest --test-dir build-windows-libtcc-jit -C Release -R "^test_dsl_jit_runtime_cache$" -V \
+          2>&1 | tee build-windows-libtcc-jit/tcc-trace.log
+        grep -E "jit runtime built: .*compiler=tcc" build-windows-libtcc-jit/tcc-trace.log
