@@ -8,7 +8,6 @@ on:
 
 jobs:
   build-and-test:
-    if: ${{ vars.ENABLE_LEGACY_CI_LANES == '1' }}
     strategy:
       fail-fast: false
       matrix:
@@ -58,8 +57,20 @@ jobs:
             ctest --test-dir build --rerun-failed --output-on-failure
         fi
 
+    - name: Trace DSL JIT backend activity
+      shell: bash
+      run: |
+        set -o pipefail
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          ME_DSL_TRACE=1 ctest --test-dir build -C Release -R "^test_dsl_jit_runtime_cache$" -V \
+            2>&1 | tee build/dsl-jit-trace.log
+        else
+          ME_DSL_TRACE=1 ctest --test-dir build -R "^test_dsl_jit_runtime_cache$" -V \
+            2>&1 | tee build/dsl-jit-trace.log
+        fi
+        grep -E "jit ir built:|jit runtime (built|skip|hit|stubbed):" build/dsl-jit-trace.log || true
+
   minicc-wasm:
-    if: ${{ vars.ENABLE_LEGACY_CI_LANES == '1' }}
     strategy:
       fail-fast: false
       matrix:
