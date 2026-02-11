@@ -56,3 +56,33 @@ jobs:
           ctest --test-dir build --output-on-failure || \
             ctest --test-dir build --rerun-failed --output-on-failure
         fi
+
+  minicc-wasm:
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node }}
+
+    - name: Configure miniexpr (populate MiniCC sources)
+      shell: bash
+      run: |
+        cmake -S . -B build-populate -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build and test MiniCC wasm32 backend
+      shell: bash
+      run: |
+        cmake -S build-populate/_deps/tinycc-src -B build-minicc-wasm -G Ninja \
+          -DMINICC_BUILD_WASM32_TCC=ON \
+          -DMINICC_ENABLE_TESTING=ON \
+          -DMINICC_BUILD_SHARED_LIBTCC=ON
+        cmake --build build-minicc-wasm -j
+        ctest --test-dir build-minicc-wasm -R '^minicc\.wasm\.' --output-on-failure
