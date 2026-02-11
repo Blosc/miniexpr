@@ -123,6 +123,8 @@ jobs:
         emcmake cmake -S . -B build-wasm32 -G Ninja \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_CROSSCOMPILING_EMULATOR=node \
+          -DMINIEXPR_BUILD_SHARED=OFF \
+          -DMINIEXPR_BUILD_STATIC=ON \
           -DMINIEXPR_BUILD_BENCH=OFF \
           -DMINIEXPR_BUILD_EXAMPLES=OFF \
           -DMINIEXPR_USE_SLEEF=OFF \
