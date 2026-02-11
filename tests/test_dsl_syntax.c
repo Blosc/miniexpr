@@ -228,9 +228,9 @@ static int test_invalid_conditionals(void) {
     const char *src_element_return_in_loop =
         "def kernel(x):\n"
         "    for i in range(4):\n"
-        "        if x > i:\n"
-        "            return i\n"
-        "    return 0\n";
+        "        if x == i:\n"
+        "            return i + 10\n"
+        "    return -1\n";
 
     int err = 0;
     me_expr *expr = NULL;
@@ -258,9 +258,17 @@ static int test_invalid_conditionals(void) {
     }
 
     expr = NULL;
-    if (me_compile(src_missing_return, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: missing return path accepted\n");
-        me_free(expr);
+    if (me_compile(src_missing_return, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: missing return path rejected at compile time\n");
+        return 1;
+    }
+    double x_missing[4] = {-1.0, -2.0, -3.0, -4.0};
+    double out_missing[4] = {0.0, 0.0, 0.0, 0.0};
+    const void *inputs_missing[] = {x_missing};
+    int rc_missing = me_eval(expr, inputs_missing, 1, out_missing, 4, NULL);
+    me_free(expr);
+    if (rc_missing != ME_EVAL_ERR_INVALID_ARG) {
+        printf("  ❌ FAILED: missing return path should be runtime eval error (got %d)\n", rc_missing);
         return 1;
     }
 
@@ -308,14 +316,69 @@ static int test_invalid_conditionals(void) {
     }
 
     expr = NULL;
-    if (me_compile(src_element_return_in_loop, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: return inside loop was accepted\n");
+    if (me_compile(src_element_return_in_loop, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: return inside loop should be accepted\n");
+        return 1;
+    }
+    double x_return_loop[4] = {0.0, 1.0, 3.0, 5.0};
+    double out_return_loop[4] = {0.0, 0.0, 0.0, 0.0};
+    const void *inputs_return_loop[] = {x_return_loop};
+    if (me_eval(expr, inputs_return_loop, 1, out_return_loop, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: return-inside-loop eval error\n");
         me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+    double expected_return_loop[4] = {10.0, 11.0, 13.0, -1.0};
+    if (check_all_close(out_return_loop, expected_return_loop, 4, 1e-12) != 0) {
+        printf("  ❌ FAILED: return-inside-loop output mismatch\n");
         return 1;
     }
 
     printf("  ✅ PASSED\n");
     return 0;
+}
+
+static int test_string_truthiness(void) {
+    printf("\n=== DSL Test 20: string truthiness in conditions ===\n");
+
+    const uint32_t names[4][8] = {
+        {'a', 'l', 'p', 'h', 'a', 0, 0, 0},
+        {'b', 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0},
+        {'z', 0, 0, 0, 0, 0, 0, 0}
+    };
+    const char *src =
+        "def kernel(name):\n"
+        "    if name:\n"
+        "        return 1\n"
+        "    return 0\n";
+
+    me_variable_ex vars[] = {
+        {"name", ME_STRING, names, ME_VARIABLE, NULL, sizeof(names[0])}
+    };
+    int err = 0;
+    me_expr *expr = NULL;
+    if (me_compile_ex(src, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compile error at %d\n", err);
+        return 1;
+    }
+
+    double out[4] = {0.0, 0.0, 0.0, 0.0};
+    const void *inputs[] = {names};
+    int rc_eval = me_eval(expr, inputs, 1, out, 4, NULL);
+    me_free(expr);
+    if (rc_eval != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: eval error (%d)\n", rc_eval);
+        return 1;
+    }
+
+    double expected[4] = {1.0, 1.0, 0.0, 1.0};
+    int rc = check_all_close(out, expected, 4, 1e-12);
+    if (rc == 0) {
+        printf("  ✅ PASSED\n");
+    }
+    return rc;
 }
 
 static int test_if_elif_else(void) {
@@ -832,11 +895,11 @@ static int test_unified_interpreter_jit_parity(void) {
     return 0;
 }
 
-static int test_dialect_pragma_rejected(void) {
-    printf("\n=== DSL Test 15: dialect pragma rejected ===\n");
+static int test_unknown_me_pragma_rejected(void) {
+    printf("\n=== DSL Test 15: unknown me pragma rejected ===\n");
 
     const char *src =
-        "# me:dialect=element\n"
+        "# me:bogus=element\n"
         "def kernel(x):\n"
         "    return x\n";
 
@@ -845,7 +908,7 @@ static int test_dialect_pragma_rejected(void) {
     me_expr *expr = NULL;
 
     if (me_compile(src, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-        printf("  ❌ FAILED: me:dialect pragma should be rejected\n");
+        printf("  ❌ FAILED: unknown me pragma should be rejected\n");
         me_free(expr);
         return 1;
     }
@@ -854,8 +917,111 @@ static int test_dialect_pragma_rejected(void) {
     return 0;
 }
 
+static int test_return_inside_loop_interpreter_jit_parity(void) {
+    printf("\n=== DSL Test 16: return-in-loop interpreter/JIT parity ===\n");
+
+    const char *src =
+        "def kernel(x):\n"
+        "    for i in range(4):\n"
+        "        if x == i:\n"
+        "            return i + 10\n"
+        "    return -1\n";
+
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    double x[4] = {0.0, 1.0, 3.0, 5.0};
+    const void *inputs[] = {x};
+    double out_interp[4] = {0.0, 0.0, 0.0, 0.0};
+    double out_jit[4] = {0.0, 0.0, 0.0, 0.0};
+    double expected[4] = {10.0, 11.0, 13.0, -1.0};
+
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+    if (setenv("ME_DSL_JIT", "0", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=0 failed\n");
+        free(saved_jit);
+        return 1;
+    }
+    if (compile_eval_double(src, vars, 1, inputs, 4, out_interp) != 0) {
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=1 failed\n");
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+    if (compile_eval_double(src, vars, 1, inputs, 4, out_jit) != 0) {
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    free(saved_jit);
+
+    if (check_all_close(out_interp, expected, 4, 1e-12) != 0) {
+        printf("  ❌ FAILED: unexpected interpreter output\n");
+        return 1;
+    }
+    for (int i = 0; i < 4; i++) {
+        if (out_interp[i] != out_jit[i]) {
+            printf("  ❌ FAILED: mismatch at %d (interp=%.17g jit=%.17g)\n",
+                   i, out_interp[i], out_jit[i]);
+            return 1;
+        }
+    }
+
+    printf("  ✅ PASSED\n");
+    return 0;
+}
+
+static int test_missing_return_runtime_error_with_jit_enabled(void) {
+    printf("\n=== DSL Test 17: missing return runtime error with JIT enabled ===\n");
+
+    const char *src =
+        "def kernel(x):\n"
+        "    if any(x > 0):\n"
+        "        return 1\n";
+
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    double x[4] = {-1.0, -2.0, -3.0, -4.0};
+    double out[4] = {0.0, 0.0, 0.0, 0.0};
+    const void *inputs[] = {x};
+
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=1 failed\n");
+        free(saved_jit);
+        return 1;
+    }
+
+    me_expr *expr = NULL;
+    int err = 0;
+    if (me_compile(src, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compile error at %d\n", err);
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+
+    int rc_eval = me_eval(expr, inputs, 1, out, 4, NULL);
+    me_free(expr);
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    free(saved_jit);
+
+    if (rc_eval != ME_EVAL_ERR_INVALID_ARG) {
+        printf("  ❌ FAILED: expected runtime missing-return error, got %d\n", rc_eval);
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    return 0;
+}
+
 static int test_fp_pragma_modes(void) {
-    printf("\n=== DSL Test 16: fp pragma modes ===\n");
+    printf("\n=== DSL Test 18: fp pragma modes ===\n");
 
     const char *src_strict =
         "# me:fp=strict\n"
@@ -918,7 +1084,7 @@ static int test_fp_pragma_modes(void) {
 }
 
 static int test_dsl_print_stmt(void) {
-    printf("\n=== DSL Test 17: print statement ===\n");
+    printf("\n=== DSL Test 19: print statement ===\n");
 
     const char *src =
         "def kernel():\n"
@@ -968,8 +1134,11 @@ int main(void) {
     fail |= test_unified_per_item_break();
     fail |= test_reduction_any_remains_global();
     fail |= test_unified_interpreter_jit_parity();
-    fail |= test_dialect_pragma_rejected();
+    fail |= test_unknown_me_pragma_rejected();
+    fail |= test_return_inside_loop_interpreter_jit_parity();
+    fail |= test_missing_return_runtime_error_with_jit_enabled();
     fail |= test_fp_pragma_modes();
     fail |= test_dsl_print_stmt();
+    fail |= test_string_truthiness();
     return fail;
 }

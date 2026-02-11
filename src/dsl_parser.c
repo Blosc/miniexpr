@@ -337,14 +337,13 @@ static bool dsl_parse_compiler_pragma_line(const char *start, const char *end,
     return false;
 }
 
-static bool dsl_parse_program_pragmas(const char *source, me_dsl_dialect *dialect_out,
+static bool dsl_parse_program_pragmas(const char *source,
                                       me_dsl_fp_mode *fp_mode_out,
                                       me_dsl_compiler *compiler_out,
                                       me_dsl_error *error) {
-    if (!dialect_out || !fp_mode_out || !compiler_out) {
+    if (!fp_mode_out || !compiler_out) {
         return false;
     }
-    *dialect_out = ME_DSL_DIALECT_ELEMENT;
     *fp_mode_out = ME_DSL_FP_STRICT;
     *compiler_out = ME_DSL_COMPILER_LIBTCC;
     if (!source) {
@@ -376,12 +375,7 @@ static bool dsl_parse_program_pragmas(const char *source, me_dsl_dialect *dialec
             while (body < line_end && isspace((unsigned char)*body)) {
                 body++;
             }
-            if ((size_t)(line_end - body) >= 10 && strncmp(body, "me:dialect", 10) == 0) {
-                dsl_set_error(error, line, (int)(p - line_start) + 1,
-                              "me:dialect pragma is no longer supported");
-                return false;
-            }
-            else if ((size_t)(line_end - body) >= 5 && strncmp(body, "me:fp", 5) == 0) {
+            if ((size_t)(line_end - body) >= 5 && strncmp(body, "me:fp", 5) == 0) {
                 if (seen_fp_mode) {
                     dsl_set_error(error, line, (int)(p - line_start) + 1,
                                   "duplicate me:fp pragma");
@@ -404,6 +398,11 @@ static bool dsl_parse_program_pragmas(const char *source, me_dsl_dialect *dialec
                 }
                 *compiler_out = parsed_compiler;
                 seen_compiler = true;
+            }
+            else if ((size_t)(line_end - body) >= 3 && strncmp(body, "me:", 3) == 0) {
+                dsl_set_error(error, line, (int)(p - line_start) + 1,
+                              "unknown me:* pragma (supported: me:fp, me:compiler)");
+                return false;
             }
         }
         else {
@@ -1413,7 +1412,7 @@ static bool parse_program(me_dsl_lexer *lex, me_dsl_program *program, me_dsl_err
     program->compiler = ME_DSL_COMPILER_LIBTCC;
 
     if (!dsl_parse_program_pragmas(lex ? lex->source : NULL,
-                                   &program->dialect, &program->fp_mode,
+                                   &program->fp_mode,
                                    &program->compiler, error)) {
         return false;
     }

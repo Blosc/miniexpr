@@ -8,7 +8,7 @@ The DSL extends single expressions to full programs with:
 - **Temporary variables** - Store intermediate results
 - **Multi-statement programs** - Combine multiple computations
 - **Element-wise conditionals** - Using `where(cond, true_val, false_val)`
-- **Conditional blocks** - `if/elif/else` with scalar conditions
+- **Conditional blocks** - `if/elif/else` with scalar or per-element conditions
 - **Loop constructs** - `for` loops with `break` and `continue`
 - **Index access** - Reference element positions via `_i0`, `_i1`, etc.
 
@@ -32,7 +32,8 @@ not listed in the signature.)
 Note: The order of the variables array still defines the pointer order passed to
 `me_eval()`. The signature is declarative and does not reorder inputs.
 
-A kernel must return on all control-flow paths. Missing returns are compile errors.
+A kernel must contain at least one `return` statement.
+If execution reaches the end for any lane without returning, evaluation fails at runtime.
 
 ### Control-Flow Semantics
 
@@ -41,7 +42,8 @@ DSL kernels use unified per-element control-flow semantics:
 - Reduction conditions (`any(...)`, `all(...)`) remain global to the active lane mask.
 - `break` and `continue` act per element inside loops.
 
-The old `# me:dialect=...` pragma is no longer supported and is now a parse error.
+Only `# me:fp=...` and `# me:compiler=...` pragmas are supported.
+Any other `# me:*` pragma is a parse error.
 
 For backend diagnostics, set `ME_DSL_TRACE=1` to emit compile/JIT trace lines
 to stderr (JIT accept/reject reasons, runtime cache/fallback paths).

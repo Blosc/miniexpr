@@ -234,8 +234,8 @@ static int test_ir_fingerprint_is_deterministic(void) {
     return 0;
 }
 
-static int test_parser_dialect_pragma(void) {
-    printf("\n=== JIT IR Test 4: parser dialect pragma ===\n");
+static int test_parser_pragmas(void) {
+    printf("\n=== JIT IR Test 4: parser pragmas ===\n");
 
     me_dsl_error error;
 
@@ -263,17 +263,6 @@ static int test_parser_dialect_pragma(void) {
         return 1;
     }
     me_dsl_program_free(program);
-
-    const char *src_element =
-        "# me:dialect=element\n"
-        "def kernel(x):\n"
-        "    return x\n";
-    program = me_dsl_parse(src_element, &error);
-    if (program) {
-        printf("  FAILED: me:dialect pragma should be rejected\n");
-        me_dsl_program_free(program);
-        return 1;
-    }
 
     const char *src_cc =
         "# me:compiler=cc\n"
@@ -308,12 +297,12 @@ static int test_parser_dialect_pragma(void) {
     me_dsl_program_free(program);
 
     const char *src_unknown =
-        "# me:dialect=unknown\n"
+        "# me:bogus=unknown\n"
         "def kernel(x):\n"
         "    return x\n";
     program = me_dsl_parse(src_unknown, &error);
     if (program) {
-        printf("  FAILED: unknown dialect pragma should fail parse\n");
+        printf("  FAILED: unknown me pragma should fail parse\n");
         me_dsl_program_free(program);
         return 1;
     }
@@ -418,7 +407,7 @@ int main(void) {
     fail |= test_ir_accepts_supported_subset();
     fail |= test_ir_rejects_unsupported_statements();
     fail |= test_ir_fingerprint_is_deterministic();
-    fail |= test_parser_dialect_pragma();
+    fail |= test_parser_pragmas();
     fail |= test_ir_fingerprint_includes_fp_mode();
     return fail;
 }

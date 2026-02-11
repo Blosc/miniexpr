@@ -23,13 +23,13 @@ This created a discussion point: if we enable per-element control flow in JIT on
 Dialect is declared at top of DSL source:
 
 ```python
-# me:dialect=vector
+# legacy dialect pragma (removed)
 def kernel(cr, ci):
     ...
 ```
 
 ```python
-# me:dialect=element
+# legacy dialect pragma (removed)
 def kernel(cr, ci):
     ...
 ```
@@ -61,7 +61,7 @@ This dialect directly addresses Mandelbrot escape behavior:
 ## Implementation Steps
 
 1. Parser/metadata:
-   1. Parse `# me:dialect=...` pragma from DSL source.
+   1. Parse legacy dialect pragma comments from DSL source.
    2. Store dialect in compiled DSL program metadata.
    3. Emit clear error on unknown dialect value.
 2. Compilation policy:

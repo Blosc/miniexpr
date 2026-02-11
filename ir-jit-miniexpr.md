@@ -43,19 +43,15 @@ Implemented:
     added Mandelbrot-style DSL benchmark for JIT cold/warm vs interpreter, plus optional numba baseline script.
 14. Runtime compile-flag tuning hook:
     `ME_DSL_JIT_CFLAGS` is included in runtime compile command and cache metadata fingerprinting.
-15. Dialect pragma support:
-    `# me:dialect=vector|element` parsed and stored in DSL/JIT metadata (`vector` default).
-16. Dialect-aware compilation policy:
-    `vector` keeps uniform loop-condition checks; `element` allows per-item loop conditions.
-17. Element interpreter semantics:
+15. Unified control-flow semantics:
     per-item loop control (`if`/`elif`/`else`, `break`, `continue`) implemented with active masks.
-18. JIT/interpreter parity coverage:
-    element-dialect parity tests added for representative loop-control kernels.
-19. Dialect-aware cache identity:
-    JIT IR fingerprint and runtime cache metadata include dialect; cache-key differentiation tested.
-20. Dialect diagnostics and rollout controls:
-    `ME_DSL_TRACE=1` includes dialect-aware compile/JIT reasons; `ME_DSL_ELEMENT=0` disables element dialect.
-21. Constrained FP pragma support:
+16. JIT/interpreter parity coverage:
+    parity tests added for representative loop-control kernels.
+17. Cache identity includes current DSL metadata:
+    runtime cache keys/fingerprints track semantic-affecting configuration.
+18. Diagnostics and rollout controls:
+    `ME_DSL_TRACE=1` includes compile/JIT reasons.
+19. Constrained FP pragma support:
     `# me:fp=strict|contract|fast` parsed and stored in DSL/JIT metadata; runtime JIT applies
     mode-specific compiler flags and integrates FP mode into cache identity.
 

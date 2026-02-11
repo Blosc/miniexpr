@@ -648,11 +648,11 @@ cleanup:
     return rc;
 }
 
-static int test_dialect_pragma_is_rejected(void) {
-    printf("\n=== DSL JIT Runtime Cache Test 6: dialect pragma rejected ===\n");
+static int test_unknown_me_pragma_is_rejected(void) {
+    printf("\n=== DSL JIT Runtime Cache Test 6: unknown me pragma rejected ===\n");
 
     int rc = 1;
-    char tmp_template[] = "/tmp/me_jit_dialect_cache_XXXXXX";
+    char tmp_template[] = "/tmp/me_jit_unknown_pragma_cache_XXXXXX";
     char *tmp_root = mkdtemp(tmp_template);
     char cache_dir[1024];
     cache_dir[0] = '\0';
@@ -664,9 +664,9 @@ static int test_dialect_pragma_is_rejected(void) {
         "def kernel(x):\n"
         "    y = x + 23\n"
         "    return y\n";
-    const char *src_dialect =
+    const char *src_unknown_pragma =
         "# me:compiler=cc\n"
-        "# me:dialect=element\n"
+        "# me:bogus=element\n"
         "def kernel(x):\n"
         "    y = x + 23\n"
         "    return y\n";
@@ -699,15 +699,15 @@ static int test_dialect_pragma_is_rejected(void) {
     me_variable vars[] = {{"x", ME_FLOAT64}};
     int err = 0;
     me_expr *expr = NULL;
-    if (me_compile(src_dialect, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
-        printf("  FAILED: me:dialect pragma should be rejected\n");
+    if (me_compile(src_unknown_pragma, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+        printf("  FAILED: unknown me pragma should be rejected\n");
         me_free(expr);
         goto cleanup;
     }
 
     int n_meta = count_kernel_files_with_suffix(cache_dir, ".meta", NULL, 0);
     if (n_meta != 1) {
-        printf("  FAILED: rejected me:dialect pragma should not create a second cache entry (meta=%d)\n",
+        printf("  FAILED: rejected unknown me pragma should not create a second cache entry (meta=%d)\n",
                n_meta);
         goto cleanup;
     }
@@ -910,8 +910,103 @@ cleanup:
     return rc;
 }
 
+static int test_missing_return_skips_runtime_jit(void) {
+    printf("\n=== DSL JIT Runtime Cache Test 9: missing return skips runtime JIT ===\n");
+
+    int rc = 1;
+    char tmp_template[] = "/tmp/me_jit_missing_return_XXXXXX";
+    char *tmp_root = mkdtemp(tmp_template);
+    char cache_dir[1024];
+    cache_dir[0] = '\0';
+    char *saved_tmpdir = dup_env_value("TMPDIR");
+    char *saved_cc = dup_env_value("CC");
+    char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+    const char *src =
+        "# me:compiler=cc\n"
+        "def kernel(x):\n"
+        "    if any(x > 0):\n"
+        "        return 1\n";
+
+    if (!tmp_root) {
+        printf("  FAILED: mkdtemp failed\n");
+        goto cleanup;
+    }
+    if (snprintf(cache_dir, sizeof(cache_dir), "%s/miniexpr-jit", tmp_root) >= (int)sizeof(cache_dir)) {
+        printf("  FAILED: cache path too long\n");
+        goto cleanup;
+    }
+    if (setenv("TMPDIR", tmp_root, 1) != 0) {
+        printf("  FAILED: setenv TMPDIR failed\n");
+        goto cleanup;
+    }
+    if (setenv("CC", "cc", 1) != 0) {
+        printf("  FAILED: setenv CC failed\n");
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT_POS_CACHE", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT_POS_CACHE failed\n");
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT=1 failed\n");
+        goto cleanup;
+    }
+
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    double in[4] = {-1.0, -2.0, -3.0, -4.0};
+    double out[4] = {0.0, 0.0, 0.0, 0.0};
+    const void *inputs[] = {in};
+    int err = 0;
+    me_expr *expr = NULL;
+    if (me_compile(src, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+        printf("  FAILED: compile error at %d\n", err);
+        me_free(expr);
+        goto cleanup;
+    }
+
+    int eval_rc = me_eval(expr, inputs, 1, out, 4, NULL);
+    me_free(expr);
+    if (eval_rc != ME_EVAL_ERR_INVALID_ARG) {
+        printf("  FAILED: expected runtime missing-return error, got %d\n", eval_rc);
+        goto cleanup;
+    }
+
+    int n_files = 0;
+    n_files += count_kernel_files_with_suffix(cache_dir, ".c", NULL, 0);
+    n_files += count_kernel_files_with_suffix(cache_dir, ".so", NULL, 0);
+    n_files += count_kernel_files_with_suffix(cache_dir, ".dylib", NULL, 0);
+    n_files += count_kernel_files_with_suffix(cache_dir, ".meta", NULL, 0);
+    if (n_files != 0) {
+        printf("  FAILED: missing-return kernel should not emit runtime JIT artifacts (count=%d)\n",
+               n_files);
+        goto cleanup;
+    }
+
+    rc = 0;
+    printf("  PASSED\n");
+
+cleanup:
+    restore_env_value("TMPDIR", saved_tmpdir);
+    restore_env_value("CC", saved_cc);
+    restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    free(saved_tmpdir);
+    free(saved_cc);
+    free(saved_pos_cache);
+    free(saved_jit);
+    if (cache_dir[0] != '\0') {
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+    }
+    if (tmp_root) {
+        (void)rmdir(tmp_root);
+    }
+    return rc;
+}
+
 static int test_cc_backend_bridge_path(void) {
-    printf("\n=== DSL JIT Runtime Cache Test 9: cc backend bridge path ===\n");
+    printf("\n=== DSL JIT Runtime Cache Test 10: cc backend bridge path ===\n");
 
     int rc = 1;
     char tmp_template[] = "/tmp/me_jit_cc_bridge_XXXXXX";
@@ -1014,9 +1109,10 @@ int main(void) {
     fail |= test_rejects_metadata_mismatch_artifact();
     fail |= test_jit_disable_env_guardrail();
     fail |= test_default_libtcc_skips_cc_backend();
-    fail |= test_dialect_pragma_is_rejected();
+    fail |= test_unknown_me_pragma_is_rejected();
     fail |= test_cache_key_differentiates_fp_mode();
     fail |= test_element_interpreter_jit_parity();
+    fail |= test_missing_return_skips_runtime_jit();
     fail |= test_cc_backend_bridge_path();
     return fail;
 #endif

@@ -149,7 +149,7 @@ Element-dialect DSL JIT baseline for representative math kernels:
   - max-abs numerical diff (JIT warm vs interpreter)
 
 Notes:
-- Uses `# me:fp=strict` and `# me:dialect=element`.
+- Uses `# me:fp=strict` under unified DSL semantics.
 - Uses `# me:compiler=libtcc` by default (when `ME_BENCH_COMPILER` is unset).
 - Set `ME_BENCH_COMPILER=cc` to benchmark the `cc` backend explicitly.
 

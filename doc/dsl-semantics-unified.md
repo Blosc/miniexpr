@@ -79,7 +79,8 @@ Goal: remove vector/element dialect split and define one behavior model
 
 ## Compile-Time Rules
 
-1. Dialect pragma is accepted for now but ignored semantically.
+1. Only `me:fp` and `me:compiler` pragmas are supported in DSL headers.
+   Any other `me:*` pragma is rejected at parse time.
 2. Control-flow conditions no longer require explicit `any()`/`all()`.
 3. `range()` with start/stop/step is still unsupported unless separately implemented.
 4. New locals inside conditional branches remain disallowed unless separately relaxed.
