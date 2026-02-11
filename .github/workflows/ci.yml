@@ -41,9 +41,9 @@ jobs:
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
         fi
         if [ "$RUNNER_OS" == "Windows" ]; then
-          cmake --build build --config Release
+          cmake --build build --config Release --parallel
         else
-          cmake --build build
+          cmake --build build --parallel
         fi
     
     - name: Build and run tests
