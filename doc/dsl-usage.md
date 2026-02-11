@@ -88,6 +88,7 @@ Supported values:
 
 Notes:
 - This pragma is independent from `# me:fp=...`.
+- With `# me:compiler=cc`, runtime uses `CC` (default: `cc`) to select the compiler executable.
 - If the selected backend is unavailable at runtime, miniexpr falls back to interpreter execution.
 
 ### Temporary Variables

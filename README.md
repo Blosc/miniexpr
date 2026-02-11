@@ -283,6 +283,7 @@ Backend selection is done in DSL source via pragma:
 
 - `# me:compiler=tcc` (default when omitted)
 - `# me:compiler=cc`
+- For `# me:compiler=cc`, runtime uses `CC` (default: `cc`) as the compiler executable.
 
 Operational `libtcc` runtime location/options remain configurable:
 
