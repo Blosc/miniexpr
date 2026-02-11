@@ -3921,6 +3921,8 @@ static bool dsl_jit_c_compiler_available(void) {
     return dsl_jit_command_exists(cc);
 }
 
+#endif
+
 #if ME_USE_LIBTCC_FALLBACK
 typedef struct TCCState me_tcc_state;
 
@@ -5112,6 +5114,7 @@ static bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
 }
 #endif
 
+#if !defined(_WIN32) && !defined(_WIN64)
 static bool dsl_jit_cc_math_bridge_available(void) {
 #if defined(_WIN32) || defined(_WIN64)
     return false;

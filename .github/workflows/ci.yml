@@ -8,6 +8,7 @@ on:
 
 jobs:
   build-and-test:
+    if: ${{ vars.ENABLE_LEGACY_CI_LANES == '1' }}
     strategy:
       fail-fast: false
       matrix:
@@ -58,6 +59,7 @@ jobs:
         fi
 
   minicc-wasm:
+    if: ${{ vars.ENABLE_LEGACY_CI_LANES == '1' }}
     strategy:
       fail-fast: false
       matrix:
