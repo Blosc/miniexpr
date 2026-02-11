@@ -288,16 +288,16 @@ Backend selection is done in DSL source via pragma:
 Operational `libtcc` runtime location/options remain configurable:
 
 - `ME_DSL_JIT_LIBTCC_PATH=/path/to/libtcc.{so,dylib}`: Override runtime library path used for `libtcc` loading.
-- `ME_DSL_JIT_TCC_LIB_PATH=/path/to/tcc/libdir`: Override `tcc_set_lib_path()` directory (where `libtcc1.a` is searched).
+- `ME_DSL_JIT_TCC_LIB_PATH=/path/to/tcc/libdir`: Override `tcc_set_lib_path()` directory (mainly for custom/legacy `libtcc` layouts).
 - `ME_DSL_JIT_TCC_OPTIONS="..."`: Extra options passed to `tcc_set_options()`.
 
 Build-time note:
 
 - On Linux/macOS, libtcc support is built by default and required for DSL JIT's default
   `# me:compiler=tcc` mode.
-- CMake uses local TinyCC sources at `../tinycc` and builds `libtcc` as a separate shared library.
-  `libtcc` and `libtcc1.a` are staged in the same directory as `libminiexpr`, and miniexpr
-  embeds that staged `libtcc` path as a default runtime lookup candidate.
+- CMake uses local MiniCC sources at `../minicc` and builds `libtcc` as a separate shared library.
+  `libtcc` is staged in the same directory as `libminiexpr`, and miniexpr embeds that staged
+  `libtcc` path as a default runtime lookup candidate.
 
 ## Contributing
 
