@@ -122,9 +122,9 @@ static const char *current_jit_backend_label(void) {
     if (force && force[0] != '\0' && strcmp(force, "0") != 0) {
         const char *bridge = getenv("ME_DSL_JIT_USE_SLEEF_BRIDGE");
         if (bridge && bridge[0] != '\0' && strcmp(bridge, "0") != 0) {
-            return "libtcc-forced+bridge";
+            return "tcc-forced+bridge";
         }
-        return "libtcc-forced";
+        return "tcc-forced";
     }
     return "cc-default";
 }
@@ -137,9 +137,17 @@ static bool build_dsl_source(char *out, size_t out_size, const char *expr) {
     bool use_compiler_pragma = false;
     const char *compiler_value = NULL;
     if (compiler && compiler[0] != '\0') {
-        if (strcmp(compiler, "libtcc") == 0 || strcmp(compiler, "cc") == 0) {
+        if (strcmp(compiler, "tcc") == 0) {
             use_compiler_pragma = true;
-            compiler_value = compiler;
+            compiler_value = "tcc";
+        }
+        else if (strcmp(compiler, "cc") == 0) {
+            use_compiler_pragma = true;
+            compiler_value = "cc";
+        }
+        else {
+            fprintf(stderr, "invalid ME_BENCH_COMPILER=%s (expected tcc or cc)\n", compiler);
+            return false;
         }
     }
     int n = 0;

@@ -577,11 +577,11 @@ cleanup:
     return rc;
 }
 
-static int test_default_libtcc_skips_cc_backend(void) {
-    printf("\n=== DSL JIT Runtime Cache Test 5: default libtcc backend ===\n");
+static int test_default_tcc_skips_cc_backend(void) {
+    printf("\n=== DSL JIT Runtime Cache Test 5: default tcc backend ===\n");
 
     int rc = 1;
-    char tmp_template[] = "/tmp/me_jit_force_libtcc_XXXXXX";
+    char tmp_template[] = "/tmp/me_jit_force_tcc_XXXXXX";
     char *tmp_root = mkdtemp(tmp_template);
     char cache_dir[1024];
     cache_dir[0] = '\0';
@@ -624,7 +624,7 @@ static int test_default_libtcc_skips_cc_backend(void) {
     n_files += count_kernel_files_with_suffix(cache_dir, ".dylib", NULL, 0);
     n_files += count_kernel_files_with_suffix(cache_dir, ".meta", NULL, 0);
     if (n_files != 0) {
-        printf("  FAILED: default libtcc path unexpectedly used cc-backed cache path\n");
+        printf("  FAILED: default tcc path unexpectedly used cc-backed cache path\n");
         goto cleanup;
     }
 
@@ -1195,7 +1195,7 @@ int main(void) {
     fail |= test_positive_cache_reuses_loaded_kernel();
     fail |= test_rejects_metadata_mismatch_artifact();
     fail |= test_jit_disable_env_guardrail();
-    fail |= test_default_libtcc_skips_cc_backend();
+    fail |= test_default_tcc_skips_cc_backend();
     fail |= test_unknown_me_pragma_is_rejected();
     fail |= test_cache_key_differentiates_fp_mode();
     fail |= test_element_interpreter_jit_parity();

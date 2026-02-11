@@ -165,7 +165,7 @@ static bool valid_compiler_mode(const char *compiler_mode) {
         return true;
     }
     return strcmp(compiler_mode, "cc") == 0 ||
-           strcmp(compiler_mode, "libtcc") == 0;
+           strcmp(compiler_mode, "tcc") == 0;
 }
 
 static bool build_dsl_source(char *out, size_t out_size, int max_iter,
@@ -452,16 +452,16 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    kernel_result element_libtcc_res;
+    kernel_result element_tcc_res;
     kernel_result element_cc_strict_res;
     kernel_result element_cc_fast_res;
     bench_result interpreted_baseline;
-    char element_libtcc_source[1024];
+    char element_tcc_source[1024];
     char element_cc_strict_source[1024];
     char element_cc_fast_source[1024];
 
-    if (!build_dsl_source(element_libtcc_source, sizeof(element_libtcc_source),
-                          max_iter, fp_mode, NULL) ||
+    if (!build_dsl_source(element_tcc_source, sizeof(element_tcc_source),
+                          max_iter, fp_mode, "tcc") ||
         !build_dsl_source(element_cc_strict_source, sizeof(element_cc_strict_source),
                           max_iter, "strict", "cc") ||
         !build_dsl_source(element_cc_fast_source, sizeof(element_cc_fast_source),
@@ -482,7 +482,7 @@ int main(int argc, char **argv) {
     printf("%-10s %-18s %12s %14s %12s %12s %14s\n",
            "compiler", "mode", "compile_ms", "eval_ms_best", "ns_per_elem", "checksum", "speedup");
 
-    if (run_mode("interpreted DSL", "0", element_libtcc_source,
+    if (run_mode("interpreted DSL", "0", element_tcc_source,
                  cr, ci, nitems, 1, &interpreted_baseline, NULL) != 0) {
         restore_env_value("TMPDIR", saved_tmpdir);
         free(saved_tmpdir);
@@ -495,9 +495,9 @@ int main(int argc, char **argv) {
     }
     print_mode_result_line("n/a", "interpreted DSL", &interpreted_baseline, "baseline");
 
-    if (run_kernel("libtcc", element_libtcc_source,
+    if (run_kernel("tcc", element_tcc_source,
                    cr, ci, nitems, repeats,
-                   interpreted_baseline.ns_per_elem_best, &element_libtcc_res) != 0) {
+                   interpreted_baseline.ns_per_elem_best, &element_tcc_res) != 0) {
         restore_env_value("TMPDIR", saved_tmpdir);
         free(saved_tmpdir);
         free(cr);

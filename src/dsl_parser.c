@@ -324,7 +324,7 @@ static bool dsl_parse_compiler_pragma_line(const char *start, const char *end,
         return false;
     }
     size_t value_len = (size_t)(value_end - value_start);
-    if (value_len == 6 && strncmp(value_start, "libtcc", value_len) == 0) {
+    if (value_len == 3 && strncmp(value_start, "tcc", value_len) == 0) {
         *compiler_out = ME_DSL_COMPILER_LIBTCC;
         return true;
     }
@@ -333,7 +333,7 @@ static bool dsl_parse_compiler_pragma_line(const char *start, const char *end,
         return true;
     }
     dsl_set_error(error, line, (int)(value_start - start) + 1,
-                  "unknown me:compiler value (expected 'libtcc' or 'cc')");
+                  "unknown me:compiler value (expected 'tcc' or 'cc')");
     return false;
 }
 

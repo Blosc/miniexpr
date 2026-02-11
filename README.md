@@ -281,7 +281,7 @@ On Linux/macOS, DSL kernels may use runtime JIT compilation when eligible. The f
 
 Backend selection is done in DSL source via pragma:
 
-- `# me:compiler=libtcc` (default when omitted)
+- `# me:compiler=tcc` (default when omitted)
 - `# me:compiler=cc`
 
 Operational `libtcc` runtime location/options remain configurable:
@@ -293,7 +293,7 @@ Operational `libtcc` runtime location/options remain configurable:
 Build-time note:
 
 - On Linux/macOS, libtcc support is built by default and required for DSL JIT's default
-  `# me:compiler=libtcc` mode.
+  `# me:compiler=tcc` mode.
 - CMake uses local TinyCC sources at `../tinycc` and builds `libtcc` as a separate shared library.
   `libtcc` and `libtcc1.a` are staged in the same directory as `libminiexpr`, and miniexpr
   embeds that staged `libtcc` path as a default runtime lookup candidate.

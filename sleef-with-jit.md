@@ -13,7 +13,7 @@ lowering and runtime integration work. The key reasons are:
   `me_jit_vec_*`) rather than SLEEF internals directly.
 - Backends differ:
   - `cc` shared-object JIT can resolve linked symbols at load/link time.
-  - `libtcc` in-memory JIT requires explicit symbol registration
+  - `tcc` in-memory JIT requires explicit symbol registration
     (`tcc_add_symbol`).
 - Only some IR patterns are safe and profitable for vector lowering; guarded
   pattern detection and scalar fallback are required to preserve semantics.
@@ -46,7 +46,7 @@ Evaluate and stage support for using the same SLEEF-backed math path from DSL JI
 
 1. Add benchmark/test baselines for representative math kernels (`sin`, `exp`, `log`, `pow`, `hypot`, `atan2`, `sinpi`, `cospi`).
 2. Record per-backend metrics:
-   - compile latency (`cc`, `libtcc`)
+   - compile latency (`cc`, `tcc`)
    - warm runtime throughput
    - numerical diffs vs interpreter
 3. Add a feature flag placeholder: `ME_DSL_JIT_USE_SLEEF_BRIDGE` (default off).
@@ -61,7 +61,7 @@ Acceptance:
    - vector bridge entrypoints mapped to existing `vec_*_dispatch`.
 2. Extend JIT backends to resolve host symbols:
    - `cc` backend: link generated shared object against `libminiexpr`.
-   - `libtcc` backend: register symbols with `tcc_add_symbol`.
+   - `tcc` backend: register symbols with `tcc_add_symbol`.
 3. Keep current scalar codegen unchanged; only symbol resolution improves.
 
 Acceptance:
@@ -112,7 +112,7 @@ Acceptance:
    - JIT acceptance/rejection paths by dialect/pattern
 2. Integration:
    - DSL kernels using math aliases and two-arg functions
-   - forced `libtcc` and default `cc` backends
+   - forced `tcc` and default `cc` backends
 3. Performance:
    - compile latency and warm runtime benchmarks across representative kernels
 4. Numerical:
@@ -121,7 +121,7 @@ Acceptance:
 ## Risk Register
 
 1. ABI/symbol visibility issues between generated kernels and `libminiexpr`.
-2. Backend divergence (`cc` vs `libtcc`) causing inconsistent behavior.
+2. Backend divergence (`cc` vs `tcc`) causing inconsistent behavior.
 3. Overly broad vector lowering may introduce silent numeric drift.
 4. Packaging/runtime loader differences across environments.
 
@@ -137,18 +137,18 @@ Acceptance:
 
 | Milestone | Status | Scope Delivered | Validation |
 |---|---|---|---|
-| Phase 0 baseline harness | Done | Added `bench/benchmark_dsl_jit_math_kernels.c` (`sin`, `exp`, `log`, `pow`, `hypot`, `atan2`, `sinpi`, `cospi`) with compile/warm/diff reporting and docs in `bench/README.md`. | Build + targeted tests pass; benchmark runnable in `cc`, forced `libtcc`, and bridge modes. |
-| Phase 1 parity bridge | Done | Alias rewrites (`arctan2`, `exp10`, `sinpi`, `cospi`, `logaddexp`, `where`), bridge declarations/definitions, runtime bridge env gate, libtcc symbol registration, backend-tag cache separation. | `test_dsl_jit_codegen`, `test_dsl_jit_runtime_cache` pass; forced bridge runtime is stable. |
-| Bridge runtime crash fix | Done | Fixed forced `libtcc + bridge` crash by registering bridge symbols after `tcc_set_output_type`; added specific `tcc_add_symbol` error messages. | Reproduced crash, patched, validated via benchmarks and tests. |
+| Phase 0 baseline harness | Done | Added `bench/benchmark_dsl_jit_math_kernels.c` (`sin`, `exp`, `log`, `pow`, `hypot`, `atan2`, `sinpi`, `cospi`) with compile/warm/diff reporting and docs in `bench/README.md`. | Build + targeted tests pass; benchmark runnable in `cc`, forced `tcc`, and bridge modes. |
+| Phase 1 parity bridge | Done | Alias rewrites (`arctan2`, `exp10`, `sinpi`, `cospi`, `logaddexp`, `where`), bridge declarations/definitions, runtime bridge env gate, tcc symbol registration, backend-tag cache separation. | `test_dsl_jit_codegen`, `test_dsl_jit_runtime_cache` pass; forced bridge runtime is stable. |
+| Bridge runtime crash fix | Done | Fixed forced `tcc + bridge` crash by registering bridge symbols after `tcc_set_output_type`; added specific `tcc_add_symbol` error messages. | Reproduced crash, patched, validated via benchmarks and tests. |
 | Phase 2 narrow lowering | Done | Selective lowering for simple element map unary kernels (`sinpi`, `cospi`, `exp10`) to bulk `me_jit_vec_*` calls. | Performance improved on matched kernels; tests updated. |
 | Phase 2 expansion | Done | Added unary lowering for `sin`, `cos`, `exp`, `log` and binary lowering for `atan2`, `hypot`; added bridge exports for f64/f32 unary+binary vector entrypoints. | Codegen tests for unary+binary lowering pass; benchmark shows strong wins on most matched kernels. |
-| Phase 2 binary `pow` lowering | Done | Added selective binary lowering for `pow(x, y)` and safe broadcast forms (`pow(x, c)`, `pow(c, x)`) to bulk `me_jit_vec_pow_*` bridge calls; registered `libtcc` bridge symbols for f64/f32. | `test_dsl_jit_codegen` coverage includes map + broadcast `pow` lowering marker checks. |
+| Phase 2 binary `pow` lowering | Done | Added selective binary lowering for `pow(x, y)` and safe broadcast forms (`pow(x, c)`, `pow(c, x)`) to bulk `me_jit_vec_pow_*` bridge calls; registered tcc bridge symbols for f64/f32. | `test_dsl_jit_codegen` coverage includes map + broadcast `pow` lowering marker checks. |
 | cc backend bridge-link path | Partial | Exposed real `me_jit_*` bridge symbols for `cc` runtime path and enabled bridge codegen when `ME_DSL_JIT_USE_SLEEF_BRIDGE=1` and symbols are dynamically visible; added cc-path runtime test with scalar fallback verification when bridge symbols are unavailable. | `test_dsl_jit_runtime_cache` includes cc bridge-path coverage; current local test binary falls back to scalar (no dynamic bridge symbols exported). |
 | Unary affine lowering | Done | Added matcher/emitter support for `f(x + c)`, `f(x - c)`, `f(c + x)` using prepass + bulk vector call; added codegen test for `log(x + 1.5)`. | Tests pass; `log` improved vs non-bridge JIT but remains slower than interpreter in current benchmark. |
 
 ### Latest Metrics Snapshot (`nitems=262144`, `repeats=6`)
 
-| Kernel | forced `libtcc` ns/elem | forced `libtcc + bridge` ns/elem | Notes |
+| Kernel | forced `tcc` ns/elem | forced `tcc + bridge` ns/elem | Notes |
 |---|---:|---:|---|
 | `sin` | ~7.77 | ~2.18 | improved |
 | `exp` | ~5.83 | ~1.61 | improved |

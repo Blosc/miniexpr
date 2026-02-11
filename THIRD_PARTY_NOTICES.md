@@ -18,7 +18,7 @@ This project includes or depends on third-party components with separate license
 
 ### TinyCC / libtcc
 
-- Component: DSL JIT in-memory compiler backend (`libtcc`)
+- Component: DSL JIT in-memory compiler backend (`tcc`, powered by `libtcc`)
 - Upstream: https://repo.or.cz/tinycc.git
 - License: GNU LGPL v2.1 or later
 - Local license file: `LICENSE-LIBTCC`

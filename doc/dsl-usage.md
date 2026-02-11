@@ -71,7 +71,7 @@ Notes:
 For JIT-eligible kernels, you can choose which runtime JIT compiler backend to use:
 
 ```
-# me:compiler=libtcc
+# me:compiler=tcc
 def kernel(x):
     ...
 ```
@@ -83,7 +83,7 @@ def kernel(x):
 ```
 
 Supported values:
-- `libtcc` (default when omitted): in-memory JIT path.
+- `tcc` (default when omitted): in-memory JIT path.
 - `cc`: shared-object compile/load path.
 
 Notes:

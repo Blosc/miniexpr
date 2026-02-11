@@ -2498,7 +2498,7 @@ static const char *dsl_fp_mode_name(me_dsl_fp_mode fp_mode) {
 static const char *dsl_compiler_name(me_dsl_compiler compiler) {
     switch (compiler) {
     case ME_DSL_COMPILER_LIBTCC:
-        return "libtcc";
+        return "tcc";
     case ME_DSL_COMPILER_CC:
         return "cc";
     default:
@@ -3663,7 +3663,7 @@ static uint64_t dsl_jit_toolchain_hash(const me_dsl_compiled_program *program) {
     if (program->compiler == ME_DSL_COMPILER_LIBTCC) {
         const char *tcc_opts = getenv("ME_DSL_JIT_TCC_OPTIONS");
         const char *tcc_lib_path = getenv("ME_DSL_JIT_TCC_LIB_PATH");
-        uint64_t h = dsl_jit_hash_cstr(1469598103934665603ULL, "libtcc");
+        uint64_t h = dsl_jit_hash_cstr(1469598103934665603ULL, "tcc");
         h = dsl_jit_hash_cstr(h, tcc_opts ? tcc_opts : "");
         return dsl_jit_hash_cstr(h, tcc_lib_path ? tcc_lib_path : "");
     }
@@ -3956,7 +3956,7 @@ static const char *dsl_jit_libtcc_error_message(void) {
     if (g_dsl_tcc_api.error[0]) {
         return g_dsl_tcc_api.error;
     }
-    return "libtcc fallback unavailable";
+    return "tcc backend unavailable";
 }
 
 static bool dsl_jit_path_dirname(const char *path, char *out, size_t out_size) {
@@ -4533,7 +4533,7 @@ static bool dsl_jit_libtcc_register_math_bridge(me_tcc_state *state) {
     }
     if (!g_dsl_tcc_api.tcc_add_symbol_fn) {
         snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "libtcc missing required symbol tcc_add_symbol for math bridge");
+                 "tcc backend missing required symbol tcc_add_symbol for math bridge");
         return false;
     }
     if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_exp10", (const void *)&dsl_jit_bridge_exp10) < 0) {
@@ -4931,7 +4931,7 @@ static bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
     }
     if (program->fp_mode != ME_DSL_FP_STRICT) {
         snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "libtcc fallback supports only strict fp mode");
+                 "tcc backend supports only strict fp mode");
         return false;
     }
     if (!dsl_jit_libtcc_load_api()) {
@@ -5004,7 +5004,7 @@ static bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
 }
 #else
 static const char *dsl_jit_libtcc_error_message(void) {
-    return "libtcc fallback not built";
+    return "tcc backend not built";
 }
 
 static void dsl_jit_libtcc_delete_state(void *state) {
@@ -5263,7 +5263,7 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         }
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
-                 "jit runtime libtcc compilation failed");
+                 "jit runtime tcc compilation failed");
         dsl_tracef("jit runtime skip: dialect=%s fp=%s compiler=%s reason=%s detail=%s",
                    dsl_dialect_name(program->dialect),
                    dsl_fp_mode_name(program->fp_mode),

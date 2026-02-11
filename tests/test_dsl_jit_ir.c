@@ -296,11 +296,38 @@ static int test_parser_pragmas(void) {
         return 1;
     }
     if (program->compiler != ME_DSL_COMPILER_LIBTCC) {
-        printf("  FAILED: default compiler should be libtcc\n");
+        printf("  FAILED: default compiler should be tcc\n");
         me_dsl_program_free(program);
         return 1;
     }
     me_dsl_program_free(program);
+
+    const char *src_tcc =
+        "# me:compiler=tcc\n"
+        "def kernel(x):\n"
+        "    return x\n";
+    program = me_dsl_parse(src_tcc, &error);
+    if (!program) {
+        printf("  FAILED: parse error for tcc compiler source\n");
+        return 1;
+    }
+    if (program->compiler != ME_DSL_COMPILER_LIBTCC) {
+        printf("  FAILED: tcc compiler pragma not detected\n");
+        me_dsl_program_free(program);
+        return 1;
+    }
+    me_dsl_program_free(program);
+
+    const char *src_legacy_libtcc =
+        "# me:compiler=libtcc\n"
+        "def kernel(x):\n"
+        "    return x\n";
+    program = me_dsl_parse(src_legacy_libtcc, &error);
+    if (program) {
+        printf("  FAILED: legacy libtcc compiler pragma should be rejected\n");
+        me_dsl_program_free(program);
+        return 1;
+    }
 
     const char *src_cc =
         "# me:compiler=cc\n"
