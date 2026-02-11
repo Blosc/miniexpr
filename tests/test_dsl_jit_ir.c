@@ -91,6 +91,44 @@ static int test_ir_accepts_supported_subset(void) {
     return 0;
 }
 
+static int test_ir_accepts_range_start_stop_step(void) {
+    printf("\n=== JIT IR Test 1b: range(start, stop, step) ===\n");
+
+    const char *src =
+        "def kernel(x):\n"
+        "    acc = 0.0\n"
+        "    for i in range(1, 8, 2):\n"
+        "        acc = acc + x + i\n"
+        "    return acc\n";
+
+    me_dsl_error parse_error;
+    me_dsl_program *program = me_dsl_parse(src, &parse_error);
+    if (!program) {
+        printf("  FAILED: parse error at %d:%d (%s)\n",
+               parse_error.line, parse_error.column, parse_error.message);
+        return 1;
+    }
+
+    const char *param_names[] = {"x"};
+    me_dtype param_dtypes[] = {ME_FLOAT64};
+    me_dsl_error build_error;
+    me_dsl_jit_ir_program *ir = NULL;
+
+    bool ok = me_dsl_jit_ir_build(program, param_names, param_dtypes, 1,
+                                  mock_resolve_dtype, NULL, &ir, &build_error);
+    me_dsl_program_free(program);
+    if (!ok || !ir) {
+        printf("  FAILED: jit ir build rejected range(start, stop, step) at %d:%d (%s)\n",
+               build_error.line, build_error.column, build_error.message);
+        me_dsl_jit_ir_free(ir);
+        return 1;
+    }
+
+    me_dsl_jit_ir_free(ir);
+    printf("  PASSED\n");
+    return 0;
+}
+
 static int test_ir_rejects_unsupported_statements(void) {
     printf("\n=== JIT IR Test 2: unsupported statements ===\n");
 
@@ -405,6 +443,7 @@ static int test_ir_fingerprint_includes_fp_mode(void) {
 int main(void) {
     int fail = 0;
     fail |= test_ir_accepts_supported_subset();
+    fail |= test_ir_accepts_range_start_stop_step();
     fail |= test_ir_rejects_unsupported_statements();
     fail |= test_ir_fingerprint_is_deterministic();
     fail |= test_parser_pragmas();

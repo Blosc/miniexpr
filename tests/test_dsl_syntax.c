@@ -176,6 +176,154 @@ static int test_loop_break_continue(void) {
     return rc;
 }
 
+static int test_range_start_stop_step(void) {
+    printf("\n=== DSL Test 2b: range() start/stop/step forms ===\n");
+
+    const char *src_start_stop =
+        "def kernel():\n"
+        "    acc = 0\n"
+        "    for i in range(2, 6):\n"
+        "        acc = acc + i\n"
+        "    return acc\n";
+    const char *src_step =
+        "def kernel():\n"
+        "    acc = 0\n"
+        "    for i in range(1, 8, 3):\n"
+        "        acc = acc + i\n"
+        "    return acc\n";
+    const char *src_neg_step =
+        "def kernel():\n"
+        "    acc = 0\n"
+        "    for i in range(5, -2, -2):\n"
+        "        acc = acc + i\n"
+        "    return acc\n";
+    const char *src_zero_step =
+        "def kernel():\n"
+        "    for i in range(0, 5, 0):\n"
+        "        return i\n"
+        "    return 0\n";
+    const char *src_parity =
+        "def kernel(x):\n"
+        "    acc = 0\n"
+        "    for i in range(1, 8, 3):\n"
+        "        if x > i:\n"
+        "            acc = acc + i\n"
+        "    return acc\n";
+
+    int err = 0;
+    me_expr *expr = NULL;
+    double out[4] = {0.0, 0.0, 0.0, 0.0};
+
+    if (me_compile(src_start_stop, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: range(start, stop) compile error at %d\n", err);
+        return 1;
+    }
+    if (me_eval(expr, NULL, 0, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: range(start, stop) eval error\n");
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+    double expected_start_stop[4] = {14.0, 14.0, 14.0, 14.0};
+    if (check_all_close(out, expected_start_stop, 4, 1e-12) != 0) {
+        printf("  ❌ FAILED: range(start, stop) output mismatch\n");
+        return 1;
+    }
+
+    expr = NULL;
+    if (me_compile(src_step, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: range(start, stop, step) compile error at %d\n", err);
+        return 1;
+    }
+    if (me_eval(expr, NULL, 0, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: range(start, stop, step) eval error\n");
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+    double expected_step[4] = {12.0, 12.0, 12.0, 12.0};
+    if (check_all_close(out, expected_step, 4, 1e-12) != 0) {
+        printf("  ❌ FAILED: range(start, stop, step) output mismatch\n");
+        return 1;
+    }
+
+    expr = NULL;
+    if (me_compile(src_neg_step, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: range() negative-step compile error at %d\n", err);
+        return 1;
+    }
+    if (me_eval(expr, NULL, 0, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: range() negative-step eval error\n");
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+    double expected_neg_step[4] = {8.0, 8.0, 8.0, 8.0};
+    if (check_all_close(out, expected_neg_step, 4, 1e-12) != 0) {
+        printf("  ❌ FAILED: range() negative-step output mismatch\n");
+        return 1;
+    }
+
+    expr = NULL;
+    if (me_compile(src_zero_step, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: zero-step range compile error at %d\n", err);
+        return 1;
+    }
+    if (me_eval(expr, NULL, 0, out, 4, NULL) != ME_EVAL_ERR_INVALID_ARG) {
+        printf("  ❌ FAILED: zero-step range should fail at runtime\n");
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    double x[4] = {0.0, 2.0, 5.0, 10.0};
+    const void *inputs[] = {x};
+    double out_interp[4] = {0.0, 0.0, 0.0, 0.0};
+    double out_jit_enabled[4] = {0.0, 0.0, 0.0, 0.0};
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+
+    if (setenv("ME_DSL_JIT", "0", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=0 failed\n");
+        free(saved_jit);
+        return 1;
+    }
+    if (compile_eval_double(src_parity, vars, 1, inputs, 4, out_interp) != 0) {
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=1 failed\n");
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+    if (compile_eval_double(src_parity, vars, 1, inputs, 4, out_jit_enabled) != 0) {
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    free(saved_jit);
+
+    double expected_parity[4] = {0.0, 1.0, 5.0, 12.0};
+    if (check_all_close(out_interp, expected_parity, 4, 1e-12) != 0) {
+        printf("  ❌ FAILED: range parity unexpected interpreter output\n");
+        return 1;
+    }
+    for (int i = 0; i < 4; i++) {
+        if (out_interp[i] != out_jit_enabled[i]) {
+            printf("  ❌ FAILED: range parity mismatch at %d (interp=%.17g jit=%.17g)\n",
+                   i, out_interp[i], out_jit_enabled[i]);
+            return 1;
+        }
+    }
+
+    printf("  ✅ PASSED\n");
+    return 0;
+}
+
 static int test_invalid_conditionals(void) {
     printf("\n=== DSL Test 3: invalid conditionals ===\n");
 
@@ -1121,6 +1269,7 @@ int main(void) {
     int fail = 0;
     fail |= test_assign_and_result_stmt();
     fail |= test_loop_break_continue();
+    fail |= test_range_start_stop_step();
     fail |= test_invalid_conditionals();
     fail |= test_if_elif_else();
     fail |= test_nd_indices();

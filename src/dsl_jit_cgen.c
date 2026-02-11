@@ -1421,38 +1421,76 @@ static bool me_jit_emit_stmt(me_jit_codegen_ctx *ctx, const me_dsl_jit_ir_stmt *
         }
         return true;
     case ME_DSL_JIT_IR_STMT_FOR: {
-        char *limit_c = NULL;
-        if (!me_jit_expr_to_c(&stmt->as.for_loop.limit, &limit_c, ctx->error, stmt->line, stmt->column)) {
-            free(limit_c);
+        char *start_c = NULL;
+        char *stop_c = NULL;
+        char *step_c = NULL;
+        if (!me_jit_expr_to_c(&stmt->as.for_loop.start, &start_c, ctx->error, stmt->line, stmt->column) ||
+            !me_jit_expr_to_c(&stmt->as.for_loop.stop, &stop_c, ctx->error, stmt->line, stmt->column) ||
+            !me_jit_expr_to_c(&stmt->as.for_loop.step, &step_c, ctx->error, stmt->line, stmt->column)) {
+            free(start_c);
+            free(stop_c);
+            free(step_c);
             return false;
         }
-        size_t decl_need = strlen(stmt->as.for_loop.var) + strlen(limit_c) + 48;
-        char *decl_line = malloc(decl_need);
-        if (!decl_line) {
-            free(limit_c);
+
+        size_t start_need = strlen(start_c) + 48;
+        size_t stop_need = strlen(stop_c) + 46;
+        size_t step_need = strlen(step_c) + 46;
+        char *start_line = malloc(start_need);
+        char *stop_line = malloc(stop_need);
+        char *step_line = malloc(step_need);
+        if (!start_line || !stop_line || !step_line) {
+            free(start_c);
+            free(stop_c);
+            free(step_c);
+            free(start_line);
+            free(stop_line);
+            free(step_line);
             me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
             return false;
         }
-        snprintf(decl_line, decl_need, "int64_t __me_limit = (int64_t)(%s);", limit_c);
-        free(limit_c);
-        if (!me_jit_emit_line(&ctx->source, indent, decl_line)) {
-            free(decl_line);
+        snprintf(start_line, start_need, "int64_t __me_start = (int64_t)(%s);", start_c);
+        snprintf(stop_line, stop_need, "int64_t __me_stop = (int64_t)(%s);", stop_c);
+        snprintf(step_line, step_need, "int64_t __me_step = (int64_t)(%s);", step_c);
+        free(start_c);
+        free(stop_c);
+        free(step_c);
+
+        if (!me_jit_emit_line(&ctx->source, indent, start_line) ||
+            !me_jit_emit_line(&ctx->source, indent, stop_line) ||
+            !me_jit_emit_line(&ctx->source, indent, step_line)) {
+            free(start_line);
+            free(stop_line);
+            free(step_line);
             me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
             return false;
         }
-        free(decl_line);
-        if (!me_jit_emit_line(&ctx->source, indent, "if (__me_limit > 0) {")) {
+        free(start_line);
+        free(stop_line);
+        free(step_line);
+
+        if (!me_jit_emit_line(&ctx->source, indent, "if (__me_step == 0) {")) {
             me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
             return false;
         }
-        size_t for_need = strlen(stmt->as.for_loop.var) * 3 + 96;
+        if (!me_jit_emit_line(&ctx->source, indent + 1, "return 1;")) {
+            me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
+            return false;
+        }
+        if (!me_jit_emit_line(&ctx->source, indent, "}")) {
+            me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
+            return false;
+        }
+        size_t for_need = strlen(stmt->as.for_loop.var) * 4 + 160;
         char *for_line = malloc(for_need);
         if (!for_line) {
             me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
             return false;
         }
-        snprintf(for_line, for_need, "for (%s = 0; %s < __me_limit; %s++) {",
-                 stmt->as.for_loop.var, stmt->as.for_loop.var, stmt->as.for_loop.var);
+        snprintf(for_line, for_need,
+                 "for (%s = __me_start; ((__me_step > 0) ? (%s < __me_stop) : (%s > __me_stop)); %s += __me_step) {",
+                 stmt->as.for_loop.var, stmt->as.for_loop.var,
+                 stmt->as.for_loop.var, stmt->as.for_loop.var);
         if (!me_jit_emit_line(&ctx->source, indent + 1, for_line)) {
             free(for_line);
             me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
@@ -1463,10 +1501,6 @@ static bool me_jit_emit_stmt(me_jit_codegen_ctx *ctx, const me_dsl_jit_ir_stmt *
             return false;
         }
         if (!me_jit_emit_line(&ctx->source, indent + 1, "}")) {
-            me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
-            return false;
-        }
-        if (!me_jit_emit_line(&ctx->source, indent, "}")) {
             me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
             return false;
         }

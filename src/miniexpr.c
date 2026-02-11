@@ -81,7 +81,7 @@ For log = base 10 log comment the next line. */
 
 #define ME_DSL_MAX_NDIM 8
 #define ME_DSL_JIT_SYMBOL_NAME "me_dsl_jit_kernel"
-#define ME_DSL_JIT_CGEN_VERSION 4
+#define ME_DSL_JIT_CGEN_VERSION 5
 #ifndef ME_USE_LIBTCC_FALLBACK
 #define ME_USE_LIBTCC_FALLBACK 0
 #endif
@@ -173,7 +173,9 @@ struct me_dsl_compiled_stmt {
         } if_stmt;
         struct {
             int loop_var_slot;
-            me_dsl_compiled_expr limit;
+            me_dsl_compiled_expr start;
+            me_dsl_compiled_expr stop;
+            me_dsl_compiled_expr step;
             me_dsl_compiled_block body;
         } for_loop;
         struct {
@@ -630,7 +632,9 @@ static void dsl_compiled_stmt_free(me_dsl_compiled_stmt *stmt) {
         }
         break;
     case ME_DSL_STMT_FOR:
-        dsl_compiled_expr_free(&stmt->as.for_loop.limit);
+        dsl_compiled_expr_free(&stmt->as.for_loop.start);
+        dsl_compiled_expr_free(&stmt->as.for_loop.stop);
+        dsl_compiled_expr_free(&stmt->as.for_loop.step);
         dsl_compiled_block_free(&stmt->as.for_loop.body);
         break;
     case ME_DSL_STMT_BREAK:
@@ -3131,6 +3135,207 @@ static bool dsl_compile_condition_expr(dsl_compile_ctx *ctx, const me_dsl_expr *
     };
     bool ok = dsl_compile_expr(ctx, &truthy_expr, ME_BOOL, out_expr);
     free(truthy_text);
+    return ok;
+}
+
+static bool dsl_split_top_level_csv(const char *text, char ***out_parts, int *out_nparts) {
+    if (!text || !out_parts || !out_nparts) {
+        return false;
+    }
+    *out_parts = NULL;
+    *out_nparts = 0;
+
+    const char *part_start = text;
+    const char *p = text;
+    int paren_depth = 0;
+    int bracket_depth = 0;
+    int brace_depth = 0;
+    char quote = '\0';
+    char **parts = NULL;
+    int nparts = 0;
+
+    while (*p) {
+        char c = *p;
+        if (quote) {
+            if (c == '\\' && p[1] != '\0') {
+                p += 2;
+                continue;
+            }
+            if (c == quote) {
+                quote = '\0';
+            }
+            p++;
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            quote = c;
+            p++;
+            continue;
+        }
+        if (c == '(') {
+            paren_depth++;
+            p++;
+            continue;
+        }
+        if (c == ')') {
+            if (paren_depth > 0) {
+                paren_depth--;
+            }
+            p++;
+            continue;
+        }
+        if (c == '[') {
+            bracket_depth++;
+            p++;
+            continue;
+        }
+        if (c == ']') {
+            if (bracket_depth > 0) {
+                bracket_depth--;
+            }
+            p++;
+            continue;
+        }
+        if (c == '{') {
+            brace_depth++;
+            p++;
+            continue;
+        }
+        if (c == '}') {
+            if (brace_depth > 0) {
+                brace_depth--;
+            }
+            p++;
+            continue;
+        }
+        if (c == ',' && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0) {
+            char *part = dsl_trim_copy(part_start, p);
+            if (!part || part[0] == '\0') {
+                free(part);
+                for (int i = 0; i < nparts; i++) {
+                    free(parts[i]);
+                }
+                free(parts);
+                return false;
+            }
+            char **next = realloc(parts, (size_t)(nparts + 1) * sizeof(*next));
+            if (!next) {
+                free(part);
+                for (int i = 0; i < nparts; i++) {
+                    free(parts[i]);
+                }
+                free(parts);
+                return false;
+            }
+            parts = next;
+            parts[nparts++] = part;
+            part_start = p + 1;
+        }
+        p++;
+    }
+
+    if (quote || paren_depth != 0 || bracket_depth != 0 || brace_depth != 0) {
+        for (int i = 0; i < nparts; i++) {
+            free(parts[i]);
+        }
+        free(parts);
+        return false;
+    }
+
+    char *tail = dsl_trim_copy(part_start, p);
+    if (!tail || tail[0] == '\0') {
+        free(tail);
+        for (int i = 0; i < nparts; i++) {
+            free(parts[i]);
+        }
+        free(parts);
+        return false;
+    }
+    char **next = realloc(parts, (size_t)(nparts + 1) * sizeof(*next));
+    if (!next) {
+        free(tail);
+        for (int i = 0; i < nparts; i++) {
+            free(parts[i]);
+        }
+        free(parts);
+        return false;
+    }
+    parts = next;
+    parts[nparts++] = tail;
+
+    *out_parts = parts;
+    *out_nparts = nparts;
+    return true;
+}
+
+static bool dsl_compile_range_bound_expr(dsl_compile_ctx *ctx, const char *text,
+                                         int line, int column,
+                                         me_dsl_compiled_expr *out_expr) {
+    if (!ctx || !text || !out_expr) {
+        return false;
+    }
+    me_dsl_expr expr = {
+        .text = (char *)text,
+        .line = line,
+        .column = column
+    };
+    return dsl_compile_expr(ctx, &expr, ME_AUTO, out_expr);
+}
+
+static bool dsl_compile_for_range_args(dsl_compile_ctx *ctx, const me_dsl_stmt *stmt,
+                                       me_dsl_compiled_stmt *compiled) {
+    if (!ctx || !stmt || !compiled || !stmt->as.for_loop.limit || !stmt->as.for_loop.limit->text) {
+        return false;
+    }
+
+    char **parts = NULL;
+    int nparts = 0;
+    if (!dsl_split_top_level_csv(stmt->as.for_loop.limit->text, &parts, &nparts)) {
+        if (ctx->error_pos) {
+            *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+        }
+        return false;
+    }
+    if (nparts < 1 || nparts > 3) {
+        if (ctx->error_pos) {
+            *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+        }
+        for (int i = 0; i < nparts; i++) {
+            free(parts[i]);
+        }
+        free(parts);
+        return false;
+    }
+
+    const char *start_text = "0";
+    const char *stop_text = parts[0];
+    const char *step_text = "1";
+    if (nparts == 2) {
+        start_text = parts[0];
+        stop_text = parts[1];
+    }
+    else if (nparts == 3) {
+        start_text = parts[0];
+        stop_text = parts[1];
+        step_text = parts[2];
+    }
+
+    bool ok = dsl_compile_range_bound_expr(ctx, start_text, stmt->line, stmt->column,
+                                           &compiled->as.for_loop.start) &&
+              dsl_compile_range_bound_expr(ctx, stop_text, stmt->line, stmt->column,
+                                           &compiled->as.for_loop.stop) &&
+              dsl_compile_range_bound_expr(ctx, step_text, stmt->line, stmt->column,
+                                           &compiled->as.for_loop.step);
+    if (!ok) {
+        dsl_compiled_expr_free(&compiled->as.for_loop.start);
+        dsl_compiled_expr_free(&compiled->as.for_loop.stop);
+        dsl_compiled_expr_free(&compiled->as.for_loop.step);
+    }
+
+    for (int i = 0; i < nparts; i++) {
+        free(parts[i]);
+    }
+    free(parts);
     return ok;
 }
 
@@ -5743,13 +5948,6 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
-            if (strchr(stmt->as.for_loop.limit->text, ',')) {
-                if (ctx->error_pos) {
-                    *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
-                }
-                dsl_compiled_stmt_free(compiled);
-                return false;
-            }
             int var_index = dsl_var_table_find(&ctx->program->vars, var);
             if (var_index >= 0) {
                 if (ctx->error_pos) {
@@ -5769,7 +5967,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             }
             compiled->as.for_loop.loop_var_slot = ctx->program->local_slots[var_index];
 
-            if (!dsl_compile_expr(ctx, stmt->as.for_loop.limit, ME_AUTO, &compiled->as.for_loop.limit)) {
+            if (!dsl_compile_for_range_args(ctx, stmt, compiled)) {
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
@@ -7112,25 +7310,75 @@ static int dsl_eval_for_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_st
         return ME_EVAL_ERR_INVALID_ARG;
     }
 
-    const me_dsl_compiled_expr *limit = &stmt->as.for_loop.limit;
-    me_dtype limit_dtype = me_get_dtype(limit->expr);
-    size_t limit_size = dtype_size(limit_dtype);
-    void *limit_buf = malloc(limit_size ? limit_size : sizeof(int64_t));
-    if (!limit_buf) {
-        return ME_EVAL_ERR_OOM;
-    }
-    int rc = dsl_eval_expr_nitems(ctx, limit, limit_buf, 1);
-    if (rc != ME_EVAL_SUCCESS) {
-        free(limit_buf);
-        return rc;
-    }
-    int64_t limit_val = 0;
-    if (!dsl_read_int64(limit_buf, limit_dtype, &limit_val)) {
-        free(limit_buf);
+    const me_dsl_compiled_expr *start_expr = &stmt->as.for_loop.start;
+    const me_dsl_compiled_expr *stop_expr = &stmt->as.for_loop.stop;
+    const me_dsl_compiled_expr *step_expr = &stmt->as.for_loop.step;
+    if (!start_expr->expr || !stop_expr->expr || !step_expr->expr) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
-    free(limit_buf);
-    if (limit_val <= 0 || ctx->nitems <= 0) {
+
+    int64_t start_val = 0;
+    int64_t stop_val = 0;
+    int64_t step_val = 0;
+    int rc = ME_EVAL_SUCCESS;
+
+    {
+        me_dtype dtype = me_get_dtype(start_expr->expr);
+        size_t size = dtype_size(dtype);
+        void *buf = malloc(size ? size : sizeof(int64_t));
+        if (!buf) {
+            return ME_EVAL_ERR_OOM;
+        }
+        rc = dsl_eval_expr_nitems(ctx, start_expr, buf, 1);
+        if (rc == ME_EVAL_SUCCESS && !dsl_read_int64(buf, dtype, &start_val)) {
+            rc = ME_EVAL_ERR_INVALID_ARG;
+        }
+        free(buf);
+        if (rc != ME_EVAL_SUCCESS) {
+            return rc;
+        }
+    }
+    {
+        me_dtype dtype = me_get_dtype(stop_expr->expr);
+        size_t size = dtype_size(dtype);
+        void *buf = malloc(size ? size : sizeof(int64_t));
+        if (!buf) {
+            return ME_EVAL_ERR_OOM;
+        }
+        rc = dsl_eval_expr_nitems(ctx, stop_expr, buf, 1);
+        if (rc == ME_EVAL_SUCCESS && !dsl_read_int64(buf, dtype, &stop_val)) {
+            rc = ME_EVAL_ERR_INVALID_ARG;
+        }
+        free(buf);
+        if (rc != ME_EVAL_SUCCESS) {
+            return rc;
+        }
+    }
+    {
+        me_dtype dtype = me_get_dtype(step_expr->expr);
+        size_t size = dtype_size(dtype);
+        void *buf = malloc(size ? size : sizeof(int64_t));
+        if (!buf) {
+            return ME_EVAL_ERR_OOM;
+        }
+        rc = dsl_eval_expr_nitems(ctx, step_expr, buf, 1);
+        if (rc == ME_EVAL_SUCCESS && !dsl_read_int64(buf, dtype, &step_val)) {
+            rc = ME_EVAL_ERR_INVALID_ARG;
+        }
+        free(buf);
+        if (rc != ME_EVAL_SUCCESS) {
+            return rc;
+        }
+    }
+
+    if (step_val == 0) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+    if (ctx->nitems <= 0) {
+        return ME_EVAL_SUCCESS;
+    }
+    if ((step_val > 0 && start_val >= stop_val) ||
+        (step_val < 0 && start_val <= stop_val)) {
         return ME_EVAL_SUCCESS;
     }
 
@@ -7154,7 +7402,8 @@ static int dsl_eval_for_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_st
     int slot = stmt->as.for_loop.loop_var_slot;
     int64_t *loop_buf = (int64_t *)ctx->local_buffers[slot];
 
-    for (int64_t iter = 0; iter < limit_val; iter++) {
+    for (int64_t iter = start_val;
+         (step_val > 0) ? (iter < stop_val) : (iter > stop_val);) {
         if (!dsl_mask_any(active_mask, ctx->nitems)) {
             break;
         }
@@ -7191,6 +7440,18 @@ static int dsl_eval_for_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_st
 
         free(break_mask);
         free(continue_mask);
+
+        if (step_val > 0) {
+            if (iter > INT64_MAX - step_val) {
+                break;
+            }
+        }
+        else {
+            if (iter < INT64_MIN - step_val) {
+                break;
+            }
+        }
+        iter += step_val;
     }
 
     free(active_mask);

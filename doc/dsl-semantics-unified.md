@@ -4,6 +4,19 @@ Status: Draft
 Scope: DSL language semantics and backend conformance
 Goal: remove vector/element dialect split and define one behavior model
 
+## Implementation Status (2026-02-11)
+
+- [x] Unified semantics model in place (no user-facing dialect split).
+- [x] Per-lane `if/elif/else`, `break`, `continue`, and `return` semantics implemented.
+- [x] Missing return path reported at runtime (eval error), not compile-time.
+- [x] `return` inside loops supported.
+- [x] Truthiness supports bool/int/float and strings (non-empty true, empty false).
+- [x] Only `me:fp` and `me:compiler` pragmas are accepted; unknown `me:*` pragmas are rejected.
+- [x] Runtime JIT fallback/guardrails preserve interpreter semantics (including missing-return cases).
+- [x] Interpreter/JIT parity tests cover core unified control-flow behavior.
+- [x] `range()` supports `range(stop)`, `range(start, stop)`, and `range(start, stop, step)`.
+- [ ] Allow declaration of new locals inside conditional branches (if desired).
+
 ## Decision Summary (Proposed)
 
 1. There is a single DSL semantics model. Dialect specific behavior is removed.
@@ -13,7 +26,7 @@ Goal: remove vector/element dialect split and define one behavior model
 3. `if` / `elif` / `else` run per lane:
    - A lane enters the first branch whose condition is true for that lane.
    - `else` applies to lanes that did not match previous branches.
-4. `for` loops have scalar limits only (`range(N)` where `N` is scalar).
+4. `for` loops use scalar bounds (`range(stop)`, `range(start, stop)`, or `range(start, stop, step)`).
 5. `break` and `continue` are per-lane inside loops.
 6. `return` is per-lane:
    - Returned lanes write output and become inactive for the rest of the kernel.
@@ -49,9 +62,11 @@ Goal: remove vector/element dialect split and define one behavior model
 
 ### Loops
 
-- `for i in range(N)`:
-  - `N` is scalar and evaluated once before loop entry.
-  - If `N <= 0`, loop body is skipped for all lanes.
+- `for i in range(...)`:
+  - Bounds are scalar and evaluated once before loop entry.
+  - Accepted forms: `range(stop)`, `range(start, stop)`, `range(start, stop, step)`.
+  - `step == 0` is a runtime error.
+  - Loop body is skipped when the range is empty.
 - Per iteration, only active lanes execute loop body.
 - Early stop rule: if no lanes remain active, the loop exits.
 
@@ -82,7 +97,7 @@ Goal: remove vector/element dialect split and define one behavior model
 1. Only `me:fp` and `me:compiler` pragmas are supported in DSL headers.
    Any other `me:*` pragma is rejected at parse time.
 2. Control-flow conditions no longer require explicit `any()`/`all()`.
-3. `range()` with start/stop/step is still unsupported unless separately implemented.
+3. `range()` accepts one to three scalar arguments (`stop`, `start/stop`, `start/stop/step`).
 4. New locals inside conditional branches remain disallowed unless separately relaxed.
 
 ## Backend Conformance

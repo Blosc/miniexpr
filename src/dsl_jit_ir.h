@@ -68,7 +68,9 @@ struct me_dsl_jit_ir_stmt {
         } if_stmt;
         struct {
             char *var;
-            me_dsl_jit_ir_expr limit;
+            me_dsl_jit_ir_expr start;
+            me_dsl_jit_ir_expr stop;
+            me_dsl_jit_ir_expr step;
             me_dsl_jit_ir_block body;
         } for_loop;
     } as;

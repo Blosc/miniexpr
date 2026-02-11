@@ -146,6 +146,14 @@ def kernel(n):
     return accumulator
 ```
 
+`range()` supports:
+- `range(stop)`
+- `range(start, stop)`
+- `range(start, stop, step)`
+
+`start`, `stop`, and `step` are scalar bounds evaluated once before loop entry.
+`step == 0` is a runtime evaluation error.
+
 With early exit:
 ```
 def kernel(converged, value):
@@ -180,7 +188,7 @@ Rules:
 - Use `return` to produce output; all `return` expressions must infer the same dtype.
 - Early returns are allowed, but ensure every control-flow path eventually returns.
   Loops never guarantee a return; add a return after any loop.
-- `return` inside a loop body is not supported.
+- `return` inside loop bodies is supported.
 
 Example:
 ```

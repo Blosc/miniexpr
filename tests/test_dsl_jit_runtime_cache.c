@@ -1005,8 +1005,95 @@ cleanup:
     return rc;
 }
 
+static int test_range_start_stop_step_jit_lowering(void) {
+    printf("\n=== DSL JIT Runtime Cache Test 10: range(start, stop, step) JIT lowering ===\n");
+
+    int rc = 1;
+    char tmp_template[] = "/tmp/me_jit_range_step_XXXXXX";
+    char *tmp_root = mkdtemp(tmp_template);
+    char cache_dir[1024];
+    cache_dir[0] = '\0';
+    char *saved_tmpdir = dup_env_value("TMPDIR");
+    char *saved_cc = dup_env_value("CC");
+    char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+    const char *src =
+        "# me:compiler=cc\n"
+        "def kernel(x):\n"
+        "    acc = 0\n"
+        "    for i in range(1, 8, 3):\n"
+        "        acc = acc + i\n"
+        "    return x + acc\n";
+    const double in[4] = {0.0, 1.0, 2.0, 3.0};
+    double out[4] = {0.0, 0.0, 0.0, 0.0};
+
+    if (!tmp_root) {
+        printf("  FAILED: mkdtemp failed\n");
+        goto cleanup;
+    }
+    if (snprintf(cache_dir, sizeof(cache_dir), "%s/miniexpr-jit", tmp_root) >= (int)sizeof(cache_dir)) {
+        printf("  FAILED: cache path too long\n");
+        goto cleanup;
+    }
+    if (setenv("TMPDIR", tmp_root, 1) != 0) {
+        printf("  FAILED: setenv TMPDIR failed\n");
+        goto cleanup;
+    }
+    if (setenv("CC", "cc", 1) != 0) {
+        printf("  FAILED: setenv CC failed\n");
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT_POS_CACHE", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT_POS_CACHE failed\n");
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT=1 failed\n");
+        goto cleanup;
+    }
+
+    if (compile_and_eval_dsl_values(src, in, 4, out) != 0) {
+        goto cleanup;
+    }
+    for (int i = 0; i < 4; i++) {
+        double expected = in[i] + 12.0;
+        if (fabs(out[i] - expected) > 1e-12) {
+            printf("  FAILED: output mismatch at %d (%.17g vs %.17g)\n",
+                   i, out[i], expected);
+            goto cleanup;
+        }
+    }
+
+    int n_meta = count_kernel_files_with_suffix(cache_dir, ".meta", NULL, 0);
+    if (n_meta < 1) {
+        printf("  FAILED: expected JIT cache metadata for range(start, stop, step) kernel\n");
+        goto cleanup;
+    }
+
+    rc = 0;
+    printf("  PASSED\n");
+
+cleanup:
+    restore_env_value("TMPDIR", saved_tmpdir);
+    restore_env_value("CC", saved_cc);
+    restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    free(saved_tmpdir);
+    free(saved_cc);
+    free(saved_pos_cache);
+    free(saved_jit);
+    if (cache_dir[0] != '\0') {
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+    }
+    if (tmp_root) {
+        (void)rmdir(tmp_root);
+    }
+    return rc;
+}
+
 static int test_cc_backend_bridge_path(void) {
-    printf("\n=== DSL JIT Runtime Cache Test 10: cc backend bridge path ===\n");
+    printf("\n=== DSL JIT Runtime Cache Test 11: cc backend bridge path ===\n");
 
     int rc = 1;
     char tmp_template[] = "/tmp/me_jit_cc_bridge_XXXXXX";
@@ -1113,6 +1200,7 @@ int main(void) {
     fail |= test_cache_key_differentiates_fp_mode();
     fail |= test_element_interpreter_jit_parity();
     fail |= test_missing_return_skips_runtime_jit();
+    fail |= test_range_start_stop_step_jit_lowering();
     fail |= test_cc_backend_bridge_path();
     return fail;
 #endif

@@ -128,7 +128,9 @@ static void dsl_jit_ir_stmt_free(me_dsl_jit_ir_stmt *stmt) {
         break;
     case ME_DSL_JIT_IR_STMT_FOR:
         free(stmt->as.for_loop.var);
-        dsl_jit_ir_expr_free(&stmt->as.for_loop.limit);
+        dsl_jit_ir_expr_free(&stmt->as.for_loop.start);
+        dsl_jit_ir_expr_free(&stmt->as.for_loop.stop);
+        dsl_jit_ir_expr_free(&stmt->as.for_loop.step);
         dsl_jit_ir_block_free(&stmt->as.for_loop.body);
         break;
     case ME_DSL_JIT_IR_STMT_BREAK:
@@ -254,45 +256,180 @@ static bool dsl_jit_resolve_expr_dtype(me_dsl_jit_build_ctx *ctx, const me_dsl_e
     return true;
 }
 
-static bool dsl_jit_expr_has_comma(const char *text) {
-    bool in_string = false;
-    char quote = '\0';
-    int depth = 0;
-    if (!text) {
+static char *dsl_jit_trim_copy(const char *start, const char *end) {
+    if (!start || !end || end < start) {
+        return NULL;
+    }
+    while (start < end && isspace((unsigned char)*start)) {
+        start++;
+    }
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+    size_t len = (size_t)(end - start);
+    char *out = malloc(len + 1);
+    if (!out) {
+        return NULL;
+    }
+    memcpy(out, start, len);
+    out[len] = '\0';
+    return out;
+}
+
+static bool dsl_jit_split_top_level_csv(const char *text, char ***out_parts, int *out_nparts) {
+    if (!text || !out_parts || !out_nparts) {
         return false;
     }
-    for (const char *p = text; *p; p++) {
+    *out_parts = NULL;
+    *out_nparts = 0;
+
+    const char *part_start = text;
+    const char *p = text;
+    int paren_depth = 0;
+    int bracket_depth = 0;
+    int brace_depth = 0;
+    char quote = '\0';
+    char **parts = NULL;
+    int nparts = 0;
+
+    while (*p) {
         char c = *p;
-        if (in_string) {
-            if (c == '\\' && p[1]) {
-                p++;
+        if (quote) {
+            if (c == '\\' && p[1] != '\0') {
+                p += 2;
                 continue;
             }
             if (c == quote) {
-                in_string = false;
+                quote = '\0';
             }
+            p++;
             continue;
         }
         if (c == '"' || c == '\'') {
-            in_string = true;
             quote = c;
+            p++;
             continue;
         }
         if (c == '(') {
-            depth++;
+            paren_depth++;
+            p++;
             continue;
         }
         if (c == ')') {
-            if (depth > 0) {
-                depth--;
+            if (paren_depth > 0) {
+                paren_depth--;
             }
+            p++;
             continue;
         }
-        if (c == ',' && depth == 0) {
-            return true;
+        if (c == '[') {
+            bracket_depth++;
+            p++;
+            continue;
         }
+        if (c == ']') {
+            if (bracket_depth > 0) {
+                bracket_depth--;
+            }
+            p++;
+            continue;
+        }
+        if (c == '{') {
+            brace_depth++;
+            p++;
+            continue;
+        }
+        if (c == '}') {
+            if (brace_depth > 0) {
+                brace_depth--;
+            }
+            p++;
+            continue;
+        }
+        if (c == ',' && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0) {
+            char *part = dsl_jit_trim_copy(part_start, p);
+            if (!part || part[0] == '\0') {
+                free(part);
+                for (int i = 0; i < nparts; i++) {
+                    free(parts[i]);
+                }
+                free(parts);
+                return false;
+            }
+            char **next = realloc(parts, (size_t)(nparts + 1) * sizeof(*next));
+            if (!next) {
+                free(part);
+                for (int i = 0; i < nparts; i++) {
+                    free(parts[i]);
+                }
+                free(parts);
+                return false;
+            }
+            parts = next;
+            parts[nparts++] = part;
+            part_start = p + 1;
+        }
+        p++;
     }
-    return false;
+
+    if (quote || paren_depth != 0 || bracket_depth != 0 || brace_depth != 0) {
+        for (int i = 0; i < nparts; i++) {
+            free(parts[i]);
+        }
+        free(parts);
+        return false;
+    }
+
+    char *tail = dsl_jit_trim_copy(part_start, p);
+    if (!tail || tail[0] == '\0') {
+        free(tail);
+        for (int i = 0; i < nparts; i++) {
+            free(parts[i]);
+        }
+        free(parts);
+        return false;
+    }
+    char **next = realloc(parts, (size_t)(nparts + 1) * sizeof(*next));
+    if (!next) {
+        free(tail);
+        for (int i = 0; i < nparts; i++) {
+            free(parts[i]);
+        }
+        free(parts);
+        return false;
+    }
+    parts = next;
+    parts[nparts++] = tail;
+
+    *out_parts = parts;
+    *out_nparts = nparts;
+    return true;
+}
+
+static bool dsl_jit_ir_expr_init_from_text(me_dsl_jit_ir_expr *out, const char *text, me_dtype dtype) {
+    if (!out || !text) {
+        return false;
+    }
+    memset(out, 0, sizeof(*out));
+    out->text = dsl_jit_strdup(text);
+    if (!out->text) {
+        return false;
+    }
+    out->dtype = dtype;
+    return true;
+}
+
+static bool dsl_jit_resolve_expr_dtype_from_text(me_dsl_jit_build_ctx *ctx, const char *text,
+                                                 int line, int column, me_dtype *out_dtype) {
+    if (!ctx || !text || !out_dtype) {
+        return false;
+    }
+    me_dsl_expr expr;
+    memset(&expr, 0, sizeof(expr));
+    expr.text = (char *)text;
+    expr.line = line;
+    expr.column = column;
+    return dsl_jit_resolve_expr_dtype(ctx, &expr, line, column, out_dtype);
 }
 
 static bool dsl_jit_ident_is_reduction(const char *ident, size_t len) {
@@ -558,45 +695,131 @@ static bool dsl_jit_build_block(me_dsl_jit_build_ctx *ctx, const me_dsl_block *i
                 dsl_jit_ir_stmt_free(ir_stmt);
                 return false;
             }
-            if (dsl_jit_expr_has_comma(stmt->as.for_loop.limit->text)) {
+
+            char **range_parts = NULL;
+            int n_range_parts = 0;
+            if (!dsl_jit_split_top_level_csv(stmt->as.for_loop.limit->text, &range_parts, &n_range_parts)) {
                 dsl_jit_set_error(ctx->error, stmt->line, stmt->column,
-                                  "range() with start/stop/step is not supported by jit ir");
+                                  "invalid range() argument list for jit ir");
                 dsl_jit_ir_stmt_free(ir_stmt);
                 return false;
             }
-            if (!dsl_jit_expr_validate_subset(ctx, stmt->as.for_loop.limit,
-                                              stmt->as.for_loop.limit->line,
-                                              stmt->as.for_loop.limit->column)) {
+            if (n_range_parts < 1 || n_range_parts > 3) {
+                dsl_jit_set_error(ctx->error, stmt->line, stmt->column,
+                                  "range() expects 1 to 3 arguments for jit ir");
+                for (int i = 0; i < n_range_parts; i++) {
+                    free(range_parts[i]);
+                }
+                free(range_parts);
                 dsl_jit_ir_stmt_free(ir_stmt);
                 return false;
             }
-            me_dtype limit_dtype = ME_AUTO;
-            if (!dsl_jit_resolve_expr_dtype(ctx, stmt->as.for_loop.limit, stmt->line, stmt->column,
-                                            &limit_dtype)) {
+
+            const char *start_text = "0";
+            const char *stop_text = range_parts[0];
+            const char *step_text = "1";
+            if (n_range_parts == 2) {
+                start_text = range_parts[0];
+                stop_text = range_parts[1];
+            }
+            else if (n_range_parts == 3) {
+                start_text = range_parts[0];
+                stop_text = range_parts[1];
+                step_text = range_parts[2];
+            }
+
+            me_dsl_expr tmp_expr;
+            memset(&tmp_expr, 0, sizeof(tmp_expr));
+            tmp_expr.line = stmt->line;
+            tmp_expr.column = stmt->column;
+            tmp_expr.text = (char *)start_text;
+            if (!dsl_jit_expr_validate_subset(ctx, &tmp_expr, stmt->line, stmt->column)) {
+                for (int i = 0; i < n_range_parts; i++) {
+                    free(range_parts[i]);
+                }
+                free(range_parts);
                 dsl_jit_ir_stmt_free(ir_stmt);
                 return false;
             }
+            tmp_expr.text = (char *)stop_text;
+            if (!dsl_jit_expr_validate_subset(ctx, &tmp_expr, stmt->line, stmt->column)) {
+                for (int i = 0; i < n_range_parts; i++) {
+                    free(range_parts[i]);
+                }
+                free(range_parts);
+                dsl_jit_ir_stmt_free(ir_stmt);
+                return false;
+            }
+            tmp_expr.text = (char *)step_text;
+            if (!dsl_jit_expr_validate_subset(ctx, &tmp_expr, stmt->line, stmt->column)) {
+                for (int i = 0; i < n_range_parts; i++) {
+                    free(range_parts[i]);
+                }
+                free(range_parts);
+                dsl_jit_ir_stmt_free(ir_stmt);
+                return false;
+            }
+
+            me_dtype start_dtype = ME_AUTO;
+            me_dtype stop_dtype = ME_AUTO;
+            me_dtype step_dtype = ME_AUTO;
+            if (!dsl_jit_resolve_expr_dtype_from_text(ctx, start_text, stmt->line, stmt->column,
+                                                      &start_dtype) ||
+                !dsl_jit_resolve_expr_dtype_from_text(ctx, stop_text, stmt->line, stmt->column,
+                                                      &stop_dtype) ||
+                !dsl_jit_resolve_expr_dtype_from_text(ctx, step_text, stmt->line, stmt->column,
+                                                      &step_dtype)) {
+                for (int i = 0; i < n_range_parts; i++) {
+                    free(range_parts[i]);
+                }
+                free(range_parts);
+                dsl_jit_ir_stmt_free(ir_stmt);
+                return false;
+            }
+
             ir_stmt->kind = ME_DSL_JIT_IR_STMT_FOR;
             ir_stmt->as.for_loop.var = dsl_jit_strdup(stmt->as.for_loop.var);
             if (!ir_stmt->as.for_loop.var) {
                 dsl_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
+                for (int i = 0; i < n_range_parts; i++) {
+                    free(range_parts[i]);
+                }
+                free(range_parts);
                 dsl_jit_ir_stmt_free(ir_stmt);
                 return false;
             }
-            if (!dsl_jit_ir_expr_init(&ir_stmt->as.for_loop.limit, stmt->as.for_loop.limit, limit_dtype)) {
+            if (!dsl_jit_ir_expr_init_from_text(&ir_stmt->as.for_loop.start, start_text, start_dtype) ||
+                !dsl_jit_ir_expr_init_from_text(&ir_stmt->as.for_loop.stop, stop_text, stop_dtype) ||
+                !dsl_jit_ir_expr_init_from_text(&ir_stmt->as.for_loop.step, step_text, step_dtype)) {
                 dsl_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
+                for (int i = 0; i < n_range_parts; i++) {
+                    free(range_parts[i]);
+                }
+                free(range_parts);
                 dsl_jit_ir_stmt_free(ir_stmt);
                 return false;
             }
             if (!dsl_jit_symbols_add(&ctx->symbols, stmt->as.for_loop.var, ME_INT64, false)) {
                 dsl_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
+                for (int i = 0; i < n_range_parts; i++) {
+                    free(range_parts[i]);
+                }
+                free(range_parts);
                 dsl_jit_ir_stmt_free(ir_stmt);
                 return false;
             }
             if (!dsl_jit_build_block(ctx, &stmt->as.for_loop.body, &ir_stmt->as.for_loop.body, true)) {
+                for (int i = 0; i < n_range_parts; i++) {
+                    free(range_parts[i]);
+                }
+                free(range_parts);
                 dsl_jit_ir_stmt_free(ir_stmt);
                 return false;
             }
+            for (int i = 0; i < n_range_parts; i++) {
+                free(range_parts[i]);
+            }
+            free(range_parts);
             break;
         }
         case ME_DSL_STMT_BREAK:
@@ -808,7 +1031,9 @@ static uint64_t dsl_jit_ir_hash_stmt(uint64_t h, const me_dsl_jit_ir_stmt *stmt)
         break;
     case ME_DSL_JIT_IR_STMT_FOR:
         h = dsl_jit_hash_string(h, stmt->as.for_loop.var);
-        h = dsl_jit_ir_hash_expr(h, &stmt->as.for_loop.limit);
+        h = dsl_jit_ir_hash_expr(h, &stmt->as.for_loop.start);
+        h = dsl_jit_ir_hash_expr(h, &stmt->as.for_loop.stop);
+        h = dsl_jit_ir_hash_expr(h, &stmt->as.for_loop.step);
         h = dsl_jit_ir_hash_block(h, &stmt->as.for_loop.body);
         break;
     case ME_DSL_JIT_IR_STMT_BREAK:
