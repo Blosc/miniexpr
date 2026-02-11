@@ -128,7 +128,7 @@ jobs:
           -DMINIEXPR_BUILD_BENCH=OFF \
           -DMINIEXPR_BUILD_EXAMPLES=OFF \
           -DMINIEXPR_USE_SLEEF=OFF \
-          -DMINIEXPR_USE_LIBTCC_FALLBACK=OFF \
+          -DMINIEXPR_ENABLE_WASM_LIBTCC_JIT=ON \
           -DMINIEXPR_DSL_TRACE_DEFAULT=ON
 
     - name: Build wasm32 miniexpr + tests
@@ -146,11 +146,23 @@ jobs:
       shell: bash
       run: |
         set -o pipefail
+        : > build-wasm32/dsl-trace.log
         node -e 'global.Module={ENV:{ME_DSL_TRACE:"1"}}; require("./build-wasm32/tests/test_dsl_jit_ir.js");' \
-          2>&1 | tee build-wasm32/dsl-trace.log
+          >> build-wasm32/dsl-trace.log 2>&1
         node -e 'global.Module={ENV:{ME_DSL_TRACE:"1"}}; require("./build-wasm32/tests/test_dsl_syntax.js");' \
-          2>&1 | tee -a build-wasm32/dsl-trace.log
-        grep -E "jit ir built:|jit ir skip:|jit runtime (built|skip|hit|stubbed):" build-wasm32/dsl-trace.log || true
+          >> build-wasm32/dsl-trace.log 2>&1
+        echo "=== DSL JIT Trace Summary (wasm32) ==="
+        if grep -E "\\[me-dsl\\] (jit ir (built|skip|reject):|jit runtime (built|skip|hit|stubbed):)" \
+             build-wasm32/dsl-trace.log > /tmp/dsl-trace-summary.raw; then
+          sed -E 's/fingerprint=[0-9a-f]+/fingerprint=<fp>/g; s/key=[0-9a-f]+/key=<key>/g' \
+            /tmp/dsl-trace-summary.raw \
+            | sort \
+            | uniq -c \
+            | sed -E 's/^ +//'
+        else
+          echo "No DSL JIT trace lines captured"
+        fi
+        echo "=== End Summary ==="
 
   windows-libtcc-jit:
     if: ${{ false }}

@@ -26,11 +26,16 @@ option(MINIEXPR_BUILD_BENCH "Build benchmarks" ON)
 option(MINIEXPR_USE_SLEEF "Enable SLEEF SIMD acceleration" ON)
 option(MINIEXPR_USE_LIBTCC_FALLBACK "Enable libtcc DSL JIT fallback" ON)
 option(MINIEXPR_DSL_TRACE_DEFAULT "Enable DSL trace logs by default when ME_DSL_TRACE is unset" OFF)
+option(MINIEXPR_ENABLE_WASM_LIBTCC_JIT "Enable experimental libtcc DSL JIT support on Emscripten" OFF)
 option(MINIEXPR_ENABLE_WINDOWS_LIBTCC_JIT "Enable experimental libtcc DSL JIT support on Windows" OFF)
 
 if(EMSCRIPTEN)
-  # Emscripten targets plain wasm32 and does not support the host-side libtcc JIT runtime path.
-  set(MINIEXPR_USE_LIBTCC_FALLBACK OFF)
+  if(MINIEXPR_ENABLE_WASM_LIBTCC_JIT)
+    set(MINIEXPR_USE_LIBTCC_FALLBACK ON)
+  else()
+    # Plain wasm32 builds default to interpreter-only DSL execution.
+    set(MINIEXPR_USE_LIBTCC_FALLBACK OFF)
+  endif()
 elseif(WIN32)
   if(MINIEXPR_ENABLE_WINDOWS_LIBTCC_JIT)
     set(MINIEXPR_USE_LIBTCC_FALLBACK ON)
