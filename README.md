@@ -185,26 +185,22 @@ The `examples/` directory contains complete, runnable examples demonstrating var
 
 Build and run:
 ```bash
-mkdir -p build
-cd build
-cmake ..
-make -j
-./01_simple_expression
+cmake -S . -B build -G Ninja
+cmake --build build -j
+./build/examples/01_simple_expression
 ```
 
 See [examples/README.md](examples/README.md) for detailed documentation of each example.
 
 ## Building
 
-CMake (recommended):
+CMake + Ninja (recommended):
 ```bash
-mkdir -p build
-cd build
-cmake ..
-make -j
-ctest
+cmake -S . -B build -G Ninja
+cmake --build build -j
+ctest --test-dir build
 ```
-Tip: run a subset of tests with `ctest -R <pattern>`.
+Tip: run a subset of tests with `ctest --test-dir build -R <pattern>`.
 
 Options:
 - `-DMINIEXPR_BUILD_TESTS=ON|OFF`

@@ -7,11 +7,9 @@ This directory contains practical examples demonstrating various features and us
 From the repository root, build and run all examples:
 
 ```bash
-mkdir -p build
-cd build
-cmake ..
-make -j
-ctest
+cmake -S . -B build -G Ninja
+cmake --build build -j
+ctest --test-dir build
 ```
 
 To run a specific example:
@@ -455,11 +453,9 @@ def mandelbrot(cr, ci):
 
 From the repo root:
 ```bash
-mkdir -p build
-cd build
-cmake ..
-make -j
-ctest
+cmake -S . -B build -G Ninja
+cmake --build build -j
+ctest --test-dir build
 ```
 
 ### Using the Makefile
