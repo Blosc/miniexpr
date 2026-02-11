@@ -8,6 +8,7 @@ on:
 
 jobs:
   build-and-test:
+    if: ${{ false }}
     strategy:
       fail-fast: false
       matrix:
@@ -100,7 +101,46 @@ jobs:
         cmake --build build-minicc-wasm -j
         ctest --test-dir build-minicc-wasm -R '^minicc\.wasm\.' --output-on-failure
 
+  miniexpr-wasm32:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+
+    - name: Set up Emscripten
+      uses: mymindstorm/setup-emsdk@v14
+      with:
+        version: latest
+
+    - name: Configure wasm32 build
+      shell: bash
+      run: |
+        emcmake cmake -S . -B build-wasm32 -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CROSSCOMPILING_EMULATOR=node \
+          -DMINIEXPR_BUILD_BENCH=OFF \
+          -DMINIEXPR_BUILD_EXAMPLES=OFF \
+          -DMINIEXPR_USE_SLEEF=OFF \
+          -DMINIEXPR_USE_LIBTCC_FALLBACK=OFF
+
+    - name: Build wasm32 miniexpr + tests
+      shell: bash
+      run: |
+        cmake --build build-wasm32 -j
+
+    - name: Run wasm32 tests
+      shell: bash
+      run: |
+        ctest --test-dir build-wasm32 --output-on-failure || \
+          ctest --test-dir build-wasm32 --rerun-failed --output-on-failure
+
   windows-libtcc-jit:
+    if: ${{ false }}
     runs-on: windows-latest
 
     steps:

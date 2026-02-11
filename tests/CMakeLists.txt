@@ -10,6 +10,12 @@ if(WIN32)
   # MSVC/clang-cl complex literal handling breaks this test; skip on Windows.
   list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_regressions\\.c$")
 endif()
+if(EMSCRIPTEN)
+  # These rely on host runtime features that are not available in plain wasm32 CI.
+  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_threadsafe_chunk\\.c$")
+  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_jit_codegen\\.c$")
+  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_jit_runtime_cache\\.c$")
+endif()
 
 foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
   get_filename_component(test_name "${test_src}" NAME_WE)

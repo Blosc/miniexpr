@@ -24,16 +24,18 @@ option(MINIEXPR_BUILD_TESTS "Build tests" ON)
 option(MINIEXPR_BUILD_EXAMPLES "Build examples" ON)
 option(MINIEXPR_BUILD_BENCH "Build benchmarks" ON)
 option(MINIEXPR_USE_SLEEF "Enable SLEEF SIMD acceleration" ON)
+option(MINIEXPR_USE_LIBTCC_FALLBACK "Enable libtcc DSL JIT fallback" ON)
 option(MINIEXPR_ENABLE_WINDOWS_LIBTCC_JIT "Enable experimental libtcc DSL JIT support on Windows" OFF)
 
-if(WIN32)
+if(EMSCRIPTEN)
+  # Emscripten targets plain wasm32 and does not support the host-side libtcc JIT runtime path.
+  set(MINIEXPR_USE_LIBTCC_FALLBACK OFF)
+elseif(WIN32)
   if(MINIEXPR_ENABLE_WINDOWS_LIBTCC_JIT)
     set(MINIEXPR_USE_LIBTCC_FALLBACK ON)
   else()
     set(MINIEXPR_USE_LIBTCC_FALLBACK OFF)
   endif()
-else()
-  set(MINIEXPR_USE_LIBTCC_FALLBACK ON)
 endif()
 
 set(MINIEXPR_SOURCES
