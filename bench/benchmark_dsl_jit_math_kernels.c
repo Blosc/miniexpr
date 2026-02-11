@@ -117,16 +117,18 @@ static void remove_files_in_dir(const char *dir_path) {
 }
 #endif
 
-static const char *current_jit_backend_label(void) {
-    const char *force = getenv("ME_DSL_JIT_FORCE_LIBTCC");
-    if (force && force[0] != '\0' && strcmp(force, "0") != 0) {
-        const char *bridge = getenv("ME_DSL_JIT_USE_SLEEF_BRIDGE");
-        if (bridge && bridge[0] != '\0' && strcmp(bridge, "0") != 0) {
-            return "tcc-forced+bridge";
-        }
-        return "tcc-forced";
+static const char *current_dsl_compiler_label(void) {
+    const char *compiler = getenv("ME_BENCH_COMPILER");
+    if (!compiler || compiler[0] == '\0') {
+        return "tcc-default";
     }
-    return "cc-default";
+    if (strcmp(compiler, "tcc") == 0) {
+        return "tcc";
+    }
+    if (strcmp(compiler, "cc") == 0) {
+        return "cc";
+    }
+    return "invalid";
 }
 
 static bool build_dsl_source(char *out, size_t out_size, const char *expr) {
@@ -421,7 +423,7 @@ int main(int argc, char **argv) {
 
     if (!failed) {
         printf("benchmark_dsl_jit_math_kernels\n");
-        printf("backend=%s nitems=%d repeats=%d\n", current_jit_backend_label(), nitems, repeats);
+        printf("compiler=%s nitems=%d repeats=%d\n", current_dsl_compiler_label(), nitems, repeats);
         printf("fp_pragma=strict\n");
         printf("timing: jit-warm/interp report best single eval over repeats\n");
         printf("%-8s %12s %14s %14s %14s %14s %12s %12s\n",
