@@ -65,7 +65,15 @@ For log = base 10 log comment the next line. */
 #include <time.h>
 #include <stdarg.h>
 
-#if !defined(_WIN32) && !defined(_WIN64)
+#if defined(_WIN32) || defined(_WIN64)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#ifndef PATH_MAX
+#define PATH_MAX MAX_PATH
+#endif
+#else
 #include <dlfcn.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -230,10 +238,10 @@ typedef struct {
     bool jit_dl_handle_cached;
 } me_dsl_compiled_program;
 
-#if !defined(_WIN32) && !defined(_WIN64)
 static void dsl_jit_libtcc_delete_state(void *state);
 static bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program);
 static const char *dsl_jit_libtcc_error_message(void);
+#if !defined(_WIN32) && !defined(_WIN64)
 static bool dsl_jit_c_compiler_available(void);
 #endif
 static bool dsl_jit_cc_math_bridge_available(void);
@@ -661,11 +669,13 @@ static void dsl_compiled_program_free(me_dsl_compiled_program *program) {
     if (!program) {
         return;
     }
-#if !defined(_WIN32) && !defined(_WIN64)
+#if ME_USE_LIBTCC_FALLBACK
     if (program->jit_tcc_state) {
         dsl_jit_libtcc_delete_state(program->jit_tcc_state);
         program->jit_tcc_state = NULL;
     }
+#endif
+#if !defined(_WIN32) && !defined(_WIN64)
     if (program->jit_dl_handle) {
         if (!program->jit_dl_handle_cached) {
             dlclose(program->jit_dl_handle);
@@ -3951,11 +3961,95 @@ static const char *dsl_jit_libtcc_error_message(void) {
     return "tcc backend unavailable";
 }
 
+static bool dsl_jit_module_path_from_symbol(const void *symbol, char *out, size_t out_size) {
+    if (!symbol || !out || out_size == 0) {
+        return false;
+    }
+#if defined(_WIN32) || defined(_WIN64)
+    HMODULE module = NULL;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCSTR)symbol, &module)) {
+        return false;
+    }
+    DWORD n = GetModuleFileNameA(module, out, (DWORD)out_size);
+    if (n == 0 || n >= (DWORD)out_size) {
+        return false;
+    }
+    out[n] = '\0';
+    return true;
+#else
+    Dl_info info;
+    if (dladdr(symbol, &info) == 0 || !info.dli_fname || info.dli_fname[0] == '\0') {
+        return false;
+    }
+    int n = snprintf(out, out_size, "%s", info.dli_fname);
+    return n > 0 && (size_t)n < out_size;
+#endif
+}
+
+static void *dsl_jit_dynlib_open(const char *path) {
+#if defined(_WIN32) || defined(_WIN64)
+    return (void *)LoadLibraryA(path);
+#else
+    return dlopen(path, RTLD_NOW | RTLD_LOCAL);
+#endif
+}
+
+static void *dsl_jit_dynlib_symbol(void *handle, const char *name) {
+#if defined(_WIN32) || defined(_WIN64)
+    return (void *)GetProcAddress((HMODULE)handle, name);
+#else
+    return dlsym(handle, name);
+#endif
+}
+
+static void dsl_jit_dynlib_close(void *handle) {
+    if (!handle) {
+        return;
+    }
+#if defined(_WIN32) || defined(_WIN64)
+    (void)FreeLibrary((HMODULE)handle);
+#else
+    dlclose(handle);
+#endif
+}
+
+static const char *dsl_jit_dynlib_last_error(void) {
+#if defined(_WIN32) || defined(_WIN64)
+    static char err[160];
+    DWORD code = GetLastError();
+    if (code == 0) {
+        err[0] = '\0';
+        return err;
+    }
+    DWORD n = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                             NULL, code, 0, err, (DWORD)sizeof(err), NULL);
+    if (n == 0) {
+        snprintf(err, sizeof(err), "Win32 error %lu", (unsigned long)code);
+        return err;
+    }
+    while (n > 0 && (err[n - 1] == '\r' || err[n - 1] == '\n' ||
+                     err[n - 1] == ' ' || err[n - 1] == '\t')) {
+        err[n - 1] = '\0';
+        n--;
+    }
+    return err;
+#else
+    const char *err = dlerror();
+    return err ? err : "";
+#endif
+}
+
 static bool dsl_jit_path_dirname(const char *path, char *out, size_t out_size) {
     if (!path || !out || out_size == 0) {
         return false;
     }
     const char *slash = strrchr(path, '/');
+    const char *backslash = strrchr(path, '\\');
+    if (!slash || (backslash && backslash > slash)) {
+        slash = backslash;
+    }
     if (!slash) {
         if (out_size < 2) {
             return false;
@@ -3985,21 +4079,27 @@ static bool dsl_jit_libtcc_path_near_self(char *out, size_t out_size) {
     if (!out || out_size == 0) {
         return false;
     }
-    Dl_info info;
-    if (dladdr((void *)&dsl_jit_libtcc_path_near_self, &info) == 0 ||
-        !info.dli_fname || info.dli_fname[0] == '\0') {
+    char module_path[PATH_MAX];
+    if (!dsl_jit_module_path_from_symbol((const void *)&dsl_jit_libtcc_path_near_self,
+                                         module_path, sizeof(module_path))) {
         return false;
     }
     char dir[PATH_MAX];
-    if (!dsl_jit_path_dirname(info.dli_fname, dir, sizeof(dir))) {
+    if (!dsl_jit_path_dirname(module_path, dir, sizeof(dir))) {
         return false;
     }
-#if defined(__APPLE__)
+#if defined(_WIN32) || defined(_WIN64)
+    const char *name = "tcc.dll";
+#elif defined(__APPLE__)
     const char *name = "libtcc.dylib";
 #else
     const char *name = "libtcc.so";
 #endif
-    int n = snprintf(out, out_size, "%s/%s", dir, name);
+    char sep = '/';
+    if (strchr(dir, '\\')) {
+        sep = '\\';
+    }
+    int n = snprintf(out, out_size, "%s%c%s", dir, sep, name);
     return n > 0 && (size_t)n < out_size;
 }
 
@@ -4015,12 +4115,12 @@ static bool dsl_jit_libtcc_runtime_dir(char *out, size_t out_size) {
     if (!g_dsl_tcc_api.tcc_new_fn) {
         return false;
     }
-    Dl_info info;
-    if (dladdr((void *)g_dsl_tcc_api.tcc_new_fn, &info) == 0 ||
-        !info.dli_fname || info.dli_fname[0] == '\0') {
+    char module_path[PATH_MAX];
+    if (!dsl_jit_module_path_from_symbol((const void *)g_dsl_tcc_api.tcc_new_fn,
+                                         module_path, sizeof(module_path))) {
         return false;
     }
-    return dsl_jit_path_dirname(info.dli_fname, out, out_size);
+    return dsl_jit_path_dirname(module_path, out, out_size);
 }
 
 static double dsl_jit_bridge_apply_unary_f64(void (*fn)(const double *, double *, int), double x) {
@@ -4841,7 +4941,7 @@ static bool dsl_jit_libtcc_load_api(void) {
 
     const char *env_path = getenv("ME_DSL_JIT_LIBTCC_PATH");
     const char *default_path = ME_DSL_JIT_LIBTCC_DEFAULT_PATH;
-    const char *candidates[9];
+    const char *candidates[12];
     char self_candidate[PATH_MAX];
     int ncandidates = 0;
     if (env_path && env_path[0] != '\0') {
@@ -4853,7 +4953,10 @@ static bool dsl_jit_libtcc_load_api(void) {
     if (dsl_jit_libtcc_path_near_self(self_candidate, sizeof(self_candidate))) {
         candidates[ncandidates++] = self_candidate;
     }
-#if defined(__APPLE__)
+#if defined(_WIN32) || defined(_WIN64)
+    candidates[ncandidates++] = "tcc.dll";
+    candidates[ncandidates++] = "libtcc.dll";
+#elif defined(__APPLE__)
     candidates[ncandidates++] = "libtcc.dylib";
     candidates[ncandidates++] = "libtcc.so";
     candidates[ncandidates++] = "libtcc.so.1";
@@ -4865,24 +4968,24 @@ static bool dsl_jit_libtcc_load_api(void) {
 
     void *handle = NULL;
     for (int i = 0; i < ncandidates; i++) {
-        handle = dlopen(candidates[i], RTLD_NOW | RTLD_LOCAL);
+        handle = dsl_jit_dynlib_open(candidates[i]);
         if (handle) {
             break;
         }
     }
     if (!handle) {
-        const char *err = dlerror();
+        const char *err = dsl_jit_dynlib_last_error();
         snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error),
                  "failed to load libtcc shared library%s%s",
-                 err ? ": " : "", err ? err : "");
+                 (err && err[0]) ? ": " : "", (err && err[0]) ? err : "");
         return false;
     }
 
 #define ME_LOAD_TCC_SYM(field, sym_name, fn_type) \
     do { \
-        g_dsl_tcc_api.field = (fn_type)dlsym(handle, sym_name); \
+        g_dsl_tcc_api.field = (fn_type)dsl_jit_dynlib_symbol(handle, sym_name); \
         if (!g_dsl_tcc_api.field) { \
-            dlclose(handle); \
+            dsl_jit_dynlib_close(handle); \
             snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), \
                      "libtcc missing required symbol %s", sym_name); \
             return false; \
@@ -4897,10 +5000,10 @@ static bool dsl_jit_libtcc_load_api(void) {
     ME_LOAD_TCC_SYM(tcc_get_symbol_fn, "tcc_get_symbol", me_tcc_get_symbol_fn);
 #undef ME_LOAD_TCC_SYM
 
-    g_dsl_tcc_api.tcc_set_options_fn = (me_tcc_set_options_fn)dlsym(handle, "tcc_set_options");
-    g_dsl_tcc_api.tcc_add_library_fn = (me_tcc_add_library_fn)dlsym(handle, "tcc_add_library");
-    g_dsl_tcc_api.tcc_add_symbol_fn = (me_tcc_add_symbol_fn)dlsym(handle, "tcc_add_symbol");
-    g_dsl_tcc_api.tcc_set_lib_path_fn = (me_tcc_set_lib_path_fn)dlsym(handle, "tcc_set_lib_path");
+    g_dsl_tcc_api.tcc_set_options_fn = (me_tcc_set_options_fn)dsl_jit_dynlib_symbol(handle, "tcc_set_options");
+    g_dsl_tcc_api.tcc_add_library_fn = (me_tcc_add_library_fn)dsl_jit_dynlib_symbol(handle, "tcc_add_library");
+    g_dsl_tcc_api.tcc_add_symbol_fn = (me_tcc_add_symbol_fn)dsl_jit_dynlib_symbol(handle, "tcc_add_symbol");
+    g_dsl_tcc_api.tcc_set_lib_path_fn = (me_tcc_set_lib_path_fn)dsl_jit_dynlib_symbol(handle, "tcc_set_lib_path");
     g_dsl_tcc_api.handle = handle;
     g_dsl_tcc_api.available = true;
     g_dsl_tcc_api.error[0] = '\0';
@@ -5352,8 +5455,41 @@ static bool dsl_jit_cc_math_bridge_available(void) {
     return false;
 }
 
+static bool dsl_jit_runtime_enabled(void) {
+    const char *env = getenv("ME_DSL_JIT");
+    if (!env || env[0] == '\0') {
+        return true;
+    }
+    return strcmp(env, "0") != 0;
+}
+
 static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
+#if ME_USE_LIBTCC_FALLBACK
+    if (!program || !program->jit_c_source || program->jit_kernel_fn) {
+        return;
+    }
+    if (!dsl_jit_runtime_enabled()) {
+        return;
+    }
+    if (program->compiler != ME_DSL_COMPILER_LIBTCC) {
+        return;
+    }
+    if (dsl_jit_compile_libtcc_in_memory(program)) {
+        dsl_tracef("jit runtime built: fp=%s compiler=%s",
+                   dsl_fp_mode_name(program->fp_mode),
+                   dsl_compiler_name(program->compiler));
+        return;
+    }
+    snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+             "jit runtime tcc compilation failed");
+    dsl_tracef("jit runtime skip: fp=%s compiler=%s reason=%s detail=%s",
+               dsl_fp_mode_name(program->fp_mode),
+               dsl_compiler_name(program->compiler),
+               program->jit_c_error,
+               dsl_jit_libtcc_error_message());
+#else
     (void)program;
+#endif
 }
 #endif
 
@@ -5410,11 +5546,13 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     program->jit_param_input_indices = NULL;
     program->jit_nparams = 0;
     program->jit_kernel_fn = NULL;
-#if !defined(_WIN32) && !defined(_WIN64)
+#if ME_USE_LIBTCC_FALLBACK
     if (program->jit_tcc_state) {
         dsl_jit_libtcc_delete_state(program->jit_tcc_state);
         program->jit_tcc_state = NULL;
     }
+#endif
+#if !defined(_WIN32) && !defined(_WIN64)
     if (program->jit_dl_handle) {
         if (!program->jit_dl_handle_cached) {
             dlclose(program->jit_dl_handle);

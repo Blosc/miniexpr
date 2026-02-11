@@ -86,3 +86,29 @@ jobs:
           -DMINICC_BUILD_SHARED_LIBTCC=ON
         cmake --build build-minicc-wasm -j
         ctest --test-dir build-minicc-wasm -R '^minicc\.wasm\.' --output-on-failure
+
+  windows-libtcc-jit:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up MSVC (Windows)
+      uses: ilammy/msvc-dev-cmd@v1
+
+    - name: Configure and build (clang-cl + libtcc JIT)
+      shell: bash
+      run: |
+        cmake -S . -B build-windows-libtcc-jit -G "Visual Studio 17 2022" -T ClangCL \
+          -DCMAKE_C_COMPILER=clang-cl \
+          -DMINIEXPR_ENABLE_WINDOWS_LIBTCC_JIT=ON \
+          -DMINIEXPR_BUILD_BENCH=OFF \
+          -DMINIEXPR_BUILD_EXAMPLES=OFF
+        grep -Ei '^CMAKE_C_COMPILER:(FILEPATH|STRING|UNINITIALIZED)=.*clang-cl' build-windows-libtcc-jit/CMakeCache.txt
+        cmake --build build-windows-libtcc-jit --config Release
+
+    - name: Run DSL JIT tests (libtcc lane)
+      shell: bash
+      run: |
+        ctest --test-dir build-windows-libtcc-jit -C Release -R "test_dsl_jit_|test_dsl_syntax" --output-on-failure || \
+          ctest --test-dir build-windows-libtcc-jit -C Release --rerun-failed --output-on-failure

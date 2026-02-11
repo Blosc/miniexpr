@@ -24,9 +24,14 @@ option(MINIEXPR_BUILD_TESTS "Build tests" ON)
 option(MINIEXPR_BUILD_EXAMPLES "Build examples" ON)
 option(MINIEXPR_BUILD_BENCH "Build benchmarks" ON)
 option(MINIEXPR_USE_SLEEF "Enable SLEEF SIMD acceleration" ON)
+option(MINIEXPR_ENABLE_WINDOWS_LIBTCC_JIT "Enable experimental libtcc DSL JIT support on Windows" OFF)
 
 if(WIN32)
-  set(MINIEXPR_USE_LIBTCC_FALLBACK OFF)
+  if(MINIEXPR_ENABLE_WINDOWS_LIBTCC_JIT)
+    set(MINIEXPR_USE_LIBTCC_FALLBACK ON)
+  else()
+    set(MINIEXPR_USE_LIBTCC_FALLBACK OFF)
+  endif()
 else()
   set(MINIEXPR_USE_LIBTCC_FALLBACK ON)
 endif()
@@ -60,7 +65,7 @@ if(MINIEXPR_USE_SLEEF)
   FetchContent_Populate(sleef)
 endif()
 
-if(MINIEXPR_USE_LIBTCC_FALLBACK AND NOT WIN32)
+if(MINIEXPR_USE_LIBTCC_FALLBACK)
   FetchContent_Declare(
     tinycc
     # GIT_REPOSITORY https://repo.or.cz/tinycc.git
@@ -74,17 +79,36 @@ if(MINIEXPR_USE_LIBTCC_FALLBACK AND NOT WIN32)
 
   if(APPLE)
     set(MINIEXPR_TINYCC_SHARED_NAME "libtcc.dylib")
+  elseif(WIN32)
+    set(MINIEXPR_TINYCC_SHARED_NAME "tcc.dll")
   else()
     set(MINIEXPR_TINYCC_SHARED_NAME "libtcc.so")
   endif()
-  set(MINIEXPR_TINYCC_SHARED_PATH "${tinycc_BINARY_DIR}/${MINIEXPR_TINYCC_SHARED_NAME}")
+  if(WIN32)
+    set(MINIEXPR_TINYCC_BUILT_SHARED_PATH "${tinycc_BINARY_DIR}/$<CONFIG>/${MINIEXPR_TINYCC_SHARED_NAME}")
+  else()
+    set(MINIEXPR_TINYCC_BUILT_SHARED_PATH "${tinycc_BINARY_DIR}/${MINIEXPR_TINYCC_SHARED_NAME}")
+  endif()
   set(MINIEXPR_TINYCC_STAGED_SHARED_PATH "${CMAKE_CURRENT_BINARY_DIR}/${MINIEXPR_TINYCC_SHARED_NAME}")
   set(MINIEXPR_TINYCC_CONFIG_STAMP "${tinycc_BINARY_DIR}/.miniexpr_tinycc_configured")
+  set(MINIEXPR_TINYCC_GENERATOR_ARGS)
+  if(CMAKE_GENERATOR)
+    list(APPEND MINIEXPR_TINYCC_GENERATOR_ARGS -G "${CMAKE_GENERATOR}")
+  endif()
+  if(CMAKE_GENERATOR_PLATFORM)
+    list(APPEND MINIEXPR_TINYCC_GENERATOR_ARGS -A "${CMAKE_GENERATOR_PLATFORM}")
+  endif()
+  if(CMAKE_GENERATOR_TOOLSET)
+    list(APPEND MINIEXPR_TINYCC_GENERATOR_ARGS -T "${CMAKE_GENERATOR_TOOLSET}")
+  endif()
 
   add_custom_command(
     OUTPUT "${MINIEXPR_TINYCC_CONFIG_STAMP}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${tinycc_BINARY_DIR}"
+    COMMAND "${CMAKE_COMMAND}" -E rm -f "${tinycc_BINARY_DIR}/CMakeCache.txt"
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${tinycc_BINARY_DIR}/CMakeFiles"
     COMMAND "${CMAKE_COMMAND}"
+            ${MINIEXPR_TINYCC_GENERATOR_ARGS}
             -S "${tinycc_SOURCE_DIR}"
             -B "${tinycc_BINARY_DIR}"
             "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
@@ -96,19 +120,23 @@ if(MINIEXPR_USE_LIBTCC_FALLBACK AND NOT WIN32)
     VERBATIM
   )
 
-  add_custom_command(
-    OUTPUT "${MINIEXPR_TINYCC_SHARED_PATH}"
-    COMMAND "${CMAKE_COMMAND}" --build "${tinycc_BINARY_DIR}" --target minicc_libtcc_shared
-    DEPENDS "${MINIEXPR_TINYCC_CONFIG_STAMP}"
-    VERBATIM
-  )
-
-  add_custom_command(
-    OUTPUT "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MINIEXPR_TINYCC_SHARED_PATH}" "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
-    DEPENDS "${MINIEXPR_TINYCC_SHARED_PATH}"
-    VERBATIM
-  )
+  if(WIN32)
+    add_custom_command(
+      OUTPUT "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
+      COMMAND "${CMAKE_COMMAND}" --build "${tinycc_BINARY_DIR}" --config "$<CONFIG>" --target minicc_libtcc_shared
+      COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MINIEXPR_TINYCC_BUILT_SHARED_PATH}" "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
+      DEPENDS "${MINIEXPR_TINYCC_CONFIG_STAMP}"
+      VERBATIM
+    )
+  else()
+    add_custom_command(
+      OUTPUT "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
+      COMMAND "${CMAKE_COMMAND}" --build "${tinycc_BINARY_DIR}" --target minicc_libtcc_shared
+      COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MINIEXPR_TINYCC_BUILT_SHARED_PATH}" "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
+      DEPENDS "${MINIEXPR_TINYCC_CONFIG_STAMP}"
+      VERBATIM
+    )
+  endif()
 
   add_custom_target(miniexpr_tinycc ALL
     DEPENDS "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}")
@@ -141,7 +169,7 @@ function(miniexpr_setup_target target_name)
   endif()
   if(MINIEXPR_USE_LIBTCC_FALLBACK)
     target_compile_definitions(${target_name} PRIVATE ME_USE_LIBTCC_FALLBACK=1)
-    if(NOT WIN32 AND DEFINED MINIEXPR_TINYCC_STAGED_SHARED_PATH)
+    if(DEFINED MINIEXPR_TINYCC_STAGED_SHARED_PATH)
       target_compile_definitions(${target_name}
         PRIVATE ME_DSL_JIT_LIBTCC_DEFAULT_PATH="${MINIEXPR_TINYCC_STAGED_SHARED_PATH}")
     endif()
@@ -162,7 +190,7 @@ endfunction()
 if(MINIEXPR_BUILD_SHARED)
   add_library(miniexpr SHARED)
   miniexpr_setup_target(miniexpr)
-  if(MINIEXPR_USE_LIBTCC_FALLBACK AND NOT WIN32)
+  if(MINIEXPR_USE_LIBTCC_FALLBACK)
     add_dependencies(miniexpr miniexpr_tinycc)
   endif()
   if(WIN32)
@@ -173,7 +201,7 @@ endif()
 if(MINIEXPR_BUILD_STATIC)
   add_library(miniexpr_static STATIC)
   miniexpr_setup_target(miniexpr_static)
-  if(MINIEXPR_USE_LIBTCC_FALLBACK AND NOT WIN32)
+  if(MINIEXPR_USE_LIBTCC_FALLBACK)
     add_dependencies(miniexpr_static miniexpr_tinycc)
   endif()
   set_target_properties(miniexpr_static PROPERTIES OUTPUT_NAME miniexpr)
