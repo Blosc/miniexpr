@@ -145,8 +145,10 @@ jobs:
       shell: bash
       run: |
         set -o pipefail
-        ME_DSL_TRACE=1 ctest --test-dir build-wasm32 -R "test_dsl_jit_ir|test_dsl_syntax" -V \
+        node -e 'global.Module={ENV:{ME_DSL_TRACE:"1"}}; require("./build-wasm32/tests/test_dsl_jit_ir.js");' \
           2>&1 | tee build-wasm32/dsl-trace.log
+        node -e 'global.Module={ENV:{ME_DSL_TRACE:"1"}}; require("./build-wasm32/tests/test_dsl_syntax.js");' \
+          2>&1 | tee -a build-wasm32/dsl-trace.log
         grep -E "jit ir built:|jit ir skip:|jit runtime (built|skip|hit|stubbed):" build-wasm32/dsl-trace.log || true
 
   windows-libtcc-jit:
