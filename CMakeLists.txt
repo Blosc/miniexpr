@@ -65,10 +65,10 @@ if(MINIEXPR_USE_LIBTCC_FALLBACK AND NOT WIN32)
     tinycc
     # GIT_REPOSITORY https://repo.or.cz/tinycc.git
     # GIT_TAG 4597a9621e70a337b241d424f4ab4729cb75b426  # latest commit as of Feb 2025
-    #GIT_REPOSITORY https://github.com/Blosc/minicc.git
-    #GIT_TAG 20a9b2a0d55ff2866776ba82c40965bb307ada24
-    SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../minicc"
-    BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/_deps/minicc-build"
+    # minicc is a fork of tinycc with support for wasm32 and shared library builds
+    GIT_REPOSITORY https://github.com/Blosc/minicc.git
+    GIT_TAG 0cc737c2e3778b27d91a988daff98a4d6acf1090
+    # SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../minicc"
   )
   FetchContent_Populate(tinycc)
 
