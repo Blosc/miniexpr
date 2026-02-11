@@ -1,9 +1,7 @@
 /*
- * DSL Mandelbrot benchmark for JIT cold/warm vs interpreter fallback.
+ * DSL Mandelbrot benchmark for JIT cold/warm vs interpreted baseline.
  *
- * Compares two DSL kernel styles:
- * 1. masked updates + global break via `all(active == 0)`
- * 2. per-item escape via `if ...: break`
+ * Uses a per-item escape kernel via `if ...: break`.
  *
  * The kernel matches the python-blosc2 notebook variant and returns
  * per-element escape iteration counts.
@@ -35,7 +33,6 @@ typedef struct {
 typedef struct {
     bench_result jit_cold;
     bench_result jit_warm;
-    bench_result interp;
 } kernel_result;
 
 static uint64_t monotonic_ns(void) {
@@ -172,7 +169,6 @@ static bool valid_compiler_mode(const char *compiler_mode) {
 }
 
 static bool build_dsl_source(char *out, size_t out_size, int max_iter,
-                             bool use_any_break,
                              const char *fp_mode, const char *compiler_mode) {
     if (!out || out_size == 0 || max_iter <= 0) {
         return false;
@@ -196,83 +192,47 @@ static bool build_dsl_source(char *out, size_t out_size, int max_iter,
     if (n <= 0 || (size_t)n >= sizeof(prefix)) {
         return false;
     }
-    if (use_any_break) {
-        n = snprintf(out, out_size,
-                     "%s"
-                     "def kernel(cr, ci):\n"
-                     "    zr = 0.0\n"
-                     "    zi = 0.0\n"
-                     "    escape_iter = %.1f\n"
-                     "    for i in range(%d):\n"
-                     "        zr2 = zr * zr\n"
-                     "        zi2 = zi * zi\n"
-                     "        mag2 = zr2 + zi2\n"
-                     "        active = escape_iter == %.1f\n"
-                     "        just_escaped = (mag2 > 4.0) & active\n"
-                     "        escape_iter = where(just_escaped, i + 0.0, escape_iter)\n"
-                     "        active = escape_iter == %.1f\n"
-                     "        if all(active == 0):\n"
-                     "            break\n"
-                     "        zr_new = zr2 - zi2 + cr\n"
-                     "        zi_new = 2.0 * zr * zi + ci\n"
-                     "        zr = where(active, zr_new, zr)\n"
-                     "        zi = where(active, zi_new, zi)\n"
-                     "    return escape_iter\n",
-                     prefix,
-                     (double)max_iter,
-                     max_iter,
-                     (double)max_iter,
-                     (double)max_iter);
-    }
-    else {
-        n = snprintf(out, out_size,
-                     "%s"
-                     "def kernel(cr, ci):\n"
-                     "    zr = 0.0\n"
-                     "    zi = 0.0\n"
-                     "    escape_iter = %.1f\n"
-                     "    for i in range(%d):\n"
-                     "        if zr * zr + zi * zi > 4.0:\n"
-                     "            escape_iter = i + 0.0\n"
-                     "            break\n"
-                     "        zr_new = zr * zr - zi * zi + cr\n"
-                     "        zi = 2.0 * zr * zi + ci\n"
-                     "        zr = zr_new\n"
-                     "    return escape_iter\n",
-                     prefix,
-                     (double)max_iter,
-                     max_iter);
-    }
+    n = snprintf(out, out_size,
+                 "%s"
+                 "def kernel(cr, ci):\n"
+                 "    zr = 0.0\n"
+                 "    zi = 0.0\n"
+                 "    escape_iter = %.1f\n"
+                 "    for i in range(%d):\n"
+                 "        if zr * zr + zi * zi > 4.0:\n"
+                 "            escape_iter = i + 0.0\n"
+                 "            break\n"
+                 "        zr_new = zr * zr - zi * zi + cr\n"
+                 "        zi = 2.0 * zr * zi + ci\n"
+                 "        zr = zr_new\n"
+                 "    return escape_iter\n",
+                 prefix,
+                 (double)max_iter,
+                 max_iter);
     return n > 0 && (size_t)n < out_size;
 }
 
-static void print_mode_result_line(const char *kernel_style, const char *compiler_label,
-                                   const char *mode, const bench_result *result) {
-    if (!kernel_style || !compiler_label || !mode || !result) {
+static void print_mode_result_line(const char *compiler_label,
+                                   const char *mode, const bench_result *result,
+                                   const char *speedup_label) {
+    if (!compiler_label || !mode || !result || !speedup_label) {
         return;
     }
-    printf("%-10s %-10s %-18s %12.3f %14.3f %12.3f %12.3f\n",
-           kernel_style, compiler_label, mode,
+    printf("%-10s %-18s %12.3f %14.3f %12.3f %12.3f %14s\n",
+           compiler_label, mode,
            result->compile_ms, result->eval_ms_best,
-           result->ns_per_elem_best, result->checksum);
+           result->ns_per_elem_best, result->checksum, speedup_label);
 }
 
-static void print_speedup_lines(const char *compiler_label,
-                                const kernel_result *masked_res,
-                                const kernel_result *per_item_res) {
-    if (!compiler_label || !masked_res || !per_item_res) {
+static void format_speedup_vs_baseline(char *out, size_t out_size,
+                                       double baseline_ns_per_elem,
+                                       const bench_result *result) {
+    if (!out || out_size == 0 || !result ||
+        baseline_ns_per_elem <= 0.0 || result->ns_per_elem_best <= 0.0) {
         return;
     }
-    double masked_warm = masked_res->jit_warm.ns_per_elem_best;
-    double per_item_warm = per_item_res->jit_warm.ns_per_elem_best;
-    double masked_interp = masked_res->interp.ns_per_elem_best;
-    double per_item_interp = per_item_res->interp.ns_per_elem_best;
-    if (per_item_warm > 0.0 && per_item_interp > 0.0) {
-        printf("speedup_warm_per_item_vs_masked[%s]=%.3fx\n",
-               compiler_label, masked_warm / per_item_warm);
-        printf("speedup_interp_per_item_vs_masked[%s]=%.3fx\n",
-               compiler_label, masked_interp / per_item_interp);
-    }
+    (void)snprintf(out, out_size, "%.1fx",
+                   baseline_ns_per_elem / result->ns_per_elem_best);
 }
 
 static int run_mode(const char *mode_name, const char *jit_env_value,
@@ -367,42 +327,44 @@ static int run_mode(const char *mode_name, const char *jit_env_value,
     return 0;
 }
 
-static int run_kernel(const char *kernel_name, const char *compiler_label,
-                      const char *source,
+static int run_kernel(const char *compiler_label, const char *source,
                       const float *cr, const float *ci, int nitems, int repeats,
-                      kernel_result *result) {
-    if (!kernel_name || !compiler_label || !source || !cr || !ci ||
-        nitems <= 0 || repeats <= 0 || !result) {
+                      double baseline_ns_per_elem, kernel_result *result) {
+    if (!compiler_label || !source || !cr || !ci ||
+        nitems <= 0 || repeats <= 0 || baseline_ns_per_elem <= 0.0 || !result) {
         return 1;
     }
 
     memset(result, 0, sizeof(*result));
     bool cold_has_jit = false;
     bool warm_has_jit = false;
+    char speedup[32];
 
-    if (run_mode(kernel_name, "1", source, cr, ci, nitems, 1,
+    if (run_mode("jit-cold", "1", source, cr, ci, nitems, 1,
                  &result->jit_cold, &cold_has_jit) != 0) {
         return 1;
     }
     const char *cold_mode = cold_has_jit ? "jit-cold" : "jit-fallback-cold";
-    print_mode_result_line(kernel_name, compiler_label, cold_mode, &result->jit_cold);
-    if (run_mode(kernel_name, "1", source, cr, ci, nitems, repeats,
+    snprintf(speedup, sizeof(speedup), "-");
+    format_speedup_vs_baseline(speedup, sizeof(speedup), baseline_ns_per_elem,
+                               &result->jit_cold);
+    print_mode_result_line(compiler_label, cold_mode, &result->jit_cold, speedup);
+    if (run_mode("jit-warm", "1", source, cr, ci, nitems, repeats,
                  &result->jit_warm, &warm_has_jit) != 0) {
         return 1;
     }
     const char *warm_mode = warm_has_jit ? "jit-warm" : "jit-fallback-warm";
-    print_mode_result_line(kernel_name, compiler_label, warm_mode, &result->jit_warm);
-    if (run_mode(kernel_name, "0", source, cr, ci, nitems, repeats, &result->interp, NULL) != 0) {
-        return 1;
-    }
-    print_mode_result_line(kernel_name, compiler_label, "interp", &result->interp);
+    snprintf(speedup, sizeof(speedup), "-");
+    format_speedup_vs_baseline(speedup, sizeof(speedup), baseline_ns_per_elem,
+                               &result->jit_warm);
+    print_mode_result_line(compiler_label, warm_mode, &result->jit_warm, speedup);
     return 0;
 }
 
 int main(int argc, char **argv) {
     int width = 1200;
     int height = 800;
-    int repeats = 6;
+    int repeats = 3;
     int max_iter = 200;
     int argi = 1;
     const char *fp_mode = getenv("ME_BENCH_FP_MODE");
@@ -490,23 +452,20 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    kernel_result vector_libtcc_res;
     kernel_result element_libtcc_res;
-    kernel_result vector_cc_res;
-    kernel_result element_cc_res;
-    char vector_libtcc_source[1024];
+    kernel_result element_cc_strict_res;
+    kernel_result element_cc_fast_res;
+    bench_result interpreted_baseline;
     char element_libtcc_source[1024];
-    char vector_cc_source[1024];
-    char element_cc_source[1024];
+    char element_cc_strict_source[1024];
+    char element_cc_fast_source[1024];
 
-    if (!build_dsl_source(vector_libtcc_source, sizeof(vector_libtcc_source),
-                          max_iter, true, fp_mode, NULL) ||
-        !build_dsl_source(element_libtcc_source, sizeof(element_libtcc_source),
-                          max_iter, false, fp_mode, NULL) ||
-        !build_dsl_source(vector_cc_source, sizeof(vector_cc_source),
-                          max_iter, true, fp_mode, "cc") ||
-        !build_dsl_source(element_cc_source, sizeof(element_cc_source),
-                          max_iter, false, fp_mode, "cc")) {
+    if (!build_dsl_source(element_libtcc_source, sizeof(element_libtcc_source),
+                          max_iter, fp_mode, NULL) ||
+        !build_dsl_source(element_cc_strict_source, sizeof(element_cc_strict_source),
+                          max_iter, "strict", "cc") ||
+        !build_dsl_source(element_cc_fast_source, sizeof(element_cc_fast_source),
+                          max_iter, "fast", "cc")) {
         fprintf(stderr, "failed to build benchmark DSL source\n");
         restore_env_value("TMPDIR", saved_tmpdir);
         free(saved_tmpdir);
@@ -518,19 +477,13 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    printf("benchmark_dsl_jit_mandelbrot\n");
     printf("width=%d height=%d repeats=%d max_iter=%d\n",
            width, height, repeats, max_iter);
-    printf("kernel: notebook-equivalent escape-iteration output\n");
-    printf("kernels: masked(all-active break) vs per-item(if ...: break)\n");
-    printf("compiler order: default-libtcc then cc\n");
-    printf("fp_pragma=%s\n", fp_mode);
-    printf("timing: warm modes report best single run over repeats\n");
-    printf("%-10s %-10s %-18s %12s %14s %12s %12s\n",
-           "kernel", "compiler", "mode", "compile_ms", "eval_ms_best", "ns_per_elem", "checksum");
+    printf("%-10s %-18s %12s %14s %12s %12s %14s\n",
+           "compiler", "mode", "compile_ms", "eval_ms_best", "ns_per_elem", "checksum", "speedup");
 
-    if (run_kernel("masked", "libtcc", vector_libtcc_source,
-                   cr, ci, nitems, repeats, &vector_libtcc_res) != 0) {
+    if (run_mode("interpreted DSL", "0", element_libtcc_source,
+                 cr, ci, nitems, 1, &interpreted_baseline, NULL) != 0) {
         restore_env_value("TMPDIR", saved_tmpdir);
         free(saved_tmpdir);
         free(cr);
@@ -540,21 +493,11 @@ int main(int argc, char **argv) {
         (void)rmdir(tmp_root);
         return 1;
     }
-    if (run_kernel("per-item", "libtcc", element_libtcc_source,
-                   cr, ci, nitems, repeats, &element_libtcc_res) != 0) {
-        restore_env_value("TMPDIR", saved_tmpdir);
-        free(saved_tmpdir);
-        free(cr);
-        free(ci);
-        remove_files_in_dir(cache_dir);
-        (void)rmdir(cache_dir);
-        (void)rmdir(tmp_root);
-        return 1;
-    }
-    print_speedup_lines("libtcc", &vector_libtcc_res, &element_libtcc_res);
+    print_mode_result_line("n/a", "interpreted DSL", &interpreted_baseline, "baseline");
 
-    if (run_kernel("masked", "cc", vector_cc_source,
-                   cr, ci, nitems, repeats, &vector_cc_res) != 0) {
+    if (run_kernel("libtcc", element_libtcc_source,
+                   cr, ci, nitems, repeats,
+                   interpreted_baseline.ns_per_elem_best, &element_libtcc_res) != 0) {
         restore_env_value("TMPDIR", saved_tmpdir);
         free(saved_tmpdir);
         free(cr);
@@ -564,8 +507,11 @@ int main(int argc, char **argv) {
         (void)rmdir(tmp_root);
         return 1;
     }
-    if (run_kernel("per-item", "cc", element_cc_source,
-                   cr, ci, nitems, repeats, &element_cc_res) != 0) {
+
+    printf("fp_pragma=strict\n");
+    if (run_kernel("cc", element_cc_strict_source,
+                   cr, ci, nitems, repeats,
+                   interpreted_baseline.ns_per_elem_best, &element_cc_strict_res) != 0) {
         restore_env_value("TMPDIR", saved_tmpdir);
         free(saved_tmpdir);
         free(cr);
@@ -575,7 +521,20 @@ int main(int argc, char **argv) {
         (void)rmdir(tmp_root);
         return 1;
     }
-    print_speedup_lines("cc", &vector_cc_res, &element_cc_res);
+
+    printf("fp_pragma=fast\n");
+    if (run_kernel("cc", element_cc_fast_source,
+                   cr, ci, nitems, repeats,
+                   interpreted_baseline.ns_per_elem_best, &element_cc_fast_res) != 0) {
+        restore_env_value("TMPDIR", saved_tmpdir);
+        free(saved_tmpdir);
+        free(cr);
+        free(ci);
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+        (void)rmdir(tmp_root);
+        return 1;
+    }
 
     restore_env_value("TMPDIR", saved_tmpdir);
     free(saved_tmpdir);
