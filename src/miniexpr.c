@@ -5057,7 +5057,7 @@ static bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
                  "tcc_set_output_type failed");
         return false;
     }
-#if !defined(__APPLE__)
+#if !defined(__APPLE__) && !defined(_WIN32) && !defined(_WIN64)
     if (g_dsl_tcc_api.tcc_add_library_fn) {
         (void)g_dsl_tcc_api.tcc_add_library_fn(state, "m");
     }
