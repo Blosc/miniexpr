@@ -25,6 +25,7 @@ option(MINIEXPR_BUILD_EXAMPLES "Build examples" ON)
 option(MINIEXPR_BUILD_BENCH "Build benchmarks" ON)
 option(MINIEXPR_USE_SLEEF "Enable SLEEF SIMD acceleration" ON)
 option(MINIEXPR_USE_LIBTCC_FALLBACK "Enable libtcc DSL JIT fallback" ON)
+option(MINIEXPR_BUILD_BUNDLED_LIBTCC "Build bundled libtcc from minicc sources when fallback is enabled" ON)
 option(MINIEXPR_DSL_TRACE_DEFAULT "Enable DSL trace logs by default when ME_DSL_TRACE is unset" OFF)
 option(MINIEXPR_ENABLE_WASM_LIBTCC_JIT "Enable experimental libtcc DSL JIT support on Emscripten" OFF)
 option(MINIEXPR_ENABLE_WINDOWS_LIBTCC_JIT "Enable experimental libtcc DSL JIT support on Windows" OFF)
@@ -32,6 +33,9 @@ option(MINIEXPR_ENABLE_WINDOWS_LIBTCC_JIT "Enable experimental libtcc DSL JIT su
 if(EMSCRIPTEN)
   if(MINIEXPR_ENABLE_WASM_LIBTCC_JIT)
     set(MINIEXPR_USE_LIBTCC_FALLBACK ON)
+    # Keep wasm JIT experiments focused on runtime behavior; bundled libtcc
+    # toolchain builds under emcc are unreliable and not required for tracing.
+    set(MINIEXPR_BUILD_BUNDLED_LIBTCC OFF)
   else()
     # Plain wasm32 builds default to interpreter-only DSL execution.
     set(MINIEXPR_USE_LIBTCC_FALLBACK OFF)
@@ -53,7 +57,7 @@ set(MINIEXPR_SOURCES
   src/functions-simd.c
 )
 
-if(MINIEXPR_USE_SLEEF OR MINIEXPR_USE_LIBTCC_FALLBACK)
+if(MINIEXPR_USE_SLEEF OR (MINIEXPR_USE_LIBTCC_FALLBACK AND MINIEXPR_BUILD_BUNDLED_LIBTCC))
   include(FetchContent)
   if(POLICY CMP0169)
     cmake_policy(SET CMP0169 OLD)
@@ -73,7 +77,7 @@ if(MINIEXPR_USE_SLEEF)
   FetchContent_Populate(sleef)
 endif()
 
-if(MINIEXPR_USE_LIBTCC_FALLBACK)
+if(MINIEXPR_USE_LIBTCC_FALLBACK AND MINIEXPR_BUILD_BUNDLED_LIBTCC)
   FetchContent_Declare(
     tinycc
     # GIT_REPOSITORY https://repo.or.cz/tinycc.git
@@ -201,7 +205,7 @@ endfunction()
 if(MINIEXPR_BUILD_SHARED)
   add_library(miniexpr SHARED)
   miniexpr_setup_target(miniexpr)
-  if(MINIEXPR_USE_LIBTCC_FALLBACK)
+  if(TARGET miniexpr_tinycc)
     add_dependencies(miniexpr miniexpr_tinycc)
   endif()
   if(WIN32)
@@ -212,7 +216,7 @@ endif()
 if(MINIEXPR_BUILD_STATIC)
   add_library(miniexpr_static STATIC)
   miniexpr_setup_target(miniexpr_static)
-  if(MINIEXPR_USE_LIBTCC_FALLBACK)
+  if(TARGET miniexpr_tinycc)
     add_dependencies(miniexpr_static miniexpr_tinycc)
   endif()
   set_target_properties(miniexpr_static PROPERTIES OUTPUT_NAME miniexpr)

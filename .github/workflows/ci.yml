@@ -129,7 +129,15 @@ jobs:
           -DMINIEXPR_BUILD_EXAMPLES=OFF \
           -DMINIEXPR_USE_SLEEF=OFF \
           -DMINIEXPR_ENABLE_WASM_LIBTCC_JIT=ON \
+          -DMINIEXPR_BUILD_BUNDLED_LIBTCC=OFF \
           -DMINIEXPR_DSL_TRACE_DEFAULT=ON
+
+    - name: Verify wasm32 CMake flags
+      shell: bash
+      run: |
+        grep -E '^MINIEXPR_ENABLE_WASM_LIBTCC_JIT:BOOL=ON$' build-wasm32/CMakeCache.txt
+        grep -E '^MINIEXPR_BUILD_BUNDLED_LIBTCC:BOOL=OFF$' build-wasm32/CMakeCache.txt
+        grep -E '^MINIEXPR_USE_LIBTCC_FALLBACK:BOOL=ON$' build-wasm32/CMakeCache.txt
 
     - name: Build wasm32 miniexpr + tests
       shell: bash
