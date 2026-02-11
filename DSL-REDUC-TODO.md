@@ -20,7 +20,7 @@ Current state:
         - reduction kind: `any` or `all`
         - reduction argument expression
     - In codegen, add a reduction-capable path for those conditions:
-        - evaluate reduction argument over lane domain,
+        - evaluate reduction argument over element domain,
         - compute scalar reduction result with short-circuit behavior,
         - branch using that scalar result.
     - Keep conditional `break`/`continue` out of scope in this stage.
@@ -51,11 +51,11 @@ Current state:
 ### Parity Requirements
 
 - Truthiness must match interpreter semantics exactly.
-- `any/all` condition behavior must match interpreter control-flow effects for all lanes.
+- `any/all` condition behavior must match interpreter control-flow effects for all elements.
 - If a reduction form is unsupported, JIT must reject cleanly and runtime must fallback to interpreter.
 
 ## Migration Notes
 
 - Existing scripts with explicit `any()`/`all()` keep working.
-- Scripts written with element dialect semantics become baseline semantics.
-- Scripts relying on vector dialect scalar-only control flow still run, but may now execute per-lane when condition is vector-valued.
+- Scripts written with element-wise semantics become baseline semantics.
+- Scripts relying on scalar-condition control flow still run, but may now execute element-wise when condition is vector-valued.

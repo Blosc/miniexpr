@@ -109,7 +109,7 @@ Acceptance:
 
 1. Unit:
    - symbol registration/linking success
-   - JIT acceptance/rejection paths by dialect/pattern
+   - JIT acceptance/rejection paths by kernel pattern
 2. Integration:
    - DSL kernels using math aliases and two-arg functions
    - forced `tcc` and default `cc` backends

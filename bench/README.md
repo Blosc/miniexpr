@@ -120,9 +120,8 @@ Thread-safe evaluation overhead vs single-threaded.
 ### benchmark_dsl_jit_mandelbrot.c
 DSL Mandelbrot-style benchmark comparing:
 - Notebook-equivalent Mandelbrot escape-iteration kernel.
-- `vector` dialect kernel (`all(active == 0)` break) in JIT cold/warm + interpreter modes.
-- `element` dialect kernel (per-item `if ...: break`) in JIT cold/warm + interpreter modes.
-- Side-by-side speed ratios for element vs vector.
+- Element-wise loop form (`if ...: break`) in interpreted, JIT cold, and JIT warm modes.
+- Compiler backends: `tcc` and `cc`.
 
 Notes:
 - `jit-warm` and `interp` rows report the **best single run** over `repeats`.
@@ -140,7 +139,7 @@ ME_BENCH_FP_MODE=fast ./build/bench/benchmark_dsl_jit_mandelbrot 1024x512 6 24
 ```
 
 ### benchmark_dsl_jit_math_kernels.c
-Element-dialect DSL JIT baseline for representative math kernels:
+DSL JIT baseline for representative math kernels:
 - `sin`, `exp`, `log`, `pow`, `hypot`, `atan2`, `sinpi`, `cospi`
 - Per-kernel metrics:
   - JIT cold compile latency
@@ -149,7 +148,7 @@ Element-dialect DSL JIT baseline for representative math kernels:
   - max-abs numerical diff (JIT warm vs interpreter)
 
 Notes:
-- Uses `# me:fp=strict` under unified DSL semantics.
+- Uses `# me:fp=strict`.
 - Uses `# me:compiler=tcc` by default (when `ME_BENCH_COMPILER` is unset).
 - Set `ME_BENCH_COMPILER=cc` to benchmark the `cc` backend explicitly.
 

@@ -1,10 +1,10 @@
 /*
  * DSL Mandelbrot benchmark for JIT cold/warm vs interpreted baseline.
  *
- * Uses a per-item escape kernel via `if ...: break`.
+ * Uses an element-wise escape loop via `if ...: break`.
  *
  * The kernel matches the python-blosc2 notebook variant and returns
- * per-element escape iteration counts.
+ * element-wise escape iteration counts.
  *
  * Usage:
  *   ./benchmark_dsl_jit_mandelbrot [widthxheight | width height] [repeats] [max_iter]

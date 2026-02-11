@@ -1407,7 +1407,6 @@ static bool parse_def(me_dsl_lexer *lex, me_dsl_program *program, me_dsl_error *
 
 static bool parse_program(me_dsl_lexer *lex, me_dsl_program *program, me_dsl_error *error) {
     memset(program, 0, sizeof(*program));
-    program->dialect = ME_DSL_DIALECT_ELEMENT;
     program->fp_mode = ME_DSL_FP_STRICT;
     program->compiler = ME_DSL_COMPILER_LIBTCC;
 

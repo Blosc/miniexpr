@@ -282,11 +282,7 @@ static int test_parser_pragmas(void) {
         "    return x\n";
     me_dsl_program *program = me_dsl_parse(src_default, &error);
     if (!program) {
-        printf("  FAILED: parse error for default dialect source\n");
-        return 1;
-    }
-    if (program->dialect != ME_DSL_DIALECT_ELEMENT) {
-        printf("  FAILED: default internal dialect should be unified/element\n");
+        printf("  FAILED: parse error for default source\n");
         me_dsl_program_free(program);
         return 1;
     }

@@ -872,8 +872,8 @@ static int test_dsl_function_calls(void) {
     return rc;
 }
 
-static int test_unified_loop_condition_policy(void) {
-    printf("\n=== DSL Test 11: unified loop condition policy ===\n");
+static int test_loop_condition_policy(void) {
+    printf("\n=== DSL Test 11: loop condition policy ===\n");
 
     const char *src =
         "def kernel(x):\n"
@@ -909,8 +909,8 @@ static int test_unified_loop_condition_policy(void) {
     return rc;
 }
 
-static int test_unified_per_item_break(void) {
-    printf("\n=== DSL Test 12: unified per-item break ===\n");
+static int test_elementwise_break(void) {
+    printf("\n=== DSL Test 12: element-wise break ===\n");
 
     const char *src =
         "def kernel(x):\n"
@@ -988,8 +988,8 @@ static int test_reduction_any_remains_global(void) {
     return rc;
 }
 
-static int test_unified_interpreter_jit_parity(void) {
-    printf("\n=== DSL Test 14: unified interpreter/JIT parity ===\n");
+static int test_interpreter_jit_parity(void) {
+    printf("\n=== DSL Test 14: interpreter/JIT parity ===\n");
 
     const char *src =
         "def kernel(x):\n"
@@ -1047,7 +1047,7 @@ static int test_unified_interpreter_jit_parity(void) {
 
     double expected[4] = {0.0, 1.0, 10.0, 28.0};
     if (check_all_close(out_interp, expected, 4, 1e-12) != 0) {
-        printf("  ❌ FAILED: unexpected unified parity output\n");
+        printf("  ❌ FAILED: unexpected parity output\n");
         return 1;
     }
 
@@ -1351,10 +1351,10 @@ int main(void) {
     fail |= test_nested_loops_and_conditionals();
     fail |= test_break_any_condition();
     fail |= test_dsl_function_calls();
-    fail |= test_unified_loop_condition_policy();
-    fail |= test_unified_per_item_break();
+    fail |= test_loop_condition_policy();
+    fail |= test_elementwise_break();
     fail |= test_reduction_any_remains_global();
-    fail |= test_unified_interpreter_jit_parity();
+    fail |= test_interpreter_jit_parity();
     fail |= test_unknown_me_pragma_rejected();
     fail |= test_return_inside_loop_interpreter_jit_parity();
     fail |= test_missing_return_runtime_error_with_jit_enabled();

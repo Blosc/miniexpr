@@ -206,7 +206,6 @@ typedef struct {
     int uses_i_mask;
     int uses_n_mask;
     bool uses_ndim;
-    me_dsl_dialect dialect;
     me_dsl_fp_mode fp_mode;
     me_dsl_compiler compiler;
     bool guaranteed_return;
@@ -2477,11 +2476,6 @@ typedef struct {
     int func_count;
 } dsl_compile_ctx;
 
-static const char *dsl_dialect_name(me_dsl_dialect dialect) {
-    (void)dialect;
-    return "unified";
-}
-
 static const char *dsl_fp_mode_name(me_dsl_fp_mode fp_mode) {
     switch (fp_mode) {
     case ME_DSL_FP_STRICT:
@@ -3431,7 +3425,7 @@ static uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program
 #define ME_DSL_JIT_NEG_CACHE_LONG_COOLDOWN_SEC 120
 #define ME_DSL_JIT_POS_CACHE_SLOTS 64
 #define ME_DSL_JIT_META_MAGIC 0x4d454a49544d4554ULL
-#define ME_DSL_JIT_META_VERSION 4
+#define ME_DSL_JIT_META_VERSION 5
 
 typedef enum {
     ME_DSL_JIT_NEG_FAIL_CACHE_DIR = 1,
@@ -3470,7 +3464,6 @@ typedef struct {
     uint64_t cache_key;
     uint64_t ir_fingerprint;
     int32_t output_dtype;
-    int32_t dialect;
     int32_t fp_mode;
     int32_t compiler;
     int32_t nparams;
@@ -3702,7 +3695,6 @@ static void dsl_jit_fill_cache_meta(me_dsl_jit_cache_meta *meta,
     }
     meta->ir_fingerprint = program->jit_ir_fingerprint;
     meta->output_dtype = (int32_t)program->output_dtype;
-    meta->dialect = (int32_t)program->dialect;
     meta->fp_mode = (int32_t)program->fp_mode;
     meta->compiler = (int32_t)program->compiler;
     meta->nparams = (int32_t)program->jit_nparams;
@@ -5145,36 +5137,31 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         return;
     }
     if (program->output_is_scalar) {
-        dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=scalar output",
-                   dsl_dialect_name(program->dialect),
+        dsl_tracef("jit runtime skip: fp=%s reason=scalar output",
                    dsl_fp_mode_name(program->fp_mode));
         return;
     }
     if (program->uses_i_mask || program->uses_n_mask || program->uses_ndim) {
-        dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=reserved index vars used",
-                   dsl_dialect_name(program->dialect),
+        dsl_tracef("jit runtime skip: fp=%s reason=reserved index vars used",
                    dsl_fp_mode_name(program->fp_mode));
         return;
     }
     if (program->jit_nparams != program->jit_ir->nparams) {
-        dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=parameter metadata mismatch",
-                   dsl_dialect_name(program->dialect),
+        dsl_tracef("jit runtime skip: fp=%s reason=parameter metadata mismatch",
                    dsl_fp_mode_name(program->fp_mode));
         return;
     }
     if (!dsl_jit_runtime_enabled()) {
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime disabled by environment");
-        dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=%s",
-                   dsl_dialect_name(program->dialect),
+        dsl_tracef("jit runtime skip: fp=%s reason=%s",
                    dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
         return;
     }
 
     uint64_t key = dsl_jit_runtime_cache_key(program);
     if (dsl_jit_pos_cache_enabled() && dsl_jit_pos_cache_bind_program(program, key)) {
-        dsl_tracef("jit runtime hit: dialect=%s fp=%s source=process-cache key=%016llx",
-                   dsl_dialect_name(program->dialect),
+        dsl_tracef("jit runtime hit: fp=%s source=process-cache key=%016llx",
                    dsl_fp_mode_name(program->fp_mode),
                    (unsigned long long)key);
         dsl_jit_neg_cache_clear(key);
@@ -5183,8 +5170,7 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
     if (dsl_jit_neg_cache_should_skip(key)) {
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime skipped after recent failure");
-        dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=%s key=%016llx",
-                   dsl_dialect_name(program->dialect),
+        dsl_tracef("jit runtime skip: fp=%s reason=%s key=%016llx",
                    dsl_fp_mode_name(program->fp_mode), program->jit_c_error,
                    (unsigned long long)key);
         return;
@@ -5195,8 +5181,7 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_CACHE_DIR);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime cache directory unavailable");
-        dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=%s",
-                   dsl_dialect_name(program->dialect),
+        dsl_tracef("jit runtime skip: fp=%s reason=%s",
                    dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
         return;
     }
@@ -5217,8 +5202,7 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_PATH);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime cache path too long");
-        dsl_tracef("jit runtime skip: dialect=%s reason=%s",
-                   dsl_dialect_name(program->dialect), program->jit_c_error);
+        dsl_tracef("jit runtime skip: reason=%s", program->jit_c_error);
         return;
     }
 
@@ -5237,24 +5221,21 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
             if (dsl_jit_pos_cache_enabled()) {
                 (void)dsl_jit_pos_cache_store_program(program, key);
             }
-            dsl_tracef("jit runtime hit: dialect=%s fp=%s source=disk-cache key=%016llx",
-                       dsl_dialect_name(program->dialect),
+            dsl_tracef("jit runtime hit: fp=%s source=disk-cache key=%016llx",
                        dsl_fp_mode_name(program->fp_mode),
                        (unsigned long long)key);
             dsl_jit_neg_cache_clear(key);
             return;
         }
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_LOAD);
-        dsl_tracef("jit runtime cache reload failed: dialect=%s fp=%s key=%016llx",
-                   dsl_dialect_name(program->dialect),
+        dsl_tracef("jit runtime cache reload failed: fp=%s key=%016llx",
                    dsl_fp_mode_name(program->fp_mode),
                    (unsigned long long)key);
     }
 
     if (program->compiler == ME_DSL_COMPILER_LIBTCC) {
         if (dsl_jit_compile_libtcc_in_memory(program)) {
-            dsl_tracef("jit runtime built: dialect=%s fp=%s compiler=%s key=%016llx",
-                       dsl_dialect_name(program->dialect),
+            dsl_tracef("jit runtime built: fp=%s compiler=%s key=%016llx",
                        dsl_fp_mode_name(program->fp_mode),
                        dsl_compiler_name(program->compiler),
                        (unsigned long long)key);
@@ -5264,8 +5245,7 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime tcc compilation failed");
-        dsl_tracef("jit runtime skip: dialect=%s fp=%s compiler=%s reason=%s detail=%s",
-                   dsl_dialect_name(program->dialect),
+        dsl_tracef("jit runtime skip: fp=%s compiler=%s reason=%s detail=%s",
                    dsl_fp_mode_name(program->fp_mode),
                    dsl_compiler_name(program->compiler),
                    program->jit_c_error,
@@ -5277,8 +5257,7 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_WRITE);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime failed to write source");
-        dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=%s",
-                   dsl_dialect_name(program->dialect),
+        dsl_tracef("jit runtime skip: fp=%s reason=%s",
                    dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
         return;
     }
@@ -5289,8 +5268,7 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
             dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
             snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                      "jit runtime compilation failed");
-            dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=%s",
-                       dsl_dialect_name(program->dialect),
+            dsl_tracef("jit runtime skip: fp=%s reason=%s",
                        dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
             return;
         }
@@ -5298,8 +5276,7 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
             dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
             snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                      "jit runtime stub copy failed");
-            dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=%s",
-                       dsl_dialect_name(program->dialect),
+            dsl_tracef("jit runtime skip: fp=%s reason=%s",
                        dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
             return;
         }
@@ -5307,8 +5284,7 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
             dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_METADATA);
             snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                      "jit runtime failed to write cache metadata");
-            dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=%s",
-                       dsl_dialect_name(program->dialect),
+            dsl_tracef("jit runtime skip: fp=%s reason=%s",
                        dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
             return;
         }
@@ -5316,16 +5292,14 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
             dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_LOAD);
             snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                      "jit runtime shared object load failed");
-            dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=%s",
-                       dsl_dialect_name(program->dialect),
+            dsl_tracef("jit runtime skip: fp=%s reason=%s",
                        dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
             return;
         }
         if (dsl_jit_pos_cache_enabled()) {
             (void)dsl_jit_pos_cache_store_program(program, key);
         }
-        dsl_tracef("jit runtime stubbed: dialect=%s fp=%s key=%016llx",
-                   dsl_dialect_name(program->dialect),
+        dsl_tracef("jit runtime stubbed: fp=%s key=%016llx",
                    dsl_fp_mode_name(program->fp_mode),
                    (unsigned long long)key);
         dsl_jit_neg_cache_clear(key);
@@ -5335,8 +5309,7 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime c compiler unavailable");
-        dsl_tracef("jit runtime skip: dialect=%s fp=%s compiler=%s reason=%s",
-                   dsl_dialect_name(program->dialect),
+        dsl_tracef("jit runtime skip: fp=%s compiler=%s reason=%s",
                    dsl_fp_mode_name(program->fp_mode),
                    dsl_compiler_name(program->compiler),
                    program->jit_c_error);
@@ -5346,8 +5319,7 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime compilation failed");
-        dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=%s",
-                   dsl_dialect_name(program->dialect),
+        dsl_tracef("jit runtime skip: fp=%s reason=%s",
                    dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
         return;
     }
@@ -5355,8 +5327,7 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_METADATA);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime failed to write cache metadata");
-        dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=%s",
-                   dsl_dialect_name(program->dialect),
+        dsl_tracef("jit runtime skip: fp=%s reason=%s",
                    dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
         return;
     }
@@ -5364,16 +5335,14 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_LOAD);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime shared object load failed");
-        dsl_tracef("jit runtime skip: dialect=%s fp=%s reason=%s",
-                   dsl_dialect_name(program->dialect),
+        dsl_tracef("jit runtime skip: fp=%s reason=%s",
                    dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
         return;
     }
     if (dsl_jit_pos_cache_enabled()) {
         (void)dsl_jit_pos_cache_store_program(program, key);
     }
-    dsl_tracef("jit runtime built: dialect=%s fp=%s key=%016llx",
-               dsl_dialect_name(program->dialect),
+    dsl_tracef("jit runtime built: fp=%s key=%016llx",
                dsl_fp_mode_name(program->fp_mode),
                (unsigned long long)key);
     dsl_jit_neg_cache_clear(key);
@@ -5465,8 +5434,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     if (!program->guaranteed_return) {
         snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
                  "program may reach function end without return");
-        dsl_tracef("jit ir skip: dialect=%s fp=%s reason=%s",
-                   dsl_dialect_name(program->dialect),
+        dsl_tracef("jit ir skip: fp=%s reason=%s",
                    dsl_fp_mode_name(program->fp_mode), program->jit_ir_error);
         return;
     }
@@ -5474,8 +5442,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     if (parsed->nparams < 0) {
         snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
                  "invalid dsl parameter metadata");
-        dsl_tracef("jit ir skip: dialect=%s fp=%s reason=%s",
-                   dsl_dialect_name(program->dialect),
+        dsl_tracef("jit ir skip: fp=%s reason=%s",
                    dsl_fp_mode_name(program->fp_mode), program->jit_ir_error);
         return;
     }
@@ -5491,8 +5458,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
         if (!param_names || !param_dtypes || !param_input_indices) {
             snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
                      "out of memory building jit ir metadata");
-            dsl_tracef("jit ir skip: dialect=%s fp=%s reason=%s",
-                       dsl_dialect_name(program->dialect),
+            dsl_tracef("jit ir skip: fp=%s reason=%s",
                        dsl_fp_mode_name(program->fp_mode), program->jit_ir_error);
             free(param_names);
             free(param_dtypes);
@@ -5504,8 +5470,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
             if (idx < 0 || idx >= program->vars.count) {
                 snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
                          "failed to resolve dsl parameter dtype for jit ir");
-                dsl_tracef("jit ir skip: dialect=%s fp=%s reason=%s",
-                           dsl_dialect_name(program->dialect),
+                dsl_tracef("jit ir skip: fp=%s reason=%s",
                            dsl_fp_mode_name(program->fp_mode), program->jit_ir_error);
                 free(param_names);
                 free(param_dtypes);
@@ -5532,8 +5497,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
         program->jit_ir_error_column = ir_error.column;
         snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
                  ir_error.message[0] ? ir_error.message : "jit ir build rejected");
-        dsl_tracef("jit ir reject: dialect=%s fp=%s at %d:%d reason=%s",
-                   dsl_dialect_name(program->dialect),
+        dsl_tracef("jit ir reject: fp=%s at %d:%d reason=%s",
                    dsl_fp_mode_name(program->fp_mode),
                    program->jit_ir_error_line, program->jit_ir_error_column,
                    program->jit_ir_error);
@@ -5573,8 +5537,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
         program->jit_c_error_column = cg_error.column;
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  cg_error.message[0] ? cg_error.message : "jit c codegen rejected");
-        dsl_tracef("jit codegen reject: dialect=%s fp=%s at %d:%d reason=%s",
-                   dsl_dialect_name(program->dialect),
+        dsl_tracef("jit codegen reject: fp=%s at %d:%d reason=%s",
                    dsl_fp_mode_name(program->fp_mode),
                    program->jit_c_error_line, program->jit_c_error_column,
                    program->jit_c_error);
@@ -5589,8 +5552,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     if (program->jit_use_runtime_math_bridge) {
         dsl_tracef("jit codegen: runtime math bridge enabled");
     }
-    dsl_tracef("jit ir built: dialect=%s fp=%s compiler=%s fingerprint=%016llx",
-               dsl_dialect_name(program->dialect),
+    dsl_tracef("jit ir built: fp=%s compiler=%s fingerprint=%016llx",
                dsl_fp_mode_name(program->fp_mode),
                dsl_compiler_name(program->compiler),
                (unsigned long long)program->jit_ir_fingerprint);
@@ -6039,7 +6001,6 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
         }
         return NULL;
     }
-    program->dialect = parsed->dialect;
     program->fp_mode = parsed->fp_mode;
     program->compiler = parsed->compiler;
     dsl_var_table_init(&program->vars);

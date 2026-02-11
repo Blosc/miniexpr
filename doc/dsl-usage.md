@@ -8,7 +8,7 @@ The DSL extends single expressions to full programs with:
 - **Temporary variables** - Store intermediate results
 - **Multi-statement programs** - Combine multiple computations
 - **Element-wise conditionals** - Using `where(cond, true_val, false_val)`
-- **Conditional blocks** - `if/elif/else` with scalar or per-element conditions
+- **Conditional blocks** - `if/elif/else` with scalar or element-wise conditions
 - **Loop constructs** - `for` loops with `break` and `continue`
 - **Index access** - Reference element positions via `_i0`, `_i1`, etc.
 
@@ -33,14 +33,14 @@ Note: The order of the variables array still defines the pointer order passed to
 `me_eval()`. The signature is declarative and does not reorder inputs.
 
 A kernel must contain at least one `return` statement.
-If execution reaches the end for any lane without returning, evaluation fails at runtime.
+If execution reaches the end for any element without returning, evaluation fails at runtime.
 
 ### Control-Flow Semantics
 
-DSL kernels use unified per-element control-flow semantics:
-- Non-reduction boolean conditions (for example, `if x > 0`) are evaluated per element.
-- Reduction conditions (`any(...)`, `all(...)`) remain global to the active lane mask.
-- `break` and `continue` act per element inside loops.
+DSL kernels use element-wise control-flow semantics:
+- Non-reduction boolean conditions (for example, `if x > 0`) are evaluated element-wise.
+- Reduction conditions (`any(...)`, `all(...)`) remain global to the active-element mask.
+- `break` and `continue` act element-wise inside loops.
 
 Only `# me:fp=...` and `# me:compiler=...` pragmas are supported.
 Any other `# me:*` pragma is a parse error.
@@ -181,8 +181,8 @@ def kernel(mask, acc):
 General `if/elif/else` blocks are supported.
 
 Condition behavior:
-- Non-reduction conditions are evaluated per element.
-- Reduction conditions (`any()`/`all()`) are evaluated globally on active lanes.
+- Non-reduction conditions are evaluated element-wise.
+- Reduction conditions (`any()`/`all()`) are evaluated globally on active elements.
 - Uniform conditions (for example `if i == 2:`) work naturally as a special case.
 
 Rules:
@@ -268,7 +268,7 @@ String variables must be provided with dtype `ME_STRING` and a fixed `itemsize`
 via `me_variable_ex` (itemsize is bytes per element and must be a multiple of 4).
 String expressions always yield boolean output.
 
-Example (element-wise string match with a scalar control):
+Example (element-wise string match with a scalar condition):
 ```
 def kernel(tag, n):
     mask = 0

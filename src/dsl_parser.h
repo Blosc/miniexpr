@@ -25,11 +25,6 @@ typedef enum {
 } me_dsl_stmt_kind;
 
 typedef enum {
-    ME_DSL_DIALECT_VECTOR = 0,
-    ME_DSL_DIALECT_ELEMENT = 1
-} me_dsl_dialect;
-
-typedef enum {
     ME_DSL_FP_STRICT = 0,
     ME_DSL_FP_CONTRACT = 1,
     ME_DSL_FP_FAST = 2
@@ -102,7 +97,6 @@ typedef struct {
     char **params;
     int nparams;
     int param_capacity;
-    me_dsl_dialect dialect;
     me_dsl_fp_mode fp_mode;
     me_dsl_compiler compiler;
     me_dsl_block block;

@@ -54,4 +54,4 @@ Example: `"\u03B1"` matches U+03B1 (Greek alpha).
 
 String expressions are allowed inside DSL expressions and conditions, but
 conditions must be scalar. Use `any()` / `all()` reductions to convert
-element-wise string predicates to scalar control flow.
+element-wise string predicates to a scalar condition.

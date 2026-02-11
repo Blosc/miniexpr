@@ -43,8 +43,8 @@ Implemented:
     added Mandelbrot-style DSL benchmark for JIT cold/warm vs interpreter, plus optional numba baseline script.
 14. Runtime compile-flag tuning hook:
     `CFLAGS` is included in runtime compile command and cache metadata fingerprinting for the `cc` backend.
-15. Unified control-flow semantics:
-    per-item loop control (`if`/`elif`/`else`, `break`, `continue`) implemented with active masks.
+15. Element-wise control-flow behavior:
+    element-wise loop control (`if`/`elif`/`else`, `break`, `continue`) implemented with active masks.
 16. JIT/interpreter parity coverage:
     parity tests added for representative loop-control kernels.
 17. Cache identity includes current DSL metadata:
@@ -57,12 +57,12 @@ Implemented:
 
 Current runtime limitations (known and intentional for now):
 
-1. Runtime JIT dispatch currently targets regular per-element kernels.
+1. Runtime JIT dispatch currently targets regular element-wise kernels.
 2. Kernels using `_i*`, `_n*`, or `_ndim` use interpreter fallback.
 3. Scalar-output DSL kernels use interpreter fallback.
 4. Runtime cache (positive/negative) is process-local only (not persisted across processes).
-5. In `element` dialect, `return` inside loop bodies is currently rejected at compile time
-   (future work: per-item return masks in interpreter path).
+5. `return` inside loop bodies is currently rejected at compile time
+   (future work: element-wise return masks in interpreter path).
 
 ## Proposed architecture
 
@@ -126,7 +126,7 @@ At evaluation time:
 ### Pros
 
 1. No LLVM dependency.
-2. Native per-element loop performance with early break.
+2. Native element-wise loop performance with early break.
 3. Smaller scope than full general-purpose compiler.
 4. Works with current DSL semantics.
 
@@ -280,10 +280,10 @@ Deliverables:
 1. Benchmarks vs current miniexpr and numba for Mandelbrot and similar kernels.
 2. Tuning of compiler flags and loop codegen.
 3. Rollout guardrails and documentation.
-4. Complete remaining element-dialect control-flow edge cases.
+4. Complete remaining element-wise control-flow edge cases.
 5. Keep constrained FP mode pragma behavior documented and stable
    (`# me:fp=strict|contract|fast` + deterministic cache-key integration).
-6. Keep vector-dialect reduction control (`any/all` in loop flow) as explicit JIT-IR reject
+6. Keep reduction control (`any/all` in loop flow) as explicit JIT-IR reject
    unless/until a dedicated block-synchronous vector JIT backend milestone is approved.
 
 Success criteria:
@@ -297,6 +297,6 @@ Success criteria:
 2. Packaging story for environments without `cc`.
 3. Whether to persist cache metadata in higher-level storage later (for example vlmeta), once ABI guarantees are defined.
 4. Whether negative-cache entries should also be persisted to disk or remain process-local.
-5. Whether to implement per-item `return` semantics inside element-dialect loops (interpreter + parity hardening).
-6. Whether to fund a separate major milestone for vector-dialect JIT support of reduction
+5. Whether to implement element-wise `return` semantics inside loops (interpreter + parity hardening).
+6. Whether to fund a separate major milestone for JIT support of reduction
    functions in control flow (`any/all`), which requires a block-synchronous execution model.
