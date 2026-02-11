@@ -28,8 +28,17 @@ foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
   target_compile_definitions("${test_name}"
     PRIVATE ME_DSL_JIT_TEST_STUB_SO_PATH="$<TARGET_FILE:me_jit_test_stub>")
   target_link_libraries("${test_name}" PRIVATE ${MINIEXPR_DEFAULT_LIB} ${MINIEXPR_THREADS_LIB})
+  if(EMSCRIPTEN)
+    target_link_options("${test_name}" PRIVATE
+      "-sALLOW_MEMORY_GROWTH=1"
+      "-sINITIAL_MEMORY=134217728")
+  endif()
   if(NOT WIN32)
     target_link_libraries("${test_name}" PRIVATE m)
+  endif()
+  if(EMSCRIPTEN AND test_name STREQUAL "test_function_order")
+    target_link_options("${test_name}" PRIVATE
+      "SHELL:--embed-file ${CMAKE_SOURCE_DIR}/src/functions.c@/src/functions.c")
   endif()
   if(test_name STREQUAL "test_dsl_jit_runtime_cache")
     add_dependencies("${test_name}" me_jit_test_stub)
