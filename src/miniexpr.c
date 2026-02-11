@@ -5885,12 +5885,8 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 return false;
             }
 
-            bool prev_allow_new = ctx->allow_new_locals;
-            ctx->allow_new_locals = false;
-
             if (!dsl_compile_block(ctx, &stmt->as.if_stmt.then_block,
                                    &compiled->as.if_stmt.then_block)) {
-                ctx->allow_new_locals = prev_allow_new;
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
@@ -5901,7 +5897,6 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 compiled->as.if_stmt.elif_branches = calloc((size_t)compiled->as.if_stmt.n_elifs,
                                                             sizeof(*compiled->as.if_stmt.elif_branches));
                 if (!compiled->as.if_stmt.elif_branches) {
-                    ctx->allow_new_locals = prev_allow_new;
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
@@ -5914,7 +5909,6 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                     return false;
                 }
                 if (!dsl_compile_block(ctx, &elif_branch->block, &out_branch->block)) {
-                    ctx->allow_new_locals = prev_allow_new;
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
@@ -5923,13 +5917,11 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             if (stmt->as.if_stmt.has_else) {
                 if (!dsl_compile_block(ctx, &stmt->as.if_stmt.else_block,
                                        &compiled->as.if_stmt.else_block)) {
-                    ctx->allow_new_locals = prev_allow_new;
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
                 compiled->as.if_stmt.has_else = true;
             }
-            ctx->allow_new_locals = prev_allow_new;
             break;
         }
         case ME_DSL_STMT_FOR: {

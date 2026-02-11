@@ -15,7 +15,7 @@ Goal: remove vector/element dialect split and define one behavior model
 - [x] Runtime JIT fallback/guardrails preserve interpreter semantics (including missing-return cases).
 - [x] Interpreter/JIT parity tests cover core unified control-flow behavior.
 - [x] `range()` supports `range(stop)`, `range(start, stop)`, and `range(start, stop, step)`.
-- [ ] Allow declaration of new locals inside conditional branches (if desired).
+- [x] Declaration of new locals inside conditional branches is supported.
 
 ## Decision Summary (Proposed)
 
@@ -98,7 +98,7 @@ Goal: remove vector/element dialect split and define one behavior model
    Any other `me:*` pragma is rejected at parse time.
 2. Control-flow conditions no longer require explicit `any()`/`all()`.
 3. `range()` accepts one to three scalar arguments (`stop`, `start/stop`, `start/stop/step`).
-4. New locals inside conditional branches remain disallowed unless separately relaxed.
+4. New locals may be declared inside conditional branches.
 
 ## Backend Conformance
 

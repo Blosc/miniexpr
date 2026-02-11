@@ -184,7 +184,7 @@ Condition behavior:
 - Uniform conditions (for example `if i == 2:`) work naturally as a special case.
 
 Rules:
-- No new locals are allowed inside branches.
+- New locals are allowed inside branches.
 - Use `return` to produce output; all `return` expressions must infer the same dtype.
 - Early returns are allowed, but ensure every control-flow path eventually returns.
   Loops never guarantee a return; add a return after any loop.
@@ -210,6 +210,20 @@ def kernel(x):
             acc = acc + 1
         else:
             break
+    return acc
+```
+
+Expanded `range()` + branch-local declarations:
+```
+def kernel(x):
+    acc = 0
+    for i in range(1, 10, 2):
+        if x > i:
+            bonus = i * 2
+            acc = acc + bonus
+        else:
+            penalty = i - 1
+            acc = acc - penalty
     return acc
 ```
 
