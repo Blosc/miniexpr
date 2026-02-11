@@ -141,6 +141,14 @@ jobs:
         ctest --test-dir build-wasm32 --output-on-failure || \
           ctest --test-dir build-wasm32 --rerun-failed --output-on-failure
 
+    - name: Trace DSL JIT behavior (wasm32)
+      shell: bash
+      run: |
+        set -o pipefail
+        ME_DSL_TRACE=1 ctest --test-dir build-wasm32 -R "test_dsl_jit_ir|test_dsl_syntax" -V \
+          2>&1 | tee build-wasm32/dsl-trace.log
+        grep -E "jit ir built:|jit ir skip:|jit runtime (built|skip|hit|stubbed):" build-wasm32/dsl-trace.log || true
+
   windows-libtcc-jit:
     if: ${{ false }}
     runs-on: windows-latest
