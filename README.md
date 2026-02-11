@@ -208,6 +208,7 @@ Options:
 - `-DMINIEXPR_BUILD_BENCH=ON|OFF`
 - `-DMINIEXPR_USE_SLEEF=ON|OFF`
 - `-DMINIEXPR_USE_LIBTCC_FALLBACK=ON|OFF`
+- `-DMINIEXPR_DSL_TRACE_DEFAULT=ON|OFF` (emit DSL trace logs by default when `ME_DSL_TRACE` is unset)
 - `-DMINIEXPR_ENABLE_WINDOWS_LIBTCC_JIT=ON|OFF` (Windows-only, experimental)
 
 ### SLEEF SIMD acceleration

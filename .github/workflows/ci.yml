@@ -128,7 +128,8 @@ jobs:
           -DMINIEXPR_BUILD_BENCH=OFF \
           -DMINIEXPR_BUILD_EXAMPLES=OFF \
           -DMINIEXPR_USE_SLEEF=OFF \
-          -DMINIEXPR_USE_LIBTCC_FALLBACK=OFF
+          -DMINIEXPR_USE_LIBTCC_FALLBACK=OFF \
+          -DMINIEXPR_DSL_TRACE_DEFAULT=ON
 
     - name: Build wasm32 miniexpr + tests
       shell: bash

@@ -93,6 +93,9 @@ For log = base 10 log comment the next line. */
 #ifndef ME_USE_LIBTCC_FALLBACK
 #define ME_USE_LIBTCC_FALLBACK 0
 #endif
+#ifndef ME_DSL_TRACE_DEFAULT
+#define ME_DSL_TRACE_DEFAULT 0
+#endif
 #ifndef ME_DSL_JIT_LIBTCC_DEFAULT_PATH
 #define ME_DSL_JIT_LIBTCC_DEFAULT_PATH ""
 #endif
@@ -2526,7 +2529,7 @@ static const char *dsl_jit_fp_mode_cflags(me_dsl_fp_mode fp_mode) {
 static bool dsl_trace_enabled(void) {
     const char *env = getenv("ME_DSL_TRACE");
     if (!env || env[0] == '\0') {
-        return false;
+        return ME_DSL_TRACE_DEFAULT != 0;
     }
     return strcmp(env, "0") != 0;
 }
