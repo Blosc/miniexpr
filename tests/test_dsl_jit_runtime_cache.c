@@ -19,6 +19,7 @@
 #endif
 
 #include "../src/miniexpr.h"
+#include "../src/dsl_parser.h"
 #include "../src/dsl_jit_test.h"
 #include "minctest.h"
 
@@ -1186,7 +1187,56 @@ cleanup:
 
 int main(void) {
 #if defined(_WIN32) || defined(_WIN64)
-    printf("\n=== DSL JIT Runtime Cache Test: skipped on Windows ===\n");
+    printf("\n=== DSL JIT Runtime Cache Test 1: Windows compiler=tcc smoke ===\n");
+
+    const char *src =
+        "# me:compiler=tcc\n"
+        "def kernel(x):\n"
+        "    y = x + 31\n"
+        "    return y\n";
+
+    me_dsl_error parse_error;
+    memset(&parse_error, 0, sizeof(parse_error));
+    me_dsl_program *parsed = me_dsl_parse(src, &parse_error);
+    if (!parsed) {
+        printf("  FAILED: parse error at %d:%d: %s\n",
+               parse_error.line, parse_error.column, parse_error.message);
+        return 1;
+    }
+    if (parsed->compiler != ME_DSL_COMPILER_LIBTCC) {
+        printf("  FAILED: compiler pragma did not select tcc backend\n");
+        me_dsl_program_free(parsed);
+        return 1;
+    }
+    me_dsl_program_free(parsed);
+
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    int err = 0;
+    me_expr *expr = NULL;
+    if (me_compile(src, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+        printf("  FAILED: compile error at %d\n", err);
+        me_free(expr);
+        return 1;
+    }
+
+    double in[4] = {0.0, 1.0, 2.0, 3.0};
+    double out[4] = {0.0, 0.0, 0.0, 0.0};
+    const void *inputs[] = {in};
+    if (me_eval(expr, inputs, 1, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  FAILED: eval failed\n");
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+
+    for (int i = 0; i < 4; i++) {
+        if (out[i] != in[i] + 31.0) {
+            printf("  FAILED: eval mismatch at %d\n", i);
+            return 1;
+        }
+    }
+
+    printf("  PASSED\n");
     return 0;
 #else
     configure_jit_stub_env();
