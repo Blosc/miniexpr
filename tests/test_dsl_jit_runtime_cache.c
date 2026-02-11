@@ -193,7 +193,7 @@ static int test_negative_cache_skips_immediate_retry(void) {
     first_src_path[0] = '\0';
     char *saved_tmpdir = dup_env_value("TMPDIR");
     char *saved_cc = dup_env_value("CC");
-    char *saved_jit_cflags = dup_env_value("ME_DSL_JIT_CFLAGS");
+    char *saved_cflags = dup_env_value("CFLAGS");
     char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
     const char *src =
         "# me:compiler=cc\n"
@@ -217,8 +217,8 @@ static int test_negative_cache_skips_immediate_retry(void) {
         printf("  FAILED: setenv CC failed\n");
         goto cleanup;
     }
-    if (setenv("ME_DSL_JIT_CFLAGS", "-me_intentional_bad_flag_for_neg_cache", 1) != 0) {
-        printf("  FAILED: setenv ME_DSL_JIT_CFLAGS failed\n");
+    if (setenv("CFLAGS", "-me_intentional_bad_flag_for_neg_cache", 1) != 0) {
+        printf("  FAILED: setenv CFLAGS failed\n");
         goto cleanup;
     }
     (void)unsetenv("ME_DSL_JIT_POS_CACHE");
@@ -253,11 +253,11 @@ static int test_negative_cache_skips_immediate_retry(void) {
 cleanup:
     restore_env_value("TMPDIR", saved_tmpdir);
     restore_env_value("CC", saved_cc);
-    restore_env_value("ME_DSL_JIT_CFLAGS", saved_jit_cflags);
+    restore_env_value("CFLAGS", saved_cflags);
     restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
     free(saved_tmpdir);
     free(saved_cc);
-    free(saved_jit_cflags);
+    free(saved_cflags);
     free(saved_pos_cache);
     if (cache_dir[0] != '\0') {
         remove_files_in_dir(cache_dir);

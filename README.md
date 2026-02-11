@@ -277,7 +277,7 @@ On Linux/macOS, DSL kernels may use runtime JIT compilation when eligible. The f
 
 - `ME_DSL_JIT=0`: Disable runtime JIT and always use interpreter fallback.
 - `ME_DSL_JIT_POS_CACHE=0`: Disable process-local positive cache reuse for loaded JIT kernels.
-- `ME_DSL_JIT_CFLAGS="..."`: Extra C compiler flags appended to runtime JIT builds.
+- `CFLAGS="..."`: Standard C compiler flags honored by the `cc` backend runtime JIT path.
 
 Backend selection is done in DSL source via pragma:
 

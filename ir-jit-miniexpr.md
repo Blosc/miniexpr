@@ -42,7 +42,7 @@ Implemented:
 13. Initial stabilization benchmarks:
     added Mandelbrot-style DSL benchmark for JIT cold/warm vs interpreter, plus optional numba baseline script.
 14. Runtime compile-flag tuning hook:
-    `ME_DSL_JIT_CFLAGS` is included in runtime compile command and cache metadata fingerprinting.
+    `CFLAGS` is included in runtime compile command and cache metadata fingerprinting for the `cc` backend.
 15. Unified control-flow semantics:
     per-item loop control (`if`/`elif`/`else`, `break`, `continue`) implemented with active masks.
 16. JIT/interpreter parity coverage:

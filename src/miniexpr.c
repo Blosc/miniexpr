@@ -3668,20 +3668,20 @@ static uint64_t dsl_jit_toolchain_hash(const me_dsl_compiled_program *program) {
         return dsl_jit_hash_cstr(h, tcc_lib_path ? tcc_lib_path : "");
     }
     const char *cc = getenv("CC");
-    const char *jit_cflags = getenv("ME_DSL_JIT_CFLAGS");
+    const char *cflags = getenv("CFLAGS");
     const char *fp_cflags = dsl_jit_fp_mode_cflags(program->fp_mode);
     if (!cc || cc[0] == '\0') {
         cc = "cc";
     }
-    if (!jit_cflags) {
-        jit_cflags = "";
+    if (!cflags) {
+        cflags = "";
     }
     if (!fp_cflags) {
         fp_cflags = "";
     }
     uint64_t h = dsl_jit_hash_cstr(1469598103934665603ULL, cc);
     h = dsl_jit_hash_cstr(h, fp_cflags);
-    return dsl_jit_hash_cstr(h, jit_cflags);
+    return dsl_jit_hash_cstr(h, cflags);
 }
 
 static void dsl_jit_fill_cache_meta(me_dsl_jit_cache_meta *meta,
@@ -5082,13 +5082,13 @@ static bool dsl_jit_compile_shared(const me_dsl_compiled_program *program,
         return false;
     }
     const char *cc = getenv("CC");
-    const char *jit_cflags = getenv("ME_DSL_JIT_CFLAGS");
+    const char *cflags = getenv("CFLAGS");
     const char *fp_cflags = dsl_jit_fp_mode_cflags(program->fp_mode);
     if (!cc || cc[0] == '\0') {
         cc = "cc";
     }
-    if (!jit_cflags) {
-        jit_cflags = "";
+    if (!cflags) {
+        cflags = "";
     }
     if (!fp_cflags) {
         fp_cflags = "";
@@ -5105,12 +5105,12 @@ static bool dsl_jit_compile_shared(const me_dsl_compiled_program *program,
 #if defined(__APPLE__)
     int n = snprintf(cmd, sizeof(cmd),
                      "%s -std=c99 -O3 -fPIC %s %s -dynamiclib -o \"%s\" \"%s\"%s%s",
-                     cc, fp_cflags, jit_cflags, so_path, src_path, bridge_ldflags,
+                     cc, fp_cflags, cflags, so_path, src_path, bridge_ldflags,
                      show_cc_output ? "" : " >/dev/null 2>&1");
 #else
     int n = snprintf(cmd, sizeof(cmd),
                      "%s -std=c99 -O3 -fPIC %s %s -shared -o \"%s\" \"%s\"%s%s",
-                     cc, fp_cflags, jit_cflags, so_path, src_path, bridge_ldflags,
+                     cc, fp_cflags, cflags, so_path, src_path, bridge_ldflags,
                      show_cc_output ? "" : " >/dev/null 2>&1");
 #endif
     if (n <= 0 || (size_t)n >= sizeof(cmd)) {
@@ -5284,8 +5284,8 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
     }
     const char *jit_stub_path = getenv("ME_DSL_JIT_TEST_STUB_SO");
     if (jit_stub_path && jit_stub_path[0] != '\0') {
-        const char *jit_cflags = getenv("ME_DSL_JIT_CFLAGS");
-        if (jit_cflags && strstr(jit_cflags, ME_DSL_JIT_TEST_NEG_CACHE_FLAG)) {
+        const char *cflags = getenv("CFLAGS");
+        if (cflags && strstr(cflags, ME_DSL_JIT_TEST_NEG_CACHE_FLAG)) {
             dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
             snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                      "jit runtime compilation failed");
