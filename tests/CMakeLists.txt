@@ -32,6 +32,11 @@ foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
     target_link_options("${test_name}" PRIVATE
       "-sALLOW_MEMORY_GROWTH=1"
       "-sINITIAL_MEMORY=134217728")
+    if(MINIEXPR_USE_WASM32_JIT)
+      target_link_options("${test_name}" PRIVATE
+        "-sALLOW_TABLE_GROWTH=1"
+        "-sEXPORTED_RUNTIME_METHODS=addFunction,removeFunction")
+    endif()
   endif()
   if(NOT WIN32)
     target_link_libraries("${test_name}" PRIVATE m)

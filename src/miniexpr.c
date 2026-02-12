@@ -93,6 +93,13 @@ For log = base 10 log comment the next line. */
 #ifndef ME_USE_LIBTCC_FALLBACK
 #define ME_USE_LIBTCC_FALLBACK 0
 #endif
+#ifndef ME_USE_WASM32_JIT
+#define ME_USE_WASM32_JIT 0
+#endif
+#if ME_USE_WASM32_JIT
+/* Forward declarations for EM_JS helpers defined later in the file. */
+extern void me_wasm_jit_free_fn(int idx);
+#endif
 #ifndef ME_DSL_TRACE_DEFAULT
 #define ME_DSL_TRACE_DEFAULT 0
 #endif
@@ -100,7 +107,12 @@ For log = base 10 log comment the next line. */
 #define ME_DSL_JIT_LIBTCC_DEFAULT_PATH ""
 #endif
 
+#if ME_USE_WASM32_JIT
+/* wasm32 kernels use int for nitems (TCC wasm32 int64_t limitation). */
+typedef int (*me_dsl_jit_kernel_fn)(const void **inputs, void *output, int nitems);
+#else
 typedef int (*me_dsl_jit_kernel_fn)(const void **inputs, void *output, int64_t nitems);
+#endif
 
 /* ND metadata attached to compiled expressions (used by me_eval_nd). */
 typedef struct {
@@ -244,7 +256,7 @@ typedef struct {
 static void dsl_jit_libtcc_delete_state(void *state);
 static bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program);
 static const char *dsl_jit_libtcc_error_message(void);
-#if !defined(_WIN32) && !defined(_WIN64)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__EMSCRIPTEN__)
 static bool dsl_jit_c_compiler_available(void);
 #endif
 static bool dsl_jit_cc_math_bridge_available(void);
@@ -678,7 +690,7 @@ static void dsl_compiled_program_free(me_dsl_compiled_program *program) {
         program->jit_tcc_state = NULL;
     }
 #endif
-#if !defined(_WIN32) && !defined(_WIN64)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__EMSCRIPTEN__)
     if (program->jit_dl_handle) {
         if (!program->jit_dl_handle_cached) {
             dlclose(program->jit_dl_handle);
@@ -686,6 +698,15 @@ static void dsl_compiled_program_free(me_dsl_compiled_program *program) {
         program->jit_dl_handle = NULL;
     }
 #endif
+#if ME_USE_WASM32_JIT
+    if (program->jit_kernel_fn && !program->jit_dl_handle_cached) {
+        me_wasm_jit_free_fn((int)(uintptr_t)program->jit_kernel_fn);
+    }
+    /* jit_dl_handle holds the wasm32 JIT scratch memory. */
+    free(program->jit_dl_handle);
+    program->jit_dl_handle = NULL;
+#endif
+    program->jit_kernel_fn = NULL;
     program->jit_runtime_key = 0;
     program->jit_dl_handle_cached = false;
     free(program->jit_c_source);
@@ -3430,7 +3451,7 @@ static uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program
     return h;
 }
 
-#if !defined(_WIN32) && !defined(_WIN64)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__EMSCRIPTEN__)
 /* In-process negative cache for recent JIT runtime failures. */
 #define ME_DSL_JIT_NEG_CACHE_SLOTS 64
 #define ME_DSL_JIT_NEG_CACHE_RETRY_BUDGET 2
@@ -5117,7 +5138,7 @@ static bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
 }
 #endif
 
-#if !defined(_WIN32) && !defined(_WIN64)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__EMSCRIPTEN__)
 static bool dsl_jit_cc_math_bridge_available(void) {
 #if defined(_WIN32) || defined(_WIN64)
     return false;
@@ -5469,8 +5490,337 @@ static bool dsl_jit_runtime_enabled(void) {
     return strcmp(env, "0") != 0;
 }
 
+#if ME_USE_WASM32_JIT
+#include <emscripten.h>
+#include "libtcc.h"
+
+/* JS helper: patch a TCC-emitted wasm module so it imports the host's linear
+   memory instead of defining its own, then instantiate and return a
+   function-table index for the exported kernel.
+   The kernel uses int (i32) for nitems, so the wasm signature is
+   (i32, i32, i32) -> i32. */
+EM_JS(int, me_wasm_jit_instantiate, (const unsigned char *wasm_bytes, int wasm_len), {
+    var src = HEAPU8.subarray(wasm_bytes, wasm_bytes + wasm_len);
+    /* --- LEB128 helpers ------------------------------------------------- */
+    function readULEB(buf, pos) {
+        var r = 0, s = 0, b;
+        do { b = buf[pos++]; r |= (b & 0x7f) << s; s += 7; } while (b & 0x80);
+        return [r, pos];
+    }
+    function encULEB(v) {
+        var a = [];
+        do { var b = v & 0x7f; v >>>= 7; if (v) b |= 0x80; a.push(b); } while (v);
+        return a;
+    }
+    function encStr(s) {
+        var b = new TextEncoder().encode(s);
+        return encULEB(b.length).concat(Array.from(b));
+    }
+    /* --- build import section: env.memory (limits: min 256) ------------- */
+    function buildImportSec() {
+        var body = [1]; /* 1 import */
+        body = body.concat(encStr("env"), encStr("memory"));
+        body.push(0x02, 0x00); /* memory, limits-flag: no-max */
+        body = body.concat(encULEB(256));
+        var sec = [0x02];
+        sec = sec.concat(encULEB(body.length));
+        return sec.concat(body);
+    }
+    /* --- parse sections ------------------------------------------------- */
+    var pos = 8, sections = [];
+    while (pos < src.length) {
+        var id = src[pos++];
+        var tmp = readULEB(src, pos), len = tmp[0]; pos = tmp[1];
+        sections.push({ id: id, data: src.subarray(pos, pos + len) });
+        pos += len;
+    }
+    /* --- reassemble with patched memory -------------------------------- */
+    var out = [0x00,0x61,0x73,0x6d, 0x01,0x00,0x00,0x00];
+    var impDone = false;
+    for (var i = 0; i < sections.length; i++) {
+        var s = sections[i];
+        if (s.id === 5) continue; /* drop memory section */
+        if (!impDone && s.id >= 2) { out = out.concat(buildImportSec()); impDone = true; }
+        if (s.id === 7) { /* strip memory export from export section */
+            var ep = 0, et = readULEB(s.data, ep), ne = et[0]; ep = et[1];
+            var exps = [];
+            for (var e = 0; e < ne; e++) {
+                var nt = readULEB(s.data, ep), nl = nt[0]; ep = nt[1];
+                var nm = new TextDecoder().decode(s.data.subarray(ep, ep + nl)); ep += nl;
+                var kd = s.data[ep++];
+                var xt = readULEB(s.data, ep), xi = xt[0]; ep = xt[1];
+                if (nm === "memory" && kd === 0x02) continue;
+                exps.push({ n: nm, k: kd, i: xi });
+            }
+            var eb = encULEB(exps.length);
+            for (var e = 0; e < exps.length; e++) {
+                eb = eb.concat(encStr(exps[e].n));
+                eb.push(exps[e].k);
+                eb = eb.concat(encULEB(exps[e].i));
+            }
+            out.push(0x07);
+            out = out.concat(encULEB(eb.length));
+            out = out.concat(eb);
+            continue;
+        }
+        out.push(s.id);
+        out = out.concat(encULEB(s.data.length));
+        out = out.concat(Array.from(s.data));
+    }
+    /* --- instantiate with shared memory -------------------------------- */
+    var patched = new Uint8Array(out);
+    try {
+        var mod = new WebAssembly.Module(patched);
+        var inst = new WebAssembly.Instance(mod, { env: { memory: wasmMemory } });
+    } catch (e) {
+        err("[me-wasm-jit] " + e.message);
+        return 0;
+    }
+    var fn = inst.exports["me_dsl_jit_kernel"];
+    if (!fn) { err("[me-wasm-jit] missing export"); return 0; }
+    return addFunction(fn, "iiii");
+});
+
+/* Free a function-table slot previously allocated by me_wasm_jit_instantiate. */
+EM_JS(void, me_wasm_jit_free_fn, (int idx), {
+    if (idx) removeFunction(idx);
+});
+
+static void dsl_wasm_tcc_error_handler(void *opaque, const char *msg) {
+    (void)opaque;
+    dsl_tracef("jit tcc error: %s", msg);
+}
+
+/* Replace "int64_t nitems" with "int nitems" in the generated C source to
+   avoid TCC wasm32 int64_t comparison bugs.  Returns a malloc'd copy. */
+static char *dsl_wasm32_patch_source(const char *src) {
+    /* On wasm32 we patch the generated C source to work around TCC
+       wasm32 backend limitations:
+       1. Replace all int64_t declarations/casts with int (64-bit
+          comparisons trigger wasm32 backend bugs in gen_opl)
+       2. Split "if (!output || nitems < 0)" into two separate ifs
+          (TCC wasm32 can't mix comparison types in ||) */
+    typedef struct { const char *old; const char *rep; } Repl;
+    Repl repls[] = {
+        { "int64_t ",       "int "           },
+        { "(int64_t)",      "(int)"          },
+        { "if (!output || nitems < 0) {\n"
+          "        return -1;\n"
+          "    }",
+          "if (!output) {\n"
+          "        return -1;\n"
+          "    }\n"
+          "    if (nitems < 0) {\n"
+          "        return -1;\n"
+          "    }" },
+    };
+    size_t nrepls = sizeof(repls) / sizeof(repls[0]);
+    size_t src_len = strlen(src);
+    size_t alloc = src_len + 512;
+    char *patched = (char *)malloc(alloc);
+    if (!patched) return NULL;
+    const char *p = src;
+    char *d = patched;
+    while (*p) {
+        bool matched = false;
+        for (size_t ri = 0; ri < nrepls; ri++) {
+            size_t olen = strlen(repls[ri].old);
+            if (strncmp(p, repls[ri].old, olen) == 0) {
+                size_t rlen = strlen(repls[ri].rep);
+                if ((size_t)(d - patched) + rlen + 1 > alloc) break;
+                memcpy(d, repls[ri].rep, rlen);
+                d += rlen;
+                p += olen;
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) *d++ = *p++;
+    }
+    *d = '\0';
+    return patched;
+}
+
+static bool dsl_wasm32_source_calls_math(const char *src) {
+    /* Check if the C source actually calls external math functions (not just
+       extern declarations).  Look for "funcname(" that isn't preceded by
+       "extern" on the same line.  This is a heuristic but sufficient for
+       the generated C code. */
+    static const char *math_funcs[] = {
+        "acos(", "acosh(", "asin(", "asinh(", "atan(", "atan2(",
+        "atanh(", "cbrt(", "ceil(", "cos(", "cosh(", "erf(",
+        "erfc(", "exp(", "exp2(", "expm1(", "fabs(", "floor(",
+        "fmod(", "hypot(", "lgamma(", "log(", "log10(", "log1p(",
+        "log2(", "pow(", "remainder(", "round(", "sin(", "sinh(",
+        "sqrt(", "tan(", "tanh(", "tgamma(", "trunc(",
+        "me_jit_exp10(", "me_jit_sinpi(", "me_jit_cospi(",
+        "me_jit_logaddexp(", "me_jit_where(",
+        "me_jit_vec_sin_f64(", "me_jit_vec_cos_f64(",
+        "me_jit_vec_exp_f64(", "me_jit_vec_log_f64(",
+        "me_jit_vec_exp10_f64(", "me_jit_vec_sinpi_f64(",
+        "me_jit_vec_cospi_f64(",
+        NULL
+    };
+    const char *p = src;
+    while (*p) {
+        /* Skip extern and static declaration lines. */
+        if (strncmp(p, "extern ", 7) == 0 ||
+            strncmp(p, "static ", 7) == 0) {
+            while (*p && *p != '\n') p++;
+            if (*p) p++;
+            continue;
+        }
+        for (int i = 0; math_funcs[i]; i++) {
+            size_t len = strlen(math_funcs[i]);
+            if (strncmp(p, math_funcs[i], len) == 0) {
+                /* Make sure it's a standalone call, not part of a longer
+                   identifier (e.g. "round(" but not "myround("). */
+                if (p == src || !((p[-1] >= 'a' && p[-1] <= 'z') ||
+                                  (p[-1] >= 'A' && p[-1] <= 'Z') ||
+                                  (p[-1] >= '0' && p[-1] <= '9') ||
+                                   p[-1] == '_')) {
+                    return true;
+                }
+            }
+        }
+        p++;
+    }
+    return false;
+}
+
+static bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program) {
+    if (!program || !program->jit_c_source) {
+        return false;
+    }
+
+    /* Patch int64_t → int for nitems (wasm32 backend limitation). */
+    char *patched_src = dsl_wasm32_patch_source(program->jit_c_source);
+    if (!patched_src) return false;
+    dsl_tracef("jit wasm32: source patched (%zu bytes)", strlen(patched_src));
+
+    /* Skip JIT for kernels that call external math functions — the wasm32
+       math bridge is not yet implemented (Phase 3).  Checking the actual
+       source avoids false positives from extern declarations alone. */
+    if (dsl_wasm32_source_calls_math(patched_src)) {
+        free(patched_src);
+        dsl_tracef("jit runtime skip: wasm32 math bridge not available");
+        return false;
+    }
+
+    TCCState *state = tcc_new();
+    if (!state) {
+        free(patched_src);
+        dsl_tracef("jit runtime skip: tcc_new failed");
+        return false;
+    }
+    tcc_set_error_func(state, NULL, dsl_wasm_tcc_error_handler);
+    tcc_set_options(state, "-nostdlib -nostdinc");
+
+    if (tcc_set_output_type(state, TCC_OUTPUT_EXE) < 0) {
+        tcc_delete(state);
+        free(patched_src);
+        dsl_tracef("jit runtime skip: tcc_set_output_type failed");
+        return false;
+    }
+
+    /* Relocate data/stack to a safe region that doesn't collide with
+       the host module's linear memory layout. */
+    void *jit_scratch = malloc(256 * 1024);
+    if (!jit_scratch) { tcc_delete(state); free(patched_src); return false; }
+    unsigned int jit_base = ((unsigned int)(uintptr_t)jit_scratch + 0xFFFFu) & ~0xFFFFu;
+    tcc_set_wasm_data_base(state, jit_base);
+
+    if (tcc_compile_string(state, patched_src) < 0) {
+        dsl_tracef("jit runtime skip: tcc_compile_string failed");
+        tcc_delete(state);
+        free(patched_src);
+        free(jit_scratch);
+        return false;
+    }
+    free(patched_src);
+
+    const char *wasm_path = "/tmp/me_jit_kernel.wasm";
+    if (tcc_output_file(state, wasm_path) < 0) {
+        tcc_delete(state);
+        free(jit_scratch);
+        dsl_tracef("jit runtime skip: tcc_output_file failed");
+        return false;
+    }
+    tcc_delete(state);
+
+    /* Read the .wasm bytes from Emscripten's virtual filesystem. */
+    FILE *fp = fopen(wasm_path, "rb");
+    if (!fp) {
+        free(jit_scratch);
+        dsl_tracef("jit runtime skip: cannot read wasm file");
+        return false;
+    }
+    fseek(fp, 0, SEEK_END);
+    long wasm_len = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (wasm_len <= 0 || wasm_len > 1024 * 1024) {
+        fclose(fp);
+        free(jit_scratch);
+        dsl_tracef("jit runtime skip: wasm file size %ld unexpected", wasm_len);
+        return false;
+    }
+    unsigned char *wasm_bytes = (unsigned char *)malloc((size_t)wasm_len);
+    if (!wasm_bytes) {
+        fclose(fp);
+        free(jit_scratch);
+        return false;
+    }
+    if ((long)fread(wasm_bytes, 1, (size_t)wasm_len, fp) != wasm_len) {
+        free(wasm_bytes);
+        fclose(fp);
+        free(jit_scratch);
+        return false;
+    }
+    fclose(fp);
+    remove(wasm_path);
+
+    /* Instantiate the wasm module and get a callable function pointer. */
+    int fn_idx = me_wasm_jit_instantiate(wasm_bytes, (int)wasm_len);
+    free(wasm_bytes);
+    if (fn_idx == 0) {
+        free(jit_scratch);
+        dsl_tracef("jit runtime skip: wasm instantiation failed");
+        return false;
+    }
+
+    program->jit_kernel_fn = (me_dsl_jit_kernel_fn)(uintptr_t)fn_idx;
+    /* Keep scratch memory alive — the JIT module's data/stack lives there. */
+    program->jit_dl_handle = jit_scratch;
+    program->jit_c_error_line = 0;
+    program->jit_c_error_column = 0;
+    program->jit_c_error[0] = '\0';
+    program->jit_runtime_key = 0;
+    program->jit_dl_handle_cached = false;
+    return true;
+}
+#endif /* ME_USE_WASM32_JIT */
+
 static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
-#if ME_USE_LIBTCC_FALLBACK
+#if ME_USE_WASM32_JIT
+    if (!program || !program->jit_c_source || program->jit_kernel_fn) {
+        return;
+    }
+    if (!dsl_jit_runtime_enabled()) {
+        return;
+    }
+    if (dsl_jit_compile_wasm32(program)) {
+        dsl_tracef("jit runtime built: fp=%s compiler=%s",
+                   dsl_fp_mode_name(program->fp_mode),
+                   dsl_compiler_name(program->compiler));
+        return;
+    }
+    snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+             "jit runtime wasm32 compilation failed");
+    dsl_tracef("jit runtime skip: fp=%s compiler=%s reason=%s",
+               dsl_fp_mode_name(program->fp_mode),
+               dsl_compiler_name(program->compiler),
+               program->jit_c_error);
+#elif ME_USE_LIBTCC_FALLBACK
     if (!program || !program->jit_c_source || program->jit_kernel_fn) {
         return;
     }
@@ -5558,7 +5908,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
         program->jit_tcc_state = NULL;
     }
 #endif
-#if !defined(_WIN32) && !defined(_WIN64)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__EMSCRIPTEN__)
     if (program->jit_dl_handle) {
         if (!program->jit_dl_handle_cached) {
             dlclose(program->jit_dl_handle);

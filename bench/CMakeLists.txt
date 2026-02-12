@@ -32,4 +32,11 @@ foreach(bench_src IN LISTS MINIEXPR_BENCH_SOURCES)
   if(NOT WIN32)
     target_link_libraries("${bench_name}" PRIVATE m)
   endif()
+  if(EMSCRIPTEN)
+    target_link_options("${bench_name}" PRIVATE
+        "-sALLOW_TABLE_GROWTH=1"
+        "-sALLOW_MEMORY_GROWTH=1"
+        "-sINITIAL_MEMORY=134217728"
+        "-sEXPORTED_RUNTIME_METHODS=addFunction,removeFunction")
+  endif()
 endforeach()

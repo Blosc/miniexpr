@@ -33,12 +33,12 @@ option(MINIEXPR_ENABLE_WINDOWS_LIBTCC_JIT "Enable experimental libtcc DSL JIT su
 if(EMSCRIPTEN)
   if(MINIEXPR_ENABLE_WASM_LIBTCC_JIT)
     set(MINIEXPR_USE_LIBTCC_FALLBACK ON)
-    # Keep wasm JIT experiments focused on runtime behavior; bundled libtcc
-    # toolchain builds under emcc are unreliable and not required for tracing.
     set(MINIEXPR_BUILD_BUNDLED_LIBTCC OFF)
+    set(MINIEXPR_USE_WASM32_JIT ON)
   else()
     # Plain wasm32 builds default to interpreter-only DSL execution.
     set(MINIEXPR_USE_LIBTCC_FALLBACK OFF)
+    set(MINIEXPR_USE_WASM32_JIT OFF)
   endif()
 elseif(WIN32)
   if(MINIEXPR_ENABLE_WINDOWS_LIBTCC_JIT)
@@ -57,7 +57,7 @@ set(MINIEXPR_SOURCES
   src/functions-simd.c
 )
 
-if(MINIEXPR_USE_SLEEF OR (MINIEXPR_USE_LIBTCC_FALLBACK AND MINIEXPR_BUILD_BUNDLED_LIBTCC))
+if(MINIEXPR_USE_SLEEF OR (MINIEXPR_USE_LIBTCC_FALLBACK AND MINIEXPR_BUILD_BUNDLED_LIBTCC) OR MINIEXPR_USE_WASM32_JIT)
   include(FetchContent)
   if(POLICY CMP0169)
     cmake_policy(SET CMP0169 OLD)
@@ -83,9 +83,9 @@ if(MINIEXPR_USE_LIBTCC_FALLBACK AND MINIEXPR_BUILD_BUNDLED_LIBTCC)
     # GIT_REPOSITORY https://repo.or.cz/tinycc.git
     # GIT_TAG 4597a9621e70a337b241d424f4ab4729cb75b426  # latest commit as of Feb 2025
     # minicc is a fork of tinycc with support for wasm32 and shared library builds
-    GIT_REPOSITORY https://github.com/Blosc/minicc.git
-    GIT_TAG 0cc737c2e3778b27d91a988daff98a4d6acf1090
-    # SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../minicc"
+    #GIT_REPOSITORY https://github.com/Blosc/minicc.git
+    #GIT_TAG 0cc737c2e3778b27d91a988daff98a4d6acf1090
+    SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../minicc"
   )
   FetchContent_Populate(tinycc)
 
@@ -162,6 +162,73 @@ if(MINIEXPR_USE_LIBTCC_FALLBACK AND MINIEXPR_BUILD_BUNDLED_LIBTCC)
           PATTERN ".git" EXCLUDE)
 endif()
 
+# --- wasm32 static libtcc (Emscripten cross-compile, targets wasm32) --------
+if(MINIEXPR_USE_WASM32_JIT)
+  FetchContent_Declare(
+    tinycc
+    #GIT_REPOSITORY https://github.com/Blosc/minicc.git
+    #GIT_TAG 0cc737c2e3778b27d91a988daff98a4d6acf1090
+    SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../minicc"
+  )
+  FetchContent_Populate(tinycc)
+
+  # Build the c2str host tool with the native compiler so it can run during
+  # the cross-compilation build.  Emscripten sets CMAKE_CROSSCOMPILING, so
+  # we invoke the system C compiler directly.
+  find_program(MINIEXPR_HOST_CC cc REQUIRED)
+  set(MINIEXPR_WASM_LIBTCC_INCDIR "${CMAKE_CURRENT_BINARY_DIR}/wasm-libtcc-include")
+  file(MAKE_DIRECTORY "${MINIEXPR_WASM_LIBTCC_INCDIR}")
+  set(MINIEXPR_C2STR_BIN "${CMAKE_CURRENT_BINARY_DIR}/minicc-c2str-host")
+  set(MINIEXPR_WASM_TCCDEFS "${MINIEXPR_WASM_LIBTCC_INCDIR}/tccdefs_.h")
+  add_custom_command(
+    OUTPUT "${MINIEXPR_C2STR_BIN}"
+    COMMAND "${MINIEXPR_HOST_CC}" -DC2STR=1
+            "${tinycc_SOURCE_DIR}/conftest.c"
+            -o "${MINIEXPR_C2STR_BIN}"
+    DEPENDS "${tinycc_SOURCE_DIR}/conftest.c"
+    VERBATIM
+  )
+  add_custom_command(
+    OUTPUT "${MINIEXPR_WASM_TCCDEFS}"
+    COMMAND "${MINIEXPR_C2STR_BIN}"
+            "${tinycc_SOURCE_DIR}/include/tccdefs.h"
+            "${MINIEXPR_WASM_TCCDEFS}"
+    DEPENDS "${MINIEXPR_C2STR_BIN}" "${tinycc_SOURCE_DIR}/include/tccdefs.h"
+    VERBATIM
+  )
+  add_custom_target(miniexpr_wasm_tccdefs DEPENDS "${MINIEXPR_WASM_TCCDEFS}")
+
+  # Generate config.h for the wasm32-targeting libtcc.
+  file(READ "${tinycc_SOURCE_DIR}/VERSION" _minicc_ver)
+  string(STRIP "${_minicc_ver}" _minicc_ver)
+  file(WRITE "${MINIEXPR_WASM_LIBTCC_INCDIR}/config.h"
+    "/* Generated for wasm32-targeting libtcc under Emscripten */\n"
+    "#define TCC_VERSION \"${_minicc_ver}\"\n"
+    "#define CC_NAME CC_clang\n"
+    "#define GCC_MAJOR 0\n"
+    "#define GCC_MINOR 0\n"
+    "#define CONFIG_TCC_PREDEFS 1\n"
+    "#define CONFIG_NEW_DTAGS 1\n"
+    "#ifndef CONFIG_TCCDIR\n"
+    "#define CONFIG_TCCDIR \"/usr/local/lib/tcc\"\n"
+    "#endif\n"
+  )
+
+  # Build a static libtcc that compiles C to wasm32 modules.
+  # Uses ONE_SOURCE=1 so libtcc.c pulls in all other .c files via #include.
+  add_library(miniexpr_wasm_libtcc STATIC "${tinycc_SOURCE_DIR}/libtcc.c")
+  set_target_properties(miniexpr_wasm_libtcc PROPERTIES OUTPUT_NAME "tcc_wasm32")
+  target_include_directories(miniexpr_wasm_libtcc PRIVATE
+    "${MINIEXPR_WASM_LIBTCC_INCDIR}"   # config.h, tccdefs_.h
+    "${tinycc_SOURCE_DIR}"
+  )
+  target_compile_definitions(miniexpr_wasm_libtcc PRIVATE
+    ONE_SOURCE=1
+    TCC_TARGET_WASM32
+  )
+  add_dependencies(miniexpr_wasm_libtcc miniexpr_wasm_tccdefs)
+endif()
+
 function(miniexpr_setup_target target_name)
   target_sources(${target_name} PRIVATE ${MINIEXPR_SOURCES})
   target_include_directories(${target_name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -190,6 +257,11 @@ function(miniexpr_setup_target target_name)
   endif()
   if(MINIEXPR_DSL_TRACE_DEFAULT)
     target_compile_definitions(${target_name} PRIVATE ME_DSL_TRACE_DEFAULT=1)
+  endif()
+  if(MINIEXPR_USE_WASM32_JIT)
+    target_compile_definitions(${target_name} PRIVATE ME_USE_WASM32_JIT=1)
+    target_include_directories(${target_name} PRIVATE "${tinycc_SOURCE_DIR}")
+    target_link_libraries(${target_name} PRIVATE miniexpr_wasm_libtcc)
   endif()
   if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang")
     target_link_libraries(${target_name} PUBLIC clang_rt.builtins-x86_64.lib)
