@@ -77,7 +77,8 @@ if(MINIEXPR_USE_SLEEF)
   FetchContent_Populate(sleef)
 endif()
 
-if(MINIEXPR_USE_LIBTCC_FALLBACK AND MINIEXPR_BUILD_BUNDLED_LIBTCC)
+if((MINIEXPR_USE_LIBTCC_FALLBACK AND MINIEXPR_BUILD_BUNDLED_LIBTCC) OR MINIEXPR_USE_WASM32_JIT)
+  # Shared tinycc source declaration for both host fallback and wasm32 JIT builds.
   FetchContent_Declare(
     tinycc
     # GIT_REPOSITORY https://repo.or.cz/tinycc.git
@@ -88,7 +89,9 @@ if(MINIEXPR_USE_LIBTCC_FALLBACK AND MINIEXPR_BUILD_BUNDLED_LIBTCC)
     # SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../minicc"
   )
   FetchContent_Populate(tinycc)
+endif()
 
+if(MINIEXPR_USE_LIBTCC_FALLBACK AND MINIEXPR_BUILD_BUNDLED_LIBTCC)
   if(APPLE)
     set(MINIEXPR_TINYCC_SHARED_NAME "libtcc.dylib")
   elseif(WIN32)
@@ -164,14 +167,6 @@ endif()
 
 # --- wasm32 static libtcc (Emscripten cross-compile, targets wasm32) --------
 if(MINIEXPR_USE_WASM32_JIT)
-  FetchContent_Declare(
-    tinycc
-    #GIT_REPOSITORY https://github.com/Blosc/minicc.git
-    #GIT_TAG 0cc737c2e3778b27d91a988daff98a4d6acf1090
-    SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../minicc"
-  )
-  FetchContent_Populate(tinycc)
-
   # Build the c2str host tool with the native compiler so it can run during
   # the cross-compilation build.  Emscripten sets CMAKE_CROSSCOMPILING, so
   # we invoke the system C compiler directly.
