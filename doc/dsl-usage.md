@@ -90,6 +90,7 @@ Notes:
 - This pragma is independent from `# me:fp=...`.
 - With `# me:compiler=cc`, runtime uses `CC` (default: `cc`) to select the compiler executable.
 - With `# me:compiler=cc`, runtime also honors `CFLAGS`.
+- Build option `MINIEXPR_ENABLE_TCC_JIT=OFF` disables TCC-based JIT backends; on Linux/macOS, the separate `# me:compiler=cc` runtime path may still be available.
 - If the selected backend is unavailable at runtime, miniexpr falls back to interpreter execution.
 
 ### Temporary Variables

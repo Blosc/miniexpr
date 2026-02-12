@@ -207,11 +207,14 @@ Options:
 - `-DMINIEXPR_BUILD_EXAMPLES=ON|OFF`
 - `-DMINIEXPR_BUILD_BENCH=ON|OFF`
 - `-DMINIEXPR_USE_SLEEF=ON|OFF`
-- `-DMINIEXPR_USE_LIBTCC_FALLBACK=ON|OFF`
-- `-DMINIEXPR_BUILD_BUNDLED_LIBTCC=ON|OFF` (build bundled libtcc from minicc when fallback is enabled)
+- `-DMINIEXPR_ENABLE_TCC_JIT=ON|OFF`
+- `-DMINIEXPR_BUILD_BUNDLED_LIBTCC=ON|OFF` (build bundled libtcc from minicc when TCC JIT is enabled)
 - `-DMINIEXPR_DSL_TRACE_DEFAULT=ON|OFF` (emit DSL trace logs by default when `ME_DSL_TRACE` is unset)
-- `-DMINIEXPR_ENABLE_WASM_LIBTCC_JIT=ON|OFF` (Emscripten-only, experimental)
-- `-DMINIEXPR_ENABLE_WINDOWS_LIBTCC_JIT=ON|OFF` (Windows-only, experimental)
+
+Notes:
+- On Windows, TCC JIT is enabled by default (`MINIEXPR_ENABLE_TCC_JIT=ON`).
+- On Emscripten, setting `MINIEXPR_ENABLE_TCC_JIT=ON` enables wasm32 JIT support automatically.
+- Setting `MINIEXPR_ENABLE_TCC_JIT=OFF` disables TCC-based JIT backends; on Linux/macOS, the separate `# me:compiler=cc` runtime path may still be available.
 
 ### SLEEF SIMD acceleration
 
