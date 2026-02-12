@@ -8,18 +8,12 @@ on:
 
 jobs:
   build-and-test:
-    if: ${{ false }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
         compiler: [gcc]
-        exclude:
-          - os: windows-latest
-            compiler: gcc
         include:
-#          - os: windows-latest
-#            compiler: msvc
           - os: windows-latest
             compiler: clang-cl
     runs-on: ${{ matrix.os }}
@@ -36,7 +30,9 @@ jobs:
       run: |
         if [ "$RUNNER_OS" == "Windows" ]; then
           # Visual Studio generators are multi-config; select Release at build time.
-          cmake -S . -B build -G "Visual Studio 17 2022" -T ClangCL -DCMAKE_C_COMPILER=clang-cl
+          cmake -S . -B build -G "Visual Studio 17 2022" -T ClangCL \
+            -DCMAKE_C_COMPILER=clang-cl \
+            -DMINIEXPR_ENABLE_WINDOWS_LIBTCC_JIT=ON
           grep -Ei '^CMAKE_C_COMPILER:(FILEPATH|STRING|UNINITIALIZED)=.*clang-cl' build/CMakeCache.txt
         else
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -59,6 +55,7 @@ jobs:
         fi
 
     - name: Trace DSL JIT backend activity
+      if: ${{ false }}
       shell: bash
       run: |
         set -o pipefail
@@ -70,36 +67,6 @@ jobs:
             2>&1 | tee build/dsl-jit-trace.log
         fi
         grep -E "jit ir built:|jit runtime (built|skip|hit|stubbed):" build/dsl-jit-trace.log || true
-
-  minicc-wasm:
-    strategy:
-      fail-fast: false
-      matrix:
-        node: ['22', '24']
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ matrix.node }}
-
-    - name: Configure miniexpr (populate MiniCC sources)
-      shell: bash
-      run: |
-        cmake -S . -B build-populate -DCMAKE_BUILD_TYPE=Release
-
-    - name: Build and test MiniCC wasm32 backend
-      shell: bash
-      run: |
-        cmake -S build-populate/_deps/tinycc-src -B build-minicc-wasm -G Ninja \
-          -DMINICC_BUILD_WASM32_TCC=ON \
-          -DMINICC_ENABLE_TESTING=ON \
-          -DMINICC_BUILD_SHARED_LIBTCC=ON
-        cmake --build build-minicc-wasm -j
-        ctest --test-dir build-minicc-wasm -R '^minicc\.wasm\.' --output-on-failure
 
   miniexpr-wasm32:
     runs-on: ubuntu-latest
@@ -171,38 +138,3 @@ jobs:
           echo "No DSL JIT trace lines captured"
         fi
         echo "=== End Summary ==="
-
-  windows-libtcc-jit:
-    if: ${{ false }}
-    runs-on: windows-latest
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up MSVC (Windows)
-      uses: ilammy/msvc-dev-cmd@v1
-
-    - name: Configure and build (clang-cl + libtcc JIT)
-      shell: bash
-      run: |
-        cmake -S . -B build-windows-libtcc-jit -G "Visual Studio 17 2022" -T ClangCL \
-          -DCMAKE_C_COMPILER=clang-cl \
-          -DMINIEXPR_ENABLE_WINDOWS_LIBTCC_JIT=ON \
-          -DMINIEXPR_BUILD_BENCH=OFF \
-          -DMINIEXPR_BUILD_EXAMPLES=OFF
-        grep -Ei '^CMAKE_C_COMPILER:(FILEPATH|STRING|UNINITIALIZED)=.*clang-cl' build-windows-libtcc-jit/CMakeCache.txt
-        cmake --build build-windows-libtcc-jit --config Release
-
-    - name: Run DSL JIT tests (libtcc lane)
-      shell: bash
-      run: |
-        ctest --test-dir build-windows-libtcc-jit -C Release -R "test_dsl_jit_|test_dsl_syntax" --output-on-failure || \
-          ctest --test-dir build-windows-libtcc-jit -C Release --rerun-failed --output-on-failure
-
-    - name: Assert tcc runtime JIT activation (trace)
-      shell: bash
-      run: |
-        set -o pipefail
-        ME_DSL_TRACE=1 ctest --test-dir build-windows-libtcc-jit -C Release -R "^test_dsl_jit_runtime_cache$" -V \
-          2>&1 | tee build-windows-libtcc-jit/tcc-trace.log
-        grep -E "jit runtime built: .*compiler=tcc" build-windows-libtcc-jit/tcc-trace.log

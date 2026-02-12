@@ -2,13 +2,10 @@ cmake_minimum_required(VERSION 3.16.3)
 project(miniexpr LANGUAGES C)
 include(GNUInstallDirs)
 
-if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "MSVC")
-  message(FATAL_ERROR "MSVC is not supported. Use clang-cl (e.g., cmake -G \"Visual Studio 17 2022\" -T ClangCL).")
-endif()
 if(WIN32 AND NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
   message(FATAL_ERROR "Windows builds require clang-cl.")
 endif()
-if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang"
+if(WIN32
    AND DEFINED CMAKE_C_COMPILER_FRONTEND_VARIANT
    AND NOT CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
   message(FATAL_ERROR "Windows builds require clang-cl (MSVC frontend variant).")
@@ -48,6 +45,15 @@ elseif(WIN32)
   endif()
 endif()
 
+set(MINIEXPR_NEEDS_BUNDLED_TINYCC OFF)
+if(MINIEXPR_USE_LIBTCC_FALLBACK AND MINIEXPR_BUILD_BUNDLED_LIBTCC)
+  set(MINIEXPR_NEEDS_BUNDLED_TINYCC ON)
+endif()
+set(MINIEXPR_NEEDS_TINYCC OFF)
+if(MINIEXPR_NEEDS_BUNDLED_TINYCC OR MINIEXPR_USE_WASM32_JIT)
+  set(MINIEXPR_NEEDS_TINYCC ON)
+endif()
+
 set(MINIEXPR_SOURCES
   src/miniexpr.c
   src/dsl_parser.c
@@ -57,7 +63,7 @@ set(MINIEXPR_SOURCES
   src/functions-simd.c
 )
 
-if(MINIEXPR_USE_SLEEF OR (MINIEXPR_USE_LIBTCC_FALLBACK AND MINIEXPR_BUILD_BUNDLED_LIBTCC) OR MINIEXPR_USE_WASM32_JIT)
+if(MINIEXPR_USE_SLEEF OR MINIEXPR_NEEDS_TINYCC)
   include(FetchContent)
   if(POLICY CMP0169)
     cmake_policy(SET CMP0169 OLD)
@@ -77,7 +83,7 @@ if(MINIEXPR_USE_SLEEF)
   FetchContent_Populate(sleef)
 endif()
 
-if((MINIEXPR_USE_LIBTCC_FALLBACK AND MINIEXPR_BUILD_BUNDLED_LIBTCC) OR MINIEXPR_USE_WASM32_JIT)
+if(MINIEXPR_NEEDS_TINYCC)
   # Shared tinycc source declaration for both host fallback and wasm32 JIT builds.
   FetchContent_Declare(
     tinycc
@@ -91,7 +97,7 @@ if((MINIEXPR_USE_LIBTCC_FALLBACK AND MINIEXPR_BUILD_BUNDLED_LIBTCC) OR MINIEXPR_
   FetchContent_Populate(tinycc)
 endif()
 
-if(MINIEXPR_USE_LIBTCC_FALLBACK AND MINIEXPR_BUILD_BUNDLED_LIBTCC)
+if(MINIEXPR_NEEDS_BUNDLED_TINYCC)
   if(APPLE)
     set(MINIEXPR_TINYCC_SHARED_NAME "libtcc.dylib")
   elseif(WIN32)
@@ -116,6 +122,20 @@ if(MINIEXPR_USE_LIBTCC_FALLBACK AND MINIEXPR_BUILD_BUNDLED_LIBTCC)
   if(CMAKE_GENERATOR_TOOLSET)
     list(APPEND MINIEXPR_TINYCC_GENERATOR_ARGS -T "${CMAKE_GENERATOR_TOOLSET}")
   endif()
+  set(MINIEXPR_TINYCC_CMAKE_ARGS
+    "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
+    "-DMINICC_BUILD_SHARED_LIBTCC=ON"
+    "-DMINICC_BUILD_WASM32_TCC=OFF"
+    "-DMINICC_ENABLE_TESTING=OFF"
+  )
+  set(MINIEXPR_TINYCC_BUILD_CMD
+    "${CMAKE_COMMAND}" --build "${tinycc_BINARY_DIR}" --target minicc_libtcc_shared
+  )
+  if(WIN32)
+    set(MINIEXPR_TINYCC_BUILD_CMD
+      "${CMAKE_COMMAND}" --build "${tinycc_BINARY_DIR}" --config "$<CONFIG>" --target minicc_libtcc_shared
+    )
+  endif()
 
   add_custom_command(
     OUTPUT "${MINIEXPR_TINYCC_CONFIG_STAMP}"
@@ -126,32 +146,19 @@ if(MINIEXPR_USE_LIBTCC_FALLBACK AND MINIEXPR_BUILD_BUNDLED_LIBTCC)
             ${MINIEXPR_TINYCC_GENERATOR_ARGS}
             -S "${tinycc_SOURCE_DIR}"
             -B "${tinycc_BINARY_DIR}"
-            "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
-            "-DMINICC_BUILD_SHARED_LIBTCC=ON"
-            "-DMINICC_BUILD_WASM32_TCC=OFF"
-            "-DMINICC_ENABLE_TESTING=OFF"
+            ${MINIEXPR_TINYCC_CMAKE_ARGS}
     COMMAND "${CMAKE_COMMAND}" -E touch "${MINIEXPR_TINYCC_CONFIG_STAMP}"
     DEPENDS "${tinycc_SOURCE_DIR}/CMakeLists.txt"
     VERBATIM
   )
 
-  if(WIN32)
-    add_custom_command(
-      OUTPUT "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
-      COMMAND "${CMAKE_COMMAND}" --build "${tinycc_BINARY_DIR}" --config "$<CONFIG>" --target minicc_libtcc_shared
-      COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MINIEXPR_TINYCC_BUILT_SHARED_PATH}" "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
-      DEPENDS "${MINIEXPR_TINYCC_CONFIG_STAMP}"
-      VERBATIM
-    )
-  else()
-    add_custom_command(
-      OUTPUT "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
-      COMMAND "${CMAKE_COMMAND}" --build "${tinycc_BINARY_DIR}" --target minicc_libtcc_shared
-      COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MINIEXPR_TINYCC_BUILT_SHARED_PATH}" "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
-      DEPENDS "${MINIEXPR_TINYCC_CONFIG_STAMP}"
-      VERBATIM
-    )
-  endif()
+  add_custom_command(
+    OUTPUT "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
+    COMMAND ${MINIEXPR_TINYCC_BUILD_CMD}
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MINIEXPR_TINYCC_BUILT_SHARED_PATH}" "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
+    DEPENDS "${MINIEXPR_TINYCC_CONFIG_STAMP}"
+    VERBATIM
+  )
 
   add_custom_target(miniexpr_tinycc ALL
     DEPENDS "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}")
@@ -263,29 +270,29 @@ function(miniexpr_setup_target target_name)
   endif()
   if(NOT WIN32)
     target_link_libraries(${target_name} PRIVATE m)
-    if(UNIX AND NOT APPLE)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
       target_link_libraries(${target_name} PRIVATE dl)
     endif()
   endif()
 endfunction()
 
-if(MINIEXPR_BUILD_SHARED)
-  add_library(miniexpr SHARED)
-  miniexpr_setup_target(miniexpr)
+function(miniexpr_add_library_target target_name target_type)
+  add_library(${target_name} ${target_type})
+  miniexpr_setup_target(${target_name})
   if(TARGET miniexpr_tinycc)
-    add_dependencies(miniexpr miniexpr_tinycc)
+    add_dependencies(${target_name} miniexpr_tinycc)
   endif()
+endfunction()
+
+if(MINIEXPR_BUILD_SHARED)
+  miniexpr_add_library_target(miniexpr SHARED)
   if(WIN32)
     set_target_properties(miniexpr PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
   endif()
 endif()
 
 if(MINIEXPR_BUILD_STATIC)
-  add_library(miniexpr_static STATIC)
-  miniexpr_setup_target(miniexpr_static)
-  if(TARGET miniexpr_tinycc)
-    add_dependencies(miniexpr_static miniexpr_tinycc)
-  endif()
+  miniexpr_add_library_target(miniexpr_static STATIC)
   set_target_properties(miniexpr_static PROPERTIES OUTPUT_NAME miniexpr)
 endif()
 
