@@ -161,6 +161,14 @@ The DSL (`dsl_parser.c`) extends single expressions to multi-statement programs:
 
 ### High Priority
 
+1. **Emit `while` loops instead of ternary-`for` in JIT C codegen**
+   - Current codegen emits: `for (i = start; ((step > 0) ? (i < stop) : (i > stop)); i += step)`
+   - The ternary condition creates TCC's "jump into loop" CFG pattern (nearly 2× more basic blocks)
+   - This forces the wasm32 backend to use the slower switch-loop dispatch instead of structured control flow
+   - When step direction is known at codegen time (positive or negative), emit a simple `while (i < stop)` or `while (i > stop)` instead
+   - Expected benefit: enables wasm32 Stackifier path (native `block`/`loop`/`br_if`), fewer basic blocks, and potentially better V8 JIT optimization
+   - See `minicc/wasm32-opts.md` and the structured control flow code in `minicc/tccwasm.c`
+
 ### Medium Priority
 1. **String interop with Blosc2 variable-length types**
    - interop with Blosc2 variable-length string types
