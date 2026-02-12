@@ -115,8 +115,9 @@ the .wasm output) so kernel code can read/write arrays directly.
       `me_wasm_jit_instantiate`: imports now resolve to host wasm bridge
       functions first, with JS math/vector loops kept as fallback.
 
-**Current behavior:** math kernels JIT on wasm32 with imported host math
-functions; non-math kernels continue to JIT as before.
+**Current behavior:** On wasm32, both math and non-math DSL kernels now JIT
+ successfully. Math operations are resolved through host-provided imports,
+ while non-math kernels run through the existing JIT path unchanged.
 
 Math benchmark on wasm32 (`bench/benchmark_dsl_jit_math_kernels.js`,
 `nitems=262144`, `repeats=6`, strict):
