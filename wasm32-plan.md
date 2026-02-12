@@ -81,33 +81,64 @@ the .wasm output) so kernel code can read/write arrays directly.
       the wasm module's `__stack_pointer` and data section reference this
       region.  Freed on program cleanup.
 
-### Phase 3: Math bridge for wasm32 kernels — NOT STARTED
+### Phase 3: Math bridge for wasm32 kernels ✅ DONE
 
-- [ ] Register math functions (sin, cos, round, exp, pow, etc.) as wasm
+- [x] Register math functions (sin, cos, round, exp, pow, etc.) as wasm
       imports so JIT kernels can call them.
-- [ ] Extend `me_wasm_jit_instantiate` JS to provide math functions in the
+- [x] Extend `me_wasm_jit_instantiate` JS to provide math functions in the
       import object: `{ env: { memory: wasmMemory, sin: Math.sin, ... } }`.
-- [ ] Add TCC symbol registration for bridge functions so the wasm linker
+- [x] Add TCC symbol registration for bridge functions so the wasm linker
       can resolve the calls (via `tcc_add_symbol()` or a function index table
       in `tccwasm.c`).
-- [ ] Remove `dsl_wasm32_source_calls_math()` skip once bridge is working.
-- [ ] Handle `me_jit_exp10`, `me_jit_sinpi`, `me_jit_cospi`, `me_jit_where`,
+- [x] Remove `dsl_wasm32_source_calls_math()` skip once bridge is working.
+- [x] Handle `me_jit_exp10`, `me_jit_sinpi`, `me_jit_cospi`, `me_jit_where`,
       `me_jit_logaddexp` — either bridge to JS implementations or inline.
-- [ ] Handle static inline helpers in non-bridge codegen path (currently
+- [x] Handle static inline helpers in non-bridge codegen path (currently
       these emit `pow()`, `sin()`, `cos()` calls inside static functions
       that TCC compiles even when unused).
 
-**Current behavior:** kernels that call math functions are detected by
-`dsl_wasm32_source_calls_math()` and gracefully skip JIT, falling back
-to the interpreter.  Tests pass.
+#### Phase 3 progress (in this branch)
+
+- [x] `me_wasm_jit_instantiate` now merges/patches an existing import section
+      (if present), ensures `env.memory` import is available, and provides a
+      JS math/bridge import object (scalar + `me_jit_*` + `me_jit_vec_*`).
+- [x] Added wasm32-side best-effort `tcc_add_symbol()` registration for
+      required math and bridge symbols detected in generated C source.
+- [x] Removed hard skip on `dsl_wasm32_source_calls_math()` so math kernels
+      now attempt wasm32 JIT compilation.
+- [x] Patched `../minicc/tccwasm.c` to represent unresolved direct calls as
+      wasm imports (env module), emit import section entries, and offset
+      function/export indices accordingly. Probe kernels using `sin()+exp()`
+      now report `has_jit=1` for both `# me:compiler=tcc` and
+      `# me:compiler=cc`.
+- [x] Added wasm32 bridge-symbol lookup + import binding preference in
+      `me_wasm_jit_instantiate`: imports now resolve to host wasm bridge
+      functions first, with JS math/vector loops kept as fallback.
+
+**Current behavior:** math kernels JIT on wasm32 with imported host math
+functions; non-math kernels continue to JIT as before.
+
+Math benchmark on wasm32 (`bench/benchmark_dsl_jit_math_kernels.js`,
+`nitems=262144`, `repeats=6`, strict):
+
+| Kernel | JIT ns/elem | Interp ns/elem | Relative |
+|--------|-------------|----------------|----------|
+| sin    | 2.816       | 8.689          | 3.09x faster |
+| exp    | 2.180       | 3.365          | 1.54x faster |
+| log    | 4.043       | 3.854          | 0.95x (slower) |
+| pow    | 4.362       | 5.614          | 1.29x faster |
+| hypot  | 3.244       | 4.255          | 1.31x faster |
+| atan2  | 6.344       | 7.339          | 1.16x faster |
+| sinpi  | 4.946       | 6.440          | 1.30x faster |
+| cospi  | 4.915       | 6.492          | 1.32x faster |
 
 ### Phase 4: Testing ✅ DONE (for current scope)
 
 - [x] All 26 wasm32 ctest tests pass (100%).
 - [x] JIT kernels compile and execute correctly for non-math kernels
       (tests 1–3, 11–12, 14, 16, 18–19).
-- [x] Math-using kernels (test 10) gracefully skip JIT, interpreter fallback
-      produces correct results.
+- [x] Math-using kernels now JIT on wasm32 via imports/bridge binding; no
+      forced interpreter fallback for standard math kernels.
 - [x] UDF tests gracefully skip JIT (unresolved external calls), pass.
 - [x] ND-index kernels (tests 4–7) skip JIT at compile time (`_i0`
       undeclared), interpreter fallback works.
@@ -115,14 +146,14 @@ to the interpreter.  Tests pass.
       and runs (0.8× speedup — see Phase 6 below).
 - [x] All 9 minicc native tests pass (no regressions from TCC fixes).
 
-### Phase 5: Cleanup ✅ DONE
+### Phase 5: Cleanup — IN PROGRESS
 
 - [x] Removed debug trace (`dsl_tracef("jit wasm32: patched source:...")`).
 - [ ] Update `WASM32-TODO.md` with final status.
 - [ ] Update `README.md` build instructions if needed.
 - [ ] Consolidate minicc patches into proper commits in the minicc repo.
 
-### Phase 6: wasm32 JIT performance optimization — NOT STARTED
+### Phase 6: wasm32 JIT performance optimization — IN PROGRESS
 
 The wasm32 TCC JIT currently **underperforms** the interpreter for
 compute-heavy kernels due to the switch-loop dispatch model.  Mandelbrot
@@ -136,6 +167,10 @@ benchmark (1200×800):
 
 A detailed optimization plan with three options is in
 `../minicc/wasm32-opts.md`:
+
+Recent progress: bridge import binding now prefers wasm-native host bridge
+functions over JS per-element loops, which significantly improved math-kernel
+JIT throughput (see Phase 3 benchmark table above).
 
 - [ ] **Option 1 — Basic block coalescing** (~300 lines, expected 2–4×):
       merge consecutive non-branching IR ops into single br_table cases.
@@ -156,19 +191,16 @@ A detailed optimization plan with three options is in
 | Shared memory (host ↔ JIT module) | ✅ |
 | Correct numerical results | ✅ |
 | Graceful fallback for unsupported kernels | ✅ |
-| Math function bridge | ❌ not started |
-| JIT performance (vs interpreter) | ⚠️ 0.8× (needs optimization) |
+| Math function bridge | ✅ |
+| JIT performance (vs interpreter) | ⚠️ mixed: math mostly >1x, Mandelbrot still <1x |
 
 ## What's Left
 
-1. **Math bridge (Phase 3)** — required for kernels using sin/cos/round/etc.
-   Currently these gracefully fall back to the interpreter.
-
-2. **Performance optimization (Phase 6)** — the switch-loop dispatch model
+1. **Performance optimization (Phase 6)** — the switch-loop dispatch model
    makes JIT slower than interpreter for loop-heavy kernels.  Basic block
    coalescing (Option 1) is the recommended first step.
 
-3. **Documentation (Phase 5 remainder)** — update WASM32-TODO.md, README.
+2. **Documentation (Phase 5 remainder)** — update WASM32-TODO.md, README.
 
-4. **Minicc patch consolidation** — the TCC fixes are currently in the local
+3. **Minicc patch consolidation** — the TCC fixes are currently in the local
    `../minicc` working tree.  Need proper commits pushed to the minicc repo.
