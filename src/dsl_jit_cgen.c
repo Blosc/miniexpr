@@ -306,6 +306,11 @@ static bool me_jit_collect_locals_stmt(me_jit_locals *locals, const me_dsl_jit_i
             }
         }
         break;
+    case ME_DSL_JIT_IR_STMT_WHILE:
+        if (!me_jit_collect_locals_block(locals, &stmt->as.while_loop.body)) {
+            return false;
+        }
+        break;
     case ME_DSL_JIT_IR_STMT_FOR:
         if (!me_jit_locals_add(locals, stmt->as.for_loop.var, ME_INT64)) {
             return false;
@@ -1420,6 +1425,43 @@ static bool me_jit_emit_stmt(me_jit_codegen_ctx *ctx, const me_dsl_jit_ir_stmt *
             }
         }
         return true;
+    case ME_DSL_JIT_IR_STMT_WHILE: {
+        char *cond_c = NULL;
+        if (!me_jit_expr_to_c(&stmt->as.while_loop.cond, &cond_c, ctx->error, stmt->line, stmt->column)) {
+            free(cond_c);
+            return false;
+        }
+        const char *ctype = me_jit_c_type(stmt->as.while_loop.cond.dtype);
+        if (!ctype) {
+            free(cond_c);
+            me_jit_set_error(ctx->error, stmt->line, stmt->column,
+                             "unsupported while condition dtype in jit c codegen");
+            return false;
+        }
+        size_t need = strlen(cond_c) + strlen(ctype) * 2 + 30;
+        char *line_buf = malloc(need);
+        if (!line_buf) {
+            free(cond_c);
+            me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
+            return false;
+        }
+        snprintf(line_buf, need, "while (((%s)(%s)) != (%s)0) {", ctype, cond_c, ctype);
+        free(cond_c);
+        bool ok = me_jit_emit_line(&ctx->source, indent, line_buf);
+        free(line_buf);
+        if (!ok) {
+            me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
+            return false;
+        }
+        if (!me_jit_emit_block(ctx, &stmt->as.while_loop.body, indent + 1)) {
+            return false;
+        }
+        if (!me_jit_emit_line(&ctx->source, indent, "}")) {
+            me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
+            return false;
+        }
+        return true;
+    }
     case ME_DSL_JIT_IR_STMT_FOR: {
         char *start_c = NULL;
         char *stop_c = NULL;
@@ -1572,6 +1614,11 @@ static bool me_jit_collect_return_dtype(const me_dsl_jit_ir_block *block,
                 if (!me_jit_collect_return_dtype(&stmt->as.if_stmt.else_block, has_return, out_dtype, error)) {
                     return false;
                 }
+            }
+            break;
+        case ME_DSL_JIT_IR_STMT_WHILE:
+            if (!me_jit_collect_return_dtype(&stmt->as.while_loop.body, has_return, out_dtype, error)) {
+                return false;
             }
             break;
         case ME_DSL_JIT_IR_STMT_FOR:

@@ -103,6 +103,9 @@ extern void me_wasm_jit_free_fn(int idx);
 #ifndef ME_DSL_TRACE_DEFAULT
 #define ME_DSL_TRACE_DEFAULT 0
 #endif
+#ifndef ME_DSL_WHILE_MAX_ITERS_DEFAULT
+#define ME_DSL_WHILE_MAX_ITERS_DEFAULT 10000000LL
+#endif
 #ifndef ME_DSL_JIT_LIBTCC_DEFAULT_PATH
 #define ME_DSL_JIT_LIBTCC_DEFAULT_PATH ""
 #endif
@@ -201,6 +204,10 @@ struct me_dsl_compiled_stmt {
             me_dsl_compiled_expr step;
             me_dsl_compiled_block body;
         } for_loop;
+        struct {
+            me_dsl_compiled_expr cond;
+            me_dsl_compiled_block body;
+        } while_loop;
         struct {
             me_dsl_compiled_expr cond;
         } flow;
@@ -652,6 +659,10 @@ static void dsl_compiled_stmt_free(me_dsl_compiled_stmt *stmt) {
         if (stmt->as.if_stmt.has_else) {
             dsl_compiled_block_free(&stmt->as.if_stmt.else_block);
         }
+        break;
+    case ME_DSL_STMT_WHILE:
+        dsl_compiled_expr_free(&stmt->as.while_loop.cond);
+        dsl_compiled_block_free(&stmt->as.while_loop.body);
         break;
     case ME_DSL_STMT_FOR:
         dsl_compiled_expr_free(&stmt->as.for_loop.start);
@@ -2567,6 +2578,26 @@ static void dsl_tracef(const char *fmt, ...) {
     fputc('\n', stderr);
 }
 
+static int64_t dsl_while_max_iters(void) {
+    const char *env = getenv("ME_DSL_WHILE_MAX_ITERS");
+    if (!env || env[0] == '\0') {
+        return (int64_t)ME_DSL_WHILE_MAX_ITERS_DEFAULT;
+    }
+    errno = 0;
+    char *end = NULL;
+    long long v = strtoll(env, &end, 10);
+    if (errno != 0 || end == env) {
+        return (int64_t)ME_DSL_WHILE_MAX_ITERS_DEFAULT;
+    }
+    while (*end && isspace((unsigned char)*end)) {
+        end++;
+    }
+    if (*end != '\0') {
+        return (int64_t)ME_DSL_WHILE_MAX_ITERS_DEFAULT;
+    }
+    return (int64_t)v;
+}
+
 static int dsl_offset_from_linecol(const char *source, int line, int column) {
     if (!source || line <= 0 || column <= 0) {
         return -1;
@@ -2629,7 +2660,9 @@ static bool dsl_is_candidate(const char *source) {
                 }
                 break;
             case 5:
-                if (memcmp(start, "break", 5) == 0 || memcmp(start, "print", 5) == 0) {
+                if (memcmp(start, "break", 5) == 0 ||
+                    memcmp(start, "print", 5) == 0 ||
+                    memcmp(start, "while", 5) == 0) {
                     return true;
                 }
                 break;
@@ -2687,6 +2720,9 @@ static void dsl_scan_reserved_usage_block(const me_dsl_block *block, int *uses_i
         case ME_DSL_STMT_IF:
             expr_text = stmt->as.if_stmt.cond ? stmt->as.if_stmt.cond->text : NULL;
             break;
+        case ME_DSL_STMT_WHILE:
+            expr_text = stmt->as.while_loop.cond ? stmt->as.while_loop.cond->text : NULL;
+            break;
         case ME_DSL_STMT_FOR:
             expr_text = stmt->as.for_loop.limit ? stmt->as.for_loop.limit->text : NULL;
             break;
@@ -2743,6 +2779,9 @@ static void dsl_scan_reserved_usage_block(const me_dsl_block *block, int *uses_i
         }
         if (stmt->kind == ME_DSL_STMT_FOR) {
             dsl_scan_reserved_usage_block(&stmt->as.for_loop.body, uses_i_mask, uses_n_mask, uses_ndim);
+        }
+        if (stmt->kind == ME_DSL_STMT_WHILE) {
+            dsl_scan_reserved_usage_block(&stmt->as.while_loop.body, uses_i_mask, uses_n_mask, uses_ndim);
         }
     }
 }
@@ -6755,6 +6794,20 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             }
             break;
         }
+        case ME_DSL_STMT_WHILE: {
+            if (!dsl_compile_condition_expr(ctx, stmt->as.while_loop.cond, &compiled->as.while_loop.cond)) {
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            ctx->loop_depth++;
+            if (!dsl_compile_block(ctx, &stmt->as.while_loop.body, &compiled->as.while_loop.body)) {
+                ctx->loop_depth--;
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            ctx->loop_depth--;
+            break;
+        }
         case ME_DSL_STMT_FOR: {
             const char *var = stmt->as.for_loop.var;
             if (!var || dsl_is_reserved_name(var)) {
@@ -7563,6 +7616,8 @@ static int dsl_eval_expr_nitems(dsl_eval_ctx *ctx, const me_dsl_compiled_expr *e
 static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
                                        uint8_t *run_mask, uint8_t *break_mask,
                                        uint8_t *continue_mask, uint8_t *return_mask);
+static int dsl_eval_while_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_stmt *stmt,
+                                       const uint8_t *input_mask, uint8_t *return_mask);
 static int dsl_eval_for_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_stmt *stmt,
                                      const uint8_t *input_mask, uint8_t *return_mask);
 
@@ -8076,6 +8131,13 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
             }
             break;
         }
+        case ME_DSL_STMT_WHILE: {
+            int rc = dsl_eval_while_element_loop(ctx, stmt, run_mask, return_mask);
+            if (rc != ME_EVAL_SUCCESS) {
+                return rc;
+            }
+            break;
+        }
         case ME_DSL_STMT_BREAK:
         case ME_DSL_STMT_CONTINUE: {
             bool cond_is_reduction = false;
@@ -8123,6 +8185,125 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
         }
     }
 
+    return ME_EVAL_SUCCESS;
+}
+
+static int dsl_eval_while_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_stmt *stmt,
+                                       const uint8_t *input_mask, uint8_t *return_mask) {
+    if (!ctx || !stmt || stmt->kind != ME_DSL_STMT_WHILE) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+    if (!stmt->as.while_loop.cond.expr) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+    if (ctx->nitems <= 0) {
+        return ME_EVAL_SUCCESS;
+    }
+
+    uint8_t *active_mask = malloc((size_t)ctx->nitems);
+    if (!active_mask) {
+        return ME_EVAL_ERR_OOM;
+    }
+    if (input_mask) {
+        memcpy(active_mask, input_mask, (size_t)ctx->nitems);
+    }
+    else {
+        memset(active_mask, 1, (size_t)ctx->nitems);
+    }
+    dsl_mask_remove_flow(active_mask, NULL, NULL, return_mask, ctx->nitems);
+    if (!dsl_mask_any(active_mask, ctx->nitems)) {
+        free(active_mask);
+        return ME_EVAL_SUCCESS;
+    }
+
+    int64_t max_iters = dsl_while_max_iters();
+    int64_t iter_count = 0;
+
+    int rc = ME_EVAL_SUCCESS;
+    for (;;) {
+        if (!dsl_mask_any(active_mask, ctx->nitems)) {
+            break;
+        }
+
+        uint8_t *cond_mask = calloc((size_t)ctx->nitems, sizeof(*cond_mask));
+        if (!cond_mask) {
+            free(active_mask);
+            return ME_EVAL_ERR_OOM;
+        }
+        bool cond_is_reduction = false;
+        bool cond_scalar_true = false;
+        rc = dsl_eval_condition_masked(ctx, &stmt->as.while_loop.cond, active_mask,
+                                       cond_mask, &cond_is_reduction, &cond_scalar_true);
+        if (rc != ME_EVAL_SUCCESS) {
+            free(cond_mask);
+            free(active_mask);
+            return rc;
+        }
+
+        if (cond_is_reduction && !cond_scalar_true) {
+            free(cond_mask);
+            break;
+        }
+        if (!cond_is_reduction && !dsl_mask_any(cond_mask, ctx->nitems)) {
+            free(cond_mask);
+            break;
+        }
+        if (max_iters > 0 && iter_count >= max_iters) {
+            dsl_tracef("while iteration cap hit at %d:%d after %lld iterations (limit=%lld)",
+                       stmt->line, stmt->column,
+                       (long long)iter_count, (long long)max_iters);
+            free(cond_mask);
+            free(active_mask);
+            return ME_EVAL_ERR_INVALID_ARG;
+        }
+        iter_count++;
+
+        uint8_t *run_mask = malloc((size_t)ctx->nitems);
+        uint8_t *break_mask = calloc((size_t)ctx->nitems, sizeof(*break_mask));
+        uint8_t *continue_mask = calloc((size_t)ctx->nitems, sizeof(*continue_mask));
+        if (!run_mask || !break_mask || !continue_mask) {
+            free(run_mask);
+            free(break_mask);
+            free(continue_mask);
+            free(cond_mask);
+            free(active_mask);
+            return ME_EVAL_ERR_OOM;
+        }
+
+        if (cond_is_reduction) {
+            memcpy(run_mask, active_mask, (size_t)ctx->nitems);
+        }
+        else {
+            memcpy(run_mask, cond_mask, (size_t)ctx->nitems);
+            for (int i = 0; i < ctx->nitems; i++) {
+                if (!cond_mask[i]) {
+                    active_mask[i] = 0;
+                }
+            }
+        }
+
+        rc = dsl_eval_block_element_loop(ctx, &stmt->as.while_loop.body, run_mask,
+                                         break_mask, continue_mask, return_mask);
+        free(run_mask);
+        free(cond_mask);
+        if (rc != ME_EVAL_SUCCESS) {
+            free(break_mask);
+            free(continue_mask);
+            free(active_mask);
+            return rc;
+        }
+
+        for (int i = 0; i < ctx->nitems; i++) {
+            if (break_mask[i] || return_mask[i]) {
+                active_mask[i] = 0;
+            }
+        }
+
+        free(break_mask);
+        free(continue_mask);
+    }
+
+    free(active_mask);
     return ME_EVAL_SUCCESS;
 }
 

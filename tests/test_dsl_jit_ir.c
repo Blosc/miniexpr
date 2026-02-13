@@ -463,6 +463,47 @@ static int test_ir_fingerprint_includes_fp_mode(void) {
     return 0;
 }
 
+static int test_ir_accepts_while_loops(void) {
+    printf("\n=== JIT IR Test 7: while loops supported ===\n");
+
+    const char *src =
+        "def kernel(x):\n"
+        "    i = x * 0\n"
+        "    while i < x:\n"
+        "        i = i + 1\n"
+        "    return i\n";
+
+    me_dsl_error error;
+    me_dsl_program *program = me_dsl_parse(src, &error);
+    if (!program) {
+        printf("  FAILED: parse error at %d:%d (%s)\n",
+               error.line, error.column, error.message);
+        return 1;
+    }
+
+    const char *param_names[] = {"x"};
+    me_dtype param_dtypes[] = {ME_FLOAT64};
+    me_dsl_jit_ir_program *ir = NULL;
+    if (!me_dsl_jit_ir_build(program, param_names, param_dtypes, 1,
+                             mock_resolve_dtype, NULL, &ir, &error) || !ir) {
+        printf("  FAILED: while-loop kernel should be accepted by jit ir at %d:%d (%s)\n",
+               error.line, error.column, error.message);
+        me_dsl_jit_ir_free(ir);
+        me_dsl_program_free(program);
+        return 1;
+    }
+    me_dsl_program_free(program);
+    uint64_t fp = me_dsl_jit_ir_fingerprint(ir);
+    me_dsl_jit_ir_free(ir);
+    if (fp == 0) {
+        printf("  FAILED: while-loop fingerprint should be non-zero\n");
+        return 1;
+    }
+
+    printf("  PASSED\n");
+    return 0;
+}
+
 int main(void) {
     int fail = 0;
     fail |= test_ir_accepts_supported_subset();
@@ -471,5 +512,6 @@ int main(void) {
     fail |= test_ir_fingerprint_is_deterministic();
     fail |= test_parser_pragmas();
     fail |= test_ir_fingerprint_includes_fp_mode();
+    fail |= test_ir_accepts_while_loops();
     return fail;
 }

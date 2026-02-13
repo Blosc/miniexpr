@@ -9,7 +9,7 @@ The DSL extends single expressions to full programs with:
 - **Multi-statement programs** - Combine multiple computations
 - **Element-wise conditionals** - Using `where(cond, true_val, false_val)`
 - **Conditional blocks** - `if/elif/else` with scalar or element-wise conditions
-- **Loop constructs** - `for` loops with `break` and `continue`
+- **Loop constructs** - `for`/`while` loops with `break` and `continue`
 - **Index access** - Reference element positions via `_i0`, `_i1`, etc.
 
 ## Basic Syntax
@@ -149,6 +149,17 @@ def kernel(n):
     return accumulator
 ```
 
+While-loop syntax (Python-style indentation):
+```
+def kernel(x):
+    i = 0
+    acc = 0
+    while i < x:
+        acc = acc + i
+        i = i + 1
+    return acc
+```
+
 `range()` supports:
 - `range(stop)`
 - `range(start, stop)`
@@ -176,6 +187,27 @@ def kernel(mask, acc):
         acc = acc + compute(i)
     return acc
 ```
+
+With `while` loop control:
+```
+def kernel(x):
+    i = 0
+    acc = 0
+    while i < 8:
+        if x > i:
+            acc = acc + 1
+            i = i + 1
+            continue
+        break
+    return acc
+```
+
+Safety notes for `while`:
+- Interpreter execution enforces an iteration cap per `while` statement.
+- Default cap: `10,000,000` iterations.
+- Configure with `ME_DSL_WHILE_MAX_ITERS` environment variable.
+- `ME_DSL_WHILE_MAX_ITERS <= 0` disables the cap.
+- When the cap is hit, evaluation returns `ME_EVAL_ERR_INVALID_ARG`.
 
 ### Conditionals
 

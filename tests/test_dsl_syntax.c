@@ -324,6 +324,151 @@ static int test_range_start_stop_step(void) {
     return 0;
 }
 
+static int test_while_loop_semantics(void) {
+    printf("\n=== DSL Test 2c: while loop semantics ===\n");
+
+    const char *src_scalar =
+        "def kernel():\n"
+        "    i = 0\n"
+        "    acc = 0\n"
+        "    while i < 5:\n"
+        "        acc = acc + i\n"
+        "        i = i + 1\n"
+        "    return acc\n";
+    const char *src_elementwise =
+        "def kernel(x):\n"
+        "    i = 0\n"
+        "    acc = 0\n"
+        "    while i < 5:\n"
+        "        if x > i:\n"
+        "            acc = acc + 1\n"
+        "            i = i + 1\n"
+        "            continue\n"
+        "        break\n"
+        "    return acc\n";
+
+    int err = 0;
+    me_expr *expr = NULL;
+    double out[4] = {0.0, 0.0, 0.0, 0.0};
+
+    if (me_compile(src_scalar, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: while scalar compile error at %d\n", err);
+        return 1;
+    }
+    if (me_eval(expr, NULL, 0, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: while scalar eval error\n");
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+    double expected_scalar[4] = {10.0, 10.0, 10.0, 10.0};
+    if (check_all_close(out, expected_scalar, 4, 1e-12) != 0) {
+        printf("  ❌ FAILED: while scalar output mismatch\n");
+        return 1;
+    }
+
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    double x[4] = {-1.0, 2.0, 5.0, 0.0};
+    const void *inputs[] = {x};
+    double out_interp[4] = {0.0, 0.0, 0.0, 0.0};
+    double out_jit_enabled[4] = {0.0, 0.0, 0.0, 0.0};
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+
+    if (setenv("ME_DSL_JIT", "0", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=0 failed\n");
+        free(saved_jit);
+        return 1;
+    }
+    if (compile_eval_double(src_elementwise, vars, 1, inputs, 4, out_interp) != 0) {
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=1 failed\n");
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+    if (compile_eval_double(src_elementwise, vars, 1, inputs, 4, out_jit_enabled) != 0) {
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    free(saved_jit);
+
+    double expected_elementwise[4] = {0.0, 2.0, 5.0, 0.0};
+    if (check_all_close(out_interp, expected_elementwise, 4, 1e-12) != 0) {
+        printf("  ❌ FAILED: while element-wise output mismatch\n");
+        return 1;
+    }
+    for (int i = 0; i < 4; i++) {
+        if (out_interp[i] != out_jit_enabled[i]) {
+            printf("  ❌ FAILED: while parity mismatch at %d (interp=%.17g jit=%.17g)\n",
+                   i, out_interp[i], out_jit_enabled[i]);
+            return 1;
+        }
+    }
+
+    printf("  ✅ PASSED\n");
+    return 0;
+}
+
+static int test_while_iteration_cap(void) {
+    printf("\n=== DSL Test 2d: while iteration cap ===\n");
+
+    const char *src =
+        "def kernel():\n"
+        "    i = 0\n"
+        "    while 1:\n"
+        "        i = i + 1\n"
+        "    return i\n";
+
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+    char *saved_cap = dup_env_value("ME_DSL_WHILE_MAX_ITERS");
+    if (setenv("ME_DSL_JIT", "0", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=0 failed\n");
+        free(saved_jit);
+        free(saved_cap);
+        return 1;
+    }
+    if (setenv("ME_DSL_WHILE_MAX_ITERS", "32", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_WHILE_MAX_ITERS failed\n");
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        free(saved_cap);
+        return 1;
+    }
+
+    int err = 0;
+    me_expr *expr = NULL;
+    if (me_compile(src, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: while-cap compile error at %d\n", err);
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        restore_env_value("ME_DSL_WHILE_MAX_ITERS", saved_cap);
+        free(saved_jit);
+        free(saved_cap);
+        return 1;
+    }
+    double out[4] = {0.0, 0.0, 0.0, 0.0};
+    int rc_eval = me_eval(expr, NULL, 0, out, 4, NULL);
+    me_free(expr);
+
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    restore_env_value("ME_DSL_WHILE_MAX_ITERS", saved_cap);
+    free(saved_jit);
+    free(saved_cap);
+
+    if (rc_eval != ME_EVAL_ERR_INVALID_ARG) {
+        printf("  ❌ FAILED: expected while-cap runtime error, got %d\n", rc_eval);
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    return 0;
+}
+
 static int test_invalid_conditionals(void) {
     printf("\n=== DSL Test 3: invalid conditionals ===\n");
 
@@ -1342,6 +1487,8 @@ int main(void) {
     fail |= test_assign_and_result_stmt();
     fail |= test_loop_break_continue();
     fail |= test_range_start_stop_step();
+    fail |= test_while_loop_semantics();
+    fail |= test_while_iteration_cap();
     fail |= test_invalid_conditionals();
     fail |= test_if_elif_else();
     fail |= test_nd_indices();

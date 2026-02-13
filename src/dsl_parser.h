@@ -19,6 +19,7 @@ typedef enum {
     ME_DSL_STMT_RETURN,
     ME_DSL_STMT_PRINT,
     ME_DSL_STMT_IF,
+    ME_DSL_STMT_WHILE,
     ME_DSL_STMT_FOR,
     ME_DSL_STMT_BREAK,
     ME_DSL_STMT_CONTINUE
@@ -81,6 +82,10 @@ struct me_dsl_stmt {
             me_dsl_block else_block;
             int has_else;
         } if_stmt;
+        struct {
+            me_dsl_expr *cond;
+            me_dsl_block body;
+        } while_loop;
         struct {
             char *var;
             me_dsl_expr *limit;
