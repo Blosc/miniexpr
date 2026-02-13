@@ -17,7 +17,6 @@ Blosc - Blocked Shuffling and Compression Library
 
 typedef double (*me_fun2)(double, double);
 
-enum { ME_CONSTANT = 1 };
 
 typedef struct state {
     const char* start;
@@ -33,12 +32,17 @@ typedef struct state {
     void* context;
     me_dtype dtype;
     me_dtype target_dtype;
+    size_t itemsize;
+    const uint32_t* str_data;
+    size_t str_len;
 
-    const me_variable* lookup;
+    const me_variable_ex* lookup;
     int lookup_len;
 } state;
 
 /* Internal definition of me_expr (opaque to users). */
+enum { ME_CONSTANT = 1, ME_STRING_CONSTANT = 2 };
+
 struct me_expr {
     int type;
 
@@ -54,13 +58,25 @@ struct me_expr {
     me_dtype input_dtype;
     void* bytecode;
     int ncode;
+    void* dsl_program;
+    size_t itemsize;
+    size_t str_len;
+    unsigned int flags;
     void* parameters[1];
 };
 
 enum {
     TOK_NULL = ME_CLOSURE7 + 1, TOK_ERROR, TOK_END, TOK_SEP,
-    TOK_OPEN, TOK_CLOSE, TOK_NUMBER, TOK_VARIABLE, TOK_INFIX,
-    TOK_BITWISE, TOK_SHIFT, TOK_COMPARE, TOK_POW
+    TOK_OPEN, TOK_CLOSE, TOK_NUMBER, TOK_STRING, TOK_VARIABLE, TOK_INFIX,
+    TOK_BITWISE, TOK_SHIFT, TOK_COMPARE, TOK_POW,
+    TOK_LOGICAL_OR, TOK_LOGICAL_AND, TOK_LOGICAL_NOT
+};
+
+enum {
+    ME_EXPR_FLAG_OWNS_STRING = 1u << 0,
+    ME_EXPR_FLAG_EXPLICIT_DTYPE = 1u << 1,
+    ME_EXPR_FLAG_HAS_STRING = 1u << 2,
+    ME_EXPR_FLAG_HAS_STRING_VALID = 1u << 3
 };
 
 /* Check if a pointer is a synthetic address (used internally for chunked evaluation).
@@ -91,10 +107,13 @@ bool has_unsupported_complex_function(const me_expr* n);
 me_dtype reduction_output_dtype(me_dtype dt, const void* func);
 double min_reduce(double x);
 double max_reduce(double x);
+bool validate_string_usage(const me_expr* n);
+bool me_is_builtin_function_name(const char* name, size_t len);
 
 typedef enum {
     ME_REDUCE_NONE = 0,
     ME_REDUCE_SUM,
+    ME_REDUCE_MEAN,
     ME_REDUCE_PROD,
     ME_REDUCE_MIN,
     ME_REDUCE_MAX,
@@ -122,6 +141,10 @@ me_expr* list(state* s);
 double imag_wrapper(double x);
 double real_wrapper(double x);
 double where_scalar(double c, double x, double y);
+
+int me_eval_dsl_program(const me_expr* expr, const void** vars_block,
+                        int n_vars, void* output_block, int block_nitems,
+                        const me_eval_params* params);
 
 #if defined(_WIN32) || defined(_WIN64)
 bool has_complex_node(const me_expr* n);

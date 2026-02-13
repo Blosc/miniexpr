@@ -44,10 +44,11 @@ static inline int me_dtype_to_numpy(me_dtype dtype) {
         11,  // ME_FLOAT32 (10) -> NPY_FLOAT
         12,  // ME_FLOAT64 (11) -> NPY_DOUBLE
         14,  // ME_COMPLEX64 (12) -> NPY_CFLOAT
-        15   // ME_COMPLEX128 (13) -> NPY_CDOUBLE
+        15,   // ME_COMPLEX128 (13) -> NPY_CDOUBLE
+        19,   // ME_STRING (14) -> NPY_STR
     };
 
-    if (dtype >= 0 && dtype <= ME_COMPLEX128) {
+    if (dtype >= 0 && dtype <= ME_STRING) {
         return numpy_type_nums[dtype];
     }
     return -1;  // Invalid dtype
@@ -76,6 +77,7 @@ static inline const char* me_numpy_type_name(int numpy_type_num) {
         case 13: return "clongdouble";  // Not supported
         case 14: return "complex64";
         case 15: return "complex128";
+        case 19: return "str";
         default: return "unknown";
     }
 }
@@ -111,6 +113,7 @@ static inline me_dtype me_dtype_from_numpy(int numpy_type_num) {
         case 12: return ME_FLOAT64;
         case 14: return ME_COMPLEX64;
         case 15: return ME_COMPLEX128;
+        case 19: return ME_STRING;
         default:
             return -1;  // Return -1 to indicate error
     }
@@ -142,6 +145,7 @@ static inline int me_numpy_type_supported(int numpy_type_num) {
         case 12:  // float64
         case 14:  // complex64
         case 15:  // complex128
+        case 19:  // str
             return 1;
         default:
             return 0;

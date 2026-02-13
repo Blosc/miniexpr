@@ -9,15 +9,11 @@ on:
 jobs:
   build-and-test:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
         compiler: [gcc]
-        exclude:
-          - os: windows-latest
-            compiler: gcc
         include:
-#          - os: windows-latest
-#            compiler: msvc
           - os: windows-latest
             compiler: clang-cl
     runs-on: ${{ matrix.os }}
@@ -34,14 +30,16 @@ jobs:
       run: |
         if [ "$RUNNER_OS" == "Windows" ]; then
           # Visual Studio generators are multi-config; select Release at build time.
-          cmake -S . -B build -G "Visual Studio 17 2022" -T ClangCL
+          cmake -S . -B build -G "Visual Studio 17 2022" -T ClangCL \
+            -DCMAKE_C_COMPILER=clang-cl
+          grep -Ei '^CMAKE_C_COMPILER:(FILEPATH|STRING|UNINITIALIZED)=.*clang-cl' build/CMakeCache.txt
         else
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
         fi
         if [ "$RUNNER_OS" == "Windows" ]; then
           cmake --build build --config Release
         else
-          cmake --build build
+          cmake --build build --parallel
         fi
     
     - name: Build and run tests
@@ -54,3 +52,86 @@ jobs:
           ctest --test-dir build --output-on-failure || \
             ctest --test-dir build --rerun-failed --output-on-failure
         fi
+
+    - name: Trace DSL JIT backend activity
+      if: ${{ false }}
+      shell: bash
+      run: |
+        set -o pipefail
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          ME_DSL_TRACE=1 ctest --test-dir build -C Release -R "^test_dsl_jit_runtime_cache$" -V \
+            2>&1 | tee build/dsl-jit-trace.log
+        else
+          ME_DSL_TRACE=1 ctest --test-dir build -R "^test_dsl_jit_runtime_cache$" -V \
+            2>&1 | tee build/dsl-jit-trace.log
+        fi
+        grep -E "jit ir built:|jit runtime (built|skip|hit|stubbed):" build/dsl-jit-trace.log || true
+
+  miniexpr-wasm32:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+
+    - name: Set up Emscripten
+      uses: mymindstorm/setup-emsdk@v14
+      with:
+        version: latest
+
+    - name: Configure wasm32 build
+      shell: bash
+      run: |
+        emcmake cmake -S . -B build-wasm32 -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CROSSCOMPILING_EMULATOR=node \
+          -DMINIEXPR_BUILD_SHARED=OFF \
+          -DMINIEXPR_BUILD_STATIC=ON \
+          -DMINIEXPR_BUILD_BENCH=OFF \
+          -DMINIEXPR_BUILD_EXAMPLES=OFF \
+          -DMINIEXPR_USE_SLEEF=OFF \
+          -DMINIEXPR_BUILD_BUNDLED_LIBTCC=OFF \
+          -DMINIEXPR_DSL_TRACE_DEFAULT=ON
+
+    - name: Verify wasm32 CMake flags
+      shell: bash
+      run: |
+        grep -E '^MINIEXPR_BUILD_BUNDLED_LIBTCC:BOOL=OFF$' build-wasm32/CMakeCache.txt
+        grep -E '^MINIEXPR_ENABLE_TCC_JIT:BOOL=ON$' build-wasm32/CMakeCache.txt
+
+    - name: Build wasm32 miniexpr + tests
+      shell: bash
+      run: |
+        cmake --build build-wasm32 -j
+
+    - name: Run wasm32 tests
+      shell: bash
+      run: |
+        ctest --test-dir build-wasm32 --output-on-failure || \
+          ctest --test-dir build-wasm32 --rerun-failed --output-on-failure
+
+    - name: Trace DSL JIT behavior (wasm32)
+      shell: bash
+      run: |
+        set -o pipefail
+        : > build-wasm32/dsl-trace.log
+        node -e 'global.Module={ENV:{ME_DSL_TRACE:"1"}}; require("./build-wasm32/tests/test_dsl_jit_ir.js");' \
+          >> build-wasm32/dsl-trace.log 2>&1
+        node -e 'global.Module={ENV:{ME_DSL_TRACE:"1"}}; require("./build-wasm32/tests/test_dsl_syntax.js");' \
+          >> build-wasm32/dsl-trace.log 2>&1
+        echo "=== DSL JIT Trace Summary (wasm32) ==="
+        if grep -E "\\[me-dsl\\] (jit ir (built|skip|reject):|jit runtime (built|skip|hit|stubbed):)" \
+             build-wasm32/dsl-trace.log > /tmp/dsl-trace-summary.raw; then
+          sed -E 's/fingerprint=[0-9a-f]+/fingerprint=<fp>/g; s/key=[0-9a-f]+/key=<key>/g' \
+            /tmp/dsl-trace-summary.raw \
+            | sort \
+            | uniq -c \
+            | sed -E 's/^ +//'
+        else
+          echo "No DSL JIT trace lines captured"
+        fi
+        echo "=== End Summary ==="

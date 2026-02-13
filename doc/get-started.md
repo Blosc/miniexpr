@@ -107,11 +107,9 @@ miniexpr can use SLEEF to accelerate SIMD math kernels. With CMake, `-DMINIEXPR_
 
 With CMake (recommended):
 ```bash
-mkdir -p build
-cd build
-cmake ..
-make -j
-ctest
+cmake -S . -B build -G Ninja
+cmake --build build -j
+ctest --test-dir build
 ```
 
 ## Next Steps

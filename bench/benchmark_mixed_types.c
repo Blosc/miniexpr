@@ -163,7 +163,7 @@ static void destroy_thread_pool(thread_pool_t *pool, pthread_t *threads, int num
 
 static double benchmark_chunksize(thread_pool_t *pool, size_t chunk_bytes,
                                   double *a, float *b, int16_t *c, double *result,
-                                  size_t total_elements) {
+                                  size_t total_elements, double *compile_us_out) {
     const size_t chunk_elements = chunk_bytes / sizeof(double);
     if (chunk_elements == 0) return 0.0;
 
@@ -176,10 +176,23 @@ static double benchmark_chunksize(thread_pool_t *pool, size_t chunk_bytes,
     };
     int error;
     me_expr *expr = NULL;
+    struct timespec compile_start;
+    struct timespec compile_end;
+    clock_gettime(CLOCK_MONOTONIC, &compile_start);
     int rc_expr = me_compile("(a + b) * c", vars, 3, ME_AUTO, &error, &expr);
+    clock_gettime(CLOCK_MONOTONIC, &compile_end);
     if (rc_expr != ME_COMPILE_SUCCESS) {
         fprintf(stderr, "Failed to compile expression, error: %d\n", error);
         return 0.0;
+    }
+    if (compile_us_out) {
+        int64_t sec = (int64_t)(compile_end.tv_sec - compile_start.tv_sec);
+        int64_t nsec = (int64_t)(compile_end.tv_nsec - compile_start.tv_nsec);
+        int64_t ns = sec * 1000000000LL + nsec;
+        if (ns < 0) {
+            ns = 0;
+        }
+        *compile_us_out = (double)ns / 1000.0;
     }
 
     const void *inputs[] = {a, b, c};
@@ -271,8 +284,8 @@ int main() {
         return 1;
     }
 
-    printf("Chunk (KB)  Throughput (Melems/s)  Bandwidth (GB/s)  GFLOP/s\n");
-    printf("---------------------------------------------------------------\n");
+    printf("Chunk (KB)  Throughput (Melems/s)  Bandwidth (GB/s)   GFLOP/s  Compile Expr (us)\n");
+    printf("---------------------------------------------------------------------------------\n");
 
     double best_throughput = 0.0;
     size_t best_chunk_kb = 0;
@@ -287,7 +300,9 @@ int main() {
     for (int i = 0; i < num_sizes; i++) {
         size_t chunk_kb = test_sizes_kb[i];
         size_t chunk_bytes = chunk_kb * 1024;
-        double throughput = benchmark_chunksize(pool, chunk_bytes, a, b, c, result, total_elements);
+        double compile_us = 0.0;
+        double throughput = benchmark_chunksize(pool, chunk_bytes, a, b, c, result,
+                total_elements, &compile_us);
 
         if (throughput == 0.0) {
             fprintf(stderr, "Benchmark failed for chunk size %zu KB\n", chunk_kb);
@@ -298,8 +313,8 @@ int main() {
         double bandwidth = (throughput * 22.0) / 1000.0; // Melems/s * 22 bytes / 1000 = GB/s
         double gflops = throughput * 2.0 / 1000.0; // 2 FLOP per element (1 add, 1 mul)
 
-        printf("%10zu  %21.2f  %16.2f  %8.2f\n",
-               chunk_kb, throughput, bandwidth, gflops);
+        printf("%10zu  %21.2f  %16.2f  %8.2f  %16.2f\n",
+               chunk_kb, throughput, bandwidth, gflops, compile_us);
         fflush(stdout);
 
         if (throughput > best_throughput) {

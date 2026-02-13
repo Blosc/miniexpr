@@ -360,6 +360,154 @@ void test_logical_bool() {
     }
 
     me_free(expr);
+
+    // Test AND keyword
+    expr = NULL;
+    rc_expr = me_compile("a and b", vars, 2, ME_BOOL, &err, &expr);
+
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: AND keyword compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs_and_kw[] = {a, b};
+    ME_EVAL_CHECK(expr, var_ptrs_and_kw, 2, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        bool expected = a[i] && b[i];
+        if (result[i] != expected) {
+            printf("  FAIL AND keyword at [%d]: expected %d, got %d\n", i, expected, result[i]);
+            tests_failed++;
+            me_free(expr);
+            return;
+        }
+    }
+
+    me_free(expr);
+
+    // Test OR keyword
+    expr = NULL;
+    rc_expr = me_compile("a or b", vars, 2, ME_BOOL, &err, &expr);
+
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: OR keyword compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs_or_kw[] = {a, b};
+    ME_EVAL_CHECK(expr, var_ptrs_or_kw, 2, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        bool expected = a[i] || b[i];
+        if (result[i] != expected) {
+            printf("  FAIL OR keyword at [%d]: expected %d, got %d\n", i, expected, result[i]);
+            tests_failed++;
+            me_free(expr);
+            return;
+        }
+    }
+
+    me_free(expr);
+
+    // Test NOT keyword
+    expr = NULL;
+    rc_expr = me_compile("not a", vars_not, 1, ME_BOOL, &err, &expr);
+
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: NOT keyword compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs_not_kw[] = {a};
+    ME_EVAL_CHECK(expr, var_ptrs_not_kw, 1, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        bool expected = !a[i];
+        if (result[i] != expected) {
+            printf("  FAIL NOT keyword at [%d]: expected %d, got %d\n", i, expected, result[i]);
+            tests_failed++;
+            me_free(expr);
+            return;
+        }
+    }
+
+    me_free(expr);
+
+    // Test AND/OR/NOT symbols
+    expr = NULL;
+    rc_expr = me_compile("a && b", vars, 2, ME_BOOL, &err, &expr);
+
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: AND symbol compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs_and_sym[] = {a, b};
+    ME_EVAL_CHECK(expr, var_ptrs_and_sym, 2, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        bool expected = a[i] && b[i];
+        if (result[i] != expected) {
+            printf("  FAIL AND symbol at [%d]: expected %d, got %d\n", i, expected, result[i]);
+            tests_failed++;
+            me_free(expr);
+            return;
+        }
+    }
+
+    me_free(expr);
+
+    expr = NULL;
+    rc_expr = me_compile("a || b", vars, 2, ME_BOOL, &err, &expr);
+
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: OR symbol compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs_or_sym[] = {a, b};
+    ME_EVAL_CHECK(expr, var_ptrs_or_sym, 2, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        bool expected = a[i] || b[i];
+        if (result[i] != expected) {
+            printf("  FAIL OR symbol at [%d]: expected %d, got %d\n", i, expected, result[i]);
+            tests_failed++;
+            me_free(expr);
+            return;
+        }
+    }
+
+    me_free(expr);
+
+    expr = NULL;
+    rc_expr = me_compile("!a", vars_not, 1, ME_BOOL, &err, &expr);
+
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: NOT symbol compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    const void *var_ptrs_not_sym[] = {a};
+    ME_EVAL_CHECK(expr, var_ptrs_not_sym, 1, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        bool expected = !a[i];
+        if (result[i] != expected) {
+            printf("  FAIL NOT symbol at [%d]: expected %d, got %d\n", i, expected, result[i]);
+            tests_failed++;
+            me_free(expr);
+            return;
+        }
+    }
+
+    me_free(expr);
     printf("  PASS\n");
 }
 
@@ -389,6 +537,29 @@ void test_logical_comparisons() {
         bool expected = (o0[i] > 0.5f) && (o1[i] > 10000);
         if (result[i] != expected) {
             printf("  FAIL at [%d]: expected %d, got %d\n", i, expected, result[i]);
+            tests_failed++;
+            me_free(expr);
+            return;
+        }
+    }
+
+    me_free(expr);
+
+    expr = NULL;
+    rc_expr = me_compile("o0 > 0.5 and o1 > 10000 or o1 == 42", vars, 2, ME_BOOL, &err, &expr);
+
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: keyword precedence compilation error at position %d\n", err);
+        tests_failed++;
+        return;
+    }
+
+    ME_EVAL_CHECK(expr, var_ptrs, 2, result, VECTOR_SIZE);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        bool expected = ((o0[i] > 0.5f) && (o1[i] > 10000)) || (o1[i] == 42);
+        if (result[i] != expected) {
+            printf("  FAIL precedence at [%d]: expected %d, got %d\n", i, expected, result[i]);
             tests_failed++;
             me_free(expr);
             return;

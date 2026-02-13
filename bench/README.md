@@ -116,3 +116,58 @@ Thread-safe evaluation overhead vs single-threaded.
 ```bash
 ./build/bench/benchmark_threadsafe
 ```
+
+### benchmark_dsl_jit_mandelbrot.c
+DSL Mandelbrot-style benchmark comparing:
+- Notebook-equivalent Mandelbrot escape-iteration kernel.
+- Element-wise loop form (`if ...: break`) in interpreted, JIT cold, and JIT warm modes.
+- Compiler backends: `tcc` and `cc`.
+
+Notes:
+- `jit-warm` and `interp` rows report the **best single run** over `repeats`.
+- `jit-cold` runs once and includes first compile overhead separately in `compile_ms`.
+- Use `ME_BENCH_FP_MODE=strict|contract|fast` to emit `# me:fp=...` in benchmark kernels
+  (default: `strict`).
+
+```bash
+./build/bench/benchmark_dsl_jit_mandelbrot
+./build/bench/benchmark_dsl_jit_mandelbrot 1024x512 6
+./build/bench/benchmark_dsl_jit_mandelbrot 1024x512 6 24
+ME_BENCH_FP_MODE=fast ./build/bench/benchmark_dsl_jit_mandelbrot 1024x512 6 24
+# Alternate form:
+./build/bench/benchmark_dsl_jit_mandelbrot 1024 512 6 24
+```
+
+### benchmark_dsl_jit_math_kernels.c
+DSL JIT baseline for representative math kernels:
+- `sin`, `exp`, `log`, `pow`, `hypot`, `atan2`, `sinpi`, `cospi`
+- Per-kernel metrics:
+  - JIT cold compile latency
+  - JIT warm throughput
+  - interpreter throughput
+  - max-abs numerical diff (JIT warm vs interpreter)
+
+Notes:
+- Uses `# me:fp=strict`.
+- Uses `# me:compiler=tcc` by default (when `ME_BENCH_COMPILER` is unset).
+- Set `ME_BENCH_COMPILER=cc` to benchmark the `cc` backend explicitly.
+
+```bash
+./build/bench/benchmark_dsl_jit_math_kernels
+./build/bench/benchmark_dsl_jit_math_kernels 262144 6
+ME_BENCH_COMPILER=tcc ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
+ME_BENCH_COMPILER=cc ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
+```
+
+### benchmark_mandelbrot_numba.py
+Optional Python/Numba baseline matching notebook-style escape-iteration output
+with regular early escape (`if zr*zr + zi*zi > 4.0: break`).
+Requires `numpy` and `numba`.
+
+```bash
+python bench/benchmark_mandelbrot_numba.py
+python bench/benchmark_mandelbrot_numba.py 1024x512 6
+python bench/benchmark_mandelbrot_numba.py 1024x512 6 24
+# Alternate form:
+python bench/benchmark_mandelbrot_numba.py 1024 512 6 24
+```

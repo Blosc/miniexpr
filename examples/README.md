@@ -7,11 +7,9 @@ This directory contains practical examples demonstrating various features and us
 From the repository root, build and run all examples:
 
 ```bash
-mkdir -p build
-cd build
-cmake ..
-make -j
-ctest
+cmake -S . -B build -G Ninja
+cmake --build build -j
+ctest --test-dir build
 ```
 
 To run a specific example:
@@ -275,8 +273,8 @@ Chunk size matters enormously for parallel performance:
 ### 10_boolean_logical_ops.c
 **Logical operators on boolean arrays**
 
-- **What it demonstrates**: Logical semantics for `&`, `|`, `^`, and `~` on bool arrays
-- **Expressions**: `a & b`, `a | b`, `a ^ b`, `~a`, `(o0 > 0.5) & (o1 > 10000)`
+- **What it demonstrates**: Logical semantics for `and`/`or`/`not` (plus `&`, `|`, `^`, `~`) on bool arrays
+- **Expressions**: `a and b`, `a or b`, `a ^ b`, `not a`, `o0 > 0.5 and o1 > 10000 or o1 == 42`
 - **Concepts**: ME_BOOL output, boolean masks, comparison composition
 - **Best for**: Masking, filtering, conditional logic
 
@@ -287,17 +285,177 @@ Chunk size matters enormously for parallel performance:
 
 ---
 
+### 11_dsl_kernel.c
+**DSL multi-statement kernel demonstration**
+
+- **What it demonstrates**: DSL parsing for multi-statement programs
+- **Programs**: Polynomial evaluation, conditional clamping, trig identities
+- **Concepts**: Temporary variables, where() conditionals, DSL parsing API
+- **Best for**: Understanding DSL features and syntax
+
+**Run it:**
+```bash
+./build/examples/11_dsl_kernel
+```
+
+**Key features:**
+- Multi-statement programs with temporary variables
+- Conditional expressions with `where(cond, then, else)`
+- DSL parsing via `me_dsl_parse()`
+
+---
+
+### 12_mandelbrot.c
+**Mandelbrot set computation**
+
+- **What it demonstrates**: Using miniexpr for fractal computation
+- **Grid size**: 78×32 (2496 points)
+- **Iterations**: 100 max
+- **Concepts**: Complex arithmetic via components, iteration, ASCII visualization
+- **Best for**: Understanding expression-based iterative algorithms
+
+**Run it:**
+```bash
+./build/examples/12_mandelbrot
+```
+
+**Key features:**
+- Complex number arithmetic (z = z² + c)
+- Iterative evaluation with escape detection
+- ASCII art visualization
+- Performance metrics
+
+---
+
+### 13_mandelbrot_dsl.c
+**Mandelbrot set with DSL kernel**
+
+- **What it demonstrates**: Full DSL expressiveness for complex algorithms
+- **Grid size**: 78×32 (2496 points)
+- **Iterations**: 100 max
+- **Concepts**: For loops, break conditions, temporaries, where() conditionals
+- **Best for**: Understanding DSL kernel programming
+
+**Run it:**
+```bash
+./build/examples/13_mandelbrot_dsl
+```
+
+**Key features:**
+- Complete algorithm in a single DSL program
+- `for iter in range(100): ...` loop construct
+- `if all(escape_iter != 100.0): break` early exit
+- `where()` conditionals for element-wise selection
+- Comments with `#` syntax
+- Demonstrates parsing via `me_dsl_parse()`
+
+**DSL Kernel Preview:**
+```
+def mandelbrot(cr, ci):
+    zr = 0.0
+    zi = 0.0
+    escape_iter = 100.0
+    for iter in range(100):
+        zr2 = zr * zr
+        zi2 = zi * zi
+        mag2 = zr2 + zi2
+        just_escaped = mag2 > 4.0 and escape_iter == 100.0
+        escape_iter = where(just_escaped, iter, escape_iter)
+        if all(escape_iter != 100.0):
+            break
+        zr_new = zr2 - zi2 + cr
+        zi_new = 2.0 * zr * zi + ci
+        zr = zr_new
+        zi = zi_new
+    return escape_iter
+```
+
+---
+
+### 14_string_ops.c
+**String-aware expressions with dynamic dispatch**
+
+- **What it demonstrates**: String comparisons and predicates in expressions
+- **Expressions**: Comparisons and other boolean conditions involving strings
+- **Concepts**: String literals, string variables, and boolean-valued string operations
+- **Best for**: Adding simple string-based conditions and metadata-driven logic
+
+**Run it:**
+```bash
+./build/examples/14_string_ops
+```
+
+---
+
+### 15_dsl_print.c
+**Printing from DSL programs**
+
+- **What it demonstrates**: DSL `print()` statements for debugging
+- **Programs**: Simple expressions with intermediate printouts
+- **Concepts**: DSL I/O and debugging helpers
+- **Best for**: Understanding and validating DSL program flow
+
+**Run it:**
+```bash
+./build/examples/15_dsl_print
+```
+
+---
+
+### 16_nd_padding_example.c
+**N-dimensional padding for array expressions**
+
+- **What it demonstrates**: Padding N-D arrays before evaluation
+- **Expressions**: N-D input with padding-aware evaluation
+- **Concepts**: N-D metadata, padding configuration, and boundary handling
+- **Best for**: Image/volume processing and stencil-style operations
+
+**Run it:**
+```bash
+./build/examples/16_nd_padding_example
+```
+
+---
+
+### 17_dsl_user_function.c
+**User-defined functions in DSL programs**
+
+- **What it demonstrates**: Registering a custom C function for DSL evaluation
+- **Expressions**: Calling a user-defined function from a DSL program
+- **Concepts**: `me_variable_ex` function entries, explicit return dtype
+- **Best for**: Extending DSL with domain-specific helpers
+
+**Run it:**
+```bash
+./build/examples/17_dsl_user_function
+```
+
+---
+
+### 18_dsl_if_elif_else.c
+**Scalar if/elif/else and flow-only loop control**
+
+- **What it demonstrates**: DSL `if/elif/else` blocks with scalar conditions
+- **Programs**: Result assignment branches and flow-only loop control
+- **Concepts**: Uniform conditions, required `result` assignment, `break`/`continue` chains
+- **Best for**: Using structured control flow in DSL kernels
+
+**Run it:**
+```bash
+./build/examples/18_dsl_if_elif_else
+```
+
+---
+
 ## Building Examples
 
 ### Using CMake (recommended)
 
 From the repo root:
 ```bash
-mkdir -p build
-cd build
-cmake ..
-make -j
-ctest
+cmake -S . -B build -G Ninja
+cmake --build build -j
+ctest --test-dir build
 ```
 
 ### Using the Makefile
@@ -433,5 +591,15 @@ After trying these examples:
 | 05 | ⭐⭐⭐ Advanced | Parallelism | ~140 | ~1s |
 | 06 | ⭐ Simple | Debugging | ~70 | <1s |
 | 07 | ⭐⭐ Moderate | Bool output | ~180 | <1s |
+| 08 | ⭐⭐ Moderate | Explicit output dtype | ~110 | <1s |
+| 09 | ⭐⭐ Moderate | Reductions | ~80 | <1s |
+| 10 | ⭐⭐ Moderate | Boolean logic | ~110 | <1s |
+| 11 | ⭐⭐ Moderate | DSL kernels | ~160 | <1s |
+| 12 | ⭐⭐⭐ Advanced | Mandelbrot | ~170 | ~1s |
+| 13 | ⭐⭐⭐ Advanced | DSL Mandelbrot | ~210 | ~1s |
+| 14 | ⭐⭐ Moderate | String ops | ~120 | <1s |
+| 15 | ⭐ Simple | DSL print | ~40 | <1s |
+| 16 | ⭐⭐ Moderate | N-D padding | ~90 | <1s |
+| 17 | ⭐ Simple | DSL UDFs | ~70 | <1s |
 
 **Start with Example 01, then explore based on your needs!** 🚀

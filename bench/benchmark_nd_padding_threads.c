@@ -101,10 +101,10 @@ typedef struct {
 } thread_args_c_t;
 
 static const scenario_t SCENARIOS[] = {
-    {.name = "chunk+block", .chunkshape = {200, 240, 280}, .blockshape = {18, 20, 24}, .align_shape_to_chunk = false},
+    {.name = "chunk+block", .chunkshape = {250, 242, 234}, .blockshape = {16, 16, 16}, .align_shape_to_chunk = false},
     {.name = "chunk-pad", .chunkshape = {256, 256, 192}, .blockshape = {16, 16, 16}, .align_shape_to_chunk = false},
-    {.name = "block-pad", .chunkshape = {256, 256, 256}, .blockshape = {24, 24, 24}, .align_shape_to_chunk = true},
-    {.name = "none", .chunkshape = {1024, 64, 64}, .blockshape = {64, 64, 64}, .align_shape_to_chunk = true}
+    {.name = "block-pad", .chunkshape = {250, 250, 250}, .blockshape = {16, 16, 16}, .align_shape_to_chunk = true},
+    {.name = "none", .chunkshape = {256, 256, 256}, .blockshape = {16, 16, 16}, .align_shape_to_chunk = true}
 };
 
 static double get_time(void) {

@@ -185,32 +185,36 @@ The `examples/` directory contains complete, runnable examples demonstrating var
 
 Build and run:
 ```bash
-mkdir -p build
-cd build
-cmake ..
-make -j
-./01_simple_expression
+cmake -S . -B build -G Ninja
+cmake --build build -j
+./build/examples/01_simple_expression
 ```
 
 See [examples/README.md](examples/README.md) for detailed documentation of each example.
 
 ## Building
 
-CMake (recommended):
+CMake + Ninja (recommended):
 ```bash
-mkdir -p build
-cd build
-cmake ..
-make -j
-ctest
+cmake -S . -B build -G Ninja
+cmake --build build -j
+ctest --test-dir build
 ```
-Tip: run a subset of tests with `ctest -R <pattern>`.
+Tip: run a subset of tests with `ctest --test-dir build -R <pattern>`.
 
 Options:
 - `-DMINIEXPR_BUILD_TESTS=ON|OFF`
 - `-DMINIEXPR_BUILD_EXAMPLES=ON|OFF`
 - `-DMINIEXPR_BUILD_BENCH=ON|OFF`
 - `-DMINIEXPR_USE_SLEEF=ON|OFF`
+- `-DMINIEXPR_ENABLE_TCC_JIT=ON|OFF`
+- `-DMINIEXPR_BUILD_BUNDLED_LIBTCC=ON|OFF` (build bundled libtcc from minicc when TCC JIT is enabled)
+- `-DMINIEXPR_DSL_TRACE_DEFAULT=ON|OFF` (emit DSL trace logs by default when `ME_DSL_TRACE` is unset)
+
+Notes:
+- On Windows, TCC JIT is enabled by default (`MINIEXPR_ENABLE_TCC_JIT=ON`).
+- On Emscripten, setting `MINIEXPR_ENABLE_TCC_JIT=ON` enables wasm32 JIT support automatically.
+- Setting `MINIEXPR_ENABLE_TCC_JIT=OFF` disables TCC-based JIT backends; on Linux/macOS, the separate `# me:compiler=cc` runtime path may still be available.
 
 ### SLEEF SIMD acceleration
 
@@ -237,6 +241,67 @@ make examples
 - **[doc/data-types.md](doc/data-types.md)** - Data types guide
 - **[doc/type-inference.md](doc/type-inference.md)** - Type inference rules
 - **[doc/parallel-processing.md](doc/parallel-processing.md)** - Parallel processing patterns
+- **[doc/dsl-usage.md](doc/dsl-usage.md)** - DSL kernel programming guide
+- **[doc/strings.md](doc/strings.md)** - UCS4 string support and string operators
+
+## DSL Kernels
+
+miniexpr includes a DSL (Domain-Specific Language) for writing multi-statement computational kernels. The DSL extends single-expression evaluation with:
+
+- **Temporary variables**: Intermediate results for complex computations
+- **Conditionals**: `where(cond, then, else)` for element-wise selection
+- **Loops**: `for var in range(limit)` iteration
+- **Control flow**: `break` and `continue` statements
+- **Index access**: Built-in `_i0`–`_i7` (position) and `_n0`–`_n7` (shape) variables
+- **Function-style kernels**: `def name(args): ... return expr`
+
+### DSL Example
+
+```c
+const char *dsl_source =
+    "def kernel(x):\n"
+    "    t1 = 1.0 * x - 2.0\n"
+    "    t2 = t1 * x + 3.0\n"
+    "    return t2 * x - 1.0";
+
+me_dsl_error error;
+me_dsl_program *prog = me_dsl_parse(dsl_source, &error);
+if (!prog) {
+    printf("Parse error: %s\n", error.message);
+}
+// Compile and evaluate each statement's expression...
+me_dsl_program_free(prog);
+```
+
+See [doc/dsl-usage.md](doc/dsl-usage.md) for the complete DSL reference and [examples/11_dsl_kernel.c](examples/11_dsl_kernel.c) for a working example.
+
+### DSL Runtime JIT Controls
+
+On Linux/macOS, DSL kernels may use runtime JIT compilation when eligible. The following environment variables control this path:
+
+- `ME_DSL_JIT=0`: Disable runtime JIT and always use interpreter fallback.
+- `ME_DSL_JIT_POS_CACHE=0`: Disable process-local positive cache reuse for loaded JIT kernels.
+- `CFLAGS="..."`: Standard C compiler flags honored by the `cc` backend runtime JIT path.
+
+Backend selection is done in DSL source via pragma:
+
+- `# me:compiler=tcc` (default when omitted)
+- `# me:compiler=cc`
+- For `# me:compiler=cc`, runtime uses `CC` (default: `cc`) as the compiler executable.
+
+Operational `libtcc` runtime location/options remain configurable:
+
+- `ME_DSL_JIT_LIBTCC_PATH=/path/to/libtcc.{so,dylib}`: Override runtime library path used for `libtcc` loading.
+- `ME_DSL_JIT_TCC_LIB_PATH=/path/to/tcc/libdir`: Override `tcc_set_lib_path()` directory (mainly for custom/legacy `libtcc` layouts).
+- `ME_DSL_JIT_TCC_OPTIONS="..."`: Extra options passed to `tcc_set_options()`.
+
+Build-time note:
+
+- On Linux/macOS, libtcc support is built by default and required for DSL JIT's default
+  `# me:compiler=tcc` mode.
+- CMake uses local MiniCC sources at `../minicc` and builds `libtcc` as a separate shared library.
+  `libtcc` is staged in the same directory as `libminiexpr`, and miniexpr embeds that staged
+  `libtcc` path as a default runtime lookup candidate.
 
 ## Contributing
 
@@ -251,6 +316,18 @@ This sets up automatic checks for code quality (e.g., trailing whitespace).
 ## License
 
 BSD 3-Clause License. See [LICENSE](LICENSE) for details.
+
+Third-party licensing:
+
+- tinyexpr portions are under Zlib terms (see [LICENSE-TINYEXPR](LICENSE-TINYEXPR)).
+- SLEEF portions are under Boost Software License 1.0 (see [LICENSE-SLEEF](LICENSE-SLEEF)).
+- Runtime `libtcc` (TinyCC) is under LGPL-2.1-or-later (see [LICENSE-LIBTCC](LICENSE-LIBTCC)).
+
+For binary installs built with libtcc support, the corresponding TinyCC source and
+license are installed under:
+
+- `${CMAKE_INSTALL_DATADIR}/miniexpr/third_party/tinycc/source`
+- `${CMAKE_INSTALL_DATADIR}/miniexpr/third_party/tinycc/COPYING`
 
 Copyright (c) 2025-2026, The Blosc Development Team
 

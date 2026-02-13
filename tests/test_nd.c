@@ -628,7 +628,6 @@ static int test_big_stress(void) {
     const int64_t shape[3] = {20000, 20000, 20000};
     const int32_t chunkshape[3] = {250, 250, 250};
     const int32_t blockshape[3] = {32, 64, 64};
-    const int64_t nchunks_dim0 = (shape[0] + chunkshape[0] - 1) / chunkshape[0];
     const int64_t nchunks_dim1 = (shape[1] + chunkshape[1] - 1) / chunkshape[1];
     const int64_t nchunks_dim2 = (shape[2] + chunkshape[2] - 1) / chunkshape[2];
     const int64_t nblocks_dim0 = (chunkshape[0] + blockshape[0] - 1) / blockshape[0];
@@ -818,12 +817,9 @@ static int test_nd_mixed_reductions(void) {
     int64_t nchunks_dim1 = (shape[1] + chunkshape[1] - 1) / chunkshape[1];
     int64_t nchunks_dim2 = (shape[2] + chunkshape[2] - 1) / chunkshape[2];
     nchunk = (nchunks_dim0 - 1) * nchunks_dim1 * nchunks_dim2 + (nchunks_dim1 - 1) * nchunks_dim2 + (nchunks_dim2 - 1);
-    nblock = ((chunkshape[0] + blockshape[0] - 1) / blockshape[0] - 1) *
-             ((chunkshape[1] + blockshape[1] - 1) / blockshape[1]) *
-             ((chunkshape[2] + blockshape[2] - 1) / blockshape[2]) +
-             ((chunkshape[1] + blockshape[1] - 1) / blockshape[1] - 1) *
-             ((chunkshape[2] + blockshape[2] - 1) / blockshape[2]) +
-             ((chunkshape[2] + blockshape[2] - 1) / blockshape[2] - 1);
+    nblock = (nblocks_dim0 - 1) * nblocks_dim1 * nblocks_dim2 +
+             (nblocks_dim1 - 1) * nblocks_dim2 +
+             (nblocks_dim2 - 1);
 
     int64_t valid = 0;
     me_nd_valid_nitems(expr, nchunk, nblock, &valid);

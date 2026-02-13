@@ -14,6 +14,12 @@ int main(void) {
     snprintf(path, sizeof(path), "%s/src/functions.c", MINIEXPR_SOURCE_DIR);
 
     FILE *fp = fopen(path, "r");
+#if defined(__EMSCRIPTEN__)
+    if (!fp) {
+        snprintf(path, sizeof(path), "%s", "/src/functions.c");
+        fp = fopen(path, "r");
+    }
+#endif
     if (!fp) {
         printf("Failed to open %s\n", path);
         return 1;
@@ -26,7 +32,8 @@ int main(void) {
 
     while (fgets(line, sizeof(line), fp)) {
         if (!in_functions) {
-            if (strstr(line, "static const me_variable functions[]")) {
+            if (strstr(line, "static const me_variable functions[]") ||
+                strstr(line, "static const me_variable_ex functions[]")) {
                 in_functions = 1;
             }
             continue;

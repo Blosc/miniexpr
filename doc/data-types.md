@@ -288,6 +288,40 @@ if (me_compile("x < y", vars, 2, ME_AUTO, &error, &expr) != ME_COMPILE_SUCCESS) 
 
 Both methods require explicit variable dtypes when the computation type differs from the output type.
 
+## ME_STRING: Fixed-Size UCS4 Strings
+
+`ME_STRING` represents fixed-size UCS4 (`uint32_t`) strings. Each element is a
+NUL-terminated array of codepoints with no embedded NULs. You must provide the
+per-element byte size via `me_variable_ex` (`itemsize` must be a multiple of 4
+and include the terminator). The maximum string length in codepoints is
+`itemsize / 4 - 1`.
+
+String expressions support comparisons (`==`, `!=`) and string predicates
+(`startswith`, `endswith`, `contains`). These operations always yield boolean
+output; expressions cannot output `ME_STRING`.
+
+```c
+#include <stdint.h>
+#include "miniexpr.h"
+
+uint32_t names[][8] = {
+    {'a','l','p','h','a',0,0,0},
+    {'b','e','t','a',0,0,0,0},
+};
+
+me_variable_ex vars[] = {
+    {"name", ME_STRING, names, ME_VARIABLE, NULL, sizeof(names[0])}
+};
+
+int error;
+me_expr *expr = NULL;
+if (me_compile_ex("startswith(name, \"alp\")", vars, 1, ME_BOOL, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
+```
+
+String literals are UTF-8 and support escapes like `\n`, `\t`, `\\`, `\"`, `\'`,
+and Unicode escapes (`\uXXXX`, `\UXXXXXXXX`) that map to UCS4 codepoints. For
+example, `"\u03B1"` matches U+03B1 (Greek alpha).
+
 ## Example 6: Explicit Variable Types with Explicit Output Dtype
 
 You can specify both explicit variable types AND an explicit output dtype. This is useful when you want variables to keep their types during computation, but cast the final result to a specific output type.
