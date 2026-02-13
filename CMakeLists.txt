@@ -83,7 +83,7 @@ if(MINIEXPR_NEEDS_TINYCC)
     # GIT_TAG 4597a9621e70a337b241d424f4ab4729cb75b426  # latest commit as of Feb 2025
     # minicc is a fork of tinycc with support for wasm32 and shared library builds
     GIT_REPOSITORY https://github.com/Blosc/minicc.git
-    GIT_TAG 517ef1fb1d4f59b13b100fa21774c7242cd57b98
+    GIT_TAG 49c7afc57e86da1aae709c34184de27f0f60794a
     # SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../minicc"
   )
   FetchContent_Populate(tinycc)
