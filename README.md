@@ -22,7 +22,7 @@ miniexpr follows semantic versioning. The library version is available at compil
 
 miniexpr provides a simple, focused API with just two main functions:
 
-### `me_compile()` and `me_compile_nd()`
+### `me_compile()`, `me_compile_nd()`, and `me_compile_nd_jit()`
 ```c
 int me_compile(const char *expression, const me_variable *variables,
                int var_count, me_dtype dtype, int *error, me_expr **out);
@@ -31,6 +31,12 @@ int me_compile_nd(const char *expression, const me_variable *variables,
                   int var_count, me_dtype dtype, int ndims,
                   const int64_t *shape, const int32_t *chunkshape,
                   const int32_t *blockshape, int *error, me_expr **out);
+
+int me_compile_nd_jit(const char *expression, const me_variable *variables,
+                      int var_count, me_dtype dtype, int ndims,
+                      const int64_t *shape, const int32_t *chunkshape,
+                      const int32_t *blockshape, int jit_mode,
+                      int *error, me_expr **out);
 ```
 Compiles an expression for evaluation. Variable and output pointers are provided during evaluation rather than compilation.
 
@@ -70,6 +76,11 @@ The `dtype` parameter has two mutually exclusive modes:
 
 Mixing modes (some vars with types, some `ME_AUTO`) will cause compilation to fail.
 
+`me_compile_nd_jit(...)` adds a compile-time JIT policy hint:
+- `jit_mode = 0` (`ME_JIT_DEFAULT`): default behavior.
+- `jit_mode = 1` (`ME_JIT_ON`): prefer runtime JIT preparation.
+- `jit_mode = 2` (`ME_JIT_OFF`): skip runtime JIT preparation at compile time.
+
 ### `me_eval()` and `me_eval_nd()`
 ```c
 int me_eval(const me_expr *expr, const void **vars_block,
@@ -97,6 +108,13 @@ Use `ME_EVAL_PARAMS_DEFAULTS` to start from defaults and override only what you 
 ```c
 me_eval_params params = ME_EVAL_PARAMS_DEFAULTS;
 params.disable_simd = true;
+if (me_eval(expr, var_ptrs, 2, result, 3, &params) != ME_EVAL_SUCCESS) { /* handle error */ }
+```
+
+JIT policy can also be controlled per-evaluation call:
+```c
+me_eval_params params = ME_EVAL_PARAMS_DEFAULTS;
+params.jit_mode = ME_JIT_OFF;  // disable runtime JIT execution for this call
 if (me_eval(expr, var_ptrs, 2, result, 3, &params) != ME_EVAL_SUCCESS) { /* handle error */ }
 ```
 
@@ -282,6 +300,14 @@ On Linux/macOS, DSL kernels may use runtime JIT compilation when eligible. The f
 - `ME_DSL_JIT=0`: Disable runtime JIT and always use interpreter fallback.
 - `ME_DSL_JIT_POS_CACHE=0`: Disable process-local positive cache reuse for loaded JIT kernels.
 - `CFLAGS="..."`: Standard C compiler flags honored by the `cc` backend runtime JIT path.
+
+Per-call policy overrides are available via API:
+- `me_eval_params.jit_mode = ME_JIT_ON|ME_JIT_OFF|ME_JIT_DEFAULT`
+- `me_compile_nd_jit(..., jit_mode, ...)` to control compile-time runtime-JIT preparation.
+
+When `jit_mode=ME_JIT_OFF` is used in `me_compile_nd_jit(...)`, trace logs include:
+- `jit runtime skipped: ... reason=jit_mode=off`
+and no runtime JIT backend step (`tcc`/`cc` compile/load) is performed for that compiled expression path.
 
 Backend selection is done in DSL source via pragma:
 

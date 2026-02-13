@@ -47,6 +47,28 @@ Any other `# me:*` pragma is a parse error.
 
 For backend diagnostics, set `ME_DSL_TRACE=1` to emit compile/JIT trace lines
 to stderr (JIT accept/reject reasons, runtime cache/fallback paths).
+When runtime JIT is disabled via API (`jit_mode=ME_JIT_OFF`), traces include
+`jit runtime skipped: ... reason=jit_mode=off` for eligible kernels.
+
+### API JIT Policy Overrides
+
+In addition to source pragmas, callers can control runtime JIT policy from C:
+
+```c
+int me_compile_nd_jit(const char *expression, const me_variable *variables,
+                      int var_count, int type, int32_t storage_dtype,
+                      const int32_t *shape, int32_t ndim,
+                      const int32_t *blockshape, int jit_mode,
+                      te_expr **n);
+```
+
+`jit_mode` values:
+- `ME_JIT_DEFAULT` (`0`): default behavior.
+- `ME_JIT_ON` (`1`): prefer runtime JIT preparation.
+- `ME_JIT_OFF` (`2`): skip runtime JIT preparation at compile time.
+
+At evaluation time, `me_eval_params.jit_mode` provides a per-call override with
+the same values (`ME_JIT_DEFAULT`, `ME_JIT_ON`, `ME_JIT_OFF`).
 
 ### Floating-Point Pragma
 

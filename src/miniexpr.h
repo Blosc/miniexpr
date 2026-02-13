@@ -212,6 +212,18 @@ int me_compile_nd(const char *expression, const me_variable *variables,
                   const int64_t *shape, const int32_t *chunkshape,
                   const int32_t *blockshape, int *error, me_expr **out);
 
+/* Compile expression with multidimensional metadata and a JIT-mode hint.
+ * jit_mode values:
+ *   0 -> default policy
+ *   1 -> prefer JIT
+ *   2 -> disable JIT preparation at compile time
+ */
+int me_compile_nd_jit(const char *expression, const me_variable *variables,
+                      int var_count, me_dtype dtype, int ndims,
+                      const int64_t *shape, const int32_t *chunkshape,
+                      const int32_t *blockshape, int jit_mode,
+                      int *error, me_expr **out);
+
 /* Compile expression with multidimensional metadata and extended variables. */
 int me_compile_nd_ex(const char *expression, const me_variable_ex *variables,
                      int var_count, me_dtype dtype, int ndims,
@@ -249,6 +261,13 @@ typedef enum {
     ME_SIMD_ULP_3_5 = 2
 } me_simd_ulp_mode;
 
+/* JIT policy for a single evaluation call. */
+typedef enum {
+    ME_JIT_DEFAULT = 0,  /* auto policy (environment/default behavior) */
+    ME_JIT_ON = 1,       /* prefer JIT when available */
+    ME_JIT_OFF = 2       /* disable JIT for this call */
+} me_jit_mode;
+
 #ifndef ME_SIMD_ULP_DEFAULT_MODE
 #define ME_SIMD_ULP_DEFAULT_MODE ME_SIMD_ULP_3_5
 #endif
@@ -257,9 +276,10 @@ typedef enum {
 typedef struct {
     bool disable_simd;
     me_simd_ulp_mode simd_ulp_mode;
+    me_jit_mode jit_mode;
 } me_eval_params;
 
-#define ME_EVAL_PARAMS_DEFAULTS ((me_eval_params){false, ME_SIMD_ULP_DEFAULT})
+#define ME_EVAL_PARAMS_DEFAULTS ((me_eval_params){false, ME_SIMD_ULP_DEFAULT, ME_JIT_DEFAULT})
 
 /* Evaluates compiled expression with variable and output pointers.
  * This function can be safely called from multiple threads simultaneously on the
