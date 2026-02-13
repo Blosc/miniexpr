@@ -9,7 +9,7 @@
 - [x] JIT IR now supports `while` lowering.
 - [x] JIT C codegen now supports `while` lowering.
 - [x] JIT IR/codegen tests updated for `while`.
-- [ ] Optional safety cap for non-terminating `while` loops.
+- [x] Optional safety cap for non-terminating `while` loops.
 
 ## Current DSL loop syntax (from `doc/dsl-usage.md`)
 
@@ -87,13 +87,14 @@ Phase 1 is complete. Phase 2 JIT lowering is now implemented as well.
 
 ### 5. Termination safety for `while`
 
-`while` can be non-terminating. Recommended safety policy for phase 1:
+Implemented:
 
-- Add a high iteration cap (for example, 1e7 iterations) in interpreter `while` execution.
-- On cap hit, return `ME_EVAL_ERR_INVALID_ARG`.
-- Document this explicitly in `doc/dsl-usage.md`.
-
-This avoids hard hangs in accidental infinite-loop kernels while preserving practical behavior.
+- Interpreter `while` execution now enforces a high iteration cap per `while` statement.
+- Default cap: `10,000,000`.
+- Env override: `ME_DSL_WHILE_MAX_ITERS` (`<= 0` disables cap).
+- On cap hit, evaluation returns `ME_EVAL_ERR_INVALID_ARG`.
+- With `ME_DSL_TRACE=1`, runtime emits a trace line when the cap is hit.
+- Behavior is documented in `doc/dsl-usage.md` and covered by `tests/test_dsl_syntax.c`.
 
 ### 6. JIT IR/codegen behavior (`src/dsl_jit_ir.h`, `src/dsl_jit_ir.c`, `src/dsl_jit_cgen.c`)
 

@@ -103,6 +103,9 @@ extern void me_wasm_jit_free_fn(int idx);
 #ifndef ME_DSL_TRACE_DEFAULT
 #define ME_DSL_TRACE_DEFAULT 0
 #endif
+#ifndef ME_DSL_WHILE_MAX_ITERS_DEFAULT
+#define ME_DSL_WHILE_MAX_ITERS_DEFAULT 10000000LL
+#endif
 #ifndef ME_DSL_JIT_LIBTCC_DEFAULT_PATH
 #define ME_DSL_JIT_LIBTCC_DEFAULT_PATH ""
 #endif
@@ -2573,6 +2576,26 @@ static void dsl_tracef(const char *fmt, ...) {
     vfprintf(stderr, fmt, ap);
     va_end(ap);
     fputc('\n', stderr);
+}
+
+static int64_t dsl_while_max_iters(void) {
+    const char *env = getenv("ME_DSL_WHILE_MAX_ITERS");
+    if (!env || env[0] == '\0') {
+        return (int64_t)ME_DSL_WHILE_MAX_ITERS_DEFAULT;
+    }
+    errno = 0;
+    char *end = NULL;
+    long long v = strtoll(env, &end, 10);
+    if (errno != 0 || end == env) {
+        return (int64_t)ME_DSL_WHILE_MAX_ITERS_DEFAULT;
+    }
+    while (*end && isspace((unsigned char)*end)) {
+        end++;
+    }
+    if (*end != '\0') {
+        return (int64_t)ME_DSL_WHILE_MAX_ITERS_DEFAULT;
+    }
+    return (int64_t)v;
 }
 
 static int dsl_offset_from_linecol(const char *source, int line, int column) {
@@ -8193,6 +8216,9 @@ static int dsl_eval_while_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
         return ME_EVAL_SUCCESS;
     }
 
+    int64_t max_iters = dsl_while_max_iters();
+    int64_t iter_count = 0;
+
     int rc = ME_EVAL_SUCCESS;
     for (;;) {
         if (!dsl_mask_any(active_mask, ctx->nitems)) {
@@ -8222,6 +8248,15 @@ static int dsl_eval_while_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
             free(cond_mask);
             break;
         }
+        if (max_iters > 0 && iter_count >= max_iters) {
+            dsl_tracef("while iteration cap hit at %d:%d after %lld iterations (limit=%lld)",
+                       stmt->line, stmt->column,
+                       (long long)iter_count, (long long)max_iters);
+            free(cond_mask);
+            free(active_mask);
+            return ME_EVAL_ERR_INVALID_ARG;
+        }
+        iter_count++;
 
         uint8_t *run_mask = malloc((size_t)ctx->nitems);
         uint8_t *break_mask = calloc((size_t)ctx->nitems, sizeof(*break_mask));

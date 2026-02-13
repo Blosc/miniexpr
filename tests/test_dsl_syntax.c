@@ -415,6 +415,60 @@ static int test_while_loop_semantics(void) {
     return 0;
 }
 
+static int test_while_iteration_cap(void) {
+    printf("\n=== DSL Test 2d: while iteration cap ===\n");
+
+    const char *src =
+        "def kernel():\n"
+        "    i = 0\n"
+        "    while 1:\n"
+        "        i = i + 1\n"
+        "    return i\n";
+
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+    char *saved_cap = dup_env_value("ME_DSL_WHILE_MAX_ITERS");
+    if (setenv("ME_DSL_JIT", "0", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=0 failed\n");
+        free(saved_jit);
+        free(saved_cap);
+        return 1;
+    }
+    if (setenv("ME_DSL_WHILE_MAX_ITERS", "32", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_WHILE_MAX_ITERS failed\n");
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        free(saved_cap);
+        return 1;
+    }
+
+    int err = 0;
+    me_expr *expr = NULL;
+    if (me_compile(src, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: while-cap compile error at %d\n", err);
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        restore_env_value("ME_DSL_WHILE_MAX_ITERS", saved_cap);
+        free(saved_jit);
+        free(saved_cap);
+        return 1;
+    }
+    double out[4] = {0.0, 0.0, 0.0, 0.0};
+    int rc_eval = me_eval(expr, NULL, 0, out, 4, NULL);
+    me_free(expr);
+
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    restore_env_value("ME_DSL_WHILE_MAX_ITERS", saved_cap);
+    free(saved_jit);
+    free(saved_cap);
+
+    if (rc_eval != ME_EVAL_ERR_INVALID_ARG) {
+        printf("  ❌ FAILED: expected while-cap runtime error, got %d\n", rc_eval);
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    return 0;
+}
+
 static int test_invalid_conditionals(void) {
     printf("\n=== DSL Test 3: invalid conditionals ===\n");
 
@@ -1434,6 +1488,7 @@ int main(void) {
     fail |= test_loop_break_continue();
     fail |= test_range_start_stop_step();
     fail |= test_while_loop_semantics();
+    fail |= test_while_iteration_cap();
     fail |= test_invalid_conditionals();
     fail |= test_if_elif_else();
     fail |= test_nd_indices();

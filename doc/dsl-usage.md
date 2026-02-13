@@ -202,6 +202,13 @@ def kernel(x):
     return acc
 ```
 
+Safety notes for `while`:
+- Interpreter execution enforces an iteration cap per `while` statement.
+- Default cap: `10,000,000` iterations.
+- Configure with `ME_DSL_WHILE_MAX_ITERS` environment variable.
+- `ME_DSL_WHILE_MAX_ITERS <= 0` disables the cap.
+- When the cap is hit, evaluation returns `ME_EVAL_ERR_INVALID_ARG`.
+
 ### Conditionals
 
 General `if/elif/else` blocks are supported.
