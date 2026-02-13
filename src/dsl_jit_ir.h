@@ -21,6 +21,7 @@ typedef enum {
     ME_DSL_JIT_IR_STMT_ASSIGN = 0,
     ME_DSL_JIT_IR_STMT_RETURN,
     ME_DSL_JIT_IR_STMT_IF,
+    ME_DSL_JIT_IR_STMT_WHILE,
     ME_DSL_JIT_IR_STMT_FOR,
     ME_DSL_JIT_IR_STMT_BREAK,
     ME_DSL_JIT_IR_STMT_CONTINUE
@@ -66,6 +67,10 @@ struct me_dsl_jit_ir_stmt {
             me_dsl_jit_ir_block else_block;
             bool has_else;
         } if_stmt;
+        struct {
+            me_dsl_jit_ir_expr cond;
+            me_dsl_jit_ir_block body;
+        } while_loop;
         struct {
             char *var;
             me_dsl_jit_ir_expr start;

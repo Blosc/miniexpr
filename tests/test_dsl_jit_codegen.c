@@ -275,6 +275,76 @@ static int test_codegen_element_loop_control(void) {
     return 0;
 }
 
+static int test_codegen_while_loop_control(void) {
+    printf("\n=== JIT C Codegen Test 3b: while loop control ===\n");
+
+    const char *src =
+        "def kernel(x):\n"
+        "    i = 0\n"
+        "    acc = 0\n"
+        "    while i < 8:\n"
+        "        if i == 0:\n"
+        "            i = i + 1\n"
+        "            continue\n"
+        "        if x > i:\n"
+        "            acc = acc + i\n"
+        "            i = i + 1\n"
+        "        else:\n"
+        "            break\n"
+        "    return acc\n";
+
+    me_dsl_error parse_error;
+    me_dsl_program *program = me_dsl_parse(src, &parse_error);
+    if (!program) {
+        printf("  FAILED: parse error at %d:%d (%s)\n",
+               parse_error.line, parse_error.column, parse_error.message);
+        return 1;
+    }
+
+    const char *param_names[] = {"x"};
+    me_dtype param_dtypes[] = {ME_FLOAT64};
+    dtype_resolve_ctx rctx;
+    rctx.value_dtype = ME_INT64;
+
+    me_dsl_error ir_error;
+    me_dsl_jit_ir_program *ir = NULL;
+    bool ok = me_dsl_jit_ir_build(program, param_names, param_dtypes, 1,
+                                  mock_resolve_dtype, &rctx, &ir, &ir_error);
+    me_dsl_program_free(program);
+    if (!ok || !ir) {
+        printf("  FAILED: ir build rejected while-loop source at %d:%d (%s)\n",
+               ir_error.line, ir_error.column, ir_error.message);
+        me_dsl_jit_ir_free(ir);
+        return 1;
+    }
+
+    me_dsl_error cg_error;
+    me_dsl_jit_cgen_options options;
+    memset(&options, 0, sizeof(options));
+    options.symbol_name = "me_dsl_jit_kernel";
+    char *c_source = NULL;
+    ok = me_dsl_jit_codegen_c(ir, ME_INT64, &options, &c_source, &cg_error);
+    me_dsl_jit_ir_free(ir);
+    if (!ok || !c_source) {
+        printf("  FAILED: codegen rejected while-loop source at %d:%d (%s)\n",
+               cg_error.line, cg_error.column, cg_error.message);
+        free(c_source);
+        return 1;
+    }
+
+#if !defined(_WIN32) && !defined(_WIN64)
+    if (compile_generated_source(c_source) != 0) {
+        printf("  FAILED: generated C did not compile for while-loop source\n");
+        free(c_source);
+        return 1;
+    }
+#endif
+
+    free(c_source);
+    printf("  PASSED\n");
+    return 0;
+}
+
 static int test_codegen_math_alias_rewrite(void) {
     printf("\n=== JIT C Codegen Test 4: math alias rewrite ===\n");
 
@@ -851,6 +921,7 @@ int main(void) {
     fail |= test_codegen_all_noncomplex_dtypes();
     fail |= test_codegen_rejects_unsupported_expression_ops();
     fail |= test_codegen_element_loop_control();
+    fail |= test_codegen_while_loop_control();
     fail |= test_codegen_math_alias_rewrite();
     fail |= test_codegen_runtime_math_bridge_emission();
     fail |= test_codegen_runtime_math_bridge_vector_lowering();

@@ -126,6 +126,10 @@ static void dsl_jit_ir_stmt_free(me_dsl_jit_ir_stmt *stmt) {
             dsl_jit_ir_block_free(&stmt->as.if_stmt.else_block);
         }
         break;
+    case ME_DSL_JIT_IR_STMT_WHILE:
+        dsl_jit_ir_expr_free(&stmt->as.while_loop.cond);
+        dsl_jit_ir_block_free(&stmt->as.while_loop.body);
+        break;
     case ME_DSL_JIT_IR_STMT_FOR:
         free(stmt->as.for_loop.var);
         dsl_jit_ir_expr_free(&stmt->as.for_loop.start);
@@ -683,11 +687,36 @@ static bool dsl_jit_build_block(me_dsl_jit_build_ctx *ctx, const me_dsl_block *i
             }
             break;
         }
-        case ME_DSL_STMT_WHILE:
-            dsl_jit_set_error(ctx->error, stmt->line, stmt->column,
-                              "while loops are not supported by jit ir");
-            dsl_jit_ir_stmt_free(ir_stmt);
-            return false;
+        case ME_DSL_STMT_WHILE: {
+            if (!stmt->as.while_loop.cond) {
+                dsl_jit_set_error(ctx->error, stmt->line, stmt->column, "invalid while condition");
+                dsl_jit_ir_stmt_free(ir_stmt);
+                return false;
+            }
+            if (!dsl_jit_expr_validate_subset(ctx, stmt->as.while_loop.cond,
+                                              stmt->as.while_loop.cond->line,
+                                              stmt->as.while_loop.cond->column)) {
+                dsl_jit_ir_stmt_free(ir_stmt);
+                return false;
+            }
+            me_dtype cond_dtype = ME_AUTO;
+            if (!dsl_jit_resolve_expr_dtype(ctx, stmt->as.while_loop.cond, stmt->line, stmt->column,
+                                            &cond_dtype)) {
+                dsl_jit_ir_stmt_free(ir_stmt);
+                return false;
+            }
+            ir_stmt->kind = ME_DSL_JIT_IR_STMT_WHILE;
+            if (!dsl_jit_ir_expr_init(&ir_stmt->as.while_loop.cond, stmt->as.while_loop.cond, cond_dtype)) {
+                dsl_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
+                dsl_jit_ir_stmt_free(ir_stmt);
+                return false;
+            }
+            if (!dsl_jit_build_block(ctx, &stmt->as.while_loop.body, &ir_stmt->as.while_loop.body, true)) {
+                dsl_jit_ir_stmt_free(ir_stmt);
+                return false;
+            }
+            break;
+        }
         case ME_DSL_STMT_FOR: {
             if (!stmt->as.for_loop.var || !stmt->as.for_loop.limit) {
                 dsl_jit_set_error(ctx->error, stmt->line, stmt->column, "invalid for-loop in dsl");
@@ -1027,6 +1056,10 @@ static uint64_t dsl_jit_ir_hash_stmt(uint64_t h, const me_dsl_jit_ir_stmt *stmt)
         if (stmt->as.if_stmt.has_else) {
             h = dsl_jit_ir_hash_block(h, &stmt->as.if_stmt.else_block);
         }
+        break;
+    case ME_DSL_JIT_IR_STMT_WHILE:
+        h = dsl_jit_ir_hash_expr(h, &stmt->as.while_loop.cond);
+        h = dsl_jit_ir_hash_block(h, &stmt->as.while_loop.body);
         break;
     case ME_DSL_JIT_IR_STMT_FOR:
         h = dsl_jit_hash_string(h, stmt->as.for_loop.var);

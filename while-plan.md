@@ -1,5 +1,16 @@
 # Python-Style `while` Loops for DSL Kernels: Implementation Plan
 
+## Status (updated)
+
+- [x] Parser AST + syntax support for `while`.
+- [x] Interpreter compile/eval support for `while` with loop-control flow.
+- [x] DSL docs updated with `while` syntax/examples.
+- [x] Core DSL syntax tests added for `while` behavior and parity checks.
+- [x] JIT IR now supports `while` lowering.
+- [x] JIT C codegen now supports `while` lowering.
+- [x] JIT IR/codegen tests updated for `while`.
+- [ ] Optional safety cap for non-terminating `while` loops.
+
 ## Current DSL loop syntax (from `doc/dsl-usage.md`)
 
 - The DSL currently supports Python-style `for i in range(...)` loops.
@@ -32,7 +43,7 @@ Recommended rollout is two phases to keep risk low:
 1. Interpreter support (full functionality) + docs/tests.
 2. JIT IR/codegen support later (or explicit JIT-IR rejection in phase 1).
 
-Phase 1 already gives usable `while` loops because DSL execution falls back to the interpreter when JIT is unavailable/inapplicable.
+Phase 1 is complete. Phase 2 JIT lowering is now implemented as well.
 
 ## Detailed changes
 
@@ -86,14 +97,12 @@ This avoids hard hangs in accidental infinite-loop kernels while preserving prac
 
 ### 6. JIT IR/codegen behavior (`src/dsl_jit_ir.h`, `src/dsl_jit_ir.c`, `src/dsl_jit_cgen.c`)
 
-Phase 1 recommendation:
+Implemented:
 
-- Do not add JIT `while` lowering yet.
-- In JIT IR builder, reject `ME_DSL_STMT_WHILE` with a clear message:
-  - `"while loops are not supported by jit ir"`
-- Keep runtime fallback to interpreter (already existing behavior).
-
-Phase 2 (optional): add JIT IR/C codegen while lowering once interpreter semantics are stable.
+- Added `while` statement kind to JIT IR.
+- Added JIT IR builder lowering for DSL `while` (`cond` + `body`).
+- Added JIT C codegen emission for `while` truthiness checks and loop body emission.
+- Updated JIT local collection, return-dtype traversal, free paths, and fingerprint hashing to include `while`.
 
 ### 7. Documentation (`doc/dsl-usage.md`)
 
@@ -122,9 +131,10 @@ Add tests for:
 - Runtime non-return behavior still unchanged (paths that never return remain eval-time error).
 - If iteration cap is implemented: explicit test that infinite loop returns `ME_EVAL_ERR_INVALID_ARG`.
 
-Optional JIT tests:
+JIT tests:
 
-- Update JIT IR test suite to assert explicit `while` rejection reason (phase 1 behavior).
+- Validate JIT IR accepts `while`.
+- Validate JIT C codegen for `while` emits compilable C.
 
 ## Suggested implementation order
 
@@ -133,8 +143,9 @@ Optional JIT tests:
 3. Interpreter `while` evaluator + dispatch.
 4. Reserved-scan + DSL candidate updates.
 5. Tests (`test_dsl_syntax.c`) for happy path and errors.
-6. JIT IR explicit rejection test/update.
-7. Docs update.
+6. JIT IR/codegen while lowering.
+7. Optional loop-iteration safety cap.
+8. Docs/tests final polish.
 
 ## Acceptance criteria
 
