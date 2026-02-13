@@ -513,6 +513,10 @@ static void dsl_stmt_free(me_dsl_stmt *stmt) {
             dsl_block_free(&stmt->as.if_stmt.else_block);
         }
         break;
+    case ME_DSL_STMT_WHILE:
+        dsl_expr_free(stmt->as.while_loop.cond);
+        dsl_block_free(&stmt->as.while_loop.body);
+        break;
     case ME_DSL_STMT_FOR:
         free(stmt->as.for_loop.var);
         dsl_expr_free(stmt->as.for_loop.limit);
@@ -934,6 +938,37 @@ static bool parse_if(me_dsl_lexer *lex, me_dsl_block *block, int line, int colum
     return true;
 }
 
+static bool parse_while(me_dsl_lexer *lex, me_dsl_block *block, int line, int column,
+                        me_dsl_error *error) {
+    me_dsl_expr *cond = NULL;
+    if (!parse_if_condition(lex, line, column, "while", &cond, error)) {
+        return false;
+    }
+
+    me_dsl_block while_block;
+    if (!parse_if_body(lex, &while_block, line, column, true, error)) {
+        dsl_expr_free(cond);
+        return false;
+    }
+
+    me_dsl_stmt *stmt = dsl_stmt_new(ME_DSL_STMT_WHILE, line, column);
+    if (!stmt) {
+        dsl_set_error(error, line, column, "out of memory");
+        dsl_expr_free(cond);
+        dsl_block_free(&while_block);
+        return false;
+    }
+    stmt->as.while_loop.cond = cond;
+    stmt->as.while_loop.body = while_block;
+
+    if (!dsl_block_push(block, stmt, error)) {
+        dsl_stmt_free(stmt);
+        return false;
+    }
+
+    return true;
+}
+
 static bool parse_for(me_dsl_lexer *lex, me_dsl_block *block, int line, int column, me_dsl_error *error) {
     lexer_skip_space(lex);
     const char *var_start = NULL;
@@ -1160,6 +1195,9 @@ static bool parse_statement(me_dsl_lexer *lex, me_dsl_block *block, bool in_loop
 
         if (ident_len == 3 && strncmp(ident_start, "for", ident_len) == 0) {
             return parse_for(lex, block, snapshot.line, snapshot.column, error);
+        }
+        if (ident_len == 5 && strncmp(ident_start, "while", ident_len) == 0) {
+            return parse_while(lex, block, snapshot.line, snapshot.column, error);
         }
         if (ident_len == 2 && strncmp(ident_start, "if", ident_len) == 0) {
             return parse_if(lex, block, snapshot.line, snapshot.column, in_loop, error);

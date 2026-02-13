@@ -463,6 +463,45 @@ static int test_ir_fingerprint_includes_fp_mode(void) {
     return 0;
 }
 
+static int test_ir_rejects_while_loops(void) {
+    printf("\n=== JIT IR Test 7: while loops rejected ===\n");
+
+    const char *src =
+        "def kernel(x):\n"
+        "    i = 0\n"
+        "    while i < x:\n"
+        "        i = i + 1\n"
+        "    return i\n";
+
+    me_dsl_error error;
+    me_dsl_program *program = me_dsl_parse(src, &error);
+    if (!program) {
+        printf("  FAILED: parse error at %d:%d (%s)\n",
+               error.line, error.column, error.message);
+        return 1;
+    }
+
+    const char *param_names[] = {"x"};
+    me_dtype param_dtypes[] = {ME_FLOAT64};
+    me_dsl_jit_ir_program *ir = NULL;
+    if (me_dsl_jit_ir_build(program, param_names, param_dtypes, 1,
+                            mock_resolve_dtype, NULL, &ir, &error)) {
+        printf("  FAILED: while-loop kernel should be rejected by jit ir\n");
+        me_dsl_jit_ir_free(ir);
+        me_dsl_program_free(program);
+        return 1;
+    }
+    me_dsl_program_free(program);
+    if (strstr(error.message, "while loops are not supported by jit ir") == NULL) {
+        printf("  FAILED: expected explicit while-loop rejection reason (got '%s')\n",
+               error.message);
+        return 1;
+    }
+
+    printf("  PASSED\n");
+    return 0;
+}
+
 int main(void) {
     int fail = 0;
     fail |= test_ir_accepts_supported_subset();
@@ -471,5 +510,6 @@ int main(void) {
     fail |= test_ir_fingerprint_is_deterministic();
     fail |= test_parser_pragmas();
     fail |= test_ir_fingerprint_includes_fp_mode();
+    fail |= test_ir_rejects_while_loops();
     return fail;
 }

@@ -683,6 +683,11 @@ static bool dsl_jit_build_block(me_dsl_jit_build_ctx *ctx, const me_dsl_block *i
             }
             break;
         }
+        case ME_DSL_STMT_WHILE:
+            dsl_jit_set_error(ctx->error, stmt->line, stmt->column,
+                              "while loops are not supported by jit ir");
+            dsl_jit_ir_stmt_free(ir_stmt);
+            return false;
         case ME_DSL_STMT_FOR: {
             if (!stmt->as.for_loop.var || !stmt->as.for_loop.limit) {
                 dsl_jit_set_error(ctx->error, stmt->line, stmt->column, "invalid for-loop in dsl");
