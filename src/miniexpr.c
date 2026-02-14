@@ -9073,7 +9073,6 @@ static int me_eval_dsl_nd(const me_expr *expr, const void **vars_block,
 
     if (program->output_is_scalar) {
         memcpy(output_block, dsl_out, item_size);
-        memset((unsigned char *)output_block + item_size, 0, (size_t)(padded_items - 1) * item_size);
         free(dsl_out);
     }
     else {
