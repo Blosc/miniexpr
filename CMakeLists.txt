@@ -97,7 +97,7 @@ if(MINIEXPR_NEEDS_BUNDLED_TINYCC)
   else()
     set(MINIEXPR_TINYCC_SHARED_NAME "libtcc.so")
   endif()
-  if(WIN32)
+  if(CMAKE_CONFIGURATION_TYPES)
     set(MINIEXPR_TINYCC_BUILT_SHARED_PATH "${tinycc_BINARY_DIR}/$<CONFIG>/${MINIEXPR_TINYCC_SHARED_NAME}")
   else()
     set(MINIEXPR_TINYCC_BUILT_SHARED_PATH "${tinycc_BINARY_DIR}/${MINIEXPR_TINYCC_SHARED_NAME}")
@@ -123,7 +123,7 @@ if(MINIEXPR_NEEDS_BUNDLED_TINYCC)
   set(MINIEXPR_TINYCC_BUILD_CMD
     "${CMAKE_COMMAND}" --build "${tinycc_BINARY_DIR}" --target minicc_libtcc_shared
   )
-  if(WIN32)
+  if(CMAKE_CONFIGURATION_TYPES)
     set(MINIEXPR_TINYCC_BUILD_CMD
       "${CMAKE_COMMAND}" --build "${tinycc_BINARY_DIR}" --config "$<CONFIG>" --target minicc_libtcc_shared
     )
@@ -144,13 +144,29 @@ if(MINIEXPR_NEEDS_BUNDLED_TINYCC)
     VERBATIM
   )
 
-  add_custom_command(
-    OUTPUT "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
-    COMMAND ${MINIEXPR_TINYCC_BUILD_CMD}
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MINIEXPR_TINYCC_BUILT_SHARED_PATH}" "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
-    DEPENDS "${MINIEXPR_TINYCC_CONFIG_STAMP}"
-    VERBATIM
-  )
+  if(WIN32)
+    # Windows generators differ in where DLL artifacts are placed.
+    # Use a helper that copies the first existing candidate.
+    add_custom_command(
+      OUTPUT "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
+      COMMAND ${MINIEXPR_TINYCC_BUILD_CMD}
+      COMMAND "${CMAKE_COMMAND}"
+              -Dsrc1="${tinycc_BINARY_DIR}/$<CONFIG>/${MINIEXPR_TINYCC_SHARED_NAME}"
+              -Dsrc2="${tinycc_BINARY_DIR}/${MINIEXPR_TINYCC_SHARED_NAME}"
+              -Ddst="${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
+              -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/copy_first_existing.cmake"
+      DEPENDS "${MINIEXPR_TINYCC_CONFIG_STAMP}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/copy_first_existing.cmake"
+      VERBATIM
+    )
+  else()
+    add_custom_command(
+      OUTPUT "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
+      COMMAND ${MINIEXPR_TINYCC_BUILD_CMD}
+      COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MINIEXPR_TINYCC_BUILT_SHARED_PATH}" "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
+      DEPENDS "${MINIEXPR_TINYCC_CONFIG_STAMP}"
+      VERBATIM
+    )
+  endif()
 
   add_custom_target(miniexpr_tinycc ALL
     DEPENDS "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}")
