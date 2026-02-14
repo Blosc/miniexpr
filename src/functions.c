@@ -3513,6 +3513,34 @@ static me_expr* expr(state* s) {
 
         ret->function = (void*)t;
         apply_type_promotion(ret); // Apply type promotion
+
+        if (t == add) {
+            me_expr *left = (me_expr*)ret->parameters[0];
+            me_expr *right = (me_expr*)ret->parameters[1];
+
+            if (left && IS_FUNCTION(left->type) && ARITY(left->type) == 1 &&
+                left->function == (void*)negate) {
+                me_expr *inner = (me_expr*)left->parameters[0];
+                if (inner && inner->type == ME_CONSTANT) {
+                    ret->parameters[0] = right;
+                    ret->parameters[1] = inner;
+                    left->parameters[0] = NULL;
+                    me_free(left);
+                    ret->function = (void*)sub;
+                    apply_type_promotion(ret);
+                }
+            } else if (right && IS_FUNCTION(right->type) && ARITY(right->type) == 1 &&
+                       right->function == (void*)negate) {
+                me_expr *inner = (me_expr*)right->parameters[0];
+                if (inner && inner->type == ME_CONSTANT) {
+                    ret->parameters[1] = inner;
+                    right->parameters[0] = NULL;
+                    me_free(right);
+                    ret->function = (void*)sub;
+                    apply_type_promotion(ret);
+                }
+            }
+        }
     }
 
     return ret;

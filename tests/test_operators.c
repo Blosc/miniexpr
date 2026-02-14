@@ -570,6 +570,47 @@ void test_logical_comparisons() {
     printf("  PASS\n");
 }
 
+void test_unary_negative_constant_addition() {
+    TEST("unary negative constants in binary ops");
+
+    int64_t a[VECTOR_SIZE] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+    int64_t result[VECTOR_SIZE] = {0};
+    me_variable vars[] = {{"a", ME_INT64}};
+    const void *var_ptrs[] = {a};
+
+    const char *exprs[] = {"-1 + a", "a + -1", "a - 1"};
+    const int expr_count = (int)(sizeof(exprs) / sizeof(exprs[0]));
+
+    for (int e = 0; e < expr_count; e++) {
+        int err = 0;
+        me_expr *expr = NULL;
+        int rc_expr = me_compile(exprs[e], vars, 1, ME_INT64, &err, &expr);
+
+        if (rc_expr != ME_COMPILE_SUCCESS) {
+            printf("  FAIL: %s compilation error at position %d\n", exprs[e], err);
+            tests_failed++;
+            return;
+        }
+
+        ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
+
+        for (int i = 0; i < VECTOR_SIZE; i++) {
+            int64_t expected = a[i] - 1;
+            if (result[i] != expected) {
+                printf("  FAIL %s at [%d]: expected %lld, got %lld\n",
+                       exprs[e], i, (long long)expected, (long long)result[i]);
+                tests_failed++;
+                me_free(expr);
+                return;
+            }
+        }
+
+        me_free(expr);
+    }
+
+    printf("  PASS\n");
+}
+
 void test_unary_bool_funcs() {
     TEST("unary funcs on bool");
 
@@ -621,6 +662,7 @@ int main() {
     test_comparison_lt_int();
     test_logical_bool();
     test_logical_comparisons();
+    test_unary_negative_constant_addition();
     test_unary_bool_funcs();
 
     printf("\n=== Test Summary ===\n");
