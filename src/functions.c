@@ -4359,6 +4359,7 @@ DEFINE_VEC_CONVERT(i32, i64, int32_t, int64_t)
 DEFINE_VEC_CONVERT(i32, f32, int32_t, float)
 DEFINE_VEC_CONVERT(i32, f64, int32_t, double)
 
+DEFINE_VEC_CONVERT(i64, f32, int64_t, float)
 DEFINE_VEC_CONVERT(i64, f64, int64_t, double)
 
 DEFINE_VEC_CONVERT(u8, u16, uint8_t, uint16_t)
@@ -4439,6 +4440,7 @@ static convert_func_t get_convert_func(me_dtype from, me_dtype to) {
     CONV_CASE(ME_INT32, ME_FLOAT32, i32, f32)
     CONV_CASE(ME_INT32, ME_FLOAT64, i32, f64)
 
+    CONV_CASE(ME_INT64, ME_FLOAT32, i64, f32)
     CONV_CASE(ME_INT64, ME_FLOAT64, i64, f64)
 
     CONV_CASE(ME_UINT8, ME_UINT16, u8, u16)
@@ -4976,6 +4978,8 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                     if (IS_FUNCTION(n->type)) { \
                         switch(arity) { \
                             case 0: output[i] = TO_TYPE_##SUFFIX(((double(*)(void))n->function)()); break; \
+                            case 1: output[i] = TO_TYPE_##SUFFIX(((double(*)(double))n->function)(args[0])); break; \
+                            case 2: output[i] = TO_TYPE_##SUFFIX(((double(*)(double,double))n->function)(args[0], args[1])); break; \
                             case 3: output[i] = TO_TYPE_##SUFFIX(((double(*)(double,double,double))n->function)(args[0], args[1], args[2])); break; \
                             case 4: output[i] = TO_TYPE_##SUFFIX(((double(*)(double,double,double,double))n->function)(args[0], args[1], args[2], args[3])); break; \
                             case 5: output[i] = TO_TYPE_##SUFFIX(((double(*)(double,double,double,double,double))n->function)(args[0], args[1], args[2], args[3], args[4])); break; \

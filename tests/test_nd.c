@@ -161,6 +161,53 @@ cleanup:
     return status;
 }
 
+static int test_nd_float_index_cast_padding(void) {
+    int status = 0;
+    int err = 0;
+    me_expr* expr = NULL;
+    int64_t shape[2] = {3, 5};
+    int32_t chunkshape[2] = {2, 4};
+    int32_t blockshape[2] = {2, 3};
+
+    int rc = me_compile_nd(
+        "def kernel():\n"
+        "    return float(_i0) * _n1 + _i1\n",
+        NULL, 0, ME_FLOAT32, 2, shape, chunkshape, blockshape, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("FAILED me_compile_nd float index cast: %d (err=%d)\n", rc, err);
+        return 1;
+    }
+
+    float out[6] = {-1, -1, -1, -1, -1, -1};
+    int64_t valid = -1;
+    rc = me_nd_valid_nitems(expr, 1, 0, &valid);
+    if (rc != ME_EVAL_SUCCESS || valid != 2) {
+        printf("FAILED me_nd_valid_nitems float index cast (rc=%d, valid=%lld)\n", rc, (long long)valid);
+        status = 1;
+        goto cleanup;
+    }
+
+    rc = me_eval_nd(expr, NULL, 0, out, 6, 1, 0, NULL);
+    if (rc != ME_EVAL_SUCCESS) {
+        printf("FAILED me_eval_nd float index cast (rc=%d)\n", rc);
+        status = 1;
+        goto cleanup;
+    }
+
+    float expected[6] = {4.0f, 0.0f, 0.0f, 9.0f, 0.0f, 0.0f};
+    for (int i = 0; i < 6; i++) {
+        if (fabsf(out[i] - expected[i]) > 1e-6f) {
+            printf("FAILED float index cast mismatch at %d (got=%g exp=%g)\n", i, out[i], expected[i]);
+            status = 1;
+            goto cleanup;
+        }
+    }
+
+cleanup:
+    me_free(expr);
+    return status;
+}
+
 static int test_nd_unary_int32_float_math(void) {
     int status = 0;
     int err = 0;
@@ -1049,6 +1096,11 @@ int main(void) {
     int t13 = test_nd_cast_intrinsics_padding();
     failed |= t13;
     printf("Result: %s\n\n", t13 ? "FAIL" : "PASS");
+
+    printf("Test 14: DSL float(_i0) cast with ND padding\n");
+    int t14 = test_nd_float_index_cast_padding();
+    failed |= t14;
+    printf("Result: %s\n\n", t14 ? "FAIL" : "PASS");
 
     printf("=====================\n");
     printf("Summary: %s\n", failed ? "FAIL" : "PASS");
