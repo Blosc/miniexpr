@@ -72,11 +72,11 @@ static int run_expr(const char *expr_str, const void **vars, int nvars,
     me_expr *expr = NULL;
     int err = 0;
 
-    me_variable_ex variables[] = {
+    me_variable variables[] = {
         {"name", ME_STRING, vars[0], ME_VARIABLE, NULL, sizeof(uint32_t) * 8}
     };
 
-    int rc = me_compile_ex(expr_str, variables, nvars, ME_BOOL, &err, &expr);
+    int rc = me_compile(expr_str, variables, nvars, ME_BOOL, &err, &expr);
     if (rc != ME_COMPILE_SUCCESS) {
         printf("compile failed (%d) at %d for: %s\n", rc, err, expr_str);
         return rc;

@@ -422,7 +422,7 @@ def mandelbrot(cr, ci):
 
 - **What it demonstrates**: Registering a custom C function for DSL evaluation
 - **Expressions**: Calling a user-defined function from a DSL program
-- **Concepts**: `me_variable_ex` function entries, explicit return dtype
+- **Concepts**: `me_variable` function entries, explicit return dtype
 - **Best for**: Extending DSL with domain-specific helpers
 
 **Run it:**

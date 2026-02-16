@@ -129,17 +129,17 @@ static float me_cimagf(float _Complex v);
 static double me_creal(double _Complex v);
 static double me_cimag(double _Complex v);
 
-static int private_compile_ex(const char* expression, const me_variable_ex* variables, int var_count,
+static int private_compile_ex(const char* expression, const me_variable* variables, int var_count,
                               void* output, int nitems, me_dtype dtype, int* error, me_expr** out);
 
-static bool is_function_entry(const me_variable_ex *var) {
+static bool is_function_entry(const me_variable *var) {
     if (!var) {
         return false;
     }
     return IS_FUNCTION(var->type) || IS_CLOSURE(var->type);
 }
 
-static bool is_variable_entry(const me_variable_ex *var) {
+static bool is_variable_entry(const me_variable *var) {
     if (!var) {
         return false;
     }
@@ -2420,7 +2420,7 @@ void me_free(me_expr* n) {
     free(n);
 }
 
-static int private_compile_ex(const char* expression, const me_variable_ex* variables, int var_count,
+static int private_compile_ex(const char* expression, const me_variable* variables, int var_count,
                               void* output, int nitems, me_dtype dtype, int* error, me_expr** out) {
     if (out) *out = NULL;
     if (!expression || !out || var_count < 0) {
@@ -2511,9 +2511,9 @@ static int private_compile_ex(const char* expression, const me_variable_ex* vari
     }
 
     // Create a copy of variables with dtype filled in (if not already set)
-    me_variable_ex* vars_copy = NULL;
+    me_variable* vars_copy = NULL;
     if (variables && var_count > 0) {
-        vars_copy = malloc(var_count * sizeof(me_variable_ex));
+        vars_copy = malloc(var_count * sizeof(me_variable));
         if (!vars_copy) {
             if (error) *error = -1;
             return ME_COMPILE_ERR_OOM;
@@ -2588,7 +2588,7 @@ static int private_compile_ex(const char* expression, const me_variable_ex* vari
 
     bool any_complex_vars = false;
     if (variables && var_count > 0) {
-        const me_variable_ex* vars_check = vars_copy ? vars_copy : variables;
+        const me_variable* vars_check = vars_copy ? vars_copy : variables;
         for (int i = 0; i < var_count; i++) {
             if (!is_variable_entry(&vars_check[i])) {
                 continue;
@@ -2609,7 +2609,7 @@ static int private_compile_ex(const char* expression, const me_variable_ex* vari
 
 #if defined(_WIN32) || defined(_WIN64)
     {
-        const me_variable_ex* vars_check = vars_copy ? vars_copy : variables;
+        const me_variable* vars_check = vars_copy ? vars_copy : variables;
         bool complex_vars = false;
         if (vars_check) {
             for (int i = 0; i < var_count; i++) {
@@ -2681,7 +2681,7 @@ typedef struct {
     bool has_return;
     me_dtype return_dtype;
     me_dsl_compiled_program *program;
-    const me_variable_ex *funcs;
+    const me_variable *funcs;
     int func_count;
 } dsl_compile_ctx;
 
@@ -2855,7 +2855,7 @@ static bool dsl_is_candidate(const char *source) {
 }
 
 static char *dsl_wrap_expression_as_function(const char *expression,
-                                             const me_variable_ex *variables,
+                                             const me_variable *variables,
                                              int var_count) {
     if (!expression) {
         return NULL;
@@ -3304,8 +3304,8 @@ fail:
     return false;
 }
 
-static bool dsl_build_var_lookup(const me_dsl_var_table *table, const me_variable_ex *funcs,
-                                 int n_funcs, me_variable_ex **out_vars, int *out_count) {
+static bool dsl_build_var_lookup(const me_dsl_var_table *table, const me_variable *funcs,
+                                 int n_funcs, me_variable **out_vars, int *out_count) {
     if (!table || !out_vars || !out_count || n_funcs < 0) {
         return false;
     }
@@ -3315,7 +3315,7 @@ static bool dsl_build_var_lookup(const me_dsl_var_table *table, const me_variabl
         *out_count = 0;
         return true;
     }
-    me_variable_ex *vars = calloc((size_t)total, sizeof(*vars));
+    me_variable *vars = calloc((size_t)total, sizeof(*vars));
     if (!vars) {
         return false;
     }
@@ -3374,9 +3374,9 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
         }
         return false;
     }
-    me_variable_ex cast_funcs[3];
+    me_variable cast_funcs[3];
     int cast_count = 0;
-    cast_funcs[cast_count++] = (me_variable_ex){
+    cast_funcs[cast_count++] = (me_variable){
         .name = "int",
         .dtype = dsl_cast_int_target_dtype(expr_dtype),
         .address = (const void *)dsl_cast_int_intrinsic,
@@ -3384,7 +3384,7 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
         .context = NULL,
         .itemsize = 0
     };
-    cast_funcs[cast_count++] = (me_variable_ex){
+    cast_funcs[cast_count++] = (me_variable){
         .name = "float",
         .dtype = dsl_cast_float_target_dtype(expr_dtype),
         .address = (const void *)dsl_cast_float_intrinsic,
@@ -3392,7 +3392,7 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
         .context = NULL,
         .itemsize = 0
     };
-    cast_funcs[cast_count++] = (me_variable_ex){
+    cast_funcs[cast_count++] = (me_variable){
         .name = "bool",
         .dtype = ME_BOOL,
         .address = (const void *)dsl_cast_bool_intrinsic,
@@ -3401,7 +3401,7 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
         .itemsize = 0
     };
 
-    me_variable_ex *all_funcs = NULL;
+    me_variable *all_funcs = NULL;
     int all_func_count = ctx->func_count + cast_count;
     if (all_func_count > 0) {
         all_funcs = calloc((size_t)all_func_count, sizeof(*all_funcs));
@@ -3416,7 +3416,7 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
         }
     }
 
-    me_variable_ex *lookup = NULL;
+    me_variable *lookup = NULL;
     int lookup_count = 0;
     if (!dsl_build_var_lookup(&ctx->program->vars, all_funcs, all_func_count,
                               &lookup, &lookup_count)) {
@@ -7181,7 +7181,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
 }
 
 static me_dsl_compiled_program *dsl_compile_program(const char *source,
-                                                    const me_variable_ex *variables,
+                                                    const me_variable *variables,
                                                     int var_count,
                                                     me_dtype dtype,
                                                     int jit_mode,
@@ -7239,13 +7239,13 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
         program->local_slots[i] = -1;
     }
 
-    me_variable_ex *funcs = NULL;
+    me_variable *funcs = NULL;
     int func_count = 0;
     int func_capacity = 0;
     int input_count = 0;
 
     for (int i = 0; i < var_count; i++) {
-        const me_variable_ex *entry = &variables[i];
+        const me_variable *entry = &variables[i];
         const char *name = entry->name;
         if (!name) {
             if (error_pos) {
@@ -7327,7 +7327,7 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
             }
             if (func_count == func_capacity) {
                 int new_cap = func_capacity ? func_capacity * 2 : 8;
-                me_variable_ex *next = realloc(funcs, (size_t)new_cap * sizeof(*next));
+                me_variable *next = realloc(funcs, (size_t)new_cap * sizeof(*next));
                 if (!next) {
                     if (error_pos) {
                         *error_pos = -1;
@@ -7522,7 +7522,7 @@ int is_synthetic_address(const void* ptr) {
     return (p >= synthetic_var_addresses && p < synthetic_var_addresses + ME_MAX_VARS);
 }
 
-static int me_compile_ex_with_jit_mode(const char* expression, const me_variable_ex* variables,
+static int compile_with_jit(const char* expression, const me_variable* variables,
                                        int var_count, me_dtype dtype, int jit_mode,
                                        int* error, me_expr** out) {
     if (out) *out = NULL;
@@ -7532,7 +7532,7 @@ static int me_compile_ex_with_jit_mode(const char* expression, const me_variable
     }
 
     if (dsl_is_candidate(expression)) {
-        me_variable_ex *vars_dsl = NULL;
+        me_variable *vars_dsl = NULL;
         if (variables && var_count > 0) {
             vars_dsl = malloc((size_t)var_count * sizeof(*vars_dsl));
             if (!vars_dsl) {
@@ -7580,7 +7580,7 @@ static int me_compile_ex_with_jit_mode(const char* expression, const me_variable
      * Keep this opt-in to preserve legacy parser semantics by default.
      */
     if (jit_mode == ME_JIT_ON) {
-        me_variable_ex *vars_dsl = NULL;
+        me_variable *vars_dsl = NULL;
         if (variables && var_count > 0) {
             vars_dsl = malloc((size_t)var_count * sizeof(*vars_dsl));
             if (!vars_dsl) {
@@ -7629,7 +7629,7 @@ static int me_compile_ex_with_jit_mode(const char* expression, const me_variable
 
     // For chunked evaluation, we compile without specific output/nitems
     // If variables have NULL addresses, assign synthetic unique addresses for ordinal matching
-    me_variable_ex* vars_copy = NULL;
+    me_variable* vars_copy = NULL;
     int needs_synthetic = 0;
 
     if (variables && var_count > 0) {
@@ -7643,7 +7643,7 @@ static int me_compile_ex_with_jit_mode(const char* expression, const me_variable
 
         if (needs_synthetic) {
             // Create copy with synthetic addresses
-            vars_copy = malloc(var_count * sizeof(me_variable_ex));
+            vars_copy = malloc(var_count * sizeof(me_variable));
             if (!vars_copy) {
                 if (error) *error = -1;
                 return ME_COMPILE_ERR_OOM;
@@ -7667,37 +7667,12 @@ static int me_compile_ex_with_jit_mode(const char* expression, const me_variable
     return private_compile_ex(expression, variables, var_count, NULL, 0, dtype, error, out);
 }
 
-int me_compile_ex(const char* expression, const me_variable_ex* variables,
-                  int var_count, me_dtype dtype, int* error, me_expr** out) {
-    return me_compile_ex_with_jit_mode(expression, variables, var_count, dtype, ME_JIT_DEFAULT, error, out);
-}
-
 int me_compile(const char* expression, const me_variable* variables,
                int var_count, me_dtype dtype, int* error, me_expr** out) {
-    if (!variables || var_count <= 0) {
-        return me_compile_ex(expression, NULL, var_count, dtype, error, out);
-    }
-
-    me_variable_ex* vars_ex = malloc((size_t)var_count * sizeof(*vars_ex));
-    if (!vars_ex) {
-        if (error) *error = -1;
-        return ME_COMPILE_ERR_OOM;
-    }
-    for (int i = 0; i < var_count; i++) {
-        vars_ex[i].name = variables[i].name;
-        vars_ex[i].dtype = variables[i].dtype;
-        vars_ex[i].address = variables[i].address;
-        vars_ex[i].type = variables[i].type;
-        vars_ex[i].context = variables[i].context;
-        vars_ex[i].itemsize = 0;
-    }
-
-    int rc = me_compile_ex_with_jit_mode(expression, vars_ex, var_count, dtype, ME_JIT_DEFAULT, error, out);
-    free(vars_ex);
-    return rc;
+    return compile_with_jit(expression, variables, var_count, dtype, ME_JIT_DEFAULT, error, out);
 }
 
-static int me_compile_nd_ex_with_jit_mode(const char* expression, const me_variable_ex* variables,
+static int compile_nd_with_jit(const char* expression, const me_variable* variables,
                                           int var_count, me_dtype dtype, int ndims,
                                           const int64_t* shape, const int32_t* chunkshape,
                                           const int32_t* blockshape, int jit_mode,
@@ -7716,7 +7691,7 @@ static int me_compile_nd_ex_with_jit_mode(const char* expression, const me_varia
     }
 
     me_expr* expr = NULL;
-    int rc = me_compile_ex_with_jit_mode(expression, variables, var_count, dtype, jit_mode, error, &expr);
+    int rc = compile_with_jit(expression, variables, var_count, dtype, jit_mode, error, &expr);
     if (rc != ME_COMPILE_SUCCESS) {
         return rc;
     }
@@ -7749,42 +7724,13 @@ static int me_compile_nd_ex_with_jit_mode(const char* expression, const me_varia
     return rc;
 }
 
-int me_compile_nd_ex(const char* expression, const me_variable_ex* variables,
-                     int var_count, me_dtype dtype, int ndims,
-                     const int64_t* shape, const int32_t* chunkshape,
-                     const int32_t* blockshape, int* error, me_expr** out) {
-    return me_compile_nd_ex_with_jit_mode(expression, variables, var_count, dtype, ndims,
-                                          shape, chunkshape, blockshape, ME_JIT_DEFAULT, error, out);
-}
-
 int me_compile_nd_jit(const char* expression, const me_variable* variables,
                       int var_count, me_dtype dtype, int ndims,
                       const int64_t* shape, const int32_t* chunkshape,
                       const int32_t* blockshape, int jit_mode,
                       int* error, me_expr** out) {
-    if (!variables || var_count <= 0) {
-        return me_compile_nd_ex_with_jit_mode(expression, NULL, var_count, dtype, ndims,
-                                              shape, chunkshape, blockshape, jit_mode, error, out);
-    }
-
-    me_variable_ex* vars_ex = malloc((size_t)var_count * sizeof(*vars_ex));
-    if (!vars_ex) {
-        if (error) *error = -1;
-        return ME_COMPILE_ERR_OOM;
-    }
-    for (int i = 0; i < var_count; i++) {
-        vars_ex[i].name = variables[i].name;
-        vars_ex[i].dtype = variables[i].dtype;
-        vars_ex[i].address = variables[i].address;
-        vars_ex[i].type = variables[i].type;
-        vars_ex[i].context = variables[i].context;
-        vars_ex[i].itemsize = 0;
-    }
-
-    int rc = me_compile_nd_ex_with_jit_mode(expression, vars_ex, var_count, dtype, ndims,
-                                            shape, chunkshape, blockshape, jit_mode, error, out);
-    free(vars_ex);
-    return rc;
+    return compile_nd_with_jit(expression, variables, var_count, dtype, ndims,
+                                          shape, chunkshape, blockshape, jit_mode, error, out);
 }
 
 int me_compile_nd(const char* expression, const me_variable* variables,

@@ -29,7 +29,7 @@ def kernel(x):
 ```
 
 Signature arguments must match the variables you pass to `me_compile()` by name
-(order does not matter). (Callback functions registered via `me_variable_ex` are
+(order does not matter). (Callback functions registered via `me_variable` are
 not listed in the signature.)
 
 Note: The order of the variables array still defines the pointer order passed to
@@ -323,7 +323,7 @@ Logical operator precedence matches Python: `not` binds tighter than `and`, whic
 - Predicates: `startswith(a, b)`, `endswith(a, b)`, `contains(a, b)` (string-to-string)
 
 String variables must be provided with dtype `ME_STRING` and a fixed `itemsize`
-via `me_variable_ex` (itemsize is bytes per element and must be a multiple of 4).
+via `me_variable` (itemsize is bytes per element and must be a multiple of 4).
 String expressions always yield boolean output.
 
 Example (element-wise string match with a scalar condition):
@@ -407,7 +407,7 @@ print(sum(a))
 ### User-defined Functions
 
 You can register custom C functions or closures and call them from DSL by
-including them in the `me_variable_ex` list passed to `me_compile_ex()`.
+including them in the `me_variable` list passed to `me_compile()`.
 
 Rules:
 - Function/closure entries must use `ME_FUNCTION*` or `ME_CLOSURE*` in `type`.
@@ -422,14 +422,14 @@ static double clamp01(double x) {
     return x < 0.0 ? 0.0 : (x > 1.0 ? 1.0 : x);
 }
 
-me_variable_ex vars[] = {
+me_variable vars[] = {
     {"x", ME_FLOAT64, x, ME_VARIABLE, NULL, 0},
     {"clamp01", ME_FLOAT64, clamp01, ME_FUNCTION1 | ME_FLAG_PURE, NULL, 0},
 };
 
 me_expr *expr = NULL;
 int err = 0;
-me_compile_ex("def kernel(x):\n    return clamp01(x)\n", vars, 2, ME_FLOAT64, &err, &expr);
+me_compile("def kernel(x):\n    return clamp01(x)\n", vars, 2, ME_FLOAT64, &err, &expr);
 ```
 
 Example (closure with context):
@@ -439,7 +439,7 @@ static double scale(void *ctx, double x) {
 }
 
 double factor = 2.0;
-me_variable_ex vars[] = {
+me_variable vars[] = {
     {"x", ME_FLOAT64, x, ME_VARIABLE, NULL, 0},
     {"scale", ME_FLOAT64, scale, ME_CLOSURE1 | ME_FLAG_PURE, &factor, 0},
 };

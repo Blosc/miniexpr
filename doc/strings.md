@@ -12,7 +12,7 @@ string operations.
 
 ## API: Variables and Compilation
 
-Use `me_variable_ex` to supply `itemsize` for string variables:
+Use `me_variable` to supply `itemsize` for string variables:
 
 ```c
 uint32_t names[][8] = {
@@ -20,13 +20,13 @@ uint32_t names[][8] = {
     {'b','e','t','a',0,0,0,0},
 };
 
-me_variable_ex vars[] = {
+me_variable vars[] = {
     {"name", ME_STRING, names, ME_VARIABLE, NULL, sizeof(names[0])}
 };
 
 me_expr *expr = NULL;
 int err = 0;
-if (me_compile_ex("contains(name, \"et\")", vars, 1, ME_BOOL, &err, &expr) != ME_COMPILE_SUCCESS) {
+if (me_compile("contains(name, \"et\")", vars, 1, ME_BOOL, &err, &expr) != ME_COMPILE_SUCCESS) {
     /* handle error */
 }
 ```

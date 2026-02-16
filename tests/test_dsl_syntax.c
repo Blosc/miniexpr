@@ -659,12 +659,12 @@ static int test_string_truthiness(void) {
         "        return 1\n"
         "    return 0\n";
 
-    me_variable_ex vars[] = {
+    me_variable vars[] = {
         {"name", ME_STRING, names, ME_VARIABLE, NULL, sizeof(names[0])}
     };
     int err = 0;
     me_expr *expr = NULL;
-    if (me_compile_ex(src, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+    if (me_compile(src, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: compile error at %d\n", err);
         return 1;
     }

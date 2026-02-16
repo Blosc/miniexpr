@@ -36,13 +36,13 @@ static void assert_bool_array(const bool *actual, const bool *expected, int n, c
 }
 
 static void run_name_expr(const char *expr_str, const bool *expected, const char *label) {
-    me_variable_ex vars[] = {
+    me_variable vars[] = {
         {"name", ME_STRING, kNames, ME_VARIABLE, NULL, sizeof(kNames[0])}
     };
 
     int err;
     me_expr *expr = NULL;
-    int rc = me_compile_ex(expr_str, vars, 1, ME_BOOL, &err, &expr);
+    int rc = me_compile(expr_str, vars, 1, ME_BOOL, &err, &expr);
     if (rc != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error %d at %d\n", rc, err);
         tests_failed++;
@@ -116,14 +116,14 @@ static void test_string_compare_itemsize(void) {
         {0,0,0,0,0}
     };
 
-    me_variable_ex vars[] = {
+    me_variable vars[] = {
         {"left", ME_STRING, left, ME_VARIABLE, NULL, sizeof(left[0])},
         {"right", ME_STRING, right, ME_VARIABLE, NULL, sizeof(right[0])}
     };
 
     int err;
     me_expr *expr = NULL;
-    int rc = me_compile_ex("left == right", vars, 2, ME_BOOL, &err, &expr);
+    int rc = me_compile("left == right", vars, 2, ME_BOOL, &err, &expr);
     if (rc != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compilation error %d at %d\n", rc, err);
         tests_failed++;
@@ -151,14 +151,14 @@ static void test_invalid_string_usage(void) {
     };
     double values[NAMES_COUNT] = {1.0, 2.0, 3.0, 4.0};
 
-    me_variable_ex vars_bad_size[] = {
+    me_variable vars_bad_size[] = {
         {"name", ME_STRING, names, ME_VARIABLE, NULL, 0}
     };
 
     int err;
     me_expr *expr = NULL;
     int local_failures = 0;
-    int rc = me_compile_ex("name == \"a\"", vars_bad_size, 1, ME_BOOL, &err, &expr);
+    int rc = me_compile("name == \"a\"", vars_bad_size, 1, ME_BOOL, &err, &expr);
     if (rc != ME_COMPILE_ERR_INVALID_ARG_TYPE) {
         printf("  FAIL: expected invalid arg type for itemsize=0, got %d\n", rc);
         tests_failed++;
@@ -173,13 +173,13 @@ static void test_invalid_string_usage(void) {
         expr = NULL;
     }
 
-    me_variable_ex vars_mixed[] = {
+    me_variable vars_mixed[] = {
         {"name", ME_STRING, names, ME_VARIABLE, NULL, sizeof(names[0])},
         {"x", ME_FLOAT64, values, ME_VARIABLE, NULL, 0}
     };
 
     expr = NULL;
-    rc = me_compile_ex("name == x", vars_mixed, 2, ME_BOOL, &err, &expr);
+    rc = me_compile("name == x", vars_mixed, 2, ME_BOOL, &err, &expr);
     if (rc != ME_COMPILE_ERR_INVALID_ARG_TYPE) {
         printf("  FAIL: expected invalid arg type for string/numeric compare, got %d\n", rc);
         tests_failed++;

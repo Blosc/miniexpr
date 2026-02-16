@@ -629,7 +629,7 @@ static double npr(double n, double r) { return ncr(n, r) * fac(r); }
 #pragma function (floor)
 #endif
 
-static const me_variable_ex functions[] = {
+static const me_variable functions[] = {
     /* must be in alphabetical order */
     /* Format: {name, dtype, address, type, context} */
     {"abs", 0, fabs, ME_FUNCTION1 | ME_FLAG_PURE, 0},
@@ -715,9 +715,9 @@ static const me_variable_ex functions[] = {
     {0, 0, 0, 0, 0}
 };
 
-static const me_variable_ex* find_builtin(const char* name, int len) {
+static const me_variable* find_builtin(const char* name, int len) {
     int imin = 0;
-    int imax = sizeof(functions) / sizeof(me_variable_ex) - 2;
+    int imax = sizeof(functions) / sizeof(me_variable) - 2;
 
     /*Binary search.*/
     while (imax >= imin) {
@@ -745,9 +745,9 @@ bool me_is_builtin_function_name(const char* name, size_t len) {
     return find_builtin(name, (int)len) != NULL;
 }
 
-static const me_variable_ex* find_lookup(const state* s, const char* name, int len) {
+static const me_variable* find_lookup(const state* s, const char* name, int len) {
     int iters;
-    const me_variable_ex* var;
+    const me_variable* var;
     if (!s->lookup) return 0;
 
     for (var = s->lookup, iters = s->lookup_len; iters; ++var, --iters) {
@@ -2998,7 +2998,7 @@ static void read_identifier_token(state* s) {
         return;
     }
 
-    const me_variable_ex* var = find_lookup(s, start, s->next - start);
+    const me_variable* var = find_lookup(s, start, s->next - start);
     if (!var) {
         var = find_builtin(start, s->next - start);
     }

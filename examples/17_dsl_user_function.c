@@ -37,14 +37,14 @@ int main(void) {
     int n = (int)(sizeof(x) / sizeof(x[0]));
     double out[5];
 
-    me_variable_ex vars[] = {
+    me_variable vars[] = {
         {"x", ME_FLOAT64, NULL, 0, NULL, 0},
         {"clamp01", ME_FLOAT64, clamp01, ME_FUNCTION1 | ME_FLAG_PURE, NULL, 0},
     };
 
     int err = 0;
     me_expr *expr = NULL;
-    if (me_compile_ex(dsl_source, vars, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+    if (me_compile(dsl_source, vars, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
         printf("Compile error at %d\n", err);
         return 1;
     }

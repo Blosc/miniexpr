@@ -292,7 +292,7 @@ Both methods require explicit variable dtypes when the computation type differs 
 
 `ME_STRING` represents fixed-size UCS4 (`uint32_t`) strings. Each element is a
 NUL-terminated array of codepoints with no embedded NULs. You must provide the
-per-element byte size via `me_variable_ex` (`itemsize` must be a multiple of 4
+per-element byte size via `me_variable` (`itemsize` must be a multiple of 4
 and include the terminator). The maximum string length in codepoints is
 `itemsize / 4 - 1`.
 
@@ -309,13 +309,13 @@ uint32_t names[][8] = {
     {'b','e','t','a',0,0,0,0},
 };
 
-me_variable_ex vars[] = {
+me_variable vars[] = {
     {"name", ME_STRING, names, ME_VARIABLE, NULL, sizeof(names[0])}
 };
 
 int error;
 me_expr *expr = NULL;
-if (me_compile_ex("startswith(name, \"alp\")", vars, 1, ME_BOOL, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
+if (me_compile("startswith(name, \"alp\")", vars, 1, ME_BOOL, &error, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
 ```
 
 String literals are UTF-8 and support escapes like `\n`, `\t`, `\\`, `\"`, `\'`,

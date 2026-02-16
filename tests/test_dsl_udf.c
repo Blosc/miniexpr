@@ -44,14 +44,14 @@ static int test_udf_function(void) {
     const char *src =
         "def kernel(x):\n"
         "    return clamp01(x)\n";
-    me_variable_ex vars[] = {
+    me_variable vars[] = {
         {"x", ME_FLOAT64, NULL, 0, NULL, 0},
         {"clamp01", ME_FLOAT64, clamp01, ME_FUNCTION1 | ME_FLAG_PURE, NULL, 0},
     };
 
     int err = 0;
     me_expr *expr = NULL;
-    if (me_compile_ex(src, vars, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+    if (me_compile(src, vars, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: compile error at %d\n", err);
         return 1;
     }
@@ -82,14 +82,14 @@ static int test_udf_closure(void) {
     const char *src =
         "def kernel(x):\n"
         "    return scale(x)\n";
-    me_variable_ex vars[] = {
+    me_variable vars[] = {
         {"x", ME_FLOAT64, NULL, 0, NULL, 0},
         {"scale", ME_FLOAT64, scale, ME_CLOSURE1 | ME_FLAG_PURE, &factor, 0},
     };
 
     int err = 0;
     me_expr *expr = NULL;
-    if (me_compile_ex(src, vars, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+    if (me_compile(src, vars, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: compile error at %d\n", err);
         return 1;
     }
@@ -115,12 +115,12 @@ static int test_udf_invalid(void) {
     int err = 0;
     me_expr *expr = NULL;
 
-    me_variable_ex vars_builtin[] = {
+    me_variable vars_builtin[] = {
         {"x", ME_FLOAT64, NULL, 0, NULL, 0},
         {"sum", ME_FLOAT64, clamp01, ME_FUNCTION1 | ME_FLAG_PURE, NULL, 0},
     };
 
-    if (me_compile_ex("def kernel(x):\n    return sum(x)\n",
+    if (me_compile("def kernel(x):\n    return sum(x)\n",
                       vars_builtin, 2, ME_FLOAT64, &err, &expr)
         == ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: builtin name accepted\n");
@@ -129,12 +129,12 @@ static int test_udf_invalid(void) {
     }
 
     expr = NULL;
-    me_variable_ex vars_reserved[] = {
+    me_variable vars_reserved[] = {
         {"x", ME_FLOAT64, NULL, 0, NULL, 0},
         {"return", ME_FLOAT64, clamp01, ME_FUNCTION1 | ME_FLAG_PURE, NULL, 0},
     };
 
-    if (me_compile_ex("def kernel(x):\n    return return(x)\n",
+    if (me_compile("def kernel(x):\n    return return(x)\n",
                       vars_reserved, 2, ME_FLOAT64, &err, &expr)
         == ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: reserved name accepted\n");
@@ -143,12 +143,12 @@ static int test_udf_invalid(void) {
     }
 
     expr = NULL;
-    me_variable_ex vars_auto[] = {
+    me_variable vars_auto[] = {
         {"x", ME_FLOAT64, NULL, 0, NULL, 0},
         {"clamp01", ME_AUTO, clamp01, ME_FUNCTION1 | ME_FLAG_PURE, NULL, 0},
     };
 
-    if (me_compile_ex("def kernel(x):\n    return clamp01(x)\n",
+    if (me_compile("def kernel(x):\n    return clamp01(x)\n",
                       vars_auto, 2, ME_FLOAT64, &err, &expr)
         == ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: ME_AUTO return dtype accepted\n");

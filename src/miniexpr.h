@@ -117,32 +117,25 @@ enum {
     ME_FLAG_PURE = 32
 };
 
-typedef struct me_variable {
-    const char *name;
-    me_dtype dtype; // Data type of this variable (ME_AUTO = use output dtype)
-    const void *address; // Pointer to data (NULL for me_compile)
-    int type; // ME_VARIABLE for user variables (0 = auto-set to ME_VARIABLE)
-    void *context; // For closures/functions (NULL for normal variables)
-} me_variable;
-
-/* Extended variable definition with per-element byte size (required for ME_STRING).
+/* Variable definition with per-element byte size (required for ME_STRING).
  * For numeric types, itemsize can be 0 to use the default dtype size.
  * For function/closure entries (ME_FUNCTION* / ME_CLOSURE*), dtype is the return type.
  */
-typedef struct me_variable_ex {
+typedef struct me_variable {
     const char *name;
     me_dtype dtype; // Data type of this variable or function return (ME_AUTO = use output dtype)
-    const void *address; // Pointer to data (NULL for me_compile_ex)
+    const void *address; // Pointer to data (NULL for me_compile)
     int type; // ME_VARIABLE for user variables (0 = auto-set to ME_VARIABLE)
     void *context; // For closures/functions (NULL for normal variables)
     size_t itemsize; // Bytes per element (required for ME_STRING; 0 = default dtype size)
-} me_variable_ex;
+} me_variable;
 
-/* Note: When initializing variables, only name/dtype/address are typically needed.
+/* Note: When initializing variables, only name/dtype/address/itemsize are typically needed.
  * Unspecified fields default to 0/NULL, which is correct for normal use:
  *   {"varname"}                          → defaults all fields
  *   {"varname", ME_FLOAT64}              → for me_compile with mixed types
  *   {"varname", ME_FLOAT64, var_array}   → for me_compile with address
+ *   {"varname", ME_STRING, var_array, 0, NULL, item_size} → for strings
  * Advanced users can specify type for closures/functions if needed.
  */
 
@@ -188,13 +181,6 @@ typedef struct me_variable_ex {
 int me_compile(const char *expression, const me_variable *variables,
                int var_count, me_dtype dtype, int *error, me_expr **out);
 
-/* Compile expression with extended variable metadata (itemsize for ME_STRING).
- * For ME_STRING, itemsize must be a multiple of 4 (UCS4 codepoints) and include
- * space for a trailing NUL codepoint.
- */
-int me_compile_ex(const char *expression, const me_variable_ex *variables,
-                  int var_count, me_dtype dtype, int *error, me_expr **out);
-
 /* Compile expression with multidimensional metadata (b2nd-aware).
  * Additional parameters describe the logical array shape, chunkshape and
  * blockshape (all C-order). Padding is implied by these shapes.
@@ -223,12 +209,6 @@ int me_compile_nd_jit(const char *expression, const me_variable *variables,
                       const int64_t *shape, const int32_t *chunkshape,
                       const int32_t *blockshape, int jit_mode,
                       int *error, me_expr **out);
-
-/* Compile expression with multidimensional metadata and extended variables. */
-int me_compile_nd_ex(const char *expression, const me_variable_ex *variables,
-                     int var_count, me_dtype dtype, int ndims,
-                     const int64_t *shape, const int32_t *chunkshape,
-                     const int32_t *blockshape, int *error, me_expr **out);
 
 /* Status codes for me_compile(). */
 typedef enum {

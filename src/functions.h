@@ -36,7 +36,7 @@ typedef struct state {
     const uint32_t* str_data;
     size_t str_len;
 
-    const me_variable_ex* lookup;
+    const me_variable* lookup;
     int lookup_len;
 } state;
 
