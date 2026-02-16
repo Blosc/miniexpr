@@ -211,6 +211,39 @@ static char *dsl_copy_trimmed(const char *start, const char *end) {
     return dsl_strndup(start, (size_t)(end - start));
 }
 
+static char *dsl_build_compound_assign_expr(const char *lhs, size_t lhs_len,
+                                            const char *op, const char *rhs) {
+    if (!lhs || lhs_len == 0 || !op || !rhs) {
+        return NULL;
+    }
+    size_t rhs_len = strlen(rhs);
+    if (strcmp(op, "//") == 0) {
+        size_t total = 6 + lhs_len + 5 + rhs_len + 3 + 1;
+        char *out = malloc(total);
+        if (!out) {
+            return NULL;
+        }
+        int wrote = snprintf(out, total, "floor(%.*s / (%s))", (int)lhs_len, lhs, rhs);
+        if (wrote < 0 || (size_t)wrote >= total) {
+            free(out);
+            return NULL;
+        }
+        return out;
+    }
+    size_t op_len = strlen(op);
+    size_t total = lhs_len + 1 + op_len + 3 + rhs_len + 2 + 1;
+    char *out = malloc(total);
+    if (!out) {
+        return NULL;
+    }
+    int wrote = snprintf(out, total, "%.*s %s (%s)", (int)lhs_len, lhs, op, rhs);
+    if (wrote < 0 || (size_t)wrote >= total) {
+        free(out);
+        return NULL;
+    }
+    return out;
+}
+
 static bool dsl_parse_fp_pragma_line(const char *start, const char *end,
                                      me_dsl_fp_mode *fp_mode_out,
                                      int line, me_dsl_error *error) {
@@ -1080,6 +1113,58 @@ static bool parse_assignment_or_expr(me_dsl_lexer *lex, me_dsl_block *block, me_
         lexer_advance(lex);
         char *expr_text = parse_expression_until_stmt_end(lex, error, line, column);
         if (!expr_text) {
+            return false;
+        }
+        me_dsl_stmt *stmt = dsl_stmt_new(ME_DSL_STMT_ASSIGN, line, column);
+        if (!stmt) {
+            free(expr_text);
+            dsl_set_error(error, line, column, "out of memory");
+            return false;
+        }
+        stmt->as.assign.name = dsl_strndup(ident_start, ident_len);
+        stmt->as.assign.value = dsl_expr_new(expr_text, line, column);
+        if (!stmt->as.assign.name || !stmt->as.assign.value) {
+            dsl_set_error(error, line, column, "out of memory");
+            dsl_stmt_free(stmt);
+            return false;
+        }
+        if (!dsl_block_push(block, stmt, error)) {
+            dsl_stmt_free(stmt);
+            return false;
+        }
+        return true;
+    }
+
+    const char *compound_op = NULL;
+    int advance_count = 0;
+    if (lex->current[0] == '+' && lex->current[1] == '=') {
+        compound_op = "+";
+        advance_count = 2;
+    } else if (lex->current[0] == '-' && lex->current[1] == '=') {
+        compound_op = "-";
+        advance_count = 2;
+    } else if (lex->current[0] == '*' && lex->current[1] == '=') {
+        compound_op = "*";
+        advance_count = 2;
+    } else if (lex->current[0] == '/' && lex->current[1] == '=') {
+        compound_op = "/";
+        advance_count = 2;
+    } else if (lex->current[0] == '/' && lex->current[1] == '/' && lex->current[2] == '=') {
+        compound_op = "//";
+        advance_count = 3;
+    }
+    if (compound_op) {
+        for (int i = 0; i < advance_count; i++) {
+            lexer_advance(lex);
+        }
+        char *rhs_text = parse_expression_until_stmt_end(lex, error, line, column);
+        if (!rhs_text) {
+            return false;
+        }
+        char *expr_text = dsl_build_compound_assign_expr(ident_start, ident_len, compound_op, rhs_text);
+        free(rhs_text);
+        if (!expr_text) {
+            dsl_set_error(error, line, column, "out of memory");
             return false;
         }
         me_dsl_stmt *stmt = dsl_stmt_new(ME_DSL_STMT_ASSIGN, line, column);

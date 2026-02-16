@@ -1601,6 +1601,63 @@ static int test_cast_intrinsics(void) {
     return 0;
 }
 
+static int test_compound_assignment_desugar(void) {
+    printf("\n=== DSL Test 23: compound assignment desugaring ===\n");
+
+    const char *src =
+        "def kernel():\n"
+        "    i = 10\n"
+        "    i += 5\n"
+        "    i -= 3\n"
+        "    i *= 2\n"
+        "    i /= 4\n"
+        "    i //= 2\n"
+        "    return i\n";
+    const char *src_floor =
+        "def kernel():\n"
+        "    i = -3\n"
+        "    i //= 2\n"
+        "    return i\n";
+
+    me_expr *expr = NULL;
+    int err = 0;
+    if (me_compile(src, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compile error at %d\n", err);
+        return 1;
+    }
+
+    double out[4] = {-1.0, -1.0, -1.0, -1.0};
+    if (me_eval(expr, NULL, 0, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: eval error\n");
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+
+    me_expr *expr_floor = NULL;
+    err = 0;
+    if (me_compile(src_floor, NULL, 0, ME_FLOAT64, &err, &expr_floor) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: floor compile error at %d\n", err);
+        return 1;
+    }
+    double out_floor[4] = {-1.0, -1.0, -1.0, -1.0};
+    if (me_eval(expr_floor, NULL, 0, out_floor, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: floor eval error\n");
+        me_free(expr_floor);
+        return 1;
+    }
+    me_free(expr_floor);
+
+    double expected[4] = {3.0, 3.0, 3.0, 3.0};
+    double expected_floor[4] = {-2.0, -2.0, -2.0, -2.0};
+    int rc = check_all_close(out, expected, 4, 1e-12);
+    rc |= check_all_close(out_floor, expected_floor, 4, 1e-12);
+    if (rc == 0) {
+        printf("  ✅ PASSED\n");
+    }
+    return rc;
+}
+
 int main(void) {
     int fail = 0;
     fail |= test_assign_and_result_stmt();
@@ -1629,5 +1686,6 @@ int main(void) {
     fail |= test_dsl_print_stmt();
     fail |= test_string_truthiness();
     fail |= test_cast_intrinsics();
+    fail |= test_compound_assignment_desugar();
     return fail;
 }
