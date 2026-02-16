@@ -4,6 +4,9 @@ This guide explains how to use the miniexpr Domain-Specific Language (DSL) for w
 
 ## Overview
 
+For the canonical syntax and error-contract reference, see `dsl-syntax.md`.
+Use this guide for usage patterns and examples.
+
 The DSL extends single expressions to full programs with:
 - **Temporary variables** - Store intermediate results
 - **Multi-statement programs** - Combine multiple computations
