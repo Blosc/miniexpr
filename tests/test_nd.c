@@ -113,6 +113,54 @@ cleanup:
     return status;
 }
 
+static int test_nd_cast_intrinsics_padding(void) {
+    int status = 0;
+    int err = 0;
+    me_expr* expr = NULL;
+    int64_t shape[2] = {3, 5};
+    int32_t chunkshape[2] = {2, 4};
+    int32_t blockshape[2] = {2, 3};
+
+    int rc = me_compile_nd(
+        "def kernel():\n"
+        "    return int(_i0 * _n1 + _i1)\n",
+        NULL, 0, ME_INT64, 2, shape, chunkshape, blockshape, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("FAILED me_compile_nd cast intrinsic: %d (err=%d)\n", rc, err);
+        return 1;
+    }
+
+    int64_t out[6] = {-1, -1, -1, -1, -1, -1};
+    int64_t valid = -1;
+    rc = me_nd_valid_nitems(expr, 1, 0, &valid);
+    if (rc != ME_EVAL_SUCCESS || valid != 2) {
+        printf("FAILED me_nd_valid_nitems cast intrinsic (rc=%d, valid=%lld)\n", rc, (long long)valid);
+        status = 1;
+        goto cleanup;
+    }
+
+    rc = me_eval_nd(expr, NULL, 0, out, 6, 1, 0, NULL);
+    if (rc != ME_EVAL_SUCCESS) {
+        printf("FAILED me_eval_nd cast intrinsic (rc=%d)\n", rc);
+        status = 1;
+        goto cleanup;
+    }
+
+    int64_t expected[6] = {4, 0, 0, 9, 0, 0};
+    for (int i = 0; i < 6; i++) {
+        if (out[i] != expected[i]) {
+            printf("FAILED cast intrinsic mismatch at %d (got=%lld exp=%lld)\n",
+                   i, (long long)out[i], (long long)expected[i]);
+            status = 1;
+            goto cleanup;
+        }
+    }
+
+cleanup:
+    me_free(expr);
+    return status;
+}
+
 static int test_nd_unary_int32_float_math(void) {
     int status = 0;
     int err = 0;
@@ -996,6 +1044,11 @@ int main(void) {
     int t12 = test_nd_unary_int32_to_float64_padding();
     failed |= t12;
     printf("Result: %s\n\n", t12 ? "FAIL" : "PASS");
+
+    printf("Test 13: DSL cast intrinsics with ND padding\n");
+    int t13 = test_nd_cast_intrinsics_padding();
+    failed |= t13;
+    printf("Result: %s\n\n", t13 ? "FAIL" : "PASS");
 
     printf("=====================\n");
     printf("Summary: %s\n", failed ? "FAIL" : "PASS");

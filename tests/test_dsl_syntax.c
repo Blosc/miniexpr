@@ -1482,6 +1482,125 @@ static int test_dsl_print_stmt(void) {
     return rc;
 }
 
+static int test_cast_intrinsics(void) {
+    printf("\n=== DSL Test 22: cast intrinsics int/float/bool ===\n");
+
+    {
+        const char *src =
+            "def kernel():\n"
+            "    return float(3)\n";
+        me_expr *expr = NULL;
+        int err = 0;
+        if (me_compile(src, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+            printf("  ❌ FAILED: float() compile error at %d\n", err);
+            return 1;
+        }
+        double out[4] = {-1.0, -1.0, -1.0, -1.0};
+        if (me_eval(expr, NULL, 0, out, 4, NULL) != ME_EVAL_SUCCESS) {
+            printf("  ❌ FAILED: float() eval error\n");
+            me_free(expr);
+            return 1;
+        }
+        me_free(expr);
+        for (int i = 0; i < 4; i++) {
+            if (out[i] != 3.0) {
+                printf("  ❌ FAILED: float() mismatch at %d got %.12f expected 3.0\n", i, out[i]);
+                return 1;
+            }
+        }
+    }
+
+    {
+        const char *src =
+            "def kernel():\n"
+            "    return int(3.9)\n";
+        me_expr *expr = NULL;
+        int err = 0;
+        if (me_compile(src, NULL, 0, ME_INT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+            printf("  ❌ FAILED: int() compile error at %d\n", err);
+            return 1;
+        }
+        int64_t out[4] = {-1, -1, -1, -1};
+        if (me_eval(expr, NULL, 0, out, 4, NULL) != ME_EVAL_SUCCESS) {
+            printf("  ❌ FAILED: int() eval error\n");
+            me_free(expr);
+            return 1;
+        }
+        me_free(expr);
+        for (int i = 0; i < 4; i++) {
+            if (out[i] != 3) {
+                printf("  ❌ FAILED: int() mismatch at %d got %lld expected 3\n",
+                       i, (long long)out[i]);
+                return 1;
+            }
+        }
+    }
+
+    {
+        const char *src =
+            "def kernel(x):\n"
+            "    return bool(x)\n";
+        me_variable vars[] = {{"x", ME_FLOAT64}};
+        double x[4] = {0.0, -1.5, 0.0, 2.0};
+        const void *inputs[] = {x};
+        me_expr *expr = NULL;
+        int err = 0;
+        if (me_compile(src, vars, 1, ME_BOOL, &err, &expr) != ME_COMPILE_SUCCESS) {
+            printf("  ❌ FAILED: bool() compile error at %d\n", err);
+            return 1;
+        }
+        bool out[4] = {false, false, false, false};
+        if (me_eval(expr, inputs, 1, out, 4, NULL) != ME_EVAL_SUCCESS) {
+            printf("  ❌ FAILED: bool() eval error\n");
+            me_free(expr);
+            return 1;
+        }
+        me_free(expr);
+        bool expected[4] = {false, true, false, true};
+        for (int i = 0; i < 4; i++) {
+            if (out[i] != expected[i]) {
+                printf("  ❌ FAILED: bool() mismatch at %d got %d expected %d\n",
+                       i, (int)out[i], (int)expected[i]);
+                return 1;
+            }
+        }
+    }
+
+    {
+        const char *src_bad0 =
+            "def kernel(x):\n"
+            "    return float()\n";
+        const char *src_bad2 =
+            "def kernel(x):\n"
+            "    return float(x, x)\n";
+        const char *src_unknown =
+            "def kernel(x):\n"
+            "    return floaty(x)\n";
+        me_variable vars[] = {{"x", ME_FLOAT64}};
+        int err = 0;
+        me_expr *expr = NULL;
+
+        if (me_compile(src_bad0, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+            printf("  ❌ FAILED: float() with zero args unexpectedly compiled\n");
+            me_free(expr);
+            return 1;
+        }
+        if (me_compile(src_bad2, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+            printf("  ❌ FAILED: float(x, x) unexpectedly compiled\n");
+            me_free(expr);
+            return 1;
+        }
+        if (me_compile(src_unknown, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+            printf("  ❌ FAILED: floaty(x) unexpectedly compiled\n");
+            me_free(expr);
+            return 1;
+        }
+    }
+
+    printf("  ✅ PASSED\n");
+    return 0;
+}
+
 int main(void) {
     int fail = 0;
     fail |= test_assign_and_result_stmt();
@@ -1509,5 +1628,6 @@ int main(void) {
     fail |= test_fp_pragma_modes();
     fail |= test_dsl_print_stmt();
     fail |= test_string_truthiness();
+    fail |= test_cast_intrinsics();
     return fail;
 }

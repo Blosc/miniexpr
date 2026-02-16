@@ -360,6 +360,16 @@ def kernel(tag, n):
 - `erf`, `erfc`, `tgamma`, `lgamma`
 - `fma` (fused multiply-add)
 
+### Type Conversion
+
+- `float(x)` - Cast to floating-point (`float64` by default; `float32` when compiling with `ME_FLOAT32`)
+- `int(x)` - Cast to signed integer (`int64` by default; preserves signed integer width when compile dtype is an explicit signed integer type)
+- `bool(x)` - Cast to boolean (`0 -> false`, non-zero -> true)
+
+Notes:
+- Cast intrinsics take exactly one positional argument.
+- `float()`, `int()`, `bool()` (missing arg) and multi-argument forms like `float(a, b)` are compile errors.
+
 ### Reductions
 
 Reduce arrays to scalars:
@@ -400,7 +410,7 @@ Rules:
 - Function/closure entries must use `ME_FUNCTION*` or `ME_CLOSURE*` in `type`.
 - The return dtype must be explicit (not `ME_AUTO`).
 - Names cannot shadow built-ins (`sin`, `sum`, etc.) or reserved identifiers
-  (`def`, `return`, `print`, `_i0`, `_n0`, `_ndim`).
+  (`def`, `return`, `print`, `int`, `float`, `bool`, `_i0`, `_n0`, `_ndim`).
 - String return types are not supported.
 
 Example (pure function):

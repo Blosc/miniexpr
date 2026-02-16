@@ -550,6 +550,9 @@ static bool dsl_is_reserved_name(const char *name) {
     if (strcmp(name, "print") == 0) {
         return true;
     }
+    if (strcmp(name, "int") == 0 || strcmp(name, "float") == 0 || strcmp(name, "bool") == 0) {
+        return true;
+    }
     if (strcmp(name, "def") == 0 || strcmp(name, "return") == 0) {
         return true;
     }
@@ -560,6 +563,40 @@ static bool dsl_is_reserved_name(const char *name) {
         return true;
     }
     return false;
+}
+
+static double dsl_cast_int_intrinsic(double x) {
+    return (double)(int64_t)x;
+}
+
+static double dsl_cast_float_intrinsic(double x) {
+    return x;
+}
+
+static double dsl_cast_bool_intrinsic(double x) {
+    return x != 0.0 ? 1.0 : 0.0;
+}
+
+static me_dtype dsl_cast_int_target_dtype(me_dtype expr_dtype) {
+    switch (expr_dtype) {
+    case ME_INT8:
+    case ME_INT16:
+    case ME_INT32:
+    case ME_INT64:
+        return expr_dtype;
+    default:
+        return ME_INT64;
+    }
+}
+
+static me_dtype dsl_cast_float_target_dtype(me_dtype expr_dtype) {
+    switch (expr_dtype) {
+    case ME_FLOAT32:
+    case ME_FLOAT64:
+        return expr_dtype;
+    default:
+        return ME_FLOAT64;
+    }
 }
 
 static bool dsl_is_reserved_index_name(const char *name, int *is_index, int *dim) {
@@ -608,6 +645,133 @@ static bool dsl_expr_uses_identifier(const char *expr, const char *ident) {
         }
     }
     return false;
+}
+
+static bool dsl_is_ident_char_scan(char c) {
+    return isalnum((unsigned char)c) || c == '_';
+}
+
+static bool dsl_is_cast_intrinsic_name_len(const char *s, size_t n) {
+    return (n == 3 && strncmp(s, "int", 3) == 0) ||
+        (n == 5 && strncmp(s, "float", 5) == 0) ||
+        (n == 4 && strncmp(s, "bool", 4) == 0);
+}
+
+static bool dsl_validate_cast_intrinsics_usage(const char *text, int *error_offset) {
+    if (error_offset) {
+        *error_offset = -1;
+    }
+    if (!text) {
+        return true;
+    }
+
+    const char *p = text;
+    while (*p) {
+        if (*p == '"' || *p == '\'') {
+            char quote = *p++;
+            while (*p) {
+                if (*p == '\\' && p[1] != '\0') {
+                    p += 2;
+                    continue;
+                }
+                if (*p == quote) {
+                    p++;
+                    break;
+                }
+                p++;
+            }
+            continue;
+        }
+
+        if (!(isalpha((unsigned char)*p) || *p == '_')) {
+            p++;
+            continue;
+        }
+
+        const char *ident_start = p;
+        p++;
+        while (*p && dsl_is_ident_char_scan(*p)) {
+            p++;
+        }
+        size_t ident_len = (size_t)(p - ident_start);
+        if (!dsl_is_cast_intrinsic_name_len(ident_start, ident_len)) {
+            continue;
+        }
+
+        const char *q = p;
+        while (*q && isspace((unsigned char)*q)) {
+            q++;
+        }
+        if (*q != '(') {
+            continue;
+        }
+
+        const char *arg_start = q + 1;
+        const char *r = arg_start;
+        int depth = 1;
+        int top_level_commas = 0;
+        char quote = '\0';
+        while (*r && depth > 0) {
+            char c = *r;
+            if (quote) {
+                if (c == '\\' && r[1] != '\0') {
+                    r += 2;
+                    continue;
+                }
+                if (c == quote) {
+                    quote = '\0';
+                }
+                r++;
+                continue;
+            }
+            if (c == '"' || c == '\'') {
+                quote = c;
+                r++;
+                continue;
+            }
+            if (c == '(') {
+                depth++;
+            }
+            else if (c == ')') {
+                depth--;
+                if (depth == 0) {
+                    break;
+                }
+            }
+            else if (c == ',' && depth == 1) {
+                top_level_commas++;
+            }
+            r++;
+        }
+
+        if (depth != 0) {
+            if (error_offset) {
+                *error_offset = (int)(ident_start - text) + 1;
+            }
+            return false;
+        }
+
+        const char *arg_end = r;
+        const char *trim_start = arg_start;
+        const char *trim_end = arg_end;
+        while (trim_start < trim_end && isspace((unsigned char)*trim_start)) {
+            trim_start++;
+        }
+        while (trim_end > trim_start && isspace((unsigned char)trim_end[-1])) {
+            trim_end--;
+        }
+
+        if (trim_start == trim_end || top_level_commas > 0) {
+            if (error_offset) {
+                *error_offset = (int)(ident_start - text) + 1;
+            }
+            return false;
+        }
+
+        p = r + 1;
+    }
+
+    return true;
 }
 
 static void dsl_compiled_block_free(me_dsl_compiled_block *block);
@@ -3197,12 +3361,69 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
         return false;
     }
     memset(out_expr, 0, sizeof(*out_expr));
-    me_variable_ex *lookup = NULL;
-    int lookup_count = 0;
-    if (!dsl_build_var_lookup(&ctx->program->vars, ctx->funcs, ctx->func_count,
-                              &lookup, &lookup_count)) {
+    int cast_error_offset = -1;
+    if (!dsl_validate_cast_intrinsics_usage(expr_node->text, &cast_error_offset)) {
+        if (ctx->error_pos) {
+            int offset = dsl_offset_from_linecol(ctx->source, expr_node->line, expr_node->column);
+            if (offset >= 0 && cast_error_offset > 0) {
+                *ctx->error_pos = offset + cast_error_offset - 1;
+            }
+            else {
+                *ctx->error_pos = offset >= 0 ? offset : -1;
+            }
+        }
         return false;
     }
+    me_variable_ex cast_funcs[3];
+    int cast_count = 0;
+    cast_funcs[cast_count++] = (me_variable_ex){
+        .name = "int",
+        .dtype = dsl_cast_int_target_dtype(expr_dtype),
+        .address = (const void *)dsl_cast_int_intrinsic,
+        .type = ME_FUNCTION1 | ME_FLAG_PURE,
+        .context = NULL,
+        .itemsize = 0
+    };
+    cast_funcs[cast_count++] = (me_variable_ex){
+        .name = "float",
+        .dtype = dsl_cast_float_target_dtype(expr_dtype),
+        .address = (const void *)dsl_cast_float_intrinsic,
+        .type = ME_FUNCTION1 | ME_FLAG_PURE,
+        .context = NULL,
+        .itemsize = 0
+    };
+    cast_funcs[cast_count++] = (me_variable_ex){
+        .name = "bool",
+        .dtype = ME_BOOL,
+        .address = (const void *)dsl_cast_bool_intrinsic,
+        .type = ME_FUNCTION1 | ME_FLAG_PURE,
+        .context = NULL,
+        .itemsize = 0
+    };
+
+    me_variable_ex *all_funcs = NULL;
+    int all_func_count = ctx->func_count + cast_count;
+    if (all_func_count > 0) {
+        all_funcs = calloc((size_t)all_func_count, sizeof(*all_funcs));
+        if (!all_funcs) {
+            return false;
+        }
+        for (int i = 0; i < ctx->func_count; i++) {
+            all_funcs[i] = ctx->funcs[i];
+        }
+        for (int i = 0; i < cast_count; i++) {
+            all_funcs[ctx->func_count + i] = cast_funcs[i];
+        }
+    }
+
+    me_variable_ex *lookup = NULL;
+    int lookup_count = 0;
+    if (!dsl_build_var_lookup(&ctx->program->vars, all_funcs, all_func_count,
+                              &lookup, &lookup_count)) {
+        free(all_funcs);
+        return false;
+    }
+    free(all_funcs);
     me_expr *compiled = NULL;
     int local_error = 0;
     int rc = private_compile_ex(expr_node->text, lookup, lookup_count,
