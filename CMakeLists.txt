@@ -24,6 +24,7 @@ option(MINIEXPR_USE_SLEEF "Enable SLEEF SIMD acceleration" ON)
 option(MINIEXPR_ENABLE_TCC_JIT "Enable TCC-based JIT backends (libtcc/wasm32)" ON)
 option(MINIEXPR_BUILD_BUNDLED_LIBTCC "Build bundled libtcc from minicc sources when TCC JIT is enabled" ON)
 option(MINIEXPR_DSL_TRACE_DEFAULT "Enable DSL trace logs by default when ME_DSL_TRACE is unset" OFF)
+option(MINIEXPR_WASM32_SIDE_MODULE "Use side-module wasm32 JIT glue (host registers JS helpers)" OFF)
 
 if(EMSCRIPTEN)
   # wasm32 JIT uses a static libtcc build; bundled host shared libtcc is not used.
@@ -54,6 +55,7 @@ set(MINIEXPR_SOURCES
   src/functions.c
   src/functions-simd.c
 )
+set(MINIEXPR_WASM_JIT_GLUE_JS "${CMAKE_CURRENT_SOURCE_DIR}/src/me_jit_glue.js")
 
 if(MINIEXPR_USE_SLEEF OR MINIEXPR_NEEDS_TINYCC)
   include(FetchContent)
@@ -270,6 +272,14 @@ function(miniexpr_setup_target target_name)
   endif()
   if(MINIEXPR_USE_WASM32_JIT)
     target_compile_definitions(${target_name} PRIVATE ME_USE_WASM32_JIT=1)
+    if(MINIEXPR_WASM32_SIDE_MODULE)
+      target_compile_definitions(${target_name} PRIVATE ME_WASM32_SIDE_MODULE=1)
+    else()
+      target_compile_definitions(${target_name} PRIVATE ME_WASM32_SIDE_MODULE=0)
+    endif()
+    if(EMSCRIPTEN AND NOT MINIEXPR_WASM32_SIDE_MODULE)
+      target_link_options(${target_name} PUBLIC "--pre-js" "${MINIEXPR_WASM_JIT_GLUE_JS}")
+    endif()
     target_include_directories(${target_name} PRIVATE "${tinycc_SOURCE_DIR}")
     target_link_libraries(${target_name} PRIVATE miniexpr_wasm_libtcc)
   endif()
@@ -311,6 +321,10 @@ install(FILES
   "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE-LIBTCC"
   "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
   DESTINATION "${CMAKE_INSTALL_DATADIR}/miniexpr/licenses")
+
+if(MINIEXPR_USE_WASM32_JIT)
+  install(FILES "${MINIEXPR_WASM_JIT_GLUE_JS}" DESTINATION "${CMAKE_INSTALL_DATADIR}/miniexpr")
+endif()
 
 find_package(Threads)
 if(Threads_FOUND)

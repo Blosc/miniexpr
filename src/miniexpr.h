@@ -312,6 +312,22 @@ void me_free(me_expr *n);
  */
 me_dtype me_get_dtype(const me_expr *expr);
 
+/* Host helpers used by wasm32 JIT runtime instantiation/free.
+ * The instantiate helper returns a non-zero function-table index on success.
+ */
+typedef int (*me_wasm_jit_instantiate_helper_fn)(const unsigned char *wasm_bytes,
+                                                 int wasm_len,
+                                                 int bridge_lookup_fn_idx);
+typedef void (*me_wasm_jit_free_helper_fn)(int fn_table_idx);
+
+/* Register host helpers for wasm32 JIT runtime glue.
+ * Passing NULL clears a helper.  In side-module builds
+ * (ME_WASM32_SIDE_MODULE=1), both helpers must be registered for JIT;
+ * otherwise JIT is skipped and evaluation falls back to the interpreter.
+ */
+void me_register_wasm_jit_helpers(me_wasm_jit_instantiate_helper_fn instantiate_helper,
+                                  me_wasm_jit_free_helper_fn free_helper);
+
 /* Returns true when a DSL expression has a callable JIT runtime kernel bound. */
 bool me_expr_has_jit_kernel(const me_expr *expr);
 

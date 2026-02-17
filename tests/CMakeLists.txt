@@ -20,6 +20,9 @@ if(EMSCRIPTEN)
   list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_jit_codegen\\.c$")
   list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_jit_runtime_cache\\.c$")
 endif()
+if(NOT (EMSCRIPTEN AND MINIEXPR_USE_WASM32_JIT AND MINIEXPR_WASM32_SIDE_MODULE))
+  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_jit_side_module\\.c$")
+endif()
 
 foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
   get_filename_component(test_name "${test_src}" NAME_WE)
@@ -32,7 +35,7 @@ foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
     target_link_options("${test_name}" PRIVATE
       "-sALLOW_MEMORY_GROWTH=1"
       "-sINITIAL_MEMORY=134217728")
-    if(MINIEXPR_USE_WASM32_JIT)
+    if(MINIEXPR_USE_WASM32_JIT AND NOT MINIEXPR_WASM32_SIDE_MODULE)
       target_link_options("${test_name}" PRIVATE
         "-sALLOW_TABLE_GROWTH=1"
         "-sEXPORTED_RUNTIME_METHODS=addFunction,removeFunction")
@@ -45,6 +48,15 @@ foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
     target_link_options("${test_name}" PRIVATE
       "SHELL:--embed-file ${CMAKE_SOURCE_DIR}/src/functions.c@/src/functions.c")
   endif()
+  if(EMSCRIPTEN
+     AND MINIEXPR_USE_WASM32_JIT
+     AND MINIEXPR_WASM32_SIDE_MODULE
+     AND test_name STREQUAL "test_dsl_jit_side_module")
+    target_link_options("${test_name}" PRIVATE
+      "--pre-js" "${CMAKE_SOURCE_DIR}/src/me_jit_glue.js"
+      "-sALLOW_TABLE_GROWTH=1"
+      "-sEXPORTED_RUNTIME_METHODS=addFunction,removeFunction,stackSave,stackAlloc,stackRestore,lengthBytesUTF8,stringToUTF8")
+  endif()
   if(test_name STREQUAL "test_dsl_jit_runtime_cache")
     add_dependencies("${test_name}" me_jit_test_stub)
   endif()
@@ -53,3 +65,9 @@ foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
     set_tests_properties("${test_name}" PROPERTIES ENVIRONMENT "ME_DSL_JIT=0")
   endif()
 endforeach()
+
+find_program(MINIEXPR_NODE_EXE node)
+if(MINIEXPR_NODE_EXE)
+  add_test(NAME test_me_jit_glue_smoke
+           COMMAND "${MINIEXPR_NODE_EXE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_me_jit_glue_smoke.js")
+endif()
