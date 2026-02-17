@@ -161,6 +161,58 @@ cleanup:
     return status;
 }
 
+static int test_nd_cast_intrinsics_with_input_padding(void) {
+    int status = 0;
+    int err = 0;
+    me_expr* expr = NULL;
+    int64_t shape[2] = {3, 5};
+    int32_t chunkshape[2] = {2, 4};
+    int32_t blockshape[2] = {2, 3};
+    me_variable vars[] = {{"x", ME_FLOAT32}};
+
+    int rc = me_compile_nd(
+        "def kernel(x):\n"
+        "    return int(_i0 * _n1 + _i1)\n",
+        vars, 1, ME_INT64, 2, shape, chunkshape, blockshape, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("FAILED me_compile_nd cast intrinsic with input: %d (err=%d)\n", rc, err);
+        return 1;
+    }
+
+    int64_t out[6] = {-1, -1, -1, -1, -1, -1};
+    int64_t valid = -1;
+    rc = me_nd_valid_nitems(expr, 1, 0, &valid);
+    if (rc != ME_EVAL_SUCCESS || valid != 2) {
+        printf("FAILED me_nd_valid_nitems cast intrinsic with input (rc=%d, valid=%lld)\n",
+               rc, (long long)valid);
+        status = 1;
+        goto cleanup;
+    }
+
+    float xblock[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    const void* inputs[] = {xblock};
+    rc = me_eval_nd(expr, inputs, 1, out, 6, 1, 0, NULL);
+    if (rc != ME_EVAL_SUCCESS) {
+        printf("FAILED me_eval_nd cast intrinsic with input (rc=%d)\n", rc);
+        status = 1;
+        goto cleanup;
+    }
+
+    int64_t expected[6] = {4, 0, 0, 9, 0, 0};
+    for (int i = 0; i < 6; i++) {
+        if (out[i] != expected[i]) {
+            printf("FAILED cast intrinsic with input mismatch at %d (got=%lld exp=%lld)\n",
+                   i, (long long)out[i], (long long)expected[i]);
+            status = 1;
+            goto cleanup;
+        }
+    }
+
+cleanup:
+    me_free(expr);
+    return status;
+}
+
 static int test_nd_float_index_cast_padding(void) {
     int status = 0;
     int err = 0;
@@ -1300,15 +1352,20 @@ int main(void) {
     failed |= t15;
     printf("Result: %s\n\n", t15 ? "FAIL" : "PASS");
 
-    printf("Test 16: DSL bool(x) cast with ND padding\n");
-    int t16 = test_nd_bool_cast_numeric_padding();
+    printf("Test 16: DSL cast intrinsics with explicit input + ND padding\n");
+    int t16 = test_nd_cast_intrinsics_with_input_padding();
     failed |= t16;
     printf("Result: %s\n\n", t16 ? "FAIL" : "PASS");
 
-    printf("Test 17: DSL int32 ramp kernel sum regression\n");
-    int t17 = test_nd_int32_ramp_kernel_sum();
+    printf("Test 17: DSL bool(x) cast with ND padding\n");
+    int t17 = test_nd_bool_cast_numeric_padding();
     failed |= t17;
     printf("Result: %s\n\n", t17 ? "FAIL" : "PASS");
+
+    printf("Test 18: DSL int32 ramp kernel sum regression\n");
+    int t18 = test_nd_int32_ramp_kernel_sum();
+    failed |= t18;
+    printf("Result: %s\n\n", t18 ? "FAIL" : "PASS");
 
     printf("=====================\n");
     printf("Summary: %s\n", failed ? "FAIL" : "PASS");
