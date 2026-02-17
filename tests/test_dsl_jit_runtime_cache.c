@@ -911,6 +911,128 @@ cleanup:
     return rc;
 }
 
+static int run_cast_interpreter_jit_parity_for_compiler(const char *compiler_tag) {
+    int rc = 1;
+    char tmp_template[] = "/tmp/me_jit_cast_parity_XXXXXX";
+    char *tmp_root = mkdtemp(tmp_template);
+    char cache_dir[1024];
+    cache_dir[0] = '\0';
+    char *saved_tmpdir = dup_env_value("TMPDIR");
+    char *saved_cc = dup_env_value("CC");
+    char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+    const char *src = NULL;
+    const char *src_cc =
+        "# me:compiler=cc\n"
+        "def kernel(x):\n"
+        "    return float(int(x)) + bool(x)\n";
+    const char *src_tcc =
+        "# me:compiler=tcc\n"
+        "def kernel(x):\n"
+        "    return float(int(x)) + bool(x)\n";
+    const double in[6] = {0.0, 0.2, 1.0, 1.9, 2.0, 3.2};
+    const double expected[6] = {0.0, 1.0, 2.0, 2.0, 3.0, 4.0};
+    double out_interp[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    double out_jit[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+
+    if (strcmp(compiler_tag, "cc") == 0) {
+        src = src_cc;
+    }
+    else if (strcmp(compiler_tag, "tcc") == 0) {
+        src = src_tcc;
+    }
+    else {
+        printf("  FAILED: unknown compiler tag '%s'\n", compiler_tag ? compiler_tag : "(null)");
+        goto cleanup;
+    }
+
+    if (!tmp_root) {
+        printf("  FAILED: mkdtemp failed for %s cast parity test\n", compiler_tag);
+        goto cleanup;
+    }
+    if (snprintf(cache_dir, sizeof(cache_dir), "%s/miniexpr-jit", tmp_root) >= (int)sizeof(cache_dir)) {
+        printf("  FAILED: cache path too long for %s cast parity test\n", compiler_tag);
+        goto cleanup;
+    }
+    if (setenv("TMPDIR", tmp_root, 1) != 0) {
+        printf("  FAILED: setenv TMPDIR failed for %s cast parity test\n", compiler_tag);
+        goto cleanup;
+    }
+    if (setenv("CC", "cc", 1) != 0) {
+        printf("  FAILED: setenv CC failed for %s cast parity test\n", compiler_tag);
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT_POS_CACHE", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT_POS_CACHE failed for %s cast parity test\n", compiler_tag);
+        goto cleanup;
+    }
+
+    if (setenv("ME_DSL_JIT", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT=0 failed for %s cast parity test\n", compiler_tag);
+        goto cleanup;
+    }
+    if (compile_and_eval_dsl_values(src, in, 6, out_interp) != 0) {
+        printf("  FAILED: interpreter execution failed for %s cast parity test\n", compiler_tag);
+        goto cleanup;
+    }
+
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT=1 failed for %s cast parity test\n", compiler_tag);
+        goto cleanup;
+    }
+    if (compile_and_eval_dsl_values(src, in, 6, out_jit) != 0) {
+        printf("  FAILED: JIT execution failed for %s cast parity test\n", compiler_tag);
+        goto cleanup;
+    }
+
+    for (int i = 0; i < 6; i++) {
+        if (out_interp[i] != out_jit[i]) {
+            printf("  FAILED: %s cast parity mismatch at %d (interp=%.17g jit=%.17g)\n",
+                   compiler_tag, i, out_interp[i], out_jit[i]);
+            goto cleanup;
+        }
+        if (fabs(out_jit[i] - expected[i]) > 1e-12) {
+            printf("  FAILED: %s cast output mismatch at %d (got=%.17g exp=%.17g)\n",
+                   compiler_tag, i, out_jit[i], expected[i]);
+            goto cleanup;
+        }
+    }
+
+    rc = 0;
+
+cleanup:
+    restore_env_value("TMPDIR", saved_tmpdir);
+    restore_env_value("CC", saved_cc);
+    restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    free(saved_tmpdir);
+    free(saved_cc);
+    free(saved_pos_cache);
+    free(saved_jit);
+    if (cache_dir[0] != '\0') {
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+    }
+    if (tmp_root) {
+        (void)rmdir(tmp_root);
+    }
+    return rc;
+}
+
+static int test_cast_interpreter_jit_parity_compilers(void) {
+    printf("\n=== DSL JIT Runtime Cache Test 8b: cast interpreter/JIT parity (cc+tcc) ===\n");
+
+    int rc = 0;
+    rc |= run_cast_interpreter_jit_parity_for_compiler("cc");
+    rc |= run_cast_interpreter_jit_parity_for_compiler("tcc");
+    if (rc != 0) {
+        return 1;
+    }
+
+    printf("  PASSED\n");
+    return 0;
+}
+
 static int test_missing_return_skips_runtime_jit(void) {
     printf("\n=== DSL JIT Runtime Cache Test 9: missing return skips runtime JIT ===\n");
 
@@ -1249,6 +1371,7 @@ int main(void) {
     fail |= test_unknown_me_pragma_is_rejected();
     fail |= test_cache_key_differentiates_fp_mode();
     fail |= test_element_interpreter_jit_parity();
+    fail |= test_cast_interpreter_jit_parity_compilers();
     fail |= test_missing_return_skips_runtime_jit();
     fail |= test_range_start_stop_step_jit_lowering();
     fail |= test_cc_backend_bridge_path();

@@ -208,6 +208,132 @@ cleanup:
     return status;
 }
 
+static int test_nd_int_constant_cast_padding(void) {
+    int status = 0;
+    int err = 0;
+    me_expr* expr = NULL;
+    int64_t shape[1] = {5};
+    int32_t chunkshape[1] = {4};
+    int32_t blockshape[1] = {3};
+
+    int rc = me_compile_nd(
+        "def kernel():\n"
+        "    return int(1.9)\n",
+        NULL, 0, ME_INT64, 1, shape, chunkshape, blockshape, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("FAILED me_compile_nd int(1.9): %d (err=%d)\n", rc, err);
+        return 1;
+    }
+
+    int64_t out[3] = {-1, -1, -1};
+    int64_t valid = -1;
+    rc = me_nd_valid_nitems(expr, 0, 0, &valid);
+    if (rc != ME_EVAL_SUCCESS || valid != 3) {
+        printf("FAILED me_nd_valid_nitems int(1.9) full block (rc=%d, valid=%lld)\n",
+               rc, (long long)valid);
+        status = 1;
+        goto cleanup;
+    }
+
+    rc = me_eval_nd(expr, NULL, 0, out, 3, 0, 0, NULL);
+    if (rc != ME_EVAL_SUCCESS || out[0] != 1 || out[1] != 1 || out[2] != 1) {
+        printf("FAILED me_eval_nd int(1.9) full block (rc=%d, out=[%lld,%lld,%lld])\n",
+               rc, (long long)out[0], (long long)out[1], (long long)out[2]);
+        status = 1;
+        goto cleanup;
+    }
+
+    out[0] = -1;
+    out[1] = -1;
+    out[2] = -1;
+    rc = me_nd_valid_nitems(expr, 1, 0, &valid);
+    if (rc != ME_EVAL_SUCCESS || valid != 1) {
+        printf("FAILED me_nd_valid_nitems int(1.9) padded block (rc=%d, valid=%lld)\n",
+               rc, (long long)valid);
+        status = 1;
+        goto cleanup;
+    }
+
+    rc = me_eval_nd(expr, NULL, 0, out, 3, 1, 0, NULL);
+    if (rc != ME_EVAL_SUCCESS || out[0] != 1 || out[1] != 0 || out[2] != 0) {
+        printf("FAILED me_eval_nd int(1.9) padded block (rc=%d, out=[%lld,%lld,%lld])\n",
+               rc, (long long)out[0], (long long)out[1], (long long)out[2]);
+        status = 1;
+        goto cleanup;
+    }
+
+cleanup:
+    me_free(expr);
+    return status;
+}
+
+static int test_nd_bool_cast_numeric_padding(void) {
+    int status = 0;
+    int err = 0;
+    me_expr* expr = NULL;
+    int64_t shape[1] = {5};
+    int32_t chunkshape[1] = {4};
+    int32_t blockshape[1] = {3};
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+
+    int rc = me_compile_nd(
+        "def kernel(x):\n"
+        "    return bool(x)\n",
+        vars, 1, ME_BOOL, 1, shape, chunkshape, blockshape, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("FAILED me_compile_nd bool(x): %d (err=%d)\n", rc, err);
+        return 1;
+    }
+
+    const void* ptrs[] = {NULL};
+    double in[3] = {0.0, -2.0, 3.5};
+    bool out[3] = {true, false, false};
+    int64_t valid = -1;
+    ptrs[0] = in;
+
+    rc = me_nd_valid_nitems(expr, 0, 0, &valid);
+    if (rc != ME_EVAL_SUCCESS || valid != 3) {
+        printf("FAILED me_nd_valid_nitems bool(x) full block (rc=%d, valid=%lld)\n",
+               rc, (long long)valid);
+        status = 1;
+        goto cleanup;
+    }
+
+    rc = me_eval_nd(expr, ptrs, 1, out, 3, 0, 0, NULL);
+    if (rc != ME_EVAL_SUCCESS || out[0] || !out[1] || !out[2]) {
+        printf("FAILED me_eval_nd bool(x) full block (rc=%d, out=[%d,%d,%d])\n",
+               rc, (int)out[0], (int)out[1], (int)out[2]);
+        status = 1;
+        goto cleanup;
+    }
+
+    in[0] = 7.0;
+    in[1] = 123.0;
+    in[2] = 123.0;
+    out[0] = false;
+    out[1] = true;
+    out[2] = true;
+    rc = me_nd_valid_nitems(expr, 1, 0, &valid);
+    if (rc != ME_EVAL_SUCCESS || valid != 1) {
+        printf("FAILED me_nd_valid_nitems bool(x) padded block (rc=%d, valid=%lld)\n",
+               rc, (long long)valid);
+        status = 1;
+        goto cleanup;
+    }
+
+    rc = me_eval_nd(expr, ptrs, 1, out, 3, 1, 0, NULL);
+    if (rc != ME_EVAL_SUCCESS || !out[0] || out[1] || out[2]) {
+        printf("FAILED me_eval_nd bool(x) padded block (rc=%d, out=[%d,%d,%d])\n",
+               rc, (int)out[0], (int)out[1], (int)out[2]);
+        status = 1;
+        goto cleanup;
+    }
+
+cleanup:
+    me_free(expr);
+    return status;
+}
+
 static int test_nd_int32_ramp_kernel_sum(void) {
     int status = 0;
     int err = 0;
@@ -1169,10 +1295,20 @@ int main(void) {
     failed |= t14;
     printf("Result: %s\n\n", t14 ? "FAIL" : "PASS");
 
-    printf("Test 15: DSL int32 ramp kernel sum regression\n");
-    int t15 = test_nd_int32_ramp_kernel_sum();
+    printf("Test 15: DSL int(1.9) cast with ND padding\n");
+    int t15 = test_nd_int_constant_cast_padding();
     failed |= t15;
     printf("Result: %s\n\n", t15 ? "FAIL" : "PASS");
+
+    printf("Test 16: DSL bool(x) cast with ND padding\n");
+    int t16 = test_nd_bool_cast_numeric_padding();
+    failed |= t16;
+    printf("Result: %s\n\n", t16 ? "FAIL" : "PASS");
+
+    printf("Test 17: DSL int32 ramp kernel sum regression\n");
+    int t17 = test_nd_int32_ramp_kernel_sum();
+    failed |= t17;
+    printf("Result: %s\n\n", t17 ? "FAIL" : "PASS");
 
     printf("=====================\n");
     printf("Summary: %s\n", failed ? "FAIL" : "PASS");
