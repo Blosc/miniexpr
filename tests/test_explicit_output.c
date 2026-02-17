@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
+#include <complex.h>
 #include "../src/miniexpr.h"
 #include "minctest.h"
 
@@ -540,6 +541,191 @@ void test_numeric_output_conversions() {
     }
 }
 
+void test_complex_output_conversions() {
+    TEST("Complex-to-real and complex narrowing conversions");
+
+    int passed = 1;
+    int err;
+    me_expr *expr = NULL;
+
+    {
+        float _Complex x[VECTOR_SIZE] = {
+            -3.5f + 1.0f * I, -2.0f - 4.0f * I, -1.0f + 2.0f * I, 0.0f + 3.0f * I, 1.0f - 1.0f * I,
+            2.25f + 0.5f * I, 42.0f + 5.0f * I, 127.75f - 7.0f * I, 128.5f + 8.0f * I, 1000.0f - 2.0f * I
+        };
+        float _Complex y[VECTOR_SIZE] = {0};
+        double out[VECTOR_SIZE];
+        me_variable vars[] = {{"x", ME_COMPLEX64}, {"y", ME_COMPLEX64}};
+
+        int rc_expr = me_compile("x + y", vars, 2, ME_FLOAT64, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
+            printf("  FAIL complex64->float64: compilation error at position %d\n", err);
+            passed = 0;
+        } else {
+            const void *var_ptrs[] = {x, y};
+            int rc_eval = me_eval(expr, var_ptrs, 2, out, VECTOR_SIZE, NULL);
+            if (rc_eval != ME_EVAL_SUCCESS) {
+                printf("  FAIL complex64->float64: eval error %d\n", rc_eval);
+                passed = 0;
+            } else {
+                for (int i = 0; i < VECTOR_SIZE; i++) {
+                    double expected = (double)crealf(x[i] + y[i]);
+                    if (fabs(out[i] - expected) > 1e-12) {
+                        printf("  FAIL complex64->float64 at [%d]: expected %.17g, got %.17g\n",
+                               i, expected, out[i]);
+                        passed = 0;
+                    }
+                }
+            }
+        }
+        me_free(expr);
+        expr = NULL;
+    }
+
+    {
+        float _Complex x[VECTOR_SIZE] = {
+            -300.0f + 0.25f * I, -1.0f - 2.0f * I, 0.0f + 1.0f * I, 1.0f + 0.5f * I, 127.9f - 1.0f * I,
+            128.1f + 2.0f * I, 255.0f - 3.0f * I, 256.0f + 4.0f * I, 511.7f - 5.0f * I, 1000.2f + 6.0f * I
+        };
+        float _Complex y[VECTOR_SIZE] = {0};
+        int32_t out[VECTOR_SIZE];
+        me_variable vars[] = {{"x", ME_COMPLEX64}, {"y", ME_COMPLEX64}};
+
+        int rc_expr = me_compile("x + y", vars, 2, ME_INT32, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
+            printf("  FAIL complex64->int32: compilation error at position %d\n", err);
+            passed = 0;
+        } else {
+            const void *var_ptrs[] = {x, y};
+            int rc_eval = me_eval(expr, var_ptrs, 2, out, VECTOR_SIZE, NULL);
+            if (rc_eval != ME_EVAL_SUCCESS) {
+                printf("  FAIL complex64->int32: eval error %d\n", rc_eval);
+                passed = 0;
+            } else {
+                for (int i = 0; i < VECTOR_SIZE; i++) {
+                    int32_t expected = (int32_t)crealf(x[i] + y[i]);
+                    if (out[i] != expected) {
+                        printf("  FAIL complex64->int32 at [%d]: expected %lld, got %lld\n",
+                               i, (long long)expected, (long long)out[i]);
+                        passed = 0;
+                    }
+                }
+            }
+        }
+        me_free(expr);
+        expr = NULL;
+    }
+
+    {
+        double _Complex x[VECTOR_SIZE] = {
+            -3.5 + 1.25 * I, -2.0 - 4.5 * I, -1.0 + 2.75 * I, 0.0 + 3.0 * I, 1.0 - 1.5 * I,
+            2.25 + 0.5 * I, 42.0 + 5.5 * I, 127.75 - 7.125 * I, 128.5 + 8.25 * I, 1000.0 - 2.875 * I
+        };
+        double _Complex y[VECTOR_SIZE] = {0};
+        float out[VECTOR_SIZE];
+        me_variable vars[] = {{"x", ME_COMPLEX128}, {"y", ME_COMPLEX128}};
+
+        int rc_expr = me_compile("x + y", vars, 2, ME_FLOAT32, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
+            printf("  FAIL complex128->float32: compilation error at position %d\n", err);
+            passed = 0;
+        } else {
+            const void *var_ptrs[] = {x, y};
+            int rc_eval = me_eval(expr, var_ptrs, 2, out, VECTOR_SIZE, NULL);
+            if (rc_eval != ME_EVAL_SUCCESS) {
+                printf("  FAIL complex128->float32: eval error %d\n", rc_eval);
+                passed = 0;
+            } else {
+                for (int i = 0; i < VECTOR_SIZE; i++) {
+                    float expected = (float)creal(x[i] + y[i]);
+                    if (fabsf(out[i] - expected) > 1e-6f) {
+                        printf("  FAIL complex128->float32 at [%d]: expected %.9g, got %.9g\n",
+                               i, expected, out[i]);
+                        passed = 0;
+                    }
+                }
+            }
+        }
+        me_free(expr);
+        expr = NULL;
+    }
+
+    {
+        double _Complex x[VECTOR_SIZE] = {
+            0.0 + 1.0 * I, 1.0 + 2.0 * I, 2.0 + 3.0 * I, 42.0 + 4.0 * I, 255.0 + 5.0 * I,
+            1024.0 + 6.0 * I, 2048.0 + 7.0 * I, 4096.0 + 8.0 * I, 12345.0 + 9.0 * I, 32767.0 + 10.0 * I
+        };
+        double _Complex y[VECTOR_SIZE] = {0};
+        uint16_t out[VECTOR_SIZE];
+        me_variable vars[] = {{"x", ME_COMPLEX128}, {"y", ME_COMPLEX128}};
+
+        int rc_expr = me_compile("x + y", vars, 2, ME_UINT16, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
+            printf("  FAIL complex128->uint16: compilation error at position %d\n", err);
+            passed = 0;
+        } else {
+            const void *var_ptrs[] = {x, y};
+            int rc_eval = me_eval(expr, var_ptrs, 2, out, VECTOR_SIZE, NULL);
+            if (rc_eval != ME_EVAL_SUCCESS) {
+                printf("  FAIL complex128->uint16: eval error %d\n", rc_eval);
+                passed = 0;
+            } else {
+                for (int i = 0; i < VECTOR_SIZE; i++) {
+                    uint16_t expected = (uint16_t)creal(x[i] + y[i]);
+                    if (out[i] != expected) {
+                        printf("  FAIL complex128->uint16 at [%d]: expected %llu, got %llu\n",
+                               i, (unsigned long long)expected, (unsigned long long)out[i]);
+                        passed = 0;
+                    }
+                }
+            }
+        }
+        me_free(expr);
+        expr = NULL;
+    }
+
+    {
+        double _Complex x[VECTOR_SIZE] = {
+            -3.5 + 1.25 * I, -2.0 - 4.5 * I, -1.0 + 2.75 * I, 0.0 + 3.0 * I, 1.0 - 1.5 * I,
+            2.25 + 0.5 * I, 42.0 + 5.5 * I, 127.75 - 7.125 * I, 128.5 + 8.25 * I, 1000.0 - 2.875 * I
+        };
+        double _Complex y[VECTOR_SIZE] = {0};
+        float _Complex out[VECTOR_SIZE];
+        me_variable vars[] = {{"x", ME_COMPLEX128}, {"y", ME_COMPLEX128}};
+
+        int rc_expr = me_compile("x + y", vars, 2, ME_COMPLEX64, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
+            printf("  FAIL complex128->complex64: compilation error at position %d\n", err);
+            passed = 0;
+        } else {
+            const void *var_ptrs[] = {x, y};
+            int rc_eval = me_eval(expr, var_ptrs, 2, out, VECTOR_SIZE, NULL);
+            if (rc_eval != ME_EVAL_SUCCESS) {
+                printf("  FAIL complex128->complex64: eval error %d\n", rc_eval);
+                passed = 0;
+            } else {
+                for (int i = 0; i < VECTOR_SIZE; i++) {
+                    float _Complex expected = (float _Complex)(x[i] + y[i]);
+                    float dre = fabsf(crealf(out[i]) - crealf(expected));
+                    float dim = fabsf(cimagf(out[i]) - cimagf(expected));
+                    if (dre > 1e-6f || dim > 1e-6f) {
+                        printf("  FAIL complex128->complex64 at [%d]: expected (%.9g, %.9g), got (%.9g, %.9g)\n",
+                               i, crealf(expected), cimagf(expected), crealf(out[i]), cimagf(out[i]));
+                        passed = 0;
+                    }
+                }
+            }
+        }
+        me_free(expr);
+    }
+
+    if (passed) {
+        printf("  PASS: Complex conversion outputs match expected casts\n");
+    } else {
+        tests_failed++;
+    }
+}
+
 int main() {
     printf("========================================================================\n");
     printf("TEST: Explicit Variable Types with Explicit Output Dtype\n");
@@ -556,6 +742,7 @@ int main() {
     test_comparison_explicit_bool_output();
     test_integer_output_conversions();
     test_numeric_output_conversions();
+    test_complex_output_conversions();
 
     printf("\n========================================================================\n");
     printf("Test Summary\n");

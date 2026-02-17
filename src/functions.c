@@ -379,6 +379,17 @@ static double _Complex me_cmplx(double re, double im) {
 #endif
 }
 
+static float _Complex me_cmplxf(float re, float im) {
+#if defined(_MSC_VER)
+    float _Complex v;
+    __real__ v = re;
+    __imag__ v = im;
+    return v;
+#else
+    return re + im * I;
+#endif
+}
+
 
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -4344,6 +4355,53 @@ static void vec_convert_c128_to_bool(const double _Complex *in, bool *out, int n
     for (i = 0; i < n; i++) out[i] = IS_NONZERO_c128(in[i]);
 }
 
+#define DEFINE_VEC_CONVERT_C64_TO(TO_SFX, TO_TYPE) \
+static void vec_convert_c64_to_##TO_SFX(const float _Complex *in, TO_TYPE *out, int n) { \
+    int i; \
+    IVDEP \
+    for (i = 0; i < n; i++) out[i] = (TO_TYPE)me_crealf(in[i]); \
+}
+
+#define DEFINE_VEC_CONVERT_C128_TO(TO_SFX, TO_TYPE) \
+static void vec_convert_c128_to_##TO_SFX(const double _Complex *in, TO_TYPE *out, int n) { \
+    int i; \
+    IVDEP \
+    for (i = 0; i < n; i++) out[i] = (TO_TYPE)me_creal(in[i]); \
+}
+
+DEFINE_VEC_CONVERT_C64_TO(i8, int8_t)
+DEFINE_VEC_CONVERT_C64_TO(i16, int16_t)
+DEFINE_VEC_CONVERT_C64_TO(i32, int32_t)
+DEFINE_VEC_CONVERT_C64_TO(i64, int64_t)
+DEFINE_VEC_CONVERT_C64_TO(u8, uint8_t)
+DEFINE_VEC_CONVERT_C64_TO(u16, uint16_t)
+DEFINE_VEC_CONVERT_C64_TO(u32, uint32_t)
+DEFINE_VEC_CONVERT_C64_TO(u64, uint64_t)
+DEFINE_VEC_CONVERT_C64_TO(f32, float)
+DEFINE_VEC_CONVERT_C64_TO(f64, double)
+
+DEFINE_VEC_CONVERT_C128_TO(i8, int8_t)
+DEFINE_VEC_CONVERT_C128_TO(i16, int16_t)
+DEFINE_VEC_CONVERT_C128_TO(i32, int32_t)
+DEFINE_VEC_CONVERT_C128_TO(i64, int64_t)
+DEFINE_VEC_CONVERT_C128_TO(u8, uint8_t)
+DEFINE_VEC_CONVERT_C128_TO(u16, uint16_t)
+DEFINE_VEC_CONVERT_C128_TO(u32, uint32_t)
+DEFINE_VEC_CONVERT_C128_TO(u64, uint64_t)
+DEFINE_VEC_CONVERT_C128_TO(f32, float)
+DEFINE_VEC_CONVERT_C128_TO(f64, double)
+
+static void vec_convert_c128_to_c64(const double _Complex *in, float _Complex *out, int n) {
+    int i;
+    IVDEP
+    for (i = 0; i < n; i++) {
+        out[i] = me_cmplxf((float)me_creal(in[i]), (float)me_cimag(in[i]));
+    }
+}
+
+#undef DEFINE_VEC_CONVERT_C64_TO
+#undef DEFINE_VEC_CONVERT_C128_TO
+
 DEFINE_VEC_CONVERT(i8, i16, int8_t, int16_t)
 DEFINE_VEC_CONVERT(i8, i32, int8_t, int32_t)
 DEFINE_VEC_CONVERT(i8, i64, int8_t, int64_t)
@@ -4584,7 +4642,29 @@ static convert_func_t get_convert_func(me_dtype from, me_dtype to) {
     CONV_CASE(ME_FLOAT64, ME_UINT64, f64, u64)
     CONV_CASE(ME_FLOAT64, ME_COMPLEX128, f64, c128)
 
+    CONV_CASE(ME_COMPLEX64, ME_INT8, c64, i8)
+    CONV_CASE(ME_COMPLEX64, ME_INT16, c64, i16)
+    CONV_CASE(ME_COMPLEX64, ME_INT32, c64, i32)
+    CONV_CASE(ME_COMPLEX64, ME_INT64, c64, i64)
+    CONV_CASE(ME_COMPLEX64, ME_UINT8, c64, u8)
+    CONV_CASE(ME_COMPLEX64, ME_UINT16, c64, u16)
+    CONV_CASE(ME_COMPLEX64, ME_UINT32, c64, u32)
+    CONV_CASE(ME_COMPLEX64, ME_UINT64, c64, u64)
+    CONV_CASE(ME_COMPLEX64, ME_FLOAT32, c64, f32)
+    CONV_CASE(ME_COMPLEX64, ME_FLOAT64, c64, f64)
     CONV_CASE(ME_COMPLEX64, ME_COMPLEX128, c64, c128)
+
+    CONV_CASE(ME_COMPLEX128, ME_INT8, c128, i8)
+    CONV_CASE(ME_COMPLEX128, ME_INT16, c128, i16)
+    CONV_CASE(ME_COMPLEX128, ME_INT32, c128, i32)
+    CONV_CASE(ME_COMPLEX128, ME_INT64, c128, i64)
+    CONV_CASE(ME_COMPLEX128, ME_UINT8, c128, u8)
+    CONV_CASE(ME_COMPLEX128, ME_UINT16, c128, u16)
+    CONV_CASE(ME_COMPLEX128, ME_UINT32, c128, u32)
+    CONV_CASE(ME_COMPLEX128, ME_UINT64, c128, u64)
+    CONV_CASE(ME_COMPLEX128, ME_FLOAT32, c128, f32)
+    CONV_CASE(ME_COMPLEX128, ME_FLOAT64, c128, f64)
+    CONV_CASE(ME_COMPLEX128, ME_COMPLEX64, c128, c64)
 
 #undef CONV_CASE
 
