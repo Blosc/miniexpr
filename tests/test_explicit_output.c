@@ -266,6 +266,143 @@ void test_comparison_explicit_bool_output() {
     me_free(expr);
 }
 
+void test_integer_output_conversions() {
+    TEST("Integer conversions with explicit output dtype");
+
+    int passed = 1;
+    int err;
+    me_expr *expr = NULL;
+
+    {
+        int64_t x[VECTOR_SIZE] = {-1000000LL, -129LL, -1LL, 0LL, 1LL, 127LL, 128LL, 255LL, 32767LL, 1000000LL};
+        int64_t y[VECTOR_SIZE] = {0};
+        int32_t out[VECTOR_SIZE];
+        me_variable vars[] = {{"x", ME_INT64}, {"y", ME_INT64}};
+
+        int rc_expr = me_compile("x + y", vars, 2, ME_INT32, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
+            printf("  FAIL int64->int32: compilation error at position %d\n", err);
+            passed = 0;
+        } else {
+            const void *var_ptrs[] = {x, y};
+            int rc_eval = me_eval(expr, var_ptrs, 2, out, VECTOR_SIZE, NULL);
+            if (rc_eval != ME_EVAL_SUCCESS) {
+                printf("  FAIL int64->int32: eval error %d\n", rc_eval);
+                passed = 0;
+            } else {
+                for (int i = 0; i < VECTOR_SIZE; i++) {
+                    int32_t expected = (int32_t)x[i];
+                    if (out[i] != expected) {
+                        printf("  FAIL int64->int32 at [%d]: expected %lld, got %lld\n",
+                               i, (long long)expected, (long long)out[i]);
+                        passed = 0;
+                    }
+                }
+            }
+        }
+        me_free(expr);
+        expr = NULL;
+    }
+
+    {
+        int32_t x[VECTOR_SIZE] = {-300, -1, 0, 1, 127, 128, 255, 256, 511, 1000};
+        int32_t y[VECTOR_SIZE] = {0};
+        uint8_t out[VECTOR_SIZE];
+        me_variable vars[] = {{"x", ME_INT32}, {"y", ME_INT32}};
+
+        int rc_expr = me_compile("x + y", vars, 2, ME_UINT8, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
+            printf("  FAIL int32->uint8: compilation error at position %d\n", err);
+            passed = 0;
+        } else {
+            const void *var_ptrs[] = {x, y};
+            int rc_eval = me_eval(expr, var_ptrs, 2, out, VECTOR_SIZE, NULL);
+            if (rc_eval != ME_EVAL_SUCCESS) {
+                printf("  FAIL int32->uint8: eval error %d\n", rc_eval);
+                passed = 0;
+            } else {
+                for (int i = 0; i < VECTOR_SIZE; i++) {
+                    uint8_t expected = (uint8_t)x[i];
+                    if (out[i] != expected) {
+                        printf("  FAIL int32->uint8 at [%d]: expected %llu, got %llu\n",
+                               i, (unsigned long long)expected, (unsigned long long)out[i]);
+                        passed = 0;
+                    }
+                }
+            }
+        }
+        me_free(expr);
+        expr = NULL;
+    }
+
+    {
+        uint64_t x[VECTOR_SIZE] = {0ULL, 1ULL, 2ULL, 42ULL, 255ULL, 1024ULL, 2048ULL, 4096ULL, 12345ULL, 32767ULL};
+        uint64_t y[VECTOR_SIZE] = {0};
+        int16_t out[VECTOR_SIZE];
+        me_variable vars[] = {{"x", ME_UINT64}, {"y", ME_UINT64}};
+
+        int rc_expr = me_compile("x + y", vars, 2, ME_INT16, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
+            printf("  FAIL uint64->int16: compilation error at position %d\n", err);
+            passed = 0;
+        } else {
+            const void *var_ptrs[] = {x, y};
+            int rc_eval = me_eval(expr, var_ptrs, 2, out, VECTOR_SIZE, NULL);
+            if (rc_eval != ME_EVAL_SUCCESS) {
+                printf("  FAIL uint64->int16: eval error %d\n", rc_eval);
+                passed = 0;
+            } else {
+                for (int i = 0; i < VECTOR_SIZE; i++) {
+                    int16_t expected = (int16_t)x[i];
+                    if (out[i] != expected) {
+                        printf("  FAIL uint64->int16 at [%d]: expected %lld, got %lld\n",
+                               i, (long long)expected, (long long)out[i]);
+                        passed = 0;
+                    }
+                }
+            }
+        }
+        me_free(expr);
+        expr = NULL;
+    }
+
+    {
+        int16_t x[VECTOR_SIZE] = {-32768, -1024, -1, 0, 1, 2, 127, 255, 1024, 32767};
+        int16_t y[VECTOR_SIZE] = {0};
+        uint32_t out[VECTOR_SIZE];
+        me_variable vars[] = {{"x", ME_INT16}, {"y", ME_INT16}};
+
+        int rc_expr = me_compile("x + y", vars, 2, ME_UINT32, &err, &expr);
+        if (rc_expr != ME_COMPILE_SUCCESS) {
+            printf("  FAIL int16->uint32: compilation error at position %d\n", err);
+            passed = 0;
+        } else {
+            const void *var_ptrs[] = {x, y};
+            int rc_eval = me_eval(expr, var_ptrs, 2, out, VECTOR_SIZE, NULL);
+            if (rc_eval != ME_EVAL_SUCCESS) {
+                printf("  FAIL int16->uint32: eval error %d\n", rc_eval);
+                passed = 0;
+            } else {
+                for (int i = 0; i < VECTOR_SIZE; i++) {
+                    uint32_t expected = (uint32_t)x[i];
+                    if (out[i] != expected) {
+                        printf("  FAIL int16->uint32 at [%d]: expected %llu, got %llu\n",
+                               i, (unsigned long long)expected, (unsigned long long)out[i]);
+                        passed = 0;
+                    }
+                }
+            }
+        }
+        me_free(expr);
+    }
+
+    if (passed) {
+        printf("  PASS: Integer conversion outputs match expected casts\n");
+    } else {
+        tests_failed++;
+    }
+}
+
 int main() {
     printf("========================================================================\n");
     printf("TEST: Explicit Variable Types with Explicit Output Dtype\n");
@@ -280,6 +417,7 @@ int main() {
     test_float32_vars_float64_output();
     test_float32_with_constant_float64_output();
     test_comparison_explicit_bool_output();
+    test_integer_output_conversions();
 
     printf("\n========================================================================\n");
     printf("Test Summary\n");
@@ -297,4 +435,3 @@ int main() {
 
     return (tests_failed == 0) ? 0 : 1;
 }
-
