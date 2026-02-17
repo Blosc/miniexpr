@@ -320,6 +320,8 @@ Operational `libtcc` runtime location/options remain configurable:
 - `ME_DSL_JIT_LIBTCC_PATH=/path/to/libtcc.{so,dylib}`: Override runtime library path used for `libtcc` loading.
 - `ME_DSL_JIT_TCC_LIB_PATH=/path/to/tcc/libdir`: Override `tcc_set_lib_path()` directory (mainly for custom/legacy `libtcc` layouts).
 - `ME_DSL_JIT_TCC_OPTIONS="..."`: Extra options passed to `tcc_set_options()`.
+- On Linux, the libtcc JIT automatically appends common multiarch library directories
+  (for example `/usr/lib/x86_64-linux-gnu`) to help `-lm` resolve without extra flags.
 
 Build-time note:
 

@@ -116,6 +116,8 @@ Notes:
 - With `# me:compiler=cc`, runtime uses `CC` (default: `cc`) to select the compiler executable.
 - With `# me:compiler=cc`, runtime also honors `CFLAGS`.
 - Build option `MINIEXPR_ENABLE_TCC_JIT=OFF` disables TCC-based JIT backends; on Linux/macOS, the separate `# me:compiler=cc` runtime path may still be available.
+- On Linux, the libtcc JIT automatically appends common multiarch library directories
+  (for example `/usr/lib/x86_64-linux-gnu`) to help `-lm` resolve without extra flags.
 - If the selected backend is unavailable at runtime, miniexpr falls back to interpreter execution.
 
 ### Temporary Variables

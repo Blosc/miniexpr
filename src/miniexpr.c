@@ -4176,7 +4176,11 @@ static bool dsl_jit_get_cache_dir(char *out, size_t out_size) {
     }
     const char *tmpdir = getenv("TMPDIR");
     if (!tmpdir || tmpdir[0] == '\0') {
-        tmpdir = "/tmp";
+        /* Avoid cross-user permission conflicts when TMPDIR is not set. */
+        if (snprintf(out, out_size, "/tmp/miniexpr-jit-%lu", (unsigned long)getuid()) >= (int)out_size) {
+            return false;
+        }
+        return dsl_jit_ensure_dir(out);
     }
     if (snprintf(out, out_size, "%s/miniexpr-jit", tmpdir) >= (int)out_size) {
         return false;
@@ -4322,6 +4326,7 @@ typedef int (*me_tcc_compile_string_fn)(me_tcc_state *s, const char *buf);
 typedef int (*me_tcc_relocate_fn)(me_tcc_state *s);
 typedef void *(*me_tcc_get_symbol_fn)(me_tcc_state *s, const char *name);
 typedef int (*me_tcc_set_options_fn)(me_tcc_state *s, const char *str);
+typedef int (*me_tcc_add_library_path_fn)(me_tcc_state *s, const char *path);
 typedef int (*me_tcc_add_library_fn)(me_tcc_state *s, const char *libraryname);
 typedef int (*me_tcc_add_symbol_fn)(me_tcc_state *s, const char *name, const void *val);
 typedef void (*me_tcc_set_lib_path_fn)(me_tcc_state *s, const char *path);
@@ -4337,6 +4342,7 @@ typedef struct {
     me_tcc_relocate_fn tcc_relocate_fn;
     me_tcc_get_symbol_fn tcc_get_symbol_fn;
     me_tcc_set_options_fn tcc_set_options_fn;
+    me_tcc_add_library_path_fn tcc_add_library_path_fn;
     me_tcc_add_library_fn tcc_add_library_fn;
     me_tcc_add_symbol_fn tcc_add_symbol_fn;
     me_tcc_set_lib_path_fn tcc_set_lib_path_fn;
@@ -4512,6 +4518,49 @@ static bool dsl_jit_libtcc_runtime_dir(char *out, size_t out_size) {
         return false;
     }
     return dsl_jit_path_dirname(module_path, out, out_size);
+}
+
+static void dsl_jit_libtcc_add_library_path_if_exists(me_tcc_state *state, const char *path) {
+    if (!state || !g_dsl_tcc_api.tcc_add_library_path_fn || !path || path[0] == '\0') {
+        return;
+    }
+    struct stat st;
+    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+        (void)g_dsl_tcc_api.tcc_add_library_path_fn(state, path);
+    }
+}
+
+static void dsl_jit_libtcc_add_multiarch_paths(me_tcc_state *state) {
+#if defined(__linux__)
+    if (!state || !g_dsl_tcc_api.tcc_add_library_path_fn) {
+        return;
+    }
+    const char *paths[] = {
+#if defined(__x86_64__) || defined(__amd64__)
+        "/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu",
+#elif defined(__aarch64__)
+        "/usr/lib/aarch64-linux-gnu", "/lib/aarch64-linux-gnu",
+#elif defined(__arm__)
+        "/usr/lib/arm-linux-gnueabihf", "/lib/arm-linux-gnueabihf",
+        "/usr/lib/arm-linux-gnueabi", "/lib/arm-linux-gnueabi",
+#elif defined(__riscv) && (__riscv_xlen == 64)
+        "/usr/lib/riscv64-linux-gnu", "/lib/riscv64-linux-gnu",
+#elif defined(__powerpc64__) && defined(__LITTLE_ENDIAN__)
+        "/usr/lib/powerpc64le-linux-gnu", "/lib/powerpc64le-linux-gnu",
+#elif defined(__s390x__)
+        "/usr/lib/s390x-linux-gnu", "/lib/s390x-linux-gnu",
+#elif defined(__i386__)
+        "/usr/lib/i386-linux-gnu", "/lib/i386-linux-gnu",
+#endif
+        "/usr/lib64", "/lib64",
+        NULL
+    };
+    for (int i = 0; paths[i]; i++) {
+        dsl_jit_libtcc_add_library_path_if_exists(state, paths[i]);
+    }
+#else
+    (void)state;
+#endif
 }
 
 static double dsl_jit_bridge_apply_unary_f64(void (*fn)(const double *, double *, int), double x) {
@@ -5392,6 +5441,7 @@ static bool dsl_jit_libtcc_load_api(void) {
 #undef ME_LOAD_TCC_SYM
 
     g_dsl_tcc_api.tcc_set_options_fn = (me_tcc_set_options_fn)dsl_jit_dynlib_symbol(handle, "tcc_set_options");
+    g_dsl_tcc_api.tcc_add_library_path_fn = (me_tcc_add_library_path_fn)dsl_jit_dynlib_symbol(handle, "tcc_add_library_path");
     g_dsl_tcc_api.tcc_add_library_fn = (me_tcc_add_library_fn)dsl_jit_dynlib_symbol(handle, "tcc_add_library");
     g_dsl_tcc_api.tcc_add_symbol_fn = (me_tcc_add_symbol_fn)dsl_jit_dynlib_symbol(handle, "tcc_add_symbol");
     g_dsl_tcc_api.tcc_set_lib_path_fn = (me_tcc_set_lib_path_fn)dsl_jit_dynlib_symbol(handle, "tcc_set_lib_path");
@@ -5446,6 +5496,7 @@ static bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
                  "tcc_set_output_type failed");
         return false;
     }
+    dsl_jit_libtcc_add_multiarch_paths(state);
 #if !defined(__APPLE__) && !defined(_WIN32) && !defined(_WIN64)
     if (g_dsl_tcc_api.tcc_add_library_fn) {
         (void)g_dsl_tcc_api.tcc_add_library_fn(state, "m");
@@ -5563,6 +5614,59 @@ static bool dsl_jit_cc_math_bridge_available(void) {
 #endif
 }
 
+static void dsl_jit_cc_add_library_flag_if_exists(char *flags, size_t flags_size, const char *path) {
+    if (!flags || flags_size == 0 || !path || path[0] == '\0') {
+        return;
+    }
+    struct stat st;
+    if (stat(path, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        return;
+    }
+    size_t len = strlen(flags);
+    if (len >= flags_size - 1) {
+        return;
+    }
+    int n = snprintf(flags + len, flags_size - len, " -L%s", path);
+    if (n <= 0 || (size_t)n >= (flags_size - len)) {
+        flags[flags_size - 1] = '\0';
+    }
+}
+
+static void dsl_jit_cc_add_multiarch_library_flags(char *flags, size_t flags_size) {
+    if (!flags || flags_size == 0) {
+        return;
+    }
+    flags[0] = '\0';
+#if defined(__linux__)
+    /* Match libtcc fallback dirs so cc JIT can resolve -lm on multiarch layouts. */
+    const char *paths[] = {
+#if defined(__x86_64__) || defined(__amd64__)
+        "/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu",
+#elif defined(__aarch64__)
+        "/usr/lib/aarch64-linux-gnu", "/lib/aarch64-linux-gnu",
+#elif defined(__arm__)
+        "/usr/lib/arm-linux-gnueabihf", "/lib/arm-linux-gnueabihf",
+        "/usr/lib/arm-linux-gnueabi", "/lib/arm-linux-gnueabi",
+#elif defined(__riscv) && (__riscv_xlen == 64)
+        "/usr/lib/riscv64-linux-gnu", "/lib/riscv64-linux-gnu",
+#elif defined(__powerpc64__) && defined(__LITTLE_ENDIAN__)
+        "/usr/lib/powerpc64le-linux-gnu", "/lib/powerpc64le-linux-gnu",
+#elif defined(__s390x__)
+        "/usr/lib/s390x-linux-gnu", "/lib/s390x-linux-gnu",
+#elif defined(__i386__)
+        "/usr/lib/i386-linux-gnu", "/lib/i386-linux-gnu",
+#endif
+        "/usr/lib64", "/lib64",
+        NULL
+    };
+    for (int i = 0; paths[i]; i++) {
+        dsl_jit_cc_add_library_flag_if_exists(flags, flags_size, paths[i]);
+    }
+#else
+    (void)flags_size;
+#endif
+}
+
 static bool dsl_jit_compile_shared(const me_dsl_compiled_program *program,
                                    const char *src_path, const char *so_path) {
     if (!program || !src_path || !so_path) {
@@ -5583,21 +5687,28 @@ static bool dsl_jit_compile_shared(const me_dsl_compiled_program *program,
     const char *debug_cc = getenv("ME_DSL_JIT_DEBUG_CC");
     bool show_cc_output = (debug_cc && debug_cc[0] != '\0' && strcmp(debug_cc, "0") != 0);
     const char *bridge_ldflags = "";
+    char multiarch_ldflags[512];
+    const char *math_ldflags = "";
+    dsl_jit_cc_add_multiarch_library_flags(multiarch_ldflags, sizeof(multiarch_ldflags));
 #if defined(__APPLE__)
     if (program->jit_use_runtime_math_bridge) {
         bridge_ldflags = " -Wl,-undefined,dynamic_lookup";
     }
+#elif !defined(_WIN32) && !defined(_WIN64)
+    math_ldflags = " -lm";
 #endif
     char cmd[2048];
 #if defined(__APPLE__)
     int n = snprintf(cmd, sizeof(cmd),
-                     "%s -std=c99 -O3 -fPIC %s %s -dynamiclib -o \"%s\" \"%s\"%s%s",
+                     "%s -std=c99 -O3 -fPIC %s %s -dynamiclib -o \"%s\" \"%s\"%s%s%s%s",
                      cc, fp_cflags, cflags, so_path, src_path, bridge_ldflags,
+                     multiarch_ldflags, math_ldflags,
                      show_cc_output ? "" : " >/dev/null 2>&1");
 #else
     int n = snprintf(cmd, sizeof(cmd),
-                     "%s -std=c99 -O3 -fPIC %s %s -shared -o \"%s\" \"%s\"%s%s",
+                     "%s -std=c99 -O3 -fPIC %s %s -shared -o \"%s\" \"%s\"%s%s%s%s",
                      cc, fp_cflags, cflags, so_path, src_path, bridge_ldflags,
+                     multiarch_ldflags, math_ldflags,
                      show_cc_output ? "" : " >/dev/null 2>&1");
 #endif
     if (n <= 0 || (size_t)n >= sizeof(cmd)) {
