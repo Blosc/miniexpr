@@ -372,6 +372,10 @@ def kernel(tag, n):
 Notes:
 - Cast intrinsics take exactly one positional argument.
 - `float()`, `int()`, `bool()` (missing arg) and multi-argument forms like `float(a, b)` are compile errors.
+- For complex inputs:
+  - `float(complex)` and `int(complex)` cast the real component and discard the imaginary one.
+  - `bool(complex)` is `true` when either real or imaginary component is non-zero.
+  - `complex128 -> complex64` narrows both real and imaginary components.
 
 ### Reductions
 
