@@ -726,6 +726,219 @@ void test_complex_output_conversions() {
     }
 }
 
+static int run_real_to_complex64_case(const char *label, me_dtype in_dtype,
+                                      const void *x, const void *y,
+                                      const float _Complex *expected) {
+    int err;
+    me_expr *expr = NULL;
+    me_variable vars[] = {{"x", in_dtype}, {"y", in_dtype}};
+    float _Complex out[VECTOR_SIZE];
+
+    int rc_expr = me_compile("x + y", vars, 2, ME_COMPLEX64, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  FAIL %s: compilation error at position %d\n", label, err);
+        return 0;
+    }
+
+    const void *var_ptrs[] = {x, y};
+    int rc_eval = me_eval(expr, var_ptrs, 2, out, VECTOR_SIZE, NULL);
+    if (rc_eval != ME_EVAL_SUCCESS) {
+        printf("  FAIL %s: eval error %d\n", label, rc_eval);
+        me_free(expr);
+        return 0;
+    }
+
+    int ok = 1;
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        float dre = fabsf(crealf(out[i]) - crealf(expected[i]));
+        float dim = fabsf(cimagf(out[i]) - cimagf(expected[i]));
+        if (dre > 1e-6f || dim > 1e-6f) {
+            printf("  FAIL %s at [%d]: expected (%.9g, %.9g), got (%.9g, %.9g)\n",
+                   label, i, crealf(expected[i]), cimagf(expected[i]), crealf(out[i]), cimagf(out[i]));
+            ok = 0;
+        }
+    }
+
+    me_free(expr);
+    return ok;
+}
+
+static int run_real_to_complex128_case(const char *label, me_dtype in_dtype,
+                                       const void *x, const void *y,
+                                       const double _Complex *expected) {
+    int err;
+    me_expr *expr = NULL;
+    me_variable vars[] = {{"x", in_dtype}, {"y", in_dtype}};
+    double _Complex out[VECTOR_SIZE];
+
+    int rc_expr = me_compile("x + y", vars, 2, ME_COMPLEX128, &err, &expr);
+    if (rc_expr != ME_COMPILE_SUCCESS) {
+        printf("  FAIL %s: compilation error at position %d\n", label, err);
+        return 0;
+    }
+
+    const void *var_ptrs[] = {x, y};
+    int rc_eval = me_eval(expr, var_ptrs, 2, out, VECTOR_SIZE, NULL);
+    if (rc_eval != ME_EVAL_SUCCESS) {
+        printf("  FAIL %s: eval error %d\n", label, rc_eval);
+        me_free(expr);
+        return 0;
+    }
+
+    int ok = 1;
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        double dre = fabs(creal(out[i]) - creal(expected[i]));
+        double dim = fabs(cimag(out[i]) - cimag(expected[i]));
+        if (dre > 1e-12 || dim > 1e-12) {
+            printf("  FAIL %s at [%d]: expected (%.17g, %.17g), got (%.17g, %.17g)\n",
+                   label, i, creal(expected[i]), cimag(expected[i]), creal(out[i]), cimag(out[i]));
+            ok = 0;
+        }
+    }
+
+    me_free(expr);
+    return ok;
+}
+
+void test_real_to_complex_output_conversions() {
+    TEST("Real-to-complex promotions and float64->complex64");
+
+    int passed = 1;
+
+    {
+        bool x[VECTOR_SIZE] = {false, true, false, true, true, false, true, false, true, false};
+        bool y[VECTOR_SIZE] = {0};
+        float _Complex expected64[VECTOR_SIZE];
+        double _Complex expected128[VECTOR_SIZE];
+        for (int i = 0; i < VECTOR_SIZE; i++) {
+            expected64[i] = (float _Complex)(x[i] + y[i]);
+            expected128[i] = (double _Complex)(x[i] + y[i]);
+        }
+        passed &= run_real_to_complex64_case("bool->complex64", ME_BOOL, x, y, expected64);
+        passed &= run_real_to_complex128_case("bool->complex128", ME_BOOL, x, y, expected128);
+    }
+
+    {
+        int8_t x[VECTOR_SIZE] = {-100, -10, -1, 0, 1, 2, 7, 42, 100, 120};
+        int8_t y[VECTOR_SIZE] = {0};
+        float _Complex expected64[VECTOR_SIZE];
+        double _Complex expected128[VECTOR_SIZE];
+        for (int i = 0; i < VECTOR_SIZE; i++) {
+            expected64[i] = (float _Complex)(x[i] + y[i]);
+            expected128[i] = (double _Complex)(x[i] + y[i]);
+        }
+        passed &= run_real_to_complex64_case("int8->complex64", ME_INT8, x, y, expected64);
+        passed &= run_real_to_complex128_case("int8->complex128", ME_INT8, x, y, expected128);
+    }
+
+    {
+        int16_t x[VECTOR_SIZE] = {-30000, -1024, -1, 0, 1, 2, 42, 127, 1024, 30000};
+        int16_t y[VECTOR_SIZE] = {0};
+        float _Complex expected64[VECTOR_SIZE];
+        double _Complex expected128[VECTOR_SIZE];
+        for (int i = 0; i < VECTOR_SIZE; i++) {
+            expected64[i] = (float _Complex)(x[i] + y[i]);
+            expected128[i] = (double _Complex)(x[i] + y[i]);
+        }
+        passed &= run_real_to_complex64_case("int16->complex64", ME_INT16, x, y, expected64);
+        passed &= run_real_to_complex128_case("int16->complex128", ME_INT16, x, y, expected128);
+    }
+
+    {
+        int32_t x[VECTOR_SIZE] = {-1000000, -1000, -1, 0, 1, 2, 42, 127, 1024, 1000000};
+        int32_t y[VECTOR_SIZE] = {0};
+        float _Complex expected64[VECTOR_SIZE];
+        double _Complex expected128[VECTOR_SIZE];
+        for (int i = 0; i < VECTOR_SIZE; i++) {
+            expected64[i] = (float _Complex)(x[i] + y[i]);
+            expected128[i] = (double _Complex)(x[i] + y[i]);
+        }
+        passed &= run_real_to_complex64_case("int32->complex64", ME_INT32, x, y, expected64);
+        passed &= run_real_to_complex128_case("int32->complex128", ME_INT32, x, y, expected128);
+    }
+
+    {
+        int64_t x[VECTOR_SIZE] = {-1000000LL, -1000LL, -1LL, 0LL, 1LL, 2LL, 42LL, 127LL, 1024LL, 1000000LL};
+        int64_t y[VECTOR_SIZE] = {0};
+        float _Complex expected64[VECTOR_SIZE];
+        double _Complex expected128[VECTOR_SIZE];
+        for (int i = 0; i < VECTOR_SIZE; i++) {
+            expected64[i] = (float _Complex)(x[i] + y[i]);
+            expected128[i] = (double _Complex)(x[i] + y[i]);
+        }
+        passed &= run_real_to_complex64_case("int64->complex64", ME_INT64, x, y, expected64);
+        passed &= run_real_to_complex128_case("int64->complex128", ME_INT64, x, y, expected128);
+    }
+
+    {
+        uint8_t x[VECTOR_SIZE] = {0, 1, 2, 7, 42, 100, 127, 128, 200, 255};
+        uint8_t y[VECTOR_SIZE] = {0};
+        float _Complex expected64[VECTOR_SIZE];
+        double _Complex expected128[VECTOR_SIZE];
+        for (int i = 0; i < VECTOR_SIZE; i++) {
+            expected64[i] = (float _Complex)(x[i] + y[i]);
+            expected128[i] = (double _Complex)(x[i] + y[i]);
+        }
+        passed &= run_real_to_complex64_case("uint8->complex64", ME_UINT8, x, y, expected64);
+        passed &= run_real_to_complex128_case("uint8->complex128", ME_UINT8, x, y, expected128);
+    }
+
+    {
+        uint16_t x[VECTOR_SIZE] = {0, 1, 2, 7, 42, 100, 255, 1024, 32767, 65535};
+        uint16_t y[VECTOR_SIZE] = {0};
+        float _Complex expected64[VECTOR_SIZE];
+        double _Complex expected128[VECTOR_SIZE];
+        for (int i = 0; i < VECTOR_SIZE; i++) {
+            expected64[i] = (float _Complex)(x[i] + y[i]);
+            expected128[i] = (double _Complex)(x[i] + y[i]);
+        }
+        passed &= run_real_to_complex64_case("uint16->complex64", ME_UINT16, x, y, expected64);
+        passed &= run_real_to_complex128_case("uint16->complex128", ME_UINT16, x, y, expected128);
+    }
+
+    {
+        uint32_t x[VECTOR_SIZE] = {0U, 1U, 2U, 7U, 42U, 100U, 255U, 1024U, 65535U, 1000000U};
+        uint32_t y[VECTOR_SIZE] = {0};
+        float _Complex expected64[VECTOR_SIZE];
+        double _Complex expected128[VECTOR_SIZE];
+        for (int i = 0; i < VECTOR_SIZE; i++) {
+            expected64[i] = (float _Complex)(x[i] + y[i]);
+            expected128[i] = (double _Complex)(x[i] + y[i]);
+        }
+        passed &= run_real_to_complex64_case("uint32->complex64", ME_UINT32, x, y, expected64);
+        passed &= run_real_to_complex128_case("uint32->complex128", ME_UINT32, x, y, expected128);
+    }
+
+    {
+        uint64_t x[VECTOR_SIZE] = {0ULL, 1ULL, 2ULL, 7ULL, 42ULL, 100ULL, 255ULL, 1024ULL, 65535ULL, 1000000ULL};
+        uint64_t y[VECTOR_SIZE] = {0};
+        float _Complex expected64[VECTOR_SIZE];
+        double _Complex expected128[VECTOR_SIZE];
+        for (int i = 0; i < VECTOR_SIZE; i++) {
+            expected64[i] = (float _Complex)(x[i] + y[i]);
+            expected128[i] = (double _Complex)(x[i] + y[i]);
+        }
+        passed &= run_real_to_complex64_case("uint64->complex64", ME_UINT64, x, y, expected64);
+        passed &= run_real_to_complex128_case("uint64->complex128", ME_UINT64, x, y, expected128);
+    }
+
+    {
+        double x[VECTOR_SIZE] = {-3.5, -2.1, -1.0, 0.0, 1.2, 2.8, 42.0, 127.9, 128.1, 1000.4};
+        double y[VECTOR_SIZE] = {0};
+        float _Complex expected64[VECTOR_SIZE];
+        for (int i = 0; i < VECTOR_SIZE; i++) {
+            expected64[i] = (float _Complex)(x[i] + y[i]);
+        }
+        passed &= run_real_to_complex64_case("float64->complex64", ME_FLOAT64, x, y, expected64);
+    }
+
+    if (passed) {
+        printf("  PASS: Real-to-complex conversion outputs match expected casts\n");
+    } else {
+        tests_failed++;
+    }
+}
+
 int main() {
     printf("========================================================================\n");
     printf("TEST: Explicit Variable Types with Explicit Output Dtype\n");
@@ -743,6 +956,7 @@ int main() {
     test_integer_output_conversions();
     test_numeric_output_conversions();
     test_complex_output_conversions();
+    test_real_to_complex_output_conversions();
 
     printf("\n========================================================================\n");
     printf("Test Summary\n");
