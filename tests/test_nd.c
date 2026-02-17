@@ -208,6 +208,73 @@ cleanup:
     return status;
 }
 
+static int test_nd_int32_ramp_kernel_sum(void) {
+    int status = 0;
+    int err = 0;
+    me_expr* expr = NULL;
+    int64_t shape[2] = {1000, 1000};
+    int32_t chunkshape[2] = {257, 251};
+    int32_t blockshape[2] = {129, 127};
+
+    int rc = me_compile_nd(
+        "def kernel():\n"
+        "    return _i0 * _n1 + _i1\n",
+        NULL, 0, ME_INT32, 2, shape, chunkshape, blockshape, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("FAILED me_compile_nd int32 ramp: %d (err=%d)\n", rc, err);
+        return 1;
+    }
+
+    const int64_t padded_items = (int64_t)blockshape[0] * blockshape[1];
+    int32_t *out = (int32_t *)malloc((size_t)padded_items * sizeof(int32_t));
+    if (!out) {
+        printf("FAILED alloc output for int32 ramp test\n");
+        me_free(expr);
+        return 1;
+    }
+
+    const int64_t nchunks_dim0 = (shape[0] + chunkshape[0] - 1) / chunkshape[0];
+    const int64_t nchunks_dim1 = (shape[1] + chunkshape[1] - 1) / chunkshape[1];
+    const int64_t nblocks_dim0 = (chunkshape[0] + blockshape[0] - 1) / blockshape[0];
+    const int64_t nblocks_dim1 = (chunkshape[1] + blockshape[1] - 1) / blockshape[1];
+
+    int64_t sum = 0;
+    for (int64_t c0 = 0; c0 < nchunks_dim0; c0++) {
+        for (int64_t c1 = 0; c1 < nchunks_dim1; c1++) {
+            const int64_t nchunk = c0 * nchunks_dim1 + c1;
+            for (int64_t b0 = 0; b0 < nblocks_dim0; b0++) {
+                for (int64_t b1 = 0; b1 < nblocks_dim1; b1++) {
+                    const int64_t nblock = b0 * nblocks_dim1 + b1;
+                    memset(out, 0, (size_t)padded_items * sizeof(int32_t));
+                    rc = me_eval_nd(expr, NULL, 0, out, padded_items, nchunk, nblock, NULL);
+                    if (rc != ME_EVAL_SUCCESS) {
+                        printf("FAILED me_eval_nd int32 ramp (rc=%d, chunk=%lld, block=%lld)\n",
+                               rc, (long long)nchunk, (long long)nblock);
+                        status = 1;
+                        goto cleanup;
+                    }
+                    for (int64_t i = 0; i < padded_items; i++) {
+                        sum += out[i];
+                    }
+                }
+            }
+        }
+    }
+
+    int64_t nitems = shape[0] * shape[1];
+    int64_t expected_sum = nitems * (nitems - 1) / 2;
+    if (sum != expected_sum) {
+        printf("FAILED int32 ramp sum mismatch (got=%lld expected=%lld)\n",
+               (long long)sum, (long long)expected_sum);
+        status = 1;
+    }
+
+cleanup:
+    free(out);
+    me_free(expr);
+    return status;
+}
+
 static int test_nd_unary_int32_float_math(void) {
     int status = 0;
     int err = 0;
@@ -1101,6 +1168,11 @@ int main(void) {
     int t14 = test_nd_float_index_cast_padding();
     failed |= t14;
     printf("Result: %s\n\n", t14 ? "FAIL" : "PASS");
+
+    printf("Test 15: DSL int32 ramp kernel sum regression\n");
+    int t15 = test_nd_int32_ramp_kernel_sum();
+    failed |= t15;
+    printf("Result: %s\n\n", t15 ? "FAIL" : "PASS");
 
     printf("=====================\n");
     printf("Summary: %s\n", failed ? "FAIL" : "PASS");
