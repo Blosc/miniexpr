@@ -96,9 +96,8 @@ For log = base 10 log comment the next line. */
 #ifndef ME_USE_WASM32_JIT
 #define ME_USE_WASM32_JIT 0
 #endif
-#if ME_USE_WASM32_JIT
-/* Forward declarations for EM_JS helpers defined later in the file. */
-extern void me_wasm_jit_free_fn(int idx);
+#ifndef ME_WASM32_SIDE_MODULE
+#define ME_WASM32_SIDE_MODULE 0
 #endif
 #ifndef ME_DSL_TRACE_DEFAULT
 #define ME_DSL_TRACE_DEFAULT 0
@@ -115,6 +114,47 @@ extern void me_wasm_jit_free_fn(int idx);
 typedef int (*me_dsl_jit_kernel_fn)(const void **inputs, void *output, int nitems);
 #else
 typedef int (*me_dsl_jit_kernel_fn)(const void **inputs, void *output, int64_t nitems);
+#endif
+
+#if ME_USE_WASM32_JIT
+#if !ME_WASM32_SIDE_MODULE
+/* Forward declarations for main-module EM_JS helpers defined later in the file. */
+int me_wasm_jit_instantiate(const unsigned char *wasm_bytes, int wasm_len,
+                            int bridge_lookup_fn_idx);
+void me_wasm_jit_free_fn(int idx);
+#endif
+
+static me_wasm_jit_instantiate_helper g_me_wasm_jit_instantiate_helper = NULL;
+static me_wasm_jit_free_helper g_me_wasm_jit_free_helper = NULL;
+
+#if ME_WASM32_SIDE_MODULE
+static bool me_wasm_jit_helpers_available(void) {
+    return g_me_wasm_jit_instantiate_helper != NULL &&
+           g_me_wasm_jit_free_helper != NULL;
+}
+#endif
+
+static int me_wasm_jit_instantiate_dispatch(const unsigned char *wasm_bytes, int wasm_len,
+                                            int bridge_lookup_fn_idx) {
+#if ME_WASM32_SIDE_MODULE
+    if (!g_me_wasm_jit_instantiate_helper) {
+        return 0;
+    }
+    return g_me_wasm_jit_instantiate_helper(wasm_bytes, wasm_len, bridge_lookup_fn_idx);
+#else
+    return me_wasm_jit_instantiate(wasm_bytes, wasm_len, bridge_lookup_fn_idx);
+#endif
+}
+
+static void me_wasm_jit_free_dispatch(int idx) {
+#if ME_WASM32_SIDE_MODULE
+    if (g_me_wasm_jit_free_helper) {
+        g_me_wasm_jit_free_helper(idx);
+    }
+#else
+    me_wasm_jit_free_fn(idx);
+#endif
+}
 #endif
 
 /* ND metadata attached to compiled expressions (used by me_eval_nd). */
@@ -875,7 +915,7 @@ static void dsl_compiled_program_free(me_dsl_compiled_program *program) {
 #endif
 #if ME_USE_WASM32_JIT
     if (program->jit_kernel_fn && !program->jit_dl_handle_cached) {
-        me_wasm_jit_free_fn((int)(uintptr_t)program->jit_kernel_fn);
+        me_wasm_jit_free_dispatch((int)(uintptr_t)program->jit_kernel_fn);
     }
     /* jit_dl_handle holds the wasm32 JIT scratch memory. */
     free(program->jit_dl_handle);
@@ -5816,8 +5856,10 @@ static bool dsl_jit_runtime_enabled(void) {
 }
 
 #if ME_USE_WASM32_JIT
-#include <emscripten.h>
 #include "libtcc.h"
+
+#if !ME_WASM32_SIDE_MODULE
+#include <emscripten.h>
 
 /* JS helper: patch a TCC-emitted wasm module so it imports the host's linear
    memory instead of defining its own, then instantiate and return a
@@ -6219,6 +6261,7 @@ EM_JS(int, me_wasm_jit_instantiate,
 EM_JS(void, me_wasm_jit_free_fn, (int idx), {
     if (idx) removeFunction(idx);
 });
+#endif
 
 static void dsl_wasm_tcc_error_handler(void *opaque, const char *msg) {
     (void)opaque;
@@ -6393,6 +6436,12 @@ static bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program) {
     if (!program || !program->jit_c_source) {
         return false;
     }
+#if ME_WASM32_SIDE_MODULE
+    if (!me_wasm_jit_helpers_available()) {
+        dsl_tracef("jit runtime skip: side-module wasm32 helpers are not registered");
+        return false;
+    }
+#endif
 
     /* Patch int64_t → int for nitems (wasm32 backend limitation). */
     char *patched_src = dsl_wasm32_patch_source(program->jit_c_source);
@@ -6479,8 +6528,8 @@ static bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program) {
     remove(wasm_path);
 
     /* Instantiate the wasm module and get a callable function pointer. */
-    int fn_idx = me_wasm_jit_instantiate(wasm_bytes, (int)wasm_len,
-                                         (int)(uintptr_t)&dsl_wasm32_lookup_bridge_symbol);
+    int fn_idx = me_wasm_jit_instantiate_dispatch(wasm_bytes, (int)wasm_len,
+                                                  (int)(uintptr_t)&dsl_wasm32_lookup_bridge_symbol);
     free(wasm_bytes);
     if (fn_idx == 0) {
         free(jit_scratch);
@@ -7801,6 +7850,17 @@ bool me_expr_has_jit_kernel(const me_expr *expr) {
     }
     const me_dsl_compiled_program *program = (const me_dsl_compiled_program *)expr->dsl_program;
     return program->jit_kernel_fn != NULL;
+}
+
+void me_register_wasm_jit_helpers(me_wasm_jit_instantiate_helper instantiate_helper,
+                                  me_wasm_jit_free_helper free_helper) {
+#if ME_USE_WASM32_JIT
+    g_me_wasm_jit_instantiate_helper = instantiate_helper;
+    g_me_wasm_jit_free_helper = free_helper;
+#else
+    (void)instantiate_helper;
+    (void)free_helper;
+#endif
 }
 
 const char* me_version(void) {

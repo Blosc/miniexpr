@@ -315,6 +315,18 @@ me_dtype me_get_dtype(const me_expr *expr);
 /* Returns true when a DSL expression has a callable JIT runtime kernel bound. */
 bool me_expr_has_jit_kernel(const me_expr *expr);
 
+/* Host-registered wasm32 JIT helpers (for side-module runtimes like Pyodide).
+ * instantiate must return a non-zero function-table index on success, or 0 on
+ * failure. free receives that index and should release it (if non-zero).
+ * When helpers are not registered, wasm32 JIT runtime compilation is skipped.
+ */
+typedef int (*me_wasm_jit_instantiate_helper)(const unsigned char *wasm_bytes,
+                                              int wasm_len,
+                                              int bridge_lookup_fn_idx);
+typedef void (*me_wasm_jit_free_helper)(int fn_idx);
+void me_register_wasm_jit_helpers(me_wasm_jit_instantiate_helper instantiate_helper,
+                                  me_wasm_jit_free_helper free_helper);
+
 /* Get the library version string (e.g., "1.0.0"). */
 const char *me_version(void);
 
