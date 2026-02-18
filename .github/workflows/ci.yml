@@ -102,6 +102,7 @@ jobs:
       run: |
         grep -E '^MINIEXPR_BUILD_BUNDLED_LIBTCC:BOOL=OFF$' build-wasm32/CMakeCache.txt
         grep -E '^MINIEXPR_ENABLE_TCC_JIT:BOOL=ON$' build-wasm32/CMakeCache.txt
+        grep -E '^MINIEXPR_WASM32_SIDE_MODULE:BOOL=ON$' build-wasm32/CMakeCache.txt
 
     - name: Build wasm32 miniexpr + tests
       shell: bash
@@ -113,6 +114,15 @@ jobs:
       run: |
         ctest --test-dir build-wasm32 --output-on-failure || \
           ctest --test-dir build-wasm32 --rerun-failed --output-on-failure
+
+    - name: Verify wasm32 side-module JIT helper path
+      shell: bash
+      run: |
+        set -o pipefail
+        ME_DSL_TRACE=1 ctest --test-dir build-wasm32 -R "^test_dsl_jit_side_module$" -V \
+          | tee build-wasm32/side-module-trace.log
+        grep -Eq "\\[me-dsl\\] jit runtime built: fp=.* compiler=tcc" \
+          build-wasm32/side-module-trace.log
 
     - name: Trace DSL JIT behavior (wasm32)
       shell: bash
