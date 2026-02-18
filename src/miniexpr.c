@@ -4524,10 +4524,17 @@ static void dsl_jit_libtcc_add_library_path_if_exists(me_tcc_state *state, const
     if (!state || !g_dsl_tcc_api.tcc_add_library_path_fn || !path || path[0] == '\0') {
         return;
     }
+#if defined(_WIN32) || defined(_WIN64)
+    DWORD attrs = GetFileAttributesA(path);
+    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+        (void)g_dsl_tcc_api.tcc_add_library_path_fn(state, path);
+    }
+#else
     struct stat st;
     if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
         (void)g_dsl_tcc_api.tcc_add_library_path_fn(state, path);
     }
+#endif
 }
 
 static void dsl_jit_libtcc_add_multiarch_paths(me_tcc_state *state) {
