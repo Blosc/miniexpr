@@ -68,6 +68,26 @@ static int compile_eval_double(const char *src, me_variable *vars, int nvars,
     return 0;
 }
 
+static int compile_eval_int64(const char *src, me_variable *vars, int nvars,
+                              const void **inputs, int nitems, int64_t *out) {
+    if (!src || !out || nitems <= 0) {
+        return 1;
+    }
+    me_expr *expr = NULL;
+    int err = 0;
+    if (me_compile(src, vars, nvars, ME_INT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: compile error at %d\n", err);
+        return 1;
+    }
+    int rc = me_eval(expr, inputs, nvars, out, nitems, NULL);
+    me_free(expr);
+    if (rc != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: eval error (%d)\n", rc);
+        return 1;
+    }
+    return 0;
+}
+
 static int test_assign_and_result_stmt(void) {
     printf("\n=== DSL Test 1: assignments + return ===\n");
 
@@ -1601,8 +1621,127 @@ static int test_cast_intrinsics(void) {
     return 0;
 }
 
+static int test_cast_conversion_runtime_parity(void) {
+    printf("\n=== DSL Test 23: cast conversion runtime parity ===\n");
+
+    int rc = 1;
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+
+    {
+        const char *src =
+            "def kernel():\n"
+            "    return int(3.9)\n";
+        int64_t out_interp[4] = {0, 0, 0, 0};
+        int64_t out_jit[4] = {0, 0, 0, 0};
+
+        if (setenv("ME_DSL_JIT", "0", 1) != 0) {
+            printf("  ❌ FAILED: setenv ME_DSL_JIT=0 failed\n");
+            goto cleanup;
+        }
+        if (compile_eval_int64(src, NULL, 0, NULL, 4, out_interp) != 0) {
+            goto cleanup;
+        }
+
+        if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+            printf("  ❌ FAILED: setenv ME_DSL_JIT=1 failed\n");
+            goto cleanup;
+        }
+        if (compile_eval_int64(src, NULL, 0, NULL, 4, out_jit) != 0) {
+            goto cleanup;
+        }
+
+        for (int i = 0; i < 4; i++) {
+            if (out_interp[i] != out_jit[i] || out_jit[i] != 3) {
+                printf("  ❌ FAILED: int(3.9) mismatch at %d (interp=%lld jit=%lld)\n",
+                       i, (long long)out_interp[i], (long long)out_jit[i]);
+                goto cleanup;
+            }
+        }
+    }
+
+    {
+        const char *src =
+            "def kernel(x):\n"
+            "    return float(int(x)) + bool(x)\n";
+        me_variable vars[] = {{"x", ME_FLOAT64}};
+        double x[6] = {0.0, 0.2, 1.0, 1.9, 2.0, 3.2};
+        double out_interp[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        double out_jit[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        double expected[6] = {0.0, 1.0, 2.0, 2.0, 3.0, 4.0};
+        const void *inputs[] = {x};
+
+        if (setenv("ME_DSL_JIT", "0", 1) != 0) {
+            printf("  ❌ FAILED: setenv ME_DSL_JIT=0 failed\n");
+            goto cleanup;
+        }
+        if (compile_eval_double(src, vars, 1, inputs, 6, out_interp) != 0) {
+            goto cleanup;
+        }
+
+        if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+            printf("  ❌ FAILED: setenv ME_DSL_JIT=1 failed\n");
+            goto cleanup;
+        }
+        if (compile_eval_double(src, vars, 1, inputs, 6, out_jit) != 0) {
+            goto cleanup;
+        }
+
+        for (int i = 0; i < 6; i++) {
+            if (out_interp[i] != out_jit[i] || out_jit[i] != expected[i]) {
+                printf("  ❌ FAILED: float(int(x))+bool(x) mismatch at %d (interp=%.17g jit=%.17g exp=%.17g)\n",
+                       i, out_interp[i], out_jit[i], expected[i]);
+                goto cleanup;
+            }
+        }
+    }
+
+    {
+        const char *src =
+            "def kernel(x):\n"
+            "    return int(x)\n";
+        me_variable vars[] = {{"x", ME_FLOAT32}};
+        float x[6] = {0.0f, -1.9f, 2.2f, 3.9f, 255.8f, -1024.5f};
+        int64_t out_interp[6] = {0, 0, 0, 0, 0, 0};
+        int64_t out_jit[6] = {0, 0, 0, 0, 0, 0};
+        int64_t expected[6] = {0, -1, 2, 3, 255, -1024};
+        const void *inputs[] = {x};
+
+        if (setenv("ME_DSL_JIT", "0", 1) != 0) {
+            printf("  ❌ FAILED: setenv ME_DSL_JIT=0 failed\n");
+            goto cleanup;
+        }
+        if (compile_eval_int64(src, vars, 1, inputs, 6, out_interp) != 0) {
+            goto cleanup;
+        }
+
+        if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+            printf("  ❌ FAILED: setenv ME_DSL_JIT=1 failed\n");
+            goto cleanup;
+        }
+        if (compile_eval_int64(src, vars, 1, inputs, 6, out_jit) != 0) {
+            goto cleanup;
+        }
+
+        for (int i = 0; i < 6; i++) {
+            if (out_interp[i] != out_jit[i] || out_jit[i] != expected[i]) {
+                printf("  ❌ FAILED: float32->int64 cast mismatch at %d (interp=%lld jit=%lld exp=%lld)\n",
+                       i, (long long)out_interp[i], (long long)out_jit[i], (long long)expected[i]);
+                goto cleanup;
+            }
+        }
+    }
+
+    rc = 0;
+    printf("  ✅ PASSED\n");
+
+cleanup:
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    free(saved_jit);
+    return rc;
+}
+
 static int test_compound_assignment_desugar(void) {
-    printf("\n=== DSL Test 23: compound assignment desugaring ===\n");
+    printf("\n=== DSL Test 24: compound assignment desugaring ===\n");
 
     const char *src =
         "def kernel():\n"
@@ -1686,6 +1825,7 @@ int main(void) {
     fail |= test_dsl_print_stmt();
     fail |= test_string_truthiness();
     fail |= test_cast_intrinsics();
+    fail |= test_cast_conversion_runtime_parity();
     fail |= test_compound_assignment_desugar();
     return fail;
 }

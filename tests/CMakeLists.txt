@@ -18,7 +18,9 @@ if(EMSCRIPTEN)
   # These rely on host runtime features that are not available in plain wasm32 CI.
   list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_threadsafe_chunk\\.c$")
   list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_jit_codegen\\.c$")
-  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_jit_runtime_cache\\.c$")
+  if(NOT (MINIEXPR_USE_WASM32_JIT AND MINIEXPR_WASM32_SIDE_MODULE))
+    list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_jit_runtime_cache\\.c$")
+  endif()
 endif()
 if(NOT (EMSCRIPTEN AND MINIEXPR_USE_WASM32_JIT AND MINIEXPR_WASM32_SIDE_MODULE))
   list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_jit_side_module\\.c$")
@@ -49,6 +51,11 @@ foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
       "SHELL:--embed-file ${CMAKE_SOURCE_DIR}/src/functions.c@/src/functions.c")
   endif()
   if(EMSCRIPTEN AND test_name STREQUAL "test_dsl_jit_side_module")
+    target_link_options("${test_name}" PRIVATE
+      "SHELL:--pre-js ${CMAKE_SOURCE_DIR}/src/me_jit_glue.js"
+      "-sEXPORTED_RUNTIME_METHODS=addFunction,removeFunction,stackSave,stackAlloc,stackRestore,lengthBytesUTF8,stringToUTF8")
+  endif()
+  if(EMSCRIPTEN AND test_name STREQUAL "test_dsl_jit_runtime_cache")
     target_link_options("${test_name}" PRIVATE
       "SHELL:--pre-js ${CMAKE_SOURCE_DIR}/src/me_jit_glue.js"
       "-sEXPORTED_RUNTIME_METHODS=addFunction,removeFunction,stackSave,stackAlloc,stackRestore,lengthBytesUTF8,stringToUTF8")

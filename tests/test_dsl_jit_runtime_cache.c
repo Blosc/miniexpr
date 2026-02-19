@@ -11,6 +11,10 @@
 #include <errno.h>
 #include <limits.h>
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#endif
+
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <dirent.h>
 #include <sys/stat.h>
@@ -25,6 +29,41 @@
 
 #ifndef ME_DSL_JIT_TEST_STUB_SO_PATH
 #define ME_DSL_JIT_TEST_STUB_SO_PATH ""
+#endif
+
+#if defined(__EMSCRIPTEN__)
+EM_JS(int, test_wasm_runtime_cache_instantiate,
+      (const unsigned char *wasm_bytes, int wasm_len, int bridge_lookup_fn_idx), {
+    if (typeof _meJitInstantiate !== "function") {
+        err("[test-runtime-cache] missing _meJitInstantiate");
+        return 0;
+    }
+    var runtime = {
+        HEAPF64: HEAPF64,
+        HEAPF32: HEAPF32,
+        wasmMemory: wasmMemory,
+        wasmTable: wasmTable,
+        stackSave: stackSave,
+        stackAlloc: stackAlloc,
+        stackRestore: stackRestore,
+        lengthBytesUTF8: lengthBytesUTF8,
+        stringToUTF8: stringToUTF8,
+        addFunction: addFunction,
+        err: err
+    };
+    var src = HEAPU8.subarray(wasm_bytes, wasm_bytes + wasm_len);
+    return _meJitInstantiate(runtime, src, bridge_lookup_fn_idx) | 0;
+});
+
+EM_JS(void, test_wasm_runtime_cache_free, (int idx), {
+    if (typeof _meJitFreeFn === "function") {
+        _meJitFreeFn({ removeFunction: removeFunction }, idx);
+        return;
+    }
+    if (idx) {
+        removeFunction(idx);
+    }
+});
 #endif
 
 static void configure_jit_stub_env(void) {
@@ -1361,8 +1400,18 @@ int main(void) {
     printf("  PASSED\n");
     return 0;
 #else
+#if defined(__EMSCRIPTEN__)
+    me_register_wasm_jit_helpers(test_wasm_runtime_cache_instantiate,
+                                 test_wasm_runtime_cache_free);
+#endif
     configure_jit_stub_env();
     int fail = 0;
+#if defined(__EMSCRIPTEN__)
+    fail |= test_jit_disable_env_guardrail();
+    fail |= test_default_tcc_skips_cc_backend();
+    fail |= test_cast_interpreter_jit_parity_compilers();
+    fail |= test_missing_return_skips_runtime_jit();
+#else
     fail |= test_negative_cache_skips_immediate_retry();
     fail |= test_positive_cache_reuses_loaded_kernel();
     fail |= test_rejects_metadata_mismatch_artifact();
@@ -1375,6 +1424,10 @@ int main(void) {
     fail |= test_missing_return_skips_runtime_jit();
     fail |= test_range_start_stop_step_jit_lowering();
     fail |= test_cc_backend_bridge_path();
+#endif
+#if defined(__EMSCRIPTEN__)
+    me_register_wasm_jit_helpers(NULL, NULL);
+#endif
     return fail;
 #endif
 }

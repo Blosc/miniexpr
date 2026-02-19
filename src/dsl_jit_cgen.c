@@ -424,6 +424,15 @@ static bool me_jit_ident_equals(const char *start, size_t ident_len, const char 
 }
 
 static const char *me_jit_function_name_rewrite(const char *start, size_t ident_len) {
+    if (me_jit_ident_equals(start, ident_len, "int")) {
+        return "ME_DSL_CAST_INT";
+    }
+    if (me_jit_ident_equals(start, ident_len, "float")) {
+        return "ME_DSL_CAST_FLOAT";
+    }
+    if (me_jit_ident_equals(start, ident_len, "bool")) {
+        return "ME_DSL_CAST_BOOL";
+    }
     if (me_jit_ident_equals(start, ident_len, "arctan2")) {
         return "atan2";
     }
@@ -1713,6 +1722,9 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         !me_jit_emit_line(&ctx.source, 0, "#ifndef false") ||
         !me_jit_emit_line(&ctx.source, 0, "#define false 0") ||
         !me_jit_emit_line(&ctx.source, 0, "#endif") ||
+        !me_jit_emit_line(&ctx.source, 0, "#define ME_DSL_CAST_INT(x) ((int64_t)(x))") ||
+        !me_jit_emit_line(&ctx.source, 0, "#define ME_DSL_CAST_FLOAT(x) ((double)(x))") ||
+        !me_jit_emit_line(&ctx.source, 0, "#define ME_DSL_CAST_BOOL(x) ((x) != 0)") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double acos(double);") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double acosh(double);") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double asin(double);") ||

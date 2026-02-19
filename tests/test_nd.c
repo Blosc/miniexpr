@@ -213,6 +213,58 @@ cleanup:
     return status;
 }
 
+static int test_nd_mixed_input_to_int_output_padding(void) {
+    int status = 0;
+    int err = 0;
+    me_expr* expr = NULL;
+    int64_t shape[2] = {3, 5};
+    int32_t chunkshape[2] = {2, 4};
+    int32_t blockshape[2] = {2, 3};
+    me_variable vars[] = {{"x", ME_FLOAT32}};
+
+    int rc = me_compile_nd(
+        "def kernel(x):\n"
+        "    return int(x) + int(_i0 * _n1 + _i1)\n",
+        vars, 1, ME_INT64, 2, shape, chunkshape, blockshape, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("FAILED me_compile_nd mixed input->int output: %d (err=%d)\n", rc, err);
+        return 1;
+    }
+
+    int64_t out[6] = {-1, -1, -1, -1, -1, -1};
+    int64_t valid = -1;
+    rc = me_nd_valid_nitems(expr, 1, 0, &valid);
+    if (rc != ME_EVAL_SUCCESS || valid != 2) {
+        printf("FAILED me_nd_valid_nitems mixed input->int output (rc=%d, valid=%lld)\n",
+               rc, (long long)valid);
+        status = 1;
+        goto cleanup;
+    }
+
+    float xblock[6] = {1.9f, 999.0f, 999.0f, -2.7f, 999.0f, 999.0f};
+    const void* inputs[] = {xblock};
+    rc = me_eval_nd(expr, inputs, 1, out, 6, 1, 0, NULL);
+    if (rc != ME_EVAL_SUCCESS) {
+        printf("FAILED me_eval_nd mixed input->int output (rc=%d)\n", rc);
+        status = 1;
+        goto cleanup;
+    }
+
+    int64_t expected[6] = {5, 0, 0, 7, 0, 0};
+    for (int i = 0; i < 6; i++) {
+        if (out[i] != expected[i]) {
+            printf("FAILED mixed input->int output mismatch at %d (got=%lld exp=%lld)\n",
+                   i, (long long)out[i], (long long)expected[i]);
+            status = 1;
+            goto cleanup;
+        }
+    }
+
+cleanup:
+    me_free(expr);
+    return status;
+}
+
 static int test_nd_float_index_cast_padding(void) {
     int status = 0;
     int err = 0;
@@ -1362,10 +1414,15 @@ int main(void) {
     failed |= t17;
     printf("Result: %s\n\n", t17 ? "FAIL" : "PASS");
 
-    printf("Test 18: DSL int32 ramp kernel sum regression\n");
-    int t18 = test_nd_int32_ramp_kernel_sum();
+    printf("Test 18: DSL mixed input dtype -> int64 output with ND padding\n");
+    int t18 = test_nd_mixed_input_to_int_output_padding();
     failed |= t18;
     printf("Result: %s\n\n", t18 ? "FAIL" : "PASS");
+
+    printf("Test 19: DSL int32 ramp kernel sum regression\n");
+    int t19 = test_nd_int32_ramp_kernel_sum();
+    failed |= t19;
+    printf("Result: %s\n\n", t19 ? "FAIL" : "PASS");
 
     printf("=====================\n");
     printf("Summary: %s\n", failed ? "FAIL" : "PASS");
