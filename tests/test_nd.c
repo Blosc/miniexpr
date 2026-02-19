@@ -505,6 +505,178 @@ cleanup:
     return status;
 }
 
+static int run_nd_python_blosc2_contract_case(const char *case_name,
+                                              const char *source,
+                                              const me_variable *vars,
+                                              int nvars,
+                                              const void **inputs,
+                                              int n_inputs) {
+    if (!case_name || !source) {
+        printf("FAILED python-blosc2 contract: invalid test arguments\n");
+        return 1;
+    }
+
+    int status = 0;
+    int err = 0;
+    int64_t shape[2] = {3, 5};
+    int32_t chunkshape[2] = {2, 4};
+    int32_t blockshape[2] = {2, 3};
+    const int64_t expected[6] = {4, 0, 0, 9, 0, 0};
+    const struct {
+        int compile_jit_mode;
+        me_jit_mode eval_jit_mode;
+        const char *label;
+    } jit_modes[] = {
+        {ME_JIT_DEFAULT, ME_JIT_DEFAULT, "default"},
+        {ME_JIT_OFF, ME_JIT_OFF, "jit_off"},
+        {ME_JIT_ON, ME_JIT_ON, "jit_on"},
+    };
+
+    for (int mode = 0; mode < (int)(sizeof(jit_modes) / sizeof(jit_modes[0])); mode++) {
+        me_expr *expr = NULL;
+        int rc = me_compile_nd_jit(source, vars, nvars, ME_INT64, 2,
+                                   shape, chunkshape, blockshape,
+                                   jit_modes[mode].compile_jit_mode, &err, &expr);
+        if (rc != ME_COMPILE_SUCCESS) {
+            printf("FAILED %s me_compile_nd_jit (%s): rc=%d err=%d\n",
+                   case_name, jit_modes[mode].label, rc, err);
+            status = 1;
+            goto cleanup;
+        }
+
+        int64_t valid = -1;
+        rc = me_nd_valid_nitems(expr, 1, 0, &valid);
+        if (rc != ME_EVAL_SUCCESS || valid != 2) {
+            printf("FAILED %s me_nd_valid_nitems (%s): rc=%d valid=%lld\n",
+                   case_name, jit_modes[mode].label, rc, (long long)valid);
+            me_free(expr);
+            status = 1;
+            goto cleanup;
+        }
+
+        int64_t out[6] = {-1, -1, -1, -1, -1, -1};
+        me_eval_params eval_params = {0};
+        eval_params.disable_simd = false;
+        eval_params.simd_ulp_mode = ME_SIMD_ULP_3_5;
+        eval_params.jit_mode = jit_modes[mode].eval_jit_mode;
+        rc = me_eval_nd(expr, inputs, n_inputs, out, 6, 1, 0, &eval_params);
+        if (rc != ME_EVAL_SUCCESS) {
+            printf("FAILED %s me_eval_nd (%s): rc=%d\n",
+                   case_name, jit_modes[mode].label, rc);
+            me_free(expr);
+            status = 1;
+            goto cleanup;
+        }
+
+        for (int i = 0; i < 6; i++) {
+            if (out[i] != expected[i]) {
+                printf("FAILED %s mismatch (%s) idx=%d got=%lld exp=%lld\n",
+                       case_name, jit_modes[mode].label, i,
+                       (long long)out[i], (long long)expected[i]);
+                me_free(expr);
+                status = 1;
+                goto cleanup;
+            }
+        }
+
+        me_free(expr);
+    }
+
+cleanup:
+    return status;
+}
+
+static int test_nd_python_blosc2_contract_int_cast_with_input_jit_modes(void) {
+    me_variable vars[] = {{"x", ME_FLOAT32}};
+    float xblock[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    const void *inputs[] = {xblock};
+    const char *source =
+        "def kernel_index_ramp_int_cast(x):\n"
+        "    return int(_i0 * _n1 + _i1)  # noqa: F821\n";
+
+    return run_nd_python_blosc2_contract_case(
+        "python-blosc2 with-input int cast contract",
+        source, vars, 1, inputs, 1);
+}
+
+static int test_nd_python_blosc2_contract_int_cast_no_input_jit_modes(void) {
+    me_variable vars[] = {{"__me_dummy0", ME_INT64}};
+    int64_t dummy[6] = {0, 0, 0, 0, 0, 0};
+    const void *inputs[] = {dummy};
+    const char *source =
+        "def kernel_index_ramp_no_inputs(__me_dummy0):\n"
+        "    return int(_i0 * _n1 + _i1)  # noqa: F821\n";
+
+    return run_nd_python_blosc2_contract_case(
+        "python-blosc2 no-input int cast contract",
+        source, vars, 1, inputs, 1);
+}
+
+static int run_nd_compile_failure_reason_case(const char *case_name,
+                                              const char *source,
+                                              const me_variable *vars,
+                                              int nvars,
+                                              const char *expected_reason_substr) {
+    if (!case_name || !source || !expected_reason_substr) {
+        printf("FAILED compile failure reason case: invalid arguments\n");
+        return 1;
+    }
+
+    int err = 0;
+    me_expr *expr = NULL;
+    int64_t shape[2] = {3, 5};
+    int32_t chunkshape[2] = {2, 4};
+    int32_t blockshape[2] = {2, 3};
+    int rc = me_compile_nd_jit(source, vars, nvars, ME_INT64, 2,
+                               shape, chunkshape, blockshape, ME_JIT_DEFAULT,
+                               &err, &expr);
+    if (rc == ME_COMPILE_SUCCESS) {
+        printf("FAILED %s: expected compile failure but rc=%d\n", case_name, rc);
+        me_free(expr);
+        return 1;
+    }
+
+    const char *reason = me_get_last_error_message();
+    if (!reason || strstr(reason, expected_reason_substr) == NULL) {
+        printf("FAILED %s: unexpected reason='%s' expected to contain '%s'\n",
+               case_name, reason ? reason : "<null>", expected_reason_substr);
+        me_free(expr);
+        return 1;
+    }
+
+    me_free(expr);
+    return 0;
+}
+
+static int test_nd_python_blosc2_contract_reason_param_mismatch(void) {
+    const char *source =
+        "def kernel_index_ramp_int_cast(x):\n"
+        "    return int(_i0 * _n1 + _i1)\n";
+    return run_nd_compile_failure_reason_case(
+        "python-blosc2 contract reason: param mismatch",
+        source, NULL, 0, "input count mismatch");
+}
+
+static int test_nd_python_blosc2_contract_reason_reserved_name(void) {
+    me_variable vars[] = {{"_i0", ME_FLOAT32}};
+    const char *source =
+        "def kernel_index_ramp_int_cast(_i0):\n"
+        "    return int(_i0)\n";
+    return run_nd_compile_failure_reason_case(
+        "python-blosc2 contract reason: reserved input name",
+        source, vars, 1, "reserved name");
+}
+
+static int test_nd_python_blosc2_contract_reason_invalid_cast_usage(void) {
+    me_variable vars[] = {{"x", ME_FLOAT32}};
+    const char *source =
+        "def kernel_index_ramp_int_cast(x):\n"
+        "    return int() + x\n";
+    return run_nd_compile_failure_reason_case(
+        "python-blosc2 contract reason: invalid cast usage",
+        source, vars, 1, "invalid cast intrinsic usage");
+}
+
 static int test_nd_unary_int32_float_math(void) {
     int status = 0;
     int err = 0;
@@ -1423,6 +1595,31 @@ int main(void) {
     int t19 = test_nd_int32_ramp_kernel_sum();
     failed |= t19;
     printf("Result: %s\n\n", t19 ? "FAIL" : "PASS");
+
+    printf("Test 20: python-blosc2 with-input int-cast contract (jit default/off/on)\n");
+    int t20 = test_nd_python_blosc2_contract_int_cast_with_input_jit_modes();
+    failed |= t20;
+    printf("Result: %s\n\n", t20 ? "FAIL" : "PASS");
+
+    printf("Test 21: python-blosc2 no-input int-cast contract (jit default/off/on)\n");
+    int t21 = test_nd_python_blosc2_contract_int_cast_no_input_jit_modes();
+    failed |= t21;
+    printf("Result: %s\n\n", t21 ? "FAIL" : "PASS");
+
+    printf("Test 22: python-blosc2 contract reason on parameter mismatch\n");
+    int t22 = test_nd_python_blosc2_contract_reason_param_mismatch();
+    failed |= t22;
+    printf("Result: %s\n\n", t22 ? "FAIL" : "PASS");
+
+    printf("Test 23: python-blosc2 contract reason on reserved input name\n");
+    int t23 = test_nd_python_blosc2_contract_reason_reserved_name();
+    failed |= t23;
+    printf("Result: %s\n\n", t23 ? "FAIL" : "PASS");
+
+    printf("Test 24: python-blosc2 contract reason on invalid cast usage\n");
+    int t24 = test_nd_python_blosc2_contract_reason_invalid_cast_usage();
+    failed |= t24;
+    printf("Result: %s\n\n", t24 ? "FAIL" : "PASS");
 
     printf("=====================\n");
     printf("Summary: %s\n", failed ? "FAIL" : "PASS");

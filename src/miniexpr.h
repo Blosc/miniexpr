@@ -210,6 +210,12 @@ int me_compile_nd_jit(const char *expression, const me_variable *variables,
                       const int32_t *blockshape, int jit_mode,
                       int *error, me_expr **out);
 
+/* Returns a thread-local, human-readable diagnostic message for the most
+ * recent failure in this thread (primarily compile/setup failures).
+ * Returns NULL when no detailed diagnostic is available.
+ */
+const char *me_get_last_error_message(void);
+
 /* Status codes for me_compile(). */
 typedef enum {
     ME_COMPILE_SUCCESS = 0,

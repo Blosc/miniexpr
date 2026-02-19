@@ -108,6 +108,17 @@ For log = base 10 log comment the next line. */
 #ifndef ME_DSL_JIT_LIBTCC_DEFAULT_PATH
 #define ME_DSL_JIT_LIBTCC_DEFAULT_PATH ""
 #endif
+#define ME_LAST_ERROR_MSG_CAP 256
+
+#if defined(_MSC_VER)
+#define ME_THREAD_LOCAL __declspec(thread)
+#elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
+#define ME_THREAD_LOCAL _Thread_local
+#elif defined(__GNUC__)
+#define ME_THREAD_LOCAL __thread
+#else
+#define ME_THREAD_LOCAL
+#endif
 
 #if ME_USE_WASM32_JIT
 /* wasm32 kernels use int for nitems (TCC wasm32 int64_t limitation). */
@@ -163,6 +174,31 @@ typedef struct {
     /* Layout: shape[ndims], chunkshape[ndims], blockshape[ndims] (all int64_t). */
     int64_t data[1];
 } me_nd_info;
+
+static ME_THREAD_LOCAL char g_me_last_error_msg[ME_LAST_ERROR_MSG_CAP];
+
+static void me_clear_last_error_message(void) {
+    g_me_last_error_msg[0] = '\0';
+}
+
+static void me_set_last_error_message(const char *msg) {
+    if (!msg || msg[0] == '\0') {
+        me_clear_last_error_message();
+        return;
+    }
+    snprintf(g_me_last_error_msg, sizeof(g_me_last_error_msg), "%s", msg);
+}
+
+static void me_set_last_error_messagef(const char *fmt, ...) {
+    if (!fmt || fmt[0] == '\0') {
+        me_clear_last_error_message();
+        return;
+    }
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(g_me_last_error_msg, sizeof(g_me_last_error_msg), fmt, args);
+    va_end(args);
+}
 
 static float me_crealf(float _Complex v);
 static float me_cimagf(float _Complex v);
@@ -2723,7 +2759,20 @@ typedef struct {
     me_dsl_compiled_program *program;
     const me_variable *funcs;
     int func_count;
+    char *error_reason;
+    size_t error_reason_cap;
 } dsl_compile_ctx;
+
+static void dsl_set_error_reason(dsl_compile_ctx *ctx, const char *msg) {
+    if (!ctx || !ctx->error_reason || ctx->error_reason_cap == 0) {
+        return;
+    }
+    if (!msg || msg[0] == '\0') {
+        ctx->error_reason[0] = '\0';
+        return;
+    }
+    snprintf(ctx->error_reason, ctx->error_reason_cap, "%s", msg);
+}
 
 static const char *dsl_fp_mode_name(me_dsl_fp_mode fp_mode) {
     switch (fp_mode) {
@@ -3403,6 +3452,7 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
     memset(out_expr, 0, sizeof(*out_expr));
     int cast_error_offset = -1;
     if (!dsl_validate_cast_intrinsics_usage(expr_node->text, &cast_error_offset)) {
+        dsl_set_error_reason(ctx, "invalid cast intrinsic usage: int()/float()/bool() must be called as functions");
         if (ctx->error_pos) {
             int offset = dsl_offset_from_linecol(ctx->source, expr_node->line, expr_node->column);
             if (offset >= 0 && cast_error_offset > 0) {
@@ -3470,6 +3520,7 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
                                 NULL, 0, expr_dtype, &local_error, &compiled);
     free(lookup);
     if (rc != ME_COMPILE_SUCCESS || !compiled) {
+        dsl_set_error_reason(ctx, "failed to compile DSL expression");
         if (ctx->error_pos) {
             int offset = dsl_offset_from_linecol(ctx->source, expr_node->line, expr_node->column);
             if (offset >= 0 && local_error > 0) {
@@ -7403,13 +7454,22 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
                                                     me_dtype dtype,
                                                     int jit_mode,
                                                     int *error_pos,
-                                                    bool *is_dsl) {
+                                                    bool *is_dsl,
+                                                    char *error_reason,
+                                                    size_t error_reason_cap) {
     me_dsl_error parse_error;
+    if (error_reason && error_reason_cap > 0) {
+        error_reason[0] = '\0';
+    }
     if (is_dsl) {
         *is_dsl = false;
     }
     me_dsl_program *parsed = me_dsl_parse(source, &parse_error);
     if (!parsed) {
+        if (error_reason && error_reason_cap > 0) {
+            snprintf(error_reason, error_reason_cap, "dsl parse error: %s",
+                     parse_error.message[0] ? parse_error.message : "unknown parse error");
+        }
         if (error_pos) {
             int off = dsl_offset_from_linecol(source, parse_error.line, parse_error.column);
             *error_pos = off >= 0 ? off : -1;
@@ -7429,6 +7489,9 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
 
     me_dsl_compiled_program *program = calloc(1, sizeof(*program));
     if (!program) {
+        if (error_reason && error_reason_cap > 0) {
+            snprintf(error_reason, error_reason_cap, "out of memory while allocating DSL program");
+        }
         me_dsl_program_free(parsed);
         if (error_pos) {
             *error_pos = -1;
@@ -7445,6 +7508,9 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     }
     program->local_slots = malloc(ME_MAX_VARS * sizeof(*program->local_slots));
     if (!program->local_slots) {
+        if (error_reason && error_reason_cap > 0) {
+            snprintf(error_reason, error_reason_cap, "out of memory while allocating DSL locals");
+        }
         dsl_compiled_program_free(program);
         me_dsl_program_free(parsed);
         if (error_pos) {
@@ -7465,6 +7531,9 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
         const me_variable *entry = &variables[i];
         const char *name = entry->name;
         if (!name) {
+            if (error_reason && error_reason_cap > 0) {
+                snprintf(error_reason, error_reason_cap, "invalid DSL input: variable name is NULL");
+            }
             if (error_pos) {
                 *error_pos = -1;
             }
@@ -7474,6 +7543,9 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
             return NULL;
         }
         if (!is_variable_entry(entry) && !is_function_entry(entry)) {
+            if (error_reason && error_reason_cap > 0) {
+                snprintf(error_reason, error_reason_cap, "invalid DSL input entry type for '%s'", name);
+            }
             dsl_compiled_program_free(program);
             me_dsl_program_free(parsed);
             if (error_pos) {
@@ -7485,6 +7557,10 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
         if (is_function_entry(entry)) {
             size_t name_len = strlen(name);
             if (dsl_is_reserved_name(name) || me_is_builtin_function_name(name, name_len)) {
+                if (error_reason && error_reason_cap > 0) {
+                    snprintf(error_reason, error_reason_cap,
+                             "DSL function name '%s' is reserved or collides with a builtin", name);
+                }
                 if (error_pos) {
                     *error_pos = -1;
                 }
@@ -7495,6 +7571,10 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
             }
             for (int j = 0; j < parsed->nparams; j++) {
                 if (strcmp(parsed->params[j], name) == 0) {
+                    if (error_reason && error_reason_cap > 0) {
+                        snprintf(error_reason, error_reason_cap,
+                                 "DSL function name '%s' collides with a parameter name", name);
+                    }
                     if (error_pos) {
                         *error_pos = -1;
                     }
@@ -7505,6 +7585,10 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
                 }
             }
             if (entry->dtype == ME_AUTO || !is_valid_dtype(entry->dtype) || entry->dtype == ME_STRING) {
+                if (error_reason && error_reason_cap > 0) {
+                    snprintf(error_reason, error_reason_cap,
+                             "DSL function '%s' has unsupported return dtype", name);
+                }
                 if (error_pos) {
                     *error_pos = -1;
                 }
@@ -7514,6 +7598,10 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
                 return NULL;
             }
             if (!entry->address) {
+                if (error_reason && error_reason_cap > 0) {
+                    snprintf(error_reason, error_reason_cap,
+                             "DSL function '%s' has NULL address", name);
+                }
                 if (error_pos) {
                     *error_pos = -1;
                 }
@@ -7523,6 +7611,10 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
                 return NULL;
             }
             if (dsl_var_table_find(&program->vars, name) >= 0) {
+                if (error_reason && error_reason_cap > 0) {
+                    snprintf(error_reason, error_reason_cap,
+                             "duplicate DSL symbol '%s' in input/function table", name);
+                }
                 if (error_pos) {
                     *error_pos = -1;
                 }
@@ -7533,6 +7625,10 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
             }
             for (int j = 0; j < func_count; j++) {
                 if (strcmp(funcs[j].name, name) == 0) {
+                    if (error_reason && error_reason_cap > 0) {
+                        snprintf(error_reason, error_reason_cap,
+                                 "duplicate DSL function name '%s'", name);
+                    }
                     if (error_pos) {
                         *error_pos = -1;
                     }
@@ -7546,6 +7642,10 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
                 int new_cap = func_capacity ? func_capacity * 2 : 8;
                 me_variable *next = realloc(funcs, (size_t)new_cap * sizeof(*next));
                 if (!next) {
+                    if (error_reason && error_reason_cap > 0) {
+                        snprintf(error_reason, error_reason_cap,
+                                 "out of memory while storing DSL function symbols");
+                    }
                     if (error_pos) {
                         *error_pos = -1;
                     }
@@ -7561,6 +7661,10 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
             continue;
         }
         if (dsl_is_reserved_name(name)) {
+            if (error_reason && error_reason_cap > 0) {
+                snprintf(error_reason, error_reason_cap,
+                         "DSL input variable '%s' uses a reserved name", name);
+            }
             if (error_pos) {
                 *error_pos = -1;
             }
@@ -7571,6 +7675,10 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
         }
         for (int j = 0; j < func_count; j++) {
             if (strcmp(funcs[j].name, name) == 0) {
+                if (error_reason && error_reason_cap > 0) {
+                    snprintf(error_reason, error_reason_cap,
+                             "DSL input variable '%s' collides with a function name", name);
+                }
                 if (error_pos) {
                     *error_pos = -1;
                 }
@@ -7590,6 +7698,10 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
         }
         int idx = dsl_var_table_add_with_uniform(&program->vars, name, vtype, itemsize, false);
         if (idx < 0) {
+            if (error_reason && error_reason_cap > 0) {
+                snprintf(error_reason, error_reason_cap,
+                         "failed to register DSL input variable '%s'", name);
+            }
             free(funcs);
             dsl_compiled_program_free(program);
             me_dsl_program_free(parsed);
@@ -7601,6 +7713,11 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
         input_count++;
     }
     if (input_count != parsed->nparams) {
+        if (error_reason && error_reason_cap > 0) {
+            snprintf(error_reason, error_reason_cap,
+                     "DSL input count mismatch: function expects %d parameter(s), got %d",
+                     parsed->nparams, input_count);
+        }
         if (error_pos) {
             *error_pos = -1;
         }
@@ -7611,6 +7728,10 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     }
     for (int i = 0; i < parsed->nparams; i++) {
         if (dsl_var_table_find(&program->vars, parsed->params[i]) < 0) {
+            if (error_reason && error_reason_cap > 0) {
+                snprintf(error_reason, error_reason_cap,
+                         "missing DSL input for parameter '%s'", parsed->params[i]);
+            }
             if (error_pos) {
                 *error_pos = -1;
             }
@@ -7625,6 +7746,11 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     if (dtype == ME_AUTO) {
         for (int i = 0; i < program->vars.count; i++) {
             if (program->vars.dtypes[i] == ME_AUTO) {
+                if (error_reason && error_reason_cap > 0) {
+                    snprintf(error_reason, error_reason_cap,
+                             "output dtype is ME_AUTO but variable '%s' dtype is unspecified",
+                             program->vars.names[i]);
+                }
                 if (error_pos) {
                     *error_pos = -1;
                 }
@@ -7651,6 +7777,10 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
             snprintf(name, sizeof(name), "_i%d", d);
             program->idx_i[d] = dsl_var_table_add(&program->vars, name, ME_INT64);
             if (program->idx_i[d] < 0) {
+                if (error_reason && error_reason_cap > 0) {
+                    snprintf(error_reason, error_reason_cap,
+                             "failed to register reserved index symbol '%s'", name);
+                }
                 if (error_pos) {
                     *error_pos = -1;
                 }
@@ -7666,6 +7796,10 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
             program->idx_n[d] = dsl_var_table_add_with_uniform(&program->vars, name, ME_INT64,
                                                                0, true);
             if (program->idx_n[d] < 0) {
+                if (error_reason && error_reason_cap > 0) {
+                    snprintf(error_reason, error_reason_cap,
+                             "failed to register reserved shape symbol '%s'", name);
+                }
                 if (error_pos) {
                     *error_pos = -1;
                 }
@@ -7680,6 +7814,10 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
         program->idx_ndim = dsl_var_table_add_with_uniform(&program->vars, "_ndim", ME_INT64,
                                                            0, true);
         if (program->idx_ndim < 0) {
+            if (error_reason && error_reason_cap > 0) {
+                snprintf(error_reason, error_reason_cap,
+                         "failed to register reserved symbol '_ndim'");
+            }
             if (error_pos) {
                 *error_pos = -1;
             }
@@ -7703,8 +7841,13 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     ctx.program = program;
     ctx.funcs = funcs;
     ctx.func_count = func_count;
+    ctx.error_reason = error_reason;
+    ctx.error_reason_cap = error_reason_cap;
 
     if (!dsl_compile_block(&ctx, &parsed->block, &program->block)) {
+        if (error_reason && error_reason_cap > 0 && error_reason[0] == '\0') {
+            snprintf(error_reason, error_reason_cap, "failed to compile DSL statement block");
+        }
         free(funcs);
         dsl_compiled_program_free(program);
         me_dsl_program_free(parsed);
@@ -7712,6 +7855,10 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     }
 
     if (!ctx.has_return || !ctx.output_expr || !ctx.output_expr->expr) {
+        if (error_reason && error_reason_cap > 0) {
+            snprintf(error_reason, error_reason_cap,
+                     "DSL kernel must return a value via a return statement");
+        }
         if (error_pos) {
             *error_pos = -1;
         }
@@ -7742,8 +7889,10 @@ int is_synthetic_address(const void* ptr) {
 static int compile_with_jit(const char* expression, const me_variable* variables,
                                        int var_count, me_dtype dtype, int jit_mode,
                                        int* error, me_expr** out) {
+    me_clear_last_error_message();
     if (out) *out = NULL;
     if (!expression || !out) {
+        me_set_last_error_message("invalid compile arguments: expression and output pointer are required");
         if (error) *error = -1;
         return ME_COMPILE_ERR_INVALID_ARG;
     }
@@ -7753,6 +7902,7 @@ static int compile_with_jit(const char* expression, const me_variable* variables
         if (variables && var_count > 0) {
             vars_dsl = malloc((size_t)var_count * sizeof(*vars_dsl));
             if (!vars_dsl) {
+                me_set_last_error_message("out of memory while preparing DSL variable table");
                 if (error) *error = -1;
                 return ME_COMPILE_ERR_OOM;
             }
@@ -7770,14 +7920,17 @@ static int compile_with_jit(const char* expression, const me_variable* variables
 
         bool is_dsl = false;
         int dsl_error = -1;
+        char dsl_reason[ME_LAST_ERROR_MSG_CAP] = {0};
         me_dsl_compiled_program *program = dsl_compile_program(
-            expression, vars_dsl ? vars_dsl : variables, var_count, dtype, jit_mode, &dsl_error, &is_dsl);
+            expression, vars_dsl ? vars_dsl : variables, var_count, dtype, jit_mode,
+            &dsl_error, &is_dsl, dsl_reason, sizeof(dsl_reason));
         free(vars_dsl);
 
         if (program) {
             me_expr *expr = new_expr(ME_CONSTANT, NULL);
             if (!expr) {
                 dsl_compiled_program_free(program);
+                me_set_last_error_message("out of memory while creating compiled DSL expression");
                 if (error) *error = -1;
                 return ME_COMPILE_ERR_OOM;
             }
@@ -7788,6 +7941,15 @@ static int compile_with_jit(const char* expression, const me_variable* variables
             return ME_COMPILE_SUCCESS;
         }
         if (is_dsl) {
+            if (dsl_reason[0] != '\0') {
+                me_set_last_error_message(dsl_reason);
+            }
+            else if (dsl_error >= 0) {
+                me_set_last_error_messagef("dsl parse/compile failed near offset %d", dsl_error);
+            }
+            else {
+                me_set_last_error_message("dsl parse/compile failed");
+            }
             if (error) *error = dsl_error;
             return ME_COMPILE_ERR_PARSE;
         }
@@ -7801,6 +7963,7 @@ static int compile_with_jit(const char* expression, const me_variable* variables
         if (variables && var_count > 0) {
             vars_dsl = malloc((size_t)var_count * sizeof(*vars_dsl));
             if (!vars_dsl) {
+                me_set_last_error_message("out of memory while preparing JIT DSL wrapper inputs");
                 if (error) *error = -1;
                 return ME_COMPILE_ERR_OOM;
             }
@@ -7821,14 +7984,17 @@ static int compile_with_jit(const char* expression, const me_variable* variables
         if (dsl_wrapped) {
             bool is_dsl = false;
             int dsl_error = -1;
+            char dsl_reason[ME_LAST_ERROR_MSG_CAP] = {0};
             me_dsl_compiled_program *program = dsl_compile_program(
-                dsl_wrapped, vars_dsl ? vars_dsl : variables, var_count, dtype, jit_mode, &dsl_error, &is_dsl);
+                dsl_wrapped, vars_dsl ? vars_dsl : variables, var_count, dtype, jit_mode,
+                &dsl_error, &is_dsl, dsl_reason, sizeof(dsl_reason));
             free(dsl_wrapped);
             free(vars_dsl);
             if (program) {
                 me_expr *expr = new_expr(ME_CONSTANT, NULL);
                 if (!expr) {
                     dsl_compiled_program_free(program);
+                    me_set_last_error_message("out of memory while creating JIT DSL wrapped expression");
                     if (error) *error = -1;
                     return ME_COMPILE_ERR_OOM;
                 }
@@ -7837,6 +8003,9 @@ static int compile_with_jit(const char* expression, const me_variable* variables
                 if (error) *error = 0;
                 *out = expr;
                 return ME_COMPILE_SUCCESS;
+            }
+            if (is_dsl && dsl_reason[0] != '\0') {
+                me_set_last_error_message(dsl_reason);
             }
         }
         else {
@@ -7862,6 +8031,7 @@ static int compile_with_jit(const char* expression, const me_variable* variables
             // Create copy with synthetic addresses
             vars_copy = malloc(var_count * sizeof(me_variable));
             if (!vars_copy) {
+                me_set_last_error_message("out of memory while creating synthetic variable addresses");
                 if (error) *error = -1;
                 return ME_COMPILE_ERR_OOM;
             }
@@ -7876,12 +8046,29 @@ static int compile_with_jit(const char* expression, const me_variable* variables
 
             int status = private_compile_ex(expression, vars_copy, var_count, NULL, 0, dtype, error, out);
             free(vars_copy);
+            if (status != ME_COMPILE_SUCCESS) {
+                if (error && *error > 0) {
+                    me_set_last_error_messagef("expression parse failed near offset %d", *error);
+                }
+                else {
+                    me_set_last_error_message("expression compilation failed");
+                }
+            }
             return status;
         }
     }
 
     // No NULL addresses, use variables as-is
-    return private_compile_ex(expression, variables, var_count, NULL, 0, dtype, error, out);
+    int status = private_compile_ex(expression, variables, var_count, NULL, 0, dtype, error, out);
+    if (status != ME_COMPILE_SUCCESS) {
+        if (error && *error > 0) {
+            me_set_last_error_messagef("expression parse failed near offset %d", *error);
+        }
+        else {
+            me_set_last_error_message("expression compilation failed");
+        }
+    }
+    return status;
 }
 
 int me_compile(const char* expression, const me_variable* variables,
@@ -7896,12 +8083,14 @@ static int compile_nd_with_jit(const char* expression, const me_variable* variab
                                           int* error, me_expr** out) {
     if (out) *out = NULL;
     if (!expression || !out || ndims <= 0 || !shape || !chunkshape || !blockshape) {
+        me_set_last_error_message("invalid nd compile arguments: expression, shapes and output pointer are required");
         if (error) *error = -1;
         return ME_COMPILE_ERR_INVALID_ARG;
     }
 
     for (int i = 0; i < ndims; i++) {
         if (chunkshape[i] <= 0 || blockshape[i] <= 0) {
+            me_set_last_error_messagef("invalid nd shape metadata at dim %d: chunkshape and blockshape must be > 0", i);
             if (error) *error = -1;
             return ME_COMPILE_ERR_INVALID_ARG;
         }
@@ -7918,6 +8107,7 @@ static int compile_nd_with_jit(const char* expression, const me_variable* variab
     me_nd_info* info = malloc(info_size);
     if (!info) {
         me_free(expr);
+        me_set_last_error_message("out of memory while allocating nd metadata");
         if (error) *error = -1;
         return ME_COMPILE_ERR_OOM;
     }
@@ -8010,6 +8200,13 @@ void me_print(const me_expr* n) {
 
 me_dtype me_get_dtype(const me_expr* expr) {
     return expr ? expr->dtype : ME_AUTO;
+}
+
+const char *me_get_last_error_message(void) {
+    if (g_me_last_error_msg[0] == '\0') {
+        return NULL;
+    }
+    return g_me_last_error_msg;
 }
 
 bool me_expr_has_jit_kernel(const me_expr *expr) {
