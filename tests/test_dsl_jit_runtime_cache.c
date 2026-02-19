@@ -1072,6 +1072,68 @@ static int test_cast_interpreter_jit_parity_compilers(void) {
     return 0;
 }
 
+static int test_wasm_cast_intrinsics_jit_skip(void) {
+#if !defined(__EMSCRIPTEN__)
+    return 0;
+#else
+    printf("\n=== DSL JIT Runtime Cache Test 8c: wasm cast intrinsics runtime-JIT fallback ===\n");
+
+    int rc = 1;
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+    const char *src =
+        "# me:compiler=cc\n"
+        "def kernel(x):\n"
+        "    return float(int(x)) + bool(x)\n";
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    int err = 0;
+    me_expr *expr = NULL;
+    double in[4] = {0.0, 0.2, 1.9, 3.2};
+    double out[4] = {0.0, 0.0, 0.0, 0.0};
+    const double expected[4] = {0.0, 1.0, 2.0, 4.0};
+    const void *inputs[] = {in};
+
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT=1 failed\n");
+        goto cleanup;
+    }
+
+    if (me_compile(src, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+        printf("  FAILED: compile error at %d\n", err);
+        me_free(expr);
+        goto cleanup;
+    }
+
+    if (me_expr_has_jit_kernel(expr)) {
+        printf("  FAILED: expected wasm runtime JIT fallback for cast intrinsics\n");
+        me_free(expr);
+        goto cleanup;
+    }
+
+    if (me_eval(expr, inputs, 1, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  FAILED: eval failed\n");
+        me_free(expr);
+        goto cleanup;
+    }
+    me_free(expr);
+
+    for (int i = 0; i < 4; i++) {
+        if (out[i] != expected[i]) {
+            printf("  FAILED: output mismatch at %d (%.17g vs %.17g)\n",
+                   i, out[i], expected[i]);
+            goto cleanup;
+        }
+    }
+
+    rc = 0;
+    printf("  PASSED\n");
+
+cleanup:
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    free(saved_jit);
+    return rc;
+#endif
+}
+
 static int test_missing_return_skips_runtime_jit(void) {
     printf("\n=== DSL JIT Runtime Cache Test 9: missing return skips runtime JIT ===\n");
 
@@ -1410,6 +1472,7 @@ int main(void) {
     fail |= test_jit_disable_env_guardrail();
     fail |= test_default_tcc_skips_cc_backend();
     fail |= test_cast_interpreter_jit_parity_compilers();
+    fail |= test_wasm_cast_intrinsics_jit_skip();
     fail |= test_missing_return_skips_runtime_jit();
 #else
     fail |= test_negative_cache_skips_immediate_retry();

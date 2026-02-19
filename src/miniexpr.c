@@ -6466,6 +6466,48 @@ static bool dsl_wasm32_source_calls_symbol(const char *src, const char *name) {
     return false;
 }
 
+static bool dsl_wasm32_source_uses_cast_intrinsics(const char *src) {
+    if (!src) {
+        return false;
+    }
+    const char *tok_int = "ME_DSL_CAST_INT(";
+    const char *tok_float = "ME_DSL_CAST_FLOAT(";
+    const char *tok_bool = "ME_DSL_CAST_BOOL(";
+    size_t tok_int_len = strlen(tok_int);
+    size_t tok_float_len = strlen(tok_float);
+    size_t tok_bool_len = strlen(tok_bool);
+    const char *line = src;
+    while (*line) {
+        const char *line_end = strchr(line, '\n');
+        if (!line_end) {
+            line_end = line + strlen(line);
+        }
+        const char *p = line;
+        while (p < line_end && isspace((unsigned char)*p)) {
+            p++;
+        }
+        if (p < line_end && *p != '#') {
+            for (const char *q = p; q < line_end; q++) {
+                size_t remain = (size_t)(line_end - q);
+                if (remain >= tok_int_len && memcmp(q, tok_int, tok_int_len) == 0) {
+                    return true;
+                }
+                if (remain >= tok_float_len && memcmp(q, tok_float, tok_float_len) == 0) {
+                    return true;
+                }
+                if (remain >= tok_bool_len && memcmp(q, tok_bool, tok_bool_len) == 0) {
+                    return true;
+                }
+            }
+        }
+        if (*line_end == '\0') {
+            break;
+        }
+        line = line_end + 1;
+    }
+    return false;
+}
+
 typedef struct {
     const char *name;
     const void *addr;
@@ -6560,6 +6602,12 @@ static bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program) {
         return false;
     }
 #endif
+    if (dsl_wasm32_source_uses_cast_intrinsics(program->jit_c_source)) {
+        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+                 "wasm32 runtime JIT does not yet support DSL cast intrinsics");
+        dsl_tracef("jit runtime skip: %s", program->jit_c_error);
+        return false;
+    }
 
     /* Patch int64_t → int for nitems (wasm32 backend limitation). */
     char *patched_src = dsl_wasm32_patch_source(program->jit_c_source);
@@ -6681,8 +6729,10 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
                    dsl_compiler_name(program->compiler));
         return;
     }
-    snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
-             "jit runtime wasm32 compilation failed");
+    if (program->jit_c_error[0] == '\0') {
+        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+                 "jit runtime wasm32 compilation failed");
+    }
     dsl_tracef("jit runtime skip: fp=%s compiler=%s reason=%s",
                dsl_fp_mode_name(program->fp_mode),
                dsl_compiler_name(program->compiler),
