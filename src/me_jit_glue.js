@@ -302,6 +302,15 @@
             me_jit_exp10: meJitExp10, me_jit_sinpi: meJitSinpi, me_jit_cospi: meJitCospi,
             me_jit_logaddexp: meJitLogaddexp, me_jit_where: meJitWhere
         };
+        env.me_wasm32_cast_int = function(x) {
+            return x < 0 ? Math.ceil(x) : Math.floor(x);
+        };
+        env.me_wasm32_cast_float = function(x) {
+            return x;
+        };
+        env.me_wasm32_cast_bool = function(x) {
+            return x !== 0 ? 1 : 0;
+        };
         /* Prefer host wasm bridge symbols; keep JS fallbacks for robustness. */
         env.me_jit_exp10 = bindBridge("me_jit_exp10", env.me_jit_exp10);
         env.me_jit_sinpi = bindBridge("me_jit_sinpi", env.me_jit_sinpi);

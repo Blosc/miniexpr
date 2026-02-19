@@ -1072,11 +1072,11 @@ static int test_cast_interpreter_jit_parity_compilers(void) {
     return 0;
 }
 
-static int test_wasm_cast_intrinsics_jit_skip(void) {
+static int test_wasm_cast_intrinsics_jit_enabled(void) {
 #if !defined(__EMSCRIPTEN__)
     return 0;
 #else
-    printf("\n=== DSL JIT Runtime Cache Test 8c: wasm cast intrinsics runtime-JIT fallback ===\n");
+    printf("\n=== DSL JIT Runtime Cache Test 8c: wasm cast intrinsics runtime-JIT enabled ===\n");
 
     int rc = 1;
     char *saved_jit = dup_env_value("ME_DSL_JIT");
@@ -1103,8 +1103,8 @@ static int test_wasm_cast_intrinsics_jit_skip(void) {
         goto cleanup;
     }
 
-    if (me_expr_has_jit_kernel(expr)) {
-        printf("  FAILED: expected wasm runtime JIT fallback for cast intrinsics\n");
+    if (!me_expr_has_jit_kernel(expr)) {
+        printf("  FAILED: expected wasm runtime JIT kernel for cast intrinsics\n");
         me_free(expr);
         goto cleanup;
     }
@@ -1472,7 +1472,7 @@ int main(void) {
     fail |= test_jit_disable_env_guardrail();
     fail |= test_default_tcc_skips_cc_backend();
     fail |= test_cast_interpreter_jit_parity_compilers();
-    fail |= test_wasm_cast_intrinsics_jit_skip();
+    fail |= test_wasm_cast_intrinsics_jit_enabled();
     fail |= test_missing_return_skips_runtime_jit();
 #else
     fail |= test_negative_cache_skips_immediate_retry();

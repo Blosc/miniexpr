@@ -6306,6 +6306,15 @@ EM_JS(int, me_wasm_jit_instantiate,
             me_jit_exp10: meJitExp10, me_jit_sinpi: meJitSinpi, me_jit_cospi: meJitCospi,
             me_jit_logaddexp: meJitLogaddexp, me_jit_where: meJitWhere
         };
+        env.me_wasm32_cast_int = function(x) {
+            return x < 0 ? Math.ceil(x) : Math.floor(x);
+        };
+        env.me_wasm32_cast_float = function(x) {
+            return x;
+        };
+        env.me_wasm32_cast_bool = function(x) {
+            return x !== 0 ? 1 : 0;
+        };
         /* Prefer host wasm bridge symbols; keep JS fallbacks for robustness. */
         env.me_jit_exp10 = bindBridge("me_jit_exp10", env.me_jit_exp10);
         env.me_jit_sinpi = bindBridge("me_jit_sinpi", env.me_jit_sinpi);
@@ -6448,6 +6457,15 @@ static char *dsl_wasm32_patch_source(const char *src) {
           (TCC wasm32 can't mix comparison types in ||) */
     typedef struct { const char *old; const char *rep; } Repl;
     Repl repls[] = {
+        { "#define ME_DSL_CAST_INT(x) ((int64_t)(x))",
+          "extern int me_wasm32_cast_int(double);\n"
+          "#define ME_DSL_CAST_INT(x) (me_wasm32_cast_int((double)(x)))" },
+        { "#define ME_DSL_CAST_FLOAT(x) ((double)(x))",
+          "extern double me_wasm32_cast_float(double);\n"
+          "#define ME_DSL_CAST_FLOAT(x) (me_wasm32_cast_float((double)(x)))" },
+        { "#define ME_DSL_CAST_BOOL(x) ((x) != 0)",
+          "extern int me_wasm32_cast_bool(double);\n"
+          "#define ME_DSL_CAST_BOOL(x) (me_wasm32_cast_bool((double)(x)))" },
         { "int64_t ",       "int "           },
         { "(int64_t)",      "(int)"          },
         { "if (!output || nitems < 0) {\n"
@@ -6462,7 +6480,7 @@ static char *dsl_wasm32_patch_source(const char *src) {
     };
     size_t nrepls = sizeof(repls) / sizeof(repls[0]);
     size_t src_len = strlen(src);
-    size_t alloc = src_len + 512;
+    size_t alloc = src_len + 2048;
     char *patched = (char *)malloc(alloc);
     if (!patched) return NULL;
     const char *p = src;
@@ -6513,48 +6531,6 @@ static bool dsl_wasm32_source_calls_symbol(const char *src, const char *name) {
             }
         }
         p++;
-    }
-    return false;
-}
-
-static bool dsl_wasm32_source_uses_cast_intrinsics(const char *src) {
-    if (!src) {
-        return false;
-    }
-    const char *tok_int = "ME_DSL_CAST_INT(";
-    const char *tok_float = "ME_DSL_CAST_FLOAT(";
-    const char *tok_bool = "ME_DSL_CAST_BOOL(";
-    size_t tok_int_len = strlen(tok_int);
-    size_t tok_float_len = strlen(tok_float);
-    size_t tok_bool_len = strlen(tok_bool);
-    const char *line = src;
-    while (*line) {
-        const char *line_end = strchr(line, '\n');
-        if (!line_end) {
-            line_end = line + strlen(line);
-        }
-        const char *p = line;
-        while (p < line_end && isspace((unsigned char)*p)) {
-            p++;
-        }
-        if (p < line_end && *p != '#') {
-            for (const char *q = p; q < line_end; q++) {
-                size_t remain = (size_t)(line_end - q);
-                if (remain >= tok_int_len && memcmp(q, tok_int, tok_int_len) == 0) {
-                    return true;
-                }
-                if (remain >= tok_float_len && memcmp(q, tok_float, tok_float_len) == 0) {
-                    return true;
-                }
-                if (remain >= tok_bool_len && memcmp(q, tok_bool, tok_bool_len) == 0) {
-                    return true;
-                }
-            }
-        }
-        if (*line_end == '\0') {
-            break;
-        }
-        line = line_end + 1;
     }
     return false;
 }
@@ -6653,13 +6629,6 @@ static bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program) {
         return false;
     }
 #endif
-    if (dsl_wasm32_source_uses_cast_intrinsics(program->jit_c_source)) {
-        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
-                 "wasm32 runtime JIT does not yet support DSL cast intrinsics");
-        dsl_tracef("jit runtime skip: %s", program->jit_c_error);
-        return false;
-    }
-
     /* Patch int64_t → int for nitems (wasm32 backend limitation). */
     char *patched_src = dsl_wasm32_patch_source(program->jit_c_source);
     if (!patched_src) return false;

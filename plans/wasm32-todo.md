@@ -4,20 +4,18 @@ Last updated: 2026-02-19
 
 ## Context
 
-In `python-blosc2` on wasm32/Pyodide, DSL kernels that use index symbols with `int(...)` casting still fail in practice for this shape:
+In `python-blosc2` on wasm32/Pyodide, DSL kernels that use index symbols with `int(...)` casting were failing for this shape and are now passing after integration fixes:
 
 - DSL kernel: `return int(_i0 * _n1 + _i1)`
-- Typical integration symptom: `DSL kernels require miniexpr ... miniexpr compilation or execution failed`
-- Observed integration detail (2026-02-19): failure is raised during miniexpr setup (`NDArray._set_pref_expr`), with `NotImplementedError: Cannot compile expression ...`, and reproduces for default, `jit=False`, and `jit=True`.
-- Current status in python-blosc2: expected-to-fail behavior is still kept for wasm32.
+- Prior integration symptom: `DSL kernels require miniexpr ... miniexpr compilation or execution failed`.
+- Resolved integration detail (2026-02-19): python-blosc2 was mapping dtypes via `dtype.num` in `_set_pref_expr`, which is platform-dependent on wasm32/Pyodide.
+- Current status in python-blosc2: task-7 kernel now succeeds on wasm32 with deterministic `int64` ramp output, and wasm expected-fail behavior was removed.
 
-This is likely either:
-- a true miniexpr wasm32 cast/runtime gap, or
-- an integration mismatch between python-blosc2's prefilter setup and miniexpr's supported dtype/cast combinations.
+The remaining miniexpr work is now runtime-JIT parity for cast intrinsics on wasm32.
 
 ## Goal
 
-Make DSL `int(...)` casting reliable on wasm32 for ND/index-symbol expressions (or explicitly declare and document it as unsupported with precise diagnostics).
+Keep DSL `int(...)` casting reliable on wasm32 for ND/index-symbol expressions and complete runtime-JIT cast-intrinsic parity on wasm32.
 
 ## Work Items
 
@@ -122,54 +120,62 @@ Make DSL `int(...)` casting reliable on wasm32 for ND/index-symbol expressions (
 ### Updated status after this follow-up
 
 - Phase 1 compile/setup behavior in miniexpr is now exercised by dedicated contract tests and has explicit diagnostics.
-- The remaining Phase 1 integration gap is surfacing those diagnostics in python-blosc2 exceptions (`_set_pref_expr`) so failures are actionable instead of generic.
+- The former Phase 1 integration gap in python-blosc2 is now closed (diagnostics are surfaced and wasm-safe dtype mapping is in place).
 - Full wasm runtime-JIT support for cast intrinsics remains Phase 2 follow-up work.
 
-## Remaining Tasks (Task-7 Unblock First)
+## Session Update (2026-02-19, Phase 2 takeover)
 
-### Phase 1: unblock python-blosc2 task-7 compile path
+### Completed in this session
 
-1. Reproduce the exact python-blosc2 call contract inside miniexpr tests.
-- Add a wasm test that uses function-form DSL source with reserved index symbols and `int(...)` return cast:
-  - `def kernel(x): return int(_i0 * _n1 + _i1)`
-  - output dtype `ME_INT64`
-  - evaluate with runtime-JIT default, disabled, and enabled settings.
-- Ensure this test exercises the same compile/setup entrypoint used by `NDArray._set_pref_expr` integration.
+- Root-caused the wasm invalid-module failure for cast-heavy kernels by reproducing without the temporary skip gate:
+  - `WebAssembly.Module(): ... i32.trunc_f32_u ... expected type f32, found ... f64`.
+- Implemented wasm-safe cast lowering for runtime-JIT kernels in the wasm patch step:
+  - `src/miniexpr.c` now rewrites JIT C cast macros to helper-call form in patched wasm source:
+    - `ME_DSL_CAST_INT(x)` -> `me_wasm32_cast_int((double)(x))`
+    - `ME_DSL_CAST_FLOAT(x)` -> `me_wasm32_cast_float((double)(x))`
+    - `ME_DSL_CAST_BOOL(x)` -> `me_wasm32_cast_bool((double)(x))`
+- Added explicit wasm import helpers in both wasm JIT JS import builders:
+  - `src/me_jit_glue.js` (side-module path used in wasm tests)
+  - `src/miniexpr.c` EM_JS instantiate helper (main-module path)
+- Removed the temporary wasm cast-intrinsic runtime-JIT skip gate in `src/miniexpr.c`.
+- Flipped wasm runtime-cache cast behavior contract to require JIT kernel creation:
+  - `tests/test_dsl_jit_runtime_cache.c` test 8c now expects `me_expr_has_jit_kernel(expr) == true`.
 
-2. Diagnose compile-time rejection and close the gap.
-- Identify why miniexpr accepts equivalent interpreter tests but rejects this integration expression form.
-- Audit parser/lowering for function-form DSL + reserved symbols + `int(...)` cast combination.
-- Fix support if intended, or return a precise unsupported reason if not.
+### Validation in this session
 
-3. Strengthen diagnostics and contract tests for compile/setup failures.
-- Replace generic compile failure surfaces with actionable reason strings.
-- Add tests that assert the reason for intentionally unsupported combos.
+- wasm targeted tests:
+  - `ctest --test-dir build-wasm32-fast --output-on-failure -R "test_nd|test_dsl_syntax|test_dsl_jit_runtime_cache|test_dsl_jit_side_module"` (pass)
+- native targeted regression check:
+  - `ctest --test-dir build --output-on-failure -R test_dsl_jit_runtime_cache` (pass)
 
-4. Re-validate python-blosc2 task-7 immediately after phase-1 changes.
-- Rebuild python-blosc2 against updated miniexpr.
-- Re-run `tests/ndarray/test_dsl_kernels.py::test_dsl_kernel_index_symbols_int_cast_matches_expected_ramp`.
-- Remove expected-fail behavior only after this passes with deterministic output.
+## Remaining Tasks
+
+### Phase 1: task-7 unblock status (completed)
+
+Completed on 2026-02-19 (cross-repo validation):
+
+- miniexpr contract-parity tests pass for the exact task-7 expression shape on native and wasm.
+- miniexpr diagnostics are exposed through `me_get_last_error_message()`.
+- python-blosc2 integration now uses wasm-safe dtype mapping for miniexpr setup and task-7 passes on wasm.
+
+No additional Phase 1 actions are pending in miniexpr for task-7 unblock.
 
 ### Phase 2: full wasm runtime-JIT cast support (follow-up)
 
 1. Root-cause the wasm backend invalid-module failure for cast-heavy kernels.
-- Reproduce with a minimal runtime-JIT kernel that uses cast intrinsics (e.g. `float(int(x)) + bool(x)`).
-- Inspect generated C and emitted wasm around conversion ops; isolate exact tinycc wasm32 lowering pattern that triggers invalid wasm.
+- Completed in this session (reproduced concrete truncation opcode/type mismatch in wasm module compile).
 
 2. Implement wasm-safe cast lowering for runtime-JIT kernels.
-- Introduce lowering that avoids problematic wasm32 conversion instruction sequences for:
+- Completed in this session via wasm-patched cast helper-call lowering for:
   - `int(...)`
   - `float(...)`
   - `bool(...)`
-- Prefer explicit helper calls or safe expansion patterns known to compile/instantiate correctly in wasm side-module mode.
 
 3. Remove the temporary wasm cast-intrinsic runtime-JIT skip gate.
-- Delete the detection/skip path once runtime JIT works for cast intrinsics.
-- Keep precise diagnostics for genuinely unsupported combinations (if any remain).
+- Completed in this session.
 
 4. Flip wasm tests from fallback-expectation to JIT-expectation.
-- Update wasm runtime-cache cast test to require `me_expr_has_jit_kernel(expr) == true` for cast kernels.
-- Keep interpreter/JIT numeric parity checks.
+- Completed in this session (`test_dsl_jit_runtime_cache` test 8c).
 
 5. Expand wasm runtime-cache coverage back to full parity where feasible.
 - Reconcile runtime-cache test assumptions that are host-file-cache specific vs wasm side-module behavior.
@@ -200,5 +206,5 @@ ctest --test-dir build-wasm32 --output-on-failure -R "test_nd|test_dsl_syntax|te
 
 ## Exit Criteria
 
-- `int(_i0 * _n1 + _i1)` works on wasm32 in miniexpr and in python-blosc2 integration, with deterministic behavior and tests.
-- OR behavior is explicitly unsupported, documented, and enforced by a precise, tested error path.
+- Task-7 unblock criterion is met: `int(_i0 * _n1 + _i1)` works on wasm32 in miniexpr and python-blosc2 integration, with deterministic behavior and tests.
+- Remaining completion criterion for this plan: runtime-JIT cast intrinsics on wasm32 achieve parity (remove fallback gate and require JIT-kernel expectations in wasm tests).
