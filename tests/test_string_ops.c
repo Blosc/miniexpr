@@ -100,6 +100,108 @@ static void test_string_contains(void) {
     run_name_expr("contains(name, \"et\")", expected, "contains(name, \"et\")");
 }
 
+static void test_string_contains_nd_padded(void) {
+    TEST("contains(name, \"et\") with me_eval_nd padded blocks");
+
+    static const uint32_t names[6][8] = {
+        {'a','l','p','h','a',0,0,0},
+        {'b','e','t','a',0,0,0,0},
+        {'g','a','m','m','a',0,0,0},
+        {'d','e','l','t','a',0,0,0},
+        {'z','e','t','a',0,0,0,0},
+        {0,0,0,0,0,0,0,0}
+    };
+    me_variable vars[] = {
+        {"name", ME_STRING, NULL, ME_VARIABLE, NULL, sizeof(names[0])}
+    };
+    int64_t shape[1] = {6};
+    int32_t chunkshape[1] = {3};
+    int32_t blockshape[1] = {2};
+
+    int err = 0;
+    me_expr *expr = NULL;
+    int rc = me_compile_nd("contains(name, \"et\")", vars, 1, ME_BOOL, 1,
+                           shape, chunkshape, blockshape, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: me_compile_nd error %d at %d\n", rc, err);
+        tests_failed++;
+        return;
+    }
+
+    int64_t valid = -1;
+    rc = me_nd_valid_nitems(expr, 0, 1, &valid);
+    if (rc != ME_EVAL_SUCCESS || valid != 1) {
+        printf("  FAIL: me_nd_valid_nitems chunk0/block1 (rc=%d, valid=%lld)\n", rc, (long long)valid);
+        tests_failed++;
+        me_free(expr);
+        return;
+    }
+
+    const uint32_t block_c0b1[2][8] = {
+        {'g','a','m','m','a',0,0,0},
+        {'x','x','x',0,0,0,0,0}
+    };
+    const void *ptrs_c0b1[] = {block_c0b1};
+    bool out_c0b1[2] = {true, true};
+    rc = me_eval_nd(expr, ptrs_c0b1, 1, out_c0b1, 2, 0, 1, NULL);
+    if (rc != ME_EVAL_SUCCESS) {
+        printf("  FAIL: me_eval_nd chunk0/block1 rc=%d\n", rc);
+        tests_failed++;
+        me_free(expr);
+        return;
+    }
+    {
+        const bool expected[2] = {false, false};
+        assert_bool_array(out_c0b1, expected, 2, "chunk0/block1 padded");
+    }
+
+    const uint32_t block_c1b0[2][8] = {
+        {'d','e','l','t','a',0,0,0},
+        {'z','e','t','a',0,0,0,0}
+    };
+    const void *ptrs_c1b0[] = {block_c1b0};
+    bool out_c1b0[2] = {false, false};
+    rc = me_eval_nd(expr, ptrs_c1b0, 1, out_c1b0, 2, 1, 0, NULL);
+    if (rc != ME_EVAL_SUCCESS) {
+        printf("  FAIL: me_eval_nd chunk1/block0 rc=%d\n", rc);
+        tests_failed++;
+        me_free(expr);
+        return;
+    }
+    {
+        const bool expected[2] = {false, true};
+        assert_bool_array(out_c1b0, expected, 2, "chunk1/block0 full");
+    }
+
+    rc = me_nd_valid_nitems(expr, 1, 1, &valid);
+    if (rc != ME_EVAL_SUCCESS || valid != 1) {
+        printf("  FAIL: me_nd_valid_nitems chunk1/block1 (rc=%d, valid=%lld)\n", rc, (long long)valid);
+        tests_failed++;
+        me_free(expr);
+        return;
+    }
+
+    const uint32_t block_c1b1[2][8] = {
+        {0,0,0,0,0,0,0,0},
+        {'e','t',0,0,0,0,0,0}
+    };
+    const void *ptrs_c1b1[] = {block_c1b1};
+    bool out_c1b1[2] = {true, true};
+    rc = me_eval_nd(expr, ptrs_c1b1, 1, out_c1b1, 2, 1, 1, NULL);
+    if (rc != ME_EVAL_SUCCESS) {
+        printf("  FAIL: me_eval_nd chunk1/block1 rc=%d\n", rc);
+        tests_failed++;
+        me_free(expr);
+        return;
+    }
+    {
+        const bool expected[2] = {false, false};
+        assert_bool_array(out_c1b1, expected, 2, "chunk1/block1 padded");
+    }
+
+    me_free(expr);
+}
+
 static void test_string_compare_itemsize(void) {
     TEST("string compare with different itemsize");
 
@@ -208,6 +310,7 @@ int main(void) {
     test_string_startswith();
     test_string_endswith();
     test_string_contains();
+    test_string_contains_nd_padded();
     test_string_compare_itemsize();
     test_invalid_string_usage();
 
