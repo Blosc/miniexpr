@@ -114,7 +114,8 @@ enum {
     ME_CLOSURE0 = 16, ME_CLOSURE1, ME_CLOSURE2, ME_CLOSURE3,
     ME_CLOSURE4, ME_CLOSURE5, ME_CLOSURE6, ME_CLOSURE7,
 
-    ME_FLAG_PURE = 32
+    ME_FLAG_PURE = 32,
+    ME_FLAG_FLOAT_MATH = 64
 };
 
 /* Variable definition with per-element byte size (required for ME_STRING).

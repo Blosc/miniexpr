@@ -2159,7 +2159,7 @@ me_dtype infer_result_type(const me_expr* n) {
                 }
             }
 
-            if (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && is_float_math_function(n->function)) {
+            if (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && (n->flags & ME_EXPR_FLAG_FLOAT_MATH)) {
                 me_dtype param_type = infer_result_type((const me_expr*)n->parameters[0]);
                 return promote_float_math_result(param_type);
             }
@@ -2263,7 +2263,7 @@ me_dtype infer_output_type(const me_expr* n) {
                 return promote_types(x_type, y_type);
             }
 
-            if (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && is_float_math_function(n->function)) {
+            if (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && (n->flags & ME_EXPR_FLAG_FLOAT_MATH)) {
                 me_dtype param_type = infer_output_type((const me_expr*)n->parameters[0]);
                 return promote_float_math_result(param_type);
             }
