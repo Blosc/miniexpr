@@ -805,6 +805,63 @@ static int test_nd_indices(void) {
     return rc;
 }
 
+static int test_global_linear_idx(void) {
+    printf("\n=== DSL Test 4b: global linear index ===\n");
+
+    const char *src_linear =
+        "def kernel():\n"
+        "    return _global_linear_idx\n";
+
+    me_expr *expr = NULL;
+    int err = 0;
+    if (me_compile(src_linear, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: linear compile error at %d\n", err);
+        return 1;
+    }
+
+    double out_linear[4] = {0.0, 0.0, 0.0, 0.0};
+    if (me_eval(expr, NULL, 0, out_linear, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: linear eval error\n");
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+    double expected_linear[4] = {0.0, 1.0, 2.0, 3.0};
+    if (check_all_close(out_linear, expected_linear, 4, 1e-12) != 0) {
+        printf("  ❌ FAILED: linear output mismatch\n");
+        return 1;
+    }
+
+    const char *src_nd =
+        "def kernel():\n"
+        "    return _global_linear_idx\n";
+    int64_t shape[2] = {3, 5};
+    int32_t chunks[2] = {2, 4};
+    int32_t blocks[2] = {2, 3};
+
+    expr = NULL;
+    err = 0;
+    if (me_compile_nd(src_nd, NULL, 0, ME_FLOAT64, 2, shape, chunks, blocks, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: ND compile error at %d\n", err);
+        return 1;
+    }
+
+    double out_nd[6] = {0, 0, 0, 0, 0, 0};
+    if (me_eval_nd(expr, NULL, 0, out_nd, 6, 1, 0, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: ND eval error\n");
+        me_free(expr);
+        return 1;
+    }
+
+    double expected_nd[6] = {4, 0, 0, 9, 0, 0};
+    int rc = check_all_close(out_nd, expected_nd, 6, 1e-12);
+    me_free(expr);
+    if (rc == 0) {
+        printf("  ✅ PASSED\n");
+    }
+    return rc;
+}
+
 static int test_nd_padding(void) {
     printf("\n=== DSL Test 5: ND padding in blocks ===\n");
 
@@ -1807,6 +1864,7 @@ int main(void) {
     fail |= test_invalid_conditionals();
     fail |= test_if_elif_else();
     fail |= test_nd_indices();
+    fail |= test_global_linear_idx();
     fail |= test_nd_padding();
     fail |= test_nd_large_block();
     fail |= test_nd_3d_indices_padding();

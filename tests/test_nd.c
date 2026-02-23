@@ -667,6 +667,16 @@ static int test_nd_python_blosc2_contract_reason_reserved_name(void) {
         source, vars, 1, "reserved name");
 }
 
+static int test_nd_python_blosc2_contract_reason_reserved_global_linear_idx_name(void) {
+    me_variable vars[] = {{"_global_linear_idx", ME_FLOAT32}};
+    const char *source =
+        "def kernel_index_ramp_int_cast(_global_linear_idx):\n"
+        "    return int(_global_linear_idx)\n";
+    return run_nd_compile_failure_reason_case(
+        "python-blosc2 contract reason: reserved _global_linear_idx input name",
+        source, vars, 1, "reserved name");
+}
+
 static int test_nd_python_blosc2_contract_reason_invalid_cast_usage(void) {
     me_variable vars[] = {{"x", ME_FLOAT32}};
     const char *source =
@@ -1615,6 +1625,11 @@ int main(void) {
     int t23 = test_nd_python_blosc2_contract_reason_reserved_name();
     failed |= t23;
     printf("Result: %s\n\n", t23 ? "FAIL" : "PASS");
+
+    printf("Test 23b: python-blosc2 contract reason on reserved _global_linear_idx input name\n");
+    int t23b = test_nd_python_blosc2_contract_reason_reserved_global_linear_idx_name();
+    failed |= t23b;
+    printf("Result: %s\n\n", t23b ? "FAIL" : "PASS");
 
     printf("Test 24: python-blosc2 contract reason on invalid cast usage\n");
     int t24 = test_nd_python_blosc2_contract_reason_invalid_cast_usage();

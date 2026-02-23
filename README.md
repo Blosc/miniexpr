@@ -270,7 +270,7 @@ miniexpr includes a DSL (Domain-Specific Language) for writing multi-statement c
 - **Conditionals**: `where(cond, then, else)` for element-wise selection
 - **Loops**: `for var in range(limit)` iteration
 - **Control flow**: `break` and `continue` statements
-- **Index access**: Built-in `_i0`–`_i7` (position) and `_n0`–`_n7` (shape) variables
+- **Index access**: Built-in `_i0`–`_i7` (position), `_n0`–`_n7` (shape), and `_global_linear_idx` variables
 - **Function-style kernels**: `def name(args): ... return expr`
 
 ### DSL Example

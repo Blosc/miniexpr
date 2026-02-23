@@ -156,6 +156,7 @@ The following cannot be used as user variable/function names in DSL context:
 - `print`, `int`, `float`, `bool`, `def`, `return`
 - `_ndim`
 - `_i<d>` and `_n<d>` (reserved ND symbols)
+- `_global_linear_idx`
 
 ## ND reserved symbols
 
@@ -164,6 +165,7 @@ Supported reserved ND symbols when referenced in expressions:
 - `_i0`, `_i1`, ... (index per dimension)
 - `_n0`, `_n1`, ... (shape per dimension)
 - `_ndim`
+- `_global_linear_idx` (global C-order linear index)
 
 These are synthesized by DSL compiler/runtime when used.
 
@@ -213,4 +215,3 @@ When parser/compiler/tests change DSL behavior:
 1. Update this document in the same PR.
 2. Update or add tests in `tests/test_dsl_syntax.c` / `tests/test_nd.c`.
 3. Keep frontend validators (e.g. python-blosc2) aligned with this spec.
-
