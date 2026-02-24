@@ -84,6 +84,43 @@ static int eval_simple_kernel(const char *src, int expect_jit, double expected_o
     return 0;
 }
 
+static int eval_int64_passthrough_kernel(const char *src, int expect_jit) {
+    me_variable vars[] = {{"x", ME_INT64}};
+    int err = 0;
+    me_expr *expr = NULL;
+    if (me_compile(src, vars, 1, ME_INT64, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+        printf("  FAILED: int64 compile error at %d\n", err);
+        me_free(expr);
+        return 1;
+    }
+
+    int has_jit = me_expr_has_jit_kernel(expr) ? 1 : 0;
+    if (has_jit != expect_jit) {
+        printf("  FAILED: int64 expected has_jit=%d got %d\n", expect_jit, has_jit);
+        me_free(expr);
+        return 1;
+    }
+
+    int64_t in[4] = {0, 1, 2, 3};
+    int64_t out[4] = {-1, -1, -1, -1};
+    const void *inputs[] = {in};
+    if (me_eval(expr, inputs, 1, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  FAILED: int64 eval failed\n");
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+
+    for (int i = 0; i < 4; i++) {
+        if (out[i] != in[i]) {
+            printf("  FAILED: int64 mismatch at %d got %lld expected %lld\n",
+                   i, (long long)out[i], (long long)in[i]);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int main(void) {
 #if !defined(__EMSCRIPTEN__)
     printf("Skipping side-module wasm32 helper test (requires Emscripten).\n");
@@ -93,6 +130,9 @@ int main(void) {
         "def kernel(x):\n"
         "    y = x + 5\n"
         "    return y\n";
+    const char *src_i64 =
+        "def kernel(x):\n"
+        "    return x\n";
 
     printf("=== Side-module wasm32 JIT helper registration test ===\n");
 
@@ -101,9 +141,16 @@ int main(void) {
         me_register_wasm_jit_helpers(NULL, NULL);
         return 1;
     }
+    if (eval_int64_passthrough_kernel(src_i64, 1) != 0) {
+        me_register_wasm_jit_helpers(NULL, NULL);
+        return 1;
+    }
 
     me_register_wasm_jit_helpers(NULL, NULL);
     if (eval_simple_kernel(src, 0, 5.0) != 0) {
+        return 1;
+    }
+    if (eval_int64_passthrough_kernel(src_i64, 0) != 0) {
         return 1;
     }
 

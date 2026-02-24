@@ -9608,6 +9608,80 @@ static bool dsl_fill_reserved_from_nd_synth_ctx(int nitems,
                                                 uint32_t idx_mask,
                                                 int64_t *global_output);
 
+#if ME_USE_WASM32_JIT
+/* wasm32 runtime JIT lowers int64/uint64 generated C types to 32-bit.
+   Marshal 64-bit outputs through temporary 32-bit buffers and widen back. */
+static bool dsl_wasm32_prepare_jit_output(const me_dsl_compiled_program *program,
+                                          void *output_block, int nitems,
+                                          void **jit_output, void **jit_output_tmp) {
+    if (!program || !output_block || !jit_output || !jit_output_tmp || nitems < 0) {
+        return false;
+    }
+
+    *jit_output = output_block;
+    *jit_output_tmp = NULL;
+    if (nitems == 0) {
+        return true;
+    }
+
+    switch (program->output_dtype) {
+    case ME_INT64: {
+        int *tmp = malloc((size_t)nitems * sizeof(*tmp));
+        if (!tmp) {
+            return false;
+        }
+        *jit_output = (void *)tmp;
+        *jit_output_tmp = (void *)tmp;
+        return true;
+    }
+    case ME_UINT64: {
+        unsigned int *tmp = malloc((size_t)nitems * sizeof(*tmp));
+        if (!tmp) {
+            return false;
+        }
+        *jit_output = (void *)tmp;
+        *jit_output_tmp = (void *)tmp;
+        return true;
+    }
+    default:
+        return true;
+    }
+}
+
+static void dsl_wasm32_finalize_jit_output(const me_dsl_compiled_program *program,
+                                           void *output_block, int nitems,
+                                           void *jit_output_tmp, bool jit_success) {
+    if (!jit_output_tmp) {
+        return;
+    }
+
+    if (jit_success && program && output_block && nitems > 0) {
+        switch (program->output_dtype) {
+        case ME_INT64: {
+            const int *src = (const int *)jit_output_tmp;
+            int64_t *dst = (int64_t *)output_block;
+            for (int i = 0; i < nitems; i++) {
+                dst[i] = (int64_t)src[i];
+            }
+            break;
+        }
+        case ME_UINT64: {
+            const unsigned int *src = (const unsigned int *)jit_output_tmp;
+            uint64_t *dst = (uint64_t *)output_block;
+            for (int i = 0; i < nitems; i++) {
+                dst[i] = (uint64_t)src[i];
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
+
+    free(jit_output_tmp);
+}
+#endif
+
 static int dsl_eval_program(const me_dsl_compiled_program *program,
                             const void **vars_block, int n_vars,
                             void *output_block, int nitems,
@@ -9691,17 +9765,37 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
             }
         }
         if (can_run_jit_direct) {
-            int jit_rc = program->jit_kernel_fn(program->jit_nparams > 0 ? jit_inputs : NULL,
-                                                output_block, (int64_t)nitems);
-            jit_attempted = true;
-            for (int i = 0; i < jit_temp_count; i++) {
-                free(jit_temp_buffers[i]);
+            void *jit_output = output_block;
+            void *jit_output_tmp = NULL;
+#if ME_USE_WASM32_JIT
+            if (!dsl_wasm32_prepare_jit_output(program, output_block, nitems,
+                                               &jit_output, &jit_output_tmp)) {
+                can_run_jit_direct = false;
             }
-            if (jit_rc == 0) {
-                return ME_EVAL_SUCCESS;
+#endif
+            if (can_run_jit_direct) {
+                int jit_rc = program->jit_kernel_fn(program->jit_nparams > 0 ? jit_inputs : NULL,
+                                                    jit_output, (int64_t)nitems);
+                bool jit_success = (jit_rc == 0);
+                jit_attempted = true;
+#if ME_USE_WASM32_JIT
+                dsl_wasm32_finalize_jit_output(program, output_block, nitems,
+                                               jit_output_tmp, jit_success);
+                jit_output_tmp = NULL;
+#endif
+                for (int i = 0; i < jit_temp_count; i++) {
+                    free(jit_temp_buffers[i]);
+                }
+                if (jit_success) {
+                    return ME_EVAL_SUCCESS;
+                }
             }
+#if ME_USE_WASM32_JIT
+            dsl_wasm32_finalize_jit_output(program, output_block, nitems,
+                                           jit_output_tmp, false);
+#endif
         }
-        else {
+        if (!can_run_jit_direct) {
             for (int i = 0; i < jit_temp_count; i++) {
                 free(jit_temp_buffers[i]);
             }
@@ -9938,26 +10032,46 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
             }
         }
         if (can_run_jit) {
-            int jit_rc = program->jit_kernel_fn(program->jit_nparams > 0 ? jit_inputs : NULL,
-                                                output_block, (int64_t)nitems);
-            for (int i = 0; i < jit_temp_count; i++) {
-                free(jit_temp_buffers[i]);
+            void *jit_output = output_block;
+            void *jit_output_tmp = NULL;
+#if ME_USE_WASM32_JIT
+            if (!dsl_wasm32_prepare_jit_output(program, output_block, nitems,
+                                               &jit_output, &jit_output_tmp)) {
+                can_run_jit = false;
             }
-            if (jit_rc == 0) {
-                for (int i = 0; i < reserved_count; i++) {
-                    free(reserved_buffers[i]);
+#endif
+            if (can_run_jit) {
+                int jit_rc = program->jit_kernel_fn(program->jit_nparams > 0 ? jit_inputs : NULL,
+                                                    jit_output, (int64_t)nitems);
+                bool jit_success = (jit_rc == 0);
+#if ME_USE_WASM32_JIT
+                dsl_wasm32_finalize_jit_output(program, output_block, nitems,
+                                               jit_output_tmp, jit_success);
+                jit_output_tmp = NULL;
+#endif
+                for (int i = 0; i < jit_temp_count; i++) {
+                    free(jit_temp_buffers[i]);
                 }
-                for (int i = 0; i < program->n_locals; i++) {
-                    if (local_buffers[i]) {
-                        free(local_buffers[i]);
+                if (jit_success) {
+                    for (int i = 0; i < reserved_count; i++) {
+                        free(reserved_buffers[i]);
                     }
+                    for (int i = 0; i < program->n_locals; i++) {
+                        if (local_buffers[i]) {
+                            free(local_buffers[i]);
+                        }
+                    }
+                    free(var_buffers);
+                    free(local_buffers);
+                    return ME_EVAL_SUCCESS;
                 }
-                free(var_buffers);
-                free(local_buffers);
-                return ME_EVAL_SUCCESS;
             }
+#if ME_USE_WASM32_JIT
+            dsl_wasm32_finalize_jit_output(program, output_block, nitems,
+                                           jit_output_tmp, false);
+#endif
         }
-        else {
+        if (!can_run_jit) {
             for (int i = 0; i < jit_temp_count; i++) {
                 free(jit_temp_buffers[i]);
             }

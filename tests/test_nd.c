@@ -612,6 +612,92 @@ static int test_nd_python_blosc2_contract_int_cast_no_input_jit_modes(void) {
         source, vars, 1, inputs, 1);
 }
 
+static int test_nd_python_blosc2_contract_full_int_cast_ramp_with_input_jit_modes(void) {
+    int status = 0;
+    int err = 0;
+    int64_t shape[2] = {32, 5};
+    int32_t chunkshape[2] = {32, 5};
+    int32_t blockshape[2] = {32, 5};
+    me_variable vars[] = {{"x", ME_FLOAT32}};
+    float xblock[160] = {0};
+    const void *inputs[] = {xblock};
+    const char *source =
+        "def kernel_index_ramp_int_cast(x):\n"
+        "    return int(_i0 * _n1 + _i1)  # noqa: F821\n";
+    const struct {
+        int compile_jit_mode;
+        me_jit_mode eval_jit_mode;
+        const char *label;
+    } jit_modes[] = {
+        {ME_JIT_DEFAULT, ME_JIT_DEFAULT, "default"},
+        {ME_JIT_OFF, ME_JIT_OFF, "jit_off"},
+        {ME_JIT_ON, ME_JIT_ON, "jit_on"},
+    };
+
+    for (int mode = 0; mode < (int)(sizeof(jit_modes) / sizeof(jit_modes[0])); mode++) {
+        me_expr *expr = NULL;
+        int rc = me_compile_nd_jit(source, vars, 1, ME_INT64, 2,
+                                   shape, chunkshape, blockshape,
+                                   jit_modes[mode].compile_jit_mode, &err, &expr);
+        if (rc != ME_COMPILE_SUCCESS) {
+            printf("FAILED python-blosc2 full-ramp int cast me_compile_nd_jit (%s): rc=%d err=%d\n",
+                   jit_modes[mode].label, rc, err);
+            status = 1;
+            goto cleanup;
+        }
+
+        int64_t valid = -1;
+        rc = me_nd_valid_nitems(expr, 0, 0, &valid);
+        if (rc != ME_EVAL_SUCCESS || valid != 160) {
+            printf("FAILED python-blosc2 full-ramp int cast me_nd_valid_nitems (%s): rc=%d valid=%lld\n",
+                   jit_modes[mode].label, rc, (long long)valid);
+            me_free(expr);
+            status = 1;
+            goto cleanup;
+        }
+
+        int64_t out[160];
+        for (int i = 0; i < 160; i++) {
+            out[i] = -1;
+        }
+
+        me_eval_params eval_params = {0};
+        eval_params.disable_simd = false;
+        eval_params.simd_ulp_mode = ME_SIMD_ULP_3_5;
+        eval_params.jit_mode = jit_modes[mode].eval_jit_mode;
+        rc = me_eval_nd(expr, inputs, 1, out, 160, 0, 0, &eval_params);
+        if (rc != ME_EVAL_SUCCESS) {
+            printf("FAILED python-blosc2 full-ramp int cast me_eval_nd (%s): rc=%d\n",
+                   jit_modes[mode].label, rc);
+            me_free(expr);
+            status = 1;
+            goto cleanup;
+        }
+
+        for (int64_t i0 = 0; i0 < shape[0]; i0++) {
+            for (int64_t i1 = 0; i1 < shape[1]; i1++) {
+                int64_t idx = i0 * shape[1] + i1;
+                int64_t expected = i0 * shape[1] + i1;
+                if (out[idx] != expected) {
+                    printf("FAILED python-blosc2 full-ramp int cast mismatch (%s): "
+                           "idx=%lld (_i0=%lld _i1=%lld) got=%lld exp=%lld\n",
+                           jit_modes[mode].label,
+                           (long long)idx, (long long)i0, (long long)i1,
+                           (long long)out[idx], (long long)expected);
+                    me_free(expr);
+                    status = 1;
+                    goto cleanup;
+                }
+            }
+        }
+
+        me_free(expr);
+    }
+
+cleanup:
+    return status;
+}
+
 static int run_nd_compile_failure_reason_case(const char *case_name,
                                               const char *source,
                                               const me_variable *vars,
@@ -1615,6 +1701,11 @@ int main(void) {
     int t21 = test_nd_python_blosc2_contract_int_cast_no_input_jit_modes();
     failed |= t21;
     printf("Result: %s\n\n", t21 ? "FAIL" : "PASS");
+
+    printf("Test 21b: python-blosc2 full-ramp int-cast contract with input (32x5, jit default/off/on)\n");
+    int t21b = test_nd_python_blosc2_contract_full_int_cast_ramp_with_input_jit_modes();
+    failed |= t21b;
+    printf("Result: %s\n\n", t21b ? "FAIL" : "PASS");
 
     printf("Test 22: python-blosc2 contract reason on parameter mismatch\n");
     int t22 = test_nd_python_blosc2_contract_reason_param_mismatch();
