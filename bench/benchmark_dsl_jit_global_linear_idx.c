@@ -1,18 +1,19 @@
 /*
- * DSL global-linear-index A/B benchmark (ND).
+ * DSL global-linear-index benchmark (ND).
  *
  * Exercises a kernel that uses only _global_linear_idx with constant offsets:
  *   START_CONST + _global_linear_idx + STEP_CONST
  *
  * Compares:
  * - interp      : ME_DSL_JIT=0
- * - jit-buffer  : ME_DSL_JIT=1, ME_DSL_JIT_INDEX_VARS=1, ME_DSL_JIT_INDEX_VARS_SYNTH=0
- * - jit-synth   : ME_DSL_JIT=1, ME_DSL_JIT_INDEX_VARS=1, ME_DSL_JIT_INDEX_VARS_SYNTH=1
+ * - jit-indexvars: ME_DSL_JIT=1, ME_DSL_JIT_INDEX_VARS=1
  * - jit-gateoff : ME_DSL_JIT=1, ME_DSL_JIT_INDEX_VARS=0 (control)
  *
  * ND scenarios:
- * - no-padding : valid_items == padded_items
- * - padded     : valid_items < padded_items
+ * - seq-true-origin       : contiguous linear walk from origin
+ * - seq-true-outer-offset : contiguous linear walk with non-zero outer offset
+ * - seq-false-inner-offset: non-contiguous walk due to inner-dim offset
+ * - seq-false-inner-tail  : non-contiguous walk with inner-dim tail padding
  *
  * Usage:
  *   ./benchmark_dsl_jit_global_linear_idx [target_nitems] [repeats]
@@ -47,7 +48,6 @@ typedef struct {
     const char *name;
     const char *jit;
     const char *index_vars;
-    const char *synth;
     bool expect_jit;
 } mode_def;
 
@@ -60,6 +60,7 @@ typedef struct {
     int64_t nblock;
     int padded_items;
     int valid_items;
+    bool seq_expected;
 } nd_case;
 
 typedef struct {
@@ -224,13 +225,115 @@ static bool build_dsl_source(char *out, size_t out_size) {
     return n > 0 && (size_t)n < out_size;
 }
 
-static void build_cases(int target_nitems, nd_case out_cases[2]) {
+static int64_t ceil_div64(int64_t a, int64_t b) {
+    if (b <= 0) {
+        return 0;
+    }
+    return (a + b - 1) / b;
+}
+
+static bool compute_case_layout_2d(const nd_case *sc,
+                                   int64_t out_base_idx[2],
+                                   int64_t out_valid_len[2]) {
+    if (!sc || !out_base_idx || !out_valid_len) {
+        return false;
+    }
+    int64_t shape0 = sc->shape[0];
+    int64_t shape1 = sc->shape[1];
+    int64_t chunk0 = sc->chunkshape[0];
+    int64_t chunk1 = sc->chunkshape[1];
+    int64_t block0 = sc->blockshape[0];
+    int64_t block1 = sc->blockshape[1];
+    if (shape0 <= 0 || shape1 <= 0 || chunk0 <= 0 || chunk1 <= 0 || block0 <= 0 || block1 <= 0) {
+        return false;
+    }
+
+    int64_t nchunks0 = ceil_div64(shape0, chunk0);
+    int64_t nchunks1 = ceil_div64(shape1, chunk1);
+    int64_t nblocks0 = ceil_div64(chunk0, block0);
+    int64_t nblocks1 = ceil_div64(chunk1, block1);
+    if (nchunks0 <= 0 || nchunks1 <= 0 || nblocks0 <= 0 || nblocks1 <= 0) {
+        return false;
+    }
+
+    int64_t chunk_idx[2];
+    int64_t block_idx[2];
+    int64_t tmp = sc->nchunk;
+    chunk_idx[1] = tmp % nchunks1;
+    tmp /= nchunks1;
+    chunk_idx[0] = tmp % nchunks0;
+    tmp /= nchunks0;
+    if (tmp != 0) {
+        return false;
+    }
+    tmp = sc->nblock;
+    block_idx[1] = tmp % nblocks1;
+    tmp /= nblocks1;
+    block_idx[0] = tmp % nblocks0;
+    tmp /= nblocks0;
+    if (tmp != 0) {
+        return false;
+    }
+
+    out_base_idx[0] = chunk_idx[0] * chunk0 + block_idx[0] * block0;
+    out_base_idx[1] = chunk_idx[1] * chunk1 + block_idx[1] * block1;
+
+    int64_t chunk_start0 = chunk_idx[0] * chunk0;
+    int64_t chunk_start1 = chunk_idx[1] * chunk1;
+    int64_t chunk_len0 = shape0 - chunk_start0;
+    int64_t chunk_len1 = shape1 - chunk_start1;
+    if (chunk_len0 > chunk0) {
+        chunk_len0 = chunk0;
+    }
+    if (chunk_len1 > chunk1) {
+        chunk_len1 = chunk1;
+    }
+
+    int64_t block_start0 = block_idx[0] * block0;
+    int64_t block_start1 = block_idx[1] * block1;
+    if (block_start0 >= chunk_len0) {
+        out_valid_len[0] = 0;
+    }
+    else {
+        int64_t remain0 = chunk_len0 - block_start0;
+        out_valid_len[0] = (remain0 < block0) ? remain0 : block0;
+    }
+    if (block_start1 >= chunk_len1) {
+        out_valid_len[1] = 0;
+    }
+    else {
+        int64_t remain1 = chunk_len1 - block_start1;
+        out_valid_len[1] = (remain1 < block1) ? remain1 : block1;
+    }
+    return true;
+}
+
+static bool finalize_case(nd_case *sc) {
+    if (!sc) {
+        return false;
+    }
+    int64_t base_idx[2];
+    int64_t valid_len[2];
+    if (!compute_case_layout_2d(sc, base_idx, valid_len)) {
+        return false;
+    }
+    sc->padded_items = sc->blockshape[0] * sc->blockshape[1];
+    sc->valid_items = (int)(valid_len[0] * valid_len[1]);
+    sc->seq_expected = (base_idx[1] == 0 && valid_len[1] == sc->shape[1]);
+    return sc->padded_items > 0 && sc->valid_items >= 0;
+}
+
+static bool build_cases(int target_nitems, nd_case out_cases[4]) {
     int side = (int)ceil(sqrt((double)target_nitems));
     if (side < 4) {
         side = 4;
     }
+    int inner_half = side / 2;
+    if (inner_half < 1) {
+        inner_half = 1;
+    }
 
-    out_cases[0].name = "no-padding";
+    out_cases[0].name = "seq-true-origin";
     out_cases[0].shape[0] = side;
     out_cases[0].shape[1] = side;
     out_cases[0].chunkshape[0] = side;
@@ -239,24 +342,58 @@ static void build_cases(int target_nitems, nd_case out_cases[2]) {
     out_cases[0].blockshape[1] = side;
     out_cases[0].nchunk = 0;
     out_cases[0].nblock = 0;
-    out_cases[0].padded_items = side * side;
-    out_cases[0].valid_items = out_cases[0].padded_items;
+    if (!finalize_case(&out_cases[0])) {
+        return false;
+    }
 
-    out_cases[1].name = "padded";
-    out_cases[1].shape[0] = side - 1;
-    out_cases[1].shape[1] = side - 3;
+    out_cases[1].name = "seq-true-outer-offset";
+    out_cases[1].shape[0] = 2 * side;
+    out_cases[1].shape[1] = side;
     out_cases[1].chunkshape[0] = side;
     out_cases[1].chunkshape[1] = side;
     out_cases[1].blockshape[0] = side;
     out_cases[1].blockshape[1] = side;
-    out_cases[1].nchunk = 0;
+    out_cases[1].nchunk = 1;
     out_cases[1].nblock = 0;
-    out_cases[1].padded_items = side * side;
-    out_cases[1].valid_items = (side - 1) * (side - 3);
+    if (!finalize_case(&out_cases[1])) {
+        return false;
+    }
+
+    out_cases[2].name = "seq-false-inner-offset";
+    out_cases[2].shape[0] = side;
+    out_cases[2].shape[1] = side;
+    out_cases[2].chunkshape[0] = side;
+    out_cases[2].chunkshape[1] = side;
+    out_cases[2].blockshape[0] = side;
+    out_cases[2].blockshape[1] = inner_half;
+    out_cases[2].nchunk = 0;
+    out_cases[2].nblock = 1;
+    if (!finalize_case(&out_cases[2])) {
+        return false;
+    }
+
+    out_cases[3].name = "seq-false-inner-tail";
+    out_cases[3].shape[0] = side;
+    out_cases[3].shape[1] = side - 3;
+    out_cases[3].chunkshape[0] = side;
+    out_cases[3].chunkshape[1] = side;
+    out_cases[3].blockshape[0] = side;
+    out_cases[3].blockshape[1] = inner_half;
+    out_cases[3].nchunk = 0;
+    out_cases[3].nblock = 1;
+    if (!finalize_case(&out_cases[3])) {
+        return false;
+    }
+    return true;
 }
 
 static bool verify_expected_formula_2d(const double *out, const nd_case *sc) {
     if (!out || !sc) {
+        return false;
+    }
+    int64_t base_idx[2];
+    int64_t valid_len[2];
+    if (!compute_case_layout_2d(sc, base_idx, valid_len)) {
         return false;
     }
     int64_t n0 = sc->shape[0];
@@ -267,17 +404,44 @@ static bool verify_expected_formula_2d(const double *out, const nd_case *sc) {
         for (int i1 = 0; i1 < b1; i1++) {
             int off = i0 * b1 + i1;
             double expected = 0.0;
-            if ((int64_t)i0 < n0 && (int64_t)i1 < n1) {
-                int64_t global = (int64_t)i0 * n1 + (int64_t)i1;
-                expected = (double)(global + START_CONST + STEP_CONST);
+            if ((int64_t)i0 < valid_len[0] && (int64_t)i1 < valid_len[1]) {
+                int64_t global_i0 = base_idx[0] + i0;
+                int64_t global_i1 = base_idx[1] + i1;
+                if (global_i0 < n0 && global_i1 < n1) {
+                    int64_t global = global_i0 * n1 + global_i1;
+                    expected = (double)(global + START_CONST + STEP_CONST);
+                }
             }
             if (fabs(out[off] - expected) > 1e-12) {
                 fprintf(stderr,
-                        "formula mismatch case=%s at off=%d (%d,%d): got=%.17g expected=%.17g\n",
-                        sc->name, off, i0, i1, out[off], expected);
+                        "formula mismatch case=%s at off=%d (%d,%d): got=%.17g expected=%.17g "
+                        "base=(%" PRId64 ",%" PRId64 ") valid=(%" PRId64 ",%" PRId64 ")\n",
+                        sc->name, off, i0, i1, out[off], expected,
+                        base_idx[0], base_idx[1], valid_len[0], valid_len[1]);
                 return false;
             }
         }
+    }
+    return true;
+}
+
+static bool case_seq_flag_matches(const nd_case *sc) {
+    if (!sc) {
+        return false;
+    }
+    int64_t base_idx[2];
+    int64_t valid_len[2];
+    if (!compute_case_layout_2d(sc, base_idx, valid_len)) {
+        return false;
+    }
+    bool seq_actual = (base_idx[1] == 0 && valid_len[1] == sc->shape[1]);
+    if (seq_actual != sc->seq_expected) {
+        fprintf(stderr,
+                "seq flag mismatch case=%s expected=%d actual=%d base=(%" PRId64 ",%" PRId64 ") "
+                "valid=(%" PRId64 ",%" PRId64 ") shape=(%" PRId64 ",%" PRId64 ")\n",
+                sc->name, sc->seq_expected ? 1 : 0, seq_actual ? 1 : 0,
+                base_idx[0], base_idx[1], valid_len[0], valid_len[1], sc->shape[0], sc->shape[1]);
+        return false;
     }
     return true;
 }
@@ -308,20 +472,16 @@ static int run_mode(const mode_def *mode,
 
     char *saved_jit = dup_env_value("ME_DSL_JIT");
     char *saved_index_vars = dup_env_value("ME_DSL_JIT_INDEX_VARS");
-    char *saved_synth = dup_env_value("ME_DSL_JIT_INDEX_VARS_SYNTH");
     char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
 
     if (!set_or_unset_env("ME_DSL_JIT", mode->jit) ||
         !set_or_unset_env("ME_DSL_JIT_INDEX_VARS", mode->index_vars) ||
-        !set_or_unset_env("ME_DSL_JIT_INDEX_VARS_SYNTH", mode->synth) ||
         !set_or_unset_env("ME_DSL_JIT_POS_CACHE", "0")) {
         restore_env_value("ME_DSL_JIT", saved_jit);
         restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
-        restore_env_value("ME_DSL_JIT_INDEX_VARS_SYNTH", saved_synth);
         restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
         free(saved_jit);
         free(saved_index_vars);
-        free(saved_synth);
         free(saved_pos_cache);
         return 1;
     }
@@ -340,11 +500,9 @@ static int run_mode(const mode_def *mode,
         me_free(expr);
         restore_env_value("ME_DSL_JIT", saved_jit);
         restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
-        restore_env_value("ME_DSL_JIT_INDEX_VARS_SYNTH", saved_synth);
         restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
         free(saved_jit);
         free(saved_index_vars);
-        free(saved_synth);
         free(saved_pos_cache);
         return 1;
     }
@@ -360,11 +518,9 @@ static int run_mode(const mode_def *mode,
         me_free(expr);
         restore_env_value("ME_DSL_JIT", saved_jit);
         restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
-        restore_env_value("ME_DSL_JIT_INDEX_VARS_SYNTH", saved_synth);
         restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
         free(saved_jit);
         free(saved_index_vars);
-        free(saved_synth);
         free(saved_pos_cache);
         return 1;
     }
@@ -380,11 +536,9 @@ static int run_mode(const mode_def *mode,
             me_free(expr);
             restore_env_value("ME_DSL_JIT", saved_jit);
             restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
-            restore_env_value("ME_DSL_JIT_INDEX_VARS_SYNTH", saved_synth);
             restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
             free(saved_jit);
             free(saved_index_vars);
-            free(saved_synth);
             free(saved_pos_cache);
             return 1;
         }
@@ -399,11 +553,9 @@ static int run_mode(const mode_def *mode,
         me_free(expr);
         restore_env_value("ME_DSL_JIT", saved_jit);
         restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
-        restore_env_value("ME_DSL_JIT_INDEX_VARS_SYNTH", saved_synth);
         restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
         free(saved_jit);
         free(saved_index_vars);
-        free(saved_synth);
         free(saved_pos_cache);
         return 1;
     }
@@ -431,11 +583,9 @@ static int run_mode(const mode_def *mode,
     me_free(expr);
     restore_env_value("ME_DSL_JIT", saved_jit);
     restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
-    restore_env_value("ME_DSL_JIT_INDEX_VARS_SYNTH", saved_synth);
     restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
     free(saved_jit);
     free(saved_index_vars);
-    free(saved_synth);
     free(saved_pos_cache);
     return 0;
 }
@@ -447,7 +597,7 @@ static void print_row(const mode_def *mode,
     if (interp_ns_per_elem > 0.0 && result->ns_per_elem_best > 0.0) {
         (void)snprintf(speedup, sizeof(speedup), "%.2fx", interp_ns_per_elem / result->ns_per_elem_best);
     }
-    printf("%-12s %7s %12.3f %12.3f %13.3f %12.3f %10.3g %10s\n",
+    printf("%-13s %7s %12.3f %12.3f %13.3f %12.3f %10.3g %10s\n",
            mode->name,
            result->has_jit ? "yes" : "no",
            result->compile_ms,
@@ -475,14 +625,16 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    nd_case cases[2];
-    build_cases(target_nitems, cases);
+    nd_case cases[4];
+    if (!build_cases(target_nitems, cases)) {
+        fprintf(stderr, "failed to build benchmark cases\n");
+        return 1;
+    }
 
     mode_def modes[] = {
-        {"interp", "0", "1", "0", false},
-        {"jit-buffer", "1", "1", "0", true},
-        {"jit-synth", "1", "1", "1", true},
-        {"jit-gateoff", "1", "0", "1", false}
+        {"interp", "0", "1", false},
+        {"jit-indexvars", "1", "1", true},
+        {"jit-gateoff", "1", "0", false}
     };
     enum {
         NMODES = (int)(sizeof(modes) / sizeof(modes[0]))
@@ -494,8 +646,14 @@ int main(int argc, char **argv) {
     printf("compiler=%s target_nitems=%d repeats=%d\n", compiler_label, target_nitems, repeats);
     printf("kernel: %d + _global_linear_idx + %d\n", START_CONST, STEP_CONST);
 
-    for (int c = 0; c < 2; c++) {
+    enum {
+        NCASES = (int)(sizeof(cases) / sizeof(cases[0]))
+    };
+    for (int c = 0; c < NCASES; c++) {
         const nd_case *sc = &cases[c];
+        if (!case_seq_flag_matches(sc)) {
+            return 1;
+        }
         memset(results, 0, sizeof(results));
 
         double *interp_values = malloc((size_t)sc->padded_items * sizeof(*interp_values));
@@ -520,16 +678,19 @@ int main(int argc, char **argv) {
         }
 
         printf("\n");
-        printf("case=%s shape=(%" PRId64 ",%" PRId64 ") chunk=(%d,%d) block=(%d,%d) valid=%d padded=%d\n",
+        printf("case=%s seq=%s shape=(%" PRId64 ",%" PRId64 ") chunk=(%d,%d) block=(%d,%d) "
+               "nchunk=%" PRId64 " nblock=%" PRId64 " valid=%d padded=%d\n",
                sc->name,
+               sc->seq_expected ? "true" : "false",
                sc->shape[0], sc->shape[1],
                sc->chunkshape[0], sc->chunkshape[1],
                sc->blockshape[0], sc->blockshape[1],
+               sc->nchunk, sc->nblock,
                sc->valid_items, sc->padded_items);
-        printf("%-12s %7s %12s %12s %13s %12s %10s %10s\n",
+        printf("%-13s %7s %12s %12s %13s %12s %10s %10s\n",
                "mode", "has_jit", "compile_ms", "eval_ms", "ns_per_elem", "checksum", "max_diff", "speedup");
-        printf("%-12s %7s %12s %12s %13s %12s %10s %10s\n",
-               "------------", "-------", "------------", "------------",
+        printf("%-13s %7s %12s %12s %13s %12s %10s %10s\n",
+               "-------------", "-------", "------------", "------------",
                "-------------", "------------", "----------", "----------");
 
         double interp_ns_per_elem = results[0].ns_per_elem_best;
@@ -542,9 +703,8 @@ int main(int argc, char **argv) {
     }
 
     printf("\n");
-    printf("A/B notes:\n");
-    printf("  A=jit-buffer  (ME_DSL_JIT_INDEX_VARS_SYNTH=0)\n");
-    printf("  B=jit-synth   (ME_DSL_JIT_INDEX_VARS_SYNTH=1)\n");
-    printf("  gate-off ctrl (ME_DSL_JIT_INDEX_VARS=0)\n");
+    printf("notes:\n");
+    printf("  jit-indexvars: ME_DSL_JIT=1, ME_DSL_JIT_INDEX_VARS=1\n");
+    printf("  gate-off ctrl: ME_DSL_JIT=1, ME_DSL_JIT_INDEX_VARS=0\n");
     return 0;
 }

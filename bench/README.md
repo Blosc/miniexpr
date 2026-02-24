@@ -160,12 +160,11 @@ ME_BENCH_COMPILER=cc ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
 ```
 
 ### benchmark_dsl_jit_index_vars.c
-DSL reserved-index-vars A/B benchmark for:
+DSL reserved-index-vars benchmark for:
 - `_i0`, `_i1`, `_n0`, `_n1`, `_ndim`, `_global_linear_idx`
-- Compares interpreter vs JIT buffer-path vs JIT synthesis-path:
+- Compares interpreter vs JIT index-vars path:
   - `interp`: `ME_DSL_JIT=0`
-  - `jit-buffer`: `ME_DSL_JIT=1`, `ME_DSL_JIT_INDEX_VARS=1`, `ME_DSL_JIT_INDEX_VARS_SYNTH=0`
-  - `jit-synth`: `ME_DSL_JIT=1`, `ME_DSL_JIT_INDEX_VARS=1`, `ME_DSL_JIT_INDEX_VARS_SYNTH=1`
+  - `jit-indexvars`: `ME_DSL_JIT=1`, `ME_DSL_JIT_INDEX_VARS=1`
   - `jit-gateoff`: `ME_DSL_JIT=1`, `ME_DSL_JIT_INDEX_VARS=0` (control)
 
 Notes:
@@ -181,16 +180,19 @@ ME_BENCH_COMPILER=cc ./build/bench/benchmark_dsl_jit_index_vars 1048576 9
 ```
 
 ### benchmark_dsl_jit_global_linear_idx.c
-DSL reserved-index-vars A/B benchmark focused on global linear index only:
+DSL reserved-index-vars benchmark focused on global linear index only:
 - Kernel: `START_CONST + _global_linear_idx + STEP_CONST`
-- Compares interpreter vs JIT buffer-path vs JIT synthesis-path:
+- Compares interpreter vs JIT index-vars path:
   - `interp`: `ME_DSL_JIT=0`
-  - `jit-buffer`: `ME_DSL_JIT=1`, `ME_DSL_JIT_INDEX_VARS=1`, `ME_DSL_JIT_INDEX_VARS_SYNTH=0`
-  - `jit-synth`: `ME_DSL_JIT=1`, `ME_DSL_JIT_INDEX_VARS=1`, `ME_DSL_JIT_INDEX_VARS_SYNTH=1`
+  - `jit-indexvars`: `ME_DSL_JIT=1`, `ME_DSL_JIT_INDEX_VARS=1`
   - `jit-gateoff`: `ME_DSL_JIT=1`, `ME_DSL_JIT_INDEX_VARS=0` (control)
 
 Notes:
-- Uses 2D ND cases (`no-padding` and `padded`) like `benchmark_dsl_jit_index_vars`.
+- Uses 2D ND cases with explicit linearity split:
+  - `seq-true-origin`
+  - `seq-true-outer-offset`
+  - `seq-false-inner-offset`
+  - `seq-false-inner-tail`
 - Uses `# me:fp=strict`.
 - Uses `# me:compiler=tcc` by default when `ME_BENCH_COMPILER` is unset.
 

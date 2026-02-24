@@ -1107,7 +1107,6 @@ static int test_nd_reserved_index_synth_codegen_and_parity(void) {
     char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
     char *saved_jit = dup_env_value("ME_DSL_JIT");
     char *saved_index_vars = dup_env_value("ME_DSL_JIT_INDEX_VARS");
-    char *saved_synth = dup_env_value("ME_DSL_JIT_INDEX_VARS_SYNTH");
 
     const char *src =
         "# me:compiler=cc\n"
@@ -1133,8 +1132,7 @@ static int test_nd_reserved_index_synth_codegen_and_parity(void) {
         setenv("CC", "cc", 1) != 0 ||
         setenv("ME_DSL_JIT_POS_CACHE", "0", 1) != 0 ||
         setenv("ME_DSL_JIT", "1", 1) != 0 ||
-        setenv("ME_DSL_JIT_INDEX_VARS", "1", 1) != 0 ||
-        setenv("ME_DSL_JIT_INDEX_VARS_SYNTH", "1", 1) != 0) {
+        setenv("ME_DSL_JIT_INDEX_VARS", "1", 1) != 0) {
         printf("  FAILED: setenv failed\n");
         goto cleanup;
     }
@@ -1196,13 +1194,11 @@ cleanup:
     restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
     restore_env_value("ME_DSL_JIT", saved_jit);
     restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
-    restore_env_value("ME_DSL_JIT_INDEX_VARS_SYNTH", saved_synth);
     free(saved_tmpdir);
     free(saved_cc);
     free(saved_pos_cache);
     free(saved_jit);
     free(saved_index_vars);
-    free(saved_synth);
     if (cache_dir[0] != '\0') {
         remove_files_in_dir(cache_dir);
         (void)rmdir(cache_dir);

@@ -4218,14 +4218,6 @@ static bool dsl_jit_index_vars_enabled(void) {
     return strcmp(env, "0") != 0;
 }
 
-static bool dsl_jit_index_vars_synthesis_enabled(void) {
-    const char *env = getenv("ME_DSL_JIT_INDEX_VARS_SYNTH");
-    if (!env || env[0] == '\0') {
-        return false;
-    }
-    return strcmp(env, "0") != 0;
-}
-
 static bool dsl_jit_pos_cache_bind_program(me_dsl_compiled_program *program, uint64_t key) {
     if (!program) {
         return false;
@@ -6217,14 +6209,6 @@ static bool dsl_jit_index_vars_enabled(void) {
     return strcmp(env, "0") != 0;
 }
 
-static bool dsl_jit_index_vars_synthesis_enabled(void) {
-    const char *env = getenv("ME_DSL_JIT_INDEX_VARS_SYNTH");
-    if (!env || env[0] == '\0') {
-        return false;
-    }
-    return strcmp(env, "0") != 0;
-}
-
 #if ME_USE_WASM32_JIT
 #include "libtcc.h"
 
@@ -7109,7 +7093,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
                    dsl_fp_mode_name(program->fp_mode), program->jit_ir_error);
         return;
     }
-    if (uses_reserved_index_vars && dsl_jit_index_vars_synthesis_enabled()) {
+    if (uses_reserved_index_vars) {
         int compile_ndims = program->compile_ndims;
         if (compile_ndims <= 1) {
             program->jit_synth_reserved_non_nd = true;

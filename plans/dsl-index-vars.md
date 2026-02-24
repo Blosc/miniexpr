@@ -19,7 +19,7 @@ with behavior matching interpreter semantics for regular and ND/padded evaluatio
 - Phase 1 (IR/codegen acceptance): done
 - Phase 2 (runtime binding channel v1): done
 - Phase 3 (ND/padding correctness hardening): done for current coverage
-- Phase 4 (optional synthesis optimization): partial (non-ND + ND synthesis under current ABI; wasm ND synthesis still disabled)
+- Phase 4 (synthesis optimization): done for current ABI (non-ND + ND synthesis; wasm ND synthesis still disabled)
 
 ## Implemented so far
 
@@ -55,7 +55,7 @@ with behavior matching interpreter semantics for regular and ND/padded evaluatio
 - `_global_linear_idx` continues to map to global C-order positions as in interpreter path.
 - No behavior change to padded write handling (existing zero-fill/scatter preserved).
 
-### Phase 4: optional synthesis optimization (partial)
+### Phase 4: synthesis optimization (done for current ABI)
 
 - Implemented non-ND synthesis in codegen while keeping the existing kernel ABI:
   - `_i0 = idx`, `_i(d>0) = 0`
@@ -68,16 +68,13 @@ with behavior matching interpreter semantics for regular and ND/padded evaluatio
   - `_ndim` from ND context
   - `_global_linear_idx` from synthesized coordinates and global strides
 - ND synthesis currently remains disabled for wasm32 builds.
-- Synthesis is opt-in via:
-  - `ME_DSL_JIT_INDEX_VARS_SYNTH=1`
-  - default is off (buffer-passing path remains default for stability).
+- Synthesis is now the default path for reserved-index JIT kernels.
 - Runtime input binding allows synthesized reserved params to be omitted from `inputs[]`.
 
 ## Rollout behavior (current)
 
 - `ME_DSL_JIT=0`: disables runtime JIT globally.
 - `ME_DSL_JIT_INDEX_VARS=0`: disables runtime JIT for DSL kernels using reserved index vars.
-- `ME_DSL_JIT_INDEX_VARS_SYNTH=1`: enables non-ND synthesized reserved vars in JIT codegen.
 
 ## Validation completed
 

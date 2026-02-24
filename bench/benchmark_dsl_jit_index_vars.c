@@ -1,13 +1,12 @@
 /*
- * DSL reserved-index-vars A/B benchmark (ND).
+ * DSL reserved-index-vars benchmark (ND).
  *
  * Exercises reserved symbols in one kernel:
  *   _i0, _i1, _n0, _n1, _ndim, _global_linear_idx
  *
  * Compares:
  * - interp      : ME_DSL_JIT=0
- * - jit-buffer  : ME_DSL_JIT=1, ME_DSL_JIT_INDEX_VARS=1, ME_DSL_JIT_INDEX_VARS_SYNTH=0
- * - jit-synth   : ME_DSL_JIT=1, ME_DSL_JIT_INDEX_VARS=1, ME_DSL_JIT_INDEX_VARS_SYNTH=1
+ * - jit-indexvars: ME_DSL_JIT=1, ME_DSL_JIT_INDEX_VARS=1
  * - jit-gateoff : ME_DSL_JIT=1, ME_DSL_JIT_INDEX_VARS=0 (control)
  *
  * ND scenarios:
@@ -42,7 +41,6 @@ typedef struct {
     const char *name;
     const char *jit;
     const char *index_vars;
-    const char *synth;
     bool expect_jit;
 } mode_def;
 
@@ -303,20 +301,16 @@ static int run_mode(const mode_def *mode,
 
     char *saved_jit = dup_env_value("ME_DSL_JIT");
     char *saved_index_vars = dup_env_value("ME_DSL_JIT_INDEX_VARS");
-    char *saved_synth = dup_env_value("ME_DSL_JIT_INDEX_VARS_SYNTH");
     char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
 
     if (!set_or_unset_env("ME_DSL_JIT", mode->jit) ||
         !set_or_unset_env("ME_DSL_JIT_INDEX_VARS", mode->index_vars) ||
-        !set_or_unset_env("ME_DSL_JIT_INDEX_VARS_SYNTH", mode->synth) ||
         !set_or_unset_env("ME_DSL_JIT_POS_CACHE", "0")) {
         restore_env_value("ME_DSL_JIT", saved_jit);
         restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
-        restore_env_value("ME_DSL_JIT_INDEX_VARS_SYNTH", saved_synth);
         restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
         free(saved_jit);
         free(saved_index_vars);
-        free(saved_synth);
         free(saved_pos_cache);
         return 1;
     }
@@ -335,11 +329,9 @@ static int run_mode(const mode_def *mode,
         me_free(expr);
         restore_env_value("ME_DSL_JIT", saved_jit);
         restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
-        restore_env_value("ME_DSL_JIT_INDEX_VARS_SYNTH", saved_synth);
         restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
         free(saved_jit);
         free(saved_index_vars);
-        free(saved_synth);
         free(saved_pos_cache);
         return 1;
     }
@@ -355,11 +347,9 @@ static int run_mode(const mode_def *mode,
         me_free(expr);
         restore_env_value("ME_DSL_JIT", saved_jit);
         restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
-        restore_env_value("ME_DSL_JIT_INDEX_VARS_SYNTH", saved_synth);
         restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
         free(saved_jit);
         free(saved_index_vars);
-        free(saved_synth);
         free(saved_pos_cache);
         return 1;
     }
@@ -375,11 +365,9 @@ static int run_mode(const mode_def *mode,
             me_free(expr);
             restore_env_value("ME_DSL_JIT", saved_jit);
             restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
-            restore_env_value("ME_DSL_JIT_INDEX_VARS_SYNTH", saved_synth);
             restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
             free(saved_jit);
             free(saved_index_vars);
-            free(saved_synth);
             free(saved_pos_cache);
             return 1;
         }
@@ -394,11 +382,9 @@ static int run_mode(const mode_def *mode,
         me_free(expr);
         restore_env_value("ME_DSL_JIT", saved_jit);
         restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
-        restore_env_value("ME_DSL_JIT_INDEX_VARS_SYNTH", saved_synth);
         restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
         free(saved_jit);
         free(saved_index_vars);
-        free(saved_synth);
         free(saved_pos_cache);
         return 1;
     }
@@ -426,11 +412,9 @@ static int run_mode(const mode_def *mode,
     me_free(expr);
     restore_env_value("ME_DSL_JIT", saved_jit);
     restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
-    restore_env_value("ME_DSL_JIT_INDEX_VARS_SYNTH", saved_synth);
     restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
     free(saved_jit);
     free(saved_index_vars);
-    free(saved_synth);
     free(saved_pos_cache);
     return 0;
 }
@@ -442,7 +426,7 @@ static void print_row(const mode_def *mode,
     if (interp_ns_per_elem > 0.0 && result->ns_per_elem_best > 0.0) {
         (void)snprintf(speedup, sizeof(speedup), "%.2fx", interp_ns_per_elem / result->ns_per_elem_best);
     }
-    printf("%-12s %7s %12.3f %12.3f %13.3f %12.3f %10.3g %10s\n",
+    printf("%-13s %7s %12.3f %12.3f %13.3f %12.3f %10.3g %10s\n",
            mode->name,
            result->has_jit ? "yes" : "no",
            result->compile_ms,
@@ -474,10 +458,9 @@ int main(int argc, char **argv) {
     build_cases(target_nitems, cases);
 
     mode_def modes[] = {
-        {"interp", "0", "1", "0", false},
-        {"jit-buffer", "1", "1", "0", true},
-        {"jit-synth", "1", "1", "1", true},
-        {"jit-gateoff", "1", "0", "1", false}
+        {"interp", "0", "1", false},
+        {"jit-indexvars", "1", "1", true},
+        {"jit-gateoff", "1", "0", false}
     };
     enum {
         NMODES = (int)(sizeof(modes) / sizeof(modes[0]))
@@ -521,10 +504,10 @@ int main(int argc, char **argv) {
                sc->chunkshape[0], sc->chunkshape[1],
                sc->blockshape[0], sc->blockshape[1],
                sc->valid_items, sc->padded_items);
-        printf("%-12s %7s %12s %12s %13s %12s %10s %10s\n",
+        printf("%-13s %7s %12s %12s %13s %12s %10s %10s\n",
                "mode", "has_jit", "compile_ms", "eval_ms", "ns_per_elem", "checksum", "max_diff", "speedup");
-        printf("%-12s %7s %12s %12s %13s %12s %10s %10s\n",
-               "------------", "-------", "------------", "------------",
+        printf("%-13s %7s %12s %12s %13s %12s %10s %10s\n",
+               "-------------", "-------", "------------", "------------",
                "-------------", "------------", "----------", "----------");
 
         double interp_ns_per_elem = results[0].ns_per_elem_best;
@@ -537,9 +520,8 @@ int main(int argc, char **argv) {
     }
 
     printf("\n");
-    printf("A/B notes:\n");
-    printf("  A=jit-buffer  (ME_DSL_JIT_INDEX_VARS_SYNTH=0)\n");
-    printf("  B=jit-synth   (ME_DSL_JIT_INDEX_VARS_SYNTH=1)\n");
-    printf("  gate-off ctrl (ME_DSL_JIT_INDEX_VARS=0)\n");
+    printf("notes:\n");
+    printf("  jit-indexvars: ME_DSL_JIT=1, ME_DSL_JIT_INDEX_VARS=1\n");
+    printf("  gate-off ctrl: ME_DSL_JIT=1, ME_DSL_JIT_INDEX_VARS=0\n");
     return 0;
 }
