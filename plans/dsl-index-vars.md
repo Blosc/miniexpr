@@ -82,6 +82,7 @@ with behavior matching interpreter semantics for regular and ND/padded evaluatio
 
 - `ME_DSL_JIT=0`: disables runtime JIT globally.
 - `ME_DSL_JIT_INDEX_VARS=0`: disables runtime JIT for DSL kernels using reserved index vars.
+- `tcc` auto-policy: kernels mixing `_global_linear_idx` with `_i*`/`_n*`/`_ndim` are JIT-skipped (interpreter path) to avoid known regressions.
 
 ## Validation completed
 

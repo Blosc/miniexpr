@@ -468,6 +468,10 @@ int main(int argc, char **argv) {
     mode_result results[NMODES];
 
     const char *compiler_label = current_dsl_compiler_label();
+    bool tcc_like_compiler = strcmp(compiler_label, "cc") != 0;
+    if (tcc_like_compiler) {
+        modes[1].expect_jit = false;
+    }
     printf("benchmark_dsl_jit_index_vars\n");
     printf("compiler=%s target_nitems=%d repeats=%d\n", compiler_label, target_nitems, repeats);
     printf("kernel: _global_linear_idx + _i0 + _i1 + _n0 + _n1 + _ndim\n");
@@ -523,5 +527,8 @@ int main(int argc, char **argv) {
     printf("notes:\n");
     printf("  jit-indexvars: ME_DSL_JIT=1, ME_DSL_JIT_INDEX_VARS=1\n");
     printf("  gate-off ctrl: ME_DSL_JIT=1, ME_DSL_JIT_INDEX_VARS=0\n");
+    if (tcc_like_compiler) {
+        printf("  tcc policy: mixed _global_linear_idx + _i/_n/_ndim kernels auto-disable reserved-index JIT\n");
+    }
     return 0;
 }

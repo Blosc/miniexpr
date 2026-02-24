@@ -3957,6 +3957,19 @@ static uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program
     return h;
 }
 
+static bool dsl_jit_tcc_reserved_index_mix_auto_disabled(const me_dsl_compiled_program *program) {
+    if (!program || program->compiler != ME_DSL_COMPILER_LIBTCC) {
+        return false;
+    }
+    if (!program->uses_global_linear_idx) {
+        return false;
+    }
+    if ((program->uses_i_mask == 0) && (program->uses_n_mask == 0) && !program->uses_ndim) {
+        return false;
+    }
+    return true;
+}
+
 #if ME_USE_WASM32_JIT
 typedef struct {
     bool valid;
@@ -7114,6 +7127,13 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     if (uses_reserved_index_vars && !dsl_jit_index_vars_enabled()) {
         snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
                  "reserved index vars disabled by ME_DSL_JIT_INDEX_VARS");
+        dsl_tracef("jit ir skip: fp=%s reason=%s",
+                   dsl_fp_mode_name(program->fp_mode), program->jit_ir_error);
+        return;
+    }
+    if (uses_reserved_index_vars && dsl_jit_tcc_reserved_index_mix_auto_disabled(program)) {
+        snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
+                 "tcc mixed reserved index vars auto-disabled");
         dsl_tracef("jit ir skip: fp=%s reason=%s",
                    dsl_fp_mode_name(program->fp_mode), program->jit_ir_error);
         return;
