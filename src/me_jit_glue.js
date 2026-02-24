@@ -311,6 +311,12 @@
         env.me_wasm32_cast_bool = function(x) {
             return x !== 0 ? 1 : 0;
         };
+        env.memset = bindBridge("memset", function(ptr, value, n) {
+            if (n > 0) {
+                HEAPU8.fill(value & 255, ptr, ptr + n);
+            }
+            return ptr | 0;
+        });
         /* Prefer host wasm bridge symbols; keep JS fallbacks for robustness. */
         env.me_jit_exp10 = bindBridge("me_jit_exp10", env.me_jit_exp10);
         env.me_jit_sinpi = bindBridge("me_jit_sinpi", env.me_jit_sinpi);

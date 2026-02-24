@@ -90,7 +90,11 @@ For log = base 10 log comment the next line. */
 #define ME_DSL_MAX_NDIM 8
 #define ME_DSL_JIT_SYMBOL_NAME "me_dsl_jit_kernel"
 #define ME_DSL_JIT_SYNTH_ND_CTX_PARAM "__me_nd_ctx"
-#define ME_DSL_JIT_CGEN_VERSION 5
+#define ME_DSL_JIT_CGEN_VERSION 6
+#define ME_DSL_JIT_SYNTH_ND_CTX_V2_VERSION 2
+#define ME_DSL_ND_CTX_FLAG_SEQ 1
+#define ME_DSL_JIT_SYNTH_ND_CTX_BASE_WORDS (1 + 4 * ME_DSL_MAX_NDIM)
+#define ME_DSL_JIT_SYNTH_ND_CTX_WORDS (ME_DSL_JIT_SYNTH_ND_CTX_BASE_WORDS + 3)
 #ifndef ME_USE_LIBTCC_FALLBACK
 #define ME_USE_LIBTCC_FALLBACK 0
 #endif
@@ -367,6 +371,18 @@ static bool dsl_jit_cc_math_bridge_available(void);
 
 static int64_t ceil_div64(int64_t a, int64_t b) {
     return (b == 0) ? 0 : (a + b - 1) / b;
+}
+
+static int64_t dsl_i64_add_wrap(int64_t a, int64_t b) {
+    return (int64_t)((uint64_t)a + (uint64_t)b);
+}
+
+static int64_t dsl_i64_mul_wrap(int64_t a, int64_t b) {
+    return (int64_t)((uint64_t)a * (uint64_t)b);
+}
+
+static int64_t dsl_i64_addmul_wrap(int64_t acc, int64_t a, int64_t b) {
+    return dsl_i64_add_wrap(acc, dsl_i64_mul_wrap(a, b));
 }
 
 #ifndef NAN
@@ -6500,6 +6516,12 @@ EM_JS(int, me_wasm_jit_instantiate,
         env.me_wasm32_cast_bool = function(x) {
             return x !== 0 ? 1 : 0;
         };
+        env.memset = bindBridge("memset", function(ptr, value, n) {
+            if (n > 0) {
+                HEAPU8.fill(value & 255, ptr, ptr + n);
+            }
+            return ptr | 0;
+        });
         /* Prefer host wasm bridge symbols; keep JS fallbacks for robustness. */
         env.me_jit_exp10 = bindBridge("me_jit_exp10", env.me_jit_exp10);
         env.me_jit_sinpi = bindBridge("me_jit_sinpi", env.me_jit_sinpi);
@@ -6651,6 +6673,8 @@ static char *dsl_wasm32_patch_source(const char *src) {
         { "#define ME_DSL_CAST_BOOL(x) ((x) != 0)",
           "extern int me_wasm32_cast_bool(double);\n"
           "#define ME_DSL_CAST_BOOL(x) (me_wasm32_cast_bool((double)(x)))" },
+        { "uint64_t ",      "unsigned int "  },
+        { "(uint64_t)",     "(unsigned int)" },
         { "int64_t ",       "int "           },
         { "(int64_t)",      "(int)"          },
         { "if (!output || nitems < 0) {\n"
@@ -6744,6 +6768,7 @@ static const dsl_wasm32_symbol_binding dsl_wasm32_symbol_bindings[] = {
     ME_WASM32_BRIDGE_SYM(sin), ME_WASM32_BRIDGE_SYM(sinh), ME_WASM32_BRIDGE_SYM(sqrt),
     ME_WASM32_BRIDGE_SYM(tan), ME_WASM32_BRIDGE_SYM(tanh), ME_WASM32_BRIDGE_SYM(tgamma),
     ME_WASM32_BRIDGE_SYM(trunc),
+    ME_WASM32_BRIDGE_SYM(memset),
     ME_WASM32_BRIDGE_SYM(me_jit_exp10), ME_WASM32_BRIDGE_SYM(me_jit_sinpi),
     ME_WASM32_BRIDGE_SYM(me_jit_cospi), ME_WASM32_BRIDGE_SYM(me_jit_logaddexp),
     ME_WASM32_BRIDGE_SYM(me_jit_where),
@@ -7099,9 +7124,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
             program->jit_synth_reserved_non_nd = true;
         }
         else {
-#if !ME_USE_WASM32_JIT
             program->jit_synth_reserved_nd = true;
-#endif
         }
     }
 
@@ -9624,17 +9647,20 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
                     }
 #if ME_USE_WASM32_JIT
                     if (jit_inputs_stack[i] &&
-                        binding->kind != ME_DSL_JIT_BIND_SYNTH_ND_CTX &&
                         program->jit_ir &&
                         i < program->jit_ir->nparams &&
                         program->jit_ir->param_dtypes[i] == ME_INT64) {
-                        int *tmp_i32 = malloc((size_t)nitems * sizeof(*tmp_i32));
+                        size_t count = (size_t)nitems;
+                        if (binding->kind == ME_DSL_JIT_BIND_SYNTH_ND_CTX) {
+                            count = (size_t)ME_DSL_JIT_SYNTH_ND_CTX_WORDS;
+                        }
+                        int *tmp_i32 = malloc(count * sizeof(*tmp_i32));
                         if (!tmp_i32) {
                             can_run_jit_direct = false;
                             break;
                         }
                         const int64_t *src_i64 = (const int64_t *)jit_inputs_stack[i];
-                        for (int j = 0; j < nitems; j++) {
+                        for (size_t j = 0; j < count; j++) {
                             tmp_i32[j] = (int)src_i64[j];
                         }
                         jit_inputs_stack[i] = (const void *)tmp_i32;
@@ -9868,17 +9894,20 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
                     }
 #if ME_USE_WASM32_JIT
                     if (jit_inputs_stack[i] &&
-                        binding->kind != ME_DSL_JIT_BIND_SYNTH_ND_CTX &&
                         program->jit_ir &&
                         i < program->jit_ir->nparams &&
                         program->jit_ir->param_dtypes[i] == ME_INT64) {
-                        int *tmp_i32 = malloc((size_t)nitems * sizeof(*tmp_i32));
+                        size_t count = (size_t)nitems;
+                        if (binding->kind == ME_DSL_JIT_BIND_SYNTH_ND_CTX) {
+                            count = (size_t)ME_DSL_JIT_SYNTH_ND_CTX_WORDS;
+                        }
+                        int *tmp_i32 = malloc(count * sizeof(*tmp_i32));
                         if (!tmp_i32) {
                             can_run_jit = false;
                             break;
                         }
                         const int64_t *src_i64 = (const int64_t *)jit_inputs_stack[i];
-                        for (int j = 0; j < nitems; j++) {
+                        for (size_t j = 0; j < count; j++) {
                             tmp_i32[j] = (int)src_i64[j];
                         }
                         jit_inputs_stack[i] = (const void *)tmp_i32;
@@ -9959,13 +9988,16 @@ int me_eval_dsl_program(const me_expr *expr, const void **vars_block,
                             1, NULL, NULL, NULL, NULL);
 }
 
-/* ND synthesis context layout:
+/* ND synthesis context layout v2:
    [0] = ndim
    [1 .. 1+ndim-1] = shape[d]
    [1+ndim .. 1+2*ndim-1] = shape_stride[d]
    [1+2*ndim .. 1+3*ndim-1] = base_idx[d]
-   [1+3*ndim .. 1+4*ndim-1] = iter_len[d] */
-static void dsl_build_nd_synth_ctx(int nd,
+   [1+3*ndim .. 1+4*ndim-1] = iter_len[d]
+   [1+4*ndim] = abi version (2)
+   [1+4*ndim+1] = flags (bit0: seq contiguous walk)
+   [1+4*ndim+2] = global_linear_base (wrap-safe int64 arithmetic) */
+static bool dsl_build_nd_synth_ctx(int nd,
                                    const int64_t *shape,
                                    const int64_t *shape_stride,
                                    const int64_t *base_idx,
@@ -9973,15 +10005,16 @@ static void dsl_build_nd_synth_ctx(int nd,
                                    int64_t *out_ctx,
                                    size_t out_ctx_len) {
     if (!shape || !shape_stride || !base_idx || !iter_len || !out_ctx || out_ctx_len == 0) {
-        return;
+        return false;
     }
     memset(out_ctx, 0, out_ctx_len * sizeof(*out_ctx));
     if (nd <= 0 || nd > ME_DSL_MAX_NDIM) {
-        return;
+        return false;
     }
-    const size_t need = (size_t)(1 + 4 * nd);
+    const size_t tail = (size_t)(1 + 4 * nd);
+    const size_t need = tail + 3;
     if (out_ctx_len < need) {
-        return;
+        return false;
     }
     out_ctx[0] = (int64_t)nd;
     for (int d = 0; d < nd; d++) {
@@ -9990,6 +10023,22 @@ static void dsl_build_nd_synth_ctx(int nd,
         out_ctx[1 + 2 * nd + d] = base_idx[d];
         out_ctx[1 + 3 * nd + d] = iter_len[d];
     }
+
+    bool seq = true;
+    for (int d = nd - 1; d >= 1; d--) {
+        if (base_idx[d] != 0 || iter_len[d] != shape[d]) {
+            seq = false;
+            break;
+        }
+    }
+    int64_t glin_base = 0;
+    for (int d = 0; d < nd; d++) {
+        glin_base = dsl_i64_addmul_wrap(glin_base, base_idx[d], shape_stride[d]);
+    }
+    out_ctx[tail] = (int64_t)ME_DSL_JIT_SYNTH_ND_CTX_V2_VERSION;
+    out_ctx[tail + 1] = seq ? (int64_t)ME_DSL_ND_CTX_FLAG_SEQ : 0;
+    out_ctx[tail + 2] = glin_base;
+    return true;
 }
 
 /* Fill missing reserved index buffers from ND synth context.
@@ -10010,6 +10059,9 @@ static bool dsl_fill_reserved_from_nd_synth_ctx(int nitems,
     const int64_t *shape_stride = nd_ctx + 1 + nd;
     const int64_t *base_idx = nd_ctx + 1 + 2 * nd;
     const int64_t *iter_len = nd_ctx + 1 + 3 * nd;
+    const int64_t tail = 1 + 4 * nd;
+    const bool has_v2_tail = (nd_ctx[tail] >= (int64_t)ME_DSL_JIT_SYNTH_ND_CTX_V2_VERSION);
+    const bool seq = has_v2_tail && ((nd_ctx[tail + 1] & (int64_t)ME_DSL_ND_CTX_FLAG_SEQ) != 0);
 
     for (int d = nd; d < ME_DSL_MAX_NDIM; d++) {
         if ((idx_mask & (1u << d)) && idx_outputs && idx_outputs[d]) {
@@ -10017,17 +10069,26 @@ static bool dsl_fill_reserved_from_nd_synth_ctx(int nitems,
         }
     }
 
+    if (seq && idx_mask == 0 && global_output) {
+        int64_t glin = nd_ctx[tail + 2];
+        for (int64_t it = 0; it < nitems; it++) {
+            global_output[it] = glin;
+            glin = dsl_i64_add_wrap(glin, 1);
+        }
+        return true;
+    }
+
     int64_t indices[ME_DSL_MAX_NDIM];
     memset(indices, 0, sizeof(indices));
     for (int64_t it = 0; it < nitems; it++) {
         int64_t global_idx = 0;
         for (int d = 0; d < nd; d++) {
-            int64_t coord = base_idx[d] + indices[d];
+            int64_t coord = dsl_i64_add_wrap(base_idx[d], indices[d]);
             if ((idx_mask & (1u << d)) && idx_outputs && idx_outputs[d]) {
                 idx_outputs[d][it] = coord;
             }
             if (global_output) {
-                global_idx += coord * shape_stride[d];
+                global_idx = dsl_i64_addmul_wrap(global_idx, coord, shape_stride[d]);
             }
         }
         if (global_output) {
@@ -10117,12 +10178,13 @@ static int me_eval_dsl_nd(const me_expr *expr, const void **vars_block,
 
     int64_t base_idx[64];
     for (int i = 0; i < nd; i++) {
-        base_idx[i] = chunk_idx[i] * chunkshape[i] + block_idx[i] * blockshape[i];
+        int64_t chunk_term = dsl_i64_mul_wrap(chunk_idx[i], chunkshape[i]);
+        base_idx[i] = dsl_i64_addmul_wrap(chunk_term, block_idx[i], blockshape[i]);
     }
     int64_t shape_stride[64];
     shape_stride[nd - 1] = 1;
     for (int i = nd - 2; i >= 0; i--) {
-        shape_stride[i] = shape_stride[i + 1] * shape[i + 1];
+        shape_stride[i] = dsl_i64_mul_wrap(shape_stride[i + 1], shape[i + 1]);
     }
 
     int64_t *idx_buffers[ME_DSL_MAX_NDIM];
@@ -10130,16 +10192,25 @@ static int me_eval_dsl_nd(const me_expr *expr, const void **vars_block,
         idx_buffers[i] = NULL;
     }
     int64_t *global_linear_idx_buffer = NULL;
-    int64_t nd_synth_ctx[1 + 4 * ME_DSL_MAX_NDIM];
+    int64_t nd_synth_ctx[ME_DSL_JIT_SYNTH_ND_CTX_WORDS];
     const int64_t *nd_synth_ctx_ptr = NULL;
-    const bool prefer_nd_synth_fast = program->jit_synth_reserved_nd &&
-                                      program->jit_kernel_fn &&
-                                      !me_eval_jit_disabled(params);
+    const bool prefer_nd_synth_fast =
+        program->jit_synth_reserved_nd &&
+        program->jit_kernel_fn &&
+        !me_eval_jit_disabled(params);
 
     if (valid_items == padded_items) {
+        bool nd_ctx_ready = false;
+        bool use_nd_synth_fast = false;
+        if (program->jit_synth_reserved_nd && prefer_nd_synth_fast) {
+            nd_ctx_ready = dsl_build_nd_synth_ctx(nd, shape, shape_stride, base_idx, blockshape,
+                                                  nd_synth_ctx,
+                                                  sizeof(nd_synth_ctx) / sizeof(nd_synth_ctx[0]));
+            use_nd_synth_fast = nd_ctx_ready;
+        }
         bool need_reserved_indices =
             ((program->uses_i_mask != 0) || program->uses_global_linear_idx) &&
-            !prefer_nd_synth_fast;
+            !use_nd_synth_fast;
         if (need_reserved_indices) {
             for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
                 if (program->uses_i_mask & (1 << d)) {
@@ -10173,7 +10244,8 @@ static int me_eval_dsl_nd(const me_expr *expr, const void **vars_block,
                 if (global_linear_idx_buffer) {
                     int64_t global_idx = 0;
                     for (int d = 0; d < nd; d++) {
-                        global_idx += (base_idx[d] + indices[d]) * shape_stride[d];
+                        int64_t coord = dsl_i64_add_wrap(base_idx[d], indices[d]);
+                        global_idx = dsl_i64_addmul_wrap(global_idx, coord, shape_stride[d]);
                     }
                     global_linear_idx_buffer[it] = global_idx;
                 }
@@ -10186,9 +10258,14 @@ static int me_eval_dsl_nd(const me_expr *expr, const void **vars_block,
         }
 
         if (program->jit_synth_reserved_nd) {
-            dsl_build_nd_synth_ctx(nd, shape, shape_stride, base_idx, blockshape,
-                                   nd_synth_ctx, sizeof(nd_synth_ctx) / sizeof(nd_synth_ctx[0]));
-            nd_synth_ctx_ptr = nd_synth_ctx;
+            if (!nd_ctx_ready) {
+                nd_ctx_ready = dsl_build_nd_synth_ctx(nd, shape, shape_stride, base_idx, blockshape,
+                                                      nd_synth_ctx,
+                                                      sizeof(nd_synth_ctx) / sizeof(nd_synth_ctx[0]));
+            }
+            if (nd_ctx_ready) {
+                nd_synth_ctx_ptr = nd_synth_ctx;
+            }
         }
 
         rc = dsl_eval_program(program, vars_block, n_vars, output_block,
@@ -10253,7 +10330,16 @@ static int me_eval_dsl_nd(const me_expr *expr, const void **vars_block,
         }
     }
 
-    if (!prefer_nd_synth_fast) {
+    bool nd_ctx_ready = false;
+    bool use_nd_synth_fast = false;
+    if (program->jit_synth_reserved_nd && prefer_nd_synth_fast) {
+        nd_ctx_ready = dsl_build_nd_synth_ctx(nd, shape, shape_stride, base_idx, valid_len,
+                                              nd_synth_ctx,
+                                              sizeof(nd_synth_ctx) / sizeof(nd_synth_ctx[0]));
+        use_nd_synth_fast = nd_ctx_ready;
+    }
+
+    if (!use_nd_synth_fast) {
         for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
             if (program->uses_i_mask & (1 << d)) {
                 idx_buffers[d] = malloc((size_t)valid_items * sizeof(int64_t));
@@ -10297,7 +10383,8 @@ static int me_eval_dsl_nd(const me_expr *expr, const void **vars_block,
         if (global_linear_idx_buffer) {
             int64_t global_idx = 0;
             for (int d = 0; d < nd; d++) {
-                global_idx += (base_idx[d] + indices[d]) * shape_stride[d];
+                int64_t coord = dsl_i64_add_wrap(base_idx[d], indices[d]);
+                global_idx = dsl_i64_addmul_wrap(global_idx, coord, shape_stride[d]);
             }
             global_linear_idx_buffer[write_idx] = global_idx;
         }
@@ -10319,9 +10406,14 @@ static int me_eval_dsl_nd(const me_expr *expr, const void **vars_block,
     }
 
     if (program->jit_synth_reserved_nd) {
-        dsl_build_nd_synth_ctx(nd, shape, shape_stride, base_idx, valid_len,
-                               nd_synth_ctx, sizeof(nd_synth_ctx) / sizeof(nd_synth_ctx[0]));
-        nd_synth_ctx_ptr = nd_synth_ctx;
+        if (!nd_ctx_ready) {
+            nd_ctx_ready = dsl_build_nd_synth_ctx(nd, shape, shape_stride, base_idx, valid_len,
+                                                  nd_synth_ctx,
+                                                  sizeof(nd_synth_ctx) / sizeof(nd_synth_ctx[0]));
+        }
+        if (nd_ctx_ready) {
+            nd_synth_ctx_ptr = nd_synth_ctx;
+        }
     }
 
     rc = dsl_eval_program(program, (const void **)packed_vars, n_vars, dsl_out,

@@ -1819,6 +1819,9 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         !me_jit_emit_line(&ctx.source, 0, "#define ME_DSL_CAST_INT(x) ((int64_t)(x))") ||
         !me_jit_emit_line(&ctx.source, 0, "#define ME_DSL_CAST_FLOAT(x) ((double)(x))") ||
         !me_jit_emit_line(&ctx.source, 0, "#define ME_DSL_CAST_BOOL(x) ((x) != 0)") ||
+        !me_jit_emit_line(&ctx.source, 0, "#define me_jit_i64_add_wrap(a, b) ((int64_t)((uint64_t)(a) + (uint64_t)(b)))") ||
+        !me_jit_emit_line(&ctx.source, 0, "#define me_jit_i64_mul_wrap(a, b) ((int64_t)((uint64_t)(a) * (uint64_t)(b)))") ||
+        !me_jit_emit_line(&ctx.source, 0, "#define me_jit_i64_addmul_wrap(acc, a, b) me_jit_i64_add_wrap((acc), me_jit_i64_mul_wrap((a), (b)))") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double acos(double);") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double acosh(double);") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double asin(double);") ||
@@ -2155,8 +2158,17 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
             return false;
         }
         if (synth_nd_fixed_ndim) {
+            char line[256];
+            if (snprintf(line, sizeof(line), "const int64_t __me_ctx_tail = %d;",
+                         1 + 4 * synth_nd_compile_ndims) >= (int)sizeof(line) ||
+                !me_jit_emit_line(&ctx.source, 1, line) ||
+                !me_jit_emit_line(&ctx.source, 1, "const int64_t __me_ctx_ver = __me_nd_ctx[__me_ctx_tail];")) {
+                me_jit_set_error(error, 0, 0, "out of memory");
+                me_jit_locals_free(&ctx.locals);
+                free(ctx.source.data);
+                return false;
+            }
             for (int d = 0; d < synth_nd_compile_ndims; d++) {
-                char line[128];
                 if (snprintf(line, sizeof(line),
                              "const int64_t __me_stride_%d = __me_nd_ctx[%d];",
                              d, 1 + synth_nd_compile_ndims + d) >= (int)sizeof(line) ||
@@ -2179,13 +2191,22 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
                     return false;
                 }
             }
+            if (!me_jit_emit_line(&ctx.source, 1, "if (__me_ctx_ver >= 2) {") ||
+                !me_jit_emit_line(&ctx.source, 2, "__me_seq = (__me_nd_ctx[__me_ctx_tail + 1] & 1) != 0;") ||
+                !me_jit_emit_line(&ctx.source, 2, "__me_glin = __me_nd_ctx[__me_ctx_tail + 2];") ||
+                !me_jit_emit_line(&ctx.source, 1, "}") ||
+                !me_jit_emit_line(&ctx.source, 1, "else {")) {
+                me_jit_set_error(error, 0, 0, "out of memory");
+                me_jit_locals_free(&ctx.locals);
+                free(ctx.source.data);
+                return false;
+            }
             for (int d = 0; d < synth_nd_compile_ndims; d++) {
-                char line[192];
                 if (snprintf(line, sizeof(line),
-                             "__me_glin += __me_nd_ctx[%d] * __me_stride_%d;",
+                             "__me_glin = me_jit_i64_addmul_wrap(__me_glin, __me_nd_ctx[%d], __me_stride_%d);",
                              1 + 2 * synth_nd_compile_ndims + d,
                              d) >= (int)sizeof(line) ||
-                    !me_jit_emit_line(&ctx.source, 1, line)) {
+                    !me_jit_emit_line(&ctx.source, 2, line)) {
                     me_jit_set_error(error, 0, 0, "out of memory");
                     me_jit_locals_free(&ctx.locals);
                     free(ctx.source.data);
@@ -2193,25 +2214,38 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
                 }
             }
             for (int d = synth_nd_compile_ndims - 1; d >= 1; d--) {
-                char line[256];
                 if (snprintf(line, sizeof(line),
                              "if (__me_nd_ctx[%d] != 0 || __me_len_%d != __me_nd_ctx[%d]) { __me_seq = false; }",
                              1 + 2 * synth_nd_compile_ndims + d,
                              d,
                              1 + d) >= (int)sizeof(line) ||
-                    !me_jit_emit_line(&ctx.source, 1, line)) {
+                    !me_jit_emit_line(&ctx.source, 2, line)) {
                     me_jit_set_error(error, 0, 0, "out of memory");
                     me_jit_locals_free(&ctx.locals);
                     free(ctx.source.data);
                     return false;
                 }
             }
+            if (!me_jit_emit_line(&ctx.source, 1, "}")) {
+                me_jit_set_error(error, 0, 0, "out of memory");
+                me_jit_locals_free(&ctx.locals);
+                free(ctx.source.data);
+                return false;
+            }
         }
-        else if (!me_jit_emit_line(&ctx.source, 1, "for (int64_t __me_d = 0; __me_d < __me_ndim_rt; __me_d++) {") ||
-                 !me_jit_emit_line(&ctx.source, 2, "__me_glin += __me_nd_ctx[1 + 2 * __me_ndim_rt + __me_d] * __me_nd_ctx[1 + __me_ndim_rt + __me_d];") ||
+        else if (!me_jit_emit_line(&ctx.source, 1, "const int64_t __me_ctx_tail = 1 + 4 * __me_ndim_rt;") ||
+                 !me_jit_emit_line(&ctx.source, 1, "const int64_t __me_ctx_ver = __me_nd_ctx[__me_ctx_tail];") ||
+                 !me_jit_emit_line(&ctx.source, 1, "if (__me_ctx_ver >= 2) {") ||
+                 !me_jit_emit_line(&ctx.source, 2, "__me_seq = (__me_nd_ctx[__me_ctx_tail + 1] & 1) != 0;") ||
+                 !me_jit_emit_line(&ctx.source, 2, "__me_glin = __me_nd_ctx[__me_ctx_tail + 2];") ||
                  !me_jit_emit_line(&ctx.source, 1, "}") ||
-                 !me_jit_emit_line(&ctx.source, 1, "for (int64_t __me_d = __me_ndim_rt - 1; __me_d >= 1; __me_d--) {") ||
-                 !me_jit_emit_line(&ctx.source, 2, "if (__me_nd_ctx[1 + 2 * __me_ndim_rt + __me_d] != 0 || __me_nd_ctx[1 + 3 * __me_ndim_rt + __me_d] != __me_nd_ctx[1 + __me_d]) { __me_seq = false; }") ||
+                 !me_jit_emit_line(&ctx.source, 1, "else {") ||
+                 !me_jit_emit_line(&ctx.source, 2, "for (int64_t __me_d = 0; __me_d < __me_ndim_rt; __me_d++) {") ||
+                 !me_jit_emit_line(&ctx.source, 3, "__me_glin = me_jit_i64_addmul_wrap(__me_glin, __me_nd_ctx[1 + 2 * __me_ndim_rt + __me_d], __me_nd_ctx[1 + __me_ndim_rt + __me_d]);") ||
+                 !me_jit_emit_line(&ctx.source, 2, "}") ||
+                 !me_jit_emit_line(&ctx.source, 2, "for (int64_t __me_d = __me_ndim_rt - 1; __me_d >= 1; __me_d--) {") ||
+                 !me_jit_emit_line(&ctx.source, 3, "if (__me_nd_ctx[1 + 2 * __me_ndim_rt + __me_d] != 0 || __me_nd_ctx[1 + 3 * __me_ndim_rt + __me_d] != __me_nd_ctx[1 + __me_d]) { __me_seq = false; }") ||
+                 !me_jit_emit_line(&ctx.source, 2, "}") ||
                  !me_jit_emit_line(&ctx.source, 1, "}")) {
             me_jit_set_error(error, 0, 0, "out of memory");
             me_jit_locals_free(&ctx.locals);
@@ -2228,7 +2262,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
     }
     if (synth_reserved_nd) {
         if (synth_nd_global_only) {
-            if (!me_jit_emit_line(&ctx.source, 2, "int64_t __me_global_linear_idx_rt = __me_seq ? (__me_glin + idx) : __me_glin;")) {
+            if (!me_jit_emit_line(&ctx.source, 2, "int64_t __me_global_linear_idx_rt = __me_seq ? me_jit_i64_add_wrap(__me_glin, idx) : __me_glin;")) {
                 me_jit_set_error(error, 0, 0, "out of memory");
                 me_jit_locals_free(&ctx.locals);
                 free(ctx.source.data);
@@ -2320,7 +2354,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
                     for (int d = 0; d < synth_nd_compile_ndims; d++) {
                         char line[192];
                         if (snprintf(line, sizeof(line),
-                                     "__me_global_linear_idx_rt += __me_coord[%d] * __me_nd_ctx[%d];",
+                                     "__me_global_linear_idx_rt = me_jit_i64_addmul_wrap(__me_global_linear_idx_rt, __me_coord[%d], __me_nd_ctx[%d]);",
                                      d, 1 + synth_nd_compile_ndims + d) >= (int)sizeof(line) ||
                             !me_jit_emit_line(&ctx.source, 2, line)) {
                             me_jit_set_error(error, 0, 0, "out of memory");
@@ -2331,7 +2365,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
                     }
                 }
                 else if (!me_jit_emit_line(&ctx.source, 2, "for (int64_t __me_d = 0; __me_d < __me_ndim_rt; __me_d++) {") ||
-                         !me_jit_emit_line(&ctx.source, 3, "__me_global_linear_idx_rt += __me_coord[__me_d] * __me_nd_ctx[1 + __me_ndim_rt + __me_d];") ||
+                         !me_jit_emit_line(&ctx.source, 3, "__me_global_linear_idx_rt = me_jit_i64_addmul_wrap(__me_global_linear_idx_rt, __me_coord[__me_d], __me_nd_ctx[1 + __me_ndim_rt + __me_d]);") ||
                          !me_jit_emit_line(&ctx.source, 2, "}")) {
                     me_jit_set_error(error, 0, 0, "out of memory");
                     me_jit_locals_free(&ctx.locals);
@@ -2514,12 +2548,12 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
                     !me_jit_emit_line(&ctx.source, 5, line) ||
                     snprintf(line, sizeof(line), "__me_pos[%d] = __me_next_%d;", d, d) >= (int)sizeof(line) ||
                     !me_jit_emit_line(&ctx.source, 6, line) ||
-                    snprintf(line, sizeof(line), "__me_glin += __me_stride_%d;", d) >= (int)sizeof(line) ||
+                    snprintf(line, sizeof(line), "__me_glin = me_jit_i64_add_wrap(__me_glin, __me_stride_%d);", d) >= (int)sizeof(line) ||
                     !me_jit_emit_line(&ctx.source, 6, line) ||
                     !me_jit_emit_line(&ctx.source, 6, "__me_advanced = true;") ||
                     !me_jit_emit_line(&ctx.source, 5, "}") ||
                     !me_jit_emit_line(&ctx.source, 5, "else {") ||
-                    snprintf(line, sizeof(line), "__me_glin -= (__me_len_%d - 1) * __me_stride_%d;", d, d) >= (int)sizeof(line) ||
+                    snprintf(line, sizeof(line), "__me_glin = me_jit_i64_addmul_wrap(__me_glin, -(__me_len_%d - 1), __me_stride_%d);", d, d) >= (int)sizeof(line) ||
                     !me_jit_emit_line(&ctx.source, 6, line) ||
                     snprintf(line, sizeof(line), "__me_pos[%d] = 0;", d) >= (int)sizeof(line) ||
                     !me_jit_emit_line(&ctx.source, 6, line) ||
@@ -2546,10 +2580,10 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
                  !me_jit_emit_line(&ctx.source, 4, "int64_t __me_next = __me_pos[__me_d] + 1;") ||
                  !me_jit_emit_line(&ctx.source, 4, "if (__me_next < __me_len) {") ||
                  !me_jit_emit_line(&ctx.source, 5, "__me_pos[__me_d] = __me_next;") ||
-                 !me_jit_emit_line(&ctx.source, 5, "__me_glin += __me_nd_ctx[1 + __me_ndim_rt + __me_d];") ||
+                 !me_jit_emit_line(&ctx.source, 5, "__me_glin = me_jit_i64_add_wrap(__me_glin, __me_nd_ctx[1 + __me_ndim_rt + __me_d]);") ||
                  !me_jit_emit_line(&ctx.source, 5, "break;") ||
                  !me_jit_emit_line(&ctx.source, 4, "}") ||
-                 !me_jit_emit_line(&ctx.source, 4, "__me_glin -= (__me_len - 1) * __me_nd_ctx[1 + __me_ndim_rt + __me_d];") ||
+                 !me_jit_emit_line(&ctx.source, 4, "__me_glin = me_jit_i64_addmul_wrap(__me_glin, -(__me_len - 1), __me_nd_ctx[1 + __me_ndim_rt + __me_d]);") ||
                  !me_jit_emit_line(&ctx.source, 4, "__me_pos[__me_d] = 0;") ||
                  !me_jit_emit_line(&ctx.source, 3, "}") ||
                  !me_jit_emit_line(&ctx.source, 2, "}")) {

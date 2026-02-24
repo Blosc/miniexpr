@@ -950,12 +950,12 @@ static int test_reserved_index_cache_key_and_param_order(void) {
     const double expected_reserved_mix[4] = {6.0, 8.0, 10.0, 12.0};
     const double expected_linear[4] = {1.0, 2.0, 3.0, 4.0};
     double out[4] = {0.0, 0.0, 0.0, 0.0};
-    const char *const expected_param_lines[] = {
+    const char *const expected_decl_lines[] = {
         "const double *in_x = (const double *)inputs[0];",
-        "const int64_t *in__i0 = (const int64_t *)inputs[1];",
-        "const int64_t *in__n0 = (const int64_t *)inputs[2];",
-        "const int64_t *in__ndim = (const int64_t *)inputs[3];",
-        "const int64_t *in__global_linear_idx = (const int64_t *)inputs[4];"
+        "int64_t _i0 = (int64_t)idx;",
+        "int64_t _n0 = (int64_t)nitems;",
+        "int64_t _ndim = (int64_t)1;",
+        "int64_t _global_linear_idx = (int64_t)idx;"
     };
 
     if (!tmp_root) {
@@ -993,9 +993,17 @@ static int test_reserved_index_cache_key_and_param_order(void) {
         printf("  FAILED: expected one generated source file for reserved order test A\n");
         goto cleanup;
     }
-    if (!file_contains_texts_in_order(src_path, expected_param_lines,
-                                      (int)(sizeof(expected_param_lines) / sizeof(expected_param_lines[0])))) {
+    if (!file_contains_texts_in_order(src_path, expected_decl_lines,
+                                      (int)(sizeof(expected_decl_lines) / sizeof(expected_decl_lines[0])))) {
         printf("  FAILED: generated source param declaration order mismatch for reserved order test A\n");
+        goto cleanup;
+    }
+    if (file_contains_text(src_path, "const int64_t *in__i0 = (const int64_t *)inputs[")) {
+        printf("  FAILED: generated source unexpectedly declares reserved _i0 input under synth path\n");
+        goto cleanup;
+    }
+    if (file_contains_text(src_path, "const int64_t *in__global_linear_idx = (const int64_t *)inputs[")) {
+        printf("  FAILED: generated source unexpectedly declares reserved _global_linear_idx input under synth path\n");
         goto cleanup;
     }
 
@@ -1015,8 +1023,8 @@ static int test_reserved_index_cache_key_and_param_order(void) {
         printf("  FAILED: expected one generated source file for reserved order test B\n");
         goto cleanup;
     }
-    if (!file_contains_texts_in_order(src_path, expected_param_lines,
-                                      (int)(sizeof(expected_param_lines) / sizeof(expected_param_lines[0])))) {
+    if (!file_contains_texts_in_order(src_path, expected_decl_lines,
+                                      (int)(sizeof(expected_decl_lines) / sizeof(expected_decl_lines[0])))) {
         printf("  FAILED: generated source param declaration order mismatch for reserved order test B\n");
         goto cleanup;
     }

@@ -19,7 +19,8 @@ with behavior matching interpreter semantics for regular and ND/padded evaluatio
 - Phase 1 (IR/codegen acceptance): done
 - Phase 2 (runtime binding channel v1): done
 - Phase 3 (ND/padding correctness hardening): done for current coverage
-- Phase 4 (synthesis optimization): done for current ABI (non-ND + ND synthesis; wasm ND synthesis still disabled)
+- Phase 4 (synthesis optimization): done for current ABI (non-ND + ND synthesis, including wasm ND synthesis)
+- Phase 4 v2 context/channel (contiguous ND fast path + safety hardening): done for current scope
 
 ## Implemented so far
 
@@ -67,9 +68,15 @@ with behavior matching interpreter semantics for regular and ND/padded evaluatio
   - `_n*` from global shape
   - `_ndim` from ND context
   - `_global_linear_idx` from synthesized coordinates and global strides
-- ND synthesis currently remains disabled for wasm32 builds.
+- ND synthesis is enabled for wasm32 builds.
+- wasm32 runtime glue now provides `memset` import fallback/binding for ND synthesis codegen.
+- wasm32 source patching now rewrites `uint64_t` before `int64_t` to avoid token-overlap corruption in wrap-arithmetic macros.
 - Synthesis is now the default path for reserved-index JIT kernels.
 - Runtime input binding allows synthesized reserved params to be omitted from `inputs[]`.
+- Added ND synth context v2 footer fields (version/flags/global-linear-base) while preserving existing v1 field layout for compatibility.
+- Codegen consumes v2 footer in ND global-only path to avoid recomputing `seq` and base global-linear index on contiguous blocks.
+- Added wrap-safe (`uint64_t`-based) int64 arithmetic in runtime and generated JIT code paths for `_global_linear_idx` synthesis.
+- Hardened ND fast-path selection so host reserved-buffer precompute is only skipped when ND synth context is actually built.
 
 ## Rollout behavior (current)
 
@@ -86,14 +93,11 @@ with behavior matching interpreter semantics for regular and ND/padded evaluatio
   - `test_dsl_jit_side_module`
   - `test_dsl_jit_runtime_cache`
   - `test_dsl_syntax`
-- Added explicit env-gate A/B test:
+- Added explicit reserved-index env-gate test:
   - `test_reserved_index_vars_env_gate` in `tests/test_dsl_syntax.c`
 
 ## Remaining work
 
-- True Phase 4 v2 ABI/context synthesis for ND contiguous cases (new context struct/ABI).
-- ND synthesis path selection/safety hardening across all edge layouts and overflow-sensitive cases.
-- Additional overflow-hardening review for global-linear-index arithmetic in all ND paths.
 - Decide final long-term default for `ME_DSL_JIT_INDEX_VARS` and whether to retire the gate.
 
 ## Done criteria status
