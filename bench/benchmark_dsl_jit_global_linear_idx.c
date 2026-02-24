@@ -22,6 +22,12 @@
  *   ME_BENCH_COMPILER=tcc|cc
  */
 
+#if defined(_WIN32) || defined(_WIN64)
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+#endif
+
 #include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
@@ -32,6 +38,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#if defined(_WIN32) || defined(_WIN64)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <dirent.h>
 #include <unistd.h>
@@ -73,9 +83,41 @@ typedef struct {
 } mode_result;
 
 static uint64_t monotonic_ns(void) {
+#if defined(_WIN32) || defined(_WIN64)
+    static LARGE_INTEGER freq;
+    static bool freq_ready = false;
+    LARGE_INTEGER now;
+    if (!freq_ready) {
+        if (!QueryPerformanceFrequency(&freq)) {
+            return 0;
+        }
+        freq_ready = true;
+    }
+    if (!QueryPerformanceCounter(&now)) {
+        return 0;
+    }
+    return (uint64_t)((now.QuadPart * 1000000000ULL) / (uint64_t)freq.QuadPart);
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+#endif
+}
+
+static int setenv_compat(const char *name, const char *value) {
+#if defined(_WIN32) || defined(_WIN64)
+    return _putenv_s(name, value ? value : "");
+#else
+    return setenv(name, value, 1);
+#endif
+}
+
+static int unsetenv_compat(const char *name) {
+#if defined(_WIN32) || defined(_WIN64)
+    return _putenv_s(name, "");
+#else
+    return unsetenv(name);
+#endif
 }
 
 static bool parse_positive_int(const char *text, int *out_value) {
@@ -93,6 +135,15 @@ static bool parse_positive_int(const char *text, int *out_value) {
 }
 
 static char *dup_env_value(const char *name) {
+#if defined(_WIN32) || defined(_WIN64)
+    char *copy = NULL;
+    size_t n = 0;
+    if (_dupenv_s(&copy, &n, name) != 0 || !copy || n == 0) {
+        free(copy);
+        return NULL;
+    }
+    return copy;
+#else
     const char *value = getenv(name);
     if (!value) {
         return NULL;
@@ -104,6 +155,7 @@ static char *dup_env_value(const char *name) {
     }
     memcpy(copy, value, n);
     return copy;
+#endif
 }
 
 static void restore_env_value(const char *name, const char *value) {
@@ -111,10 +163,10 @@ static void restore_env_value(const char *name, const char *value) {
         return;
     }
     if (value) {
-        (void)setenv(name, value, 1);
+        (void)setenv_compat(name, value);
     }
     else {
-        (void)unsetenv(name);
+        (void)unsetenv_compat(name);
     }
 }
 
@@ -123,9 +175,9 @@ static bool set_or_unset_env(const char *name, const char *value) {
         return false;
     }
     if (value) {
-        return setenv(name, value, 1) == 0;
+        return setenv_compat(name, value) == 0;
     }
-    return unsetenv(name) == 0;
+    return unsetenv_compat(name) == 0;
 }
 
 #if !defined(_WIN32) && !defined(_WIN64)
