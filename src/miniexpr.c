@@ -6898,6 +6898,12 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
     if (!dsl_jit_runtime_enabled()) {
         return;
     }
+#if ME_WASM32_SIDE_MODULE
+    if (!me_wasm_jit_helpers_available()) {
+        dsl_tracef("jit runtime skip: side-module wasm32 helpers are not registered");
+        return;
+    }
+#endif
     uint64_t key = dsl_jit_runtime_cache_key(program);
     if (dsl_jit_wasm_pos_cache_bind_program(program, key)) {
         dsl_tracef("jit runtime hit: fp=%s source=wasm-process-cache key=%016llx",
