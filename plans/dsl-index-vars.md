@@ -19,7 +19,7 @@ with behavior matching interpreter semantics for regular and ND/padded evaluatio
 - Phase 1 (IR/codegen acceptance): done
 - Phase 2 (runtime binding channel v1): done
 - Phase 3 (ND/padding correctness hardening): done for current coverage
-- Phase 4 (optional synthesis optimization): partial (non-ND synthesis only, behind env gate, same ABI)
+- Phase 4 (optional synthesis optimization): partial (non-ND + ND synthesis under current ABI; wasm ND synthesis still disabled)
 
 ## Implemented so far
 
@@ -62,6 +62,12 @@ with behavior matching interpreter semantics for regular and ND/padded evaluatio
   - `_n0 = nitems`, `_n(d>0) = 1`
   - `_ndim = 1`
   - `_global_linear_idx = idx`
+- Implemented ND synthesis (native runtime JIT) under the same kernel ABI by passing a compact ND context pointer (`__me_nd_ctx`) and synthesizing:
+  - `_i*` from `idx` decomposition + per-block base offsets
+  - `_n*` from global shape
+  - `_ndim` from ND context
+  - `_global_linear_idx` from synthesized coordinates and global strides
+- ND synthesis currently remains disabled for wasm32 builds.
 - Synthesis is opt-in via:
   - `ME_DSL_JIT_INDEX_VARS_SYNTH=1`
   - default is off (buffer-passing path remains default for stability).
@@ -89,7 +95,7 @@ with behavior matching interpreter semantics for regular and ND/padded evaluatio
 ## Remaining work
 
 - True Phase 4 v2 ABI/context synthesis for ND contiguous cases (new context struct/ABI).
-- ND synthesis path selection and safety checks (instead of current non-ND-only synthesis).
+- ND synthesis path selection/safety hardening across all edge layouts and overflow-sensitive cases.
 - Additional overflow-hardening review for global-linear-index arithmetic in all ND paths.
 - Decide final long-term default for `ME_DSL_JIT_INDEX_VARS` and whether to retire the gate.
 

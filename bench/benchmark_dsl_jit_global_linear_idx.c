@@ -1,8 +1,8 @@
 /*
- * DSL reserved-index-vars A/B benchmark (ND).
+ * DSL global-linear-index A/B benchmark (ND).
  *
- * Exercises reserved symbols in one kernel:
- *   _i0, _i1, _n0, _n1, _ndim, _global_linear_idx
+ * Exercises a kernel that uses only _global_linear_idx with constant offsets:
+ *   START_CONST + _global_linear_idx + STEP_CONST
  *
  * Compares:
  * - interp      : ME_DSL_JIT=0
@@ -15,7 +15,7 @@
  * - padded     : valid_items < padded_items
  *
  * Usage:
- *   ./benchmark_dsl_jit_index_vars [target_nitems] [repeats]
+ *   ./benchmark_dsl_jit_global_linear_idx [target_nitems] [repeats]
  *
  * Optional:
  *   ME_BENCH_COMPILER=tcc|cc
@@ -37,6 +37,11 @@
 #endif
 
 #include "miniexpr.h"
+
+#define ME_STR_HELPER(x) #x
+#define ME_STR(x) ME_STR_HELPER(x)
+#define START_CONST 17
+#define STEP_CONST 5
 
 typedef struct {
     const char *name;
@@ -207,14 +212,14 @@ static bool build_dsl_source(char *out, size_t out_size) {
                      "# me:compiler=%s\n"
                      "# me:fp=strict\n"
                      "def kernel():\n"
-                     "    return _global_linear_idx + _i0 + _i1 + _n0 + _n1 + _ndim\n",
+                     "    return " ME_STR(START_CONST) " + _global_linear_idx + " ME_STR(STEP_CONST) "\n",
                      compiler_value);
     }
     else {
         n = snprintf(out, out_size,
                      "# me:fp=strict\n"
                      "def kernel():\n"
-                     "    return _global_linear_idx + _i0 + _i1 + _n0 + _n1 + _ndim\n");
+                     "    return " ME_STR(START_CONST) " + _global_linear_idx + " ME_STR(STEP_CONST) "\n");
     }
     return n > 0 && (size_t)n < out_size;
 }
@@ -264,7 +269,7 @@ static bool verify_expected_formula_2d(const double *out, const nd_case *sc) {
             double expected = 0.0;
             if ((int64_t)i0 < n0 && (int64_t)i1 < n1) {
                 int64_t global = (int64_t)i0 * n1 + (int64_t)i1;
-                expected = (double)(global + i0 + i1 + n0 + n1 + 2);
+                expected = (double)(global + START_CONST + STEP_CONST);
             }
             if (fabs(out[off] - expected) > 1e-12) {
                 fprintf(stderr,
@@ -485,9 +490,9 @@ int main(int argc, char **argv) {
     mode_result results[NMODES];
 
     const char *compiler_label = current_dsl_compiler_label();
-    printf("benchmark_dsl_jit_index_vars\n");
+    printf("benchmark_dsl_jit_global_linear_idx\n");
     printf("compiler=%s target_nitems=%d repeats=%d\n", compiler_label, target_nitems, repeats);
-    printf("kernel: _global_linear_idx + _i0 + _i1 + _n0 + _n1 + _ndim\n");
+    printf("kernel: %d + _global_linear_idx + %d\n", START_CONST, STEP_CONST);
 
     for (int c = 0; c < 2; c++) {
         const nd_case *sc = &cases[c];

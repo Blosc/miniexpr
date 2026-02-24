@@ -180,6 +180,27 @@ ME_BENCH_COMPILER=tcc ./build/bench/benchmark_dsl_jit_index_vars 1048576 9
 ME_BENCH_COMPILER=cc ./build/bench/benchmark_dsl_jit_index_vars 1048576 9
 ```
 
+### benchmark_dsl_jit_global_linear_idx.c
+DSL reserved-index-vars A/B benchmark focused on global linear index only:
+- Kernel: `START_CONST + _global_linear_idx + STEP_CONST`
+- Compares interpreter vs JIT buffer-path vs JIT synthesis-path:
+  - `interp`: `ME_DSL_JIT=0`
+  - `jit-buffer`: `ME_DSL_JIT=1`, `ME_DSL_JIT_INDEX_VARS=1`, `ME_DSL_JIT_INDEX_VARS_SYNTH=0`
+  - `jit-synth`: `ME_DSL_JIT=1`, `ME_DSL_JIT_INDEX_VARS=1`, `ME_DSL_JIT_INDEX_VARS_SYNTH=1`
+  - `jit-gateoff`: `ME_DSL_JIT=1`, `ME_DSL_JIT_INDEX_VARS=0` (control)
+
+Notes:
+- Uses 2D ND cases (`no-padding` and `padded`) like `benchmark_dsl_jit_index_vars`.
+- Uses `# me:fp=strict`.
+- Uses `# me:compiler=tcc` by default when `ME_BENCH_COMPILER` is unset.
+
+```bash
+./build/bench/benchmark_dsl_jit_global_linear_idx
+./build/bench/benchmark_dsl_jit_global_linear_idx 1048576 9
+ME_BENCH_COMPILER=tcc ./build/bench/benchmark_dsl_jit_global_linear_idx 1048576 9
+ME_BENCH_COMPILER=cc ./build/bench/benchmark_dsl_jit_global_linear_idx 1048576 9
+```
+
 ### benchmark_mandelbrot_numba.py
 Optional Python/Numba baseline matching notebook-style escape-iteration output
 with regular early escape (`if zr*zr + zi*zi > 4.0: break`).

@@ -89,6 +89,7 @@ For log = base 10 log comment the next line. */
 
 #define ME_DSL_MAX_NDIM 8
 #define ME_DSL_JIT_SYMBOL_NAME "me_dsl_jit_kernel"
+#define ME_DSL_JIT_SYNTH_ND_CTX_PARAM "__me_nd_ctx"
 #define ME_DSL_JIT_CGEN_VERSION 5
 #ifndef ME_USE_LIBTCC_FALLBACK
 #define ME_USE_LIBTCC_FALLBACK 0
@@ -304,7 +305,8 @@ typedef enum {
     ME_DSL_JIT_BIND_RESERVED_I = 1,
     ME_DSL_JIT_BIND_RESERVED_N = 2,
     ME_DSL_JIT_BIND_RESERVED_NDIM = 3,
-    ME_DSL_JIT_BIND_RESERVED_GLOBAL_LINEAR_IDX = 4
+    ME_DSL_JIT_BIND_RESERVED_GLOBAL_LINEAR_IDX = 4,
+    ME_DSL_JIT_BIND_SYNTH_ND_CTX = 5
 } me_dsl_jit_param_binding_kind;
 
 typedef struct {
@@ -342,6 +344,7 @@ typedef struct {
     char *jit_c_source;
     bool jit_use_runtime_math_bridge;
     bool jit_synth_reserved_non_nd;
+    bool jit_synth_reserved_nd;
     int jit_c_error_line;
     int jit_c_error_column;
     char jit_c_error[128];
@@ -3920,7 +3923,17 @@ static uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program
         h = dsl_jit_hash_i32(h, program->jit_param_bindings[i].dim);
         h = dsl_jit_hash_i32(h, program->jit_param_bindings[i].var_index);
     }
-    h = dsl_jit_hash_i32(h, program->jit_synth_reserved_non_nd ? 1 : 0);
+    int synth_mode = 0;
+    if (program->jit_synth_reserved_non_nd) {
+        synth_mode = 1;
+    }
+    else if (program->jit_synth_reserved_nd) {
+        synth_mode = 2;
+    }
+    h = dsl_jit_hash_i32(h, synth_mode);
+    if (program->jit_synth_reserved_nd) {
+        h = dsl_jit_hash_i32(h, program->compile_ndims);
+    }
     h = dsl_jit_hash_i32(h, (int)sizeof(void *));
     h = dsl_jit_hash_i32(h, ME_DSL_JIT_CGEN_VERSION);
     h = dsl_jit_hash_i32(h, dsl_jit_target_tag());
@@ -7064,6 +7077,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     program->jit_c_source = NULL;
     program->jit_use_runtime_math_bridge = false;
     program->jit_synth_reserved_non_nd = false;
+    program->jit_synth_reserved_nd = false;
     program->jit_c_error_line = 0;
     program->jit_c_error_column = 0;
     program->jit_c_error[0] = '\0';
@@ -7100,6 +7114,11 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
         if (compile_ndims <= 1) {
             program->jit_synth_reserved_non_nd = true;
         }
+        else {
+#if !ME_USE_WASM32_JIT
+            program->jit_synth_reserved_nd = true;
+#endif
+        }
     }
 
     const char **param_names = NULL;
@@ -7118,6 +7137,9 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
         jit_param_count++;
     }
     if (program->uses_global_linear_idx && program->idx_global_linear_idx >= 0) {
+        jit_param_count++;
+    }
+    if (program->jit_synth_reserved_nd) {
         jit_param_count++;
     }
     if (jit_param_count > ME_MAX_VARS) {
@@ -7204,6 +7226,14 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
         param_bindings[nparams].kind = ME_DSL_JIT_BIND_RESERVED_GLOBAL_LINEAR_IDX;
         nparams++;
     }
+    if (program->jit_synth_reserved_nd) {
+        param_names[nparams] = ME_DSL_JIT_SYNTH_ND_CTX_PARAM;
+        param_dtypes[nparams] = ME_INT64;
+        param_bindings[nparams].var_index = -1;
+        param_bindings[nparams].dim = -1;
+        param_bindings[nparams].kind = ME_DSL_JIT_BIND_SYNTH_ND_CTX;
+        nparams++;
+    }
 
     me_dsl_error ir_error;
     memset(&ir_error, 0, sizeof(ir_error));
@@ -7239,6 +7269,9 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     memset(&cg_options, 0, sizeof(cg_options));
     cg_options.symbol_name = ME_DSL_JIT_SYMBOL_NAME;
     cg_options.synth_reserved_non_nd = program->jit_synth_reserved_non_nd;
+    cg_options.synth_reserved_nd = program->jit_synth_reserved_nd;
+    cg_options.synth_nd_ctx_name = ME_DSL_JIT_SYNTH_ND_CTX_PARAM;
+    cg_options.synth_nd_compile_ndims = program->compile_ndims;
     bool use_bridge = false;
     if (program->compiler == ME_DSL_COMPILER_LIBTCC) {
         use_bridge = true;
@@ -9542,13 +9575,20 @@ static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
     return rc;
 }
 
+static bool dsl_fill_reserved_from_nd_synth_ctx(int nitems,
+                                                const int64_t *nd_ctx,
+                                                int64_t **idx_outputs,
+                                                uint32_t idx_mask,
+                                                int64_t *global_output);
+
 static int dsl_eval_program(const me_dsl_compiled_program *program,
                             const void **vars_block, int n_vars,
                             void *output_block, int nitems,
                             const me_eval_params *params,
                             int ndim, const int64_t *shape,
                             int64_t **idx_buffers,
-                            const int64_t *global_linear_idx_buffer) {
+                            const int64_t *global_linear_idx_buffer,
+                            const int64_t *nd_synth_ctx_buffer) {
     if (!program || !output_block || nitems < 0) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
@@ -9582,8 +9622,17 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
                         }
                         jit_inputs_stack[i] = vars_block[idx];
                     }
-                    else if (program->jit_synth_reserved_non_nd) {
+                    else if ((program->jit_synth_reserved_non_nd || program->jit_synth_reserved_nd) &&
+                             (binding->kind == ME_DSL_JIT_BIND_RESERVED_I ||
+                              binding->kind == ME_DSL_JIT_BIND_RESERVED_N ||
+                              binding->kind == ME_DSL_JIT_BIND_RESERVED_NDIM ||
+                              binding->kind == ME_DSL_JIT_BIND_RESERVED_GLOBAL_LINEAR_IDX)) {
                         jit_inputs_stack[i] = NULL;
+                    }
+                    else if (binding->kind == ME_DSL_JIT_BIND_SYNTH_ND_CTX &&
+                             program->jit_synth_reserved_nd &&
+                             nd_synth_ctx_buffer) {
+                        jit_inputs_stack[i] = (const void *)nd_synth_ctx_buffer;
                     }
                     else {
                         can_run_jit_direct = false;
@@ -9591,6 +9640,7 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
                     }
 #if ME_USE_WASM32_JIT
                     if (jit_inputs_stack[i] &&
+                        binding->kind != ME_DSL_JIT_BIND_SYNTH_ND_CTX &&
                         program->jit_ir &&
                         i < program->jit_ir->nparams &&
                         program->jit_ir->param_dtypes[i] == ME_INT64) {
@@ -9664,6 +9714,14 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
 
     void *reserved_buffers[ME_DSL_MAX_NDIM * 2 + 2];
     int reserved_count = 0;
+    bool reserved_ctx_error = false;
+    const bool use_nd_ctx_reserved = program->jit_synth_reserved_nd &&
+                                     nd_synth_ctx_buffer &&
+                                     ndim > 0;
+    int64_t *synth_idx_outputs[ME_DSL_MAX_NDIM];
+    memset(synth_idx_outputs, 0, sizeof(synth_idx_outputs));
+    uint32_t synth_idx_mask = 0;
+    int64_t *synth_global_output = NULL;
     if (program->uses_ndim && program->idx_ndim >= 0) {
         int64_t *buf = malloc((size_t)nitems * sizeof(int64_t));
         if (!buf) {
@@ -9703,14 +9761,18 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
                     reserved_count = -1;
                     break;
                 }
-                if (d == 0) {
+                var_buffers[program->idx_i[d]] = buf;
+                reserved_buffers[reserved_count++] = buf;
+                if (use_nd_ctx_reserved) {
+                    synth_idx_outputs[d] = buf;
+                    synth_idx_mask |= (1u << d);
+                }
+                else if (d == 0) {
                     dsl_fill_iota_i64(buf, nitems, 0);
                 }
                 else {
                     dsl_fill_i64(buf, nitems, 0);
                 }
-                var_buffers[program->idx_i[d]] = buf;
-                reserved_buffers[reserved_count++] = buf;
             }
         }
     }
@@ -9724,14 +9786,32 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
                 reserved_count = -1;
             }
             else {
-                dsl_fill_iota_i64(buf, nitems, 0);
                 var_buffers[program->idx_global_linear_idx] = buf;
                 reserved_buffers[reserved_count++] = buf;
+                if (use_nd_ctx_reserved) {
+                    synth_global_output = buf;
+                }
+                else {
+                    dsl_fill_iota_i64(buf, nitems, 0);
+                }
             }
         }
     }
 
-    if (reserved_count < 0) {
+    if (reserved_count >= 0 &&
+        use_nd_ctx_reserved &&
+        (synth_idx_mask != 0 || synth_global_output != NULL)) {
+        if (!dsl_fill_reserved_from_nd_synth_ctx(nitems, nd_synth_ctx_buffer,
+                                                 synth_idx_outputs, synth_idx_mask,
+                                                 synth_global_output)) {
+            reserved_ctx_error = true;
+        }
+    }
+
+    if (reserved_count < 0 || reserved_ctx_error) {
+        for (int i = 0; i < reserved_count; i++) {
+            free(reserved_buffers[i]);
+        }
         for (int i = 0; i < program->n_locals; i++) {
             if (local_buffers[i]) {
                 free(local_buffers[i]);
@@ -9739,7 +9819,7 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
         }
         free(var_buffers);
         free(local_buffers);
-        return ME_EVAL_ERR_OOM;
+        return reserved_ctx_error ? ME_EVAL_ERR_INVALID_ARG : ME_EVAL_ERR_OOM;
     }
 
     if (!jit_attempted &&
@@ -9766,14 +9846,21 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
                         break;
                     case ME_DSL_JIT_BIND_RESERVED_NDIM:
                     case ME_DSL_JIT_BIND_RESERVED_GLOBAL_LINEAR_IDX:
-                        synth_reserved = program->jit_synth_reserved_non_nd;
+                        synth_reserved = program->jit_synth_reserved_non_nd ||
+                                         program->jit_synth_reserved_nd;
                         break;
                     case ME_DSL_JIT_BIND_RESERVED_I:
                     case ME_DSL_JIT_BIND_RESERVED_N:
                         if (binding->dim < 0 || binding->dim >= ME_DSL_MAX_NDIM) {
                             can_run_jit = false;
                         }
-                        synth_reserved = program->jit_synth_reserved_non_nd;
+                        synth_reserved = program->jit_synth_reserved_non_nd ||
+                                         program->jit_synth_reserved_nd;
+                        break;
+                    case ME_DSL_JIT_BIND_SYNTH_ND_CTX:
+                        if (!program->jit_synth_reserved_nd || !nd_synth_ctx_buffer) {
+                            can_run_jit = false;
+                        }
                         break;
                     default:
                         can_run_jit = false;
@@ -9785,6 +9872,9 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
                     if (synth_reserved) {
                         jit_inputs_stack[i] = NULL;
                     }
+                    else if (binding->kind == ME_DSL_JIT_BIND_SYNTH_ND_CTX) {
+                        jit_inputs_stack[i] = (const void *)nd_synth_ctx_buffer;
+                    }
                     else {
                         if (idx < 0 || idx >= program->vars.count || !var_buffers[idx]) {
                             can_run_jit = false;
@@ -9794,6 +9884,7 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
                     }
 #if ME_USE_WASM32_JIT
                     if (jit_inputs_stack[i] &&
+                        binding->kind != ME_DSL_JIT_BIND_SYNTH_ND_CTX &&
                         program->jit_ir &&
                         i < program->jit_ir->nparams &&
                         program->jit_ir->param_dtypes[i] == ME_INT64) {
@@ -9881,7 +9972,97 @@ int me_eval_dsl_program(const me_expr *expr, const void **vars_block,
     }
     const me_dsl_compiled_program *program = (const me_dsl_compiled_program *)expr->dsl_program;
     return dsl_eval_program(program, vars_block, n_vars, output_block, block_nitems, params,
-                            1, NULL, NULL, NULL);
+                            1, NULL, NULL, NULL, NULL);
+}
+
+/* ND synthesis context layout:
+   [0] = ndim
+   [1 .. 1+ndim-1] = shape[d]
+   [1+ndim .. 1+2*ndim-1] = shape_stride[d]
+   [1+2*ndim .. 1+3*ndim-1] = base_idx[d]
+   [1+3*ndim .. 1+4*ndim-1] = iter_len[d] */
+static void dsl_build_nd_synth_ctx(int nd,
+                                   const int64_t *shape,
+                                   const int64_t *shape_stride,
+                                   const int64_t *base_idx,
+                                   const int64_t *iter_len,
+                                   int64_t *out_ctx,
+                                   size_t out_ctx_len) {
+    if (!shape || !shape_stride || !base_idx || !iter_len || !out_ctx || out_ctx_len == 0) {
+        return;
+    }
+    memset(out_ctx, 0, out_ctx_len * sizeof(*out_ctx));
+    if (nd <= 0 || nd > ME_DSL_MAX_NDIM) {
+        return;
+    }
+    const size_t need = (size_t)(1 + 4 * nd);
+    if (out_ctx_len < need) {
+        return;
+    }
+    out_ctx[0] = (int64_t)nd;
+    for (int d = 0; d < nd; d++) {
+        out_ctx[1 + d] = shape[d];
+        out_ctx[1 + nd + d] = shape_stride[d];
+        out_ctx[1 + 2 * nd + d] = base_idx[d];
+        out_ctx[1 + 3 * nd + d] = iter_len[d];
+    }
+}
+
+/* Fill missing reserved index buffers from ND synth context.
+   This is used only as a fallback path when ND synth JIT is enabled but direct
+   JIT execution does not run and interpreter buffers are still needed. */
+static bool dsl_fill_reserved_from_nd_synth_ctx(int nitems,
+                                                const int64_t *nd_ctx,
+                                                int64_t **idx_outputs,
+                                                uint32_t idx_mask,
+                                                int64_t *global_output) {
+    if (nitems < 0 || !nd_ctx) {
+        return false;
+    }
+    int nd = (int)nd_ctx[0];
+    if (nd <= 0 || nd > ME_DSL_MAX_NDIM) {
+        return false;
+    }
+    const int64_t *shape_stride = nd_ctx + 1 + nd;
+    const int64_t *base_idx = nd_ctx + 1 + 2 * nd;
+    const int64_t *iter_len = nd_ctx + 1 + 3 * nd;
+
+    for (int d = nd; d < ME_DSL_MAX_NDIM; d++) {
+        if ((idx_mask & (1u << d)) && idx_outputs && idx_outputs[d]) {
+            dsl_fill_i64(idx_outputs[d], nitems, 0);
+        }
+    }
+
+    int64_t indices[ME_DSL_MAX_NDIM];
+    memset(indices, 0, sizeof(indices));
+    for (int64_t it = 0; it < nitems; it++) {
+        int64_t global_idx = 0;
+        for (int d = 0; d < nd; d++) {
+            int64_t coord = base_idx[d] + indices[d];
+            if ((idx_mask & (1u << d)) && idx_outputs && idx_outputs[d]) {
+                idx_outputs[d][it] = coord;
+            }
+            if (global_output) {
+                global_idx += coord * shape_stride[d];
+            }
+        }
+        if (global_output) {
+            global_output[it] = global_idx;
+        }
+        for (int d = nd - 1; d >= 0; d--) {
+            int64_t len = iter_len[d];
+            if (len <= 0) {
+                indices[d] = 0;
+                continue;
+            }
+            indices[d]++;
+            if (indices[d] < len) {
+                break;
+            }
+            indices[d] = 0;
+        }
+    }
+    return true;
 }
 
 static int me_eval_dsl_nd(const me_expr *expr, const void **vars_block,
@@ -9965,9 +10146,16 @@ static int me_eval_dsl_nd(const me_expr *expr, const void **vars_block,
         idx_buffers[i] = NULL;
     }
     int64_t *global_linear_idx_buffer = NULL;
+    int64_t nd_synth_ctx[1 + 4 * ME_DSL_MAX_NDIM];
+    const int64_t *nd_synth_ctx_ptr = NULL;
+    const bool prefer_nd_synth_fast = program->jit_synth_reserved_nd &&
+                                      program->jit_kernel_fn &&
+                                      !me_eval_jit_disabled(params);
 
     if (valid_items == padded_items) {
-        bool need_reserved_indices = (program->uses_i_mask != 0) || program->uses_global_linear_idx;
+        bool need_reserved_indices =
+            ((program->uses_i_mask != 0) || program->uses_global_linear_idx) &&
+            !prefer_nd_synth_fast;
         if (need_reserved_indices) {
             for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
                 if (program->uses_i_mask & (1 << d)) {
@@ -9983,6 +10171,11 @@ static int me_eval_dsl_nd(const me_expr *expr, const void **vars_block,
                 if (!global_linear_idx_buffer) {
                     for (int j = 0; j < ME_DSL_MAX_NDIM; j++) free(idx_buffers[j]);
                     return ME_EVAL_ERR_OOM;
+                }
+            }
+            for (int d = nd; d < ME_DSL_MAX_NDIM; d++) {
+                if (idx_buffers[d]) {
+                    dsl_fill_i64(idx_buffers[d], (int)valid_items, 0);
                 }
             }
             int64_t indices[64] = {0};
@@ -10008,9 +10201,15 @@ static int me_eval_dsl_nd(const me_expr *expr, const void **vars_block,
             }
         }
 
+        if (program->jit_synth_reserved_nd) {
+            dsl_build_nd_synth_ctx(nd, shape, shape_stride, base_idx, blockshape,
+                                   nd_synth_ctx, sizeof(nd_synth_ctx) / sizeof(nd_synth_ctx[0]));
+            nd_synth_ctx_ptr = nd_synth_ctx;
+        }
+
         rc = dsl_eval_program(program, vars_block, n_vars, output_block,
                               (int)valid_items, params, nd, shape, idx_buffers,
-                              global_linear_idx_buffer);
+                              global_linear_idx_buffer, nd_synth_ctx_ptr);
         for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
             free(idx_buffers[d]);
         }
@@ -10070,24 +10269,26 @@ static int me_eval_dsl_nd(const me_expr *expr, const void **vars_block,
         }
     }
 
-    for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
-        if (program->uses_i_mask & (1 << d)) {
-            idx_buffers[d] = malloc((size_t)valid_items * sizeof(int64_t));
-            if (!idx_buffers[d]) {
+    if (!prefer_nd_synth_fast) {
+        for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
+            if (program->uses_i_mask & (1 << d)) {
+                idx_buffers[d] = malloc((size_t)valid_items * sizeof(int64_t));
+                if (!idx_buffers[d]) {
+                    for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
+                    free(packed_out);
+                    for (int j = 0; j < ME_DSL_MAX_NDIM; j++) free(idx_buffers[j]);
+                    return ME_EVAL_ERR_OOM;
+                }
+            }
+        }
+        if (program->uses_global_linear_idx) {
+            global_linear_idx_buffer = malloc((size_t)valid_items * sizeof(int64_t));
+            if (!global_linear_idx_buffer) {
                 for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
                 free(packed_out);
                 for (int j = 0; j < ME_DSL_MAX_NDIM; j++) free(idx_buffers[j]);
                 return ME_EVAL_ERR_OOM;
             }
-        }
-    }
-    if (program->uses_global_linear_idx) {
-        global_linear_idx_buffer = malloc((size_t)valid_items * sizeof(int64_t));
-        if (!global_linear_idx_buffer) {
-            for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
-            free(packed_out);
-            for (int j = 0; j < ME_DSL_MAX_NDIM; j++) free(idx_buffers[j]);
-            return ME_EVAL_ERR_OOM;
         }
     }
 
@@ -10133,9 +10334,15 @@ static int me_eval_dsl_nd(const me_expr *expr, const void **vars_block,
         return ME_EVAL_ERR_OOM;
     }
 
+    if (program->jit_synth_reserved_nd) {
+        dsl_build_nd_synth_ctx(nd, shape, shape_stride, base_idx, valid_len,
+                               nd_synth_ctx, sizeof(nd_synth_ctx) / sizeof(nd_synth_ctx[0]));
+        nd_synth_ctx_ptr = nd_synth_ctx;
+    }
+
     rc = dsl_eval_program(program, (const void **)packed_vars, n_vars, dsl_out,
                           (int)valid_items, params, nd, shape, idx_buffers,
-                          global_linear_idx_buffer);
+                          global_linear_idx_buffer, nd_synth_ctx_ptr);
     if (rc != ME_EVAL_SUCCESS) {
         for (int v = 0; v < n_vars; v++) free(packed_vars[v]);
         if (program->output_is_scalar) free(dsl_out);

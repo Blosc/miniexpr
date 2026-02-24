@@ -21,6 +21,9 @@ typedef struct {
     const char *symbol_name;
     bool use_runtime_math_bridge;
     bool synth_reserved_non_nd;
+    bool synth_reserved_nd;
+    const char *synth_nd_ctx_name;
+    int synth_nd_compile_ndims;
 } me_dsl_jit_cgen_options;
 
 bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_dtype,

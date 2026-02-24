@@ -1089,6 +1089,131 @@ cleanup:
     return rc;
 }
 
+static int test_nd_reserved_index_synth_codegen_and_parity(void) {
+#if defined(__EMSCRIPTEN__)
+    return 0;
+#else
+    printf("\n=== DSL JIT Runtime Cache Test 8a: ND reserved-index synth codegen + parity ===\n");
+
+    int rc = 1;
+    char tmp_template[] = "/tmp/me_jit_nd_synth_XXXXXX";
+    char *tmp_root = mkdtemp(tmp_template);
+    char cache_dir[1024];
+    cache_dir[0] = '\0';
+    char src_path[1200];
+    src_path[0] = '\0';
+    char *saved_tmpdir = dup_env_value("TMPDIR");
+    char *saved_cc = dup_env_value("CC");
+    char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+    char *saved_index_vars = dup_env_value("ME_DSL_JIT_INDEX_VARS");
+    char *saved_synth = dup_env_value("ME_DSL_JIT_INDEX_VARS_SYNTH");
+
+    const char *src =
+        "# me:compiler=cc\n"
+        "def kernel():\n"
+        "    return _global_linear_idx + _i0 + _i1 + _n0 + _n1 + _ndim\n";
+    int64_t shape[2] = {3, 5};
+    int32_t chunks[2] = {2, 4};
+    int32_t blocks[2] = {2, 3};
+    const double expected[6] = {18.0, 0.0, 0.0, 24.0, 0.0, 0.0};
+    double out[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    me_expr *expr = NULL;
+    int err = 0;
+
+    if (!tmp_root) {
+        printf("  FAILED: mkdtemp failed\n");
+        goto cleanup;
+    }
+    if (snprintf(cache_dir, sizeof(cache_dir), "%s/miniexpr-jit", tmp_root) >= (int)sizeof(cache_dir)) {
+        printf("  FAILED: cache path too long\n");
+        goto cleanup;
+    }
+    if (setenv("TMPDIR", tmp_root, 1) != 0 ||
+        setenv("CC", "cc", 1) != 0 ||
+        setenv("ME_DSL_JIT_POS_CACHE", "0", 1) != 0 ||
+        setenv("ME_DSL_JIT", "1", 1) != 0 ||
+        setenv("ME_DSL_JIT_INDEX_VARS", "1", 1) != 0 ||
+        setenv("ME_DSL_JIT_INDEX_VARS_SYNTH", "1", 1) != 0) {
+        printf("  FAILED: setenv failed\n");
+        goto cleanup;
+    }
+
+    if (me_compile_nd(src, NULL, 0, ME_FLOAT64, 2, shape, chunks, blocks, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+        printf("  FAILED: compile_nd error at %d\n", err);
+        me_free(expr);
+        goto cleanup;
+    }
+    if (!me_expr_has_jit_kernel(expr)) {
+        printf("  FAILED: expected ND synth kernel to have runtime JIT\n");
+        me_free(expr);
+        goto cleanup;
+    }
+    if (me_eval_nd(expr, NULL, 0, out, 6, 1, 0, NULL) != ME_EVAL_SUCCESS) {
+        printf("  FAILED: eval_nd failed\n");
+        me_free(expr);
+        goto cleanup;
+    }
+    me_free(expr);
+    expr = NULL;
+
+    for (int i = 0; i < 6; i++) {
+        if (out[i] != expected[i]) {
+            printf("  FAILED: ND output mismatch at %d (%.17g vs %.17g)\n",
+                   i, out[i], expected[i]);
+            goto cleanup;
+        }
+    }
+
+    if (count_kernel_files_with_suffix(cache_dir, ".c", src_path, sizeof(src_path)) != 1 || src_path[0] == '\0') {
+        printf("  FAILED: expected one generated source file for ND synth test\n");
+        goto cleanup;
+    }
+    if (!file_contains_text(src_path, "const int64_t *in___me_nd_ctx = (const int64_t *)inputs[")) {
+        printf("  FAILED: ND synth source missing __me_nd_ctx input declaration\n");
+        goto cleanup;
+    }
+    if (!file_contains_text(src_path, "__me_global_linear_idx_rt")) {
+        printf("  FAILED: ND synth source missing synthesized global-linear computation\n");
+        goto cleanup;
+    }
+    if (file_contains_text(src_path, "const int64_t *in__i0 = (const int64_t *)inputs[")) {
+        printf("  FAILED: ND synth source still declares reserved _i0 input\n");
+        goto cleanup;
+    }
+    if (file_contains_text(src_path, "const int64_t *in__global_linear_idx = (const int64_t *)inputs[")) {
+        printf("  FAILED: ND synth source still declares reserved _global_linear_idx input\n");
+        goto cleanup;
+    }
+
+    rc = 0;
+    printf("  PASSED\n");
+
+cleanup:
+    me_free(expr);
+    restore_env_value("TMPDIR", saved_tmpdir);
+    restore_env_value("CC", saved_cc);
+    restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
+    restore_env_value("ME_DSL_JIT_INDEX_VARS_SYNTH", saved_synth);
+    free(saved_tmpdir);
+    free(saved_cc);
+    free(saved_pos_cache);
+    free(saved_jit);
+    free(saved_index_vars);
+    free(saved_synth);
+    if (cache_dir[0] != '\0') {
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+    }
+    if (tmp_root) {
+        (void)rmdir(tmp_root);
+    }
+    return rc;
+#endif
+}
+
 static int test_element_interpreter_jit_parity(void) {
     printf("\n=== DSL JIT Runtime Cache Test 9: element interpreter/JIT parity ===\n");
 
@@ -2076,6 +2201,7 @@ int main(void) {
     fail |= test_unknown_me_pragma_is_rejected();
     fail |= test_cache_key_differentiates_fp_mode();
     fail |= test_reserved_index_cache_key_and_param_order();
+    fail |= test_nd_reserved_index_synth_codegen_and_parity();
     fail |= test_element_interpreter_jit_parity();
     fail |= test_cast_interpreter_jit_parity_compilers();
     fail |= test_missing_return_skips_runtime_jit();
