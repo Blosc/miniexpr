@@ -1,6 +1,6 @@
 # Plan: JIT Support for DSL Reserved Index Variables
 
-Last updated: 2026-02-23
+Last updated: 2026-02-24
 
 ## Goal
 
@@ -11,133 +11,91 @@ Enable runtime JIT for DSL kernels that reference reserved index symbols:
 - `_ndim`
 - `_global_linear_idx`
 
-with behavior matching interpreter semantics for both regular and ND/padded evaluation.
+with behavior matching interpreter semantics for regular and ND/padded evaluation.
 
-## Why it is blocked today
+## Status snapshot
 
-Current runtime JIT only wires user-declared kernel params from `inputs[]` into generated C (`in_<param>[idx]`). Reserved index symbols are interpreter-injected synthetic values, not user params. The JIT pipeline therefore has no data channel for them, and runtime JIT is intentionally skipped when any reserved index symbol is used.
+- Phase 0 (metadata groundwork): done
+- Phase 1 (IR/codegen acceptance): done
+- Phase 2 (runtime binding channel v1): done
+- Phase 3 (ND/padding correctness hardening): done for current coverage
+- Phase 4 (optional synthesis optimization): partial (non-ND synthesis only, behind env gate, same ABI)
 
-## Design principles
+## Implemented so far
 
-1. Correctness first: identical semantics vs interpreter before optimization.
-2. Backward compatibility: do not break existing JIT kernel ABI abruptly.
-3. Deterministic metadata: stable ordering for bindings and cache fingerprints.
-4. Incremental rollout: pass values first, synthesize in-kernel later as an optimization.
+### Phase 0: metadata groundwork (done)
 
-## Proposed channel design
+- Added explicit JIT binding metadata (`kind`, `dim`, `var_index`) in `me_dsl_compiled_program`.
+- Preserved deterministic parameter order: user params first, then reserved params.
+- Included binding metadata in runtime cache key/fingerprint and cache metadata.
+- Added `compile_ndims` metadata for compile-time context.
 
-### Channel v1: Pass reserved buffers as synthetic JIT inputs
+### Phase 1: IR/codegen acceptance (done)
 
-Use the existing kernel ABI:
+- JIT IR now includes reserved symbols used by the DSL program.
+- C codegen accepts reserved symbols as params.
+- Runtime JIT path is no longer blanket-disabled for reserved index vars.
+- Added rollout eligibility gate:
+  - `ME_DSL_JIT_INDEX_VARS=0` disables JIT for reserved-index DSL kernels.
+  - default behavior keeps this enabled.
 
-`int me_dsl_jit_kernel(const void **inputs, void *output, int64_t nitems)`
+### Phase 2: runtime binding channel v1 (done)
 
-and extend runtime binding metadata so `inputs[]` can include:
+- Runtime dispatch builds JIT inputs from binding metadata:
+  - user bindings from `vars_block`
+  - reserved bindings from existing reserved buffers (`_i*`, `_n*`, `_ndim`, `_global_linear_idx`)
+- Existing interpreter reserved-buffer preparation remains the source of truth.
+- JIT remains best-effort with clean interpreter fallback on JIT runtime failure.
 
-- user input arrays
-- synthetic reserved arrays (`_i*`, `_n*`, `_ndim`, `_global_linear_idx`)
+### Phase 3: ND/padding correctness hardening (done for current scope)
 
-This keeps C codegen simple: reserved symbols are treated like normal params and read as `in_<name>[idx]`.
+- Reused current ND semantics:
+  - no-padding path (`valid_items == padded_items`)
+  - packed/scatter path for padded blocks
+- `_global_linear_idx` continues to map to global C-order positions as in interpreter path.
+- No behavior change to padded write handling (existing zero-fill/scatter preserved).
 
-### Channel v2 (optional optimization): Synthesize indices in JIT kernel
+### Phase 4: optional synthesis optimization (partial)
 
-Later, add an alternate ABI/context path where kernel receives ND context and computes reserved symbols on the fly (mainly to avoid materializing uniform/index buffers). Keep v1 as fallback for complex/padded layouts.
+- Implemented non-ND synthesis in codegen while keeping the existing kernel ABI:
+  - `_i0 = idx`, `_i(d>0) = 0`
+  - `_n0 = nitems`, `_n(d>0) = 1`
+  - `_ndim = 1`
+  - `_global_linear_idx = idx`
+- Synthesis is opt-in via:
+  - `ME_DSL_JIT_INDEX_VARS_SYNTH=1`
+  - default is off (buffer-passing path remains default for stability).
+- Runtime input binding allows synthesized reserved params to be omitted from `inputs[]`.
 
-## Phase 0: Metadata groundwork
+## Rollout behavior (current)
 
-1. Add JIT param binding metadata in `me_dsl_compiled_program`:
-   - binding kind (`user_input`, `reserved_i`, `reserved_n`, `reserved_ndim`, `reserved_global_linear_idx`)
-   - auxiliary index (`d` for `_i<d>`/`_n<d>`)
-   - stable param name
-2. Keep user param order first, append reserved params in deterministic order.
-3. Include new binding metadata in runtime cache key/fingerprint inputs.
+- `ME_DSL_JIT=0`: disables runtime JIT globally.
+- `ME_DSL_JIT_INDEX_VARS=0`: disables runtime JIT for DSL kernels using reserved index vars.
+- `ME_DSL_JIT_INDEX_VARS_SYNTH=1`: enables non-ND synthesized reserved vars in JIT codegen.
 
-## Phase 1: IR/codegen acceptance for reserved symbols
+## Validation completed
 
-1. Build JIT IR param metadata from:
-   - parsed user params
-   - reserved symbols actually used by program
-2. Ensure generated C declares `in_<reserved>` pointers for those symbols.
-3. Remove blanket runtime-JIT skip for reserved symbols once runtime binding is implemented.
+- Native tests passing:
+  - `test_dsl_syntax`
+  - `test_dsl_jit_codegen`
+  - `test_dsl_jit_runtime_cache`
+- Wasm tests passing:
+  - `test_dsl_jit_side_module`
+  - `test_dsl_jit_runtime_cache`
+  - `test_dsl_syntax`
+- Added explicit env-gate A/B test:
+  - `test_reserved_index_vars_env_gate` in `tests/test_dsl_syntax.c`
 
-## Phase 2: Runtime binding path (v1 pass-through channel)
+## Remaining work
 
-1. Introduce a shared helper to prepare reserved arrays for both interpreter and JIT dispatch:
-   - `_i*`: use provided `idx_buffers[d]` when available, otherwise synthesize.
-   - `_n*`: fill `int64_t` array with per-dimension shape value.
-   - `_ndim`: fill `int64_t` array with ndim.
-   - `_global_linear_idx`:
-     - non-ND: `0..nitems-1`
-     - ND contiguous/packed: use existing global-index computation semantics.
-2. Build JIT `inputs[]` from binding metadata:
-   - user bindings from `vars_block`
-   - reserved bindings from prepared buffers
-3. Attempt JIT with this expanded `inputs[]`.
-4. Preserve interpreter fallback on any JIT runtime error.
+- True Phase 4 v2 ABI/context synthesis for ND contiguous cases (new context struct/ABI).
+- ND synthesis path selection and safety checks (instead of current non-ND-only synthesis).
+- Additional overflow-hardening review for global-linear-index arithmetic in all ND paths.
+- Decide final long-term default for `ME_DSL_JIT_INDEX_VARS` and whether to retire the gate.
 
-## Phase 3: ND and padding correctness hardening
+## Done criteria status
 
-1. Reuse current ND semantics exactly:
-   - `valid_items == padded_items`: direct valid traversal.
-   - packed/scatter path: JIT runs on packed valid items only; scatter unchanged.
-2. `_global_linear_idx` must map to global C-order position in original array for each valid element.
-3. Keep integer overflow guards in global-index arithmetic (shape strides and index accumulation).
-4. Ensure no writes occur to padded elements except existing zero-fill/scatter behavior.
-
-## Phase 4: Optional synthesis optimization (v2)
-
-1. Add optional JIT context struct/ABI for contiguous ND cases:
-   - shape
-   - chunk/block offsets
-   - blockshape/valid layout metadata
-2. Generate kernel-side formulas for `_i*` and `_global_linear_idx` when safe.
-3. Select v2 only when layout permits simple arithmetic mapping.
-4. Fallback to v1 (passed buffers) for complex/padded pack layouts.
-
-## Safety and correctness requirements
-
-1. Reserved index dtype remains `ME_INT64` everywhere.
-2. Reserved names remain forbidden as user input names.
-3. Any unsupported JIT lowering must emit explicit trace/diagnostic reason and fallback cleanly.
-4. Memory ownership/lifetime for reserved buffers must be explicit and leak-free on all exit paths.
-
-## Testing plan
-
-1. Extend DSL JIT parity tests for each reserved symbol:
-   - direct return of `_i0`, `_n0`, `_ndim`, `_global_linear_idx`
-   - mixed arithmetic expressions
-2. ND coverage:
-   - no-padding and padding cases
-   - packed/scatter path
-   - multiple chunks/blocks
-3. Control-flow coverage:
-   - if/while/for kernels using reserved symbols
-4. Backend matrix:
-   - native (`cc`/`tcc` as available)
-   - wasm32 runtime JIT path
-5. Cache behavior:
-   - ensure cache keys differ when reserved-binding metadata differs
-6. Regression:
-   - existing non-index JIT kernels unchanged in behavior/perf baseline.
-
-## Rollout strategy
-
-1. Land behind temporary env gate (example: `ME_DSL_JIT_INDEX_VARS=1`).
-2. Keep detailed trace lines for:
-   - binding construction
-   - JIT eligibility
-   - fallback reason
-3. Remove gate after CI matrix is stable.
-
-## Open decisions
-
-1. Whether to implement v2 ABI/context now or after v1 parity lands.
-2. Whether `_n*`/`_ndim` should stay materialized as arrays in v1, or be emitted as scalar uniforms in codegen.
-3. Preferred deterministic reserved-param order for long-term cache stability.
-
-## Done criteria
-
-1. JIT is enabled for DSL programs using reserved index symbols.
-2. Interpreter/JIT parity passes for 1D and ND (including padding and `_global_linear_idx`).
-3. Native + wasm32 test lanes pass with no reserved-index regressions.
-4. Trace diagnostics are explicit for any remaining unsupported edge case.
+- JIT enabled for reserved-index DSL kernels: done (gate-controlled rollout).
+- Interpreter/JIT parity for 1D + ND including padding and `_global_linear_idx`: done for current tests.
+- Native + wasm32 lanes green with reserved-index coverage: done in current CI-relevant tests.
+- Trace diagnostics for unsupported/disabled paths: done for current gates and runtime fallback.

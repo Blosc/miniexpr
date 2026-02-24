@@ -159,6 +159,27 @@ ME_BENCH_COMPILER=tcc ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
 ME_BENCH_COMPILER=cc ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
 ```
 
+### benchmark_dsl_jit_index_vars.c
+DSL reserved-index-vars A/B benchmark for:
+- `_i0`, `_i1`, `_n0`, `_n1`, `_ndim`, `_global_linear_idx`
+- Compares interpreter vs JIT buffer-path vs JIT synthesis-path:
+  - `interp`: `ME_DSL_JIT=0`
+  - `jit-buffer`: `ME_DSL_JIT=1`, `ME_DSL_JIT_INDEX_VARS=1`, `ME_DSL_JIT_INDEX_VARS_SYNTH=0`
+  - `jit-synth`: `ME_DSL_JIT=1`, `ME_DSL_JIT_INDEX_VARS=1`, `ME_DSL_JIT_INDEX_VARS_SYNTH=1`
+  - `jit-gateoff`: `ME_DSL_JIT=1`, `ME_DSL_JIT_INDEX_VARS=0` (control)
+
+Notes:
+- Uses `# me:fp=strict`.
+- Uses `# me:compiler=tcc` by default when `ME_BENCH_COMPILER` is unset.
+- Set `ME_BENCH_COMPILER=cc` to force `cc` backend.
+
+```bash
+./build/bench/benchmark_dsl_jit_index_vars
+./build/bench/benchmark_dsl_jit_index_vars 1048576 9
+ME_BENCH_COMPILER=tcc ./build/bench/benchmark_dsl_jit_index_vars 1048576 9
+ME_BENCH_COMPILER=cc ./build/bench/benchmark_dsl_jit_index_vars 1048576 9
+```
+
 ### benchmark_mandelbrot_numba.py
 Optional Python/Numba baseline matching notebook-style escape-iteration output
 with regular early escape (`if zr*zr + zi*zi > 4.0: break`).

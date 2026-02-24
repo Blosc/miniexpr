@@ -328,6 +328,7 @@ typedef struct {
     int uses_n_mask;
     bool uses_ndim;
     bool uses_global_linear_idx;
+    int compile_ndims;
     me_dsl_fp_mode fp_mode;
     me_dsl_compiler compiler;
     bool guaranteed_return;
@@ -340,6 +341,7 @@ typedef struct {
     char jit_ir_error[128];
     char *jit_c_source;
     bool jit_use_runtime_math_bridge;
+    bool jit_synth_reserved_non_nd;
     int jit_c_error_line;
     int jit_c_error_column;
     char jit_c_error[128];
@@ -3918,6 +3920,7 @@ static uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program
         h = dsl_jit_hash_i32(h, program->jit_param_bindings[i].dim);
         h = dsl_jit_hash_i32(h, program->jit_param_bindings[i].var_index);
     }
+    h = dsl_jit_hash_i32(h, program->jit_synth_reserved_non_nd ? 1 : 0);
     h = dsl_jit_hash_i32(h, (int)sizeof(void *));
     h = dsl_jit_hash_i32(h, ME_DSL_JIT_CGEN_VERSION);
     h = dsl_jit_hash_i32(h, dsl_jit_target_tag());
@@ -4190,6 +4193,22 @@ static bool dsl_jit_runtime_enabled(void) {
     const char *env = getenv("ME_DSL_JIT");
     if (!env || env[0] == '\0') {
         return true;
+    }
+    return strcmp(env, "0") != 0;
+}
+
+static bool dsl_jit_index_vars_enabled(void) {
+    const char *env = getenv("ME_DSL_JIT_INDEX_VARS");
+    if (!env || env[0] == '\0') {
+        return true;
+    }
+    return strcmp(env, "0") != 0;
+}
+
+static bool dsl_jit_index_vars_synthesis_enabled(void) {
+    const char *env = getenv("ME_DSL_JIT_INDEX_VARS_SYNTH");
+    if (!env || env[0] == '\0') {
+        return false;
     }
     return strcmp(env, "0") != 0;
 }
@@ -6177,6 +6196,22 @@ static bool dsl_jit_runtime_enabled(void) {
     return strcmp(env, "0") != 0;
 }
 
+static bool dsl_jit_index_vars_enabled(void) {
+    const char *env = getenv("ME_DSL_JIT_INDEX_VARS");
+    if (!env || env[0] == '\0') {
+        return true;
+    }
+    return strcmp(env, "0") != 0;
+}
+
+static bool dsl_jit_index_vars_synthesis_enabled(void) {
+    const char *env = getenv("ME_DSL_JIT_INDEX_VARS_SYNTH");
+    if (!env || env[0] == '\0') {
+        return false;
+    }
+    return strcmp(env, "0") != 0;
+}
+
 #if ME_USE_WASM32_JIT
 #include "libtcc.h"
 
@@ -7028,6 +7063,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     free(program->jit_c_source);
     program->jit_c_source = NULL;
     program->jit_use_runtime_math_bridge = false;
+    program->jit_synth_reserved_non_nd = false;
     program->jit_c_error_line = 0;
     program->jit_c_error_column = 0;
     program->jit_c_error[0] = '\0';
@@ -7046,6 +7082,24 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
         dsl_tracef("jit ir skip: fp=%s reason=%s",
                    dsl_fp_mode_name(program->fp_mode), program->jit_ir_error);
         return;
+    }
+
+    bool uses_reserved_index_vars = (program->uses_i_mask != 0) ||
+                                    (program->uses_n_mask != 0) ||
+                                    program->uses_ndim ||
+                                    program->uses_global_linear_idx;
+    if (uses_reserved_index_vars && !dsl_jit_index_vars_enabled()) {
+        snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
+                 "reserved index vars disabled by ME_DSL_JIT_INDEX_VARS");
+        dsl_tracef("jit ir skip: fp=%s reason=%s",
+                   dsl_fp_mode_name(program->fp_mode), program->jit_ir_error);
+        return;
+    }
+    if (uses_reserved_index_vars && dsl_jit_index_vars_synthesis_enabled()) {
+        int compile_ndims = program->compile_ndims;
+        if (compile_ndims <= 1) {
+            program->jit_synth_reserved_non_nd = true;
+        }
     }
 
     const char **param_names = NULL;
@@ -7184,6 +7238,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     me_dsl_jit_cgen_options cg_options;
     memset(&cg_options, 0, sizeof(cg_options));
     cg_options.symbol_name = ME_DSL_JIT_SYMBOL_NAME;
+    cg_options.synth_reserved_non_nd = program->jit_synth_reserved_non_nd;
     bool use_bridge = false;
     if (program->compiler == ME_DSL_COMPILER_LIBTCC) {
         use_bridge = true;
@@ -7657,6 +7712,7 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
                                                     const me_variable *variables,
                                                     int var_count,
                                                     me_dtype dtype,
+                                                    int compile_ndims,
                                                     int jit_mode,
                                                     int *error_pos,
                                                     bool *is_dsl,
@@ -7705,6 +7761,7 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     }
     program->fp_mode = parsed->fp_mode;
     program->compiler = parsed->compiler;
+    program->compile_ndims = compile_ndims;
     dsl_var_table_init(&program->vars);
     program->idx_ndim = -1;
     program->idx_global_linear_idx = -1;
@@ -8112,7 +8169,8 @@ int is_synthetic_address(const void* ptr) {
 }
 
 static int compile_with_jit(const char* expression, const me_variable* variables,
-                                       int var_count, me_dtype dtype, int jit_mode,
+                                       int var_count, me_dtype dtype, int compile_ndims,
+                                       int jit_mode,
                                        int* error, me_expr** out) {
     me_clear_last_error_message();
     if (out) *out = NULL;
@@ -8147,7 +8205,7 @@ static int compile_with_jit(const char* expression, const me_variable* variables
         int dsl_error = -1;
         char dsl_reason[ME_LAST_ERROR_MSG_CAP] = {0};
         me_dsl_compiled_program *program = dsl_compile_program(
-            expression, vars_dsl ? vars_dsl : variables, var_count, dtype, jit_mode,
+            expression, vars_dsl ? vars_dsl : variables, var_count, dtype, compile_ndims, jit_mode,
             &dsl_error, &is_dsl, dsl_reason, sizeof(dsl_reason));
         free(vars_dsl);
 
@@ -8211,7 +8269,7 @@ static int compile_with_jit(const char* expression, const me_variable* variables
             int dsl_error = -1;
             char dsl_reason[ME_LAST_ERROR_MSG_CAP] = {0};
             me_dsl_compiled_program *program = dsl_compile_program(
-                dsl_wrapped, vars_dsl ? vars_dsl : variables, var_count, dtype, jit_mode,
+                dsl_wrapped, vars_dsl ? vars_dsl : variables, var_count, dtype, compile_ndims, jit_mode,
                 &dsl_error, &is_dsl, dsl_reason, sizeof(dsl_reason));
             free(dsl_wrapped);
             free(vars_dsl);
@@ -8298,7 +8356,8 @@ static int compile_with_jit(const char* expression, const me_variable* variables
 
 int me_compile(const char* expression, const me_variable* variables,
                int var_count, me_dtype dtype, int* error, me_expr** out) {
-    return compile_with_jit(expression, variables, var_count, dtype, ME_JIT_DEFAULT, error, out);
+    return compile_with_jit(expression, variables, var_count, dtype,
+                            0, ME_JIT_DEFAULT, error, out);
 }
 
 static int compile_nd_with_jit(const char* expression, const me_variable* variables,
@@ -8322,7 +8381,8 @@ static int compile_nd_with_jit(const char* expression, const me_variable* variab
     }
 
     me_expr* expr = NULL;
-    int rc = compile_with_jit(expression, variables, var_count, dtype, jit_mode, error, &expr);
+    int rc = compile_with_jit(expression, variables, var_count, dtype,
+                              ndims, jit_mode, error, &expr);
     if (rc != ME_COMPILE_SUCCESS) {
         return rc;
     }
@@ -9505,27 +9565,33 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
         const void *jit_inputs_stack[ME_MAX_VARS];
         void *jit_temp_buffers[ME_MAX_VARS];
         int jit_temp_count = 0;
-        const void **jit_inputs = vars_block;
+        const void **jit_inputs = (program->jit_nparams > 0) ? jit_inputs_stack : NULL;
         bool can_run_jit_direct = true;
         if (program->jit_nparams > 0) {
-            if (!vars_block || !program->jit_param_bindings) {
+            if (!program->jit_param_bindings) {
                 can_run_jit_direct = false;
             }
             else {
                 for (int i = 0; i < program->jit_nparams; i++) {
                     const me_dsl_jit_param_binding *binding = &program->jit_param_bindings[i];
-                    if (binding->kind != ME_DSL_JIT_BIND_USER_INPUT) {
+                    if (binding->kind == ME_DSL_JIT_BIND_USER_INPUT) {
+                        int idx = binding->var_index;
+                        if (!vars_block || idx < 0 || idx >= n_vars || !vars_block[idx]) {
+                            can_run_jit_direct = false;
+                            break;
+                        }
+                        jit_inputs_stack[i] = vars_block[idx];
+                    }
+                    else if (program->jit_synth_reserved_non_nd) {
+                        jit_inputs_stack[i] = NULL;
+                    }
+                    else {
                         can_run_jit_direct = false;
                         break;
                     }
-                    int idx = binding->var_index;
-                    if (idx < 0 || idx >= n_vars || !vars_block[idx]) {
-                        can_run_jit_direct = false;
-                        break;
-                    }
-                    jit_inputs_stack[i] = vars_block[idx];
 #if ME_USE_WASM32_JIT
-                    if (program->jit_ir &&
+                    if (jit_inputs_stack[i] &&
+                        program->jit_ir &&
                         i < program->jit_ir->nparams &&
                         program->jit_ir->param_dtypes[i] == ME_INT64) {
                         int *tmp_i32 = malloc((size_t)nitems * sizeof(*tmp_i32));
@@ -9533,7 +9599,7 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
                             can_run_jit_direct = false;
                             break;
                         }
-                        const int64_t *src_i64 = (const int64_t *)vars_block[idx];
+                        const int64_t *src_i64 = (const int64_t *)jit_inputs_stack[i];
                         for (int j = 0; j < nitems; j++) {
                             tmp_i32[j] = (int)src_i64[j];
                         }
@@ -9542,11 +9608,11 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
                     }
 #endif
                 }
-                jit_inputs = jit_inputs_stack;
             }
         }
         if (can_run_jit_direct) {
-            int jit_rc = program->jit_kernel_fn(jit_inputs, output_block, (int64_t)nitems);
+            int jit_rc = program->jit_kernel_fn(program->jit_nparams > 0 ? jit_inputs : NULL,
+                                                output_block, (int64_t)nitems);
             jit_attempted = true;
             for (int i = 0; i < jit_temp_count; i++) {
                 free(jit_temp_buffers[i]);
@@ -9694,16 +9760,20 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
                 for (int i = 0; i < program->jit_nparams; i++) {
                     const me_dsl_jit_param_binding *binding = &program->jit_param_bindings[i];
                     int idx = binding->var_index;
+                    bool synth_reserved = false;
                     switch (binding->kind) {
                     case ME_DSL_JIT_BIND_USER_INPUT:
+                        break;
                     case ME_DSL_JIT_BIND_RESERVED_NDIM:
                     case ME_DSL_JIT_BIND_RESERVED_GLOBAL_LINEAR_IDX:
+                        synth_reserved = program->jit_synth_reserved_non_nd;
                         break;
                     case ME_DSL_JIT_BIND_RESERVED_I:
                     case ME_DSL_JIT_BIND_RESERVED_N:
                         if (binding->dim < 0 || binding->dim >= ME_DSL_MAX_NDIM) {
                             can_run_jit = false;
                         }
+                        synth_reserved = program->jit_synth_reserved_non_nd;
                         break;
                     default:
                         can_run_jit = false;
@@ -9712,13 +9782,19 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
                     if (!can_run_jit) {
                         break;
                     }
-                    if (idx < 0 || idx >= program->vars.count || !var_buffers[idx]) {
-                        can_run_jit = false;
-                        break;
+                    if (synth_reserved) {
+                        jit_inputs_stack[i] = NULL;
                     }
-                    jit_inputs_stack[i] = (const void *)var_buffers[idx];
+                    else {
+                        if (idx < 0 || idx >= program->vars.count || !var_buffers[idx]) {
+                            can_run_jit = false;
+                            break;
+                        }
+                        jit_inputs_stack[i] = (const void *)var_buffers[idx];
+                    }
 #if ME_USE_WASM32_JIT
-                    if (program->jit_ir &&
+                    if (jit_inputs_stack[i] &&
+                        program->jit_ir &&
                         i < program->jit_ir->nparams &&
                         program->jit_ir->param_dtypes[i] == ME_INT64) {
                         int *tmp_i32 = malloc((size_t)nitems * sizeof(*tmp_i32));
@@ -9726,7 +9802,7 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
                             can_run_jit = false;
                             break;
                         }
-                        const int64_t *src_i64 = (const int64_t *)var_buffers[idx];
+                        const int64_t *src_i64 = (const int64_t *)jit_inputs_stack[i];
                         for (int j = 0; j < nitems; j++) {
                             tmp_i32[j] = (int)src_i64[j];
                         }

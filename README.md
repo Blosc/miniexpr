@@ -299,6 +299,8 @@ On Linux/macOS, DSL kernels may use runtime JIT compilation when eligible. The f
 
 - `ME_DSL_JIT=0`: Disable runtime JIT and always use interpreter fallback.
 - `ME_DSL_JIT_POS_CACHE=0`: Disable process-local positive cache reuse for loaded JIT kernels.
+- `ME_DSL_JIT_INDEX_VARS=0`: Disable runtime JIT for DSL kernels that use reserved index vars (`_i*`, `_n*`, `_ndim`, `_global_linear_idx`).
+- `ME_DSL_JIT_INDEX_VARS_SYNTH=1`: Enable non-ND in-kernel synthesis for reserved index vars (default is buffer-passing).
 - `CFLAGS="..."`: Standard C compiler flags honored by the `cc` backend runtime JIT path.
 
 Per-call policy overrides are available via API:

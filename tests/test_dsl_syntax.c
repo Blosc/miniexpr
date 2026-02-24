@@ -983,6 +983,151 @@ static int test_reserved_index_vars_jit_parity(void) {
     return 0;
 }
 
+static int test_reserved_index_vars_env_gate(void) {
+    printf("\n=== DSL Test 4d: reserved index vars env gate ===\n");
+
+    const char *src_plain =
+        "def kernel(x):\n"
+        "    return x + 1\n";
+    const char *src_reserved =
+        "def kernel():\n"
+        "    return _global_linear_idx + 1\n";
+
+    double x[4] = {0.0, 1.0, 2.0, 3.0};
+    const void *plain_inputs[] = {x};
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+    char *saved_index_vars = dup_env_value("ME_DSL_JIT_INDEX_VARS");
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=1 failed\n");
+        free(saved_jit);
+        free(saved_index_vars);
+        return 1;
+    }
+
+    me_expr *expr_plain = NULL;
+    int err = 0;
+    if (me_compile(src_plain, vars, 1, ME_FLOAT64, &err, &expr_plain) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: plain compile error at %d\n", err);
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
+        free(saved_jit);
+        free(saved_index_vars);
+        return 1;
+    }
+    bool baseline_has_jit = me_expr_has_jit_kernel(expr_plain);
+    double out_plain[4] = {0.0, 0.0, 0.0, 0.0};
+    if (me_eval(expr_plain, plain_inputs, 1, out_plain, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: plain eval error\n");
+        me_free(expr_plain);
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
+        free(saved_jit);
+        free(saved_index_vars);
+        return 1;
+    }
+    me_free(expr_plain);
+
+    if (setenv("ME_DSL_JIT_INDEX_VARS", "0", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT_INDEX_VARS=0 failed\n");
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
+        free(saved_jit);
+        free(saved_index_vars);
+        return 1;
+    }
+
+    me_expr *expr_gate_off = NULL;
+    err = 0;
+    if (me_compile(src_reserved, NULL, 0, ME_FLOAT64, &err, &expr_gate_off) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: reserved compile (gate=0) error at %d\n", err);
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
+        free(saved_jit);
+        free(saved_index_vars);
+        return 1;
+    }
+    if (me_expr_has_jit_kernel(expr_gate_off)) {
+        printf("  ❌ FAILED: reserved kernel unexpectedly JIT-compiled with gate=0\n");
+        me_free(expr_gate_off);
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
+        free(saved_jit);
+        free(saved_index_vars);
+        return 1;
+    }
+    double out_gate_off[4] = {0.0, 0.0, 0.0, 0.0};
+    if (me_eval(expr_gate_off, NULL, 0, out_gate_off, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: reserved eval (gate=0) error\n");
+        me_free(expr_gate_off);
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
+        free(saved_jit);
+        free(saved_index_vars);
+        return 1;
+    }
+    me_free(expr_gate_off);
+
+    if (setenv("ME_DSL_JIT_INDEX_VARS", "1", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT_INDEX_VARS=1 failed\n");
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
+        free(saved_jit);
+        free(saved_index_vars);
+        return 1;
+    }
+
+    me_expr *expr_gate_on = NULL;
+    err = 0;
+    if (me_compile(src_reserved, NULL, 0, ME_FLOAT64, &err, &expr_gate_on) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: reserved compile (gate=1) error at %d\n", err);
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
+        free(saved_jit);
+        free(saved_index_vars);
+        return 1;
+    }
+    if (baseline_has_jit && !me_expr_has_jit_kernel(expr_gate_on)) {
+        printf("  ❌ FAILED: reserved kernel did not JIT-compile with gate=1\n");
+        me_free(expr_gate_on);
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
+        free(saved_jit);
+        free(saved_index_vars);
+        return 1;
+    }
+    double out_gate_on[4] = {0.0, 0.0, 0.0, 0.0};
+    if (me_eval(expr_gate_on, NULL, 0, out_gate_on, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: reserved eval (gate=1) error\n");
+        me_free(expr_gate_on);
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
+        free(saved_jit);
+        free(saved_index_vars);
+        return 1;
+    }
+    me_free(expr_gate_on);
+
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    restore_env_value("ME_DSL_JIT_INDEX_VARS", saved_index_vars);
+    free(saved_jit);
+    free(saved_index_vars);
+
+    double expected_reserved[4] = {1.0, 2.0, 3.0, 4.0};
+    if (check_all_close(out_gate_off, expected_reserved, 4, 1e-12) != 0) {
+        printf("  ❌ FAILED: gate=0 output mismatch\n");
+        return 1;
+    }
+    if (check_all_close(out_gate_on, expected_reserved, 4, 1e-12) != 0) {
+        printf("  ❌ FAILED: gate=1 output mismatch\n");
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    return 0;
+}
+
 static int test_nd_padding(void) {
     printf("\n=== DSL Test 5: ND padding in blocks ===\n");
 
@@ -1987,6 +2132,7 @@ int main(void) {
     fail |= test_nd_indices();
     fail |= test_global_linear_idx();
     fail |= test_reserved_index_vars_jit_parity();
+    fail |= test_reserved_index_vars_env_gate();
     fail |= test_nd_padding();
     fail |= test_nd_large_block();
     fail |= test_nd_3d_indices_padding();

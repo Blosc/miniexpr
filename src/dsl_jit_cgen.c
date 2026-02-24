@@ -1644,6 +1644,43 @@ static bool me_jit_collect_return_dtype(const me_dsl_jit_ir_block *block,
     return true;
 }
 
+typedef enum {
+    ME_JIT_RESERVED_PARAM_NONE = 0,
+    ME_JIT_RESERVED_PARAM_I,
+    ME_JIT_RESERVED_PARAM_N,
+    ME_JIT_RESERVED_PARAM_NDIM,
+    ME_JIT_RESERVED_PARAM_GLOBAL_LINEAR_IDX
+} me_jit_reserved_param_kind;
+
+static me_jit_reserved_param_kind me_jit_reserved_param_from_name(const char *name, int *out_dim) {
+    if (out_dim) {
+        *out_dim = -1;
+    }
+    if (!name) {
+        return ME_JIT_RESERVED_PARAM_NONE;
+    }
+    if (strcmp(name, "_ndim") == 0) {
+        return ME_JIT_RESERVED_PARAM_NDIM;
+    }
+    if (strcmp(name, "_global_linear_idx") == 0) {
+        return ME_JIT_RESERVED_PARAM_GLOBAL_LINEAR_IDX;
+    }
+    if (name[0] == '_' &&
+        (name[1] == 'i' || name[1] == 'n') &&
+        isdigit((unsigned char)name[2]) &&
+        name[3] == '\0') {
+        int dim = name[2] - '0';
+        if (dim < 0 || dim > 7) {
+            return ME_JIT_RESERVED_PARAM_NONE;
+        }
+        if (out_dim) {
+            *out_dim = dim;
+        }
+        return (name[1] == 'i') ? ME_JIT_RESERVED_PARAM_I : ME_JIT_RESERVED_PARAM_N;
+    }
+    return ME_JIT_RESERVED_PARAM_NONE;
+}
+
 bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_dtype,
                           const me_dsl_jit_cgen_options *options,
                           char **out_source, me_dsl_error *error) {
@@ -1700,11 +1737,15 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
 
     const char *symbol = "me_dsl_jit_kernel";
     bool use_runtime_math_bridge = false;
+    bool synth_reserved_non_nd = false;
     if (options && options->symbol_name && options->symbol_name[0] != '\0') {
         symbol = options->symbol_name;
     }
     if (options && options->use_runtime_math_bridge) {
         use_runtime_math_bridge = true;
+    }
+    if (options && options->synth_reserved_non_nd) {
+        synth_reserved_non_nd = true;
     }
 
     if (!me_jit_emit_line(&ctx.source, 0, "typedef _Bool bool;") ||
@@ -1873,7 +1914,19 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         free(ctx.source.data);
         return false;
     }
-    if (program->nparams > 0) {
+    bool needs_inputs = false;
+    for (int i = 0; i < program->nparams; i++) {
+        int reserved_dim = -1;
+        me_jit_reserved_param_kind reserved_kind =
+            synth_reserved_non_nd ? me_jit_reserved_param_from_name(program->params[i], &reserved_dim)
+                                  : ME_JIT_RESERVED_PARAM_NONE;
+        (void)reserved_dim;
+        if (reserved_kind == ME_JIT_RESERVED_PARAM_NONE) {
+            needs_inputs = true;
+            break;
+        }
+    }
+    if (needs_inputs) {
         if (!me_jit_emit_line(&ctx.source, 1, "if (!inputs) {") ||
             !me_jit_emit_line(&ctx.source, 2, "return -1;") ||
             !me_jit_emit_line(&ctx.source, 1, "}")) {
@@ -1904,6 +1957,14 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
     free(out_decl);
 
     for (int i = 0; i < program->nparams; i++) {
+        int reserved_dim = -1;
+        me_jit_reserved_param_kind reserved_kind =
+            synth_reserved_non_nd ? me_jit_reserved_param_from_name(program->params[i], &reserved_dim)
+                                  : ME_JIT_RESERVED_PARAM_NONE;
+        (void)reserved_dim;
+        if (reserved_kind != ME_JIT_RESERVED_PARAM_NONE) {
+            continue;
+        }
         const char *ptype = me_jit_c_type(program->param_dtypes[i]);
         size_t need = strlen(ptype) * 2 + strlen(program->params[i]) + 48;
         char *line = malloc(need);
@@ -2011,6 +2072,10 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
 
     for (int i = 0; i < program->nparams; i++) {
         const char *ptype = me_jit_c_type(program->param_dtypes[i]);
+        int reserved_dim = -1;
+        me_jit_reserved_param_kind reserved_kind =
+            synth_reserved_non_nd ? me_jit_reserved_param_from_name(program->params[i], &reserved_dim)
+                                  : ME_JIT_RESERVED_PARAM_NONE;
         size_t need = strlen(ptype) + strlen(program->params[i]) * 2 + 32;
         char *line = malloc(need);
         if (!line) {
@@ -2019,7 +2084,23 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
             free(ctx.source.data);
             return false;
         }
-        snprintf(line, need, "%s %s = in_%s[idx];", ptype, program->params[i], program->params[i]);
+        if (reserved_kind == ME_JIT_RESERVED_PARAM_I) {
+            const char *value = (reserved_dim == 0) ? "idx" : "0";
+            snprintf(line, need, "%s %s = (%s)%s;", ptype, program->params[i], ptype, value);
+        }
+        else if (reserved_kind == ME_JIT_RESERVED_PARAM_N) {
+            const char *value = (reserved_dim == 0) ? "nitems" : "1";
+            snprintf(line, need, "%s %s = (%s)%s;", ptype, program->params[i], ptype, value);
+        }
+        else if (reserved_kind == ME_JIT_RESERVED_PARAM_NDIM) {
+            snprintf(line, need, "%s %s = (%s)1;", ptype, program->params[i], ptype);
+        }
+        else if (reserved_kind == ME_JIT_RESERVED_PARAM_GLOBAL_LINEAR_IDX) {
+            snprintf(line, need, "%s %s = (%s)idx;", ptype, program->params[i], ptype);
+        }
+        else {
+            snprintf(line, need, "%s %s = in_%s[idx];", ptype, program->params[i], program->params[i]);
+        }
         bool ok = me_jit_emit_line(&ctx.source, 2, line);
         free(line);
         if (!ok) {
