@@ -9398,6 +9398,8 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
         program->jit_nparams >= 0 &&
         program->jit_nparams <= ME_MAX_VARS) {
         const void *jit_inputs_stack[ME_MAX_VARS];
+        void *jit_temp_buffers[ME_MAX_VARS];
+        int jit_temp_count = 0;
         const void **jit_inputs = vars_block;
         bool can_run_jit_direct = true;
         if (program->jit_nparams > 0) {
@@ -9417,6 +9419,23 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
                         break;
                     }
                     jit_inputs_stack[i] = vars_block[idx];
+#if ME_USE_WASM32_JIT
+                    if (program->jit_ir &&
+                        i < program->jit_ir->nparams &&
+                        program->jit_ir->param_dtypes[i] == ME_INT64) {
+                        int *tmp_i32 = malloc((size_t)nitems * sizeof(*tmp_i32));
+                        if (!tmp_i32) {
+                            can_run_jit_direct = false;
+                            break;
+                        }
+                        const int64_t *src_i64 = (const int64_t *)vars_block[idx];
+                        for (int j = 0; j < nitems; j++) {
+                            tmp_i32[j] = (int)src_i64[j];
+                        }
+                        jit_inputs_stack[i] = (const void *)tmp_i32;
+                        jit_temp_buffers[jit_temp_count++] = tmp_i32;
+                    }
+#endif
                 }
                 jit_inputs = jit_inputs_stack;
             }
@@ -9424,8 +9443,16 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
         if (can_run_jit_direct) {
             int jit_rc = program->jit_kernel_fn(jit_inputs, output_block, (int64_t)nitems);
             jit_attempted = true;
+            for (int i = 0; i < jit_temp_count; i++) {
+                free(jit_temp_buffers[i]);
+            }
             if (jit_rc == 0) {
                 return ME_EVAL_SUCCESS;
+            }
+        }
+        else {
+            for (int i = 0; i < jit_temp_count; i++) {
+                free(jit_temp_buffers[i]);
             }
         }
     }
@@ -9550,6 +9577,8 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
         program->jit_nparams >= 0 &&
         program->jit_nparams <= ME_MAX_VARS) {
         const void *jit_inputs_stack[ME_MAX_VARS];
+        void *jit_temp_buffers[ME_MAX_VARS];
+        int jit_temp_count = 0;
         const void **jit_inputs = jit_inputs_stack;
         bool can_run_jit = true;
         if (program->jit_nparams > 0) {
@@ -9583,12 +9612,32 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
                         break;
                     }
                     jit_inputs_stack[i] = (const void *)var_buffers[idx];
+#if ME_USE_WASM32_JIT
+                    if (program->jit_ir &&
+                        i < program->jit_ir->nparams &&
+                        program->jit_ir->param_dtypes[i] == ME_INT64) {
+                        int *tmp_i32 = malloc((size_t)nitems * sizeof(*tmp_i32));
+                        if (!tmp_i32) {
+                            can_run_jit = false;
+                            break;
+                        }
+                        const int64_t *src_i64 = (const int64_t *)var_buffers[idx];
+                        for (int j = 0; j < nitems; j++) {
+                            tmp_i32[j] = (int)src_i64[j];
+                        }
+                        jit_inputs_stack[i] = (const void *)tmp_i32;
+                        jit_temp_buffers[jit_temp_count++] = tmp_i32;
+                    }
+#endif
                 }
             }
         }
         if (can_run_jit) {
             int jit_rc = program->jit_kernel_fn(program->jit_nparams > 0 ? jit_inputs : NULL,
                                                 output_block, (int64_t)nitems);
+            for (int i = 0; i < jit_temp_count; i++) {
+                free(jit_temp_buffers[i]);
+            }
             if (jit_rc == 0) {
                 for (int i = 0; i < reserved_count; i++) {
                     free(reserved_buffers[i]);
@@ -9601,6 +9650,11 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
                 free(var_buffers);
                 free(local_buffers);
                 return ME_EVAL_SUCCESS;
+            }
+        }
+        else {
+            for (int i = 0; i < jit_temp_count; i++) {
+                free(jit_temp_buffers[i]);
             }
         }
     }

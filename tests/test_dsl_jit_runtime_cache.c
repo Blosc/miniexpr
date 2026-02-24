@@ -1358,6 +1358,101 @@ cleanup:
 #endif
 }
 
+static int test_wasm_reserved_index_vars_jit_parity(void) {
+#if !defined(__EMSCRIPTEN__)
+    return 0;
+#else
+    printf("\n=== DSL JIT Runtime Cache Test 8d: wasm reserved-index runtime-JIT parity ===\n");
+
+    int rc = 1;
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+    const char *src_1d =
+        "# me:compiler=cc\n"
+        "def kernel():\n"
+        "    return _global_linear_idx + _i0 + _n0 + _ndim\n";
+    const double expected_1d[6] = {7.0, 9.0, 11.0, 13.0, 15.0, 17.0};
+    double out_1d[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    me_expr *expr = NULL;
+    int err = 0;
+
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT=1 failed\n");
+        goto cleanup;
+    }
+
+    if (me_compile(src_1d, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+        printf("  FAILED: 1D compile error at %d\n", err);
+        me_free(expr);
+        goto cleanup;
+    }
+    if (!me_expr_has_jit_kernel(expr)) {
+        printf("  FAILED: expected wasm runtime JIT kernel for 1D reserved-index kernel\n");
+        me_free(expr);
+        goto cleanup;
+    }
+    if (me_eval(expr, NULL, 0, out_1d, 6, NULL) != ME_EVAL_SUCCESS) {
+        printf("  FAILED: 1D eval failed\n");
+        me_free(expr);
+        goto cleanup;
+    }
+    me_free(expr);
+    expr = NULL;
+    for (int i = 0; i < 6; i++) {
+        if (out_1d[i] != expected_1d[i]) {
+            printf("  FAILED: 1D output mismatch at %d (%.17g vs %.17g)\n",
+                   i, out_1d[i], expected_1d[i]);
+            goto cleanup;
+        }
+    }
+
+    const char *src_nd =
+        "# me:compiler=cc\n"
+        "def kernel():\n"
+        "    return _global_linear_idx + _i0 + _i1 + _n0 + _n1 + _ndim\n";
+    int64_t shape[2] = {3, 5};
+    int32_t chunks[2] = {2, 4};
+    int32_t blocks[2] = {2, 3};
+    const double expected_nd[6] = {18.0, 0.0, 0.0, 24.0, 0.0, 0.0};
+    double out_nd[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+
+    err = 0;
+    if (me_compile_nd(src_nd, NULL, 0, ME_FLOAT64, 2, shape, chunks, blocks, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+        printf("  FAILED: ND compile error at %d\n", err);
+        me_free(expr);
+        goto cleanup;
+    }
+    if (!me_expr_has_jit_kernel(expr)) {
+        printf("  FAILED: expected wasm runtime JIT kernel for ND reserved-index kernel\n");
+        me_free(expr);
+        goto cleanup;
+    }
+    if (me_eval_nd(expr, NULL, 0, out_nd, 6, 1, 0, NULL) != ME_EVAL_SUCCESS) {
+        printf("  FAILED: ND eval failed\n");
+        me_free(expr);
+        goto cleanup;
+    }
+    me_free(expr);
+    expr = NULL;
+    for (int i = 0; i < 6; i++) {
+        if (out_nd[i] != expected_nd[i]) {
+            printf("  FAILED: ND output mismatch at %d (%.17g vs %.17g)\n",
+                   i, out_nd[i], expected_nd[i]);
+            goto cleanup;
+        }
+    }
+
+    /* wasm32 runtime JIT currently has no cache-keyed disk/process cache path.
+       This test focuses on reserved-index JIT enablement + parity only. */
+    rc = 0;
+    printf("  PASSED\n");
+
+cleanup:
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    free(saved_jit);
+    return rc;
+#endif
+}
+
 static int test_missing_return_skips_runtime_jit(void) {
     printf("\n=== DSL JIT Runtime Cache Test 9: missing return skips runtime JIT ===\n");
 
@@ -1697,6 +1792,7 @@ int main(void) {
     fail |= test_default_tcc_skips_cc_backend();
     fail |= test_cast_interpreter_jit_parity_compilers();
     fail |= test_wasm_cast_intrinsics_jit_enabled();
+    fail |= test_wasm_reserved_index_vars_jit_parity();
     fail |= test_missing_return_skips_runtime_jit();
 #else
     fail |= test_negative_cache_skips_immediate_retry();
