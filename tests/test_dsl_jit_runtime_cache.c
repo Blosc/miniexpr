@@ -38,6 +38,10 @@ EM_JS(int, test_wasm_runtime_cache_instantiate,
         err("[test-runtime-cache] missing _meJitInstantiate");
         return 0;
     }
+    if (typeof globalThis.__meJitInstantiateCount !== "number") {
+        globalThis.__meJitInstantiateCount = 0;
+    }
+    globalThis.__meJitInstantiateCount = (globalThis.__meJitInstantiateCount + 1) | 0;
     var runtime = {
         HEAPF64: HEAPF64,
         HEAPF32: HEAPF32,
@@ -63,6 +67,17 @@ EM_JS(void, test_wasm_runtime_cache_free, (int idx), {
     if (idx) {
         removeFunction(idx);
     }
+});
+
+EM_JS(void, test_wasm_runtime_cache_reset_instantiate_count, (), {
+    globalThis.__meJitInstantiateCount = 0;
+});
+
+EM_JS(int, test_wasm_runtime_cache_get_instantiate_count, (), {
+    if (typeof globalThis.__meJitInstantiateCount !== "number") {
+        return 0;
+    }
+    return globalThis.__meJitInstantiateCount | 0;
 });
 #endif
 
@@ -1441,8 +1456,127 @@ static int test_wasm_reserved_index_vars_jit_parity(void) {
         }
     }
 
-    /* wasm32 runtime JIT currently has no cache-keyed disk/process cache path.
-       This test focuses on reserved-index JIT enablement + parity only. */
+    /* wasm32 runtime JIT has keyed in-process caching; disk cache is not used.
+       This test focuses on reserved-index JIT enablement + parity. */
+    rc = 0;
+    printf("  PASSED\n");
+
+cleanup:
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    free(saved_jit);
+    return rc;
+#endif
+}
+
+static int test_wasm_reserved_index_cache_key_differentiation(void) {
+#if !defined(__EMSCRIPTEN__)
+    return 0;
+#else
+    printf("\n=== DSL JIT Runtime Cache Test 8e: wasm reserved-index cache-key differentiation ===\n");
+
+    int rc = 1;
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+    const char *src_global =
+        "# me:compiler=cc\n"
+        "def kernel():\n"
+        "    return _global_linear_idx + 123\n";
+    const char *src_i0 =
+        "# me:compiler=cc\n"
+        "def kernel():\n"
+        "    return _i0 + 123\n";
+    const double expected[4] = {123.0, 124.0, 125.0, 126.0};
+    double out[4] = {0.0, 0.0, 0.0, 0.0};
+    int err = 0;
+    me_expr *expr = NULL;
+
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT=1 failed\n");
+        goto cleanup;
+    }
+    test_wasm_runtime_cache_reset_instantiate_count();
+
+    if (me_compile(src_global, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+        printf("  FAILED: first _global_linear_idx compile error at %d\n", err);
+        me_free(expr);
+        goto cleanup;
+    }
+    if (!me_expr_has_jit_kernel(expr)) {
+        printf("  FAILED: expected runtime JIT kernel for first _global_linear_idx compile\n");
+        me_free(expr);
+        goto cleanup;
+    }
+    if (me_eval(expr, NULL, 0, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  FAILED: first _global_linear_idx eval failed\n");
+        me_free(expr);
+        goto cleanup;
+    }
+    me_free(expr);
+    expr = NULL;
+    for (int i = 0; i < 4; i++) {
+        if (out[i] != expected[i]) {
+            printf("  FAILED: first _global_linear_idx output mismatch at %d (%.17g vs %.17g)\n",
+                   i, out[i], expected[i]);
+            goto cleanup;
+        }
+    }
+    if (test_wasm_runtime_cache_get_instantiate_count() != 1) {
+        printf("  FAILED: expected 1 wasm instantiation after first _global_linear_idx compile\n");
+        goto cleanup;
+    }
+
+    err = 0;
+    if (me_compile(src_global, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+        printf("  FAILED: second _global_linear_idx compile error at %d\n", err);
+        me_free(expr);
+        goto cleanup;
+    }
+    if (!me_expr_has_jit_kernel(expr)) {
+        printf("  FAILED: expected runtime JIT kernel for second _global_linear_idx compile\n");
+        me_free(expr);
+        goto cleanup;
+    }
+    if (me_eval(expr, NULL, 0, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  FAILED: second _global_linear_idx eval failed\n");
+        me_free(expr);
+        goto cleanup;
+    }
+    me_free(expr);
+    expr = NULL;
+    if (test_wasm_runtime_cache_get_instantiate_count() != 1) {
+        printf("  FAILED: second identical _global_linear_idx compile did not reuse wasm cache entry\n");
+        goto cleanup;
+    }
+
+    err = 0;
+    if (me_compile(src_i0, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+        printf("  FAILED: _i0 compile error at %d\n", err);
+        me_free(expr);
+        goto cleanup;
+    }
+    if (!me_expr_has_jit_kernel(expr)) {
+        printf("  FAILED: expected runtime JIT kernel for _i0 compile\n");
+        me_free(expr);
+        goto cleanup;
+    }
+    if (me_eval(expr, NULL, 0, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  FAILED: _i0 eval failed\n");
+        me_free(expr);
+        goto cleanup;
+    }
+    me_free(expr);
+    expr = NULL;
+    for (int i = 0; i < 4; i++) {
+        if (out[i] != expected[i]) {
+            printf("  FAILED: _i0 output mismatch at %d (%.17g vs %.17g)\n",
+                   i, out[i], expected[i]);
+            goto cleanup;
+        }
+    }
+    if (test_wasm_runtime_cache_get_instantiate_count() != 2) {
+        printf("  FAILED: distinct reserved symbol set did not create a second wasm cache entry\n");
+        goto cleanup;
+    }
+
     rc = 0;
     printf("  PASSED\n");
 
@@ -1793,6 +1927,7 @@ int main(void) {
     fail |= test_cast_interpreter_jit_parity_compilers();
     fail |= test_wasm_cast_intrinsics_jit_enabled();
     fail |= test_wasm_reserved_index_vars_jit_parity();
+    fail |= test_wasm_reserved_index_cache_key_differentiation();
     fail |= test_missing_return_skips_runtime_jit();
 #else
     fail |= test_negative_cache_skips_immediate_retry();

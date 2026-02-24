@@ -3925,6 +3925,88 @@ static uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program
     return h;
 }
 
+#if ME_USE_WASM32_JIT
+#define ME_DSL_JIT_WASM_POS_CACHE_SLOTS 64
+
+typedef struct {
+    bool valid;
+    uint64_t key;
+    int fn_idx;
+    void *scratch;
+} me_dsl_jit_wasm_pos_cache_entry;
+
+static me_dsl_jit_wasm_pos_cache_entry g_dsl_jit_wasm_pos_cache[ME_DSL_JIT_WASM_POS_CACHE_SLOTS];
+
+static int dsl_jit_wasm_pos_cache_find_slot(uint64_t key) {
+    for (int i = 0; i < ME_DSL_JIT_WASM_POS_CACHE_SLOTS; i++) {
+        if (g_dsl_jit_wasm_pos_cache[i].valid && g_dsl_jit_wasm_pos_cache[i].key == key) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int dsl_jit_wasm_pos_cache_find_free_slot(void) {
+    for (int i = 0; i < ME_DSL_JIT_WASM_POS_CACHE_SLOTS; i++) {
+        if (!g_dsl_jit_wasm_pos_cache[i].valid) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static bool dsl_jit_wasm_pos_cache_bind_program(me_dsl_compiled_program *program, uint64_t key) {
+    if (!program) {
+        return false;
+    }
+    int slot = dsl_jit_wasm_pos_cache_find_slot(key);
+    if (slot < 0) {
+        return false;
+    }
+    program->jit_kernel_fn = (me_dsl_jit_kernel_fn)(uintptr_t)g_dsl_jit_wasm_pos_cache[slot].fn_idx;
+    program->jit_dl_handle = NULL;
+    program->jit_runtime_key = key;
+    program->jit_dl_handle_cached = true;
+    return true;
+}
+
+static bool dsl_jit_wasm_pos_cache_store_program(me_dsl_compiled_program *program, uint64_t key,
+                                                 int fn_idx, void *scratch) {
+    if (!program || fn_idx == 0 || !scratch) {
+        return false;
+    }
+
+    int slot = dsl_jit_wasm_pos_cache_find_slot(key);
+    if (slot >= 0) {
+        if (fn_idx != g_dsl_jit_wasm_pos_cache[slot].fn_idx) {
+            me_wasm_jit_free_dispatch(fn_idx);
+            free(scratch);
+        }
+        program->jit_kernel_fn = (me_dsl_jit_kernel_fn)(uintptr_t)g_dsl_jit_wasm_pos_cache[slot].fn_idx;
+        program->jit_dl_handle = NULL;
+        program->jit_runtime_key = key;
+        program->jit_dl_handle_cached = true;
+        return true;
+    }
+
+    slot = dsl_jit_wasm_pos_cache_find_free_slot();
+    if (slot < 0) {
+        return false;
+    }
+
+    g_dsl_jit_wasm_pos_cache[slot].valid = true;
+    g_dsl_jit_wasm_pos_cache[slot].key = key;
+    g_dsl_jit_wasm_pos_cache[slot].fn_idx = fn_idx;
+    g_dsl_jit_wasm_pos_cache[slot].scratch = scratch;
+
+    program->jit_kernel_fn = (me_dsl_jit_kernel_fn)(uintptr_t)fn_idx;
+    program->jit_dl_handle = NULL;
+    program->jit_runtime_key = key;
+    program->jit_dl_handle_cached = true;
+    return true;
+}
+#endif
+
 #if !defined(_WIN32) && !defined(_WIN64) && !defined(__EMSCRIPTEN__)
 /* In-process negative cache for recent JIT runtime failures. */
 #define ME_DSL_JIT_NEG_CACHE_SLOTS 64
@@ -6683,7 +6765,7 @@ static bool dsl_wasm32_register_required_symbols(TCCState *state, const char *sr
 #undef ME_WASM32_BRIDGE_SYM
 #undef ME_WASM32_BRIDGE_SYM_VEC
 
-static bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program) {
+static bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
     if (!program || !program->jit_c_source) {
         return false;
     }
@@ -6787,14 +6869,16 @@ static bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program) {
         return false;
     }
 
-    program->jit_kernel_fn = (me_dsl_jit_kernel_fn)(uintptr_t)fn_idx;
-    /* Keep scratch memory alive — the JIT module's data/stack lives there. */
-    program->jit_dl_handle = jit_scratch;
+    if (!dsl_jit_wasm_pos_cache_store_program(program, key, fn_idx, jit_scratch)) {
+        program->jit_kernel_fn = (me_dsl_jit_kernel_fn)(uintptr_t)fn_idx;
+        /* Keep scratch memory alive — the JIT module's data/stack lives there. */
+        program->jit_dl_handle = jit_scratch;
+        program->jit_runtime_key = key;
+        program->jit_dl_handle_cached = false;
+    }
     program->jit_c_error_line = 0;
     program->jit_c_error_column = 0;
     program->jit_c_error[0] = '\0';
-    program->jit_runtime_key = 0;
-    program->jit_dl_handle_cached = false;
     return true;
 }
 #endif /* ME_USE_WASM32_JIT */
@@ -6807,10 +6891,18 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
     if (!dsl_jit_runtime_enabled()) {
         return;
     }
-    if (dsl_jit_compile_wasm32(program)) {
-        dsl_tracef("jit runtime built: fp=%s compiler=%s",
+    uint64_t key = dsl_jit_runtime_cache_key(program);
+    if (dsl_jit_wasm_pos_cache_bind_program(program, key)) {
+        dsl_tracef("jit runtime hit: fp=%s source=wasm-process-cache key=%016llx",
                    dsl_fp_mode_name(program->fp_mode),
-                   dsl_compiler_name(program->compiler));
+                   (unsigned long long)key);
+        return;
+    }
+    if (dsl_jit_compile_wasm32(program, key)) {
+        dsl_tracef("jit runtime built: fp=%s compiler=%s key=%016llx",
+                   dsl_fp_mode_name(program->fp_mode),
+                   dsl_compiler_name(program->compiler),
+                   (unsigned long long)key);
         return;
     }
     if (program->jit_c_error[0] == '\0') {
