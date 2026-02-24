@@ -862,6 +862,127 @@ static int test_global_linear_idx(void) {
     return rc;
 }
 
+static int test_reserved_index_vars_jit_parity(void) {
+    printf("\n=== DSL Test 4c: reserved index vars interpreter/JIT parity ===\n");
+
+    const char *src =
+        "def kernel():\n"
+        "    return _global_linear_idx + _i0 + _n0 + _ndim\n";
+    double out_interp[6] = {0, 0, 0, 0, 0, 0};
+    double out_jit[6] = {0, 0, 0, 0, 0, 0};
+    double expected[6] = {7, 9, 11, 13, 15, 17};
+
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+    if (setenv("ME_DSL_JIT", "0", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=0 failed\n");
+        free(saved_jit);
+        return 1;
+    }
+    if (compile_eval_double(src, NULL, 0, NULL, 6, out_interp) != 0) {
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=1 failed\n");
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+    if (compile_eval_double(src, NULL, 0, NULL, 6, out_jit) != 0) {
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    free(saved_jit);
+
+    for (int i = 0; i < 6; i++) {
+        if (out_interp[i] != out_jit[i]) {
+            printf("  ❌ FAILED: mismatch at %d (interp=%.17g jit=%.17g)\n",
+                   i, out_interp[i], out_jit[i]);
+            return 1;
+        }
+    }
+    if (check_all_close(out_interp, expected, 6, 1e-12) != 0) {
+        printf("  ❌ FAILED: unexpected output for reserved index vars parity\n");
+        return 1;
+    }
+
+    const char *src_nd =
+        "def kernel():\n"
+        "    return _global_linear_idx + _i0 + _i1 + _n0 + _n1 + _ndim\n";
+    int64_t shape[2] = {3, 5};
+    int32_t chunks[2] = {2, 4};
+    int32_t blocks[2] = {2, 3};
+    double out_nd_interp[6] = {0, 0, 0, 0, 0, 0};
+    double out_nd_jit[6] = {0, 0, 0, 0, 0, 0};
+    double expected_nd[6] = {18, 0, 0, 24, 0, 0};
+
+    saved_jit = dup_env_value("ME_DSL_JIT");
+    if (setenv("ME_DSL_JIT", "0", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=0 failed (ND)\n");
+        free(saved_jit);
+        return 1;
+    }
+    int err = 0;
+    me_expr *expr = NULL;
+    if (me_compile_nd(src_nd, NULL, 0, ME_FLOAT64, 2, shape, chunks, blocks, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: ND interp compile error at %d\n", err);
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+    if (me_eval_nd(expr, NULL, 0, out_nd_interp, 6, 1, 0, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: ND interp eval error\n");
+        me_free(expr);
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+    me_free(expr);
+
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=1 failed (ND)\n");
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+    err = 0;
+    expr = NULL;
+    if (me_compile_nd(src_nd, NULL, 0, ME_FLOAT64, 2, shape, chunks, blocks, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: ND jit compile error at %d\n", err);
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+    if (me_eval_nd(expr, NULL, 0, out_nd_jit, 6, 1, 0, NULL) != ME_EVAL_SUCCESS) {
+        printf("  ❌ FAILED: ND jit eval error\n");
+        me_free(expr);
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+    me_free(expr);
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    free(saved_jit);
+
+    for (int i = 0; i < 6; i++) {
+        if (out_nd_interp[i] != out_nd_jit[i]) {
+            printf("  ❌ FAILED: ND mismatch at %d (interp=%.17g jit=%.17g)\n",
+                   i, out_nd_interp[i], out_nd_jit[i]);
+            return 1;
+        }
+    }
+    if (check_all_close(out_nd_interp, expected_nd, 6, 1e-12) != 0) {
+        printf("  ❌ FAILED: unexpected ND output for reserved index vars parity\n");
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    return 0;
+}
+
 static int test_nd_padding(void) {
     printf("\n=== DSL Test 5: ND padding in blocks ===\n");
 
@@ -1865,6 +1986,7 @@ int main(void) {
     fail |= test_if_elif_else();
     fail |= test_nd_indices();
     fail |= test_global_linear_idx();
+    fail |= test_reserved_index_vars_jit_parity();
     fail |= test_nd_padding();
     fail |= test_nd_large_block();
     fail |= test_nd_3d_indices_padding();

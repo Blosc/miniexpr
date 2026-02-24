@@ -453,6 +453,54 @@ static bool file_contains_text(const char *path, const char *needle) {
     return found;
 }
 
+static bool file_contains_texts_in_order(const char *path, const char *const *needles, int nneedles) {
+    if (!path || !needles || nneedles <= 0) {
+        return false;
+    }
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return false;
+    }
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return false;
+    }
+    long n = ftell(f);
+    if (n <= 0 || n > (8L * 1024L * 1024L)) {
+        fclose(f);
+        return false;
+    }
+    if (fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        return false;
+    }
+    char *buf = malloc((size_t)n + 1);
+    if (!buf) {
+        fclose(f);
+        return false;
+    }
+    size_t nr = fread(buf, 1, (size_t)n, f);
+    fclose(f);
+    buf[nr] = '\0';
+
+    const char *cursor = buf;
+    bool ok = true;
+    for (int i = 0; i < nneedles; i++) {
+        if (!needles[i] || needles[i][0] == '\0') {
+            ok = false;
+            break;
+        }
+        const char *pos = strstr(cursor, needles[i]);
+        if (!pos) {
+            ok = false;
+            break;
+        }
+        cursor = pos + strlen(needles[i]);
+    }
+    free(buf);
+    return ok;
+}
+
 static int test_rejects_metadata_mismatch_artifact(void) {
     printf("\n=== DSL JIT Runtime Cache Test 3: metadata mismatch rejection ===\n");
 
@@ -850,8 +898,184 @@ cleanup:
     return rc;
 }
 
+static int test_reserved_index_cache_key_and_param_order(void) {
+    printf("\n=== DSL JIT Runtime Cache Test 8: reserved index cache key + param ordering ===\n");
+
+    int rc = 1;
+    char tmp_template[] = "/tmp/me_jit_reserved_cache_XXXXXX";
+    char *tmp_root = mkdtemp(tmp_template);
+    char cache_dir[1024];
+    cache_dir[0] = '\0';
+    char src_path[1200];
+    src_path[0] = '\0';
+    char meta_path_first[1200];
+    meta_path_first[0] = '\0';
+    char meta_path_second[1200];
+    meta_path_second[0] = '\0';
+    char *saved_tmpdir = dup_env_value("TMPDIR");
+    char *saved_cc = dup_env_value("CC");
+    char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
+    const char *src_order_a =
+        "# me:compiler=cc\n"
+        "def kernel(x):\n"
+        "    return x + _global_linear_idx + _i0 + _n0 + _ndim\n";
+    const char *src_order_b =
+        "# me:compiler=cc\n"
+        "def kernel(x):\n"
+        "    return x + _ndim + _n0 + _i0 + _global_linear_idx\n";
+    const char *src_global_only =
+        "# me:compiler=cc\n"
+        "def kernel(x):\n"
+        "    return x + _global_linear_idx\n";
+    const char *src_i0_only =
+        "# me:compiler=cc\n"
+        "def kernel(x):\n"
+        "    return x + _i0\n";
+    const double in[4] = {1.0, 1.0, 1.0, 1.0};
+    const double expected_reserved_mix[4] = {6.0, 8.0, 10.0, 12.0};
+    const double expected_linear[4] = {1.0, 2.0, 3.0, 4.0};
+    double out[4] = {0.0, 0.0, 0.0, 0.0};
+    const char *const expected_param_lines[] = {
+        "const double *in_x = (const double *)inputs[0];",
+        "const int64_t *in__i0 = (const int64_t *)inputs[1];",
+        "const int64_t *in__n0 = (const int64_t *)inputs[2];",
+        "const int64_t *in__ndim = (const int64_t *)inputs[3];",
+        "const int64_t *in__global_linear_idx = (const int64_t *)inputs[4];"
+    };
+
+    if (!tmp_root) {
+        printf("  FAILED: mkdtemp failed\n");
+        goto cleanup;
+    }
+    if (snprintf(cache_dir, sizeof(cache_dir), "%s/miniexpr-jit", tmp_root) >= (int)sizeof(cache_dir)) {
+        printf("  FAILED: cache path too long\n");
+        goto cleanup;
+    }
+    if (setenv("TMPDIR", tmp_root, 1) != 0) {
+        printf("  FAILED: setenv TMPDIR failed\n");
+        goto cleanup;
+    }
+    if (setenv("CC", "cc", 1) != 0) {
+        printf("  FAILED: setenv CC failed\n");
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT_POS_CACHE", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT_POS_CACHE failed\n");
+        goto cleanup;
+    }
+
+    if (compile_and_eval_dsl_values(src_order_a, in, 4, out) != 0) {
+        goto cleanup;
+    }
+    for (int i = 0; i < 4; i++) {
+        if (out[i] != expected_reserved_mix[i]) {
+            printf("  FAILED: reserved mix eval mismatch at %d (%.17g vs %.17g)\n",
+                   i, out[i], expected_reserved_mix[i]);
+            goto cleanup;
+        }
+    }
+    if (count_kernel_files_with_suffix(cache_dir, ".c", src_path, sizeof(src_path)) != 1 || src_path[0] == '\0') {
+        printf("  FAILED: expected one generated source file for reserved order test A\n");
+        goto cleanup;
+    }
+    if (!file_contains_texts_in_order(src_path, expected_param_lines,
+                                      (int)(sizeof(expected_param_lines) / sizeof(expected_param_lines[0])))) {
+        printf("  FAILED: generated source param declaration order mismatch for reserved order test A\n");
+        goto cleanup;
+    }
+
+    remove_files_in_dir(cache_dir);
+    src_path[0] = '\0';
+    if (compile_and_eval_dsl_values(src_order_b, in, 4, out) != 0) {
+        goto cleanup;
+    }
+    for (int i = 0; i < 4; i++) {
+        if (out[i] != expected_reserved_mix[i]) {
+            printf("  FAILED: reserved mix eval mismatch (reordered expr) at %d (%.17g vs %.17g)\n",
+                   i, out[i], expected_reserved_mix[i]);
+            goto cleanup;
+        }
+    }
+    if (count_kernel_files_with_suffix(cache_dir, ".c", src_path, sizeof(src_path)) != 1 || src_path[0] == '\0') {
+        printf("  FAILED: expected one generated source file for reserved order test B\n");
+        goto cleanup;
+    }
+    if (!file_contains_texts_in_order(src_path, expected_param_lines,
+                                      (int)(sizeof(expected_param_lines) / sizeof(expected_param_lines[0])))) {
+        printf("  FAILED: generated source param declaration order mismatch for reserved order test B\n");
+        goto cleanup;
+    }
+
+    remove_files_in_dir(cache_dir);
+    meta_path_first[0] = '\0';
+    meta_path_second[0] = '\0';
+
+    if (compile_and_eval_dsl_values(src_global_only, in, 4, out) != 0) {
+        goto cleanup;
+    }
+    for (int i = 0; i < 4; i++) {
+        if (out[i] != expected_linear[i]) {
+            printf("  FAILED: global-linear eval mismatch at %d (%.17g vs %.17g)\n",
+                   i, out[i], expected_linear[i]);
+            goto cleanup;
+        }
+    }
+    if (count_kernel_files_with_suffix(cache_dir, ".meta", meta_path_first, sizeof(meta_path_first)) != 1 ||
+        meta_path_first[0] == '\0') {
+        printf("  FAILED: expected one metadata file after first _global_linear_idx compile\n");
+        goto cleanup;
+    }
+
+    if (compile_and_eval_dsl_values(src_global_only, in, 4, out) != 0) {
+        goto cleanup;
+    }
+    if (count_kernel_files_with_suffix(cache_dir, ".meta", meta_path_second, sizeof(meta_path_second)) != 1 ||
+        meta_path_second[0] == '\0') {
+        printf("  FAILED: expected stable metadata entry after repeated _global_linear_idx compile\n");
+        goto cleanup;
+    }
+    if (strcmp(meta_path_first, meta_path_second) != 0) {
+        printf("  FAILED: repeated _global_linear_idx compile changed cache key unexpectedly\n");
+        goto cleanup;
+    }
+
+    if (compile_and_eval_dsl_values(src_i0_only, in, 4, out) != 0) {
+        goto cleanup;
+    }
+    for (int i = 0; i < 4; i++) {
+        if (out[i] != expected_linear[i]) {
+            printf("  FAILED: _i0 eval mismatch at %d (%.17g vs %.17g)\n",
+                   i, out[i], expected_linear[i]);
+            goto cleanup;
+        }
+    }
+    if (count_kernel_files_with_suffix(cache_dir, ".meta", NULL, 0) != 2) {
+        printf("  FAILED: reserved symbol set did not produce distinct runtime cache key entries\n");
+        goto cleanup;
+    }
+
+    rc = 0;
+    printf("  PASSED\n");
+
+cleanup:
+    restore_env_value("TMPDIR", saved_tmpdir);
+    restore_env_value("CC", saved_cc);
+    restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
+    free(saved_tmpdir);
+    free(saved_cc);
+    free(saved_pos_cache);
+    if (cache_dir[0] != '\0') {
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+    }
+    if (tmp_root) {
+        (void)rmdir(tmp_root);
+    }
+    return rc;
+}
+
 static int test_element_interpreter_jit_parity(void) {
-    printf("\n=== DSL JIT Runtime Cache Test 8: element interpreter/JIT parity ===\n");
+    printf("\n=== DSL JIT Runtime Cache Test 9: element interpreter/JIT parity ===\n");
 
     int rc = 1;
     char tmp_template[] = "/tmp/me_jit_element_parity_XXXXXX";
@@ -1482,6 +1706,7 @@ int main(void) {
     fail |= test_default_tcc_skips_cc_backend();
     fail |= test_unknown_me_pragma_is_rejected();
     fail |= test_cache_key_differentiates_fp_mode();
+    fail |= test_reserved_index_cache_key_and_param_order();
     fail |= test_element_interpreter_jit_parity();
     fail |= test_cast_interpreter_jit_parity_compilers();
     fail |= test_missing_return_skips_runtime_jit();

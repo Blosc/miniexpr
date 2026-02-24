@@ -329,7 +329,7 @@ typedef struct {
     int jit_c_error_line;
     int jit_c_error_column;
     char jit_c_error[128];
-    int *jit_param_input_indices;
+    int *jit_param_var_indices;
     int jit_nparams;
     me_dsl_jit_kernel_fn jit_kernel_fn;
     void *jit_dl_handle;
@@ -966,7 +966,7 @@ static void dsl_compiled_program_free(me_dsl_compiled_program *program) {
     program->jit_runtime_key = 0;
     program->jit_dl_handle_cached = false;
     free(program->jit_c_source);
-    free(program->jit_param_input_indices);
+    free(program->jit_param_var_indices);
     me_dsl_jit_ir_free(program->jit_ir);
     dsl_compiled_block_free(&program->block);
     dsl_var_table_free(&program->vars);
@@ -5838,12 +5838,6 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
                    dsl_fp_mode_name(program->fp_mode));
         return;
     }
-    if (program->uses_i_mask || program->uses_n_mask || program->uses_ndim ||
-        program->uses_global_linear_idx) {
-        dsl_tracef("jit runtime skip: fp=%s reason=reserved index vars used",
-                   dsl_fp_mode_name(program->fp_mode));
-        return;
-    }
     if (program->jit_nparams != program->jit_ir->nparams) {
         dsl_tracef("jit runtime skip: fp=%s reason=parameter metadata mismatch",
                    dsl_fp_mode_name(program->fp_mode));
@@ -6774,12 +6768,6 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
     if (!program || !program->jit_c_source || program->jit_kernel_fn) {
         return;
     }
-    if (program->uses_i_mask || program->uses_n_mask || program->uses_ndim ||
-        program->uses_global_linear_idx) {
-        dsl_tracef("jit runtime skip: fp=%s reason=reserved index vars used",
-                   dsl_fp_mode_name(program->fp_mode));
-        return;
-    }
     if (!dsl_jit_runtime_enabled()) {
         return;
     }
@@ -6876,8 +6864,8 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     program->jit_ir_error_line = 0;
     program->jit_ir_error_column = 0;
     program->jit_ir_error[0] = '\0';
-    free(program->jit_param_input_indices);
-    program->jit_param_input_indices = NULL;
+    free(program->jit_param_var_indices);
+    program->jit_param_var_indices = NULL;
     program->jit_nparams = 0;
     program->jit_kernel_fn = NULL;
 #if ME_USE_LIBTCC_FALLBACK
@@ -6921,44 +6909,101 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
 
     const char **param_names = NULL;
     me_dtype *param_dtypes = NULL;
-    int *param_input_indices = NULL;
+    int *param_var_indices = NULL;
+    int jit_param_count = parsed->nparams;
+    for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
+        if ((program->uses_i_mask & (1 << d)) && program->idx_i[d] >= 0) {
+            jit_param_count++;
+        }
+        if ((program->uses_n_mask & (1 << d)) && program->idx_n[d] >= 0) {
+            jit_param_count++;
+        }
+    }
+    if (program->uses_ndim && program->idx_ndim >= 0) {
+        jit_param_count++;
+    }
+    if (program->uses_global_linear_idx && program->idx_global_linear_idx >= 0) {
+        jit_param_count++;
+    }
+    if (jit_param_count > ME_MAX_VARS) {
+        snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
+                 "jit parameter metadata exceeds ME_MAX_VARS");
+        dsl_tracef("jit ir skip: fp=%s reason=%s",
+                   dsl_fp_mode_name(program->fp_mode), program->jit_ir_error);
+        return;
+    }
 
-    if (parsed->nparams > 0) {
-        param_names = calloc((size_t)parsed->nparams, sizeof(*param_names));
-        param_dtypes = calloc((size_t)parsed->nparams, sizeof(*param_dtypes));
-        param_input_indices = calloc((size_t)parsed->nparams, sizeof(*param_input_indices));
-        if (!param_names || !param_dtypes || !param_input_indices) {
+    if (jit_param_count > 0) {
+        param_names = calloc((size_t)jit_param_count, sizeof(*param_names));
+        param_dtypes = calloc((size_t)jit_param_count, sizeof(*param_dtypes));
+        param_var_indices = calloc((size_t)jit_param_count, sizeof(*param_var_indices));
+        if (!param_names || !param_dtypes || !param_var_indices) {
             snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
                      "out of memory building jit ir metadata");
             dsl_tracef("jit ir skip: fp=%s reason=%s",
                        dsl_fp_mode_name(program->fp_mode), program->jit_ir_error);
             free(param_names);
             free(param_dtypes);
-            free(param_input_indices);
+            free(param_var_indices);
             return;
         }
-        for (int i = 0; i < parsed->nparams; i++) {
-            int idx = dsl_var_table_find(&program->vars, parsed->params[i]);
-            if (idx < 0 || idx >= program->vars.count) {
-                snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
-                         "failed to resolve dsl parameter dtype for jit ir");
-                dsl_tracef("jit ir skip: fp=%s reason=%s",
-                           dsl_fp_mode_name(program->fp_mode), program->jit_ir_error);
-                free(param_names);
-                free(param_dtypes);
-                free(param_input_indices);
-                return;
-            }
-            param_names[i] = parsed->params[i];
-            param_dtypes[i] = program->vars.dtypes[idx];
-            param_input_indices[i] = idx;
+    }
+
+    int nparams = 0;
+    for (int i = 0; i < parsed->nparams; i++) {
+        int idx = dsl_var_table_find(&program->vars, parsed->params[i]);
+        if (idx < 0 || idx >= program->vars.count) {
+            snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
+                     "failed to resolve dsl parameter dtype for jit ir");
+            dsl_tracef("jit ir skip: fp=%s reason=%s",
+                       dsl_fp_mode_name(program->fp_mode), program->jit_ir_error);
+            free(param_names);
+            free(param_dtypes);
+            free(param_var_indices);
+            return;
         }
+        param_names[nparams] = parsed->params[i];
+        param_dtypes[nparams] = program->vars.dtypes[idx];
+        param_var_indices[nparams] = idx;
+        nparams++;
+    }
+    for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
+        if ((program->uses_i_mask & (1 << d)) && program->idx_i[d] >= 0) {
+            int idx = program->idx_i[d];
+            param_names[nparams] = program->vars.names[idx];
+            param_dtypes[nparams] = program->vars.dtypes[idx];
+            param_var_indices[nparams] = idx;
+            nparams++;
+        }
+    }
+    for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
+        if ((program->uses_n_mask & (1 << d)) && program->idx_n[d] >= 0) {
+            int idx = program->idx_n[d];
+            param_names[nparams] = program->vars.names[idx];
+            param_dtypes[nparams] = program->vars.dtypes[idx];
+            param_var_indices[nparams] = idx;
+            nparams++;
+        }
+    }
+    if (program->uses_ndim && program->idx_ndim >= 0) {
+        int idx = program->idx_ndim;
+        param_names[nparams] = program->vars.names[idx];
+        param_dtypes[nparams] = program->vars.dtypes[idx];
+        param_var_indices[nparams] = idx;
+        nparams++;
+    }
+    if (program->uses_global_linear_idx && program->idx_global_linear_idx >= 0) {
+        int idx = program->idx_global_linear_idx;
+        param_names[nparams] = program->vars.names[idx];
+        param_dtypes[nparams] = program->vars.dtypes[idx];
+        param_var_indices[nparams] = idx;
+        nparams++;
     }
 
     me_dsl_error ir_error;
     memset(&ir_error, 0, sizeof(ir_error));
     me_dsl_jit_ir_program *jit_ir = NULL;
-    bool ok = me_dsl_jit_ir_build(parsed, param_names, param_dtypes, parsed->nparams,
+    bool ok = me_dsl_jit_ir_build(parsed, param_names, param_dtypes, nparams,
                                   dsl_jit_ir_resolve_dtype, ctx, &jit_ir, &ir_error);
 
     free(param_names);
@@ -6974,14 +7019,14 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
                    program->jit_ir_error_line, program->jit_ir_error_column,
                    program->jit_ir_error);
         me_dsl_jit_ir_free(jit_ir);
-        free(param_input_indices);
+        free(param_var_indices);
         return;
     }
 
     program->jit_ir = jit_ir;
     program->jit_ir_fingerprint = me_dsl_jit_ir_fingerprint(jit_ir);
-    program->jit_param_input_indices = param_input_indices;
-    program->jit_nparams = parsed->nparams;
+    program->jit_param_var_indices = param_var_indices;
+    program->jit_nparams = nparams;
 
     me_dsl_error cg_error;
     memset(&cg_error, 0, sizeof(cg_error));
@@ -7014,8 +7059,8 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
                    program->jit_c_error_line, program->jit_c_error_column,
                    program->jit_c_error);
         free(generated_c);
-        free(program->jit_param_input_indices);
-        program->jit_param_input_indices = NULL;
+        free(program->jit_param_var_indices);
+        program->jit_param_var_indices = NULL;
         program->jit_nparams = 0;
         return;
     }
@@ -9300,6 +9345,7 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
         return ME_EVAL_ERR_VAR_MISMATCH;
     }
 
+    bool jit_attempted = false;
     /* JIT is best-effort: if kernel call fails, execution falls back to interpreter. */
     if (!me_eval_jit_disabled(params) &&
         program->jit_kernel_fn &&
@@ -9307,16 +9353,16 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
         program->jit_nparams <= ME_MAX_VARS) {
         const void *jit_inputs_stack[ME_MAX_VARS];
         const void **jit_inputs = vars_block;
-        bool can_run_jit = true;
+        bool can_run_jit_direct = true;
         if (program->jit_nparams > 0) {
-            if (!vars_block || !program->jit_param_input_indices) {
-                can_run_jit = false;
+            if (!vars_block || !program->jit_param_var_indices) {
+                can_run_jit_direct = false;
             }
             else {
                 for (int i = 0; i < program->jit_nparams; i++) {
-                    int idx = program->jit_param_input_indices[i];
+                    int idx = program->jit_param_var_indices[i];
                     if (idx < 0 || idx >= n_vars) {
-                        can_run_jit = false;
+                        can_run_jit_direct = false;
                         break;
                     }
                     jit_inputs_stack[i] = vars_block[idx];
@@ -9324,8 +9370,9 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
                 jit_inputs = jit_inputs_stack;
             }
         }
-        if (can_run_jit) {
+        if (can_run_jit_direct) {
             int jit_rc = program->jit_kernel_fn(jit_inputs, output_block, (int64_t)nitems);
+            jit_attempted = true;
             if (jit_rc == 0) {
                 return ME_EVAL_SUCCESS;
             }
@@ -9444,6 +9491,48 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
         free(var_buffers);
         free(local_buffers);
         return ME_EVAL_ERR_OOM;
+    }
+
+    if (!jit_attempted &&
+        !me_eval_jit_disabled(params) &&
+        program->jit_kernel_fn &&
+        program->jit_nparams >= 0 &&
+        program->jit_nparams <= ME_MAX_VARS) {
+        const void *jit_inputs_stack[ME_MAX_VARS];
+        const void **jit_inputs = jit_inputs_stack;
+        bool can_run_jit = true;
+        if (program->jit_nparams > 0) {
+            if (!program->jit_param_var_indices) {
+                can_run_jit = false;
+            }
+            else {
+                for (int i = 0; i < program->jit_nparams; i++) {
+                    int idx = program->jit_param_var_indices[i];
+                    if (idx < 0 || idx >= program->vars.count || !var_buffers[idx]) {
+                        can_run_jit = false;
+                        break;
+                    }
+                    jit_inputs_stack[i] = (const void *)var_buffers[idx];
+                }
+            }
+        }
+        if (can_run_jit) {
+            int jit_rc = program->jit_kernel_fn(program->jit_nparams > 0 ? jit_inputs : NULL,
+                                                output_block, (int64_t)nitems);
+            if (jit_rc == 0) {
+                for (int i = 0; i < reserved_count; i++) {
+                    free(reserved_buffers[i]);
+                }
+                for (int i = 0; i < program->n_locals; i++) {
+                    if (local_buffers[i]) {
+                        free(local_buffers[i]);
+                    }
+                }
+                free(var_buffers);
+                free(local_buffers);
+                return ME_EVAL_SUCCESS;
+            }
+        }
     }
 
     dsl_eval_ctx ctx;
