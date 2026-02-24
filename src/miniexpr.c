@@ -3926,8 +3926,6 @@ static uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program
 }
 
 #if ME_USE_WASM32_JIT
-#define ME_DSL_JIT_WASM_POS_CACHE_SLOTS 64
-
 typedef struct {
     bool valid;
     uint64_t key;
@@ -3936,6 +3934,7 @@ typedef struct {
 } me_dsl_jit_wasm_pos_cache_entry;
 
 static me_dsl_jit_wasm_pos_cache_entry g_dsl_jit_wasm_pos_cache[ME_DSL_JIT_WASM_POS_CACHE_SLOTS];
+static int g_dsl_jit_wasm_pos_cache_cursor = 0;
 
 static int dsl_jit_wasm_pos_cache_find_slot(uint64_t key) {
     for (int i = 0; i < ME_DSL_JIT_WASM_POS_CACHE_SLOTS; i++) {
@@ -3991,7 +3990,15 @@ static bool dsl_jit_wasm_pos_cache_store_program(me_dsl_compiled_program *progra
 
     slot = dsl_jit_wasm_pos_cache_find_free_slot();
     if (slot < 0) {
-        return false;
+        slot = g_dsl_jit_wasm_pos_cache_cursor;
+        g_dsl_jit_wasm_pos_cache_cursor =
+            (g_dsl_jit_wasm_pos_cache_cursor + 1) % ME_DSL_JIT_WASM_POS_CACHE_SLOTS;
+        if (g_dsl_jit_wasm_pos_cache[slot].valid) {
+            if (g_dsl_jit_wasm_pos_cache[slot].fn_idx != 0) {
+                me_wasm_jit_free_dispatch(g_dsl_jit_wasm_pos_cache[slot].fn_idx);
+            }
+            free(g_dsl_jit_wasm_pos_cache[slot].scratch);
+        }
     }
 
     g_dsl_jit_wasm_pos_cache[slot].valid = true;

@@ -1587,6 +1587,143 @@ cleanup:
 #endif
 }
 
+static int test_wasm_runtime_cache_eviction_policy(void) {
+#if !defined(__EMSCRIPTEN__)
+    return 0;
+#else
+    printf("\n=== DSL JIT Runtime Cache Test 8f: wasm runtime cache eviction ===\n");
+
+    int rc = 1;
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+    const int base = 4000;
+    const int n_unique = ME_DSL_JIT_WASM_POS_CACHE_SLOTS + 8;
+    char src[256];
+    int err = 0;
+    me_expr *expr = NULL;
+    double out[1] = {0.0};
+
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT=1 failed\n");
+        goto cleanup;
+    }
+    test_wasm_runtime_cache_reset_instantiate_count();
+
+    if (snprintf(src, sizeof(src),
+                 "# me:compiler=cc\n"
+                 "def kernel():\n"
+                 "    return _global_linear_idx + %d\n", base) >= (int)sizeof(src)) {
+        printf("  FAILED: source formatting overflow for first kernel\n");
+        goto cleanup;
+    }
+    err = 0;
+    if (me_compile(src, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+        printf("  FAILED: first compile error at %d\n", err);
+        me_free(expr);
+        goto cleanup;
+    }
+    if (!me_expr_has_jit_kernel(expr)) {
+        printf("  FAILED: expected JIT kernel for first compile\n");
+        me_free(expr);
+        goto cleanup;
+    }
+    if (me_eval(expr, NULL, 0, out, 1, NULL) != ME_EVAL_SUCCESS) {
+        printf("  FAILED: first eval failed\n");
+        me_free(expr);
+        goto cleanup;
+    }
+    me_free(expr);
+    expr = NULL;
+    if (out[0] != (double)base) {
+        printf("  FAILED: first output mismatch (%.17g vs %.17g)\n", out[0], (double)base);
+        goto cleanup;
+    }
+    if (test_wasm_runtime_cache_get_instantiate_count() != 1) {
+        printf("  FAILED: expected instantiate count 1 after first compile\n");
+        goto cleanup;
+    }
+
+    for (int i = 1; i < n_unique; i++) {
+        if (snprintf(src, sizeof(src),
+                     "# me:compiler=cc\n"
+                     "def kernel():\n"
+                     "    return _global_linear_idx + %d\n", base + i) >= (int)sizeof(src)) {
+            printf("  FAILED: source formatting overflow at i=%d\n", i);
+            goto cleanup;
+        }
+        err = 0;
+        if (me_compile(src, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+            printf("  FAILED: unique compile error at i=%d err=%d\n", i, err);
+            me_free(expr);
+            goto cleanup;
+        }
+        if (!me_expr_has_jit_kernel(expr)) {
+            printf("  FAILED: expected JIT kernel for unique compile i=%d\n", i);
+            me_free(expr);
+            goto cleanup;
+        }
+        if (me_eval(expr, NULL, 0, out, 1, NULL) != ME_EVAL_SUCCESS) {
+            printf("  FAILED: unique eval failed at i=%d\n", i);
+            me_free(expr);
+            goto cleanup;
+        }
+        me_free(expr);
+        expr = NULL;
+        if (out[0] != (double)(base + i)) {
+            printf("  FAILED: unique output mismatch at i=%d (%.17g vs %.17g)\n",
+                   i, out[0], (double)(base + i));
+            goto cleanup;
+        }
+    }
+    if (test_wasm_runtime_cache_get_instantiate_count() != n_unique) {
+        printf("  FAILED: expected instantiate count %d after unique kernels\n", n_unique);
+        goto cleanup;
+    }
+
+    if (snprintf(src, sizeof(src),
+                 "# me:compiler=cc\n"
+                 "def kernel():\n"
+                 "    return _global_linear_idx + %d\n", base) >= (int)sizeof(src)) {
+        printf("  FAILED: source formatting overflow for eviction probe\n");
+        goto cleanup;
+    }
+    err = 0;
+    if (me_compile(src, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+        printf("  FAILED: eviction probe compile error at %d\n", err);
+        me_free(expr);
+        goto cleanup;
+    }
+    if (!me_expr_has_jit_kernel(expr)) {
+        printf("  FAILED: expected JIT kernel for eviction probe compile\n");
+        me_free(expr);
+        goto cleanup;
+    }
+    if (me_eval(expr, NULL, 0, out, 1, NULL) != ME_EVAL_SUCCESS) {
+        printf("  FAILED: eviction probe eval failed\n");
+        me_free(expr);
+        goto cleanup;
+    }
+    me_free(expr);
+    expr = NULL;
+    if (out[0] != (double)base) {
+        printf("  FAILED: eviction probe output mismatch (%.17g vs %.17g)\n", out[0], (double)base);
+        goto cleanup;
+    }
+    if (test_wasm_runtime_cache_get_instantiate_count() != n_unique + 1) {
+        printf("  FAILED: expected reinstantiation after eviction (count=%d expected=%d)\n",
+               test_wasm_runtime_cache_get_instantiate_count(), n_unique + 1);
+        goto cleanup;
+    }
+
+    rc = 0;
+    printf("  PASSED\n");
+
+cleanup:
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    free(saved_jit);
+    return rc;
+#endif
+}
+
 static int test_missing_return_skips_runtime_jit(void) {
     printf("\n=== DSL JIT Runtime Cache Test 9: missing return skips runtime JIT ===\n");
 
@@ -1928,6 +2065,7 @@ int main(void) {
     fail |= test_wasm_cast_intrinsics_jit_enabled();
     fail |= test_wasm_reserved_index_vars_jit_parity();
     fail |= test_wasm_reserved_index_cache_key_differentiation();
+    fail |= test_wasm_runtime_cache_eviction_policy();
     fail |= test_missing_return_skips_runtime_jit();
 #else
     fail |= test_negative_cache_skips_immediate_retry();
