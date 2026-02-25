@@ -2350,6 +2350,7 @@ static int test_cc_backend_bridge_and_vec_math_gates(void) {
     char *saved_cc = dup_env_value("CC");
     char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
     char *saved_bridge = dup_env_value("ME_DSL_JIT_MATH_BRIDGE");
+    char *saved_scalar = dup_env_value("ME_DSL_JIT_SCALAR_MATH_BRIDGE");
     char *saved_vec = dup_env_value("ME_DSL_JIT_VEC_MATH");
     const char *src_exp =
         "# me:compiler=cc\n"
@@ -2384,6 +2385,7 @@ static int test_cc_backend_bridge_and_vec_math_gates(void) {
     }
 
     if (setenv("ME_DSL_JIT_MATH_BRIDGE", "1", 1) != 0 ||
+        setenv("ME_DSL_JIT_SCALAR_MATH_BRIDGE", "0", 1) != 0 ||
         setenv("ME_DSL_JIT_VEC_MATH", "0", 1) != 0) {
         printf("  FAILED: setenv bridge/vec gate failed\n");
         goto cleanup;
@@ -2405,14 +2407,37 @@ static int test_cc_backend_bridge_and_vec_math_gates(void) {
         goto cleanup;
     }
     if (file_contains_text(c_path, "me_jit_vec_exp_f64(in_x, out, nitems);") ||
-        !file_contains_text(c_path, "for (int64_t idx = 0; idx < nitems; idx++) {")) {
-        printf("  FAILED: ME_DSL_JIT_VEC_MATH=0 did not force scalar lowering\n");
+        !file_contains_text(c_path, "for (int64_t idx = 0; idx < nitems; idx++) {") ||
+        file_contains_text(c_path, "me_jit_exp(x));")) {
+        printf("  FAILED: scalar gate=0 + vec gate=0 did not keep libm scalar lowering\n");
+        goto cleanup;
+    }
+
+    remove_files_in_dir(cache_dir);
+    c_path[0] = '\0';
+    if (setenv("ME_DSL_JIT_MATH_BRIDGE", "1", 1) != 0 ||
+        setenv("ME_DSL_JIT_SCALAR_MATH_BRIDGE", "1", 1) != 0 ||
+        setenv("ME_DSL_JIT_VEC_MATH", "0", 1) != 0) {
+        printf("  FAILED: setenv scalar bridge gate failed\n");
+        goto cleanup;
+    }
+    if (compile_and_eval_dsl_values(src_exp, in, 4, out) != 0) {
+        goto cleanup;
+    }
+    if (count_kernel_files_with_suffix(cache_dir, ".c", c_path, sizeof(c_path)) != 1 ||
+        c_path[0] == '\0' || !file_exists(c_path)) {
+        printf("  FAILED: expected generated source for scalar bridge gate check\n");
+        goto cleanup;
+    }
+    if (!file_contains_text(c_path, "me_jit_exp(x));")) {
+        printf("  FAILED: ME_DSL_JIT_SCALAR_MATH_BRIDGE=1 did not enable scalar bridge calls\n");
         goto cleanup;
     }
 
     remove_files_in_dir(cache_dir);
     c_path[0] = '\0';
     if (setenv("ME_DSL_JIT_MATH_BRIDGE", "0", 1) != 0 ||
+        setenv("ME_DSL_JIT_SCALAR_MATH_BRIDGE", "0", 1) != 0 ||
         setenv("ME_DSL_JIT_VEC_MATH", "1", 1) != 0) {
         printf("  FAILED: setenv bridge/vec gate failed\n");
         goto cleanup;
@@ -2447,11 +2472,13 @@ cleanup:
     restore_env_value("CC", saved_cc);
     restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
     restore_env_value("ME_DSL_JIT_MATH_BRIDGE", saved_bridge);
+    restore_env_value("ME_DSL_JIT_SCALAR_MATH_BRIDGE", saved_scalar);
     restore_env_value("ME_DSL_JIT_VEC_MATH", saved_vec);
     free(saved_tmpdir);
     free(saved_cc);
     free(saved_pos_cache);
     free(saved_bridge);
+    free(saved_scalar);
     free(saved_vec);
     if (cache_dir[0] != '\0') {
         remove_files_in_dir(cache_dir);

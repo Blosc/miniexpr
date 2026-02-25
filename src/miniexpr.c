@@ -358,6 +358,7 @@ typedef struct {
     char jit_ir_error[128];
     char *jit_c_source;
     bool jit_use_runtime_math_bridge;
+    bool jit_scalar_math_bridge_enabled;
     bool jit_synth_reserved_non_nd;
     bool jit_synth_reserved_nd;
     bool jit_vec_math_enabled;
@@ -4027,6 +4028,7 @@ static uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program
     h = dsl_jit_hash_i32(h, dsl_jit_target_tag());
     h = dsl_jit_hash_i32(h, dsl_jit_backend_tag(program));
     h = dsl_jit_hash_i32(h, program->jit_use_runtime_math_bridge ? 1 : 0);
+    h = dsl_jit_hash_i32(h, program->jit_scalar_math_bridge_enabled ? 1 : 0);
     h = dsl_jit_hash_i32(h, program->jit_vec_math_enabled ? 1 : 0);
     return h;
 }
@@ -4318,6 +4320,14 @@ static bool dsl_jit_math_bridge_enabled(void) {
     const char *env = getenv("ME_DSL_JIT_MATH_BRIDGE");
     if (!env || env[0] == '\0') {
         return true;
+    }
+    return strcmp(env, "0") != 0;
+}
+
+static bool dsl_jit_scalar_math_bridge_enabled(void) {
+    const char *env = getenv("ME_DSL_JIT_SCALAR_MATH_BRIDGE");
+    if (!env || env[0] == '\0') {
+        return false;
     }
     return strcmp(env, "0") != 0;
 }
@@ -6964,6 +6974,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     free(program->jit_c_source);
     program->jit_c_source = NULL;
     program->jit_use_runtime_math_bridge = false;
+    program->jit_scalar_math_bridge_enabled = false;
     program->jit_synth_reserved_non_nd = false;
     program->jit_synth_reserved_nd = false;
     program->jit_vec_math_enabled = false;
@@ -7178,8 +7189,19 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     cg_options.trace_vector_ops_cap = sizeof(vector_ops);
     cg_options.trace_lowering_reason = lowering_reason;
     cg_options.trace_lowering_reason_cap = sizeof(lowering_reason);
+    cg_options.has_enable_scalar_math_bridge = true;
+    cg_options.enable_scalar_math_bridge = dsl_jit_scalar_math_bridge_enabled();
     cg_options.has_enable_vector_math = true;
     cg_options.enable_vector_math = dsl_jit_vec_math_enabled();
+    cg_options.has_enable_hybrid_vector_math = true;
+    cg_options.enable_hybrid_vector_math = cg_options.enable_vector_math;
+    cg_options.has_enable_hybrid_expr_vector_math = true;
+    /* Phase 2 (expression/lifted hybrid lowering) stays experimental for now. */
+    cg_options.enable_hybrid_expr_vector_math = false;
+    if (program->compiler == ME_DSL_COMPILER_LIBTCC) {
+        /* TCC regresses on the multi-pass temp-buffer hybrid path. */
+        cg_options.enable_hybrid_vector_math = false;
+    }
     bool use_bridge = false;
     bool bridge_gate_enabled = dsl_jit_math_bridge_enabled();
     if (bridge_gate_enabled && program->compiler == ME_DSL_COMPILER_LIBTCC) {
@@ -7195,6 +7217,11 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     }
     else if (!bridge_gate_enabled) {
         dsl_tracef("jit codegen: runtime math bridge disabled by ME_DSL_JIT_MATH_BRIDGE");
+    }
+    if (program->compiler == ME_DSL_COMPILER_LIBTCC &&
+        cg_options.enable_vector_math &&
+        !cg_options.enable_hybrid_vector_math) {
+        dsl_tracef("jit codegen: hybrid statement vector lowering disabled for tcc backend");
     }
     cg_options.use_runtime_math_bridge = use_bridge;
     char *generated_c = NULL;
@@ -7217,12 +7244,16 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     }
     program->jit_c_source = generated_c;
     program->jit_use_runtime_math_bridge = cg_options.use_runtime_math_bridge;
+    program->jit_scalar_math_bridge_enabled = cg_options.use_runtime_math_bridge &&
+                                              cg_options.enable_scalar_math_bridge;
     program->jit_vec_math_enabled = cg_options.use_runtime_math_bridge && cg_options.enable_vector_math;
     snprintf(program->jit_lowering_mode, sizeof(program->jit_lowering_mode), "%s", lowering_mode);
     snprintf(program->jit_vector_ops, sizeof(program->jit_vector_ops), "%s", vector_ops);
     snprintf(program->jit_lowering_reason, sizeof(program->jit_lowering_reason), "%s", lowering_reason);
     if (program->jit_use_runtime_math_bridge) {
-        dsl_tracef("jit codegen: runtime math bridge enabled");
+        dsl_tracef("jit codegen: runtime math bridge enabled (scalar=%s vec=%s)",
+                   program->jit_scalar_math_bridge_enabled ? "bridge" : "libm",
+                   program->jit_vec_math_enabled ? "on" : "off");
     }
     dsl_tracef("jit codegen: lowering=%s vec_ops=%s reason=%s",
                program->jit_lowering_mode[0] ? program->jit_lowering_mode : "scalar",

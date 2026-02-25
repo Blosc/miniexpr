@@ -442,6 +442,12 @@ static int test_codegen_runtime_math_bridge_emission(void) {
     me_dsl_jit_cgen_options options;
     memset(&options, 0, sizeof(options));
     options.use_runtime_math_bridge = true;
+    options.has_enable_vector_math = true;
+    options.enable_vector_math = true;
+    options.has_enable_hybrid_vector_math = true;
+    options.enable_hybrid_vector_math = true;
+    options.has_enable_hybrid_expr_vector_math = true;
+    options.enable_hybrid_expr_vector_math = true;
     char lowering_mode[16] = {0};
     char vector_ops[64] = {0};
     char lowering_reason[64] = {0};
@@ -1137,8 +1143,84 @@ static int test_codegen_runtime_math_bridge_vector_lowering_assign_return(void) 
     return 0;
 }
 
+static int test_codegen_runtime_math_bridge_hybrid_stmt_lowering(void) {
+    printf("\n=== JIT C Codegen Test 16: runtime math bridge hybrid statement lowering ===\n");
+
+    const char *src =
+        "def kernel(x, y):\n"
+        "    t = sqrt(x)\n"
+        "    z = t + y\n"
+        "    return z\n";
+
+    me_dsl_error parse_error;
+    me_dsl_program *program = me_dsl_parse(src, &parse_error);
+    if (!program) {
+        printf("  FAILED: parse error at %d:%d (%s)\n",
+               parse_error.line, parse_error.column, parse_error.message);
+        return 1;
+    }
+
+    const char *param_names[] = {"x", "y"};
+    me_dtype param_dtypes[] = {ME_FLOAT64, ME_FLOAT64};
+    dtype_resolve_ctx rctx;
+    rctx.value_dtype = ME_FLOAT64;
+
+    me_dsl_error ir_error;
+    me_dsl_jit_ir_program *ir = NULL;
+    bool ok = me_dsl_jit_ir_build(program, param_names, param_dtypes, 2,
+                                  mock_resolve_dtype, &rctx, &ir, &ir_error);
+    me_dsl_program_free(program);
+    if (!ok || !ir) {
+        printf("  FAILED: ir build rejected source at %d:%d (%s)\n",
+               ir_error.line, ir_error.column, ir_error.message);
+        me_dsl_jit_ir_free(ir);
+        return 1;
+    }
+
+    me_dsl_error cg_error;
+    me_dsl_jit_cgen_options options;
+    memset(&options, 0, sizeof(options));
+    options.use_runtime_math_bridge = true;
+    char lowering_mode[16] = {0};
+    char vector_ops[64] = {0};
+    char lowering_reason[64] = {0};
+    options.trace_lowering_mode = lowering_mode;
+    options.trace_lowering_mode_cap = sizeof(lowering_mode);
+    options.trace_vector_ops = vector_ops;
+    options.trace_vector_ops_cap = sizeof(vector_ops);
+    options.trace_lowering_reason = lowering_reason;
+    options.trace_lowering_reason_cap = sizeof(lowering_reason);
+    char *c_source = NULL;
+    ok = me_dsl_jit_codegen_c(ir, ME_FLOAT64, &options, &c_source, &cg_error);
+    me_dsl_jit_ir_free(ir);
+    if (!ok || !c_source) {
+        printf("  FAILED: codegen rejected source at %d:%d (%s)\n",
+               cg_error.line, cg_error.column, cg_error.message);
+        free(c_source);
+        return 1;
+    }
+
+    bool has_vec_call = strstr(c_source, "me_jit_vec_sqrt_f64(in_x, __me_vec_tmp_0, nitems);") != NULL ||
+                        strstr(c_source, "me_jit_vec_sqrt_f64(in_x, out, nitems);") != NULL;
+    bool marker_ok = has_vec_call &&
+                     strstr(c_source, "t = (double)__me_vec_tmp_0[idx];") != NULL &&
+                     strstr(c_source, "for (int64_t idx = 0; idx < nitems; idx++) {") != NULL;
+    if (!marker_ok ||
+        strcmp(lowering_mode, "hybrid") != 0 ||
+        strcmp(vector_ops, "sqrt") != 0 ||
+        strcmp(lowering_reason, "statement-vector-lowered") != 0) {
+        printf("  FAILED: hybrid statement vector lowering markers not emitted as expected\n");
+        free(c_source);
+        return 1;
+    }
+
+    free(c_source);
+    printf("  PASSED\n");
+    return 0;
+}
+
 static int test_codegen_runtime_math_bridge_vector_gate_disable(void) {
-    printf("\n=== JIT C Codegen Test 16: runtime math bridge vector gate disable ===\n");
+    printf("\n=== JIT C Codegen Test 17: runtime math bridge vector gate disable ===\n");
 
     const char *src =
         "def kernel(x):\n"
@@ -1205,6 +1287,153 @@ static int test_codegen_runtime_math_bridge_vector_gate_disable(void) {
     return 0;
 }
 
+static int test_codegen_runtime_math_bridge_hybrid_lifted_unary_expr(void) {
+    printf("\n=== JIT C Codegen Test 18: runtime math bridge hybrid lifted unary expression ===\n");
+
+    const char *src =
+        "def kernel(x, y):\n"
+        "    t = 0.7071067811865475\n"
+        "    z = 0.5 * (1.0 + exp((x + y) * t))\n"
+        "    return z\n";
+
+    me_dsl_error parse_error;
+    me_dsl_program *program = me_dsl_parse(src, &parse_error);
+    if (!program) {
+        printf("  FAILED: parse error at %d:%d (%s)\n",
+               parse_error.line, parse_error.column, parse_error.message);
+        return 1;
+    }
+
+    const char *param_names[] = {"x", "y"};
+    me_dtype param_dtypes[] = {ME_FLOAT64, ME_FLOAT64};
+    dtype_resolve_ctx rctx;
+    rctx.value_dtype = ME_FLOAT64;
+
+    me_dsl_error ir_error;
+    me_dsl_jit_ir_program *ir = NULL;
+    bool ok = me_dsl_jit_ir_build(program, param_names, param_dtypes, 2,
+                                  mock_resolve_dtype, &rctx, &ir, &ir_error);
+    me_dsl_program_free(program);
+    if (!ok || !ir) {
+        printf("  FAILED: ir build rejected source at %d:%d (%s)\n",
+               ir_error.line, ir_error.column, ir_error.message);
+        me_dsl_jit_ir_free(ir);
+        return 1;
+    }
+
+    me_dsl_error cg_error;
+    me_dsl_jit_cgen_options options;
+    memset(&options, 0, sizeof(options));
+    options.use_runtime_math_bridge = true;
+    char lowering_mode[16] = {0};
+    char vector_ops[64] = {0};
+    char lowering_reason[64] = {0};
+    options.trace_lowering_mode = lowering_mode;
+    options.trace_lowering_mode_cap = sizeof(lowering_mode);
+    options.trace_vector_ops = vector_ops;
+    options.trace_vector_ops_cap = sizeof(vector_ops);
+    options.trace_lowering_reason = lowering_reason;
+    options.trace_lowering_reason_cap = sizeof(lowering_reason);
+    char *c_source = NULL;
+    ok = me_dsl_jit_codegen_c(ir, ME_FLOAT64, &options, &c_source, &cg_error);
+    me_dsl_jit_ir_free(ir);
+    if (!ok || !c_source) {
+        printf("  FAILED: codegen rejected source at %d:%d (%s)\n",
+               cg_error.line, cg_error.column, cg_error.message);
+        free(c_source);
+        return 1;
+    }
+
+    bool marker_ok = strstr(c_source, "me_jit_vec_exp_f64(") != NULL &&
+                     strstr(c_source, "__me_call = (double)__me_vec_tmp_") != NULL &&
+                     strstr(c_source, "0.5 * (1.0 + __me_call)") != NULL;
+    if (!marker_ok ||
+        strcmp(lowering_mode, "hybrid") != 0 ||
+        strcmp(vector_ops, "exp") != 0 ||
+        strcmp(lowering_reason, "statement-vector-lowered") != 0) {
+        printf("  FAILED: lifted unary expression lowering markers not emitted as expected\n");
+        free(c_source);
+        return 1;
+    }
+
+    free(c_source);
+    printf("  PASSED\n");
+    return 0;
+}
+
+static int test_codegen_runtime_math_bridge_hybrid_gate_disable(void) {
+    printf("\n=== JIT C Codegen Test 19: runtime math bridge hybrid gate disable ===\n");
+
+    const char *src =
+        "def kernel(x, y):\n"
+        "    t = sqrt(x)\n"
+        "    z = t + y\n"
+        "    return z\n";
+
+    me_dsl_error parse_error;
+    me_dsl_program *program = me_dsl_parse(src, &parse_error);
+    if (!program) {
+        printf("  FAILED: parse error at %d:%d (%s)\n",
+               parse_error.line, parse_error.column, parse_error.message);
+        return 1;
+    }
+
+    const char *param_names[] = {"x", "y"};
+    me_dtype param_dtypes[] = {ME_FLOAT64, ME_FLOAT64};
+    dtype_resolve_ctx rctx;
+    rctx.value_dtype = ME_FLOAT64;
+
+    me_dsl_error ir_error;
+    me_dsl_jit_ir_program *ir = NULL;
+    bool ok = me_dsl_jit_ir_build(program, param_names, param_dtypes, 2,
+                                  mock_resolve_dtype, &rctx, &ir, &ir_error);
+    me_dsl_program_free(program);
+    if (!ok || !ir) {
+        printf("  FAILED: ir build rejected source at %d:%d (%s)\n",
+               ir_error.line, ir_error.column, ir_error.message);
+        me_dsl_jit_ir_free(ir);
+        return 1;
+    }
+
+    me_dsl_error cg_error;
+    me_dsl_jit_cgen_options options;
+    memset(&options, 0, sizeof(options));
+    options.use_runtime_math_bridge = true;
+    options.has_enable_vector_math = true;
+    options.enable_vector_math = true;
+    options.has_enable_hybrid_vector_math = true;
+    options.enable_hybrid_vector_math = false;
+    char lowering_mode[16] = {0};
+    char lowering_reason[64] = {0};
+    options.trace_lowering_mode = lowering_mode;
+    options.trace_lowering_mode_cap = sizeof(lowering_mode);
+    options.trace_lowering_reason = lowering_reason;
+    options.trace_lowering_reason_cap = sizeof(lowering_reason);
+    char *c_source = NULL;
+    ok = me_dsl_jit_codegen_c(ir, ME_FLOAT64, &options, &c_source, &cg_error);
+    me_dsl_jit_ir_free(ir);
+    if (!ok || !c_source) {
+        printf("  FAILED: codegen rejected source at %d:%d (%s)\n",
+               cg_error.line, cg_error.column, cg_error.message);
+        free(c_source);
+        return 1;
+    }
+
+    bool has_vec_call = strstr(c_source, "me_jit_vec_sqrt_f64(in_x, __me_vec_tmp_0, nitems);") != NULL ||
+                        strstr(c_source, "me_jit_vec_sqrt_f64(in_x, out, nitems);") != NULL;
+    if (has_vec_call ||
+        strcmp(lowering_mode, "scalar") != 0 ||
+        strcmp(lowering_reason, "statement-vector-math-disabled") != 0) {
+        printf("  FAILED: hybrid gate disable did not keep scalar lowering as expected\n");
+        free(c_source);
+        return 1;
+    }
+
+    free(c_source);
+    printf("  PASSED\n");
+    return 0;
+}
+
 int main(void) {
     int fail = 0;
     fail |= test_codegen_all_noncomplex_dtypes();
@@ -1223,6 +1452,8 @@ int main(void) {
     fail |= test_codegen_runtime_math_bridge_vector_lowering_unary_extra();
     fail |= test_codegen_runtime_math_bridge_vector_lowering_unary_extended();
     fail |= test_codegen_runtime_math_bridge_vector_lowering_assign_return();
+    fail |= test_codegen_runtime_math_bridge_hybrid_stmt_lowering();
     fail |= test_codegen_runtime_math_bridge_vector_gate_disable();
+    fail |= test_codegen_runtime_math_bridge_hybrid_gate_disable();
     return fail;
 }

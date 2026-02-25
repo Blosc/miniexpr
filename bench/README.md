@@ -153,6 +153,7 @@ Notes:
 - Uses `# me:compiler=tcc` by default (when `ME_BENCH_COMPILER` is unset).
 - Set `ME_BENCH_COMPILER=cc` to benchmark the `cc` backend explicitly.
 - Set `ME_DSL_JIT_MATH_BRIDGE=0` to force scalar math fallback in JIT C.
+- Set `ME_DSL_JIT_SCALAR_MATH_BRIDGE=1` to keep scalar calls on runtime bridge symbols (`me_jit_*`) when vector lowering does not match.
 - Set `ME_DSL_JIT_VEC_MATH=0` to keep runtime bridge but disable vector lowering.
 
 ```bash
@@ -160,6 +161,23 @@ Notes:
 ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
 ME_BENCH_COMPILER=tcc ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
 ME_BENCH_COMPILER=cc ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
+```
+
+### benchmark_black-scholes.c
+Notebook-like Black-Scholes DSL kernel benchmark with branches (`if d1 > 0`, `if d2 > 0`) and multiple transcendental calls.
+
+Reports:
+- JIT cold compile latency
+- JIT warm throughput
+- interpreter throughput
+- max-abs numerical diff (JIT warm vs interpreter)
+- generated-kernel markers (`me_jit_vec_*`, scalar bridge calls, scalar loop)
+
+```bash
+./build/bench/benchmark_black-scholes
+./build/bench/benchmark_black-scholes 262144 6
+ME_BENCH_COMPILER=cc ./build/bench/benchmark_black-scholes 262144 6
+ME_DSL_TRACE=1 ./build/bench/benchmark_black-scholes 262144 6
 ```
 
 ### benchmark_dsl_jit_index_vars.c
