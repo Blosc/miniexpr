@@ -7140,7 +7140,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     }
     if (uses_reserved_index_vars) {
         int compile_ndims = program->compile_ndims;
-        if (compile_ndims <= 1) {
+        if (compile_ndims <= 0) {
             program->jit_synth_reserved_non_nd = true;
         }
         else {
