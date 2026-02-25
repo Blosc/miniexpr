@@ -6119,6 +6119,30 @@ static bool dsl_jit_cc_math_bridge_available(void) {
     return false;
 }
 
+static bool dsl_jit_math_bridge_enabled(void) {
+    const char *env = getenv("ME_DSL_JIT_MATH_BRIDGE");
+    if (!env || env[0] == '\0') {
+        return true;
+    }
+    return strcmp(env, "0") != 0;
+}
+
+static bool dsl_jit_scalar_math_bridge_enabled(void) {
+    const char *env = getenv("ME_DSL_JIT_SCALAR_MATH_BRIDGE");
+    if (!env || env[0] == '\0') {
+        return false;
+    }
+    return strcmp(env, "0") != 0;
+}
+
+static bool dsl_jit_vec_math_enabled(void) {
+    const char *env = getenv("ME_DSL_JIT_VEC_MATH");
+    if (!env || env[0] == '\0') {
+        return true;
+    }
+    return strcmp(env, "0") != 0;
+}
+
 static bool dsl_jit_runtime_enabled(void) {
     const char *env = getenv("ME_DSL_JIT");
     if (!env || env[0] == '\0') {
