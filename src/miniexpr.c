@@ -118,6 +118,14 @@ For log = base 10 log comment the next line. */
 #endif
 #define ME_LAST_ERROR_MSG_CAP 256
 
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__EMSCRIPTEN__)
+#define ME_DSL_JIT_BRIDGE_NAME_ENTRY(pub_sym, bridge_fn, sig_type, decl) #pub_sym,
+static const char *const dsl_jit_bridge_symbol_names[] = {
+    ME_DSL_JIT_BRIDGE_SYMBOL_CONTRACT(ME_DSL_JIT_BRIDGE_NAME_ENTRY)
+};
+#undef ME_DSL_JIT_BRIDGE_NAME_ENTRY
+#endif
+
 #if defined(_MSC_VER)
 #define ME_THREAD_LOCAL __declspec(thread)
 #elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
@@ -5416,7 +5424,6 @@ static const me_dsl_jit_bridge_symbol dsl_jit_math_bridge_symbols[] = {
 #undef ME_DSL_JIT_BRIDGE_SYMBOL_ENTRY
 
 #undef ME_DSL_JIT_ASSERT_FN_SIG
-#undef ME_DSL_JIT_BRIDGE_SYMBOL_CONTRACT
 
 static bool dsl_jit_libtcc_register_math_bridge(me_tcc_state *state) {
     if (!state) {
@@ -5621,80 +5628,12 @@ static bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
 
 #if !defined(_WIN32) && !defined(_WIN64) && !defined(__EMSCRIPTEN__)
 static bool dsl_jit_cc_math_bridge_available(void) {
-#if defined(_WIN32) || defined(_WIN64)
-    return false;
-#else
-    if (dlsym(RTLD_DEFAULT, "me_jit_abs") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_sin") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_cos") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_exp") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_log") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_sqrt") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_exp10") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_where") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_vec_exp_f64") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_vec_pow_f64") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_vec_abs_f64") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_vec_sqrt_f64") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_vec_log1p_f64") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_vec_exp2_f64") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_vec_log2_f64") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_vec_expm1_f64") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_vec_log10_f64") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_vec_sinh_f64") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_vec_cosh_f64") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_vec_tanh_f64") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_vec_asinh_f64") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_vec_acosh_f64") == NULL) {
-        return false;
-    }
-    if (dlsym(RTLD_DEFAULT, "me_jit_vec_atanh_f64") == NULL) {
-        return false;
+    for (size_t i = 0; i < sizeof(dsl_jit_bridge_symbol_names) / sizeof(dsl_jit_bridge_symbol_names[0]); i++) {
+        if (dlsym(RTLD_DEFAULT, dsl_jit_bridge_symbol_names[i]) == NULL) {
+            return false;
+        }
     }
     return true;
-#endif
 }
 
 static void dsl_jit_cc_add_library_flag_if_exists(char *flags, size_t flags_size, const char *path) {
@@ -6577,7 +6516,8 @@ typedef struct {
 } dsl_wasm32_symbol_binding;
 
 #define ME_WASM32_BRIDGE_SYM(fn) { #fn, (const void *)&fn }
-#define ME_WASM32_BRIDGE_SYM_VEC(fn) { #fn, (const void *)&fn }
+#define ME_WASM32_BRIDGE_CONTRACT_SYM(pub_sym, bridge_fn, sig_type, decl) \
+    ME_WASM32_BRIDGE_SYM(pub_sym),
 
 static const dsl_wasm32_symbol_binding dsl_wasm32_symbol_bindings[] = {
     ME_WASM32_BRIDGE_SYM(acos), ME_WASM32_BRIDGE_SYM(acosh), ME_WASM32_BRIDGE_SYM(asin),
@@ -6596,33 +6536,7 @@ static const dsl_wasm32_symbol_binding dsl_wasm32_symbol_bindings[] = {
     ME_WASM32_BRIDGE_SYM(tan), ME_WASM32_BRIDGE_SYM(tanh), ME_WASM32_BRIDGE_SYM(tgamma),
     ME_WASM32_BRIDGE_SYM(trunc),
     ME_WASM32_BRIDGE_SYM(memset),
-    ME_WASM32_BRIDGE_SYM(me_jit_exp10), ME_WASM32_BRIDGE_SYM(me_jit_sinpi),
-    ME_WASM32_BRIDGE_SYM(me_jit_cospi), ME_WASM32_BRIDGE_SYM(me_jit_logaddexp),
-    ME_WASM32_BRIDGE_SYM(me_jit_where),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_sin_f64), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_cos_f64),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_exp_f64), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_log_f64),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_exp10_f64), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_sinpi_f64),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_cospi_f64), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_atan2_f64),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_hypot_f64), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_pow_f64),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_expm1_f64), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_log10_f64),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_sinh_f64), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_cosh_f64),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_tanh_f64), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_asinh_f64),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_acosh_f64), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_atanh_f64),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_abs_f64), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_sqrt_f64),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_log1p_f64), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_exp2_f64),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_log2_f64),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_sin_f32), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_cos_f32),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_exp_f32), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_log_f32),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_exp10_f32), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_sinpi_f32),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_cospi_f32), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_atan2_f32),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_hypot_f32), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_pow_f32),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_expm1_f32), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_log10_f32),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_sinh_f32), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_cosh_f32),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_tanh_f32), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_asinh_f32),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_acosh_f32), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_atanh_f32),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_abs_f32), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_sqrt_f32),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_log1p_f32), ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_exp2_f32),
-    ME_WASM32_BRIDGE_SYM_VEC(me_jit_vec_log2_f32)
+    ME_DSL_JIT_BRIDGE_SYMBOL_CONTRACT(ME_WASM32_BRIDGE_CONTRACT_SYM)
 };
 
 static int dsl_wasm32_lookup_bridge_symbol(const char *name) {
@@ -6654,7 +6568,7 @@ static bool dsl_wasm32_register_required_symbols(TCCState *state, const char *sr
 }
 
 #undef ME_WASM32_BRIDGE_SYM
-#undef ME_WASM32_BRIDGE_SYM_VEC
+#undef ME_WASM32_BRIDGE_CONTRACT_SYM
 
 static bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
     if (!program || !program->jit_c_source) {
