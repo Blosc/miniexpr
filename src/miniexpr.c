@@ -90,7 +90,7 @@ For log = base 10 log comment the next line. */
 #define ME_DSL_MAX_NDIM 8
 #define ME_DSL_JIT_SYMBOL_NAME "me_dsl_jit_kernel"
 #define ME_DSL_JIT_SYNTH_ND_CTX_PARAM "__me_nd_ctx"
-#define ME_DSL_JIT_CGEN_VERSION 6
+#define ME_DSL_JIT_CGEN_VERSION 7
 #define ME_DSL_JIT_SYNTH_ND_CTX_V2_VERSION 2
 #define ME_DSL_ND_CTX_FLAG_SEQ 1
 #define ME_DSL_JIT_SYNTH_ND_CTX_BASE_WORDS (1 + 4 * ME_DSL_MAX_NDIM)
@@ -4919,6 +4919,30 @@ static double dsl_jit_bridge_exp10(double x) {
     return dsl_jit_bridge_apply_unary_f64(vec_exp10_dispatch, x);
 }
 
+static double dsl_jit_bridge_abs(double x) {
+    return dsl_jit_bridge_apply_unary_f64(vec_abs_dispatch, x);
+}
+
+static double dsl_jit_bridge_sin(double x) {
+    return dsl_jit_bridge_apply_unary_f64(vec_sin_dispatch, x);
+}
+
+static double dsl_jit_bridge_cos(double x) {
+    return dsl_jit_bridge_apply_unary_f64(vec_cos_dispatch, x);
+}
+
+static double dsl_jit_bridge_exp(double x) {
+    return dsl_jit_bridge_apply_unary_f64(vec_exp_dispatch, x);
+}
+
+static double dsl_jit_bridge_log(double x) {
+    return dsl_jit_bridge_apply_unary_f64(vec_log_dispatch, x);
+}
+
+static double dsl_jit_bridge_sqrt(double x) {
+    return dsl_jit_bridge_apply_unary_f64(vec_sqrt_dispatch, x);
+}
+
 static double dsl_jit_bridge_sinpi(double x) {
     return dsl_jit_bridge_apply_unary_f64(vec_sinpi_dispatch, x);
 }
@@ -5128,6 +5152,30 @@ double me_jit_exp10(double x) {
     return dsl_jit_bridge_exp10(x);
 }
 
+double me_jit_abs(double x) {
+    return dsl_jit_bridge_abs(x);
+}
+
+double me_jit_sin(double x) {
+    return dsl_jit_bridge_sin(x);
+}
+
+double me_jit_cos(double x) {
+    return dsl_jit_bridge_cos(x);
+}
+
+double me_jit_exp(double x) {
+    return dsl_jit_bridge_exp(x);
+}
+
+double me_jit_log(double x) {
+    return dsl_jit_bridge_log(x);
+}
+
+double me_jit_sqrt(double x) {
+    return dsl_jit_bridge_sqrt(x);
+}
+
 double me_jit_sinpi(double x) {
     return dsl_jit_bridge_sinpi(x);
 }
@@ -5335,6 +5383,36 @@ static bool dsl_jit_libtcc_register_math_bridge(me_tcc_state *state) {
     if (!g_dsl_tcc_api.tcc_add_symbol_fn) {
         snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
                  "tcc backend missing required symbol tcc_add_symbol for math bridge");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_abs", (const void *)&dsl_jit_bridge_abs) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_abs");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_sin", (const void *)&dsl_jit_bridge_sin) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_sin");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_cos", (const void *)&dsl_jit_bridge_cos) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_cos");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_exp", (const void *)&dsl_jit_bridge_exp) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_exp");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_log", (const void *)&dsl_jit_bridge_log) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_log");
+        return false;
+    }
+    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_sqrt", (const void *)&dsl_jit_bridge_sqrt) < 0) {
+        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
+                 "tcc_add_symbol failed for me_jit_sqrt");
         return false;
     }
     if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_exp10", (const void *)&dsl_jit_bridge_exp10) < 0) {
@@ -5828,6 +5906,24 @@ static bool dsl_jit_cc_math_bridge_available(void) {
 #if defined(_WIN32) || defined(_WIN64)
     return false;
 #else
+    if (dlsym(RTLD_DEFAULT, "me_jit_abs") == NULL) {
+        return false;
+    }
+    if (dlsym(RTLD_DEFAULT, "me_jit_sin") == NULL) {
+        return false;
+    }
+    if (dlsym(RTLD_DEFAULT, "me_jit_cos") == NULL) {
+        return false;
+    }
+    if (dlsym(RTLD_DEFAULT, "me_jit_exp") == NULL) {
+        return false;
+    }
+    if (dlsym(RTLD_DEFAULT, "me_jit_log") == NULL) {
+        return false;
+    }
+    if (dlsym(RTLD_DEFAULT, "me_jit_sqrt") == NULL) {
+        return false;
+    }
     if (dlsym(RTLD_DEFAULT, "me_jit_exp10") == NULL) {
         return false;
     }

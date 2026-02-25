@@ -11,9 +11,11 @@
 #include "functions.h"
 #include "functions-simd.h"
 #include <math.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <stdint.h>
+#include <string.h>
 
 #if defined(_MSC_VER)
 #include <intrin.h>
@@ -38,6 +40,10 @@ static void me_init_simd(void);
 
 #ifndef ME_USE_SLEEF
 #define ME_USE_SLEEF 1
+#endif
+
+#ifndef ME_DSL_TRACE_DEFAULT
+#define ME_DSL_TRACE_DEFAULT 0
 #endif
 
 #if ME_USE_SLEEF && (defined(__clang__) || defined(__GNUC__)) && \
@@ -3611,6 +3617,42 @@ static int me_simd_initialized = 0;
 static int me_simd_enabled = 1;
 static const char *me_simd_backend = "scalar";
 
+static int me_dsl_trace_enabled(void) {
+    const char *env = getenv("ME_DSL_TRACE");
+    if (!env || env[0] == '\0') {
+        return (ME_DSL_TRACE_DEFAULT != 0) ? 1 : 0;
+    }
+    return (strcmp(env, "0") != 0) ? 1 : 0;
+}
+
+static void me_dsl_tracef(const char *fmt, ...) {
+    if (!fmt || !me_dsl_trace_enabled()) {
+        return;
+    }
+    fprintf(stderr, "[me-dsl] ");
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+}
+
+static void me_dsl_trace_simd_init(int use_u35) {
+    me_dsl_tracef("simd init: backend=%s sleef=%s simd=%s ulp=%s",
+                  me_simd_backend,
+#if ME_USE_SLEEF
+                  "on",
+#else
+                  "off",
+#endif
+#if ME_ENABLE_SLEEF_SIMD
+                  "on",
+#else
+                  "off",
+#endif
+                  use_u35 ? "u35" : "u10");
+}
+
 void me_sincos_eval_start(void) {
     me_eval_cookie++;
 }
@@ -3915,6 +3957,7 @@ static void me_init_simd(void) {
         vec_sincos_impl = vec_sincos_scalar;
         vec_sincos_f32_impl = vec_sincos_f32_scalar;
         me_simd_backend = "scalar";
+        me_dsl_trace_simd_init(use_u35);
         return;
     }
 
@@ -4024,6 +4067,7 @@ static void me_init_simd(void) {
         vec_sincos_impl = vec_sincos_avx2;
         vec_sincos_f32_impl = vec_sincos_f32_avx2;
         me_simd_backend = use_u35 ? "avx2-u35" : "avx2-u10";
+        me_dsl_trace_simd_init(use_u35);
         return;
     }
 #endif
@@ -4139,6 +4183,7 @@ static void me_init_simd(void) {
     if (me_simd_backend[0] == '\0') {
         me_simd_backend = "scalar";
     }
+    me_dsl_trace_simd_init(use_u35);
 }
 
 int me_simd_initialized_for_tests(void) {

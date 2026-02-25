@@ -39,6 +39,7 @@ typedef struct {
     me_dtype output_dtype;
     const char *out_var_name;
     me_dsl_error *error;
+    bool use_runtime_math_bridge;
 } me_jit_codegen_ctx;
 
 typedef enum {
@@ -423,7 +424,8 @@ static bool me_jit_ident_equals(const char *start, size_t ident_len, const char 
     return ident_len == name_len && strncmp(start, name, ident_len) == 0;
 }
 
-static const char *me_jit_function_name_rewrite(const char *start, size_t ident_len) {
+static const char *me_jit_function_name_rewrite(const char *start, size_t ident_len,
+                                                bool use_runtime_math_bridge) {
     if (me_jit_ident_equals(start, ident_len, "int")) {
         return "ME_DSL_CAST_INT";
     }
@@ -437,8 +439,29 @@ static const char *me_jit_function_name_rewrite(const char *start, size_t ident_
         return "atan2";
     }
     if (me_jit_ident_equals(start, ident_len, "abs")) {
+#if defined(__EMSCRIPTEN__)
         return "fabs";
+#else
+        return use_runtime_math_bridge ? "me_jit_abs" : "fabs";
+#endif
     }
+#if !defined(__EMSCRIPTEN__)
+    if (use_runtime_math_bridge && me_jit_ident_equals(start, ident_len, "sin")) {
+        return "me_jit_sin";
+    }
+    if (use_runtime_math_bridge && me_jit_ident_equals(start, ident_len, "cos")) {
+        return "me_jit_cos";
+    }
+    if (use_runtime_math_bridge && me_jit_ident_equals(start, ident_len, "exp")) {
+        return "me_jit_exp";
+    }
+    if (use_runtime_math_bridge && me_jit_ident_equals(start, ident_len, "log")) {
+        return "me_jit_log";
+    }
+    if (use_runtime_math_bridge && me_jit_ident_equals(start, ident_len, "sqrt")) {
+        return "me_jit_sqrt";
+    }
+#endif
     if (me_jit_ident_equals(start, ident_len, "exp10")) {
         return "me_jit_exp10";
     }
@@ -1139,7 +1162,8 @@ static bool me_jit_emit_vec_binary_call(me_jit_codegen_ctx *ctx,
 }
 
 static bool me_jit_expr_to_c(const me_dsl_jit_ir_expr *expr, char **out_c,
-                             me_dsl_error *error, int line, int column) {
+                             me_dsl_error *error, int line, int column,
+                             bool use_runtime_math_bridge) {
     if (out_c) {
         *out_c = NULL;
     }
@@ -1231,7 +1255,7 @@ static bool me_jit_expr_to_c(const me_dsl_jit_ir_expr *expr, char **out_c,
                     q++;
                 }
                 if (*q == '(') {
-                    rep = me_jit_function_name_rewrite(start, ident_len);
+                    rep = me_jit_function_name_rewrite(start, ident_len, use_runtime_math_bridge);
                 }
             }
             if (rep) {
@@ -1299,7 +1323,7 @@ static bool me_jit_emit_casted_expr_line(me_jit_codegen_ctx *ctx, int indent,
         me_jit_set_error(ctx->error, line, column, "unsupported dtype in jit c codegen");
         return false;
     }
-    if (!me_jit_expr_to_c(rhs, &rhs_c, ctx->error, line, column)) {
+    if (!me_jit_expr_to_c(rhs, &rhs_c, ctx->error, line, column, ctx->use_runtime_math_bridge)) {
         free(rhs_c);
         return false;
     }
@@ -1325,7 +1349,7 @@ static bool me_jit_emit_truthy_if_open(me_jit_codegen_ctx *ctx, int indent,
                                        const me_dsl_jit_ir_expr *cond,
                                        int line, int column) {
     char *cond_c = NULL;
-    if (!me_jit_expr_to_c(cond, &cond_c, ctx->error, line, column)) {
+    if (!me_jit_expr_to_c(cond, &cond_c, ctx->error, line, column, ctx->use_runtime_math_bridge)) {
         free(cond_c);
         return false;
     }
@@ -1386,7 +1410,8 @@ static bool me_jit_emit_stmt(me_jit_codegen_ctx *ctx, const me_dsl_jit_ir_stmt *
         for (int i = 0; i < stmt->as.if_stmt.n_elifs; i++) {
             const me_dsl_jit_ir_if_branch *branch = &stmt->as.if_stmt.elif_branches[i];
             char *cond_c = NULL;
-            if (!me_jit_expr_to_c(&branch->cond, &cond_c, ctx->error, stmt->line, stmt->column)) {
+            if (!me_jit_expr_to_c(&branch->cond, &cond_c, ctx->error, stmt->line, stmt->column,
+                                  ctx->use_runtime_math_bridge)) {
                 free(cond_c);
                 return false;
             }
@@ -1436,7 +1461,8 @@ static bool me_jit_emit_stmt(me_jit_codegen_ctx *ctx, const me_dsl_jit_ir_stmt *
         return true;
     case ME_DSL_JIT_IR_STMT_WHILE: {
         char *cond_c = NULL;
-        if (!me_jit_expr_to_c(&stmt->as.while_loop.cond, &cond_c, ctx->error, stmt->line, stmt->column)) {
+        if (!me_jit_expr_to_c(&stmt->as.while_loop.cond, &cond_c, ctx->error, stmt->line, stmt->column,
+                              ctx->use_runtime_math_bridge)) {
             free(cond_c);
             return false;
         }
@@ -1475,9 +1501,12 @@ static bool me_jit_emit_stmt(me_jit_codegen_ctx *ctx, const me_dsl_jit_ir_stmt *
         char *start_c = NULL;
         char *stop_c = NULL;
         char *step_c = NULL;
-        if (!me_jit_expr_to_c(&stmt->as.for_loop.start, &start_c, ctx->error, stmt->line, stmt->column) ||
-            !me_jit_expr_to_c(&stmt->as.for_loop.stop, &stop_c, ctx->error, stmt->line, stmt->column) ||
-            !me_jit_expr_to_c(&stmt->as.for_loop.step, &step_c, ctx->error, stmt->line, stmt->column)) {
+        if (!me_jit_expr_to_c(&stmt->as.for_loop.start, &start_c, ctx->error, stmt->line, stmt->column,
+                              ctx->use_runtime_math_bridge) ||
+            !me_jit_expr_to_c(&stmt->as.for_loop.stop, &stop_c, ctx->error, stmt->line, stmt->column,
+                              ctx->use_runtime_math_bridge) ||
+            !me_jit_expr_to_c(&stmt->as.for_loop.step, &step_c, ctx->error, stmt->line, stmt->column,
+                              ctx->use_runtime_math_bridge)) {
             free(start_c);
             free(stop_c);
             free(step_c);
@@ -1753,6 +1782,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
     if (options && options->use_runtime_math_bridge) {
         use_runtime_math_bridge = true;
     }
+    ctx.use_runtime_math_bridge = use_runtime_math_bridge;
     if (options && options->synth_reserved_non_nd) {
         synth_reserved_non_nd = true;
     }
@@ -1872,7 +1902,13 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         return false;
     }
     if (use_runtime_math_bridge) {
-        if (!me_jit_emit_line(&ctx.source, 0, "extern double me_jit_exp10(double);") ||
+        if (!me_jit_emit_line(&ctx.source, 0, "extern double me_jit_abs(double);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_sin(double);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_cos(double);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_exp(double);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_log(double);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_sqrt(double);") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_exp10(double);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_sinpi(double);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_cospi(double);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_logaddexp(double, double);") ||
