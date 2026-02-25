@@ -10,8 +10,10 @@
 #include "../src/dsl_parser.h"
 #include "minctest.h"
 
-static bool mock_resolve_dtype(void *ctx, const me_dsl_expr *expr, me_dtype *out_dtype) {
+static bool mock_resolve_dtype(void *ctx, const me_dsl_expr *expr,
+                               me_dsl_jit_ir_resolve_mode mode, me_dtype *out_dtype) {
     (void)ctx;
+    (void)mode;
     if (!expr || !expr->text || !out_dtype) {
         return false;
     }

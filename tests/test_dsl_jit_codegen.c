@@ -23,8 +23,10 @@ typedef struct {
     me_dtype value_dtype;
 } dtype_resolve_ctx;
 
-static bool mock_resolve_dtype(void *ctx, const me_dsl_expr *expr, me_dtype *out_dtype) {
+static bool mock_resolve_dtype(void *ctx, const me_dsl_expr *expr,
+                               me_dsl_jit_ir_resolve_mode mode, me_dtype *out_dtype) {
     dtype_resolve_ctx *dctx = (dtype_resolve_ctx *)ctx;
+    (void)mode;
     if (!dctx || !expr || !expr->text || !out_dtype) {
         return false;
     }

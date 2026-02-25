@@ -241,14 +241,15 @@ static bool dsl_jit_symbols_add(me_dsl_jit_symbol_table *table, const char *name
 }
 
 static bool dsl_jit_resolve_expr_dtype(me_dsl_jit_build_ctx *ctx, const me_dsl_expr *expr,
-                                       int line, int column, me_dtype *out_dtype) {
+                                       int line, int column, me_dsl_jit_ir_resolve_mode mode,
+                                       me_dtype *out_dtype) {
     if (!ctx || !expr || !out_dtype || !ctx->resolve_dtype) {
         dsl_jit_set_error(ctx ? ctx->error : NULL, line, column,
                           "missing dtype resolver for jit ir");
         return false;
     }
     me_dtype dtype = ME_AUTO;
-    if (!ctx->resolve_dtype(ctx->resolve_ctx, expr, &dtype)) {
+    if (!ctx->resolve_dtype(ctx->resolve_ctx, expr, mode, &dtype)) {
         dsl_jit_set_error(ctx->error, line, column, "failed to resolve expression dtype for jit ir");
         return false;
     }
@@ -424,7 +425,9 @@ static bool dsl_jit_ir_expr_init_from_text(me_dsl_jit_ir_expr *out, const char *
 }
 
 static bool dsl_jit_resolve_expr_dtype_from_text(me_dsl_jit_build_ctx *ctx, const char *text,
-                                                 int line, int column, me_dtype *out_dtype) {
+                                                 int line, int column,
+                                                 me_dsl_jit_ir_resolve_mode mode,
+                                                 me_dtype *out_dtype) {
     if (!ctx || !text || !out_dtype) {
         return false;
     }
@@ -433,7 +436,7 @@ static bool dsl_jit_resolve_expr_dtype_from_text(me_dsl_jit_build_ctx *ctx, cons
     expr.text = (char *)text;
     expr.line = line;
     expr.column = column;
-    return dsl_jit_resolve_expr_dtype(ctx, &expr, line, column, out_dtype);
+    return dsl_jit_resolve_expr_dtype(ctx, &expr, line, column, mode, out_dtype);
 }
 
 static bool dsl_jit_ident_is_reduction(const char *ident, size_t len) {
@@ -541,6 +544,7 @@ static bool dsl_jit_build_block(me_dsl_jit_build_ctx *ctx, const me_dsl_block *i
             }
             me_dtype rhs_dtype = ME_AUTO;
             if (!dsl_jit_resolve_expr_dtype(ctx, stmt->as.assign.value, stmt->line, stmt->column,
+                                            ME_DSL_JIT_IR_RESOLVE_AUTO,
                                             &rhs_dtype)) {
                 dsl_jit_ir_stmt_free(ir_stmt);
                 return false;
@@ -594,6 +598,7 @@ static bool dsl_jit_build_block(me_dsl_jit_build_ctx *ctx, const me_dsl_block *i
             }
             me_dtype ret_dtype = ME_AUTO;
             if (!dsl_jit_resolve_expr_dtype(ctx, stmt->as.return_stmt.expr, stmt->line, stmt->column,
+                                            ME_DSL_JIT_IR_RESOLVE_OUTPUT,
                                             &ret_dtype)) {
                 dsl_jit_ir_stmt_free(ir_stmt);
                 return false;
@@ -620,6 +625,7 @@ static bool dsl_jit_build_block(me_dsl_jit_build_ctx *ctx, const me_dsl_block *i
             }
             me_dtype cond_dtype = ME_AUTO;
             if (!dsl_jit_resolve_expr_dtype(ctx, stmt->as.if_stmt.cond, stmt->line, stmt->column,
+                                            ME_DSL_JIT_IR_RESOLVE_AUTO,
                                             &cond_dtype)) {
                 dsl_jit_ir_stmt_free(ir_stmt);
                 return false;
@@ -662,7 +668,9 @@ static bool dsl_jit_build_block(me_dsl_jit_build_ctx *ctx, const me_dsl_block *i
                 }
                 me_dtype elif_dtype = ME_AUTO;
                 if (!dsl_jit_resolve_expr_dtype(ctx, in_branch->cond, in_branch->cond->line,
-                                                in_branch->cond->column, &elif_dtype)) {
+                                                in_branch->cond->column,
+                                                ME_DSL_JIT_IR_RESOLVE_AUTO,
+                                                &elif_dtype)) {
                     dsl_jit_ir_stmt_free(ir_stmt);
                     return false;
                 }
@@ -701,6 +709,7 @@ static bool dsl_jit_build_block(me_dsl_jit_build_ctx *ctx, const me_dsl_block *i
             }
             me_dtype cond_dtype = ME_AUTO;
             if (!dsl_jit_resolve_expr_dtype(ctx, stmt->as.while_loop.cond, stmt->line, stmt->column,
+                                            ME_DSL_JIT_IR_RESOLVE_AUTO,
                                             &cond_dtype)) {
                 dsl_jit_ir_stmt_free(ir_stmt);
                 return false;
@@ -798,10 +807,13 @@ static bool dsl_jit_build_block(me_dsl_jit_build_ctx *ctx, const me_dsl_block *i
             me_dtype stop_dtype = ME_AUTO;
             me_dtype step_dtype = ME_AUTO;
             if (!dsl_jit_resolve_expr_dtype_from_text(ctx, start_text, stmt->line, stmt->column,
+                                                      ME_DSL_JIT_IR_RESOLVE_AUTO,
                                                       &start_dtype) ||
                 !dsl_jit_resolve_expr_dtype_from_text(ctx, stop_text, stmt->line, stmt->column,
+                                                      ME_DSL_JIT_IR_RESOLVE_AUTO,
                                                       &stop_dtype) ||
                 !dsl_jit_resolve_expr_dtype_from_text(ctx, step_text, stmt->line, stmt->column,
+                                                      ME_DSL_JIT_IR_RESOLVE_AUTO,
                                                       &step_dtype)) {
                 for (int i = 0; i < n_range_parts; i++) {
                     free(range_parts[i]);

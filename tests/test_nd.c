@@ -775,6 +775,147 @@ cleanup:
     return status;
 }
 
+static int test_nd_python_blosc2_contract_int_linspace_step_assignment_jit_modes(void) {
+    int status = 0;
+    int err = 0;
+    int64_t shape[1] = {10};
+    int32_t chunkshape[1] = {10};
+    int32_t blockshape[1] = {10};
+    me_variable vars[] = {{"__me_dummy0", ME_INT64}};
+    int64_t dummy[10] = {0};
+    const void *inputs[] = {dummy};
+    const char *source =
+        "def kernel_ramp(__me_dummy0):\n"
+        "    step = (10.0 - 0.0) / 9.0\n"
+        "    return 0.0 + _global_linear_idx * step\n";
+    const int32_t expected[10] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 10};
+    const struct {
+        int compile_jit_mode;
+        me_jit_mode eval_jit_mode;
+        const char *label;
+    } jit_modes[] = {
+        {ME_JIT_DEFAULT, ME_JIT_DEFAULT, "default"},
+        {ME_JIT_OFF, ME_JIT_OFF, "jit_off"},
+        {ME_JIT_ON, ME_JIT_ON, "jit_on"},
+    };
+
+    for (int mode = 0; mode < (int)(sizeof(jit_modes) / sizeof(jit_modes[0])); mode++) {
+        me_expr *expr = NULL;
+        int rc = me_compile_nd_jit(source, vars, 1, ME_INT32, 1,
+                                   shape, chunkshape, blockshape,
+                                   jit_modes[mode].compile_jit_mode, &err, &expr);
+        if (rc != ME_COMPILE_SUCCESS) {
+            printf("FAILED python-blosc2 int linspace assign-step me_compile_nd_jit (%s): rc=%d err=%d\n",
+                   jit_modes[mode].label, rc, err);
+            status = 1;
+            goto cleanup;
+        }
+
+        int32_t out[10];
+        for (int i = 0; i < 10; i++) {
+            out[i] = -1;
+        }
+
+        me_eval_params eval_params = {0};
+        eval_params.disable_simd = false;
+        eval_params.simd_ulp_mode = ME_SIMD_ULP_3_5;
+        eval_params.jit_mode = jit_modes[mode].eval_jit_mode;
+        rc = me_eval_nd(expr, inputs, 1, out, 10, 0, 0, &eval_params);
+        if (rc != ME_EVAL_SUCCESS) {
+            printf("FAILED python-blosc2 int linspace assign-step me_eval_nd (%s): rc=%d\n",
+                   jit_modes[mode].label, rc);
+            me_free(expr);
+            status = 1;
+            goto cleanup;
+        }
+
+        for (int i = 0; i < 10; i++) {
+            if (out[i] != expected[i]) {
+                printf("FAILED python-blosc2 int linspace assign-step mismatch (%s): idx=%d got=%d exp=%d\n",
+                       jit_modes[mode].label, i, out[i], expected[i]);
+                me_free(expr);
+                status = 1;
+                goto cleanup;
+            }
+        }
+
+        me_free(expr);
+    }
+
+cleanup:
+    return status;
+}
+
+static int test_nd_python_blosc2_contract_float32_div_literal_jit_modes(void) {
+    int status = 0;
+    int err = 0;
+    int64_t shape[1] = {10};
+    int32_t chunkshape[1] = {10};
+    int32_t blockshape[1] = {10};
+    me_variable vars[] = {{"__me_dummy0", ME_UINT8}};
+    uint8_t dummy[10] = {0};
+    const void *inputs[] = {dummy};
+    const char *source =
+        "def kernel_div(__me_dummy0):\n"
+        "    return _global_linear_idx * (10.0 / 9.0)\n";
+    const struct {
+        int compile_jit_mode;
+        me_jit_mode eval_jit_mode;
+        const char *label;
+    } jit_modes[] = {
+        {ME_JIT_DEFAULT, ME_JIT_DEFAULT, "default"},
+        {ME_JIT_OFF, ME_JIT_OFF, "jit_off"},
+        {ME_JIT_ON, ME_JIT_ON, "jit_on"},
+    };
+
+    for (int mode = 0; mode < (int)(sizeof(jit_modes) / sizeof(jit_modes[0])); mode++) {
+        me_expr *expr = NULL;
+        int rc = me_compile_nd_jit(source, vars, 1, ME_FLOAT32, 1,
+                                   shape, chunkshape, blockshape,
+                                   jit_modes[mode].compile_jit_mode, &err, &expr);
+        if (rc != ME_COMPILE_SUCCESS) {
+            printf("FAILED python-blosc2 float32 div-literal me_compile_nd_jit (%s): rc=%d err=%d\n",
+                   jit_modes[mode].label, rc, err);
+            status = 1;
+            goto cleanup;
+        }
+
+        float out[10];
+        for (int i = 0; i < 10; i++) {
+            out[i] = -1.0f;
+        }
+
+        me_eval_params eval_params = {0};
+        eval_params.disable_simd = false;
+        eval_params.simd_ulp_mode = ME_SIMD_ULP_3_5;
+        eval_params.jit_mode = jit_modes[mode].eval_jit_mode;
+        rc = me_eval_nd(expr, inputs, 1, out, 10, 0, 0, &eval_params);
+        if (rc != ME_EVAL_SUCCESS) {
+            printf("FAILED python-blosc2 float32 div-literal me_eval_nd (%s): rc=%d\n",
+                   jit_modes[mode].label, rc);
+            me_free(expr);
+            status = 1;
+            goto cleanup;
+        }
+
+        for (int i = 0; i < 10; i++) {
+            float expected = (float)i * (10.0f / 9.0f);
+            if (fabsf(out[i] - expected) > 1e-6f) {
+                printf("FAILED python-blosc2 float32 div-literal mismatch (%s): idx=%d got=%.9g exp=%.9g\n",
+                       jit_modes[mode].label, i, (double)out[i], (double)expected);
+                me_free(expr);
+                status = 1;
+                goto cleanup;
+            }
+        }
+
+        me_free(expr);
+    }
+
+cleanup:
+    return status;
+}
+
 static int run_nd_compile_failure_reason_case(const char *case_name,
                                               const char *source,
                                               const me_variable *vars,
@@ -1808,6 +1949,16 @@ int main(void) {
     int t25 = test_nd_python_blosc2_contract_constant_subexpr_float64_to_float32_jit_modes();
     failed |= t25;
     printf("Result: %s\n\n", t25 ? "FAIL" : "PASS");
+
+    printf("Test 26: python-blosc2 int linspace assign-step contract (jit default/off/on)\n");
+    int t26 = test_nd_python_blosc2_contract_int_linspace_step_assignment_jit_modes();
+    failed |= t26;
+    printf("Result: %s\n\n", t26 ? "FAIL" : "PASS");
+
+    printf("Test 27: python-blosc2 float32 div-literal contract (jit default/off/on)\n");
+    int t27 = test_nd_python_blosc2_contract_float32_div_literal_jit_modes();
+    failed |= t27;
+    printf("Result: %s\n\n", t27 ? "FAIL" : "PASS");
 
     printf("=====================\n");
     printf("Summary: %s\n", failed ? "FAIL" : "PASS");

@@ -90,7 +90,13 @@ typedef struct {
     me_dsl_jit_ir_block block;
 } me_dsl_jit_ir_program;
 
+typedef enum {
+    ME_DSL_JIT_IR_RESOLVE_AUTO = 0,
+    ME_DSL_JIT_IR_RESOLVE_OUTPUT
+} me_dsl_jit_ir_resolve_mode;
+
 typedef bool (*me_dsl_jit_ir_dtype_resolver)(void *ctx, const me_dsl_expr *expr,
+                                             me_dsl_jit_ir_resolve_mode mode,
                                              me_dtype *out_dtype);
 
 bool me_dsl_jit_ir_build(const me_dsl_program *program, const char **param_names,

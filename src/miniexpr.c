@@ -693,6 +693,35 @@ static double dsl_cast_bool_intrinsic(double x) {
     return x != 0.0 ? 1.0 : 0.0;
 }
 
+static bool dsl_dtype_is_integer(me_dtype dtype) {
+    switch (dtype) {
+    case ME_BOOL:
+    case ME_INT8:
+    case ME_INT16:
+    case ME_INT32:
+    case ME_INT64:
+    case ME_UINT8:
+    case ME_UINT16:
+    case ME_UINT32:
+    case ME_UINT64:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool dsl_dtype_is_float_or_complex(me_dtype dtype) {
+    switch (dtype) {
+    case ME_FLOAT32:
+    case ME_FLOAT64:
+    case ME_COMPLEX64:
+    case ME_COMPLEX128:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static me_dtype dsl_cast_int_target_dtype(me_dtype expr_dtype) {
     switch (expr_dtype) {
     case ME_INT8:
@@ -3852,13 +3881,17 @@ static bool dsl_compile_for_range_args(dsl_compile_ctx *ctx, const me_dsl_stmt *
 }
 
 static bool dsl_jit_ir_resolve_dtype(void *resolve_ctx, const me_dsl_expr *expr,
+                                     me_dsl_jit_ir_resolve_mode mode,
                                      me_dtype *out_dtype) {
     dsl_compile_ctx *ctx = (dsl_compile_ctx *)resolve_ctx;
     if (!ctx || !expr || !out_dtype) {
         return false;
     }
     me_dsl_compiled_expr compiled_expr;
-    me_dtype expr_dtype = ctx->output_dtype_auto ? ME_AUTO : ctx->output_dtype;
+    me_dtype expr_dtype = ME_AUTO;
+    if (mode == ME_DSL_JIT_IR_RESOLVE_OUTPUT) {
+        expr_dtype = ctx->output_dtype_auto ? ME_AUTO : ctx->output_dtype;
+    }
     int saved_error = 0;
     if (ctx->error_pos) {
         saved_error = *ctx->error_pos;
@@ -7487,12 +7520,58 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 return false;
             }
 
-            me_dtype expr_dtype = ctx->output_dtype_auto ? ME_AUTO : ctx->output_dtype;
-            if (!dsl_compile_expr(ctx, stmt->as.assign.value, expr_dtype, &compiled->as.assign.value)) {
-                dsl_compiled_stmt_free(compiled);
-                return false;
+            me_dtype assigned_dtype = ME_AUTO;
+            bool rhs_compiled = false;
+
+            if (var_index >= 0 && var_index < ctx->program->vars.count) {
+                /*
+                 * Reassignment: compile RHS against the existing local dtype so
+                 * subsequent writes stay type-consistent.
+                 */
+                me_dtype expr_dtype = ctx->program->vars.dtypes[var_index];
+                if (!dsl_compile_expr(ctx, stmt->as.assign.value, expr_dtype, &compiled->as.assign.value)) {
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
+                assigned_dtype = me_get_dtype(compiled->as.assign.value.expr);
+                rhs_compiled = true;
             }
-            me_dtype assigned_dtype = me_get_dtype(compiled->as.assign.value.expr);
+            else if (!ctx->output_dtype_auto && dsl_dtype_is_integer(ctx->output_dtype)) {
+                /*
+                 * New local in integer-output kernels: probe true expression dtype
+                 * to avoid truncating floating temporaries like linspace steps.
+                 */
+                me_dsl_compiled_expr probe_expr;
+                memset(&probe_expr, 0, sizeof(probe_expr));
+                int saved_error = 0;
+                if (ctx->error_pos) {
+                    saved_error = *ctx->error_pos;
+                }
+                if (dsl_compile_expr(ctx, stmt->as.assign.value, ME_AUTO, &probe_expr)) {
+                    me_dtype probe_dtype = me_get_dtype(probe_expr.expr);
+                    if (dsl_dtype_is_float_or_complex(probe_dtype)) {
+                        compiled->as.assign.value = probe_expr;
+                        assigned_dtype = probe_dtype;
+                        rhs_compiled = true;
+                    }
+                    else {
+                        dsl_compiled_expr_free(&probe_expr);
+                    }
+                }
+                else if (ctx->error_pos) {
+                    *ctx->error_pos = saved_error;
+                }
+            }
+
+            if (!rhs_compiled) {
+                me_dtype expr_dtype = ctx->output_dtype_auto ? ME_AUTO : ctx->output_dtype;
+                if (!dsl_compile_expr(ctx, stmt->as.assign.value, expr_dtype, &compiled->as.assign.value)) {
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
+                assigned_dtype = me_get_dtype(compiled->as.assign.value.expr);
+            }
+
             bool is_uniform = dsl_expr_is_uniform(compiled->as.assign.value.expr,
                                                   ctx->program->vars.uniform,
                                                   ctx->program->vars.count);
