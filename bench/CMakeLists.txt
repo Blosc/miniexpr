@@ -3,6 +3,7 @@ if(WIN32)
   # These benchmarks rely on pthreads/time APIs not available on Windows CI.
   list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_blocksize\\.c$")
   list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_blocksize_threads\\.c$")
+  list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_black-scholes\\.c$")
   list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_chunked\\.c$")
   list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_chunksize\\.c$")
   list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_comparisons\\.c$")
