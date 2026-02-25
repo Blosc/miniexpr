@@ -5381,6 +5381,102 @@ void me_jit_vec_log2_f32(const float *in, float *out, int64_t nitems) {
     dsl_jit_bridge_vec_log2_f32(in, out, nitems);
 }
 
+typedef double (*me_dsl_jit_sig_scalar_unary_fn)(double);
+typedef double (*me_dsl_jit_sig_scalar_binary_fn)(double, double);
+typedef double (*me_dsl_jit_sig_scalar_ternary_fn)(double, double, double);
+typedef void (*me_dsl_jit_sig_vec_unary_f64_fn)(const double *, double *, int64_t);
+typedef void (*me_dsl_jit_sig_vec_binary_f64_fn)(const double *, const double *, double *, int64_t);
+typedef void (*me_dsl_jit_sig_vec_unary_f32_fn)(const float *, float *, int64_t);
+typedef void (*me_dsl_jit_sig_vec_binary_f32_fn)(const float *, const float *, float *, int64_t);
+
+#if defined(__clang__) || defined(__GNUC__)
+#define ME_DSL_JIT_ASSERT_FN_SIG(fn, sig_type) \
+    typedef char me_dsl_jit_sig_check_##fn[__builtin_types_compatible_p(__typeof__(&(fn)), sig_type) ? 1 : -1]
+#else
+#define ME_DSL_JIT_ASSERT_FN_SIG(fn, sig_type)
+#endif
+
+/* Frozen runtime math bridge symbol/signature contract (bridge ABI v1). */
+#define ME_DSL_JIT_BRIDGE_SYMBOL_PAIRS(X) \
+    X(me_jit_abs, dsl_jit_bridge_abs, me_dsl_jit_sig_scalar_unary_fn) \
+    X(me_jit_sin, dsl_jit_bridge_sin, me_dsl_jit_sig_scalar_unary_fn) \
+    X(me_jit_cos, dsl_jit_bridge_cos, me_dsl_jit_sig_scalar_unary_fn) \
+    X(me_jit_exp, dsl_jit_bridge_exp, me_dsl_jit_sig_scalar_unary_fn) \
+    X(me_jit_log, dsl_jit_bridge_log, me_dsl_jit_sig_scalar_unary_fn) \
+    X(me_jit_sqrt, dsl_jit_bridge_sqrt, me_dsl_jit_sig_scalar_unary_fn) \
+    X(me_jit_exp10, dsl_jit_bridge_exp10, me_dsl_jit_sig_scalar_unary_fn) \
+    X(me_jit_sinpi, dsl_jit_bridge_sinpi, me_dsl_jit_sig_scalar_unary_fn) \
+    X(me_jit_cospi, dsl_jit_bridge_cospi, me_dsl_jit_sig_scalar_unary_fn) \
+    X(me_jit_logaddexp, dsl_jit_bridge_logaddexp, me_dsl_jit_sig_scalar_binary_fn) \
+    X(me_jit_where, dsl_jit_bridge_where, me_dsl_jit_sig_scalar_ternary_fn) \
+    X(me_jit_vec_sin_f64, dsl_jit_bridge_vec_sin_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_cos_f64, dsl_jit_bridge_vec_cos_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_exp_f64, dsl_jit_bridge_vec_exp_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_log_f64, dsl_jit_bridge_vec_log_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_exp10_f64, dsl_jit_bridge_vec_exp10_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_sinpi_f64, dsl_jit_bridge_vec_sinpi_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_cospi_f64, dsl_jit_bridge_vec_cospi_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_atan2_f64, dsl_jit_bridge_vec_atan2_f64, me_dsl_jit_sig_vec_binary_f64_fn) \
+    X(me_jit_vec_hypot_f64, dsl_jit_bridge_vec_hypot_f64, me_dsl_jit_sig_vec_binary_f64_fn) \
+    X(me_jit_vec_pow_f64, dsl_jit_bridge_vec_pow_f64, me_dsl_jit_sig_vec_binary_f64_fn) \
+    X(me_jit_vec_expm1_f64, dsl_jit_bridge_vec_expm1_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_log10_f64, dsl_jit_bridge_vec_log10_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_sinh_f64, dsl_jit_bridge_vec_sinh_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_cosh_f64, dsl_jit_bridge_vec_cosh_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_tanh_f64, dsl_jit_bridge_vec_tanh_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_asinh_f64, dsl_jit_bridge_vec_asinh_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_acosh_f64, dsl_jit_bridge_vec_acosh_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_atanh_f64, dsl_jit_bridge_vec_atanh_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_sin_f32, dsl_jit_bridge_vec_sin_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
+    X(me_jit_vec_cos_f32, dsl_jit_bridge_vec_cos_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
+    X(me_jit_vec_exp_f32, dsl_jit_bridge_vec_exp_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
+    X(me_jit_vec_log_f32, dsl_jit_bridge_vec_log_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
+    X(me_jit_vec_exp10_f32, dsl_jit_bridge_vec_exp10_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
+    X(me_jit_vec_sinpi_f32, dsl_jit_bridge_vec_sinpi_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
+    X(me_jit_vec_cospi_f32, dsl_jit_bridge_vec_cospi_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
+    X(me_jit_vec_atan2_f32, dsl_jit_bridge_vec_atan2_f32, me_dsl_jit_sig_vec_binary_f32_fn) \
+    X(me_jit_vec_hypot_f32, dsl_jit_bridge_vec_hypot_f32, me_dsl_jit_sig_vec_binary_f32_fn) \
+    X(me_jit_vec_pow_f32, dsl_jit_bridge_vec_pow_f32, me_dsl_jit_sig_vec_binary_f32_fn) \
+    X(me_jit_vec_expm1_f32, dsl_jit_bridge_vec_expm1_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
+    X(me_jit_vec_log10_f32, dsl_jit_bridge_vec_log10_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
+    X(me_jit_vec_sinh_f32, dsl_jit_bridge_vec_sinh_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
+    X(me_jit_vec_cosh_f32, dsl_jit_bridge_vec_cosh_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
+    X(me_jit_vec_tanh_f32, dsl_jit_bridge_vec_tanh_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
+    X(me_jit_vec_asinh_f32, dsl_jit_bridge_vec_asinh_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
+    X(me_jit_vec_acosh_f32, dsl_jit_bridge_vec_acosh_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
+    X(me_jit_vec_atanh_f32, dsl_jit_bridge_vec_atanh_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
+    X(me_jit_vec_abs_f64, dsl_jit_bridge_vec_abs_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_sqrt_f64, dsl_jit_bridge_vec_sqrt_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_log1p_f64, dsl_jit_bridge_vec_log1p_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_exp2_f64, dsl_jit_bridge_vec_exp2_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_log2_f64, dsl_jit_bridge_vec_log2_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
+    X(me_jit_vec_abs_f32, dsl_jit_bridge_vec_abs_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
+    X(me_jit_vec_sqrt_f32, dsl_jit_bridge_vec_sqrt_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
+    X(me_jit_vec_log1p_f32, dsl_jit_bridge_vec_log1p_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
+    X(me_jit_vec_exp2_f32, dsl_jit_bridge_vec_exp2_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
+    X(me_jit_vec_log2_f32, dsl_jit_bridge_vec_log2_f32, me_dsl_jit_sig_vec_unary_f32_fn)
+
+#define ME_DSL_JIT_BRIDGE_ASSERT_PAIR(pub_sym, bridge_fn, sig_type) \
+    ME_DSL_JIT_ASSERT_FN_SIG(pub_sym, sig_type); \
+    ME_DSL_JIT_ASSERT_FN_SIG(bridge_fn, sig_type);
+ME_DSL_JIT_BRIDGE_SYMBOL_PAIRS(ME_DSL_JIT_BRIDGE_ASSERT_PAIR)
+#undef ME_DSL_JIT_BRIDGE_ASSERT_PAIR
+
+typedef struct {
+    const char *name;
+    const void *addr;
+} me_dsl_jit_bridge_symbol;
+
+#define ME_DSL_JIT_BRIDGE_SYMBOL_ENTRY(pub_sym, bridge_fn, sig_type) \
+    {#pub_sym, (const void *)&bridge_fn},
+static const me_dsl_jit_bridge_symbol dsl_jit_math_bridge_symbols[] = {
+    ME_DSL_JIT_BRIDGE_SYMBOL_PAIRS(ME_DSL_JIT_BRIDGE_SYMBOL_ENTRY)
+};
+#undef ME_DSL_JIT_BRIDGE_SYMBOL_ENTRY
+
+#undef ME_DSL_JIT_ASSERT_FN_SIG
+#undef ME_DSL_JIT_BRIDGE_SYMBOL_PAIRS
+
 static bool dsl_jit_libtcc_register_math_bridge(me_tcc_state *state) {
     if (!state) {
         return false;
@@ -5390,337 +5486,13 @@ static bool dsl_jit_libtcc_register_math_bridge(me_tcc_state *state) {
                  "tcc backend missing required symbol tcc_add_symbol for math bridge");
         return false;
     }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_abs", (const void *)&dsl_jit_bridge_abs) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_abs");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_sin", (const void *)&dsl_jit_bridge_sin) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_sin");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_cos", (const void *)&dsl_jit_bridge_cos) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_cos");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_exp", (const void *)&dsl_jit_bridge_exp) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_exp");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_log", (const void *)&dsl_jit_bridge_log) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_log");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_sqrt", (const void *)&dsl_jit_bridge_sqrt) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_sqrt");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_exp10", (const void *)&dsl_jit_bridge_exp10) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_exp10");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_sinpi", (const void *)&dsl_jit_bridge_sinpi) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_sinpi");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_cospi", (const void *)&dsl_jit_bridge_cospi) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_cospi");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_logaddexp",
-                                        (const void *)&dsl_jit_bridge_logaddexp) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_logaddexp");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_where", (const void *)&dsl_jit_bridge_where) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_where");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_sin_f64",
-                                        (const void *)&dsl_jit_bridge_vec_sin_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_sin_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_cos_f64",
-                                        (const void *)&dsl_jit_bridge_vec_cos_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_cos_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_exp_f64",
-                                        (const void *)&dsl_jit_bridge_vec_exp_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_exp_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_log_f64",
-                                        (const void *)&dsl_jit_bridge_vec_log_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_log_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_exp10_f64",
-                                        (const void *)&dsl_jit_bridge_vec_exp10_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_exp10_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_sinpi_f64",
-                                        (const void *)&dsl_jit_bridge_vec_sinpi_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_sinpi_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_cospi_f64",
-                                        (const void *)&dsl_jit_bridge_vec_cospi_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_cospi_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_atan2_f64",
-                                        (const void *)&dsl_jit_bridge_vec_atan2_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_atan2_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_hypot_f64",
-                                        (const void *)&dsl_jit_bridge_vec_hypot_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_hypot_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_pow_f64",
-                                        (const void *)&dsl_jit_bridge_vec_pow_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_pow_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_expm1_f64",
-                                        (const void *)&dsl_jit_bridge_vec_expm1_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_expm1_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_log10_f64",
-                                        (const void *)&dsl_jit_bridge_vec_log10_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_log10_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_sinh_f64",
-                                        (const void *)&dsl_jit_bridge_vec_sinh_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_sinh_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_cosh_f64",
-                                        (const void *)&dsl_jit_bridge_vec_cosh_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_cosh_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_tanh_f64",
-                                        (const void *)&dsl_jit_bridge_vec_tanh_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_tanh_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_asinh_f64",
-                                        (const void *)&dsl_jit_bridge_vec_asinh_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_asinh_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_acosh_f64",
-                                        (const void *)&dsl_jit_bridge_vec_acosh_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_acosh_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_atanh_f64",
-                                        (const void *)&dsl_jit_bridge_vec_atanh_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_atanh_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_sin_f32",
-                                        (const void *)&dsl_jit_bridge_vec_sin_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_sin_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_cos_f32",
-                                        (const void *)&dsl_jit_bridge_vec_cos_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_cos_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_exp_f32",
-                                        (const void *)&dsl_jit_bridge_vec_exp_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_exp_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_log_f32",
-                                        (const void *)&dsl_jit_bridge_vec_log_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_log_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_exp10_f32",
-                                        (const void *)&dsl_jit_bridge_vec_exp10_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_exp10_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_sinpi_f32",
-                                        (const void *)&dsl_jit_bridge_vec_sinpi_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_sinpi_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_cospi_f32",
-                                        (const void *)&dsl_jit_bridge_vec_cospi_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_cospi_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_atan2_f32",
-                                        (const void *)&dsl_jit_bridge_vec_atan2_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_atan2_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_hypot_f32",
-                                        (const void *)&dsl_jit_bridge_vec_hypot_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_hypot_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_pow_f32",
-                                        (const void *)&dsl_jit_bridge_vec_pow_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_pow_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_expm1_f32",
-                                        (const void *)&dsl_jit_bridge_vec_expm1_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_expm1_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_log10_f32",
-                                        (const void *)&dsl_jit_bridge_vec_log10_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_log10_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_sinh_f32",
-                                        (const void *)&dsl_jit_bridge_vec_sinh_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_sinh_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_cosh_f32",
-                                        (const void *)&dsl_jit_bridge_vec_cosh_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_cosh_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_tanh_f32",
-                                        (const void *)&dsl_jit_bridge_vec_tanh_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_tanh_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_asinh_f32",
-                                        (const void *)&dsl_jit_bridge_vec_asinh_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_asinh_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_acosh_f32",
-                                        (const void *)&dsl_jit_bridge_vec_acosh_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_acosh_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_atanh_f32",
-                                        (const void *)&dsl_jit_bridge_vec_atanh_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_atanh_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_abs_f64",
-                                        (const void *)&dsl_jit_bridge_vec_abs_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_abs_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_sqrt_f64",
-                                        (const void *)&dsl_jit_bridge_vec_sqrt_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_sqrt_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_log1p_f64",
-                                        (const void *)&dsl_jit_bridge_vec_log1p_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_log1p_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_exp2_f64",
-                                        (const void *)&dsl_jit_bridge_vec_exp2_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_exp2_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_log2_f64",
-                                        (const void *)&dsl_jit_bridge_vec_log2_f64) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_log2_f64");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_abs_f32",
-                                        (const void *)&dsl_jit_bridge_vec_abs_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_abs_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_sqrt_f32",
-                                        (const void *)&dsl_jit_bridge_vec_sqrt_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_sqrt_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_log1p_f32",
-                                        (const void *)&dsl_jit_bridge_vec_log1p_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_log1p_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_exp2_f32",
-                                        (const void *)&dsl_jit_bridge_vec_exp2_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_exp2_f32");
-        return false;
-    }
-    if (g_dsl_tcc_api.tcc_add_symbol_fn(state, "me_jit_vec_log2_f32",
-                                        (const void *)&dsl_jit_bridge_vec_log2_f32) < 0) {
-        snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s",
-                 "tcc_add_symbol failed for me_jit_vec_log2_f32");
-        return false;
+    for (size_t i = 0; i < (sizeof(dsl_jit_math_bridge_symbols) / sizeof(dsl_jit_math_bridge_symbols[0])); i++) {
+        const me_dsl_jit_bridge_symbol *sym = &dsl_jit_math_bridge_symbols[i];
+        if (g_dsl_tcc_api.tcc_add_symbol_fn(state, sym->name, sym->addr) < 0) {
+            snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error),
+                     "tcc_add_symbol failed for %s", sym->name);
+            return false;
+        }
     }
     return true;
 }
