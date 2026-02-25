@@ -1479,6 +1479,121 @@ static int test_black_scholes_dsl_kernel_support(void) {
     return 0;
 }
 
+static int test_black_scholes_dsl_kernel_specialized_constants_support(void) {
+    printf("\n=== DSL Test 10c: Black-Scholes specialized-constants kernel support ===\n");
+
+    const char *src =
+        "def kernel(S, X, T):\n"
+        "    A1 = 0.31938153\n"
+        "    A2 = -0.356563782\n"
+        "    A3 = 1.781477937\n"
+        "    A4 = -1.821255978\n"
+        "    A5 = 1.330274429\n"
+        "    RSQRT2PI = 0.39894228040143267793994605993438\n"
+        "\n"
+        "    sqrtT = sqrt(T)\n"
+        "    d1 = (log(S / X) + (0.1 + 0.5 * 1.0 * 1.0) * T) / (1.0 * sqrtT)\n"
+        "    d2 = d1 - 1.0 * sqrtT\n"
+        "    K = 1.0 / (1.0 + 0.2316419 * abs(d1))\n"
+        "\n"
+        "    ret_val = (RSQRT2PI * exp(-0.5 * d1 * d1) * (K * (A1 + K * (A2 + K * (A3 + K * (A4 + K * A5))))))\n"
+        "    cndd1 = ret_val\n"
+        "    if d1 > 0:\n"
+        "        cndd1 = 1.0 - ret_val\n"
+        "    else:\n"
+        "        cndd1 = ret_val\n"
+        "\n"
+        "    K = 1.0 / (1.0 + 0.2316419 * abs(d2))\n"
+        "    ret_val = (RSQRT2PI * exp(-0.5 * d2 * d2) * (K * (A1 + K * (A2 + K * (A3 + K * (A4 + K * A5))))))\n"
+        "    if d2 > 0:\n"
+        "        cndd2 = 1.0 - ret_val\n"
+        "    else:\n"
+        "        cndd2 = ret_val\n"
+        "\n"
+        "    expRT = exp((-1.0 * 0.1) * T)\n"
+        "    callResult = (S * cndd1 - X * expRT * cndd2)\n"
+        "    return callResult\n";
+
+    const int n = 8;
+    double S[8] = {100.0, 105.0, 110.0, 95.0, 120.0, 80.0, 150.0, 60.0};
+    double X[8] = {100.0, 100.0, 115.0, 90.0, 110.0, 85.0, 140.0, 65.0};
+    double T[8] = {1.0, 0.5, 2.0, 1.5, 0.25, 3.0, 0.75, 1.2};
+    const void *inputs[] = {S, X, T};
+
+    double expected[8];
+    for (int i = 0; i < n; i++) {
+        double A1 = 0.31938153;
+        double A2 = -0.356563782;
+        double A3 = 1.781477937;
+        double A4 = -1.821255978;
+        double A5 = 1.330274429;
+        double RSQRT2PI = 0.39894228040143267793994605993438;
+
+        double sqrtT = sqrt(T[i]);
+        double d1 = (log(S[i] / X[i]) + (0.1 + 0.5 * 1.0 * 1.0) * T[i]) / (1.0 * sqrtT);
+        double d2 = d1 - 1.0 * sqrtT;
+        double K = 1.0 / (1.0 + 0.2316419 * fabs(d1));
+        double ret_val = RSQRT2PI * exp(-0.5 * d1 * d1) *
+                         (K * (A1 + K * (A2 + K * (A3 + K * (A4 + K * A5)))));
+        double cndd1 = (d1 > 0.0) ? (1.0 - ret_val) : ret_val;
+
+        K = 1.0 / (1.0 + 0.2316419 * fabs(d2));
+        ret_val = RSQRT2PI * exp(-0.5 * d2 * d2) *
+                  (K * (A1 + K * (A2 + K * (A3 + K * (A4 + K * A5)))));
+        double cndd2 = (d2 > 0.0) ? (1.0 - ret_val) : ret_val;
+
+        double expRT = exp((-1.0 * 0.1) * T[i]);
+        expected[i] = S[i] * cndd1 - X[i] * expRT * cndd2;
+    }
+
+    me_variable vars[] = {
+        {"S", ME_FLOAT64},
+        {"X", ME_FLOAT64},
+        {"T", ME_FLOAT64}
+    };
+    double out_interp[8] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    double out_jit[8] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+
+    if (setenv("ME_DSL_JIT", "0", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=0 failed\n");
+        free(saved_jit);
+        return 1;
+    }
+    if (compile_eval_double(src, vars, 3, inputs, n, out_interp) != 0) {
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=1 failed\n");
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+    if (compile_eval_double(src, vars, 3, inputs, n, out_jit) != 0) {
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    free(saved_jit);
+
+    if (check_all_close(out_interp, expected, n, 1e-6) != 0) {
+        printf("  ❌ FAILED: unexpected interpreter output\n");
+        return 1;
+    }
+    if (check_all_close(out_jit, out_interp, n, 1e-10) != 0) {
+        printf("  ❌ FAILED: interpreter/JIT mismatch\n");
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    return 0;
+}
+
 static int test_loop_condition_policy(void) {
     printf("\n=== DSL Test 11: loop condition policy ===\n");
 
@@ -2259,6 +2374,7 @@ int main(void) {
     fail |= test_break_any_condition();
     fail |= test_dsl_function_calls();
     fail |= test_black_scholes_dsl_kernel_support();
+    fail |= test_black_scholes_dsl_kernel_specialized_constants_support();
     fail |= test_loop_condition_policy();
     fail |= test_elementwise_break();
     fail |= test_reduction_any_remains_global();
