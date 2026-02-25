@@ -3784,6 +3784,29 @@ static double me_eval_scalar(const me_expr* n) {
     case ME_FUNCTION5:
     case ME_FUNCTION6:
     case ME_FUNCTION7:
+        if (ARITY(n->type) == 1 && n->function == NULL) {
+            /* Internal conversion marker node created by apply_type_promotion(). */
+            double v = M(0);
+            switch (n->dtype) {
+            case ME_AUTO:
+            case ME_FLOAT64: return v;
+            case ME_BOOL: return ((bool)v) ? 1.0 : 0.0;
+            case ME_INT8: return (double)(int8_t)v;
+            case ME_INT16: return (double)(int16_t)v;
+            case ME_INT32: return (double)(int32_t)v;
+            case ME_INT64: return (double)(int64_t)v;
+            case ME_UINT8: return (double)(uint8_t)v;
+            case ME_UINT16: return (double)(uint16_t)v;
+            case ME_UINT32: return (double)(uint32_t)v;
+            case ME_UINT64: return (double)(uint64_t)v;
+            case ME_FLOAT32: return (double)(float)v;
+            case ME_COMPLEX64:
+            case ME_COMPLEX128:
+            case ME_STRING:
+            default:
+                return NAN;
+            }
+        }
         switch (ARITY(n->type)) {
         case 0: return ME_FUN(void)();
         case 1: return ME_FUN(double)(M(0));

@@ -698,6 +698,83 @@ cleanup:
     return status;
 }
 
+static int test_nd_python_blosc2_contract_constant_subexpr_float64_to_float32_jit_modes(void) {
+    int status = 0;
+    int err = 0;
+    int64_t shape[2] = {3, 5};
+    int32_t chunkshape[2] = {2, 4};
+    int32_t blockshape[2] = {2, 3};
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    const char *source =
+        "def kernel_const_subexpr(x):\n"
+        "    return (0.1 + 0.5) * x\n";
+    const struct {
+        int compile_jit_mode;
+        me_jit_mode eval_jit_mode;
+        const char *label;
+    } jit_modes[] = {
+        {ME_JIT_DEFAULT, ME_JIT_DEFAULT, "default"},
+        {ME_JIT_OFF, ME_JIT_OFF, "jit_off"},
+        {ME_JIT_ON, ME_JIT_ON, "jit_on"},
+    };
+
+    for (int mode = 0; mode < (int)(sizeof(jit_modes) / sizeof(jit_modes[0])); mode++) {
+        me_expr *expr = NULL;
+        int rc = me_compile_nd_jit(source, vars, 1, ME_FLOAT32, 2,
+                                   shape, chunkshape, blockshape,
+                                   jit_modes[mode].compile_jit_mode, &err, &expr);
+        if (rc != ME_COMPILE_SUCCESS) {
+            printf("FAILED python-blosc2 constant-subexpr float64->float32 me_compile_nd_jit (%s): rc=%d err=%d\n",
+                   jit_modes[mode].label, rc, err);
+            status = 1;
+            goto cleanup;
+        }
+
+        int64_t valid = -1;
+        rc = me_nd_valid_nitems(expr, 1, 0, &valid);
+        if (rc != ME_EVAL_SUCCESS || valid != 2) {
+            printf("FAILED python-blosc2 constant-subexpr float64->float32 me_nd_valid_nitems (%s): rc=%d valid=%lld\n",
+                   jit_modes[mode].label, rc, (long long)valid);
+            me_free(expr);
+            status = 1;
+            goto cleanup;
+        }
+
+        double xblock[6] = {0.8, 999.0, 999.0, 1.2, 999.0, 999.0};
+        const void *inputs[] = {xblock};
+        float out[6] = {-1.f, -1.f, -1.f, -1.f, -1.f, -1.f};
+        const float expected[6] = {0.48f, 0.f, 0.f, 0.72f, 0.f, 0.f};
+
+        me_eval_params eval_params = {0};
+        eval_params.disable_simd = false;
+        eval_params.simd_ulp_mode = ME_SIMD_ULP_3_5;
+        eval_params.jit_mode = jit_modes[mode].eval_jit_mode;
+        rc = me_eval_nd(expr, inputs, 1, out, 6, 1, 0, &eval_params);
+        if (rc != ME_EVAL_SUCCESS) {
+            printf("FAILED python-blosc2 constant-subexpr float64->float32 me_eval_nd (%s): rc=%d\n",
+                   jit_modes[mode].label, rc);
+            me_free(expr);
+            status = 1;
+            goto cleanup;
+        }
+
+        for (int i = 0; i < 6; i++) {
+            if (fabsf(out[i] - expected[i]) > 1e-6f) {
+                printf("FAILED python-blosc2 constant-subexpr float64->float32 mismatch (%s): idx=%d got=%g exp=%g\n",
+                       jit_modes[mode].label, i, (double)out[i], (double)expected[i]);
+                me_free(expr);
+                status = 1;
+                goto cleanup;
+            }
+        }
+
+        me_free(expr);
+    }
+
+cleanup:
+    return status;
+}
+
 static int run_nd_compile_failure_reason_case(const char *case_name,
                                               const char *source,
                                               const me_variable *vars,
@@ -1726,6 +1803,11 @@ int main(void) {
     int t24 = test_nd_python_blosc2_contract_reason_invalid_cast_usage();
     failed |= t24;
     printf("Result: %s\n\n", t24 ? "FAIL" : "PASS");
+
+    printf("Test 25: python-blosc2 constant-subexpr float64->float32 contract (jit default/off/on)\n");
+    int t25 = test_nd_python_blosc2_contract_constant_subexpr_float64_to_float32_jit_modes();
+    failed |= t25;
+    printf("Result: %s\n\n", t25 ? "FAIL" : "PASS");
 
     printf("=====================\n");
     printf("Summary: %s\n", failed ? "FAIL" : "PASS");
