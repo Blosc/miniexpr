@@ -65,6 +65,21 @@ JIT codegen can use this for guarded lowering decisions and trace output.
 
 ## Phased Implementation Plan
 
+## Progress snapshot (2026-02-25)
+
+- Phase 0: mostly complete.
+  - Done: bridge ABI contract header, signature/static checks, bridge ABI version in runtime cache metadata, cache rejection on ABI mismatch.
+  - Done: codegen/runtime bridge declaration wiring moved to shared symbol contract.
+- Phase 1: partially complete.
+  - Done: direct vector lowering for simple single-return kernels (unary and selected binary), scalar fallback path remains automatic.
+  - Done: unary vector lowering set includes baseline (`sin/cos/exp/log/sqrt/abs`) and extended unary bridge coverage.
+  - Pending: general subexpression vector-lowering pass (current lowering is pattern-based, not full graph/hybrid).
+- Phase 2: in progress.
+  - Done: binary vector lowering for `atan2`, `hypot`, `pow`.
+  - Done: binary vector lowering expanded to `fmax`/`fmin` where runtime dispatch already exists.
+  - Done: selected special unary functions (`exp10`, `log1p`, `expm1`, `sinpi`, `cospi`, and others already exposed).
+  - Partial: mixed graph/broadcast support currently implemented for `pow` constants; not yet generalized for all binary vector ops.
+
 ## Phase 0: Baseline hardening
 
 1. Freeze bridge symbol list v1 and document it in-code.

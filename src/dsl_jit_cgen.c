@@ -78,7 +78,9 @@ typedef enum {
     ME_JIT_VEC_BINARY_NONE = 0,
     ME_JIT_VEC_BINARY_ATAN2,
     ME_JIT_VEC_BINARY_HYPOT,
-    ME_JIT_VEC_BINARY_POW
+    ME_JIT_VEC_BINARY_POW,
+    ME_JIT_VEC_BINARY_FMAX,
+    ME_JIT_VEC_BINARY_FMIN
 } me_jit_vec_binary_kind;
 
 typedef struct {
@@ -940,6 +942,12 @@ static bool me_jit_detect_vec_binary_plan(const me_dsl_jit_ir_program *program,
     else if (me_jit_ident_equals(fn_start, fn_len, "pow")) {
         out_plan->kind = ME_JIT_VEC_BINARY_POW;
     }
+    else if (me_jit_ident_equals(fn_start, fn_len, "fmax")) {
+        out_plan->kind = ME_JIT_VEC_BINARY_FMAX;
+    }
+    else if (me_jit_ident_equals(fn_start, fn_len, "fmin")) {
+        out_plan->kind = ME_JIT_VEC_BINARY_FMIN;
+    }
     else {
         return false;
     }
@@ -1043,6 +1051,10 @@ static const char *me_jit_vec_binary_symbol(me_jit_vec_binary_kind kind, me_dtyp
         return (dtype == ME_FLOAT64) ? "me_jit_vec_hypot_f64" : "me_jit_vec_hypot_f32";
     case ME_JIT_VEC_BINARY_POW:
         return (dtype == ME_FLOAT64) ? "me_jit_vec_pow_f64" : "me_jit_vec_pow_f32";
+    case ME_JIT_VEC_BINARY_FMAX:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_fmax_f64" : "me_jit_vec_fmax_f32";
+    case ME_JIT_VEC_BINARY_FMIN:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_fmin_f64" : "me_jit_vec_fmin_f32";
     case ME_JIT_VEC_BINARY_NONE:
         return NULL;
     }

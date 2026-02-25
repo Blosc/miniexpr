@@ -5098,6 +5098,22 @@ static void dsl_jit_bridge_vec_pow_f32(const float *a, const float *b, float *ou
     dsl_jit_bridge_apply_binary_vector_f32(vec_pow_f32_dispatch, a, b, out, nitems);
 }
 
+static void dsl_jit_bridge_vec_fmax_f64(const double *a, const double *b, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_binary_vector_f64(vec_fmax_dispatch, a, b, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_fmax_f32(const float *a, const float *b, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_binary_vector_f32(vec_fmax_f32_dispatch, a, b, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_fmin_f64(const double *a, const double *b, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_binary_vector_f64(vec_fmin_dispatch, a, b, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_fmin_f32(const float *a, const float *b, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_binary_vector_f32(vec_fmin_f32_dispatch, a, b, out, nitems);
+}
+
 static void dsl_jit_bridge_vec_expm1_f64(const double *in, double *out, int64_t nitems) {
     dsl_jit_bridge_apply_unary_vector_f64(vec_expm1_dispatch, in, out, nitems);
 }
@@ -5246,6 +5262,14 @@ void me_jit_vec_pow_f64(const double *a, const double *b, double *out, int64_t n
     dsl_jit_bridge_vec_pow_f64(a, b, out, nitems);
 }
 
+void me_jit_vec_fmax_f64(const double *a, const double *b, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_fmax_f64(a, b, out, nitems);
+}
+
+void me_jit_vec_fmin_f64(const double *a, const double *b, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_fmin_f64(a, b, out, nitems);
+}
+
 void me_jit_vec_sin_f32(const float *in, float *out, int64_t nitems) {
     dsl_jit_bridge_vec_sin_f32(in, out, nitems);
 }
@@ -5284,6 +5308,14 @@ void me_jit_vec_hypot_f32(const float *a, const float *b, float *out, int64_t ni
 
 void me_jit_vec_pow_f32(const float *a, const float *b, float *out, int64_t nitems) {
     dsl_jit_bridge_vec_pow_f32(a, b, out, nitems);
+}
+
+void me_jit_vec_fmax_f32(const float *a, const float *b, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_fmax_f32(a, b, out, nitems);
+}
+
+void me_jit_vec_fmin_f32(const float *a, const float *b, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_fmin_f32(a, b, out, nitems);
 }
 
 void me_jit_vec_expm1_f64(const double *in, double *out, int64_t nitems) {
@@ -6304,6 +6336,8 @@ EM_JS(int, me_wasm_jit_instantiate,
         env.me_jit_vec_atan2_f64 = bindBridge("me_jit_vec_atan2_f64", function(aPtr, bPtr, outPtr, n) { vecBinaryF64(aPtr, bPtr, outPtr, n, Math.atan2); });
         env.me_jit_vec_hypot_f64 = bindBridge("me_jit_vec_hypot_f64", function(aPtr, bPtr, outPtr, n) { vecBinaryF64(aPtr, bPtr, outPtr, n, Math.hypot); });
         env.me_jit_vec_pow_f64 = bindBridge("me_jit_vec_pow_f64", function(aPtr, bPtr, outPtr, n) { vecBinaryF64(aPtr, bPtr, outPtr, n, Math.pow); });
+        env.me_jit_vec_fmax_f64 = bindBridge("me_jit_vec_fmax_f64", function(aPtr, bPtr, outPtr, n) { vecBinaryF64(aPtr, bPtr, outPtr, n, Math.max); });
+        env.me_jit_vec_fmin_f64 = bindBridge("me_jit_vec_fmin_f64", function(aPtr, bPtr, outPtr, n) { vecBinaryF64(aPtr, bPtr, outPtr, n, Math.min); });
         env.me_jit_vec_expm1_f64 = bindBridge("me_jit_vec_expm1_f64", function(inPtr, outPtr, n) { vecUnaryF64(inPtr, outPtr, n, Math.expm1); });
         env.me_jit_vec_log10_f64 = bindBridge("me_jit_vec_log10_f64", function(inPtr, outPtr, n) { vecUnaryF64(inPtr, outPtr, n, Math.log10); });
         env.me_jit_vec_sinh_f64 = bindBridge("me_jit_vec_sinh_f64", function(inPtr, outPtr, n) { vecUnaryF64(inPtr, outPtr, n, Math.sinh); });
@@ -6327,6 +6361,8 @@ EM_JS(int, me_wasm_jit_instantiate,
         env.me_jit_vec_atan2_f32 = bindBridge("me_jit_vec_atan2_f32", function(aPtr, bPtr, outPtr, n) { vecBinaryF32(aPtr, bPtr, outPtr, n, Math.atan2); });
         env.me_jit_vec_hypot_f32 = bindBridge("me_jit_vec_hypot_f32", function(aPtr, bPtr, outPtr, n) { vecBinaryF32(aPtr, bPtr, outPtr, n, Math.hypot); });
         env.me_jit_vec_pow_f32 = bindBridge("me_jit_vec_pow_f32", function(aPtr, bPtr, outPtr, n) { vecBinaryF32(aPtr, bPtr, outPtr, n, Math.pow); });
+        env.me_jit_vec_fmax_f32 = bindBridge("me_jit_vec_fmax_f32", function(aPtr, bPtr, outPtr, n) { vecBinaryF32(aPtr, bPtr, outPtr, n, Math.max); });
+        env.me_jit_vec_fmin_f32 = bindBridge("me_jit_vec_fmin_f32", function(aPtr, bPtr, outPtr, n) { vecBinaryF32(aPtr, bPtr, outPtr, n, Math.min); });
         env.me_jit_vec_expm1_f32 = bindBridge("me_jit_vec_expm1_f32", function(inPtr, outPtr, n) { vecUnaryF32(inPtr, outPtr, n, Math.expm1); });
         env.me_jit_vec_log10_f32 = bindBridge("me_jit_vec_log10_f32", function(inPtr, outPtr, n) { vecUnaryF32(inPtr, outPtr, n, Math.log10); });
         env.me_jit_vec_sinh_f32 = bindBridge("me_jit_vec_sinh_f32", function(inPtr, outPtr, n) { vecUnaryF32(inPtr, outPtr, n, Math.sinh); });
