@@ -85,6 +85,7 @@ For log = base 10 log comment the next line. */
 #include "dsl_parser.h"
 #include "dsl_jit_ir.h"
 #include "dsl_jit_cgen.h"
+#include "dsl_jit_bridge_contract.h"
 #include "dsl_jit_test.h"
 
 #define ME_DSL_MAX_NDIM 8
@@ -5396,70 +5397,10 @@ typedef void (*me_dsl_jit_sig_vec_binary_f32_fn)(const float *, const float *, f
 #define ME_DSL_JIT_ASSERT_FN_SIG(fn, sig_type)
 #endif
 
-/* Frozen runtime math bridge symbol/signature contract (bridge ABI v1). */
-#define ME_DSL_JIT_BRIDGE_SYMBOL_PAIRS(X) \
-    X(me_jit_abs, dsl_jit_bridge_abs, me_dsl_jit_sig_scalar_unary_fn) \
-    X(me_jit_sin, dsl_jit_bridge_sin, me_dsl_jit_sig_scalar_unary_fn) \
-    X(me_jit_cos, dsl_jit_bridge_cos, me_dsl_jit_sig_scalar_unary_fn) \
-    X(me_jit_exp, dsl_jit_bridge_exp, me_dsl_jit_sig_scalar_unary_fn) \
-    X(me_jit_log, dsl_jit_bridge_log, me_dsl_jit_sig_scalar_unary_fn) \
-    X(me_jit_sqrt, dsl_jit_bridge_sqrt, me_dsl_jit_sig_scalar_unary_fn) \
-    X(me_jit_exp10, dsl_jit_bridge_exp10, me_dsl_jit_sig_scalar_unary_fn) \
-    X(me_jit_sinpi, dsl_jit_bridge_sinpi, me_dsl_jit_sig_scalar_unary_fn) \
-    X(me_jit_cospi, dsl_jit_bridge_cospi, me_dsl_jit_sig_scalar_unary_fn) \
-    X(me_jit_logaddexp, dsl_jit_bridge_logaddexp, me_dsl_jit_sig_scalar_binary_fn) \
-    X(me_jit_where, dsl_jit_bridge_where, me_dsl_jit_sig_scalar_ternary_fn) \
-    X(me_jit_vec_sin_f64, dsl_jit_bridge_vec_sin_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_cos_f64, dsl_jit_bridge_vec_cos_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_exp_f64, dsl_jit_bridge_vec_exp_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_log_f64, dsl_jit_bridge_vec_log_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_exp10_f64, dsl_jit_bridge_vec_exp10_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_sinpi_f64, dsl_jit_bridge_vec_sinpi_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_cospi_f64, dsl_jit_bridge_vec_cospi_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_atan2_f64, dsl_jit_bridge_vec_atan2_f64, me_dsl_jit_sig_vec_binary_f64_fn) \
-    X(me_jit_vec_hypot_f64, dsl_jit_bridge_vec_hypot_f64, me_dsl_jit_sig_vec_binary_f64_fn) \
-    X(me_jit_vec_pow_f64, dsl_jit_bridge_vec_pow_f64, me_dsl_jit_sig_vec_binary_f64_fn) \
-    X(me_jit_vec_expm1_f64, dsl_jit_bridge_vec_expm1_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_log10_f64, dsl_jit_bridge_vec_log10_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_sinh_f64, dsl_jit_bridge_vec_sinh_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_cosh_f64, dsl_jit_bridge_vec_cosh_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_tanh_f64, dsl_jit_bridge_vec_tanh_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_asinh_f64, dsl_jit_bridge_vec_asinh_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_acosh_f64, dsl_jit_bridge_vec_acosh_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_atanh_f64, dsl_jit_bridge_vec_atanh_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_sin_f32, dsl_jit_bridge_vec_sin_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
-    X(me_jit_vec_cos_f32, dsl_jit_bridge_vec_cos_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
-    X(me_jit_vec_exp_f32, dsl_jit_bridge_vec_exp_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
-    X(me_jit_vec_log_f32, dsl_jit_bridge_vec_log_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
-    X(me_jit_vec_exp10_f32, dsl_jit_bridge_vec_exp10_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
-    X(me_jit_vec_sinpi_f32, dsl_jit_bridge_vec_sinpi_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
-    X(me_jit_vec_cospi_f32, dsl_jit_bridge_vec_cospi_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
-    X(me_jit_vec_atan2_f32, dsl_jit_bridge_vec_atan2_f32, me_dsl_jit_sig_vec_binary_f32_fn) \
-    X(me_jit_vec_hypot_f32, dsl_jit_bridge_vec_hypot_f32, me_dsl_jit_sig_vec_binary_f32_fn) \
-    X(me_jit_vec_pow_f32, dsl_jit_bridge_vec_pow_f32, me_dsl_jit_sig_vec_binary_f32_fn) \
-    X(me_jit_vec_expm1_f32, dsl_jit_bridge_vec_expm1_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
-    X(me_jit_vec_log10_f32, dsl_jit_bridge_vec_log10_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
-    X(me_jit_vec_sinh_f32, dsl_jit_bridge_vec_sinh_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
-    X(me_jit_vec_cosh_f32, dsl_jit_bridge_vec_cosh_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
-    X(me_jit_vec_tanh_f32, dsl_jit_bridge_vec_tanh_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
-    X(me_jit_vec_asinh_f32, dsl_jit_bridge_vec_asinh_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
-    X(me_jit_vec_acosh_f32, dsl_jit_bridge_vec_acosh_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
-    X(me_jit_vec_atanh_f32, dsl_jit_bridge_vec_atanh_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
-    X(me_jit_vec_abs_f64, dsl_jit_bridge_vec_abs_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_sqrt_f64, dsl_jit_bridge_vec_sqrt_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_log1p_f64, dsl_jit_bridge_vec_log1p_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_exp2_f64, dsl_jit_bridge_vec_exp2_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_log2_f64, dsl_jit_bridge_vec_log2_f64, me_dsl_jit_sig_vec_unary_f64_fn) \
-    X(me_jit_vec_abs_f32, dsl_jit_bridge_vec_abs_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
-    X(me_jit_vec_sqrt_f32, dsl_jit_bridge_vec_sqrt_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
-    X(me_jit_vec_log1p_f32, dsl_jit_bridge_vec_log1p_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
-    X(me_jit_vec_exp2_f32, dsl_jit_bridge_vec_exp2_f32, me_dsl_jit_sig_vec_unary_f32_fn) \
-    X(me_jit_vec_log2_f32, dsl_jit_bridge_vec_log2_f32, me_dsl_jit_sig_vec_unary_f32_fn)
-
-#define ME_DSL_JIT_BRIDGE_ASSERT_PAIR(pub_sym, bridge_fn, sig_type) \
+#define ME_DSL_JIT_BRIDGE_ASSERT_PAIR(pub_sym, bridge_fn, sig_type, decl) \
     ME_DSL_JIT_ASSERT_FN_SIG(pub_sym, sig_type); \
     ME_DSL_JIT_ASSERT_FN_SIG(bridge_fn, sig_type);
-ME_DSL_JIT_BRIDGE_SYMBOL_PAIRS(ME_DSL_JIT_BRIDGE_ASSERT_PAIR)
+ME_DSL_JIT_BRIDGE_SYMBOL_CONTRACT(ME_DSL_JIT_BRIDGE_ASSERT_PAIR)
 #undef ME_DSL_JIT_BRIDGE_ASSERT_PAIR
 
 typedef struct {
@@ -5467,15 +5408,15 @@ typedef struct {
     const void *addr;
 } me_dsl_jit_bridge_symbol;
 
-#define ME_DSL_JIT_BRIDGE_SYMBOL_ENTRY(pub_sym, bridge_fn, sig_type) \
+#define ME_DSL_JIT_BRIDGE_SYMBOL_ENTRY(pub_sym, bridge_fn, sig_type, decl) \
     {#pub_sym, (const void *)&bridge_fn},
 static const me_dsl_jit_bridge_symbol dsl_jit_math_bridge_symbols[] = {
-    ME_DSL_JIT_BRIDGE_SYMBOL_PAIRS(ME_DSL_JIT_BRIDGE_SYMBOL_ENTRY)
+    ME_DSL_JIT_BRIDGE_SYMBOL_CONTRACT(ME_DSL_JIT_BRIDGE_SYMBOL_ENTRY)
 };
 #undef ME_DSL_JIT_BRIDGE_SYMBOL_ENTRY
 
 #undef ME_DSL_JIT_ASSERT_FN_SIG
-#undef ME_DSL_JIT_BRIDGE_SYMBOL_PAIRS
+#undef ME_DSL_JIT_BRIDGE_SYMBOL_CONTRACT
 
 static bool dsl_jit_libtcc_register_math_bridge(me_tcc_state *state) {
     if (!state) {

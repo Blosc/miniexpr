@@ -9,6 +9,7 @@
 **********************************************************************/
 
 #include "dsl_jit_cgen.h"
+#include "dsl_jit_bridge_contract.h"
 
 #include <ctype.h>
 #include <stdint.h>
@@ -89,6 +90,27 @@ typedef struct {
     double arg_a_const_value;
     double arg_b_const_value;
 } me_jit_vec_binary_plan;
+
+#define ME_JIT_BRIDGE_DECL_ENTRY(pub_sym, bridge_fn, sig_type, decl) decl,
+static const char *const me_jit_runtime_bridge_extern_decls[] = {
+    ME_DSL_JIT_BRIDGE_SYMBOL_CONTRACT(ME_JIT_BRIDGE_DECL_ENTRY)
+};
+#undef ME_JIT_BRIDGE_DECL_ENTRY
+#undef ME_DSL_JIT_BRIDGE_SYMBOL_CONTRACT
+
+static bool me_jit_emit_line(me_jit_strbuf *buf, int indent, const char *line);
+
+static bool me_jit_emit_runtime_bridge_decls(me_jit_strbuf *buf) {
+    for (size_t i = 0; i < (sizeof(me_jit_runtime_bridge_extern_decls) / sizeof(me_jit_runtime_bridge_extern_decls[0])); i++) {
+        if (!me_jit_emit_line(buf, 0, me_jit_runtime_bridge_extern_decls[i])) {
+            return false;
+        }
+    }
+    if (!me_jit_emit_line(buf, 0, "")) {
+        return false;
+    }
+    return true;
+}
 
 static void me_jit_set_error(me_dsl_error *error, int line, int column, const char *msg) {
     if (!error) {
@@ -1902,64 +1924,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         return false;
     }
     if (use_runtime_math_bridge) {
-        if (!me_jit_emit_line(&ctx.source, 0, "extern double me_jit_abs(double);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_sin(double);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_cos(double);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_exp(double);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_log(double);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_sqrt(double);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_exp10(double);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_sinpi(double);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_cospi(double);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_logaddexp(double, double);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern double me_jit_where(double, double, double);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_sin_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_cos_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_exp_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_log_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_exp10_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_sinpi_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_cospi_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_atan2_f64(const double *, const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_hypot_f64(const double *, const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_pow_f64(const double *, const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_expm1_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_log10_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_sinh_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_cosh_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_tanh_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_asinh_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_acosh_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_atanh_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_abs_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_sqrt_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_log1p_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_exp2_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_log2_f64(const double *, double *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_sin_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_cos_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_exp_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_log_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_exp10_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_sinpi_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_cospi_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_atan2_f32(const float *, const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_hypot_f32(const float *, const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_pow_f32(const float *, const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_expm1_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_log10_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_sinh_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_cosh_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_tanh_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_asinh_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_acosh_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_atanh_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_abs_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_sqrt_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_log1p_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_exp2_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "extern void me_jit_vec_log2_f32(const float *, float *, int64_t);") ||
-            !me_jit_emit_line(&ctx.source, 0, "")) {
+        if (!me_jit_emit_runtime_bridge_decls(&ctx.source)) {
             me_jit_set_error(error, 0, 0, "out of memory");
             me_jit_locals_free(&ctx.locals);
             free(ctx.source.data);
