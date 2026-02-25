@@ -434,6 +434,41 @@ static int tamper_file_first_byte(const char *path) {
     return 0;
 }
 
+typedef struct {
+    uint64_t magic;
+    uint32_t version;
+    uint32_t cgen_version;
+    uint32_t bridge_abi_version;
+} test_dsl_jit_cache_meta_prefix;
+
+static int tamper_meta_bridge_abi_version(const char *path) {
+    if (!path) {
+        return 1;
+    }
+    FILE *f = fopen(path, "r+b");
+    if (!f) {
+        return 1;
+    }
+    test_dsl_jit_cache_meta_prefix meta;
+    if (fread(&meta, 1, sizeof(meta), f) != sizeof(meta)) {
+        fclose(f);
+        return 1;
+    }
+    meta.bridge_abi_version += 1U;
+    if (fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        return 1;
+    }
+    if (fwrite(&meta, 1, sizeof(meta), f) != sizeof(meta)) {
+        fclose(f);
+        return 1;
+    }
+    if (fclose(f) != 0) {
+        return 1;
+    }
+    return 0;
+}
+
 static bool file_contains_text(const char *path, const char *needle) {
     if (!path || !needle || needle[0] == '\0') {
         return false;
@@ -585,6 +620,98 @@ static int test_rejects_metadata_mismatch_artifact(void) {
     }
     if (!file_exists(src_path)) {
         printf("  FAILED: metadata mismatch did not force recompilation\n");
+        goto cleanup;
+    }
+
+    rc = 0;
+    printf("  PASSED\n");
+
+cleanup:
+    restore_env_value("TMPDIR", saved_tmpdir);
+    restore_env_value("CC", saved_cc);
+    restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
+    free(saved_tmpdir);
+    free(saved_cc);
+    free(saved_pos_cache);
+    if (cache_dir[0] != '\0') {
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+    }
+    if (tmp_root) {
+        (void)rmdir(tmp_root);
+    }
+    return rc;
+}
+
+static int test_rejects_bridge_abi_metadata_mismatch_artifact(void) {
+    printf("\n=== DSL JIT Runtime Cache Test 3b: bridge ABI metadata mismatch rejection ===\n");
+
+    int rc = 1;
+    char tmp_template[] = "/tmp/me_jit_meta_bridge_cache_XXXXXX";
+    char *tmp_root = mkdtemp(tmp_template);
+    char cache_dir[1024];
+    cache_dir[0] = '\0';
+    char meta_path[1200];
+    meta_path[0] = '\0';
+    char src_path[1200];
+    src_path[0] = '\0';
+    char *saved_tmpdir = dup_env_value("TMPDIR");
+    char *saved_cc = dup_env_value("CC");
+    char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
+    const char *src =
+        "# me:compiler=cc\n"
+        "def kernel(x):\n"
+        "    y = x + 17\n"
+        "    return y\n";
+
+    if (!tmp_root) {
+        printf("  FAILED: mkdtemp failed\n");
+        goto cleanup;
+    }
+    if (snprintf(cache_dir, sizeof(cache_dir), "%s/miniexpr-jit", tmp_root) >= (int)sizeof(cache_dir)) {
+        printf("  FAILED: cache path too long\n");
+        goto cleanup;
+    }
+    if (setenv("TMPDIR", tmp_root, 1) != 0) {
+        printf("  FAILED: setenv TMPDIR failed\n");
+        goto cleanup;
+    }
+    if (setenv("CC", "cc", 1) != 0) {
+        printf("  FAILED: setenv CC failed\n");
+        goto cleanup;
+    }
+    (void)unsetenv("ME_DSL_JIT_POS_CACHE");
+
+    if (compile_and_eval_simple_dsl(src, 17.0) != 0) {
+        goto cleanup;
+    }
+
+    if (count_kernel_files_with_suffix(cache_dir, ".meta", meta_path, sizeof(meta_path)) != 1 || meta_path[0] == '\0') {
+        printf("  FAILED: expected one cache metadata file\n");
+        goto cleanup;
+    }
+    if (count_kernel_files_with_suffix(cache_dir, ".c", src_path, sizeof(src_path)) != 1 || src_path[0] == '\0') {
+        printf("  FAILED: expected one generated source file\n");
+        goto cleanup;
+    }
+    if (tamper_meta_bridge_abi_version(meta_path) != 0) {
+        printf("  FAILED: could not tamper bridge ABI version in metadata file\n");
+        goto cleanup;
+    }
+    if (remove(src_path) != 0) {
+        printf("  FAILED: could not remove generated source file\n");
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT_POS_CACHE", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT_POS_CACHE failed\n");
+        goto cleanup;
+    }
+
+    if (compile_and_eval_simple_dsl(src, 17.0) != 0) {
+        goto cleanup;
+    }
+    if (!file_exists(src_path)) {
+        printf("  FAILED: bridge ABI metadata mismatch did not force recompilation\n");
         goto cleanup;
     }
 
@@ -2200,6 +2327,7 @@ int main(void) {
     fail |= test_negative_cache_skips_immediate_retry();
     fail |= test_positive_cache_reuses_loaded_kernel();
     fail |= test_rejects_metadata_mismatch_artifact();
+    fail |= test_rejects_bridge_abi_metadata_mismatch_artifact();
     fail |= test_jit_disable_env_guardrail();
     fail |= test_default_tcc_skips_cc_backend();
     fail |= test_unknown_me_pragma_is_rejected();

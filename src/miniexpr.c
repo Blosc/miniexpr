@@ -91,6 +91,8 @@ For log = base 10 log comment the next line. */
 #define ME_DSL_JIT_SYMBOL_NAME "me_dsl_jit_kernel"
 #define ME_DSL_JIT_SYNTH_ND_CTX_PARAM "__me_nd_ctx"
 #define ME_DSL_JIT_CGEN_VERSION 7
+/* Runtime math bridge ABI for JIT-generated symbols (frozen list v1). */
+#define ME_DSL_JIT_BRIDGE_ABI_VERSION 1
 #define ME_DSL_JIT_SYNTH_ND_CTX_V2_VERSION 2
 #define ME_DSL_ND_CTX_FLAG_SEQ 1
 #define ME_DSL_JIT_SYNTH_ND_CTX_BASE_WORDS (1 + 4 * ME_DSL_MAX_NDIM)
@@ -3952,6 +3954,7 @@ static uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program
     }
     h = dsl_jit_hash_i32(h, (int)sizeof(void *));
     h = dsl_jit_hash_i32(h, ME_DSL_JIT_CGEN_VERSION);
+    h = dsl_jit_hash_i32(h, ME_DSL_JIT_BRIDGE_ABI_VERSION);
     h = dsl_jit_hash_i32(h, dsl_jit_target_tag());
     h = dsl_jit_hash_i32(h, dsl_jit_backend_tag(program));
     return h;
@@ -4067,7 +4070,7 @@ static bool dsl_jit_wasm_pos_cache_store_program(me_dsl_compiled_program *progra
 #define ME_DSL_JIT_NEG_CACHE_LONG_COOLDOWN_SEC 120
 #define ME_DSL_JIT_POS_CACHE_SLOTS 64
 #define ME_DSL_JIT_META_MAGIC 0x4d454a49544d4554ULL
-#define ME_DSL_JIT_META_VERSION 6
+#define ME_DSL_JIT_META_VERSION 7
 
 typedef enum {
     ME_DSL_JIT_NEG_FAIL_CACHE_DIR = 1,
@@ -4101,6 +4104,7 @@ typedef struct {
     uint64_t magic;
     uint32_t version;
     uint32_t cgen_version;
+    uint32_t bridge_abi_version;
     uint32_t target_tag;
     uint32_t ptr_size;
     uint64_t cache_key;
@@ -4340,6 +4344,7 @@ static void dsl_jit_fill_cache_meta(me_dsl_jit_cache_meta *meta,
     meta->magic = ME_DSL_JIT_META_MAGIC;
     meta->version = ME_DSL_JIT_META_VERSION;
     meta->cgen_version = ME_DSL_JIT_CGEN_VERSION;
+    meta->bridge_abi_version = ME_DSL_JIT_BRIDGE_ABI_VERSION;
     meta->target_tag = (uint32_t)dsl_jit_target_tag();
     meta->ptr_size = (uint32_t)sizeof(void *);
     meta->cache_key = key;
