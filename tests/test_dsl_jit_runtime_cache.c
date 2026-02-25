@@ -1040,6 +1040,89 @@ cleanup:
     return rc;
 }
 
+static int test_cache_key_differentiates_env_fp_mode(void) {
+    printf("\n=== DSL JIT Runtime Cache Test 7b: env fp mode cache key differentiation ===\n");
+
+    int rc = 1;
+    char tmp_template[] = "/tmp/me_jit_fp_env_cache_XXXXXX";
+    char *tmp_root = mkdtemp(tmp_template);
+    char cache_dir[1024];
+    cache_dir[0] = '\0';
+    char *saved_tmpdir = dup_env_value("TMPDIR");
+    char *saved_cc = dup_env_value("CC");
+    char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
+    char *saved_fp_mode = dup_env_value("ME_DSL_FP_MODE");
+    const char *src =
+        "# me:compiler=cc\n"
+        "def kernel(x):\n"
+        "    y = x + 23\n"
+        "    return y\n";
+
+    if (!tmp_root) {
+        printf("  FAILED: mkdtemp failed\n");
+        goto cleanup;
+    }
+    if (snprintf(cache_dir, sizeof(cache_dir), "%s/miniexpr-jit", tmp_root) >= (int)sizeof(cache_dir)) {
+        printf("  FAILED: cache path too long\n");
+        goto cleanup;
+    }
+    if (setenv("TMPDIR", tmp_root, 1) != 0) {
+        printf("  FAILED: setenv TMPDIR failed\n");
+        goto cleanup;
+    }
+    if (setenv("CC", "cc", 1) != 0) {
+        printf("  FAILED: setenv CC failed\n");
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT_POS_CACHE", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT_POS_CACHE failed\n");
+        goto cleanup;
+    }
+
+    if (setenv("ME_DSL_FP_MODE", "strict", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_FP_MODE strict failed\n");
+        goto cleanup;
+    }
+    if (compile_and_eval_simple_dsl(src, 23.0) != 0) {
+        goto cleanup;
+    }
+
+    if (setenv("ME_DSL_FP_MODE", "relaxed", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_FP_MODE relaxed failed\n");
+        goto cleanup;
+    }
+    if (compile_and_eval_simple_dsl(src, 23.0) != 0) {
+        goto cleanup;
+    }
+
+    int n_meta = count_kernel_files_with_suffix(cache_dir, ".meta", NULL, 0);
+    if (n_meta != 2) {
+        printf("  FAILED: expected 2 cache metadata files for env strict+relaxed fp modes (got %d)\n", n_meta);
+        goto cleanup;
+    }
+
+    rc = 0;
+    printf("  PASSED\n");
+
+cleanup:
+    restore_env_value("TMPDIR", saved_tmpdir);
+    restore_env_value("CC", saved_cc);
+    restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
+    restore_env_value("ME_DSL_FP_MODE", saved_fp_mode);
+    free(saved_tmpdir);
+    free(saved_cc);
+    free(saved_pos_cache);
+    free(saved_fp_mode);
+    if (cache_dir[0] != '\0') {
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+    }
+    if (tmp_root) {
+        (void)rmdir(tmp_root);
+    }
+    return rc;
+}
+
 static int test_reserved_index_cache_key_and_param_order(void) {
     printf("\n=== DSL JIT Runtime Cache Test 8: reserved index cache key + param ordering ===\n");
 
@@ -2220,7 +2303,7 @@ static int test_cc_backend_bridge_path(void) {
         printf("  FAILED: expected one generated source file for cc bridge path (got %d)\n", n_c);
         goto cleanup;
     }
-    bool has_bridge = file_contains_text(c_path, "me_jit_vec_exp_f64(");
+    bool has_bridge = file_contains_text(c_path, "me_jit_vec_exp_f64(in_x, out, nitems);");
     bool has_scalar = file_contains_text(c_path, "for (int64_t idx = 0; idx < nitems; idx++) {");
     if (has_bridge) {
         printf("  NOTE: cc backend bridge lowering active\n");
@@ -2243,6 +2326,133 @@ cleanup:
     free(saved_tmpdir);
     free(saved_cc);
     free(saved_pos_cache);
+    if (cache_dir[0] != '\0') {
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+    }
+    if (tmp_root) {
+        (void)rmdir(tmp_root);
+    }
+    return rc;
+}
+
+static int test_cc_backend_bridge_and_vec_math_gates(void) {
+    printf("\n=== DSL JIT Runtime Cache Test 12: cc bridge/vector env gates ===\n");
+
+    int rc = 1;
+    char tmp_template[] = "/tmp/me_jit_cc_gate_XXXXXX";
+    char *tmp_root = mkdtemp(tmp_template);
+    char cache_dir[1024];
+    cache_dir[0] = '\0';
+    char c_path[1200];
+    c_path[0] = '\0';
+    char *saved_tmpdir = dup_env_value("TMPDIR");
+    char *saved_cc = dup_env_value("CC");
+    char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
+    char *saved_bridge = dup_env_value("ME_DSL_JIT_MATH_BRIDGE");
+    char *saved_vec = dup_env_value("ME_DSL_JIT_VEC_MATH");
+    const char *src_exp =
+        "# me:compiler=cc\n"
+        "def kernel(x):\n"
+        "    return exp(x)\n";
+    const char *src_exp10 =
+        "# me:compiler=cc\n"
+        "def kernel(x):\n"
+        "    return exp10(x)\n";
+    const double in[4] = {0.0, 0.5, 1.0, -1.0};
+    double out[4] = {0.0, 0.0, 0.0, 0.0};
+
+    if (!tmp_root) {
+        printf("  FAILED: mkdtemp failed\n");
+        goto cleanup;
+    }
+    if (snprintf(cache_dir, sizeof(cache_dir), "%s/miniexpr-jit", tmp_root) >= (int)sizeof(cache_dir)) {
+        printf("  FAILED: cache path too long\n");
+        goto cleanup;
+    }
+    if (setenv("TMPDIR", tmp_root, 1) != 0) {
+        printf("  FAILED: setenv TMPDIR failed\n");
+        goto cleanup;
+    }
+    if (setenv("CC", "cc", 1) != 0) {
+        printf("  FAILED: setenv CC failed\n");
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT_POS_CACHE", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT_POS_CACHE failed\n");
+        goto cleanup;
+    }
+
+    if (setenv("ME_DSL_JIT_MATH_BRIDGE", "1", 1) != 0 ||
+        setenv("ME_DSL_JIT_VEC_MATH", "0", 1) != 0) {
+        printf("  FAILED: setenv bridge/vec gate failed\n");
+        goto cleanup;
+    }
+    if (compile_and_eval_dsl_values(src_exp, in, 4, out) != 0) {
+        goto cleanup;
+    }
+    for (int i = 0; i < 4; i++) {
+        double expected = exp(in[i]);
+        if (fabs(out[i] - expected) > 1e-12) {
+            printf("  FAILED: exp parity mismatch at %d (%.17g vs %.17g)\n",
+                   i, out[i], expected);
+            goto cleanup;
+        }
+    }
+    if (count_kernel_files_with_suffix(cache_dir, ".c", c_path, sizeof(c_path)) != 1 ||
+        c_path[0] == '\0' || !file_exists(c_path)) {
+        printf("  FAILED: expected generated source for vec-gate check\n");
+        goto cleanup;
+    }
+    if (file_contains_text(c_path, "me_jit_vec_exp_f64(in_x, out, nitems);") ||
+        !file_contains_text(c_path, "for (int64_t idx = 0; idx < nitems; idx++) {")) {
+        printf("  FAILED: ME_DSL_JIT_VEC_MATH=0 did not force scalar lowering\n");
+        goto cleanup;
+    }
+
+    remove_files_in_dir(cache_dir);
+    c_path[0] = '\0';
+    if (setenv("ME_DSL_JIT_MATH_BRIDGE", "0", 1) != 0 ||
+        setenv("ME_DSL_JIT_VEC_MATH", "1", 1) != 0) {
+        printf("  FAILED: setenv bridge/vec gate failed\n");
+        goto cleanup;
+    }
+    if (compile_and_eval_dsl_values(src_exp10, in, 4, out) != 0) {
+        goto cleanup;
+    }
+    for (int i = 0; i < 4; i++) {
+        double expected = pow(10.0, in[i]);
+        if (fabs(out[i] - expected) > 1e-11) {
+            printf("  FAILED: exp10 parity mismatch at %d (%.17g vs %.17g)\n",
+                   i, out[i], expected);
+            goto cleanup;
+        }
+    }
+    if (count_kernel_files_with_suffix(cache_dir, ".c", c_path, sizeof(c_path)) != 1 ||
+        c_path[0] == '\0' || !file_exists(c_path)) {
+        printf("  FAILED: expected generated source for bridge-gate check\n");
+        goto cleanup;
+    }
+    if (!file_contains_text(c_path, "static double me_jit_exp10(double x) { return pow(10.0, x); }") ||
+        file_contains_text(c_path, "extern double me_jit_exp10(double);")) {
+        printf("  FAILED: ME_DSL_JIT_MATH_BRIDGE=0 did not force static helper fallback\n");
+        goto cleanup;
+    }
+
+    rc = 0;
+    printf("  PASSED\n");
+
+cleanup:
+    restore_env_value("TMPDIR", saved_tmpdir);
+    restore_env_value("CC", saved_cc);
+    restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
+    restore_env_value("ME_DSL_JIT_MATH_BRIDGE", saved_bridge);
+    restore_env_value("ME_DSL_JIT_VEC_MATH", saved_vec);
+    free(saved_tmpdir);
+    free(saved_cc);
+    free(saved_pos_cache);
+    free(saved_bridge);
+    free(saved_vec);
     if (cache_dir[0] != '\0') {
         remove_files_in_dir(cache_dir);
         (void)rmdir(cache_dir);
@@ -2332,6 +2542,7 @@ int main(void) {
     fail |= test_default_tcc_skips_cc_backend();
     fail |= test_unknown_me_pragma_is_rejected();
     fail |= test_cache_key_differentiates_fp_mode();
+    fail |= test_cache_key_differentiates_env_fp_mode();
     fail |= test_reserved_index_cache_key_and_param_order();
     fail |= test_nd_reserved_index_synth_codegen_and_parity();
     fail |= test_element_interpreter_jit_parity();
@@ -2339,6 +2550,7 @@ int main(void) {
     fail |= test_missing_return_skips_runtime_jit();
     fail |= test_range_start_stop_step_jit_lowering();
     fail |= test_cc_backend_bridge_path();
+    fail |= test_cc_backend_bridge_and_vec_math_gates();
 #endif
 #if defined(__EMSCRIPTEN__)
     me_register_wasm_jit_helpers(NULL, NULL);

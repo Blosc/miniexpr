@@ -91,7 +91,7 @@ For log = base 10 log comment the next line. */
 #define ME_DSL_MAX_NDIM 8
 #define ME_DSL_JIT_SYMBOL_NAME "me_dsl_jit_kernel"
 #define ME_DSL_JIT_SYNTH_ND_CTX_PARAM "__me_nd_ctx"
-#define ME_DSL_JIT_CGEN_VERSION 7
+#define ME_DSL_JIT_CGEN_VERSION 8
 /* Runtime math bridge ABI for JIT-generated symbols (frozen list v1). */
 #define ME_DSL_JIT_BRIDGE_ABI_VERSION 1
 #define ME_DSL_JIT_SYNTH_ND_CTX_V2_VERSION 2
@@ -360,9 +360,13 @@ typedef struct {
     bool jit_use_runtime_math_bridge;
     bool jit_synth_reserved_non_nd;
     bool jit_synth_reserved_nd;
+    bool jit_vec_math_enabled;
     int jit_c_error_line;
     int jit_c_error_column;
     char jit_c_error[128];
+    char jit_lowering_mode[16];
+    char jit_vector_ops[128];
+    char jit_lowering_reason[128];
     me_dsl_jit_param_binding *jit_param_bindings;
     int jit_nparams;
     me_dsl_jit_kernel_fn jit_kernel_fn;
@@ -2854,6 +2858,62 @@ static const char *dsl_fp_mode_name(me_dsl_fp_mode fp_mode) {
     }
 }
 
+static bool dsl_source_has_fp_pragma(const char *source) {
+    if (!source) {
+        return false;
+    }
+    const char *line = source;
+    while (*line) {
+        const char *line_end = line;
+        while (*line_end && *line_end != '\n') {
+            line_end++;
+        }
+        const char *p = line;
+        while (p < line_end && (*p == ' ' || *p == '\t' || *p == '\r')) {
+            p++;
+        }
+        if (p == line_end) {
+            if (*line_end == '\0') {
+                break;
+            }
+            line = line_end + 1;
+            continue;
+        }
+        if (*p != '#') {
+            break;
+        }
+        p++;
+        while (p < line_end && isspace((unsigned char)*p)) {
+            p++;
+        }
+        if ((size_t)(line_end - p) >= 5 && strncmp(p, "me:fp", 5) == 0) {
+            return true;
+        }
+        if (*line_end == '\0') {
+            break;
+        }
+        line = line_end + 1;
+    }
+    return false;
+}
+
+static me_dsl_fp_mode dsl_default_fp_mode_from_env(void) {
+    const char *env = getenv("ME_DSL_FP_MODE");
+    if (!env || env[0] == '\0') {
+        return ME_DSL_FP_STRICT;
+    }
+    if (strcmp(env, "strict") == 0) {
+        return ME_DSL_FP_STRICT;
+    }
+    if (strcmp(env, "contract") == 0) {
+        return ME_DSL_FP_CONTRACT;
+    }
+    if (strcmp(env, "fast") == 0 || strcmp(env, "relaxed") == 0) {
+        return ME_DSL_FP_FAST;
+    }
+    return ME_DSL_FP_STRICT;
+}
+
 static const char *dsl_compiler_name(me_dsl_compiler compiler) {
     switch (compiler) {
     case ME_DSL_COMPILER_LIBTCC:
@@ -3966,6 +4026,8 @@ static uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program
     h = dsl_jit_hash_i32(h, ME_DSL_JIT_BRIDGE_ABI_VERSION);
     h = dsl_jit_hash_i32(h, dsl_jit_target_tag());
     h = dsl_jit_hash_i32(h, dsl_jit_backend_tag(program));
+    h = dsl_jit_hash_i32(h, program->jit_use_runtime_math_bridge ? 1 : 0);
+    h = dsl_jit_hash_i32(h, program->jit_vec_math_enabled ? 1 : 0);
     return h;
 }
 
@@ -4246,6 +4308,22 @@ static bool dsl_jit_pos_cache_enabled(void) {
 
 static bool dsl_jit_runtime_enabled(void) {
     const char *env = getenv("ME_DSL_JIT");
+    if (!env || env[0] == '\0') {
+        return true;
+    }
+    return strcmp(env, "0") != 0;
+}
+
+static bool dsl_jit_math_bridge_enabled(void) {
+    const char *env = getenv("ME_DSL_JIT_MATH_BRIDGE");
+    if (!env || env[0] == '\0') {
+        return true;
+    }
+    return strcmp(env, "0") != 0;
+}
+
+static bool dsl_jit_vec_math_enabled(void) {
+    const char *env = getenv("ME_DSL_JIT_VEC_MATH");
     if (!env || env[0] == '\0') {
         return true;
     }
@@ -4855,16 +4933,37 @@ static double dsl_jit_bridge_apply_unary_f64(void (*fn)(const double *, double *
     return out_buf[0];
 }
 
+static int dsl_jit_bridge_chunk_items(void) {
+    const char *env = getenv("ME_DSL_JIT_VEC_CHUNK_ITEMS");
+    if (!env || env[0] == '\0') {
+        return 1 << 20;
+    }
+    errno = 0;
+    char *end = NULL;
+    long long v = strtoll(env, &end, 10);
+    if (errno != 0 || end == env || v <= 0 || v > INT_MAX) {
+        return 1 << 20;
+    }
+    while (*end && isspace((unsigned char)*end)) {
+        end++;
+    }
+    if (*end != '\0') {
+        return 1 << 20;
+    }
+    return (int)v;
+}
+
 static void dsl_jit_bridge_apply_unary_vector_f64(void (*fn)(const double *, double *, int),
                                                    const double *in, double *out, int64_t nitems) {
     if (!fn || !in || !out || nitems <= 0) {
         return;
     }
+    int max_chunk = dsl_jit_bridge_chunk_items();
     int64_t remaining = nitems;
     const double *pin = in;
     double *pout = out;
     while (remaining > 0) {
-        int chunk = (remaining > INT_MAX) ? INT_MAX : (int)remaining;
+        int chunk = (remaining > (int64_t)max_chunk) ? max_chunk : (int)remaining;
         fn(pin, pout, chunk);
         pin += chunk;
         pout += chunk;
@@ -4877,11 +4976,12 @@ static void dsl_jit_bridge_apply_unary_vector_f32(void (*fn)(const float *, floa
     if (!fn || !in || !out || nitems <= 0) {
         return;
     }
+    int max_chunk = dsl_jit_bridge_chunk_items();
     int64_t remaining = nitems;
     const float *pin = in;
     float *pout = out;
     while (remaining > 0) {
-        int chunk = (remaining > INT_MAX) ? INT_MAX : (int)remaining;
+        int chunk = (remaining > (int64_t)max_chunk) ? max_chunk : (int)remaining;
         fn(pin, pout, chunk);
         pin += chunk;
         pout += chunk;
@@ -4895,12 +4995,13 @@ static void dsl_jit_bridge_apply_binary_vector_f64(void (*fn)(const double *, co
     if (!fn || !a || !b || !out || nitems <= 0) {
         return;
     }
+    int max_chunk = dsl_jit_bridge_chunk_items();
     int64_t remaining = nitems;
     const double *pa = a;
     const double *pb = b;
     double *pout = out;
     while (remaining > 0) {
-        int chunk = (remaining > INT_MAX) ? INT_MAX : (int)remaining;
+        int chunk = (remaining > (int64_t)max_chunk) ? max_chunk : (int)remaining;
         fn(pa, pb, pout, chunk);
         pa += chunk;
         pb += chunk;
@@ -4915,12 +5016,13 @@ static void dsl_jit_bridge_apply_binary_vector_f32(void (*fn)(const float *, con
     if (!fn || !a || !b || !out || nitems <= 0) {
         return;
     }
+    int max_chunk = dsl_jit_bridge_chunk_items();
     int64_t remaining = nitems;
     const float *pa = a;
     const float *pb = b;
     float *pout = out;
     while (remaining > 0) {
-        int chunk = (remaining > INT_MAX) ? INT_MAX : (int)remaining;
+        int chunk = (remaining > (int64_t)max_chunk) ? max_chunk : (int)remaining;
         fn(pa, pb, pout, chunk);
         pa += chunk;
         pb += chunk;
@@ -6864,9 +6966,13 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     program->jit_use_runtime_math_bridge = false;
     program->jit_synth_reserved_non_nd = false;
     program->jit_synth_reserved_nd = false;
+    program->jit_vec_math_enabled = false;
     program->jit_c_error_line = 0;
     program->jit_c_error_column = 0;
     program->jit_c_error[0] = '\0';
+    program->jit_lowering_mode[0] = '\0';
+    program->jit_vector_ops[0] = '\0';
+    program->jit_lowering_reason[0] = '\0';
 
     if (!program->guaranteed_return) {
         snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
@@ -7063,17 +7169,32 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     cg_options.synth_reserved_nd = program->jit_synth_reserved_nd;
     cg_options.synth_nd_ctx_name = ME_DSL_JIT_SYNTH_ND_CTX_PARAM;
     cg_options.synth_nd_compile_ndims = program->compile_ndims;
+    char lowering_mode[16] = {0};
+    char vector_ops[128] = {0};
+    char lowering_reason[128] = {0};
+    cg_options.trace_lowering_mode = lowering_mode;
+    cg_options.trace_lowering_mode_cap = sizeof(lowering_mode);
+    cg_options.trace_vector_ops = vector_ops;
+    cg_options.trace_vector_ops_cap = sizeof(vector_ops);
+    cg_options.trace_lowering_reason = lowering_reason;
+    cg_options.trace_lowering_reason_cap = sizeof(lowering_reason);
+    cg_options.has_enable_vector_math = true;
+    cg_options.enable_vector_math = dsl_jit_vec_math_enabled();
     bool use_bridge = false;
-    if (program->compiler == ME_DSL_COMPILER_LIBTCC) {
+    bool bridge_gate_enabled = dsl_jit_math_bridge_enabled();
+    if (bridge_gate_enabled && program->compiler == ME_DSL_COMPILER_LIBTCC) {
         use_bridge = true;
     }
-    else if (program->compiler == ME_DSL_COMPILER_CC) {
+    else if (bridge_gate_enabled && program->compiler == ME_DSL_COMPILER_CC) {
         if (dsl_jit_cc_math_bridge_available()) {
             use_bridge = true;
         }
         else {
             dsl_tracef("jit codegen: runtime math bridge unavailable for cc backend");
         }
+    }
+    else if (!bridge_gate_enabled) {
+        dsl_tracef("jit codegen: runtime math bridge disabled by ME_DSL_JIT_MATH_BRIDGE");
     }
     cg_options.use_runtime_math_bridge = use_bridge;
     char *generated_c = NULL;
@@ -7096,9 +7217,17 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     }
     program->jit_c_source = generated_c;
     program->jit_use_runtime_math_bridge = cg_options.use_runtime_math_bridge;
+    program->jit_vec_math_enabled = cg_options.use_runtime_math_bridge && cg_options.enable_vector_math;
+    snprintf(program->jit_lowering_mode, sizeof(program->jit_lowering_mode), "%s", lowering_mode);
+    snprintf(program->jit_vector_ops, sizeof(program->jit_vector_ops), "%s", vector_ops);
+    snprintf(program->jit_lowering_reason, sizeof(program->jit_lowering_reason), "%s", lowering_reason);
     if (program->jit_use_runtime_math_bridge) {
         dsl_tracef("jit codegen: runtime math bridge enabled");
     }
+    dsl_tracef("jit codegen: lowering=%s vec_ops=%s reason=%s",
+               program->jit_lowering_mode[0] ? program->jit_lowering_mode : "scalar",
+               program->jit_vector_ops[0] ? program->jit_vector_ops : "-",
+               program->jit_lowering_reason[0] ? program->jit_lowering_reason : "-");
     dsl_tracef("jit ir built: fp=%s compiler=%s fingerprint=%016llx",
                dsl_fp_mode_name(program->fp_mode),
                dsl_compiler_name(program->compiler),
@@ -7584,6 +7713,10 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
         return NULL;
     }
     program->fp_mode = parsed->fp_mode;
+    if (!dsl_source_has_fp_pragma(source)) {
+        me_dsl_fp_mode env_fp_mode = dsl_default_fp_mode_from_env();
+        program->fp_mode = env_fp_mode;
+    }
     program->compiler = parsed->compiler;
     program->compile_ndims = compile_ndims;
     dsl_var_table_init(&program->vars);

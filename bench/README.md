@@ -140,7 +140,8 @@ ME_BENCH_FP_MODE=fast ./build/bench/benchmark_dsl_jit_mandelbrot 1024x512 6 24
 
 ### benchmark_dsl_jit_math_kernels.c
 DSL JIT baseline for representative math kernels:
-- `sin`, `exp`, `log`, `pow`, `hypot`, `atan2`, `sinpi`, `cospi`
+- `sin`, `exp`, `log`, `pow`, `fmax`, `fmin`, `hypot`, `atan2`, `sinpi`, `cospi`
+- `black_scholes_like` (heavier transcendental mix)
 - Per-kernel metrics:
   - JIT cold compile latency
   - JIT warm throughput
@@ -151,6 +152,8 @@ Notes:
 - Uses `# me:fp=strict`.
 - Uses `# me:compiler=tcc` by default (when `ME_BENCH_COMPILER` is unset).
 - Set `ME_BENCH_COMPILER=cc` to benchmark the `cc` backend explicitly.
+- Set `ME_DSL_JIT_MATH_BRIDGE=0` to force scalar math fallback in JIT C.
+- Set `ME_DSL_JIT_VEC_MATH=0` to keep runtime bridge but disable vector lowering.
 
 ```bash
 ./build/bench/benchmark_dsl_jit_math_kernels

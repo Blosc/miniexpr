@@ -72,13 +72,30 @@ JIT codegen can use this for guarded lowering decisions and trace output.
   - Done: codegen/runtime bridge declaration wiring moved to shared symbol contract.
 - Phase 1: partially complete.
   - Done: direct vector lowering for simple single-return kernels (unary and selected binary), scalar fallback path remains automatic.
+  - Done: staged assign+return pattern lowering (`tmp = fn(...); return tmp`) for supported unary/binary vector calls.
   - Done: unary vector lowering set includes baseline (`sin/cos/exp/log/sqrt/abs`) and extended unary bridge coverage.
   - Pending: general subexpression vector-lowering pass (current lowering is pattern-based, not full graph/hybrid).
 - Phase 2: in progress.
   - Done: binary vector lowering for `atan2`, `hypot`, `pow`.
   - Done: binary vector lowering expanded to `fmax`/`fmin` where runtime dispatch already exists.
   - Done: selected special unary functions (`exp10`, `log1p`, `expm1`, `sinpi`, `cospi`, and others already exposed).
-  - Partial: mixed graph/broadcast support currently implemented for `pow` constants; not yet generalized for all binary vector ops.
+  - Done: mixed graph/broadcast support generalized for binary vector ops (constant + parameter) across supported binary set.
+- Phase 3: partially complete.
+  - Done: runtime bridge chunk-size heuristic via `ME_DSL_JIT_VEC_CHUNK_ITEMS` (default chunk cap) to avoid oversized bridge chunks.
+  - Pending: deeper temp-buffer scheduling/reuse and fused lowering.
+- Phase 4: partially complete.
+  - Done: explicit env-controlled default FP mode via `ME_DSL_FP_MODE` with `strict|contract|fast|relaxed` (`relaxed` mapped to fast), while pragma still takes precedence.
+  - Pending: formal per-function ULP acceptance matrix for relaxed mode.
+- Phase 5: mostly complete.
+  - Done: per-kernel lowering diagnostics now reported (mode, vector op list, reason) from codegen into runtime trace.
+  - Done: reason codes for non-vectorized cases (`runtime-math-bridge-disabled`, `vector-math-disabled`, `no-vector-lowering-match`).
+- Phase 6: mostly complete.
+  - Done: feature gates wired: `ME_DSL_JIT_MATH_BRIDGE` and `ME_DSL_JIT_VEC_MATH`.
+  - Done: cache-key differentiation includes bridge/vector gate state.
+  - Pending: release policy choice for default-on/default-off vector gate.
+- Phase 7: expanded.
+  - Done: codegen/runtime-cache test coverage added for new gates, diagnostics, staged lowering, and generalized binary broadcast lowering.
+  - Done: math benchmark kernel set expanded (`fmax`, `fmin`, `black_scholes_like`).
 
 ## Phase 0: Baseline hardening
 

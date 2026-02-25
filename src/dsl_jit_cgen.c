@@ -123,6 +123,29 @@ static void me_jit_set_error(me_dsl_error *error, int line, int column, const ch
     snprintf(error->message, sizeof(error->message), "%s", msg ? msg : "jit c codegen failed");
 }
 
+static void me_jit_copy_text(char *dst, size_t dst_cap, const char *src) {
+    if (!dst || dst_cap == 0) {
+        return;
+    }
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+    snprintf(dst, dst_cap, "%s", src);
+}
+
+static void me_jit_set_lowering_trace(const me_dsl_jit_cgen_options *options,
+                                      const char *mode,
+                                      const char *ops,
+                                      const char *reason) {
+    if (!options) {
+        return;
+    }
+    me_jit_copy_text(options->trace_lowering_mode, options->trace_lowering_mode_cap, mode);
+    me_jit_copy_text(options->trace_vector_ops, options->trace_vector_ops_cap, ops);
+    me_jit_copy_text(options->trace_lowering_reason, options->trace_lowering_reason_cap, reason);
+}
+
 static bool me_jit_dtype_supported(me_dtype dtype) {
     switch (dtype) {
     case ME_BOOL:
@@ -769,6 +792,68 @@ static bool me_jit_parse_simple_binary_call(const char *expr,
     return true;
 }
 
+static bool me_jit_expr_is_single_ident(const char *expr,
+                                        const char *name) {
+    if (!expr || !name || name[0] == '\0') {
+        return false;
+    }
+    const char *p = me_jit_skip_ws(expr);
+    const char *ident_start = NULL;
+    size_t ident_len = 0;
+    if (!me_jit_parse_ident(&p, &ident_start, &ident_len)) {
+        return false;
+    }
+    p = me_jit_skip_ws(p);
+    if (!p || *p != '\0') {
+        return false;
+    }
+    return me_jit_ident_equals(ident_start, ident_len, name);
+}
+
+static const me_dsl_jit_ir_expr *me_jit_vector_candidate_expr(const me_dsl_jit_ir_program *program,
+                                                              me_dtype output_dtype) {
+    if (!program) {
+        return NULL;
+    }
+    if (output_dtype != ME_FLOAT64 && output_dtype != ME_FLOAT32) {
+        return NULL;
+    }
+    if (program->block.nstmts == 1) {
+        const me_dsl_jit_ir_stmt *stmt = program->block.stmts[0];
+        if (!stmt || stmt->kind != ME_DSL_JIT_IR_STMT_RETURN) {
+            return NULL;
+        }
+        if (stmt->as.return_stmt.expr.dtype != output_dtype ||
+            !stmt->as.return_stmt.expr.text) {
+            return NULL;
+        }
+        return &stmt->as.return_stmt.expr;
+    }
+    if (program->block.nstmts == 2) {
+        const me_dsl_jit_ir_stmt *assign_stmt = program->block.stmts[0];
+        const me_dsl_jit_ir_stmt *ret_stmt = program->block.stmts[1];
+        if (!assign_stmt || !ret_stmt ||
+            assign_stmt->kind != ME_DSL_JIT_IR_STMT_ASSIGN ||
+            ret_stmt->kind != ME_DSL_JIT_IR_STMT_RETURN) {
+            return NULL;
+        }
+        if (assign_stmt->as.assign.dtype != output_dtype ||
+            assign_stmt->as.assign.value.dtype != output_dtype ||
+            !assign_stmt->as.assign.name ||
+            !assign_stmt->as.assign.value.text ||
+            !ret_stmt->as.return_stmt.expr.text ||
+            ret_stmt->as.return_stmt.expr.dtype != output_dtype) {
+            return NULL;
+        }
+        if (!me_jit_expr_is_single_ident(ret_stmt->as.return_stmt.expr.text,
+                                         assign_stmt->as.assign.name)) {
+            return NULL;
+        }
+        return &assign_stmt->as.assign.value;
+    }
+    return NULL;
+}
+
 static bool me_jit_detect_vec_unary_plan(const me_dsl_jit_ir_program *program,
                                          me_dtype output_dtype,
                                          me_jit_vec_unary_plan *out_plan) {
@@ -780,18 +865,8 @@ static bool me_jit_detect_vec_unary_plan(const me_dsl_jit_ir_program *program,
     out_plan->has_offset = false;
     out_plan->offset = 0.0;
 
-    if (program->block.nstmts != 1) {
-        return false;
-    }
-    if (output_dtype != ME_FLOAT64 && output_dtype != ME_FLOAT32) {
-        return false;
-    }
-    const me_dsl_jit_ir_stmt *stmt = program->block.stmts[0];
-    if (!stmt || stmt->kind != ME_DSL_JIT_IR_STMT_RETURN) {
-        return false;
-    }
-    const me_dsl_jit_ir_expr *expr = &stmt->as.return_stmt.expr;
-    if (expr->dtype != output_dtype || !expr->text) {
+    const me_dsl_jit_ir_expr *expr = me_jit_vector_candidate_expr(program, output_dtype);
+    if (!expr || !expr->text || expr->dtype != output_dtype) {
         return false;
     }
 
@@ -901,18 +976,8 @@ static bool me_jit_detect_vec_binary_plan(const me_dsl_jit_ir_program *program,
     out_plan->arg_a_const_value = 0.0;
     out_plan->arg_b_const_value = 0.0;
 
-    if (program->block.nstmts != 1) {
-        return false;
-    }
-    if (output_dtype != ME_FLOAT64 && output_dtype != ME_FLOAT32) {
-        return false;
-    }
-    const me_dsl_jit_ir_stmt *stmt = program->block.stmts[0];
-    if (!stmt || stmt->kind != ME_DSL_JIT_IR_STMT_RETURN) {
-        return false;
-    }
-    const me_dsl_jit_ir_expr *expr = &stmt->as.return_stmt.expr;
-    if (expr->dtype != output_dtype || !expr->text) {
+    const me_dsl_jit_ir_expr *expr = me_jit_vector_candidate_expr(program, output_dtype);
+    if (!expr || !expr->text || expr->dtype != output_dtype) {
         return false;
     }
 
@@ -966,23 +1031,17 @@ static bool me_jit_detect_vec_binary_plan(const me_dsl_jit_ir_program *program,
             break;
         }
     }
-    if (out_plan->kind == ME_JIT_VEC_BINARY_POW) {
-        if (out_plan->param_index_a < 0 && arg0_is_const) {
-            out_plan->arg_a_const = true;
-            out_plan->arg_a_const_value = arg0_const;
-        }
-        if (out_plan->param_index_b < 0 && arg1_is_const) {
-            out_plan->arg_b_const = true;
-            out_plan->arg_b_const_value = arg1_const;
-        }
-        if ((out_plan->param_index_a >= 0 || out_plan->arg_a_const) &&
-            (out_plan->param_index_b >= 0 || out_plan->arg_b_const) &&
-            !(out_plan->arg_a_const && out_plan->arg_b_const)) {
-            return true;
-        }
+    if (out_plan->param_index_a < 0 && arg0_is_const) {
+        out_plan->arg_a_const = true;
+        out_plan->arg_a_const_value = arg0_const;
     }
-    else if (out_plan->param_index_a >= 0 && out_plan->param_index_b >= 0 &&
-             !arg0_is_const && !arg1_is_const) {
+    if (out_plan->param_index_b < 0 && arg1_is_const) {
+        out_plan->arg_b_const = true;
+        out_plan->arg_b_const_value = arg1_const;
+    }
+    if ((out_plan->param_index_a >= 0 || out_plan->arg_a_const) &&
+        (out_plan->param_index_b >= 0 || out_plan->arg_b_const) &&
+        !(out_plan->arg_a_const && out_plan->arg_b_const)) {
         return true;
     }
     out_plan->kind = ME_JIT_VEC_BINARY_NONE;
@@ -1059,6 +1118,45 @@ static const char *me_jit_vec_binary_symbol(me_jit_vec_binary_kind kind, me_dtyp
         return NULL;
     }
     return NULL;
+}
+
+static const char *me_jit_vec_unary_op_name(me_jit_vec_unary_kind kind) {
+    switch (kind) {
+    case ME_JIT_VEC_UNARY_SIN: return "sin";
+    case ME_JIT_VEC_UNARY_COS: return "cos";
+    case ME_JIT_VEC_UNARY_EXP: return "exp";
+    case ME_JIT_VEC_UNARY_LOG: return "log";
+    case ME_JIT_VEC_UNARY_EXP10: return "exp10";
+    case ME_JIT_VEC_UNARY_SINPI: return "sinpi";
+    case ME_JIT_VEC_UNARY_COSPI: return "cospi";
+    case ME_JIT_VEC_UNARY_ABS: return "abs";
+    case ME_JIT_VEC_UNARY_SQRT: return "sqrt";
+    case ME_JIT_VEC_UNARY_LOG1P: return "log1p";
+    case ME_JIT_VEC_UNARY_EXP2: return "exp2";
+    case ME_JIT_VEC_UNARY_LOG2: return "log2";
+    case ME_JIT_VEC_UNARY_EXPM1: return "expm1";
+    case ME_JIT_VEC_UNARY_LOG10: return "log10";
+    case ME_JIT_VEC_UNARY_SINH: return "sinh";
+    case ME_JIT_VEC_UNARY_COSH: return "cosh";
+    case ME_JIT_VEC_UNARY_TANH: return "tanh";
+    case ME_JIT_VEC_UNARY_ASINH: return "asinh";
+    case ME_JIT_VEC_UNARY_ACOSH: return "acosh";
+    case ME_JIT_VEC_UNARY_ATANH: return "atanh";
+    case ME_JIT_VEC_UNARY_NONE: return "";
+    }
+    return "";
+}
+
+static const char *me_jit_vec_binary_op_name(me_jit_vec_binary_kind kind) {
+    switch (kind) {
+    case ME_JIT_VEC_BINARY_ATAN2: return "atan2";
+    case ME_JIT_VEC_BINARY_HYPOT: return "hypot";
+    case ME_JIT_VEC_BINARY_POW: return "pow";
+    case ME_JIT_VEC_BINARY_FMAX: return "fmax";
+    case ME_JIT_VEC_BINARY_FMIN: return "fmin";
+    case ME_JIT_VEC_BINARY_NONE: return "";
+    }
+    return "";
 }
 
 static bool me_jit_emit_vec_unary_call(me_jit_codegen_ctx *ctx,
@@ -1806,6 +1904,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
 
     const char *symbol = "me_dsl_jit_kernel";
     bool use_runtime_math_bridge = false;
+    bool enable_vector_math = true;
     bool synth_reserved_non_nd = false;
     bool synth_reserved_nd = false;
     const char *synth_nd_ctx_name = "__me_nd_ctx";
@@ -1815,6 +1914,9 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
     }
     if (options && options->use_runtime_math_bridge) {
         use_runtime_math_bridge = true;
+    }
+    if (options && options->has_enable_vector_math) {
+        enable_vector_math = options->enable_vector_math;
     }
     ctx.use_runtime_math_bridge = use_runtime_math_bridge;
     if (options && options->synth_reserved_non_nd) {
@@ -1830,6 +1932,15 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         options->synth_nd_compile_ndims > 0 &&
         options->synth_nd_compile_ndims <= 8) {
         synth_nd_compile_ndims = options->synth_nd_compile_ndims;
+    }
+    if (!use_runtime_math_bridge) {
+        me_jit_set_lowering_trace(options, "scalar", "", "runtime-math-bridge-disabled");
+    }
+    else if (!enable_vector_math) {
+        me_jit_set_lowering_trace(options, "scalar", "", "vector-math-disabled");
+    }
+    else {
+        me_jit_set_lowering_trace(options, "scalar", "", "no-vector-lowering-match");
     }
     const bool synth_nd_fixed_ndim = synth_reserved_nd && synth_nd_compile_ndims > 0;
     bool has_nd_ctx_param = false;
@@ -2061,7 +2172,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         }
     }
 
-    if (use_runtime_math_bridge) {
+    if (use_runtime_math_bridge && enable_vector_math) {
         me_jit_vec_unary_plan vec_plan;
         if (me_jit_detect_vec_unary_plan(program, output_dtype, &vec_plan)) {
             const char *vec_sym = me_jit_vec_unary_symbol(vec_plan.kind, output_dtype);
@@ -2082,6 +2193,9 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
                 free(ctx.source.data);
                 return false;
             }
+            me_jit_set_lowering_trace(options, "vector",
+                                      me_jit_vec_unary_op_name(vec_plan.kind),
+                                      "vector-lowered");
             me_jit_locals_free(&ctx.locals);
             *out_source = ctx.source.data;
             return true;
@@ -2132,6 +2246,9 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
                 free(ctx.source.data);
                 return false;
             }
+            me_jit_set_lowering_trace(options, "vector",
+                                      me_jit_vec_binary_op_name(vec_plan2.kind),
+                                      "vector-lowered");
             me_jit_locals_free(&ctx.locals);
             *out_source = ctx.source.data;
             return true;
