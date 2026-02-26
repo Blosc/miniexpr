@@ -65,6 +65,13 @@ static bool dsl_jit_dtype_supported(me_dtype dtype) {
     }
 }
 
+static bool dsl_jit_dtype_assignment_compatible(me_dtype lhs_dtype, me_dtype rhs_dtype) {
+    if (!dsl_jit_dtype_supported(lhs_dtype) || !dsl_jit_dtype_supported(rhs_dtype)) {
+        return false;
+    }
+    return true;
+}
+
 static char *dsl_jit_strdup(const char *s) {
     if (!s) {
         return NULL;
@@ -564,10 +571,15 @@ static bool dsl_jit_build_block(me_dsl_jit_build_ctx *ctx, const me_dsl_block *i
                 }
             }
             else if (ctx->symbols.items[sym_index].dtype != rhs_dtype) {
-                dsl_jit_set_error(ctx->error, stmt->line, stmt->column,
-                                  "assignment dtype mismatch for jit ir");
-                dsl_jit_ir_stmt_free(ir_stmt);
-                return false;
+                me_dtype lhs_dtype = ctx->symbols.items[sym_index].dtype;
+                if (!dsl_jit_dtype_assignment_compatible(lhs_dtype, rhs_dtype)) {
+                    dsl_jit_set_error(ctx->error, stmt->line, stmt->column,
+                                      "assignment dtype mismatch for jit ir");
+                    dsl_jit_ir_stmt_free(ir_stmt);
+                    return false;
+                }
+                /* Match DSL compile semantics: reassignment keeps local dtype. */
+                rhs_dtype = lhs_dtype;
             }
             ir_stmt->kind = ME_DSL_JIT_IR_STMT_ASSIGN;
             ir_stmt->as.assign.name = dsl_jit_strdup(stmt->as.assign.name);
