@@ -156,6 +156,7 @@ Notes:
 - Set `ME_DSL_JIT_SCALAR_MATH_BRIDGE=1` to keep scalar calls on runtime bridge symbols (`me_jit_*`) when vector lowering does not match.
 - Set `ME_DSL_JIT_VEC_MATH=0` to keep runtime bridge but disable vector lowering.
 - Set `ME_DSL_JIT_HYBRID_EXPR_VEC_MATH=1` to enable experimental expression/lifted hybrid vector lowering in addition to statement-level lowering.
+- Set `ME_DSL_JIT_BRANCH_AWARE_IF=0` to disable branch-aware if-to-select lowering for simple assign/else patterns.
 
 ```bash
 ./build/bench/benchmark_dsl_jit_math_kernels

@@ -2384,6 +2384,7 @@ static int test_cc_backend_bridge_and_vec_math_gates(void) {
     char *saved_scalar = dup_env_value("ME_DSL_JIT_SCALAR_MATH_BRIDGE");
     char *saved_vec = dup_env_value("ME_DSL_JIT_VEC_MATH");
     char *saved_expr_vec = dup_env_value("ME_DSL_JIT_HYBRID_EXPR_VEC_MATH");
+    char *saved_branch_if = dup_env_value("ME_DSL_JIT_BRANCH_AWARE_IF");
     const char *src_exp =
         "# me:compiler=cc\n"
         "def kernel(x):\n"
@@ -2398,6 +2399,14 @@ static int test_cc_backend_bridge_and_vec_math_gates(void) {
         "    t = 0.7071067811865475\n"
         "    z = 0.5 * (1.0 + exp((x + 0.25) * t))\n"
         "    return z\n";
+    const char *src_branch_if =
+        "# me:compiler=cc\n"
+        "def kernel(x):\n"
+        "    if x > 0:\n"
+        "        y = x\n"
+        "    else:\n"
+        "        y = -x\n"
+        "    return y\n";
     const double in[4] = {0.0, 0.5, 1.0, -1.0};
     double out[4] = {0.0, 0.0, 0.0, 0.0};
 
@@ -2425,7 +2434,8 @@ static int test_cc_backend_bridge_and_vec_math_gates(void) {
     if (setenv("ME_DSL_JIT_MATH_BRIDGE", "1", 1) != 0 ||
         setenv("ME_DSL_JIT_SCALAR_MATH_BRIDGE", "0", 1) != 0 ||
         setenv("ME_DSL_JIT_VEC_MATH", "0", 1) != 0 ||
-        setenv("ME_DSL_JIT_HYBRID_EXPR_VEC_MATH", "0", 1) != 0) {
+        setenv("ME_DSL_JIT_HYBRID_EXPR_VEC_MATH", "0", 1) != 0 ||
+        setenv("ME_DSL_JIT_BRANCH_AWARE_IF", "1", 1) != 0) {
         printf("  FAILED: setenv bridge/vec gate failed\n");
         goto cleanup;
     }
@@ -2457,7 +2467,8 @@ static int test_cc_backend_bridge_and_vec_math_gates(void) {
     if (setenv("ME_DSL_JIT_MATH_BRIDGE", "1", 1) != 0 ||
         setenv("ME_DSL_JIT_SCALAR_MATH_BRIDGE", "1", 1) != 0 ||
         setenv("ME_DSL_JIT_VEC_MATH", "0", 1) != 0 ||
-        setenv("ME_DSL_JIT_HYBRID_EXPR_VEC_MATH", "0", 1) != 0) {
+        setenv("ME_DSL_JIT_HYBRID_EXPR_VEC_MATH", "0", 1) != 0 ||
+        setenv("ME_DSL_JIT_BRANCH_AWARE_IF", "1", 1) != 0) {
         printf("  FAILED: setenv scalar bridge gate failed\n");
         goto cleanup;
     }
@@ -2479,7 +2490,8 @@ static int test_cc_backend_bridge_and_vec_math_gates(void) {
     if (setenv("ME_DSL_JIT_MATH_BRIDGE", "0", 1) != 0 ||
         setenv("ME_DSL_JIT_SCALAR_MATH_BRIDGE", "0", 1) != 0 ||
         setenv("ME_DSL_JIT_VEC_MATH", "1", 1) != 0 ||
-        setenv("ME_DSL_JIT_HYBRID_EXPR_VEC_MATH", "0", 1) != 0) {
+        setenv("ME_DSL_JIT_HYBRID_EXPR_VEC_MATH", "0", 1) != 0 ||
+        setenv("ME_DSL_JIT_BRANCH_AWARE_IF", "1", 1) != 0) {
         printf("  FAILED: setenv bridge/vec gate failed\n");
         goto cleanup;
     }
@@ -2509,7 +2521,8 @@ static int test_cc_backend_bridge_and_vec_math_gates(void) {
     if (setenv("ME_DSL_JIT_MATH_BRIDGE", "1", 1) != 0 ||
         setenv("ME_DSL_JIT_SCALAR_MATH_BRIDGE", "0", 1) != 0 ||
         setenv("ME_DSL_JIT_VEC_MATH", "1", 1) != 0 ||
-        setenv("ME_DSL_JIT_HYBRID_EXPR_VEC_MATH", "0", 1) != 0) {
+        setenv("ME_DSL_JIT_HYBRID_EXPR_VEC_MATH", "0", 1) != 0 ||
+        setenv("ME_DSL_JIT_BRANCH_AWARE_IF", "1", 1) != 0) {
         printf("  FAILED: setenv hybrid expr gate=0 failed\n");
         goto cleanup;
     }
@@ -2562,6 +2575,61 @@ static int test_cc_backend_bridge_and_vec_math_gates(void) {
         goto cleanup;
     }
 
+    remove_files_in_dir(cache_dir);
+    if (setenv("ME_DSL_JIT_MATH_BRIDGE", "1", 1) != 0 ||
+        setenv("ME_DSL_JIT_SCALAR_MATH_BRIDGE", "0", 1) != 0 ||
+        setenv("ME_DSL_JIT_VEC_MATH", "0", 1) != 0 ||
+        setenv("ME_DSL_JIT_HYBRID_EXPR_VEC_MATH", "0", 1) != 0 ||
+        setenv("ME_DSL_JIT_BRANCH_AWARE_IF", "0", 1) != 0) {
+        printf("  FAILED: setenv branch-aware gate=0 failed\n");
+        goto cleanup;
+    }
+    if (compile_and_eval_dsl_values(src_branch_if, in, 4, out) != 0) {
+        goto cleanup;
+    }
+    for (int i = 0; i < 4; i++) {
+        double expected = (in[i] > 0.0) ? in[i] : -in[i];
+        if (fabs(out[i] - expected) > 1e-12) {
+            printf("  FAILED: branch-aware parity mismatch (gate=0) at %d (%.17g vs %.17g)\n",
+                   i, out[i], expected);
+            goto cleanup;
+        }
+    }
+    if (count_kernel_files_with_suffix(cache_dir, ".c", c_path, sizeof(c_path)) != 1 ||
+        c_path[0] == '\0' || !file_exists(c_path)) {
+        printf("  FAILED: expected generated source for branch-aware gate=0 check\n");
+        goto cleanup;
+    }
+    if (!file_contains_text(c_path, "if (((bool)(x > 0)) != (bool)0) {")) {
+        printf("  FAILED: branch-aware gate=0 did not keep if lowering\n");
+        goto cleanup;
+    }
+
+    if (setenv("ME_DSL_JIT_BRANCH_AWARE_IF", "1", 1) != 0) {
+        printf("  FAILED: setenv branch-aware gate=1 failed\n");
+        goto cleanup;
+    }
+    if (compile_and_eval_dsl_values(src_branch_if, in, 4, out) != 0) {
+        goto cleanup;
+    }
+    for (int i = 0; i < 4; i++) {
+        double expected = (in[i] > 0.0) ? in[i] : -in[i];
+        if (fabs(out[i] - expected) > 1e-12) {
+            printf("  FAILED: branch-aware parity mismatch (gate=1) at %d (%.17g vs %.17g)\n",
+                   i, out[i], expected);
+            goto cleanup;
+        }
+    }
+    if (count_kernel_files_with_suffix(cache_dir, ".meta", NULL, 0) != 2) {
+        printf("  FAILED: expected 2 cache entries when toggling branch-aware gate\n");
+        goto cleanup;
+    }
+    if (count_kernel_files_with_suffix_containing_text(cache_dir, ".c",
+                                                       "y = (((bool)(x > 0)) != (bool)0) ? (double)(x) : (double)(-x);") < 1) {
+        printf("  FAILED: branch-aware gate=1 did not emit select lowering marker\n");
+        goto cleanup;
+    }
+
     rc = 0;
     printf("  PASSED\n");
 
@@ -2573,6 +2641,7 @@ cleanup:
     restore_env_value("ME_DSL_JIT_SCALAR_MATH_BRIDGE", saved_scalar);
     restore_env_value("ME_DSL_JIT_VEC_MATH", saved_vec);
     restore_env_value("ME_DSL_JIT_HYBRID_EXPR_VEC_MATH", saved_expr_vec);
+    restore_env_value("ME_DSL_JIT_BRANCH_AWARE_IF", saved_branch_if);
     free(saved_tmpdir);
     free(saved_cc);
     free(saved_pos_cache);
@@ -2580,6 +2649,7 @@ cleanup:
     free(saved_scalar);
     free(saved_vec);
     free(saved_expr_vec);
+    free(saved_branch_if);
     if (cache_dir[0] != '\0') {
         remove_files_in_dir(cache_dir);
         (void)rmdir(cache_dir);

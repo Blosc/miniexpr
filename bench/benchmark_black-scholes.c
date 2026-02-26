@@ -10,6 +10,7 @@
  *   ME_DSL_JIT_SCALAR_MATH_BRIDGE=0|1
  *   ME_DSL_JIT_VEC_MATH=0|1
  *   ME_DSL_JIT_HYBRID_EXPR_VEC_MATH=0|1
+ *   ME_DSL_JIT_BRANCH_AWARE_IF=0|1
  */
 
 #include <errno.h>
@@ -564,12 +565,14 @@ int main(int argc, char **argv) {
     const char *scalar_bridge_env = getenv("ME_DSL_JIT_SCALAR_MATH_BRIDGE");
     const char *vec_math_env = getenv("ME_DSL_JIT_VEC_MATH");
     const char *expr_vec_math_env = getenv("ME_DSL_JIT_HYBRID_EXPR_VEC_MATH");
+    const char *branch_if_env = getenv("ME_DSL_JIT_BRANCH_AWARE_IF");
     printf("benchmark_black-scholes\n");
     printf("compiler=%s nitems=%d repeats=%d\n", current_dsl_compiler_label(), nitems, repeats);
-    printf("ME_DSL_JIT_SCALAR_MATH_BRIDGE=%s ME_DSL_JIT_VEC_MATH=%s ME_DSL_JIT_HYBRID_EXPR_VEC_MATH=%s\n",
+    printf("ME_DSL_JIT_SCALAR_MATH_BRIDGE=%s ME_DSL_JIT_VEC_MATH=%s ME_DSL_JIT_HYBRID_EXPR_VEC_MATH=%s ME_DSL_JIT_BRANCH_AWARE_IF=%s\n",
            scalar_bridge_env ? scalar_bridge_env : "<unset>",
            vec_math_env ? vec_math_env : "<unset>",
-           expr_vec_math_env ? expr_vec_math_env : "<unset>");
+           expr_vec_math_env ? expr_vec_math_env : "<unset>",
+           branch_if_env ? branch_if_env : "<unset>");
     printf("%-16s %12s %14s %14s %14s %14s %12s %12s\n",
            "kernel", "compile_ms", "jit_warm_ms", "interp_ms", "jit_ns_elem",
            "interp_ns_elem", "max_abs", "checksum");

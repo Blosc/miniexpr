@@ -1436,6 +1436,90 @@ static int test_codegen_runtime_math_bridge_hybrid_gate_disable(void) {
     return 0;
 }
 
+static int test_codegen_branch_aware_if_select_lowering(void) {
+    printf("\n=== JIT C Codegen Test 20: branch-aware if-to-select lowering ===\n");
+
+    const char *src =
+        "def kernel(x):\n"
+        "    if x > 0:\n"
+        "        y = x\n"
+        "    else:\n"
+        "        y = -x\n"
+        "    return y\n";
+
+    me_dsl_error parse_error;
+    me_dsl_program *program = me_dsl_parse(src, &parse_error);
+    if (!program) {
+        printf("  FAILED: parse error at %d:%d (%s)\n",
+               parse_error.line, parse_error.column, parse_error.message);
+        return 1;
+    }
+
+    const char *param_names[] = {"x"};
+    me_dtype param_dtypes[] = {ME_FLOAT64};
+    dtype_resolve_ctx rctx;
+    rctx.value_dtype = ME_FLOAT64;
+
+    me_dsl_error ir_error;
+    me_dsl_jit_ir_program *ir = NULL;
+    bool ok = me_dsl_jit_ir_build(program, param_names, param_dtypes, 1,
+                                  mock_resolve_dtype, &rctx, &ir, &ir_error);
+    me_dsl_program_free(program);
+    if (!ok || !ir) {
+        printf("  FAILED: ir build rejected source at %d:%d (%s)\n",
+               ir_error.line, ir_error.column, ir_error.message);
+        me_dsl_jit_ir_free(ir);
+        return 1;
+    }
+
+    me_dsl_error cg_error;
+    me_dsl_jit_cgen_options options;
+    memset(&options, 0, sizeof(options));
+    options.has_enable_branch_aware_if_lowering = true;
+    options.enable_branch_aware_if_lowering = true;
+    char *c_source = NULL;
+    ok = me_dsl_jit_codegen_c(ir, ME_FLOAT64, &options, &c_source, &cg_error);
+    if (!ok || !c_source) {
+        printf("  FAILED: codegen rejected source at %d:%d (%s)\n",
+               cg_error.line, cg_error.column, cg_error.message);
+        me_dsl_jit_ir_free(ir);
+        free(c_source);
+        return 1;
+    }
+    if (!strstr(c_source, "y = (((bool)(x > 0)) != (bool)0) ? (double)(x) : (double)(-x);") ||
+        strstr(c_source, "if (((bool)(x > 0)) != (bool)0) {")) {
+        printf("  FAILED: branch-aware select lowering markers not emitted as expected\n");
+        me_dsl_jit_ir_free(ir);
+        free(c_source);
+        return 1;
+    }
+    free(c_source);
+
+    memset(&options, 0, sizeof(options));
+    options.has_enable_branch_aware_if_lowering = true;
+    options.enable_branch_aware_if_lowering = false;
+    c_source = NULL;
+    ok = me_dsl_jit_codegen_c(ir, ME_FLOAT64, &options, &c_source, &cg_error);
+    if (!ok || !c_source) {
+        printf("  FAILED: codegen rejected gate-off source at %d:%d (%s)\n",
+               cg_error.line, cg_error.column, cg_error.message);
+        me_dsl_jit_ir_free(ir);
+        free(c_source);
+        return 1;
+    }
+    if (!strstr(c_source, "if (((bool)(x > 0)) != (bool)0) {")) {
+        printf("  FAILED: branch-aware gate disable did not keep if lowering as expected\n");
+        me_dsl_jit_ir_free(ir);
+        free(c_source);
+        return 1;
+    }
+
+    me_dsl_jit_ir_free(ir);
+    free(c_source);
+    printf("  PASSED\n");
+    return 0;
+}
+
 int main(void) {
     int fail = 0;
     fail |= test_codegen_all_noncomplex_dtypes();
@@ -1457,5 +1541,6 @@ int main(void) {
     fail |= test_codegen_runtime_math_bridge_hybrid_stmt_lowering();
     fail |= test_codegen_runtime_math_bridge_vector_gate_disable();
     fail |= test_codegen_runtime_math_bridge_hybrid_gate_disable();
+    fail |= test_codegen_branch_aware_if_select_lowering();
     return fail;
 }

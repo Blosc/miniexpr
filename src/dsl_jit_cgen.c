@@ -41,6 +41,7 @@ typedef struct {
     const char *out_var_name;
     me_dsl_error *error;
     bool use_runtime_scalar_math_bridge;
+    bool enable_branch_aware_if_lowering;
     const struct me_jit_vec_stmt_plan_t *stmt_vec_plans;
     int n_stmt_vec_plans;
     int stmt_vec_out_tmp_slot;
@@ -1605,6 +1606,67 @@ static bool me_jit_resolve_vec_value_ref(const me_dsl_jit_ir_program *program,
     return false;
 }
 
+static void me_jit_scan_stmt_control_flow(const me_dsl_jit_ir_stmt *stmt,
+                                          bool *out_has_if,
+                                          bool *out_has_loop) {
+    if (!stmt) {
+        return;
+    }
+    switch (stmt->kind) {
+    case ME_DSL_JIT_IR_STMT_IF:
+        if (out_has_if) {
+            *out_has_if = true;
+        }
+        for (int i = 0; i < stmt->as.if_stmt.then_block.nstmts; i++) {
+            me_jit_scan_stmt_control_flow(stmt->as.if_stmt.then_block.stmts[i], out_has_if, out_has_loop);
+        }
+        for (int i = 0; i < stmt->as.if_stmt.n_elifs; i++) {
+            const me_dsl_jit_ir_if_branch *branch = &stmt->as.if_stmt.elif_branches[i];
+            for (int j = 0; j < branch->block.nstmts; j++) {
+                me_jit_scan_stmt_control_flow(branch->block.stmts[j], out_has_if, out_has_loop);
+            }
+        }
+        if (stmt->as.if_stmt.has_else) {
+            for (int i = 0; i < stmt->as.if_stmt.else_block.nstmts; i++) {
+                me_jit_scan_stmt_control_flow(stmt->as.if_stmt.else_block.stmts[i], out_has_if, out_has_loop);
+            }
+        }
+        break;
+    case ME_DSL_JIT_IR_STMT_WHILE:
+    case ME_DSL_JIT_IR_STMT_FOR:
+    case ME_DSL_JIT_IR_STMT_BREAK:
+    case ME_DSL_JIT_IR_STMT_CONTINUE:
+        if (out_has_loop) {
+            *out_has_loop = true;
+        }
+        if (stmt->kind == ME_DSL_JIT_IR_STMT_WHILE) {
+            for (int i = 0; i < stmt->as.while_loop.body.nstmts; i++) {
+                me_jit_scan_stmt_control_flow(stmt->as.while_loop.body.stmts[i], out_has_if, out_has_loop);
+            }
+        }
+        else if (stmt->kind == ME_DSL_JIT_IR_STMT_FOR) {
+            for (int i = 0; i < stmt->as.for_loop.body.nstmts; i++) {
+                me_jit_scan_stmt_control_flow(stmt->as.for_loop.body.stmts[i], out_has_if, out_has_loop);
+            }
+        }
+        break;
+    case ME_DSL_JIT_IR_STMT_ASSIGN:
+    case ME_DSL_JIT_IR_STMT_RETURN:
+        break;
+    }
+}
+
+static void me_jit_scan_block_control_flow(const me_dsl_jit_ir_block *block,
+                                           bool *out_has_if,
+                                           bool *out_has_loop) {
+    if (!block) {
+        return;
+    }
+    for (int i = 0; i < block->nstmts; i++) {
+        me_jit_scan_stmt_control_flow(block->stmts[i], out_has_if, out_has_loop);
+    }
+}
+
 static int me_jit_collect_stmt_vec_plans(const me_dsl_jit_ir_program *program,
                                          me_jit_vec_stmt_plan *plans,
                                          int plans_cap,
@@ -1618,22 +1680,23 @@ static int me_jit_collect_stmt_vec_plans(const me_dsl_jit_ir_program *program,
     if (program->block.nstmts > plans_cap) {
         return 0;
     }
-    for (int i = 0; i < program->block.nstmts; i++) {
-        const me_dsl_jit_ir_stmt *stmt = program->block.stmts[i];
-        if (!stmt) {
-            continue;
-        }
-        if (stmt->kind == ME_DSL_JIT_IR_STMT_WHILE ||
-            stmt->kind == ME_DSL_JIT_IR_STMT_FOR ||
-            stmt->kind == ME_DSL_JIT_IR_STMT_BREAK ||
-            stmt->kind == ME_DSL_JIT_IR_STMT_CONTINUE) {
-            return 0;
-        }
+    bool has_if_control = false;
+    bool has_loop_control = false;
+    me_jit_scan_block_control_flow(&program->block, &has_if_control, &has_loop_control);
+    if (has_loop_control) {
+        return 0;
     }
 
     me_jit_const_binding const_bindings[ME_JIT_MAX_STMT_VEC_PLANS];
     int nconst_bindings = 0;
     memset(const_bindings, 0, sizeof(const_bindings));
+
+    const int expr_plan_budget = has_if_control ? 2 : 8;
+    const int lifted_expr_plan_budget = has_if_control ? 2 : 6;
+    const int plan_pass_budget = has_if_control ? 14 : 24;
+    int expr_plan_count = 0;
+    int lifted_expr_plan_count = 0;
+    int estimated_plan_passes = 0;
 
     int nplans = 0;
     for (int i = 0; i < program->block.nstmts; i++) {
@@ -1670,20 +1733,23 @@ static int me_jit_collect_stmt_vec_plans(const me_dsl_jit_ir_program *program,
                 me_jit_vec_value_ref arg_ref;
                 if (me_jit_resolve_vec_value_ref(program, plans, nplans,
                                                  arg_start, arg_len, dtype, &arg_ref)) {
-                    me_jit_vec_stmt_plan *p = &plans[nplans];
-                    memset(p, 0, sizeof(*p));
-                    p->mode = ME_JIT_VEC_STMT_PLAN_TOP_UNARY;
-                    p->stmt = stmt;
-                    p->assign_name = assign_name;
-                    p->dtype = dtype;
-                    p->tmp_slot = nplans;
-                    p->is_unary = true;
-                    p->unary_kind = ukind;
-                    p->arg0_ref = arg_ref;
-                    p->unary_has_offset = has_offset;
-                    p->unary_offset = offset;
-                    nplans++;
-                    planned = true;
+                    if (estimated_plan_passes + 1 <= plan_pass_budget) {
+                        me_jit_vec_stmt_plan *p = &plans[nplans];
+                        memset(p, 0, sizeof(*p));
+                        p->mode = ME_JIT_VEC_STMT_PLAN_TOP_UNARY;
+                        p->stmt = stmt;
+                        p->assign_name = assign_name;
+                        p->dtype = dtype;
+                        p->tmp_slot = nplans;
+                        p->is_unary = true;
+                        p->unary_kind = ukind;
+                        p->arg0_ref = arg_ref;
+                        p->unary_has_offset = has_offset;
+                        p->unary_offset = offset;
+                        nplans++;
+                        estimated_plan_passes += 1;
+                        planned = true;
+                    }
                 }
             }
         }
@@ -1720,23 +1786,26 @@ static int me_jit_collect_stmt_vec_plans(const me_dsl_jit_ir_program *program,
                                me_jit_resolve_vec_value_ref(program, plans, nplans,
                                                             arg1_start, arg1_len, dtype, &arg1_ref);
                 if (arg0_ok && arg1_ok && !(arg0_is_const && arg1_is_const)) {
-                    me_jit_vec_stmt_plan *p = &plans[nplans];
-                    memset(p, 0, sizeof(*p));
-                    p->mode = ME_JIT_VEC_STMT_PLAN_TOP_BINARY;
-                    p->stmt = stmt;
-                    p->assign_name = assign_name;
-                    p->dtype = dtype;
-                    p->tmp_slot = nplans;
-                    p->is_unary = false;
-                    p->binary_kind = bkind;
-                    p->arg0_ref = arg0_ref;
-                    p->arg1_ref = arg1_ref;
-                    p->arg0_const = arg0_is_const;
-                    p->arg1_const = arg1_is_const;
-                    p->arg0_const_value = arg0_const;
-                    p->arg1_const_value = arg1_const;
-                    nplans++;
-                    planned = true;
+                    if (estimated_plan_passes + 1 <= plan_pass_budget) {
+                        me_jit_vec_stmt_plan *p = &plans[nplans];
+                        memset(p, 0, sizeof(*p));
+                        p->mode = ME_JIT_VEC_STMT_PLAN_TOP_BINARY;
+                        p->stmt = stmt;
+                        p->assign_name = assign_name;
+                        p->dtype = dtype;
+                        p->tmp_slot = nplans;
+                        p->is_unary = false;
+                        p->binary_kind = bkind;
+                        p->arg0_ref = arg0_ref;
+                        p->arg1_ref = arg1_ref;
+                        p->arg0_const = arg0_is_const;
+                        p->arg1_const = arg1_is_const;
+                        p->arg0_const_value = arg0_const;
+                        p->arg1_const_value = arg1_const;
+                        nplans++;
+                        estimated_plan_passes += 1;
+                        planned = true;
+                    }
                 }
             }
         }
@@ -1746,7 +1815,9 @@ static int me_jit_collect_stmt_vec_plans(const me_dsl_jit_ir_program *program,
             !me_jit_expr_contains_unsupported_tokens(value_text, dtype)) {
             if (!me_jit_expr_has_call_tokens(value_text)) {
                 char *expr_c = NULL;
-                if (me_jit_expr_to_c_vector(value_text, program, plans, nplans,
+                if (expr_plan_count < expr_plan_budget &&
+                    estimated_plan_passes + 1 <= plan_pass_budget &&
+                    me_jit_expr_to_c_vector(value_text, program, plans, nplans,
                                             const_bindings, nconst_bindings,
                                             0, 0, NULL, &expr_c)) {
                     me_jit_vec_stmt_plan *p = &plans[nplans];
@@ -1758,6 +1829,8 @@ static int me_jit_collect_stmt_vec_plans(const me_dsl_jit_ir_program *program,
                     p->tmp_slot = nplans;
                     p->expr_c = expr_c;
                     nplans++;
+                    expr_plan_count++;
+                    estimated_plan_passes += 1;
                     planned = true;
                 }
                 else {
@@ -1779,6 +1852,8 @@ static int me_jit_collect_stmt_vec_plans(const me_dsl_jit_ir_program *program,
                     char *lift_arg_c = NULL;
                     char *expr_c = NULL;
                     if (arg_text &&
+                        lifted_expr_plan_count < lifted_expr_plan_budget &&
+                        estimated_plan_passes + 3 <= plan_pass_budget &&
                         me_jit_expr_to_c_vector(arg_text, program, plans, nplans,
                                                 const_bindings, nconst_bindings,
                                                 0, 0, NULL, &lift_arg_c) &&
@@ -1799,6 +1874,8 @@ static int me_jit_collect_stmt_vec_plans(const me_dsl_jit_ir_program *program,
                         p->expr_c = expr_c;
                         p->lift_arg_c = lift_arg_c;
                         nplans++;
+                        lifted_expr_plan_count++;
+                        estimated_plan_passes += 3;
                         planned = true;
                     }
                     else {
@@ -2538,6 +2615,86 @@ static bool me_jit_emit_truthy_if_open(me_jit_codegen_ctx *ctx, int indent,
     return ok;
 }
 
+static bool me_jit_try_emit_branch_aware_if_select(me_jit_codegen_ctx *ctx,
+                                                   const me_dsl_jit_ir_stmt *stmt,
+                                                   int indent,
+                                                   bool *out_emitted) {
+    if (out_emitted) {
+        *out_emitted = false;
+    }
+    if (!ctx || !stmt || stmt->kind != ME_DSL_JIT_IR_STMT_IF || !ctx->enable_branch_aware_if_lowering) {
+        return true;
+    }
+    if (stmt->as.if_stmt.n_elifs != 0 || !stmt->as.if_stmt.has_else) {
+        return true;
+    }
+    if (stmt->as.if_stmt.then_block.nstmts != 1 || stmt->as.if_stmt.else_block.nstmts != 1) {
+        return true;
+    }
+    const me_dsl_jit_ir_stmt *then_stmt = stmt->as.if_stmt.then_block.stmts[0];
+    const me_dsl_jit_ir_stmt *else_stmt = stmt->as.if_stmt.else_block.stmts[0];
+    if (!then_stmt || !else_stmt ||
+        then_stmt->kind != ME_DSL_JIT_IR_STMT_ASSIGN ||
+        else_stmt->kind != ME_DSL_JIT_IR_STMT_ASSIGN) {
+        return true;
+    }
+    if (!then_stmt->as.assign.name || !else_stmt->as.assign.name ||
+        strcmp(then_stmt->as.assign.name, else_stmt->as.assign.name) != 0 ||
+        then_stmt->as.assign.dtype != else_stmt->as.assign.dtype ||
+        then_stmt->as.assign.value.dtype != then_stmt->as.assign.dtype ||
+        else_stmt->as.assign.value.dtype != else_stmt->as.assign.dtype) {
+        return true;
+    }
+    const char *assign_ctype = me_jit_c_type(then_stmt->as.assign.dtype);
+    const char *cond_ctype = me_jit_c_type(stmt->as.if_stmt.cond.dtype);
+    if (!assign_ctype || !cond_ctype) {
+        return true;
+    }
+    char *cond_c = NULL;
+    char *then_c = NULL;
+    char *else_c = NULL;
+    if (!me_jit_expr_to_c(&stmt->as.if_stmt.cond, &cond_c, ctx->error, stmt->line, stmt->column,
+                          ctx->use_runtime_scalar_math_bridge) ||
+        !me_jit_expr_to_c(&then_stmt->as.assign.value, &then_c, ctx->error, then_stmt->line, then_stmt->column,
+                          ctx->use_runtime_scalar_math_bridge) ||
+        !me_jit_expr_to_c(&else_stmt->as.assign.value, &else_c, ctx->error, else_stmt->line, else_stmt->column,
+                          ctx->use_runtime_scalar_math_bridge)) {
+        free(cond_c);
+        free(then_c);
+        free(else_c);
+        return false;
+    }
+    size_t need = strlen(then_stmt->as.assign.name) + strlen(assign_ctype) * 3 + strlen(cond_ctype) * 3 +
+                  strlen(cond_c) + strlen(then_c) + strlen(else_c) + 96;
+    char *line_buf = malloc(need);
+    if (!line_buf) {
+        free(cond_c);
+        free(then_c);
+        free(else_c);
+        me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
+        return false;
+    }
+    snprintf(line_buf, need,
+             "%s = (((%s)(%s)) != (%s)0) ? (%s)(%s) : (%s)(%s);",
+             then_stmt->as.assign.name,
+             cond_ctype, cond_c, cond_ctype,
+             assign_ctype, then_c,
+             assign_ctype, else_c);
+    free(cond_c);
+    free(then_c);
+    free(else_c);
+    bool ok = me_jit_emit_line(&ctx->source, indent, line_buf);
+    free(line_buf);
+    if (!ok) {
+        me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
+        return false;
+    }
+    if (out_emitted) {
+        *out_emitted = true;
+    }
+    return true;
+}
+
 static bool me_jit_emit_block(me_jit_codegen_ctx *ctx, const me_dsl_jit_ir_block *block, int indent);
 
 static bool me_jit_emit_stmt(me_jit_codegen_ctx *ctx, const me_dsl_jit_ir_stmt *stmt, int indent) {
@@ -2584,6 +2741,15 @@ static bool me_jit_emit_stmt(me_jit_codegen_ctx *ctx, const me_dsl_jit_ir_stmt *
         }
         return true;
     case ME_DSL_JIT_IR_STMT_IF:
+        {
+            bool branch_aware_emitted = false;
+            if (!me_jit_try_emit_branch_aware_if_select(ctx, stmt, indent, &branch_aware_emitted)) {
+                return false;
+            }
+            if (branch_aware_emitted) {
+                return true;
+            }
+        }
         if (!me_jit_emit_truthy_if_open(ctx, indent, &stmt->as.if_stmt.cond, stmt->line, stmt->column)) {
             return false;
         }
@@ -2964,6 +3130,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
     bool enable_vector_math = true;
     bool enable_hybrid_vector_math = true;
     bool enable_hybrid_expr_vector_math = false;
+    bool enable_branch_aware_if_lowering = true;
     bool synth_reserved_non_nd = false;
     bool synth_reserved_nd = false;
     const char *synth_nd_ctx_name = "__me_nd_ctx";
@@ -2986,6 +3153,9 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
     if (options && options->has_enable_hybrid_expr_vector_math) {
         enable_hybrid_expr_vector_math = options->enable_hybrid_expr_vector_math;
     }
+    if (options && options->has_enable_branch_aware_if_lowering) {
+        enable_branch_aware_if_lowering = options->enable_branch_aware_if_lowering;
+    }
     if (!enable_vector_math) {
         enable_hybrid_vector_math = false;
     }
@@ -2993,6 +3163,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         enable_hybrid_expr_vector_math = false;
     }
     ctx.use_runtime_scalar_math_bridge = use_runtime_math_bridge && enable_scalar_math_bridge;
+    ctx.enable_branch_aware_if_lowering = enable_branch_aware_if_lowering;
     me_jit_vec_stmt_plan stmt_vec_plans[ME_JIT_MAX_STMT_VEC_PLANS];
     int n_stmt_vec_plans = 0;
     memset(stmt_vec_plans, 0, sizeof(stmt_vec_plans));
