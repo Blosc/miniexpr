@@ -20,6 +20,20 @@
 typedef struct {
     const char *symbol_name;
     bool use_runtime_math_bridge;
+    bool has_enable_scalar_math_bridge;
+    bool enable_scalar_math_bridge;
+    bool has_enable_vector_math;
+    bool enable_vector_math;
+    bool has_enable_hybrid_vector_math;
+    bool enable_hybrid_vector_math;
+    bool has_enable_hybrid_expr_vector_math;
+    bool enable_hybrid_expr_vector_math;
+    char *trace_lowering_mode;
+    size_t trace_lowering_mode_cap;
+    char *trace_vector_ops;
+    size_t trace_vector_ops_cap;
+    char *trace_lowering_reason;
+    size_t trace_lowering_reason_cap;
     bool synth_reserved_non_nd;
     bool synth_reserved_nd;
     const char *synth_nd_ctx_name;

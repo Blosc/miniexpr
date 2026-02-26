@@ -366,10 +366,15 @@ int main(int argc, char **argv) {
         {"exp", "exp(x)"},
         {"log", "log(x + 1.5)"},
         {"pow", "pow(x, y)"},
+        {"fmax", "fmax(x, y)"},
+        {"fmin", "fmin(x, y)"},
         {"hypot", "hypot(x, y)"},
         {"atan2", "atan2(y, x)"},
         {"sinpi", "sinpi(x)"},
-        {"cospi", "cospi(x)"}
+        {"cospi", "cospi(x)"},
+        {"black_scholes_like",
+         "(x + 1.5) * (0.5 + 0.5 * erf((log((x + 1.5) / (y + 1.5)) + 0.03) / sqrt(0.2))) - "
+         "(y + 1.5) * exp(-0.01) * (0.5 + 0.5 * erf((log((x + 1.5) / (y + 1.5)) - 0.02) / sqrt(0.2)))"}
     };
     const int nkernels = (int)(sizeof(kernels) / sizeof(kernels[0]));
 

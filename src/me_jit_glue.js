@@ -333,6 +333,8 @@
         env.me_jit_vec_atan2_f64 = bindBridge("me_jit_vec_atan2_f64", function(aPtr, bPtr, outPtr, n) { vecBinaryF64(aPtr, bPtr, outPtr, n, Math.atan2); });
         env.me_jit_vec_hypot_f64 = bindBridge("me_jit_vec_hypot_f64", function(aPtr, bPtr, outPtr, n) { vecBinaryF64(aPtr, bPtr, outPtr, n, Math.hypot); });
         env.me_jit_vec_pow_f64 = bindBridge("me_jit_vec_pow_f64", function(aPtr, bPtr, outPtr, n) { vecBinaryF64(aPtr, bPtr, outPtr, n, Math.pow); });
+        env.me_jit_vec_fmax_f64 = bindBridge("me_jit_vec_fmax_f64", function(aPtr, bPtr, outPtr, n) { vecBinaryF64(aPtr, bPtr, outPtr, n, Math.max); });
+        env.me_jit_vec_fmin_f64 = bindBridge("me_jit_vec_fmin_f64", function(aPtr, bPtr, outPtr, n) { vecBinaryF64(aPtr, bPtr, outPtr, n, Math.min); });
         env.me_jit_vec_expm1_f64 = bindBridge("me_jit_vec_expm1_f64", function(inPtr, outPtr, n) { vecUnaryF64(inPtr, outPtr, n, Math.expm1); });
         env.me_jit_vec_log10_f64 = bindBridge("me_jit_vec_log10_f64", function(inPtr, outPtr, n) { vecUnaryF64(inPtr, outPtr, n, Math.log10); });
         env.me_jit_vec_sinh_f64 = bindBridge("me_jit_vec_sinh_f64", function(inPtr, outPtr, n) { vecUnaryF64(inPtr, outPtr, n, Math.sinh); });
@@ -356,6 +358,8 @@
         env.me_jit_vec_atan2_f32 = bindBridge("me_jit_vec_atan2_f32", function(aPtr, bPtr, outPtr, n) { vecBinaryF32(aPtr, bPtr, outPtr, n, Math.atan2); });
         env.me_jit_vec_hypot_f32 = bindBridge("me_jit_vec_hypot_f32", function(aPtr, bPtr, outPtr, n) { vecBinaryF32(aPtr, bPtr, outPtr, n, Math.hypot); });
         env.me_jit_vec_pow_f32 = bindBridge("me_jit_vec_pow_f32", function(aPtr, bPtr, outPtr, n) { vecBinaryF32(aPtr, bPtr, outPtr, n, Math.pow); });
+        env.me_jit_vec_fmax_f32 = bindBridge("me_jit_vec_fmax_f32", function(aPtr, bPtr, outPtr, n) { vecBinaryF32(aPtr, bPtr, outPtr, n, Math.max); });
+        env.me_jit_vec_fmin_f32 = bindBridge("me_jit_vec_fmin_f32", function(aPtr, bPtr, outPtr, n) { vecBinaryF32(aPtr, bPtr, outPtr, n, Math.min); });
         env.me_jit_vec_expm1_f32 = bindBridge("me_jit_vec_expm1_f32", function(inPtr, outPtr, n) { vecUnaryF32(inPtr, outPtr, n, Math.expm1); });
         env.me_jit_vec_log10_f32 = bindBridge("me_jit_vec_log10_f32", function(inPtr, outPtr, n) { vecUnaryF32(inPtr, outPtr, n, Math.log10); });
         env.me_jit_vec_sinh_f32 = bindBridge("me_jit_vec_sinh_f32", function(inPtr, outPtr, n) { vecUnaryF32(inPtr, outPtr, n, Math.sinh); });
