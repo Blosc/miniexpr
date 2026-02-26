@@ -28,6 +28,8 @@ typedef struct {
     bool enable_hybrid_vector_math;
     bool has_enable_hybrid_expr_vector_math;
     bool enable_hybrid_expr_vector_math;
+    bool has_enable_branch_aware_if_lowering;
+    bool enable_branch_aware_if_lowering;
     char *trace_lowering_mode;
     size_t trace_lowering_mode_cap;
     char *trace_vector_ops;

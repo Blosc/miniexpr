@@ -42,6 +42,47 @@ static bool mock_resolve_dtype(void *ctx, const me_dsl_expr *expr,
     return true;
 }
 
+static bool mock_resolve_dtype_reassign_mismatch(void *ctx, const me_dsl_expr *expr,
+                                                 me_dsl_jit_ir_resolve_mode mode, me_dtype *out_dtype) {
+    (void)ctx;
+    (void)mode;
+    if (!expr || !expr->text || !out_dtype) {
+        return false;
+    }
+
+    if (strcmp(expr->text, "200.0") == 0) {
+        *out_dtype = ME_FLOAT32;
+        return true;
+    }
+    if (strcmp(expr->text, "i + 0.0") == 0) {
+        *out_dtype = ME_FLOAT64;
+        return true;
+    }
+
+    const char *text = expr->text;
+    size_t len = strlen(text);
+    bool all_digits = (len > 0);
+    for (size_t i = 0; i < len; i++) {
+        if (text[i] < '0' || text[i] > '9') {
+            all_digits = false;
+            break;
+        }
+    }
+    if (all_digits) {
+        *out_dtype = ME_INT64;
+        return true;
+    }
+
+    if (strstr(text, "==") || strstr(text, "!=") || strstr(text, "<=") ||
+        strstr(text, ">=") || strstr(text, "<") || strstr(text, ">")) {
+        *out_dtype = ME_BOOL;
+        return true;
+    }
+
+    *out_dtype = ME_FLOAT64;
+    return true;
+}
+
 static int test_ir_accepts_supported_subset(void) {
     printf("\n=== JIT IR Test 1: supported subset ===\n");
 
@@ -506,6 +547,45 @@ static int test_ir_accepts_while_loops(void) {
     return 0;
 }
 
+static int test_ir_accepts_reassignment_dtype_coercion(void) {
+    printf("\n=== JIT IR Test 8: reassignment dtype coercion ===\n");
+
+    const char *src =
+        "def kernel(x):\n"
+        "    escape_iter = 200.0\n"
+        "    for i in range(8):\n"
+        "        if i > 4:\n"
+        "            escape_iter = i + 0.0\n"
+        "            break\n"
+        "    return escape_iter\n";
+
+    me_dsl_error error;
+    me_dsl_program *program = me_dsl_parse(src, &error);
+    if (!program) {
+        printf("  FAILED: parse error at %d:%d (%s)\n",
+               error.line, error.column, error.message);
+        return 1;
+    }
+
+    const char *param_names[] = {"x"};
+    me_dtype param_dtypes[] = {ME_FLOAT32};
+    me_dsl_jit_ir_program *ir = NULL;
+    if (!me_dsl_jit_ir_build(program, param_names, param_dtypes, 1,
+                             mock_resolve_dtype_reassign_mismatch, NULL,
+                             &ir, &error) || !ir) {
+        printf("  FAILED: reassignment dtype coercion should be accepted at %d:%d (%s)\n",
+               error.line, error.column, error.message);
+        me_dsl_jit_ir_free(ir);
+        me_dsl_program_free(program);
+        return 1;
+    }
+
+    me_dsl_program_free(program);
+    me_dsl_jit_ir_free(ir);
+    printf("  PASSED\n");
+    return 0;
+}
+
 int main(void) {
     int fail = 0;
     fail |= test_ir_accepts_supported_subset();
@@ -515,5 +595,6 @@ int main(void) {
     fail |= test_parser_pragmas();
     fail |= test_ir_fingerprint_includes_fp_mode();
     fail |= test_ir_accepts_while_loops();
+    fail |= test_ir_accepts_reassignment_dtype_coercion();
     return fail;
 }

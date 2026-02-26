@@ -1,6 +1,6 @@
 # Plan: Comprehensive SLEEF Integration for Runtime JIT
 
-Last updated: 2026-02-25
+Last updated: 2026-02-26
 
 ## Context
 
@@ -74,6 +74,8 @@ JIT codegen can use this for guarded lowering decisions and trace output.
   - Done: direct vector lowering for simple single-return kernels (unary and selected binary), scalar fallback path remains automatic.
   - Done: staged assign+return pattern lowering (`tmp = fn(...); return tmp`) for supported unary/binary vector calls.
   - Done: unary vector lowering set includes baseline (`sin/cos/exp/log/sqrt/abs`) and extended unary bridge coverage.
+  - In progress: runtime wiring for expression/lifted hybrid vector lowering is env-gated via `ME_DSL_JIT_HYBRID_EXPR_VEC_MATH=0|1` (default off).
+  - In progress: branch-aware simple `if` assign/else lowering to branchless select form is env-gated via `ME_DSL_JIT_BRANCH_AWARE_IF=0|1` (default on).
   - Pending: general subexpression vector-lowering pass (current lowering is pattern-based, not full graph/hybrid).
 - Phase 2: in progress.
   - Done: binary vector lowering for `atan2`, `hypot`, `pow`.
@@ -82,6 +84,7 @@ JIT codegen can use this for guarded lowering decisions and trace output.
   - Done: mixed graph/broadcast support generalized for binary vector ops (constant + parameter) across supported binary set.
 - Phase 3: partially complete.
   - Done: runtime bridge chunk-size heuristic via `ME_DSL_JIT_VEC_CHUNK_ITEMS` (default chunk cap) to avoid oversized bridge chunks.
+  - Done: initial hybrid expression cost gating (plan-pass and expression/lifted-plan budgets, stricter when control flow is present) to avoid over-lowering regressions.
   - Pending: deeper temp-buffer scheduling/reuse and fused lowering.
 - Phase 4: partially complete.
   - Done: explicit env-controlled default FP mode via `ME_DSL_FP_MODE` with `strict|contract|fast|relaxed` (`relaxed` mapped to fast), while pragma still takes precedence.
@@ -262,3 +265,28 @@ This plan is complete when all are true:
 3. Interpreter/JIT parity is validated under strict mode.
 4. Benchmarks show sustained gains for math-heavy kernels over scalar-bridge baseline.
 5. Rollout gates allow safe enable/disable without functional regressions.
+
+## 2026-02-26 Implementation Plan (cc backend focus)
+
+1. Wire runtime gate for expression/lifted hybrid lowering (safe default off).
+- Add `ME_DSL_JIT_HYBRID_EXPR_VEC_MATH=0|1` gate.
+- Include effective gate state in JIT runtime cache keying to prevent stale cache reuse across toggles.
+- Surface gate state in trace output.
+
+2. Expand runtime/cache validation.
+- Add runtime-cache tests that toggle expression-hybrid gate and verify:
+  - generated C differs for hybrid-lifted patterns when gate is enabled
+  - cache metadata/key separation across gate states
+  - numerical parity remains unchanged
+
+3. Benchmark on Black-Scholes-like kernels with fixed env matrix.
+- Measure `cc` backend with:
+  - `ME_DSL_JIT_VEC_MATH=1`, `ME_DSL_JIT_SCALAR_MATH_BRIDGE=0|1`
+  - `ME_DSL_JIT_HYBRID_EXPR_VEC_MATH=0|1`
+- Capture lowering mode/op markers from trace and generated source.
+- Treat wins as backend-dependent (SIMD/SLEEF on vs off) and keep default off until stable.
+
+4. Follow-up lowering work if gate shows wins.
+- Improve pattern coverage for nested expressions with temp reuse.
+- Add branch/`where`-style lowering candidates for `if`-heavy kernels.
+- Re-evaluate default-on policy after repeatable perf gains and parity coverage.
