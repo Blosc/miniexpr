@@ -362,6 +362,7 @@ typedef struct {
     bool jit_synth_reserved_non_nd;
     bool jit_synth_reserved_nd;
     bool jit_vec_math_enabled;
+    bool jit_hybrid_expr_vec_math_enabled;
     int jit_c_error_line;
     int jit_c_error_column;
     char jit_c_error[128];
@@ -4063,6 +4064,7 @@ static uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program
     h = dsl_jit_hash_i32(h, program->jit_use_runtime_math_bridge ? 1 : 0);
     h = dsl_jit_hash_i32(h, program->jit_scalar_math_bridge_enabled ? 1 : 0);
     h = dsl_jit_hash_i32(h, program->jit_vec_math_enabled ? 1 : 0);
+    h = dsl_jit_hash_i32(h, program->jit_hybrid_expr_vec_math_enabled ? 1 : 0);
     return h;
 }
 
@@ -4369,6 +4371,14 @@ static bool dsl_jit_vec_math_enabled(void) {
     const char *env = getenv("ME_DSL_JIT_VEC_MATH");
     if (!env || env[0] == '\0') {
         return true;
+    }
+    return strcmp(env, "0") != 0;
+}
+
+static bool dsl_jit_hybrid_expr_vector_math_enabled(void) {
+    const char *env = getenv("ME_DSL_JIT_HYBRID_EXPR_VEC_MATH");
+    if (!env || env[0] == '\0') {
+        return false;
     }
     return strcmp(env, "0") != 0;
 }
@@ -6240,6 +6250,14 @@ static bool dsl_jit_vec_math_enabled(void) {
     return strcmp(env, "0") != 0;
 }
 
+static bool dsl_jit_hybrid_expr_vector_math_enabled(void) {
+    const char *env = getenv("ME_DSL_JIT_HYBRID_EXPR_VEC_MATH");
+    if (!env || env[0] == '\0') {
+        return false;
+    }
+    return strcmp(env, "0") != 0;
+}
+
 static bool dsl_jit_runtime_enabled(void) {
     const char *env = getenv("ME_DSL_JIT");
     if (!env || env[0] == '\0') {
@@ -7099,6 +7117,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     program->jit_synth_reserved_non_nd = false;
     program->jit_synth_reserved_nd = false;
     program->jit_vec_math_enabled = false;
+    program->jit_hybrid_expr_vec_math_enabled = false;
     program->jit_c_error_line = 0;
     program->jit_c_error_column = 0;
     program->jit_c_error[0] = '\0';
@@ -7317,8 +7336,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     cg_options.has_enable_hybrid_vector_math = true;
     cg_options.enable_hybrid_vector_math = cg_options.enable_vector_math;
     cg_options.has_enable_hybrid_expr_vector_math = true;
-    /* Phase 2 (expression/lifted hybrid lowering) stays experimental for now. */
-    cg_options.enable_hybrid_expr_vector_math = false;
+    cg_options.enable_hybrid_expr_vector_math = dsl_jit_hybrid_expr_vector_math_enabled();
     if (program->compiler == ME_DSL_COMPILER_LIBTCC) {
         /* TCC regresses on the multi-pass temp-buffer hybrid path. */
         cg_options.enable_hybrid_vector_math = false;
@@ -7368,13 +7386,18 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     program->jit_scalar_math_bridge_enabled = cg_options.use_runtime_math_bridge &&
                                               cg_options.enable_scalar_math_bridge;
     program->jit_vec_math_enabled = cg_options.use_runtime_math_bridge && cg_options.enable_vector_math;
+    program->jit_hybrid_expr_vec_math_enabled = cg_options.use_runtime_math_bridge &&
+                                                cg_options.enable_vector_math &&
+                                                cg_options.enable_hybrid_vector_math &&
+                                                cg_options.enable_hybrid_expr_vector_math;
     snprintf(program->jit_lowering_mode, sizeof(program->jit_lowering_mode), "%s", lowering_mode);
     snprintf(program->jit_vector_ops, sizeof(program->jit_vector_ops), "%s", vector_ops);
     snprintf(program->jit_lowering_reason, sizeof(program->jit_lowering_reason), "%s", lowering_reason);
     if (program->jit_use_runtime_math_bridge) {
-        dsl_tracef("jit codegen: runtime math bridge enabled (scalar=%s vec=%s)",
+        dsl_tracef("jit codegen: runtime math bridge enabled (scalar=%s vec=%s expr=%s)",
                    program->jit_scalar_math_bridge_enabled ? "bridge" : "libm",
-                   program->jit_vec_math_enabled ? "on" : "off");
+                   program->jit_vec_math_enabled ? "on" : "off",
+                   program->jit_hybrid_expr_vec_math_enabled ? "on" : "off");
     }
     dsl_tracef("jit codegen: lowering=%s vec_ops=%s reason=%s",
                program->jit_lowering_mode[0] ? program->jit_lowering_mode : "scalar",
