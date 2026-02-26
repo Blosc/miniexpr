@@ -805,12 +805,12 @@ static int test_nd_indices(void) {
     return rc;
 }
 
-static int test_global_linear_idx(void) {
+static int test_flat_idx(void) {
     printf("\n=== DSL Test 4b: global linear index ===\n");
 
     const char *src_linear =
         "def kernel():\n"
-        "    return _global_linear_idx\n";
+        "    return _flat_idx\n";
 
     me_expr *expr = NULL;
     int err = 0;
@@ -834,7 +834,7 @@ static int test_global_linear_idx(void) {
 
     const char *src_nd =
         "def kernel():\n"
-        "    return _global_linear_idx\n";
+        "    return _flat_idx\n";
     int64_t shape[2] = {3, 5};
     int32_t chunks[2] = {2, 4};
     int32_t blocks[2] = {2, 3};
@@ -867,7 +867,7 @@ static int test_reserved_index_vars_jit_parity(void) {
 
     const char *src =
         "def kernel():\n"
-        "    return _global_linear_idx + _i0 + _n0 + _ndim\n";
+        "    return _flat_idx + _i0 + _n0 + _ndim\n";
     double out_interp[6] = {0, 0, 0, 0, 0, 0};
     double out_jit[6] = {0, 0, 0, 0, 0, 0};
     double expected[6] = {7, 9, 11, 13, 15, 17};
@@ -911,7 +911,7 @@ static int test_reserved_index_vars_jit_parity(void) {
 
     const char *src_nd =
         "def kernel():\n"
-        "    return _global_linear_idx + _i0 + _i1 + _n0 + _n1 + _ndim\n";
+        "    return _flat_idx + _i0 + _i1 + _n0 + _n1 + _ndim\n";
     int64_t shape[2] = {3, 5};
     int32_t chunks[2] = {2, 4};
     int32_t blocks[2] = {2, 3};
@@ -991,7 +991,7 @@ static int test_reserved_index_vars_env_gate(void) {
         "    return x + 1\n";
     const char *src_reserved =
         "def kernel():\n"
-        "    return _global_linear_idx + 1\n";
+        "    return _flat_idx + 1\n";
 
     double x[4] = {0.0, 1.0, 2.0, 3.0};
     const void *plain_inputs[] = {x};
@@ -2364,7 +2364,7 @@ int main(void) {
     fail |= test_invalid_conditionals();
     fail |= test_if_elif_else();
     fail |= test_nd_indices();
-    fail |= test_global_linear_idx();
+    fail |= test_flat_idx();
     fail |= test_reserved_index_vars_jit_parity();
     fail |= test_reserved_index_vars_env_gate();
     fail |= test_nd_padding();

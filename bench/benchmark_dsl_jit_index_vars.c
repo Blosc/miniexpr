@@ -2,7 +2,7 @@
  * DSL reserved-index-vars benchmark (ND).
  *
  * Exercises reserved symbols in one kernel:
- *   _i0, _i1, _n0, _n1, _ndim, _global_linear_idx
+ *   _i0, _i1, _n0, _n1, _ndim, _flat_idx
  *
  * Compares:
  * - interp      : ME_DSL_JIT=0
@@ -257,14 +257,14 @@ static bool build_dsl_source(char *out, size_t out_size) {
                      "# me:compiler=%s\n"
                      "# me:fp=strict\n"
                      "def kernel():\n"
-                     "    return _global_linear_idx + _i0 + _i1 + _n0 + _n1 + _ndim\n",
+                     "    return _flat_idx + _i0 + _i1 + _n0 + _n1 + _ndim\n",
                      compiler_value);
     }
     else {
         n = snprintf(out, out_size,
                      "# me:fp=strict\n"
                      "def kernel():\n"
-                     "    return _global_linear_idx + _i0 + _i1 + _n0 + _n1 + _ndim\n");
+                     "    return _flat_idx + _i0 + _i1 + _n0 + _n1 + _ndim\n");
     }
     return n > 0 && (size_t)n < out_size;
 }
@@ -526,7 +526,7 @@ int main(int argc, char **argv) {
     }
     printf("benchmark_dsl_jit_index_vars\n");
     printf("compiler=%s target_nitems=%d repeats=%d\n", compiler_label, target_nitems, repeats);
-    printf("kernel: _global_linear_idx + _i0 + _i1 + _n0 + _n1 + _ndim\n");
+    printf("kernel: _flat_idx + _i0 + _i1 + _n0 + _n1 + _ndim\n");
 
     for (int c = 0; c < 2; c++) {
         const nd_case *sc = &cases[c];
@@ -580,7 +580,7 @@ int main(int argc, char **argv) {
     printf("  jit-indexvars: ME_DSL_JIT=1, ME_DSL_JIT_INDEX_VARS=1\n");
     printf("  gate-off ctrl: ME_DSL_JIT=1, ME_DSL_JIT_INDEX_VARS=0\n");
     if (tcc_like_compiler) {
-        printf("  tcc policy: mixed _global_linear_idx + _i/_n/_ndim kernels auto-disable reserved-index JIT\n");
+        printf("  tcc policy: mixed _flat_idx + _i/_n/_ndim kernels auto-disable reserved-index JIT\n");
     }
     return 0;
 }

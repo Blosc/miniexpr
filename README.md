@@ -270,7 +270,7 @@ miniexpr includes a DSL (Domain-Specific Language) for writing multi-statement c
 - **Conditionals**: `where(cond, then, else)` for element-wise selection
 - **Loops**: `for var in range(limit)` iteration
 - **Control flow**: `break` and `continue` statements
-- **Index access**: Built-in `_i0`–`_i7` (position), `_n0`–`_n7` (shape), and `_global_linear_idx` variables
+- **Index access**: Built-in `_i0`–`_i7` (position), `_n0`–`_n7` (shape), and `_flat_idx` variables
 - **Function-style kernels**: `def name(args): ... return expr`
 
 ### DSL Example
@@ -299,7 +299,7 @@ On Linux/macOS, DSL kernels may use runtime JIT compilation when eligible. The f
 
 - `ME_DSL_JIT=0`: Disable runtime JIT and always use interpreter fallback.
 - `ME_DSL_JIT_POS_CACHE=0`: Disable process-local positive cache reuse for loaded JIT kernels.
-- `ME_DSL_JIT_INDEX_VARS=0`: Disable runtime JIT for DSL kernels that use reserved index vars (`_i*`, `_n*`, `_ndim`, `_global_linear_idx`).
+- `ME_DSL_JIT_INDEX_VARS=0`: Disable runtime JIT for DSL kernels that use reserved index vars (`_i*`, `_n*`, `_ndim`, `_flat_idx`).
 - `ME_DSL_JIT_INDEX_VARS_SYNTH=1`: Enable non-ND in-kernel synthesis for reserved index vars (default is buffer-passing).
 - `CFLAGS="..."`: Standard C compiler flags honored by the `cc` backend runtime JIT path.
 

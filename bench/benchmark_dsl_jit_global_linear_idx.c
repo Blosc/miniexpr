@@ -1,8 +1,8 @@
 /*
  * DSL global-linear-index benchmark (ND).
  *
- * Exercises a kernel that uses only _global_linear_idx with constant offsets:
- *   START_CONST + _global_linear_idx + STEP_CONST
+ * Exercises a kernel that uses only _flat_idx with constant offsets:
+ *   START_CONST + _flat_idx + STEP_CONST
  *
  * Compares:
  * - interp      : ME_DSL_JIT=0
@@ -16,7 +16,7 @@
  * - seq-false-inner-tail  : non-contiguous walk with inner-dim tail padding
  *
  * Usage:
- *   ./benchmark_dsl_jit_global_linear_idx [target_nitems] [repeats]
+ *   ./benchmark_dsl_jit_flat_idx [target_nitems] [repeats]
  *
  * Optional:
  *   ME_BENCH_COMPILER=tcc|cc
@@ -265,14 +265,14 @@ static bool build_dsl_source(char *out, size_t out_size) {
                      "# me:compiler=%s\n"
                      "# me:fp=strict\n"
                      "def kernel():\n"
-                     "    return " ME_STR(START_CONST) " + _global_linear_idx + " ME_STR(STEP_CONST) "\n",
+                     "    return " ME_STR(START_CONST) " + _flat_idx + " ME_STR(STEP_CONST) "\n",
                      compiler_value);
     }
     else {
         n = snprintf(out, out_size,
                      "# me:fp=strict\n"
                      "def kernel():\n"
-                     "    return " ME_STR(START_CONST) " + _global_linear_idx + " ME_STR(STEP_CONST) "\n");
+                     "    return " ME_STR(START_CONST) " + _flat_idx + " ME_STR(STEP_CONST) "\n");
     }
     return n > 0 && (size_t)n < out_size;
 }
@@ -694,9 +694,9 @@ int main(int argc, char **argv) {
     mode_result results[NMODES];
 
     const char *compiler_label = current_dsl_compiler_label();
-    printf("benchmark_dsl_jit_global_linear_idx\n");
+    printf("benchmark_dsl_jit_flat_idx\n");
     printf("compiler=%s target_nitems=%d repeats=%d\n", compiler_label, target_nitems, repeats);
-    printf("kernel: %d + _global_linear_idx + %d\n", START_CONST, STEP_CONST);
+    printf("kernel: %d + _flat_idx + %d\n", START_CONST, STEP_CONST);
 
     enum {
         NCASES = (int)(sizeof(cases) / sizeof(cases[0]))

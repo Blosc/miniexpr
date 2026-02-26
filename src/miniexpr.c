@@ -338,13 +338,13 @@ typedef struct {
     int *local_var_indices;
     int *local_slots;
     int idx_ndim;
-    int idx_global_linear_idx;
+    int idx_flat_idx;
     int idx_i[ME_DSL_MAX_NDIM];
     int idx_n[ME_DSL_MAX_NDIM];
     int uses_i_mask;
     int uses_n_mask;
     bool uses_ndim;
-    bool uses_global_linear_idx;
+    bool uses_flat_idx;
     int compile_ndims;
     me_dsl_fp_mode fp_mode;
     me_dsl_compiler compiler;
@@ -690,7 +690,7 @@ static bool dsl_is_reserved_name(const char *name) {
     if (strcmp(name, "_ndim") == 0) {
         return true;
     }
-    if (strcmp(name, "_global_linear_idx") == 0) {
+    if (strcmp(name, "_flat_idx") == 0) {
         return true;
     }
     if ((name[0] == '_' && (name[1] == 'i' || name[1] == 'n')) && isdigit((unsigned char)name[2])) {
@@ -3172,7 +3172,7 @@ static bool dsl_program_is_dsl(const me_dsl_program *program) {
 
 static void dsl_scan_reserved_usage_block(const me_dsl_block *block, int *uses_i_mask,
                                           int *uses_n_mask, bool *uses_ndim,
-                                          bool *uses_global_linear_idx) {
+                                          bool *uses_flat_idx) {
     if (!block) {
         return;
     }
@@ -3213,8 +3213,8 @@ static void dsl_scan_reserved_usage_block(const me_dsl_block *block, int *uses_i
             if (dsl_expr_uses_identifier(expr_text, "_ndim")) {
                 *uses_ndim = true;
             }
-            if (dsl_expr_uses_identifier(expr_text, "_global_linear_idx")) {
-                *uses_global_linear_idx = true;
+            if (dsl_expr_uses_identifier(expr_text, "_flat_idx")) {
+                *uses_flat_idx = true;
             }
             for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
                 char name[8];
@@ -3230,11 +3230,11 @@ static void dsl_scan_reserved_usage_block(const me_dsl_block *block, int *uses_i
         }
         if (stmt->kind == ME_DSL_STMT_IF) {
             dsl_scan_reserved_usage_block(&stmt->as.if_stmt.then_block, uses_i_mask, uses_n_mask, uses_ndim,
-                                          uses_global_linear_idx);
+                                          uses_flat_idx);
             for (int j = 0; j < stmt->as.if_stmt.n_elifs; j++) {
                 dsl_scan_reserved_usage_block(&stmt->as.if_stmt.elif_branches[j].block,
                                               uses_i_mask, uses_n_mask, uses_ndim,
-                                              uses_global_linear_idx);
+                                              uses_flat_idx);
                 const char *elif_text = stmt->as.if_stmt.elif_branches[j].cond
                                             ? stmt->as.if_stmt.elif_branches[j].cond->text
                                             : NULL;
@@ -3242,8 +3242,8 @@ static void dsl_scan_reserved_usage_block(const me_dsl_block *block, int *uses_i
                     if (dsl_expr_uses_identifier(elif_text, "_ndim")) {
                         *uses_ndim = true;
                     }
-                    if (dsl_expr_uses_identifier(elif_text, "_global_linear_idx")) {
-                        *uses_global_linear_idx = true;
+                    if (dsl_expr_uses_identifier(elif_text, "_flat_idx")) {
+                        *uses_flat_idx = true;
                     }
                     for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
                         char name[8];
@@ -3261,16 +3261,16 @@ static void dsl_scan_reserved_usage_block(const me_dsl_block *block, int *uses_i
             if (stmt->as.if_stmt.has_else) {
                 dsl_scan_reserved_usage_block(&stmt->as.if_stmt.else_block,
                                               uses_i_mask, uses_n_mask, uses_ndim,
-                                              uses_global_linear_idx);
+                                              uses_flat_idx);
             }
         }
         if (stmt->kind == ME_DSL_STMT_FOR) {
             dsl_scan_reserved_usage_block(&stmt->as.for_loop.body, uses_i_mask, uses_n_mask, uses_ndim,
-                                          uses_global_linear_idx);
+                                          uses_flat_idx);
         }
         if (stmt->kind == ME_DSL_STMT_WHILE) {
             dsl_scan_reserved_usage_block(&stmt->as.while_loop.body, uses_i_mask, uses_n_mask, uses_ndim,
-                                          uses_global_linear_idx);
+                                          uses_flat_idx);
         }
     }
 }
@@ -4074,7 +4074,7 @@ static bool dsl_jit_tcc_reserved_index_mix_auto_disabled(const me_dsl_compiled_p
     if (!program || program->compiler != ME_DSL_COMPILER_LIBTCC) {
         return false;
     }
-    if (!program->uses_global_linear_idx) {
+    if (!program->uses_flat_idx) {
         return false;
     }
     if ((program->uses_i_mask == 0) && (program->uses_n_mask == 0) && !program->uses_ndim) {
@@ -7163,7 +7163,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     bool uses_reserved_index_vars = (program->uses_i_mask != 0) ||
                                     (program->uses_n_mask != 0) ||
                                     program->uses_ndim ||
-                                    program->uses_global_linear_idx;
+                                    program->uses_flat_idx;
     if (uses_reserved_index_vars && !dsl_jit_index_vars_enabled()) {
         snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
                  "reserved index vars disabled by ME_DSL_JIT_INDEX_VARS");
@@ -7203,7 +7203,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     if (program->uses_ndim && program->idx_ndim >= 0) {
         jit_param_count++;
     }
-    if (program->uses_global_linear_idx && program->idx_global_linear_idx >= 0) {
+    if (program->uses_flat_idx && program->idx_flat_idx >= 0) {
         jit_param_count++;
     }
     if (program->jit_synth_reserved_nd) {
@@ -7284,8 +7284,8 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
         param_bindings[nparams].kind = ME_DSL_JIT_BIND_RESERVED_NDIM;
         nparams++;
     }
-    if (program->uses_global_linear_idx && program->idx_global_linear_idx >= 0) {
-        int idx = program->idx_global_linear_idx;
+    if (program->uses_flat_idx && program->idx_flat_idx >= 0) {
+        int idx = program->idx_flat_idx;
         param_names[nparams] = program->vars.names[idx];
         param_dtypes[nparams] = program->vars.dtypes[idx];
         param_bindings[nparams].var_index = idx;
@@ -7965,7 +7965,7 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     program->compile_ndims = compile_ndims;
     dsl_var_table_init(&program->vars);
     program->idx_ndim = -1;
-    program->idx_global_linear_idx = -1;
+    program->idx_flat_idx = -1;
     for (int i = 0; i < ME_DSL_MAX_NDIM; i++) {
         program->idx_i[i] = -1;
         program->idx_n[i] = -1;
@@ -8229,14 +8229,14 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
     int uses_i_mask = 0;
     int uses_n_mask = 0;
     bool uses_ndim = false;
-    bool uses_global_linear_idx = false;
+    bool uses_flat_idx = false;
     dsl_scan_reserved_usage_block(&parsed->block, &uses_i_mask, &uses_n_mask, &uses_ndim,
-                                  &uses_global_linear_idx);
+                                  &uses_flat_idx);
 
     program->uses_i_mask = uses_i_mask;
     program->uses_n_mask = uses_n_mask;
     program->uses_ndim = uses_ndim;
-    program->uses_global_linear_idx = uses_global_linear_idx;
+    program->uses_flat_idx = uses_flat_idx;
 
     for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
         if (uses_i_mask & (1 << d)) {
@@ -8294,12 +8294,12 @@ static me_dsl_compiled_program *dsl_compile_program(const char *source,
             return NULL;
         }
     }
-    if (uses_global_linear_idx) {
-        program->idx_global_linear_idx = dsl_var_table_add(&program->vars, "_global_linear_idx", ME_INT64);
-        if (program->idx_global_linear_idx < 0) {
+    if (uses_flat_idx) {
+        program->idx_flat_idx = dsl_var_table_add(&program->vars, "_flat_idx", ME_INT64);
+        if (program->idx_flat_idx < 0) {
             if (error_reason && error_reason_cap > 0) {
                 snprintf(error_reason, error_reason_cap,
-                         "failed to register reserved symbol '_global_linear_idx'");
+                         "failed to register reserved symbol '_flat_idx'");
             }
             if (error_pos) {
                 *error_pos = -1;
@@ -10041,9 +10041,9 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
             }
         }
     }
-    if (program->uses_global_linear_idx && program->idx_global_linear_idx >= 0 && reserved_count >= 0) {
+    if (program->uses_flat_idx && program->idx_flat_idx >= 0 && reserved_count >= 0) {
         if (global_linear_idx_buffer) {
-            var_buffers[program->idx_global_linear_idx] = (void *)global_linear_idx_buffer;
+            var_buffers[program->idx_flat_idx] = (void *)global_linear_idx_buffer;
         }
         else {
             int64_t *buf = malloc((size_t)nitems * sizeof(int64_t));
@@ -10051,7 +10051,7 @@ static int dsl_eval_program(const me_dsl_compiled_program *program,
                 reserved_count = -1;
             }
             else {
-                var_buffers[program->idx_global_linear_idx] = buf;
+                var_buffers[program->idx_flat_idx] = buf;
                 reserved_buffers[reserved_count++] = buf;
                 if (use_nd_ctx_reserved) {
                     synth_global_output = buf;
@@ -10484,7 +10484,7 @@ static int me_eval_dsl_nd(const me_expr *expr, const void **vars_block,
             use_nd_synth_fast = nd_ctx_ready;
         }
         bool need_reserved_indices =
-            ((program->uses_i_mask != 0) || program->uses_global_linear_idx) &&
+            ((program->uses_i_mask != 0) || program->uses_flat_idx) &&
             !use_nd_synth_fast;
         if (need_reserved_indices) {
             for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
@@ -10496,7 +10496,7 @@ static int me_eval_dsl_nd(const me_expr *expr, const void **vars_block,
                     }
                 }
             }
-            if (program->uses_global_linear_idx) {
+            if (program->uses_flat_idx) {
                 global_linear_idx_buffer = malloc((size_t)valid_items * sizeof(int64_t));
                 if (!global_linear_idx_buffer) {
                     for (int j = 0; j < ME_DSL_MAX_NDIM; j++) free(idx_buffers[j]);
@@ -10626,7 +10626,7 @@ static int me_eval_dsl_nd(const me_expr *expr, const void **vars_block,
                 }
             }
         }
-        if (program->uses_global_linear_idx) {
+        if (program->uses_flat_idx) {
             global_linear_idx_buffer = malloc((size_t)valid_items * sizeof(int64_t));
             if (!global_linear_idx_buffer) {
                 for (int v = 0; v < n_vars; v++) free(packed_vars[v]);

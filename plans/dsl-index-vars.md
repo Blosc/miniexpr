@@ -9,7 +9,7 @@ Enable runtime JIT for DSL kernels that reference reserved index symbols:
 - `_i0`..`_i7`
 - `_n0`..`_n7`
 - `_ndim`
-- `_global_linear_idx`
+- `_flat_idx`
 
 with behavior matching interpreter semantics for regular and ND/padded evaluation.
 
@@ -44,7 +44,7 @@ with behavior matching interpreter semantics for regular and ND/padded evaluatio
 
 - Runtime dispatch builds JIT inputs from binding metadata:
   - user bindings from `vars_block`
-  - reserved bindings from existing reserved buffers (`_i*`, `_n*`, `_ndim`, `_global_linear_idx`)
+  - reserved bindings from existing reserved buffers (`_i*`, `_n*`, `_ndim`, `_flat_idx`)
 - Existing interpreter reserved-buffer preparation remains the source of truth.
 - JIT remains best-effort with clean interpreter fallback on JIT runtime failure.
 
@@ -53,7 +53,7 @@ with behavior matching interpreter semantics for regular and ND/padded evaluatio
 - Reused current ND semantics:
   - no-padding path (`valid_items == padded_items`)
   - packed/scatter path for padded blocks
-- `_global_linear_idx` continues to map to global C-order positions as in interpreter path.
+- `_flat_idx` continues to map to global C-order positions as in interpreter path.
 - No behavior change to padded write handling (existing zero-fill/scatter preserved).
 
 ### Phase 4: synthesis optimization (done for current ABI)
@@ -62,12 +62,12 @@ with behavior matching interpreter semantics for regular and ND/padded evaluatio
   - `_i0 = idx`, `_i(d>0) = 0`
   - `_n0 = nitems`, `_n(d>0) = 1`
   - `_ndim = 1`
-  - `_global_linear_idx = idx`
+  - `_flat_idx = idx`
 - Implemented ND synthesis (native runtime JIT) under the same kernel ABI by passing a compact ND context pointer (`__me_nd_ctx`) and synthesizing:
   - `_i*` from `idx` decomposition + per-block base offsets
   - `_n*` from global shape
   - `_ndim` from ND context
-  - `_global_linear_idx` from synthesized coordinates and global strides
+  - `_flat_idx` from synthesized coordinates and global strides
 - ND synthesis is enabled for wasm32 builds.
 - wasm32 runtime glue now provides `memset` import fallback/binding for ND synthesis codegen.
 - wasm32 source patching now rewrites `uint64_t` before `int64_t` to avoid token-overlap corruption in wrap-arithmetic macros.
@@ -75,14 +75,14 @@ with behavior matching interpreter semantics for regular and ND/padded evaluatio
 - Runtime input binding allows synthesized reserved params to be omitted from `inputs[]`.
 - Added ND synth context v2 footer fields (version/flags/global-linear-base) while preserving existing v1 field layout for compatibility.
 - Codegen consumes v2 footer in ND global-only path to avoid recomputing `seq` and base global-linear index on contiguous blocks.
-- Added wrap-safe (`uint64_t`-based) int64 arithmetic in runtime and generated JIT code paths for `_global_linear_idx` synthesis.
+- Added wrap-safe (`uint64_t`-based) int64 arithmetic in runtime and generated JIT code paths for `_flat_idx` synthesis.
 - Hardened ND fast-path selection so host reserved-buffer precompute is only skipped when ND synth context is actually built.
 
 ## Rollout behavior (current)
 
 - `ME_DSL_JIT=0`: disables runtime JIT globally.
 - `ME_DSL_JIT_INDEX_VARS=0`: disables runtime JIT for DSL kernels using reserved index vars.
-- `tcc` auto-policy: kernels mixing `_global_linear_idx` with `_i*`/`_n*`/`_ndim` are JIT-skipped (interpreter path) to avoid known regressions.
+- `tcc` auto-policy: kernels mixing `_flat_idx` with `_i*`/`_n*`/`_ndim` are JIT-skipped (interpreter path) to avoid known regressions.
 
 ## Validation completed
 
@@ -104,6 +104,6 @@ with behavior matching interpreter semantics for regular and ND/padded evaluatio
 ## Done criteria status
 
 - JIT enabled for reserved-index DSL kernels: done (gate-controlled rollout).
-- Interpreter/JIT parity for 1D + ND including padding and `_global_linear_idx`: done for current tests.
+- Interpreter/JIT parity for 1D + ND including padding and `_flat_idx`: done for current tests.
 - Native + wasm32 lanes green with reserved-index coverage: done in current CI-relevant tests.
 - Trace diagnostics for unsupported/disabled paths: done for current gates and runtime fallback.

@@ -13,7 +13,7 @@ The DSL extends single expressions to full programs with:
 - **Element-wise conditionals** - Using `where(cond, true_val, false_val)`
 - **Conditional blocks** - `if/elif/else` with scalar or element-wise conditions
 - **Loop constructs** - `for`/`while` loops with `break` and `continue`
-- **Index access** - Reference element positions via `_i0`, `_i1`, etc. and `_global_linear_idx`
+- **Index access** - Reference element positions via `_i0`, `_i1`, etc. and `_flat_idx`
 
 ## Basic Syntax
 
@@ -157,7 +157,7 @@ Access element positions using special variables:
 | `_i0`, `_i1`, ..., `_i7` | Current index in each dimension |
 | `_n0`, `_n1`, ..., `_n7` | Array shape in each dimension |
 | `_ndim` | Number of dimensions |
-| `_global_linear_idx` | Global C-order linear index of the current element |
+| `_flat_idx` | Global C-order linear index of the current element |
 
 Example - position-dependent computation:
 ```
@@ -420,7 +420,7 @@ Rules:
 - Function/closure entries must use `ME_FUNCTION*` or `ME_CLOSURE*` in `type`.
 - The return dtype must be explicit (not `ME_AUTO`).
 - Names cannot shadow built-ins (`sin`, `sum`, etc.) or reserved identifiers
-  (`def`, `return`, `print`, `int`, `float`, `bool`, `_i0`, `_n0`, `_ndim`, `_global_linear_idx`).
+  (`def`, `return`, `print`, `int`, `float`, `bool`, `_i0`, `_n0`, `_ndim`, `_flat_idx`).
 - String return types are not supported.
 
 Example (pure function):

@@ -787,7 +787,7 @@ static int test_nd_python_blosc2_contract_int_linspace_step_assignment_jit_modes
     const char *source =
         "def kernel_ramp(__me_dummy0):\n"
         "    step = (10.0 - 0.0) / 9.0\n"
-        "    return 0.0 + _global_linear_idx * step\n";
+        "    return 0.0 + _flat_idx * step\n";
     const int32_t expected[10] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 10};
     const struct {
         int compile_jit_mode;
@@ -857,7 +857,7 @@ static int test_nd_python_blosc2_contract_float32_div_literal_jit_modes(void) {
     const void *inputs[] = {dummy};
     const char *source =
         "def kernel_div(__me_dummy0):\n"
-        "    return _global_linear_idx * (10.0 / 9.0)\n";
+        "    return _flat_idx * (10.0 / 9.0)\n";
     const struct {
         int compile_jit_mode;
         me_jit_mode eval_jit_mode;
@@ -971,13 +971,13 @@ static int test_nd_python_blosc2_contract_reason_reserved_name(void) {
         source, vars, 1, "reserved name");
 }
 
-static int test_nd_python_blosc2_contract_reason_reserved_global_linear_idx_name(void) {
-    me_variable vars[] = {{"_global_linear_idx", ME_FLOAT32}};
+static int test_nd_python_blosc2_contract_reason_reserved_flat_idx_name(void) {
+    me_variable vars[] = {{"_flat_idx", ME_FLOAT32}};
     const char *source =
-        "def kernel_index_ramp_int_cast(_global_linear_idx):\n"
-        "    return int(_global_linear_idx)\n";
+        "def kernel_index_ramp_int_cast(_flat_idx):\n"
+        "    return int(_flat_idx)\n";
     return run_nd_compile_failure_reason_case(
-        "python-blosc2 contract reason: reserved _global_linear_idx input name",
+        "python-blosc2 contract reason: reserved _flat_idx input name",
         source, vars, 1, "reserved name");
 }
 
@@ -1935,8 +1935,8 @@ int main(void) {
     failed |= t23;
     printf("Result: %s\n\n", t23 ? "FAIL" : "PASS");
 
-    printf("Test 23b: python-blosc2 contract reason on reserved _global_linear_idx input name\n");
-    int t23b = test_nd_python_blosc2_contract_reason_reserved_global_linear_idx_name();
+    printf("Test 23b: python-blosc2 contract reason on reserved _flat_idx input name\n");
+    int t23b = test_nd_python_blosc2_contract_reason_reserved_flat_idx_name();
     failed |= t23b;
     printf("Result: %s\n\n", t23b ? "FAIL" : "PASS");
 

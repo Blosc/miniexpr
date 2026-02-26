@@ -3047,7 +3047,7 @@ static me_jit_reserved_param_kind me_jit_reserved_param_from_name(const char *na
     if (strcmp(name, "_ndim") == 0) {
         return ME_JIT_RESERVED_PARAM_NDIM;
     }
-    if (strcmp(name, "_global_linear_idx") == 0) {
+    if (strcmp(name, "_flat_idx") == 0) {
         return ME_JIT_RESERVED_PARAM_GLOBAL_LINEAR_IDX;
     }
     if (nd_ctx_name && nd_ctx_name[0] != '\0' && strcmp(name, nd_ctx_name) == 0) {
@@ -3715,7 +3715,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
     }
     if (synth_reserved_nd) {
         if (synth_nd_global_only) {
-            if (!me_jit_emit_line(&ctx.source, 2, "int64_t __me_global_linear_idx_rt = __me_seq ? me_jit_i64_add_wrap(__me_glin, idx) : __me_glin;")) {
+            if (!me_jit_emit_line(&ctx.source, 2, "int64_t __me_flat_idx_rt = __me_seq ? me_jit_i64_add_wrap(__me_glin, idx) : __me_glin;")) {
                 me_jit_set_error(error, 0, 0, "out of memory");
                 me_jit_locals_free(&ctx.locals);
                 me_jit_stmt_vec_plans_release(stmt_vec_plans, n_stmt_vec_plans);
@@ -3805,7 +3805,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
                 }
             }
             if (synth_nd_has_global) {
-                if (!me_jit_emit_line(&ctx.source, 2, "int64_t __me_global_linear_idx_rt = 0;")) {
+                if (!me_jit_emit_line(&ctx.source, 2, "int64_t __me_flat_idx_rt = 0;")) {
                     me_jit_set_error(error, 0, 0, "out of memory");
                     me_jit_locals_free(&ctx.locals);
                     me_jit_stmt_vec_plans_release(stmt_vec_plans, n_stmt_vec_plans);
@@ -3816,7 +3816,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
                     for (int d = 0; d < synth_nd_compile_ndims; d++) {
                         char line[192];
                         if (snprintf(line, sizeof(line),
-                                     "__me_global_linear_idx_rt = me_jit_i64_addmul_wrap(__me_global_linear_idx_rt, __me_coord[%d], __me_nd_ctx[%d]);",
+                                     "__me_flat_idx_rt = me_jit_i64_addmul_wrap(__me_flat_idx_rt, __me_coord[%d], __me_nd_ctx[%d]);",
                                      d, 1 + synth_nd_compile_ndims + d) >= (int)sizeof(line) ||
                             !me_jit_emit_line(&ctx.source, 2, line)) {
                             me_jit_set_error(error, 0, 0, "out of memory");
@@ -3828,7 +3828,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
                     }
                 }
                 else if (!me_jit_emit_line(&ctx.source, 2, "for (int64_t __me_d = 0; __me_d < __me_ndim_rt; __me_d++) {") ||
-                         !me_jit_emit_line(&ctx.source, 3, "__me_global_linear_idx_rt = me_jit_i64_addmul_wrap(__me_global_linear_idx_rt, __me_coord[__me_d], __me_nd_ctx[1 + __me_ndim_rt + __me_d]);") ||
+                         !me_jit_emit_line(&ctx.source, 3, "__me_flat_idx_rt = me_jit_i64_addmul_wrap(__me_flat_idx_rt, __me_coord[__me_d], __me_nd_ctx[1 + __me_ndim_rt + __me_d]);") ||
                          !me_jit_emit_line(&ctx.source, 2, "}")) {
                     me_jit_set_error(error, 0, 0, "out of memory");
                     me_jit_locals_free(&ctx.locals);
@@ -3918,7 +3918,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
             }
         }
         else if (synth_reserved_nd && reserved_kind == ME_JIT_RESERVED_PARAM_GLOBAL_LINEAR_IDX) {
-            snprintf(line, need, "%s %s = (%s)__me_global_linear_idx_rt;",
+            snprintf(line, need, "%s %s = (%s)__me_flat_idx_rt;",
                      ptype, program->params[i], ptype);
         }
         else {

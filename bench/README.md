@@ -184,7 +184,7 @@ ME_DSL_TRACE=1 ./build/bench/benchmark_black-scholes 262144 6
 
 ### benchmark_dsl_jit_index_vars.c
 DSL reserved-index-vars benchmark for:
-- `_i0`, `_i1`, `_n0`, `_n1`, `_ndim`, `_global_linear_idx`
+- `_i0`, `_i1`, `_n0`, `_n1`, `_ndim`, `_flat_idx`
 - Compares interpreter vs JIT index-vars path:
   - `interp`: `ME_DSL_JIT=0`
   - `jit-indexvars`: `ME_DSL_JIT=1`, `ME_DSL_JIT_INDEX_VARS=1`
@@ -202,9 +202,9 @@ ME_BENCH_COMPILER=tcc ./build/bench/benchmark_dsl_jit_index_vars 1048576 9
 ME_BENCH_COMPILER=cc ./build/bench/benchmark_dsl_jit_index_vars 1048576 9
 ```
 
-### benchmark_dsl_jit_global_linear_idx.c
+### benchmark_dsl_jit_flat_idx.c
 DSL reserved-index-vars benchmark focused on global linear index only:
-- Kernel: `START_CONST + _global_linear_idx + STEP_CONST`
+- Kernel: `START_CONST + _flat_idx + STEP_CONST`
 - Compares interpreter vs JIT index-vars path:
   - `interp`: `ME_DSL_JIT=0`
   - `jit-indexvars`: `ME_DSL_JIT=1`, `ME_DSL_JIT_INDEX_VARS=1`
@@ -220,10 +220,10 @@ Notes:
 - Uses `# me:compiler=tcc` by default when `ME_BENCH_COMPILER` is unset.
 
 ```bash
-./build/bench/benchmark_dsl_jit_global_linear_idx
-./build/bench/benchmark_dsl_jit_global_linear_idx 1048576 9
-ME_BENCH_COMPILER=tcc ./build/bench/benchmark_dsl_jit_global_linear_idx 1048576 9
-ME_BENCH_COMPILER=cc ./build/bench/benchmark_dsl_jit_global_linear_idx 1048576 9
+./build/bench/benchmark_dsl_jit_flat_idx
+./build/bench/benchmark_dsl_jit_flat_idx 1048576 9
+ME_BENCH_COMPILER=tcc ./build/bench/benchmark_dsl_jit_flat_idx 1048576 9
+ME_BENCH_COMPILER=cc ./build/bench/benchmark_dsl_jit_flat_idx 1048576 9
 ```
 
 ### benchmark_mandelbrot_numba.py

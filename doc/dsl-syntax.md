@@ -156,7 +156,7 @@ The following cannot be used as user variable/function names in DSL context:
 - `print`, `int`, `float`, `bool`, `def`, `return`
 - `_ndim`
 - `_i<d>` and `_n<d>` (reserved ND symbols)
-- `_global_linear_idx`
+- `_flat_idx`
 
 ## ND reserved symbols
 
@@ -165,7 +165,7 @@ Supported reserved ND symbols when referenced in expressions:
 - `_i0`, `_i1`, ... (index per dimension)
 - `_n0`, `_n1`, ... (shape per dimension)
 - `_ndim`
-- `_global_linear_idx` (global C-order linear index)
+- `_flat_idx` (global C-order linear index)
 
 These are synthesized by DSL compiler/runtime when used.
 

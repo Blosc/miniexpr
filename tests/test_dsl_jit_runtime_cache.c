@@ -1174,15 +1174,15 @@ static int test_reserved_index_cache_key_and_param_order(void) {
     const char *src_order_a =
         "# me:compiler=cc\n"
         "def kernel(x):\n"
-        "    return x + _global_linear_idx + _i0 + _n0 + _ndim\n";
+        "    return x + _flat_idx + _i0 + _n0 + _ndim\n";
     const char *src_order_b =
         "# me:compiler=cc\n"
         "def kernel(x):\n"
-        "    return x + _ndim + _n0 + _i0 + _global_linear_idx\n";
+        "    return x + _ndim + _n0 + _i0 + _flat_idx\n";
     const char *src_global_only =
         "# me:compiler=cc\n"
         "def kernel(x):\n"
-        "    return x + _global_linear_idx\n";
+        "    return x + _flat_idx\n";
     const char *src_i0_only =
         "# me:compiler=cc\n"
         "def kernel(x):\n"
@@ -1196,7 +1196,7 @@ static int test_reserved_index_cache_key_and_param_order(void) {
         "int64_t _i0 = (int64_t)idx;",
         "int64_t _n0 = (int64_t)nitems;",
         "int64_t _ndim = (int64_t)1;",
-        "int64_t _global_linear_idx = (int64_t)idx;"
+        "int64_t _flat_idx = (int64_t)idx;"
     };
 
     if (!tmp_root) {
@@ -1243,8 +1243,8 @@ static int test_reserved_index_cache_key_and_param_order(void) {
         printf("  FAILED: generated source unexpectedly declares reserved _i0 input under synth path\n");
         goto cleanup;
     }
-    if (file_contains_text(src_path, "const int64_t *in__global_linear_idx = (const int64_t *)inputs[")) {
-        printf("  FAILED: generated source unexpectedly declares reserved _global_linear_idx input under synth path\n");
+    if (file_contains_text(src_path, "const int64_t *in__flat_idx = (const int64_t *)inputs[")) {
+        printf("  FAILED: generated source unexpectedly declares reserved _flat_idx input under synth path\n");
         goto cleanup;
     }
 
@@ -1286,7 +1286,7 @@ static int test_reserved_index_cache_key_and_param_order(void) {
     }
     if (count_kernel_files_with_suffix(cache_dir, ".meta", meta_path_first, sizeof(meta_path_first)) != 1 ||
         meta_path_first[0] == '\0') {
-        printf("  FAILED: expected one metadata file after first _global_linear_idx compile\n");
+        printf("  FAILED: expected one metadata file after first _flat_idx compile\n");
         goto cleanup;
     }
 
@@ -1295,11 +1295,11 @@ static int test_reserved_index_cache_key_and_param_order(void) {
     }
     if (count_kernel_files_with_suffix(cache_dir, ".meta", meta_path_second, sizeof(meta_path_second)) != 1 ||
         meta_path_second[0] == '\0') {
-        printf("  FAILED: expected stable metadata entry after repeated _global_linear_idx compile\n");
+        printf("  FAILED: expected stable metadata entry after repeated _flat_idx compile\n");
         goto cleanup;
     }
     if (strcmp(meta_path_first, meta_path_second) != 0) {
-        printf("  FAILED: repeated _global_linear_idx compile changed cache key unexpectedly\n");
+        printf("  FAILED: repeated _flat_idx compile changed cache key unexpectedly\n");
         goto cleanup;
     }
 
@@ -1360,7 +1360,7 @@ static int test_nd_reserved_index_synth_codegen_and_parity(void) {
     const char *src =
         "# me:compiler=cc\n"
         "def kernel():\n"
-        "    return _global_linear_idx + _i0 + _i1 + _n0 + _n1 + _ndim\n";
+        "    return _flat_idx + _i0 + _i1 + _n0 + _n1 + _ndim\n";
     int64_t shape[2] = {3, 5};
     int32_t chunks[2] = {2, 4};
     int32_t blocks[2] = {2, 3};
@@ -1420,7 +1420,7 @@ static int test_nd_reserved_index_synth_codegen_and_parity(void) {
         printf("  FAILED: ND synth source missing __me_nd_ctx input declaration\n");
         goto cleanup;
     }
-    if (!file_contains_text(src_path, "__me_global_linear_idx_rt")) {
+    if (!file_contains_text(src_path, "__me_flat_idx_rt")) {
         printf("  FAILED: ND synth source missing synthesized global-linear computation\n");
         goto cleanup;
     }
@@ -1428,8 +1428,8 @@ static int test_nd_reserved_index_synth_codegen_and_parity(void) {
         printf("  FAILED: ND synth source still declares reserved _i0 input\n");
         goto cleanup;
     }
-    if (file_contains_text(src_path, "const int64_t *in__global_linear_idx = (const int64_t *)inputs[")) {
-        printf("  FAILED: ND synth source still declares reserved _global_linear_idx input\n");
+    if (file_contains_text(src_path, "const int64_t *in__flat_idx = (const int64_t *)inputs[")) {
+        printf("  FAILED: ND synth source still declares reserved _flat_idx input\n");
         goto cleanup;
     }
 
@@ -1754,7 +1754,7 @@ static int test_wasm_reserved_index_vars_jit_parity(void) {
     const char *src_1d =
         "# me:compiler=cc\n"
         "def kernel():\n"
-        "    return _global_linear_idx + _i0 + _n0 + _ndim\n";
+        "    return _flat_idx + _i0 + _n0 + _ndim\n";
     const double expected_1d[6] = {7.0, 9.0, 11.0, 13.0, 15.0, 17.0};
     double out_1d[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
     me_expr *expr = NULL;
@@ -1793,7 +1793,7 @@ static int test_wasm_reserved_index_vars_jit_parity(void) {
     const char *src_nd =
         "# me:compiler=cc\n"
         "def kernel():\n"
-        "    return _global_linear_idx + _i0 + _i1 + _n0 + _n1 + _ndim\n";
+        "    return _flat_idx + _i0 + _i1 + _n0 + _n1 + _ndim\n";
     int64_t shape[2] = {3, 5};
     int32_t chunks[2] = {2, 4};
     int32_t blocks[2] = {2, 3};
@@ -1849,7 +1849,7 @@ static int test_wasm_reserved_index_cache_key_differentiation(void) {
     const char *src_global =
         "# me:compiler=cc\n"
         "def kernel():\n"
-        "    return _global_linear_idx + 123\n";
+        "    return _flat_idx + 123\n";
     const char *src_i0 =
         "# me:compiler=cc\n"
         "def kernel():\n"
@@ -1866,17 +1866,17 @@ static int test_wasm_reserved_index_cache_key_differentiation(void) {
     test_wasm_runtime_cache_reset_instantiate_count();
 
     if (me_compile(src_global, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
-        printf("  FAILED: first _global_linear_idx compile error at %d\n", err);
+        printf("  FAILED: first _flat_idx compile error at %d\n", err);
         me_free(expr);
         goto cleanup;
     }
     if (!me_expr_has_jit_kernel(expr)) {
-        printf("  FAILED: expected runtime JIT kernel for first _global_linear_idx compile\n");
+        printf("  FAILED: expected runtime JIT kernel for first _flat_idx compile\n");
         me_free(expr);
         goto cleanup;
     }
     if (me_eval(expr, NULL, 0, out, 4, NULL) != ME_EVAL_SUCCESS) {
-        printf("  FAILED: first _global_linear_idx eval failed\n");
+        printf("  FAILED: first _flat_idx eval failed\n");
         me_free(expr);
         goto cleanup;
     }
@@ -1884,36 +1884,36 @@ static int test_wasm_reserved_index_cache_key_differentiation(void) {
     expr = NULL;
     for (int i = 0; i < 4; i++) {
         if (out[i] != expected[i]) {
-            printf("  FAILED: first _global_linear_idx output mismatch at %d (%.17g vs %.17g)\n",
+            printf("  FAILED: first _flat_idx output mismatch at %d (%.17g vs %.17g)\n",
                    i, out[i], expected[i]);
             goto cleanup;
         }
     }
     if (test_wasm_runtime_cache_get_instantiate_count() != 1) {
-        printf("  FAILED: expected 1 wasm instantiation after first _global_linear_idx compile\n");
+        printf("  FAILED: expected 1 wasm instantiation after first _flat_idx compile\n");
         goto cleanup;
     }
 
     err = 0;
     if (me_compile(src_global, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
-        printf("  FAILED: second _global_linear_idx compile error at %d\n", err);
+        printf("  FAILED: second _flat_idx compile error at %d\n", err);
         me_free(expr);
         goto cleanup;
     }
     if (!me_expr_has_jit_kernel(expr)) {
-        printf("  FAILED: expected runtime JIT kernel for second _global_linear_idx compile\n");
+        printf("  FAILED: expected runtime JIT kernel for second _flat_idx compile\n");
         me_free(expr);
         goto cleanup;
     }
     if (me_eval(expr, NULL, 0, out, 4, NULL) != ME_EVAL_SUCCESS) {
-        printf("  FAILED: second _global_linear_idx eval failed\n");
+        printf("  FAILED: second _flat_idx eval failed\n");
         me_free(expr);
         goto cleanup;
     }
     me_free(expr);
     expr = NULL;
     if (test_wasm_runtime_cache_get_instantiate_count() != 1) {
-        printf("  FAILED: second identical _global_linear_idx compile did not reuse wasm cache entry\n");
+        printf("  FAILED: second identical _flat_idx compile did not reuse wasm cache entry\n");
         goto cleanup;
     }
 
@@ -1981,7 +1981,7 @@ static int test_wasm_runtime_cache_eviction_policy(void) {
     if (snprintf(src, sizeof(src),
                  "# me:compiler=cc\n"
                  "def kernel():\n"
-                 "    return _global_linear_idx + %d\n", base) >= (int)sizeof(src)) {
+                 "    return _flat_idx + %d\n", base) >= (int)sizeof(src)) {
         printf("  FAILED: source formatting overflow for first kernel\n");
         goto cleanup;
     }
@@ -2016,7 +2016,7 @@ static int test_wasm_runtime_cache_eviction_policy(void) {
         if (snprintf(src, sizeof(src),
                      "# me:compiler=cc\n"
                      "def kernel():\n"
-                     "    return _global_linear_idx + %d\n", base + i) >= (int)sizeof(src)) {
+                     "    return _flat_idx + %d\n", base + i) >= (int)sizeof(src)) {
             printf("  FAILED: source formatting overflow at i=%d\n", i);
             goto cleanup;
         }
@@ -2052,7 +2052,7 @@ static int test_wasm_runtime_cache_eviction_policy(void) {
     if (snprintf(src, sizeof(src),
                  "# me:compiler=cc\n"
                  "def kernel():\n"
-                 "    return _global_linear_idx + %d\n", base) >= (int)sizeof(src)) {
+                 "    return _flat_idx + %d\n", base) >= (int)sizeof(src)) {
         printf("  FAILED: source formatting overflow for eviction probe\n");
         goto cleanup;
     }
