@@ -5780,6 +5780,36 @@ static bool dsl_jit_cc_math_bridge_available(void) {
     return true;
 }
 
+/* Linux-specific workaround: bridge symbols must be globally visible so
+   generated cc JIT modules can resolve me_jit_vec_* at dlopen() time. */
+#if defined(__linux__)
+static bool dsl_jit_cc_promote_self_symbols_global(void) {
+    /* cc JIT bridge calls resolve at dlopen() time; make libminiexpr symbols
+       visible from the global loader scope even if host loaded us RTLD_LOCAL. */
+    char self_path[PATH_MAX];
+    if (!dsl_jit_module_path_from_symbol((const void *)&dsl_jit_cc_promote_self_symbols_global,
+                                         self_path, sizeof(self_path))) {
+        return false;
+    }
+#if defined(RTLD_NOLOAD)
+    dlerror();
+    void *handle = dlopen(self_path, RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
+    if (!handle) {
+        dlerror();
+        handle = dlopen(self_path, RTLD_NOW | RTLD_GLOBAL);
+    }
+#else
+    dlerror();
+    void *handle = dlopen(self_path, RTLD_NOW | RTLD_GLOBAL);
+#endif
+    if (!handle) {
+        return false;
+    }
+    dlclose(handle);
+    return true;
+}
+#endif
+
 static void dsl_jit_cc_add_library_flag_if_exists(char *flags, size_t flags_size, const char *path) {
     if (!flags || flags_size == 0 || !path || path[0] == '\0') {
         return;
@@ -5884,16 +5914,37 @@ static bool dsl_jit_compile_shared(const me_dsl_compiled_program *program,
     return rc == 0;
 }
 
-static bool dsl_jit_load_kernel(me_dsl_compiled_program *program, const char *shared_path) {
+static bool dsl_jit_load_kernel(me_dsl_compiled_program *program, const char *shared_path,
+                                char *detail, size_t detail_cap) {
     if (!program || !shared_path) {
         return false;
     }
+    if (detail && detail_cap > 0) {
+        detail[0] = '\0';
+    }
+    dlerror();
     void *handle = dlopen(shared_path, RTLD_NOW | RTLD_LOCAL);
     if (!handle) {
+        if (detail && detail_cap > 0) {
+            const char *err = dlerror();
+            if (!err || err[0] == '\0') {
+                err = "unknown";
+            }
+            (void)snprintf(detail, detail_cap, "dlopen failed: %s", err);
+        }
         return false;
     }
+    dlerror();
     void *sym = dlsym(handle, ME_DSL_JIT_SYMBOL_NAME);
     if (!sym) {
+        if (detail && detail_cap > 0) {
+            const char *err = dlerror();
+            if (!err || err[0] == '\0') {
+                err = "unknown";
+            }
+            (void)snprintf(detail, detail_cap, "dlsym(%s) failed: %s",
+                           ME_DSL_JIT_SYMBOL_NAME, err);
+        }
         dlclose(handle);
         return false;
     }
@@ -5924,6 +5975,13 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         dsl_tracef("jit runtime skip: fp=%s reason=%s",
                    dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
         return;
+    }
+    if (program->compiler == ME_DSL_COMPILER_CC && program->jit_use_runtime_math_bridge) {
+#if defined(__linux__)
+        if (!dsl_jit_cc_promote_self_symbols_global()) {
+            dsl_tracef("jit runtime note: failed to promote self symbols globally for cc bridge");
+        }
+#endif
     }
 
     uint64_t key = dsl_jit_runtime_cache_key(program);
@@ -5984,7 +6042,8 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         dsl_jit_pos_cache_evict(key);
     }
     if (meta_matches) {
-        if (dsl_jit_load_kernel(program, so_path)) {
+        char load_detail[256];
+        if (dsl_jit_load_kernel(program, so_path, load_detail, sizeof(load_detail))) {
             if (dsl_jit_pos_cache_enabled()) {
                 (void)dsl_jit_pos_cache_store_program(program, key);
             }
@@ -5995,9 +6054,10 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
             return;
         }
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_LOAD);
-        dsl_tracef("jit runtime cache reload failed: fp=%s key=%016llx",
+        dsl_tracef("jit runtime cache reload failed: fp=%s key=%016llx detail=%s",
                    dsl_fp_mode_name(program->fp_mode),
-                   (unsigned long long)key);
+                   (unsigned long long)key,
+                   load_detail[0] ? load_detail : "-");
     }
 
     if (program->compiler == ME_DSL_COMPILER_LIBTCC) {
@@ -6055,12 +6115,14 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
                        dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
             return;
         }
-        if (!dsl_jit_load_kernel(program, so_path)) {
+        char load_detail[256];
+        if (!dsl_jit_load_kernel(program, so_path, load_detail, sizeof(load_detail))) {
             dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_LOAD);
             snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                      "jit runtime shared object load failed");
-            dsl_tracef("jit runtime skip: fp=%s reason=%s",
-                       dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
+            dsl_tracef("jit runtime skip: fp=%s reason=%s detail=%s",
+                       dsl_fp_mode_name(program->fp_mode), program->jit_c_error,
+                       load_detail[0] ? load_detail : "-");
             return;
         }
         if (dsl_jit_pos_cache_enabled()) {
@@ -6098,12 +6160,14 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
                    dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
         return;
     }
-    if (!dsl_jit_load_kernel(program, so_path)) {
+    char load_detail[256];
+    if (!dsl_jit_load_kernel(program, so_path, load_detail, sizeof(load_detail))) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_LOAD);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime shared object load failed");
-        dsl_tracef("jit runtime skip: fp=%s reason=%s",
-                   dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
+        dsl_tracef("jit runtime skip: fp=%s reason=%s detail=%s",
+                   dsl_fp_mode_name(program->fp_mode), program->jit_c_error,
+                   load_detail[0] ? load_detail : "-");
         return;
     }
     if (dsl_jit_pos_cache_enabled()) {
