@@ -1,16 +1,36 @@
-# Announcing miniexpr 0.1.0
-A small, efficient C library for parsing and evaluating mathematical expressions.
+# Announcing miniexpr 0.2.0
+A small, efficient C library for parsing and evaluating mathematical
+expressions and DSL kernels.
 
 ## What is new?
 
-This is the first public beta release of miniexpr. Highlights:
+This release is centered on a major new capability: DSL kernels.
 
-- Vectorized expression evaluation across multiple data types.
-- Thread-safe evaluation with chunked and ND helpers.
-- Optional SLEEF-accelerated SIMD math kernels.
-- Examples, tests, and benchmarks covering core usage patterns.
+Highlights:
 
-For more info, see the release notes in:
+- New Python-like DSL kernel support for multi-statement programs.
+  - Write kernels with temporaries, `if/elif/else`, `for`/`while`,
+    `break`/`continue`, reductions, and ND index symbols.
+  - Canonical syntax and behavior reference:
+    - `doc/dsl-syntax.md`
+  - Practical guide and examples:
+    - `doc/dsl-usage.md`
+
+- Runtime JIT support for DSL kernels.
+  - New parser/IR/codegen pipeline.
+  - JIT policy controls in API (`me_compile_nd_jit`, `me_eval_params.jit_mode`).
+  - Compiler/floating-point pragma controls (`# me:compiler=...`, `# me:fp=...`).
+  - Expanded Linux/macOS/Windows/wasm32 coverage and robustness.
+
+- New diagnostics helper:
+  - `me_get_last_error_message()` for clearer compile/setup failures.
+
+- Additional improvements:
+  - Extended string support (`ME_STRING`) and documentation.
+  - Multiple correctness/performance fixes in DSL/JIT and dtype handling.
+  - Many new tests and benchmarks (DSL syntax, JIT runtime/cache, strings, ND behavior).
+
+For full details, see:
 
 https://github.com/Blosc/miniexpr/blob/main/RELEASE_NOTES.md
 
@@ -18,7 +38,7 @@ https://github.com/Blosc/miniexpr/blob/main/RELEASE_NOTES.md
 
 miniexpr is designed to be embedded directly into larger projects. It provides
 fast expression evaluation with support for multiple numeric types, vectorized
-evaluation, and thread-safe parallel processing.
+evaluation, thread-safe parallel processing, and now DSL kernels with optional JIT.
 
 ## Download sources
 
