@@ -1,61 +1,68 @@
 # DSL Kernel Programming Guide
 
-This guide explains how to use the miniexpr Domain-Specific Language (DSL) for writing multi-statement expression kernels.
+This guide focuses on practical usage of miniexpr DSL kernels.
+Canonical syntax, accepted statements, and exact error behavior are documented in `doc/dsl-syntax.md`.
 
 ## Overview
 
-For the canonical syntax and error-contract reference, see `dsl-syntax.md`.
-Use this guide for usage patterns and examples.
+Use this guide for:
+- End-to-end API usage
+- Runtime JIT configuration
+- Common kernel-writing patterns
+- UDF integration examples
 
-The DSL extends single expressions to full programs with:
-- **Temporary variables** - Store intermediate results
-- **Multi-statement programs** - Combine multiple computations
-- **Element-wise conditionals** - Using `where(cond, true_val, false_val)`
-- **Conditional blocks** - `if/elif/else` with scalar or element-wise conditions
-- **Loop constructs** - `for`/`while` loops with `break` and `continue`
-- **Index access** - Reference element positions via `_i0`, `_i1`, etc. and `_flat_idx`
+For language syntax details, always refer to `doc/dsl-syntax.md`.
 
-## Basic Syntax
+## Quick Start
 
-### Kernel Definition
+Minimal compile + eval flow:
 
-A DSL kernel is a single function definition with an explicit input signature.
-The body uses Python-style indentation, and `return` defines the output:
+```c
+const char *src =
+    "def kernel(x):\n"
+    "    temp = sin(x) ** 2\n"
+    "    return temp + cos(x) ** 2\n";
 
+double x[] = {0.0, 0.5, 1.0};
+double out[3] = {0.0, 0.0, 0.0};
+int err = 0;
+me_expr *expr = NULL;
+me_variable vars[] = {
+    {"x", ME_FLOAT64, NULL, 0, NULL, 0},
+};
+
+if (me_compile(src, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+    const void *inputs[] = {x};
+    (void)me_eval(expr, inputs, 1, out, 3, NULL);
+    me_free(expr);
+}
 ```
+
+Notes:
+- Signature parameter names in the DSL must match input variable names passed to `me_compile()`.
+- The order of `vars[]` defines input pointer order for `me_eval()`.
+- Full syntax constraints are in `doc/dsl-syntax.md`.
+
+## Runtime JIT Controls
+
+Use source pragmas or API policy to control JIT behavior.
+
+### Source pragmas
+
+```python
+# me:fp=strict
+# me:compiler=tcc
 def kernel(x):
-    temp = sin(x) ** 2
-    return temp + cos(x) ** 2
+    return x
 ```
 
-Signature arguments must match the variables you pass to `me_compile()` by name
-(order does not matter). (Callback functions registered via `me_variable` are
-not listed in the signature.)
+Supported values:
+- `# me:fp=strict|contract|fast`
+- `# me:compiler=tcc|cc`
 
-Note: The order of the variables array still defines the pointer order passed to
-`me_eval()`. The signature is declarative and does not reorder inputs.
+Only these pragmas are supported. See `doc/dsl-syntax.md` for exact pragma parsing rules.
 
-A kernel must contain at least one `return` statement.
-If execution reaches the end for any element without returning, evaluation fails at runtime.
-
-### Control-Flow Semantics
-
-DSL kernels use element-wise control-flow semantics:
-- Non-reduction boolean conditions (for example, `if x > 0`) are evaluated element-wise.
-- Reduction conditions (`any(...)`, `all(...)`) remain global to the active-element mask.
-- `break` and `continue` act element-wise inside loops.
-
-Only `# me:fp=...` and `# me:compiler=...` pragmas are supported.
-Any other `# me:*` pragma is a parse error.
-
-For backend diagnostics, set `ME_DSL_TRACE=1` to emit compile/JIT trace lines
-to stderr (JIT accept/reject reasons, runtime cache/fallback paths).
-When runtime JIT is disabled via API (`jit_mode=ME_JIT_OFF`), traces include
-`jit runtime skipped: ... reason=jit_mode=off` for eligible kernels.
-
-### API JIT Policy Overrides
-
-In addition to source pragmas, callers can control runtime JIT policy from C:
+### API policy override
 
 ```c
 int me_compile_nd_jit(const char *expression, const me_variable *variables,
@@ -66,365 +73,87 @@ int me_compile_nd_jit(const char *expression, const me_variable *variables,
 ```
 
 `jit_mode` values:
-- `ME_JIT_DEFAULT` (`0`): default behavior.
-- `ME_JIT_ON` (`1`): prefer runtime JIT preparation.
-- `ME_JIT_OFF` (`2`): skip runtime JIT preparation at compile time.
+- `ME_JIT_DEFAULT` (`0`)
+- `ME_JIT_ON` (`1`)
+- `ME_JIT_OFF` (`2`)
 
-At evaluation time, `me_eval_params.jit_mode` provides a per-call override with
-the same values (`ME_JIT_DEFAULT`, `ME_JIT_ON`, `ME_JIT_OFF`).
+At evaluation time, `me_eval_params.jit_mode` provides the same per-call override.
 
-### Floating-Point Pragma
+### Diagnostics
 
-For JIT-eligible kernels, you can choose the floating-point optimization mode:
+- Set `ME_DSL_TRACE=1` to print compile/JIT trace details to stderr.
+- With `# me:compiler=cc`, runtime uses `CC` (default `cc`) and also honors `CFLAGS`.
 
-```
-# me:fp=strict
+## Practical Patterns
+
+These patterns are usage-oriented. For strict language rules, see `doc/dsl-syntax.md`.
+
+### Temporary variables and inference
+
+Temporaries are inferred from the right-hand side expression.
+
+```python
 def kernel(x):
-    ...
+    temp = sin(x) ** 2
+    return temp + cos(x) ** 2
 ```
 
-Supported values:
-- `strict` (default): no fast-math, no FP contraction.
-- `contract`: no fast-math, but allows FP contraction (e.g. FMA).
-- `fast`: enables fast-math for JIT compilation.
+If a later assignment gives the same local an incompatible dtype, compilation fails.
 
-Notes:
-- This pragma affects runtime JIT compilation flags. Interpreter execution is unchanged.
+### Element-wise selection
 
-### Compiler Pragma
+Use `where(cond, a, b)` for element-wise branching:
 
-For JIT-eligible kernels, you can choose which runtime JIT compiler backend to use:
-
-```
-# me:compiler=tcc
+```python
 def kernel(x):
-    ...
+    return where(x < 0, 0, where(x > 1, 1, x))
 ```
 
-```
-# me:compiler=cc
+### Index-aware kernels
+
+Reserved symbols such as `_i0`, `_n0`, `_ndim`, and `_flat_idx` let you write position-aware kernels.
+
+```python
 def kernel(x):
-    ...
+    return x * _i0 / _n0
 ```
 
-Supported values:
-- `tcc` (default when omitted): in-memory JIT path.
-- `cc`: shared-object compile/load path.
+### Loops and control flow
 
-Notes:
-- This pragma is independent from `# me:fp=...`.
-- With `# me:compiler=cc`, runtime uses `CC` (default: `cc`) to select the compiler executable.
-- With `# me:compiler=cc`, runtime also honors `CFLAGS`.
-- Build option `MINIEXPR_ENABLE_TCC_JIT=OFF` disables TCC-based JIT backends; on Linux/macOS, the separate `# me:compiler=cc` runtime path may still be available.
-- On Linux, the libtcc JIT automatically appends common multiarch library directories
-  (for example `/usr/lib/x86_64-linux-gnu`) to help `-lm` resolve without extra flags.
-- If the selected backend is unavailable at runtime, miniexpr falls back to interpreter execution.
+`for` and `while` are supported. `while` loops are protected by an iteration cap (`ME_DSL_WHILE_MAX_ITERS`).
 
-### Temporary Variables
-
-Use any identifier to store intermediate values:
-
-```
-def kernel(x):
-    squared = x * x
-    cubed = squared * x
-    return squared + cubed
-```
-
-Variables are element-wise arrays matching the input dimensions.
-
-### Element-wise Conditionals
-
-The `where()` function provides element-wise selection:
-
-```
-where(condition, value_if_true, value_if_false)
-```
-
-Example - clamping values:
-```
-def kernel(x):
-    clamped = where(x < 0, 0, where(x > 1, 1, x))
-    return clamped
-```
-
-### Index Variables
-
-Access element positions using special variables:
-
-| Variable | Description |
-|----------|-------------|
-| `_i0`, `_i1`, ..., `_i7` | Current index in each dimension |
-| `_n0`, `_n1`, ..., `_n7` | Array shape in each dimension |
-| `_ndim` | Number of dimensions |
-| `_flat_idx` | Global C-order linear index of the current element |
-
-Example - position-dependent computation:
-```
-def kernel(x):
-    normalized = x * _i0 / _n0
-    return normalized
-```
-
-### Loops
-
-Basic loop syntax (Python-style indentation):
-```
+```python
 def kernel(n):
-    accumulator = 0
+    acc = 0
     for i in range(n):
-        accumulator = accumulator + i
-    return accumulator
+        acc += i
+    return acc
 ```
 
-While-loop syntax (Python-style indentation):
-```
+```python
 def kernel(x):
     i = 0
     acc = 0
     while i < x:
-        acc = acc + i
-        i = i + 1
+        acc += i
+        i += 1
     return acc
 ```
 
-`range()` supports:
-- `range(stop)`
-- `range(start, stop)`
-- `range(start, stop, step)`
+Control-flow semantics are element-wise for non-reduction conditions; reduction conditions (`any`, `all`) are global to active elements.
 
-`start`, `stop`, and `step` are scalar bounds evaluated once before loop entry.
-`step == 0` is a runtime evaluation error.
+## User-defined Functions (UDFs)
 
-With early exit:
-```
-def kernel(converged, value):
-    for i in range(100):
-        if any(converged > 0.99):
-            break
-        value = iterate(value)
-    return value
-```
-
-With conditional continue:
-```
-def kernel(mask, acc):
-    for i in range(n):
-        if any(mask == 0):
-            continue
-        acc = acc + compute(i)
-    return acc
-```
-
-With `while` loop control:
-```
-def kernel(x):
-    i = 0
-    acc = 0
-    while i < 8:
-        if x > i:
-            acc = acc + 1
-            i = i + 1
-            continue
-        break
-    return acc
-```
-
-Safety notes for `while`:
-- Interpreter execution enforces an iteration cap per `while` statement.
-- Default cap: `10,000,000` iterations.
-- Configure with `ME_DSL_WHILE_MAX_ITERS` environment variable.
-- `ME_DSL_WHILE_MAX_ITERS <= 0` disables the cap.
-- When the cap is hit, evaluation returns `ME_EVAL_ERR_INVALID_ARG`.
-
-### Conditionals
-
-General `if/elif/else` blocks are supported.
-
-Condition behavior:
-- Non-reduction conditions are evaluated element-wise.
-- Reduction conditions (`any()`/`all()`) are evaluated globally on active elements.
-- Uniform conditions (for example `if i == 2:`) work naturally as a special case.
+You can register C functions/closures in `me_variable` and call them from DSL.
 
 Rules:
-- New locals are allowed inside branches.
-- Use `return` to produce output; all `return` expressions must infer the same dtype.
-- Early returns are allowed, but ensure every control-flow path eventually returns.
-  Loops never guarantee a return; add a return after any loop.
-- `return` inside loop bodies is supported.
+- Use `ME_FUNCTION*` or `ME_CLOSURE*` in `type`.
+- Function return dtype must be explicit (not `ME_AUTO`).
+- Function names must not collide with reserved identifiers or built-ins.
 
 Example:
-```
-def kernel(mask, x):
-    if any(mask == 0):
-        return 0
-    elif _n0 > 10:
-        return sum(x)
-    else:
-        return mean(x)
-```
 
-Per-element loop-control example:
-```
-def kernel(x):
-    acc = 0
-    for i in range(8):
-        if x > i:
-            acc = acc + 1
-        else:
-            break
-    return acc
-```
-
-Expanded `range()` + branch-local declarations:
-```
-def kernel(x):
-    acc = 0
-    for i in range(1, 10, 2):
-        if x > i:
-            bonus = i * 2
-            acc = acc + bonus
-        else:
-            penalty = i - 1
-            acc = acc - penalty
-    return acc
-```
-
-Flow-only loop control:
-```
-def kernel(mask):
-    for i in range(10):
-        if any(mask == 0):
-            break
-        elif i == 3:
-            continue
-    return i
-```
-
-## Available Functions
-
-### Arithmetic Operators
-- `+`, `-`, `*`, `/`, `%` (modulo)
-- `**` (power)
-- Unary `-` (negation)
-
-### Comparison Operators
-- `==`, `!=`, `<`, `<=`, `>`, `>=`
-
-### Logical Operators
-- `&&` or `and`
-- `||` or `or`
-- `!` or `not`
-
-Logical operator precedence matches Python: `not` binds tighter than `and`, which binds tighter than `or`
-(comparisons bind tighter than all three).
-
-### String Operators
-- String literals: `"..."` or `'...'`
-- Escapes: `\\`, `\"`, `\'`, `\n`, `\t`, `\uXXXX`, `\UXXXXXXXX`
-- Comparisons: `==`, `!=` (string-to-string only)
-- Predicates: `startswith(a, b)`, `endswith(a, b)`, `contains(a, b)` (string-to-string)
-
-String variables must be provided with dtype `ME_STRING` and a fixed `itemsize`
-via `me_variable` (itemsize is bytes per element and must be a multiple of 4).
-String expressions always yield boolean output.
-
-Example (element-wise string match with a scalar condition):
-```
-def kernel(tag, n):
-    mask = 0
-    for i in range(n):
-        if any(startswith(tag, "pre")):
-            break
-        mask = contains(tag, "\u03B1")
-    return mask
-```
-
-### Mathematical Functions
-
-**Trigonometric:**
-- `sin`, `cos`, `tan`
-- `asin`, `acos`, `atan`, `atan2`
-- `sinpi`, `cospi` (sin/cos of π·x)
-
-**Hyperbolic:**
-- `sinh`, `cosh`, `tanh`
-- `asinh`, `acosh`, `atanh`
-
-**Exponential/Logarithmic:**
-- `exp`, `exp2`, `exp10`, `expm1`
-- `log`, `log2`, `log10`, `log1p`
-
-**Power/Root:**
-- `sqrt`, `cbrt`, `pow`, `hypot`
-
-**Rounding:**
-- `floor`, `ceil`, `round`, `trunc`, `rint`
-
-**Other:**
-- `abs`, `copysign`, `fmax`, `fmin`, `fmod`
-- `erf`, `erfc`, `tgamma`, `lgamma`
-- `fma` (fused multiply-add)
-
-### Type Conversion
-
-- `float(x)` - Cast to floating-point (`float64` by default; `float32` when compiling with `ME_FLOAT32`)
-- `int(x)` - Cast to signed integer (`int64` by default; preserves signed integer width when compile dtype is an explicit signed integer type)
-- `bool(x)` - Cast to boolean (`0 -> false`, non-zero -> true)
-
-Notes:
-- Cast intrinsics take exactly one positional argument.
-- `float()`, `int()`, `bool()` (missing arg) and multi-argument forms like `float(a, b)` are compile errors.
-- For complex inputs:
-  - `float(complex)` and `int(complex)` cast the real component and discard the imaginary one.
-  - `bool(complex)` is `true` when either real or imaginary component is non-zero.
-  - `complex128 -> complex64` narrows both real and imaginary components.
-
-### Reductions
-
-Reduce arrays to scalars:
-- `sum(x)` - Sum of elements
-- `mean(x)` - Mean of elements (returns float64; NaN for empty input)
-- `prod(x)` - Product of elements
-- `min(x)`, `max(x)` - Minimum/maximum
-- `any(x)`, `all(x)` - Logical reductions
-
-Reductions can appear in expressions:
-```
-centered = x - sum(x) / _n0
-```
-
-### Debug Print
-
-Use `print()` for scalar debugging output:
-
-```
-print("value = {}", x)
-print("min={} max={}", min(a), max(a))
-print("sum =", sum(a))
-print(sum(a))
-```
-
-- `{}` placeholders are replaced left-to-right by arguments.
-- Use `{{` and `}}` for literal braces.
-- If the first argument is not a string literal, `print` inserts `{}` for each argument, separated by spaces.
-- If the first argument is a string literal with no `{}`, placeholders are appended for the remaining arguments (with a single space separator).
-- Arguments must be scalar or uniform across the block (use reductions like `min/max/any/all`).
-
-### User-defined Functions
-
-You can register custom C functions or closures and call them from DSL by
-including them in the `me_variable` list passed to `me_compile()`.
-
-Rules:
-- Function/closure entries must use `ME_FUNCTION*` or `ME_CLOSURE*` in `type`.
-- The return dtype must be explicit (not `ME_AUTO`).
-- Names cannot shadow built-ins (`sin`, `sum`, etc.) or reserved identifiers
-  (`def`, `return`, `print`, `int`, `float`, `bool`, `_i0`, `_n0`, `_ndim`, `_flat_idx`).
-- String return types are not supported.
-
-Example (pure function):
-```
+```c
 static double clamp01(double x) {
     return x < 0.0 ? 0.0 : (x > 1.0 ? 1.0 : x);
 }
@@ -439,34 +168,16 @@ int err = 0;
 me_compile("def kernel(x):\n    return clamp01(x)\n", vars, 2, ME_FLOAT64, &err, &expr);
 ```
 
-Example (closure with context):
-```
-static double scale(void *ctx, double x) {
-    return (*(double *)ctx) * x;
-}
+## More Examples
 
-double factor = 2.0;
-me_variable vars[] = {
-    {"x", ME_FLOAT64, x, ME_VARIABLE, NULL, 0},
-    {"scale", ME_FLOAT64, scale, ME_CLOSURE1 | ME_FLAG_PURE, &factor, 0},
-};
-```
-
-## Examples
-
-### Example 1: Polynomial Evaluation
-
-Horner's method for `ax³ + bx² + cx + d`:
-```
+```python
 def poly(a, b, c, d, x):
     t1 = a * x + b
     t2 = t1 * x + c
     return t2 * x + d
 ```
 
-### Example 2: Softmax Normalization
-
-```
+```python
 def softmax(x):
     max_val = max(x)
     shifted = x - max_val
@@ -474,18 +185,7 @@ def softmax(x):
     return exp_vals / sum(exp_vals)
 ```
 
-### Example 3: Distance from Center
-
-```
-def distance():
-    cx = _i0 - _n0 / 2
-    cy = _i1 - _n1 / 2
-    return sqrt(cx * cx + cy * cy)
-```
-
-### Example 4: Mandelbrot Iteration
-
-```
+```python
 def mandelbrot(cr, ci):
     zr = 0.0
     zi = 0.0
@@ -498,86 +198,12 @@ def mandelbrot(cr, ci):
     return iter
 ```
 
-### Example 5: Conditional Thresholding
-
-```
-def threshold(x, y, threshold):
-    magnitude = sqrt(x * x + y * y)
-    return where(magnitude > threshold, magnitude, 0.0)
-```
-
-## API Usage
-
-### Parsing DSL Programs
+## Parser API
 
 ```c
 #include "dsl_parser.h"
 
-const char *source = "def kernel(x):\\n    temp = sin(x)**2\\n    return temp + cos(x)**2";
-me_dsl_error error;
-me_dsl_program *prog = me_dsl_parse(source, &error);
-
-if (!prog) {
-    printf("Parse error at line %d, col %d: %s\n",
-           error.line, error.column, error.message);
-    return;
-}
-
-// Use the program...
-
-me_dsl_program_free(prog);
-```
-
-### Program Structure
-
-The parsed program contains a block of statements:
-
-```c
-typedef struct {
-    char *name;
-    char **params;
-    int nparams;
-    me_dsl_block block;  // Contains array of statements
-} me_dsl_program;
-
-typedef struct {
-    me_dsl_stmt **stmts;
-    int nstmts;
-} me_dsl_block;
-```
-
-Each statement has a kind and associated data:
-
-```c
-typedef enum {
-    ME_DSL_STMT_ASSIGN,   // variable = expression
-    ME_DSL_STMT_EXPR,     // bare expression
-    ME_DSL_STMT_RETURN,   // return expression
-    ME_DSL_STMT_PRINT,    // print(...)
-    ME_DSL_STMT_IF,       // if/elif/else
-    ME_DSL_STMT_FOR,      // for loop
-    ME_DSL_STMT_BREAK,    // break
-    ME_DSL_STMT_CONTINUE  // continue
-} me_dsl_stmt_kind;
-```
-
-## Performance Tips
-
-1. **Minimize temporaries** - Each temporary uses memory for the full block.
-
-2. **Use `where()` instead of branching** - Element-wise conditionals are SIMD-friendly.
-
-3. **Leverage sincos optimization** - When using both `sin(x)` and `cos(x)` on the same input, miniexpr automatically uses a combined sincos computation.
-
-4. **Process in blocks** - The default 4096-element block size is optimized for cache efficiency.
-
-5. **Avoid nested reductions** - `sum(sum(x))` is not supported; compute in stages if needed.
-
-## Error Handling
-
-The parser reports errors with line and column information:
-
-```c
+const char *source = "def kernel(x):\\n    return x + 1";
 me_dsl_error error;
 me_dsl_program *prog = me_dsl_parse(source, &error);
 
@@ -585,16 +211,22 @@ if (!prog) {
     fprintf(stderr, "DSL error at %d:%d - %s\n",
             error.line, error.column, error.message);
 }
+
+me_dsl_program_free(prog);
 ```
 
-Common errors:
-- Syntax errors (missing operators, unmatched parentheses)
-- Unknown function names
-- Invalid loop syntax
+## Performance Tips
+
+1. Minimize temporaries when possible.
+2. Prefer `where()` over branch-heavy logic for SIMD-friendly code paths.
+3. Use reductions in stages instead of deeply nested reduction expressions.
+4. Keep kernels simple and composable for easier JIT optimization.
 
 ## Limitations
 
-- **No string output** - String expressions only produce boolean results
-- **No recursion** - Functions cannot call themselves
-- **Fixed loop limits** - Loop bounds must be known at parse time
-- **Max 8 dimensions** - Index variables `_i0` through `_i7`
+For the canonical list, see `doc/dsl-syntax.md`.
+
+Current high-level limits:
+- No recursion
+- `for` loops use `range(...)`
+- Max 8 ND index dimensions (`_i0` to `_i7`)

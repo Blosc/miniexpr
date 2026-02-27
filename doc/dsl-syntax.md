@@ -1,109 +1,152 @@
 # miniexpr DSL Syntax (Canonical Reference)
 
-This document defines the currently supported DSL syntax for miniexpr.
-When behavior changes in parser/compiler/tests, update this file in the same change.
+This is the practical reference for the DSL accepted by `me_compile()`.
+It focuses on what works today and the most common gotchas.
+For usage walkthroughs and end-to-end examples, see `doc/dsl-usage.md`.
 
-## Scope and source of truth
+## Quick start
 
-The implementation source of truth is:
-
-- Parser: `src/dsl_parser.c`, `src/dsl_parser.h`
-- DSL compiler/runtime checks: `src/miniexpr.c`
-- Behavioral tests: `tests/test_dsl_syntax.c`, `tests/test_nd.c`
-
-This document describes **current behavior**, including compile-time and runtime errors.
-
-## Program shape
-
-A DSL program must be a single function definition:
+A valid DSL program is one function:
 
 ```python
 def kernel(x, y):
-    return x + y
+    temp = sin(x) ** 2
+    return temp + cos(y) ** 2
 ```
 
-Rules:
+Use Python-style indentation and always return a value on the paths you execute.
 
-- Exactly one top-level `def ...:` is expected.
+## Program shape
+
+- Exactly one top-level `def ...:` function is expected.
 - Leading blank lines and header comments are allowed.
-- Trailing content after the function is rejected.
+- Any extra trailing content after the function is a parse error.
+- Nested `def` inside the function body is not allowed.
 
 ## Header pragmas
 
-Supported pragmas at file header:
+Supported file-header pragmas:
 
 - `# me:fp=strict|contract|fast`
 - `# me:compiler=tcc|cc`
 
 Notes:
 
-- Duplicate pragma keys are rejected.
-- Unknown `me:*` pragmas are rejected.
-- Malformed pragma values are rejected.
+- Pragma keys must be unique.
+- Unknown `me:*` pragmas are errors.
+- Malformed pragma values are errors.
 
-## Function signature
+## Function signature and inputs
 
-Supported:
-
-- Positional parameters.
-
-Rejected:
-
-- Duplicate parameter names.
-- Invalid signature syntax.
-
-At DSL compile time, parameter names must match provided input variable names by set membership
-(order may differ, counts must match).
+- Parameters are positional names: `def kernel(a, b, c): ...`
+- Parameter names must be unique.
+- At compile time, DSL parameter names must match input variable names by set membership
+  (order may differ, count must match).
 
 ## Statements
 
-Supported statement kinds:
+Supported statement forms:
 
 - Assignment: `a = expr`
-- Augmented assignment: `+=`, `-=`, `*=`, `/=`, `//=`
+- Compound assignment: `+=`, `-=`, `*=`, `/=`, `//=`
 - Expression statement: `expr`
 - Return: `return expr`
 - Print: `print(...)`
-- If chain: `if` / `elif` / `else`
+- Conditionals: `if` / `elif` / `else`
 - While loop: `while cond:`
 - For loop: `for i in range(...):`
-- `break`, `continue`
+- Loop control: `break`, `continue`
 
-Notes:
+General rules:
 
 - Python-style indentation is required.
 - Empty blocks are invalid.
-- `def` nested inside function body is invalid.
-- `elif`/`else` without matching `if` are invalid.
+- `elif`/`else` must belong to a matching `if`.
+- Deprecated forms like `break if cond` / `continue if cond` are not part of DSL syntax.
 
-## Expressions
+### `if` / `elif` / `else` example
 
-Expressions are parsed by miniexpr expression compiler with DSL constraints.
+```python
+def kernel(x):
+    if x > 0:
+        y = x
+    elif x == 0:
+        y = 1
+    else:
+        y = -x
+    return y
+```
+
+### `for` example
+
+```python
+def kernel(n):
+    acc = 0
+    for i in range(0, n, 1):
+        acc += i
+    return acc
+```
+
+### `while` example
+
+```python
+def kernel(x):
+    i = 0
+    y = x
+    while i < 3:
+        y = y * 2
+        i += 1
+    return y
+```
+
+## Expressions and function calls
+
+Expressions are compiled by miniexpr with DSL checks.
 
 Commonly supported:
 
 - Names and numeric constants
-- Unary: `+`, `-`, logical not
-- Binary arithmetic and bitwise operators
-- Comparisons (`==`, `!=`, `<`, `<=`, `>`, `>=`)
-- Function calls supported by miniexpr
+- Unary operators: `+`, `-`, logical not (`not` / `!`)
+- Arithmetic and bitwise binary operators
+- Comparisons: `==`, `!=`, `<`, `<=`, `>`, `>=`
+- Function calls to supported miniexpr functions
+- User-registered C functions/closures passed in `me_variable`
 
-Notable current cast intrinsics:
+Cast intrinsics:
 
 - `int(expr)`
 - `float(expr)`
 - `bool(expr)`
 
-Cast intrinsic constraints:
+Cast rules:
 
-- Must be called form.
+- Use function-call form only.
 - Exactly one argument.
+
+## Temporary variable type inference
+
+Local temporaries get their dtype from the expression assigned to them.
+
+Example:
+
+```python
+def kernel(x):
+    temp = sin(x) ** 2
+    return temp + cos(x) ** 2
+```
+
+In this example, `temp` is inferred from `sin(x) ** 2` (typically a floating type).
+
+Notes:
+
+- You do not need to declare local variable types.
+- If you assign a value with an incompatible dtype to the same local later, compilation fails.
 
 ## Loops
 
 ### `for ... in range(...)`
 
-Only this loop form is supported:
+Supported forms:
 
 ```python
 for i in range(stop):
@@ -111,47 +154,30 @@ for i in range(start, stop):
 for i in range(start, stop, step):
 ```
 
-Range arity:
+Rules:
 
-- 1, 2, or 3 arguments supported.
-- Other arities rejected at compile time.
-
-Runtime rule:
-
-- `step == 0` is a runtime eval error.
+- `range` takes 1, 2, or 3 arguments.
+- `step == 0` raises a runtime evaluation error.
 
 ### `while`
 
-Supported with condition expression.
-
-Runtime rule:
-
-- Iteration cap is enforced (`ME_DSL_WHILE_MAX_ITERS` environment setting).
-
-## Conditionals
-
-Supported:
-
-- `if` / `elif` / `else`
-
-Rejected:
-
-- Deprecated `break if ...` / `continue if ...` syntax.
+- `while` condition is a regular DSL expression.
+- Runtime iteration cap is enforced by `ME_DSL_WHILE_MAX_ITERS`.
 
 ## `print(...)`
 
-Supported as DSL statement.
+`print` is supported as a DSL statement.
 
 Rules:
 
-- At least one argument.
-- Optional first string format argument.
-- Placeholder count must match argument count.
-- Print arguments must be uniform expressions.
+- At least one argument is required.
+- First argument may be a format string.
+- Placeholder count must match provided values.
+- Printed expressions must be uniform/scalar for the block.
 
 ## Reserved names
 
-The following cannot be used as user variable/function names in DSL context:
+Do not use these as user variable/function names in DSL:
 
 - `print`, `int`, `float`, `bool`, `def`, `return`
 - `_ndim`
@@ -160,20 +186,18 @@ The following cannot be used as user variable/function names in DSL context:
 
 ## ND reserved symbols
 
-Supported reserved ND symbols when referenced in expressions:
+When referenced, these are synthesized by DSL compiler/runtime:
 
 - `_i0`, `_i1`, ... (index per dimension)
 - `_n0`, `_n1`, ... (shape per dimension)
 - `_ndim`
 - `_flat_idx` (global C-order linear index)
 
-These are synthesized by DSL compiler/runtime when used.
+## Typing and return behavior
 
-## Assignment typing and returns
-
-- Reassigning incompatible dtypes for the same DSL local is rejected.
-- Return dtype must be consistent across all return statements.
-- Programs with non-guaranteed return paths may compile, but missing return at runtime yields eval error.
+- Reassigning incompatible dtypes to the same local is a compile-time error.
+- Return dtype must be consistent across all `return` statements.
+- Non-guaranteed return paths may compile; if execution reaches a missing return path, evaluation fails at runtime.
 
 ## Compound assignment desugaring
 
@@ -181,37 +205,29 @@ These are synthesized by DSL compiler/runtime when used.
 - `a -= b` -> `a = a - b`
 - `a *= b` -> `a = a * b`
 - `a /= b` -> `a = a / b`
-- `a //= b` -> floor-division desugaring (`floor(a / b)` semantics)
+- `a //= b` -> `a = floor(a / b)`
 
 ## Compile-time vs runtime errors
 
-### Compile-time DSL errors (examples)
+Compile-time error examples:
 
-- Invalid program shape/signature.
-- Unsupported statement forms.
-- Invalid `range(...)` arity.
-- Invalid cast intrinsic arity.
-- Reserved-name misuse.
-- Return dtype mismatch.
+- Invalid program shape or signature
+- Unsupported statement forms
+- Invalid `range(...)` arity
+- Invalid cast intrinsic arity
+- Reserved-name misuse
+- Return dtype mismatch
 
-### Runtime DSL eval errors (examples)
+Runtime error examples:
 
-- `range(..., step=0)`.
-- Missing return on executed control path.
-- While-loop iteration cap exceeded.
+- `range(..., step=0)`
+- Missing return on executed control path
+- While-loop iteration cap exceeded
 
-## Explicitly unsupported Python syntax (current)
+## Python syntax that is out of DSL scope
 
-These are not part of DSL syntax and should be rejected by frontends/validators:
+These Python features are not part of this DSL:
 
-- Python ternary expression: `a if cond else b`
-- `for ... else` / `while ... else`
-- Unsupported call targets and keyword-arg call forms (outside allowed subset)
-
-## Versioning / maintenance policy
-
-When parser/compiler/tests change DSL behavior:
-
-1. Update this document in the same PR.
-2. Update or add tests in `tests/test_dsl_syntax.c` / `tests/test_nd.c`.
-3. Keep frontend validators (e.g. python-blosc2) aligned with this spec.
+- Ternary expression: `a if cond else b`
+- `for ... else` and `while ... else`
+- Keyword-argument calls and other call forms outside the supported subset
