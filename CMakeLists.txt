@@ -37,6 +37,34 @@ elseif(NOT DEFINED MINIEXPR_USE_WASM32_JIT)
   set(MINIEXPR_USE_WASM32_JIT OFF)
 endif()
 
+# TCC JIT is only available for architectures that minicc has a native backend
+# for. On everything else fall back silently to the non-JIT evaluator so the
+# build succeeds without requiring a working libtcc.
+if(NOT EMSCRIPTEN AND MINIEXPR_ENABLE_TCC_JIT)
+  # Resolve the actual target processor, honouring CMAKE_OSX_ARCHITECTURES on
+  # Apple (conda-forge cross-builds set that rather than CMAKE_SYSTEM_PROCESSOR).
+  set(_miniexpr_proc "")
+  if(APPLE AND CMAKE_OSX_ARCHITECTURES)
+    list(GET CMAKE_OSX_ARCHITECTURES 0 _miniexpr_osx_arch)
+    string(TOLOWER "${_miniexpr_osx_arch}" _miniexpr_proc)
+    unset(_miniexpr_osx_arch)
+  endif()
+  if(_miniexpr_proc STREQUAL "")
+    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _miniexpr_proc)
+  endif()
+  # Supported minicc native backends: i386, x86_64, arm, arm64, riscv64.
+  if(NOT _miniexpr_proc MATCHES "^(x86_64|amd64|i[3-6]86|x86|aarch64|arm64|arm|riscv64)$")
+    message(STATUS
+      "MiniExpr: TCC JIT is not supported on '${CMAKE_SYSTEM_PROCESSOR}'. "
+      "Falling back to non-JIT evaluation.")
+    set(MINIEXPR_ENABLE_TCC_JIT OFF CACHE BOOL
+        "Enable TCC-based JIT backends (libtcc/wasm32)" FORCE)
+    set(MINIEXPR_BUILD_BUNDLED_LIBTCC OFF CACHE BOOL
+        "Build bundled libtcc from minicc sources when TCC JIT is enabled" FORCE)
+  endif()
+  unset(_miniexpr_proc)
+endif()
+
 if(NOT DEFINED MINIEXPR_WASM32_SIDE_MODULE)
   if(EMSCRIPTEN)
     set(MINIEXPR_WASM32_SIDE_MODULE ON)
@@ -93,7 +121,7 @@ if(MINIEXPR_NEEDS_TINYCC)
     # GIT_TAG 4597a9621e70a337b241d424f4ab4729cb75b426  # latest commit as of Feb 2025
     # minicc is a fork of tinycc with support for wasm32 and shared library builds
     GIT_REPOSITORY https://github.com/Blosc/minicc.git
-    GIT_TAG a88ba16add7893510adb4b484785d4202ca0022e
+    GIT_TAG 07b3a61c98a4d91c9dd802b879dc068d620214fb
     # SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../minicc"
   )
   FetchContent_Populate(tinycc)
