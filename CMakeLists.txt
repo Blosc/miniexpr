@@ -93,7 +93,7 @@ if(MINIEXPR_NEEDS_TINYCC)
     # GIT_TAG 4597a9621e70a337b241d424f4ab4729cb75b426  # latest commit as of Feb 2025
     # minicc is a fork of tinycc with support for wasm32 and shared library builds
     GIT_REPOSITORY https://github.com/Blosc/minicc.git
-    GIT_TAG 49c7afc57e86da1aae709c34184de27f0f60794a
+    GIT_TAG 81acee4d7116fb64820f5277eda0b88365197031
     # SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../minicc"
   )
   FetchContent_Populate(tinycc)
@@ -130,6 +130,23 @@ if(MINIEXPR_NEEDS_BUNDLED_TINYCC)
     "-DMINICC_BUILD_WASM32_TCC=OFF"
     "-DMINICC_ENABLE_TESTING=OFF"
   )
+  # When cross-compiling, forward target system info to the minicc sub-build
+  # so minicc selects the correct backend and triggers its host-tool build logic.
+  if(CMAKE_CROSSCOMPILING)
+    if(CMAKE_SYSTEM_NAME)
+      list(APPEND MINIEXPR_TINYCC_CMAKE_ARGS "-DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}")
+    endif()
+    if(CMAKE_SYSTEM_PROCESSOR)
+      list(APPEND MINIEXPR_TINYCC_CMAKE_ARGS "-DCMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR}")
+    endif()
+    if(CMAKE_TOOLCHAIN_FILE)
+      list(APPEND MINIEXPR_TINYCC_CMAKE_ARGS "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}")
+    endif()
+  endif()
+  # Always forward OSX architectures; affects target arch on Apple even on native builds.
+  if(APPLE AND CMAKE_OSX_ARCHITECTURES)
+    list(APPEND MINIEXPR_TINYCC_CMAKE_ARGS "-DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}")
+  endif()
   set(MINIEXPR_TINYCC_BUILD_CMD
     "${CMAKE_COMMAND}" --build "${tinycc_BINARY_DIR}" --target minicc_libtcc_shared
   )
