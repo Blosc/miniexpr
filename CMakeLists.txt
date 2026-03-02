@@ -346,7 +346,27 @@ function(miniexpr_setup_target target_name)
     endif()
     if(_miniexpr_builtins_names)
       unset(_miniexpr_builtins_lib CACHE)
-      find_library(_miniexpr_builtins_lib NAMES ${_miniexpr_builtins_names})
+      execute_process(
+        COMMAND "${CMAKE_C_COMPILER}" -print-resource-dir
+        OUTPUT_VARIABLE _miniexpr_clang_resource_dir
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+      )
+      if(_miniexpr_clang_resource_dir)
+        foreach(_miniexpr_builtins_name IN LISTS _miniexpr_builtins_names)
+          find_file(_miniexpr_builtins_lib
+            NAMES "${_miniexpr_builtins_name}.lib"
+            PATHS "${_miniexpr_clang_resource_dir}/lib/windows"
+            NO_DEFAULT_PATH
+          )
+          if(_miniexpr_builtins_lib)
+            break()
+          endif()
+        endforeach()
+      endif()
+      if(NOT _miniexpr_builtins_lib)
+        find_library(_miniexpr_builtins_lib NAMES ${_miniexpr_builtins_names})
+      endif()
       if(_miniexpr_builtins_lib)
         target_link_libraries(${target_name} PUBLIC "${_miniexpr_builtins_lib}")
       else()
@@ -354,6 +374,8 @@ function(miniexpr_setup_target target_name)
           "MiniExpr: clang_rt builtins library not found for ${CMAKE_VS_PLATFORM_NAME}; using default toolchain runtime.")
       endif()
       unset(_miniexpr_builtins_lib CACHE)
+      unset(_miniexpr_builtins_name)
+      unset(_miniexpr_clang_resource_dir)
     endif()
     unset(_miniexpr_builtins_names)
   endif()
