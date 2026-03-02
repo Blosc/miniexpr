@@ -67,6 +67,52 @@ jobs:
         fi
         grep -E "jit ir built:|jit runtime (built|skip|hit|stubbed):" build/dsl-jit-trace.log || true
 
+  linux-arm64-jit:
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure (JIT enabled)
+      shell: bash
+      run: |
+        cmake -S . -B build-arm64-jit -DCMAKE_BUILD_TYPE=Release -DMINIEXPR_ENABLE_TCC_JIT=ON
+        grep -E '^MINIEXPR_ENABLE_TCC_JIT:BOOL=ON$' build-arm64-jit/CMakeCache.txt
+
+    - name: Build
+      shell: bash
+      run: |
+        cmake --build build-arm64-jit --parallel
+
+    - name: Test
+      shell: bash
+      run: |
+        ME_DSL_JIT=1 ctest --test-dir build-arm64-jit --output-on-failure || \
+          ME_DSL_JIT=1 ctest --test-dir build-arm64-jit --rerun-failed --output-on-failure
+
+  linux-arm64-interpreter:
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure (interpreter only)
+      shell: bash
+      run: |
+        cmake -S . -B build-arm64-interpreter -DCMAKE_BUILD_TYPE=Release -DMINIEXPR_ENABLE_TCC_JIT=OFF
+        grep -E '^MINIEXPR_ENABLE_TCC_JIT:BOOL=OFF$' build-arm64-interpreter/CMakeCache.txt
+
+    - name: Build
+      shell: bash
+      run: |
+        cmake --build build-arm64-interpreter --parallel
+
+    - name: Test
+      shell: bash
+      run: |
+        ME_DSL_JIT=0 ctest --test-dir build-arm64-interpreter --output-on-failure || \
+          ME_DSL_JIT=0 ctest --test-dir build-arm64-interpreter --rerun-failed --output-on-failure
+
   miniexpr-wasm32:
     runs-on: ubuntu-latest
 
