@@ -3801,6 +3801,7 @@ void vec_cos_f32_cached(const float* a, float* out, int n) {
     memcpy(out, cache->cos_buf, (size_t)n * sizeof(float));
 }
 
+#if ME_ENABLE_SLEEF_SIMD && (defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64))
 static int me_cpu_supports_avx2(void) {
 #if defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)
 #if defined(_MSC_VER)
@@ -3847,6 +3848,7 @@ static int me_cpu_supports_avx2(void) {
     return 0;
 #endif
 }
+#endif
 
 #if ME_ENABLE_SLEEF_SIMD && (defined(__aarch64__) || defined(_M_ARM64))
 static int me_cpu_supports_advsimd(void) {
