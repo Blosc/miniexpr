@@ -127,6 +127,7 @@ jobs:
     - name: Configure
       shell: bash
       run: |
+        # Keep Windows/ARM64 on interpreter mode until minicc/libtcc supports this target.
         cmake -S . -B build-win-arm64 -G "Visual Studio 17 2022" -A ARM64 -T ClangCL \
           -DCMAKE_C_COMPILER=clang-cl \
           -DMINIEXPR_BUILD_BUNDLED_LIBTCC=OFF \
