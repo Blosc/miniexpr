@@ -1171,6 +1171,7 @@ static int test_reserved_index_cache_key_and_param_order(void) {
     char *saved_tmpdir = dup_env_value("TMPDIR");
     char *saved_cc = dup_env_value("CC");
     char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
     const char *src_order_a =
         "# me:compiler=cc\n"
         "def kernel(x):\n"
@@ -1217,6 +1218,47 @@ static int test_reserved_index_cache_key_and_param_order(void) {
     }
     if (setenv("ME_DSL_JIT_POS_CACHE", "0", 1) != 0) {
         printf("  FAILED: setenv ME_DSL_JIT_POS_CACHE failed\n");
+        goto cleanup;
+    }
+    if (setenv("ME_DSL_JIT", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT=0 failed\n");
+        goto cleanup;
+    }
+
+    if (compile_and_eval_dsl_values(src_order_a, in, 4, out) != 0) {
+        goto cleanup;
+    }
+    for (int i = 0; i < 4; i++) {
+        if (out[i] != expected_reserved_mix[i]) {
+            printf("  FAILED: interpreted reserved mix mismatch at %d (%.17g vs %.17g)\n",
+                   i, out[i], expected_reserved_mix[i]);
+            goto cleanup;
+        }
+    }
+    if (compile_and_eval_dsl_values(src_global_only, in, 4, out) != 0) {
+        goto cleanup;
+    }
+    for (int i = 0; i < 4; i++) {
+        if (out[i] != expected_linear[i]) {
+            printf("  FAILED: interpreted _flat_idx mismatch at %d (%.17g vs %.17g)\n",
+                   i, out[i], expected_linear[i]);
+            goto cleanup;
+        }
+    }
+    if (compile_and_eval_dsl_values(src_i0_only, in, 4, out) != 0) {
+        goto cleanup;
+    }
+    for (int i = 0; i < 4; i++) {
+        if (out[i] != expected_linear[i]) {
+            printf("  FAILED: interpreted _i0 mismatch at %d (%.17g vs %.17g)\n",
+                   i, out[i], expected_linear[i]);
+            goto cleanup;
+        }
+    }
+
+    remove_files_in_dir(cache_dir);
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT=1 failed\n");
         goto cleanup;
     }
 
@@ -1325,9 +1367,11 @@ cleanup:
     restore_env_value("TMPDIR", saved_tmpdir);
     restore_env_value("CC", saved_cc);
     restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
+    restore_env_value("ME_DSL_JIT", saved_jit);
     free(saved_tmpdir);
     free(saved_cc);
     free(saved_pos_cache);
+    free(saved_jit);
     if (cache_dir[0] != '\0') {
         remove_files_in_dir(cache_dir);
         (void)rmdir(cache_dir);
@@ -1365,7 +1409,8 @@ static int test_nd_reserved_index_synth_codegen_and_parity(void) {
     int32_t chunks[2] = {2, 4};
     int32_t blocks[2] = {2, 3};
     const double expected[6] = {18.0, 0.0, 0.0, 24.0, 0.0, 0.0};
-    double out[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    double out_interp[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    double out_jit[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
     me_expr *expr = NULL;
     int err = 0;
 
@@ -1380,14 +1425,43 @@ static int test_nd_reserved_index_synth_codegen_and_parity(void) {
     if (setenv("TMPDIR", tmp_root, 1) != 0 ||
         setenv("CC", "cc", 1) != 0 ||
         setenv("ME_DSL_JIT_POS_CACHE", "0", 1) != 0 ||
-        setenv("ME_DSL_JIT", "1", 1) != 0 ||
         setenv("ME_DSL_JIT_INDEX_VARS", "1", 1) != 0) {
         printf("  FAILED: setenv failed\n");
         goto cleanup;
     }
 
+    if (setenv("ME_DSL_JIT", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT=0 failed\n");
+        goto cleanup;
+    }
     if (me_compile_nd(src, NULL, 0, ME_FLOAT64, 2, shape, chunks, blocks, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
-        printf("  FAILED: compile_nd error at %d\n", err);
+        printf("  FAILED: compile_nd interp error at %d\n", err);
+        me_free(expr);
+        expr = NULL;
+        goto cleanup;
+    }
+    if (me_eval_nd(expr, NULL, 0, out_interp, 6, 1, 0, NULL) != ME_EVAL_SUCCESS) {
+        printf("  FAILED: eval_nd interp failed\n");
+        me_free(expr);
+        expr = NULL;
+        goto cleanup;
+    }
+    me_free(expr);
+    expr = NULL;
+    for (int i = 0; i < 6; i++) {
+        if (out_interp[i] != expected[i]) {
+            printf("  FAILED: interpreted ND output mismatch at %d (%.17g vs %.17g)\n",
+                   i, out_interp[i], expected[i]);
+            goto cleanup;
+        }
+    }
+
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT=1 failed\n");
+        goto cleanup;
+    }
+    if (me_compile_nd(src, NULL, 0, ME_FLOAT64, 2, shape, chunks, blocks, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+        printf("  FAILED: compile_nd jit error at %d\n", err);
         me_free(expr);
         goto cleanup;
     }
@@ -1396,8 +1470,8 @@ static int test_nd_reserved_index_synth_codegen_and_parity(void) {
         me_free(expr);
         goto cleanup;
     }
-    if (me_eval_nd(expr, NULL, 0, out, 6, 1, 0, NULL) != ME_EVAL_SUCCESS) {
-        printf("  FAILED: eval_nd failed\n");
+    if (me_eval_nd(expr, NULL, 0, out_jit, 6, 1, 0, NULL) != ME_EVAL_SUCCESS) {
+        printf("  FAILED: eval_nd jit failed\n");
         me_free(expr);
         goto cleanup;
     }
@@ -1405,9 +1479,16 @@ static int test_nd_reserved_index_synth_codegen_and_parity(void) {
     expr = NULL;
 
     for (int i = 0; i < 6; i++) {
-        if (out[i] != expected[i]) {
+        if (out_jit[i] != expected[i]) {
             printf("  FAILED: ND output mismatch at %d (%.17g vs %.17g)\n",
-                   i, out[i], expected[i]);
+                   i, out_jit[i], expected[i]);
+            goto cleanup;
+        }
+    }
+    for (int i = 0; i < 6; i++) {
+        if (out_interp[i] != out_jit[i]) {
+            printf("  FAILED: ND interpreted/JIT mismatch at %d (interp=%.17g jit=%.17g)\n",
+                   i, out_interp[i], out_jit[i]);
             goto cleanup;
         }
     }
@@ -1649,6 +1730,14 @@ static int test_reserved_i1_triangular_parity(void) {
     }
     me_free(expr);
     expr = NULL;
+
+    for (int i = 0; i < 10; i++) {
+        if (out_interp[i] != expected[i]) {
+            printf("  FAILED: triangular interpreted output mismatch at %d (%.17g vs %.17g)\n",
+                   i, out_interp[i], expected[i]);
+            goto cleanup;
+        }
+    }
 
     for (int i = 0; i < 10; i++) {
         if (out_jit[i] != expected[i]) {
