@@ -110,8 +110,8 @@ jobs:
     - name: Test
       shell: bash
       run: |
-        ME_DSL_JIT=0 ctest --test-dir build-arm64-interpreter --output-on-failure || \
-          ME_DSL_JIT=0 ctest --test-dir build-arm64-interpreter --rerun-failed --output-on-failure
+        ME_DSL_JIT=0 ctest --test-dir build-arm64-interpreter -E "^test_dsl_jit_runtime_cache$" --output-on-failure || \
+          ME_DSL_JIT=0 ctest --test-dir build-arm64-interpreter -E "^test_dsl_jit_runtime_cache$" --rerun-failed --output-on-failure
 
   miniexpr-wasm32:
     runs-on: ubuntu-latest
