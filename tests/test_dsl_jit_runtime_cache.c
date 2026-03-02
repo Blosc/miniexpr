@@ -1559,6 +1559,136 @@ cleanup:
     return rc;
 }
 
+static int test_reserved_i1_triangular_parity(void) {
+    printf("\n=== DSL JIT Runtime Cache Test 9b: reserved _i1 triangular parity ===\n");
+
+    int rc = 1;
+    char tmp_template[] = "/tmp/me_jit_i1_tri_parity_XXXXXX";
+    char *tmp_root = mkdtemp(tmp_template);
+    char cache_dir[1024];
+    cache_dir[0] = '\0';
+    char *saved_tmpdir = dup_env_value("TMPDIR");
+    char *saved_cc = dup_env_value("CC");
+    char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+    const char *src =
+        "# me:compiler=cc\n"
+        "def kernel(x):\n"
+        "    acc = 0\n"
+        "    for j in range(_i1 + 1):\n"
+        "        acc = acc + j\n"
+        "    return x + acc\n";
+    const int64_t shape[2] = {2, 5};
+    const int32_t chunks[2] = {2, 5};
+    const int32_t blocks[2] = {2, 5};
+    const double in[10] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    const double expected[10] = {0.0, 1.0, 3.0, 6.0, 10.0, 0.0, 1.0, 3.0, 6.0, 10.0};
+    double out_interp[10] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    double out_jit[10] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    me_expr *expr = NULL;
+    int err = 0;
+
+    if (!tmp_root) {
+        printf("  FAILED: mkdtemp failed\n");
+        goto cleanup;
+    }
+    if (snprintf(cache_dir, sizeof(cache_dir), "%s/miniexpr-jit", tmp_root) >= (int)sizeof(cache_dir)) {
+        printf("  FAILED: cache path too long\n");
+        goto cleanup;
+    }
+    if (setenv("TMPDIR", tmp_root, 1) != 0 ||
+        setenv("CC", "cc", 1) != 0 ||
+        setenv("ME_DSL_JIT_POS_CACHE", "0", 1) != 0) {
+        printf("  FAILED: setenv failed\n");
+        goto cleanup;
+    }
+
+    if (setenv("ME_DSL_JIT", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT=0 failed\n");
+        goto cleanup;
+    }
+    if (me_compile_nd(src, vars, 1, ME_FLOAT64, 2, shape, chunks, blocks, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+        printf("  FAILED: compile_nd interp error at %d\n", err);
+        me_free(expr);
+        expr = NULL;
+        goto cleanup;
+    }
+    const void *inputs_interp[] = {in};
+    if (me_eval_nd(expr, inputs_interp, 1, out_interp, 10, 0, 0, NULL) != ME_EVAL_SUCCESS) {
+        printf("  FAILED: eval_nd interp failed\n");
+        me_free(expr);
+        expr = NULL;
+        goto cleanup;
+    }
+    me_free(expr);
+    expr = NULL;
+
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_JIT=1 failed\n");
+        goto cleanup;
+    }
+    if (me_compile_nd(src, vars, 1, ME_FLOAT64, 2, shape, chunks, blocks, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+        printf("  FAILED: compile_nd jit error at %d\n", err);
+        me_free(expr);
+        expr = NULL;
+        goto cleanup;
+    }
+    if (!me_expr_has_jit_kernel(expr)) {
+        printf("  FAILED: expected runtime JIT kernel for triangular parity test\n");
+        me_free(expr);
+        expr = NULL;
+        goto cleanup;
+    }
+    const void *inputs_jit[] = {in};
+    if (me_eval_nd(expr, inputs_jit, 1, out_jit, 10, 0, 0, NULL) != ME_EVAL_SUCCESS) {
+        printf("  FAILED: eval_nd jit failed\n");
+        me_free(expr);
+        expr = NULL;
+        goto cleanup;
+    }
+    me_free(expr);
+    expr = NULL;
+
+    for (int i = 0; i < 10; i++) {
+        if (out_jit[i] != expected[i]) {
+            printf("  FAILED: triangular JIT output mismatch at %d (%.17g vs %.17g)\n",
+                   i, out_jit[i], expected[i]);
+            goto cleanup;
+        }
+    }
+
+    for (int i = 0; i < 10; i++) {
+        if (out_interp[i] != out_jit[i]) {
+            printf("  FAILED: triangular interpreter/JIT mismatch at %d (interp=%.17g jit=%.17g)\n",
+                   i, out_interp[i], out_jit[i]);
+            goto cleanup;
+        }
+    }
+
+    rc = 0;
+    printf("  PASSED\n");
+
+cleanup:
+    me_free(expr);
+    restore_env_value("TMPDIR", saved_tmpdir);
+    restore_env_value("CC", saved_cc);
+    restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    free(saved_tmpdir);
+    free(saved_cc);
+    free(saved_pos_cache);
+    free(saved_jit);
+    if (cache_dir[0] != '\0') {
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+    }
+    if (tmp_root) {
+        (void)rmdir(tmp_root);
+    }
+    return rc;
+}
+
 static int run_cast_interpreter_jit_parity_for_compiler(const char *compiler_tag) {
     int rc = 1;
     char tmp_template[] = "/tmp/me_jit_cast_parity_XXXXXX";
@@ -2743,6 +2873,7 @@ int main(void) {
     fail |= test_reserved_index_cache_key_and_param_order();
     fail |= test_nd_reserved_index_synth_codegen_and_parity();
     fail |= test_element_interpreter_jit_parity();
+    fail |= test_reserved_i1_triangular_parity();
     fail |= test_cast_interpreter_jit_parity_compilers();
     fail |= test_missing_return_skips_runtime_jit();
     fail |= test_range_start_stop_step_jit_lowering();
