@@ -113,6 +113,35 @@ jobs:
         ME_DSL_JIT=0 ctest --test-dir build-arm64-interpreter -E "^test_dsl_jit_runtime_cache$" --output-on-failure || \
           ME_DSL_JIT=0 ctest --test-dir build-arm64-interpreter -E "^test_dsl_jit_runtime_cache$" --rerun-failed --output-on-failure
 
+  windows-arm64:
+    runs-on: windows-11-arm
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up MSVC (Windows/ARM64)
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: arm64
+
+    - name: Configure
+      shell: bash
+      run: |
+        cmake -S . -B build-win-arm64 -G "Visual Studio 17 2022" -A ARM64 -T ClangCL \
+          -DCMAKE_C_COMPILER=clang-cl
+        grep -Ei '^CMAKE_C_COMPILER:(FILEPATH|STRING|UNINITIALIZED)=.*clang-cl' build-win-arm64/CMakeCache.txt
+
+    - name: Build
+      shell: bash
+      run: |
+        cmake --build build-win-arm64 --config Release
+
+    - name: Test
+      shell: bash
+      run: |
+        ctest --test-dir build-win-arm64 -C Release --output-on-failure || \
+          ctest --test-dir build-win-arm64 -C Release --rerun-failed --output-on-failure
+
   miniexpr-wasm32:
     runs-on: ubuntu-latest
 
