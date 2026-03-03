@@ -230,9 +230,6 @@ if(MINIEXPR_NEEDS_BUNDLED_TINYCC)
   install(FILES "${tinycc_SOURCE_DIR}/libtcc.h" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
   install(FILES "${tinycc_SOURCE_DIR}/COPYING"
           DESTINATION "${CMAKE_INSTALL_DATADIR}/miniexpr/third_party/tinycc")
-  install(DIRECTORY "${tinycc_SOURCE_DIR}/"
-          DESTINATION "${CMAKE_INSTALL_DATADIR}/miniexpr/third_party/tinycc/source"
-          PATTERN ".git" EXCLUDE)
 endif()
 
 # --- wasm32 static libtcc (Emscripten cross-compile, targets wasm32) --------
