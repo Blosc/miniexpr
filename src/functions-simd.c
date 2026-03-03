@@ -3670,17 +3670,16 @@ void vec_sin_cached(const double* a, double* out, int n) {
     if (cache->cookie != me_eval_cookie || cache->key != a || cache->nitems != n) {
         if (cache->cap < n) {
             int new_cap = n;
-            double *sin_buf = realloc(cache->sin_buf, (size_t)new_cap * sizeof(double));
-            double *cos_buf = realloc(cache->cos_buf, (size_t)new_cap * sizeof(double));
+            double *sin_buf = malloc((size_t)new_cap * sizeof(double));
+            double *cos_buf = malloc((size_t)new_cap * sizeof(double));
             if (!sin_buf || !cos_buf) {
                 free(sin_buf);
                 free(cos_buf);
-                cache->sin_buf = NULL;
-                cache->cos_buf = NULL;
-                cache->cap = 0;
                 vec_sin_scalar(a, out, n);
                 return;
             }
+            free(cache->sin_buf);
+            free(cache->cos_buf);
             cache->sin_buf = sin_buf;
             cache->cos_buf = cos_buf;
             cache->cap = new_cap;
@@ -3706,17 +3705,16 @@ void vec_cos_cached(const double* a, double* out, int n) {
     if (cache->cookie != me_eval_cookie || cache->key != a || cache->nitems != n) {
         if (cache->cap < n) {
             int new_cap = n;
-            double *sin_buf = realloc(cache->sin_buf, (size_t)new_cap * sizeof(double));
-            double *cos_buf = realloc(cache->cos_buf, (size_t)new_cap * sizeof(double));
+            double *sin_buf = malloc((size_t)new_cap * sizeof(double));
+            double *cos_buf = malloc((size_t)new_cap * sizeof(double));
             if (!sin_buf || !cos_buf) {
                 free(sin_buf);
                 free(cos_buf);
-                cache->sin_buf = NULL;
-                cache->cos_buf = NULL;
-                cache->cap = 0;
                 vec_cos_scalar(a, out, n);
                 return;
             }
+            free(cache->sin_buf);
+            free(cache->cos_buf);
             cache->sin_buf = sin_buf;
             cache->cos_buf = cos_buf;
             cache->cap = new_cap;
@@ -3742,17 +3740,16 @@ void vec_sin_f32_cached(const float* a, float* out, int n) {
     if (cache->cookie != me_eval_cookie || cache->key != a || cache->nitems != n) {
         if (cache->cap < n) {
             int new_cap = n;
-            float *sin_buf = realloc(cache->sin_buf, (size_t)new_cap * sizeof(float));
-            float *cos_buf = realloc(cache->cos_buf, (size_t)new_cap * sizeof(float));
+            float *sin_buf = malloc((size_t)new_cap * sizeof(float));
+            float *cos_buf = malloc((size_t)new_cap * sizeof(float));
             if (!sin_buf || !cos_buf) {
                 free(sin_buf);
                 free(cos_buf);
-                cache->sin_buf = NULL;
-                cache->cos_buf = NULL;
-                cache->cap = 0;
                 vec_sin_f32_scalar(a, out, n);
                 return;
             }
+            free(cache->sin_buf);
+            free(cache->cos_buf);
             cache->sin_buf = sin_buf;
             cache->cos_buf = cos_buf;
             cache->cap = new_cap;
@@ -3778,17 +3775,16 @@ void vec_cos_f32_cached(const float* a, float* out, int n) {
     if (cache->cookie != me_eval_cookie || cache->key != a || cache->nitems != n) {
         if (cache->cap < n) {
             int new_cap = n;
-            float *sin_buf = realloc(cache->sin_buf, (size_t)new_cap * sizeof(float));
-            float *cos_buf = realloc(cache->cos_buf, (size_t)new_cap * sizeof(float));
+            float *sin_buf = malloc((size_t)new_cap * sizeof(float));
+            float *cos_buf = malloc((size_t)new_cap * sizeof(float));
             if (!sin_buf || !cos_buf) {
                 free(sin_buf);
                 free(cos_buf);
-                cache->sin_buf = NULL;
-                cache->cos_buf = NULL;
-                cache->cap = 0;
                 vec_cos_f32_scalar(a, out, n);
                 return;
             }
+            free(cache->sin_buf);
+            free(cache->cos_buf);
             cache->sin_buf = sin_buf;
             cache->cos_buf = cos_buf;
             cache->cap = new_cap;
