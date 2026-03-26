@@ -83,6 +83,7 @@ For log = base 10 log comment the next line. */
 #endif
 
 #include "dsl_parser.h"
+#include "dsl_config.h"
 #include "dsl_jit_ir.h"
 #include "dsl_jit_cgen.h"
 #include "dsl_jit_bridge_contract.h"
@@ -2929,23 +2930,6 @@ static bool dsl_source_has_fp_pragma(const char *source) {
     return false;
 }
 
-static me_dsl_fp_mode dsl_default_fp_mode_from_env(void) {
-    const char *env = getenv("ME_DSL_FP_MODE");
-    if (!env || env[0] == '\0') {
-        return ME_DSL_FP_STRICT;
-    }
-    if (strcmp(env, "strict") == 0) {
-        return ME_DSL_FP_STRICT;
-    }
-    if (strcmp(env, "contract") == 0) {
-        return ME_DSL_FP_CONTRACT;
-    }
-    if (strcmp(env, "fast") == 0 || strcmp(env, "relaxed") == 0) {
-        return ME_DSL_FP_FAST;
-    }
-    return ME_DSL_FP_STRICT;
-}
-
 static const char *dsl_compiler_name(me_dsl_compiler compiler) {
     switch (compiler) {
     case ME_DSL_COMPILER_LIBTCC:
@@ -2955,59 +2939,6 @@ static const char *dsl_compiler_name(me_dsl_compiler compiler) {
     default:
         return "unknown";
     }
-}
-
-static const char *dsl_jit_fp_mode_cflags(me_dsl_fp_mode fp_mode) {
-    switch (fp_mode) {
-    case ME_DSL_FP_STRICT:
-        return "-fno-fast-math -ffp-contract=off";
-    case ME_DSL_FP_CONTRACT:
-        return "-fno-fast-math -ffp-contract=fast";
-    case ME_DSL_FP_FAST:
-        return "-ffast-math";
-    default:
-        return "-fno-fast-math -ffp-contract=off";
-    }
-}
-
-static bool dsl_trace_enabled(void) {
-    const char *env = getenv("ME_DSL_TRACE");
-    if (!env || env[0] == '\0') {
-        return ME_DSL_TRACE_DEFAULT != 0;
-    }
-    return strcmp(env, "0") != 0;
-}
-
-static void dsl_tracef(const char *fmt, ...) {
-    if (!dsl_trace_enabled() || !fmt) {
-        return;
-    }
-    fprintf(stderr, "[me-dsl] ");
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    va_end(ap);
-    fputc('\n', stderr);
-}
-
-static int64_t dsl_while_max_iters(void) {
-    const char *env = getenv("ME_DSL_WHILE_MAX_ITERS");
-    if (!env || env[0] == '\0') {
-        return (int64_t)ME_DSL_WHILE_MAX_ITERS_DEFAULT;
-    }
-    errno = 0;
-    char *end = NULL;
-    long long v = strtoll(env, &end, 10);
-    if (errno != 0 || end == env) {
-        return (int64_t)ME_DSL_WHILE_MAX_ITERS_DEFAULT;
-    }
-    while (*end && isspace((unsigned char)*end)) {
-        end++;
-    }
-    if (*end != '\0') {
-        return (int64_t)ME_DSL_WHILE_MAX_ITERS_DEFAULT;
-    }
-    return (int64_t)v;
 }
 
 static int dsl_offset_from_linecol(const char *source, int line, int column) {
@@ -4337,70 +4268,6 @@ static void dsl_jit_pos_cache_evict(uint64_t key) {
     memset(&g_dsl_jit_pos_cache[slot], 0, sizeof(g_dsl_jit_pos_cache[slot]));
 }
 
-static bool dsl_jit_pos_cache_enabled(void) {
-    const char *env = getenv("ME_DSL_JIT_POS_CACHE");
-    if (!env || env[0] == '\0') {
-        return true;
-    }
-    return strcmp(env, "0") != 0;
-}
-
-static bool dsl_jit_runtime_enabled(void) {
-    const char *env = getenv("ME_DSL_JIT");
-    if (!env || env[0] == '\0') {
-        return true;
-    }
-    return strcmp(env, "0") != 0;
-}
-
-static bool dsl_jit_math_bridge_enabled(void) {
-    const char *env = getenv("ME_DSL_JIT_MATH_BRIDGE");
-    if (!env || env[0] == '\0') {
-        return true;
-    }
-    return strcmp(env, "0") != 0;
-}
-
-static bool dsl_jit_scalar_math_bridge_enabled(void) {
-    const char *env = getenv("ME_DSL_JIT_SCALAR_MATH_BRIDGE");
-    if (!env || env[0] == '\0') {
-        return false;
-    }
-    return strcmp(env, "0") != 0;
-}
-
-static bool dsl_jit_vec_math_enabled(void) {
-    const char *env = getenv("ME_DSL_JIT_VEC_MATH");
-    if (!env || env[0] == '\0') {
-        return true;
-    }
-    return strcmp(env, "0") != 0;
-}
-
-static bool dsl_jit_branch_aware_if_lowering_enabled(void) {
-    const char *env = getenv("ME_DSL_JIT_BRANCH_AWARE_IF");
-    if (!env || env[0] == '\0') {
-        return true;
-    }
-    return strcmp(env, "0") != 0;
-}
-
-static bool dsl_jit_hybrid_expr_vector_math_enabled(void) {
-    const char *env = getenv("ME_DSL_JIT_HYBRID_EXPR_VEC_MATH");
-    if (!env || env[0] == '\0') {
-        return false;
-    }
-    return strcmp(env, "0") != 0;
-}
-
-static bool dsl_jit_index_vars_enabled(void) {
-    const char *env = getenv("ME_DSL_JIT_INDEX_VARS");
-    if (!env || env[0] == '\0') {
-        return true;
-    }
-    return strcmp(env, "0") != 0;
-}
-
 static bool dsl_jit_pos_cache_bind_program(me_dsl_compiled_program *program, uint64_t key) {
     if (!program) {
         return false;
@@ -4994,26 +4861,6 @@ static double dsl_jit_bridge_apply_unary_f64(void (*fn)(const double *, double *
     out_buf[0] = 0.0;
     fn(in_buf, out_buf, 1);
     return out_buf[0];
-}
-
-static int dsl_jit_bridge_chunk_items(void) {
-    const char *env = getenv("ME_DSL_JIT_VEC_CHUNK_ITEMS");
-    if (!env || env[0] == '\0') {
-        return 1 << 20;
-    }
-    errno = 0;
-    char *end = NULL;
-    long long v = strtoll(env, &end, 10);
-    if (errno != 0 || end == env || v <= 0 || v > INT_MAX) {
-        return 1 << 20;
-    }
-    while (*end && isspace((unsigned char)*end)) {
-        end++;
-    }
-    if (*end != '\0') {
-        return 1 << 20;
-    }
-    return (int)v;
 }
 
 static void dsl_jit_bridge_apply_unary_vector_f64(void (*fn)(const double *, double *, int),
@@ -6263,62 +6110,6 @@ static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
 #else
 static bool dsl_jit_cc_math_bridge_available(void) {
     return false;
-}
-
-static bool dsl_jit_math_bridge_enabled(void) {
-    const char *env = getenv("ME_DSL_JIT_MATH_BRIDGE");
-    if (!env || env[0] == '\0') {
-        return true;
-    }
-    return strcmp(env, "0") != 0;
-}
-
-static bool dsl_jit_scalar_math_bridge_enabled(void) {
-    const char *env = getenv("ME_DSL_JIT_SCALAR_MATH_BRIDGE");
-    if (!env || env[0] == '\0') {
-        return false;
-    }
-    return strcmp(env, "0") != 0;
-}
-
-static bool dsl_jit_vec_math_enabled(void) {
-    const char *env = getenv("ME_DSL_JIT_VEC_MATH");
-    if (!env || env[0] == '\0') {
-        return true;
-    }
-    return strcmp(env, "0") != 0;
-}
-
-static bool dsl_jit_branch_aware_if_lowering_enabled(void) {
-    const char *env = getenv("ME_DSL_JIT_BRANCH_AWARE_IF");
-    if (!env || env[0] == '\0') {
-        return true;
-    }
-    return strcmp(env, "0") != 0;
-}
-
-static bool dsl_jit_hybrid_expr_vector_math_enabled(void) {
-    const char *env = getenv("ME_DSL_JIT_HYBRID_EXPR_VEC_MATH");
-    if (!env || env[0] == '\0') {
-        return false;
-    }
-    return strcmp(env, "0") != 0;
-}
-
-static bool dsl_jit_runtime_enabled(void) {
-    const char *env = getenv("ME_DSL_JIT");
-    if (!env || env[0] == '\0') {
-        return true;
-    }
-    return strcmp(env, "0") != 0;
-}
-
-static bool dsl_jit_index_vars_enabled(void) {
-    const char *env = getenv("ME_DSL_JIT_INDEX_VARS");
-    if (!env || env[0] == '\0') {
-        return true;
-    }
-    return strcmp(env, "0") != 0;
 }
 
 #if ME_USE_WASM32_JIT

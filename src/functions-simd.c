@@ -10,6 +10,7 @@
 
 #include "functions.h"
 #include "functions-simd.h"
+#include "dsl_config.h"
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -3617,40 +3618,20 @@ static int me_simd_initialized = 0;
 static int me_simd_enabled = 1;
 static const char *me_simd_backend = "scalar";
 
-static int me_dsl_trace_enabled(void) {
-    const char *env = getenv("ME_DSL_TRACE");
-    if (!env || env[0] == '\0') {
-        return (ME_DSL_TRACE_DEFAULT != 0) ? 1 : 0;
-    }
-    return (strcmp(env, "0") != 0) ? 1 : 0;
-}
-
-static void me_dsl_tracef(const char *fmt, ...) {
-    if (!fmt || !me_dsl_trace_enabled()) {
-        return;
-    }
-    fprintf(stderr, "[me-dsl] ");
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    va_end(ap);
-    fputc('\n', stderr);
-}
-
 static void me_dsl_trace_simd_init(int use_u35) {
-    me_dsl_tracef("simd init: backend=%s sleef=%s simd=%s ulp=%s",
-                  me_simd_backend,
+    dsl_tracef("simd init: backend=%s sleef=%s simd=%s ulp=%s",
+               me_simd_backend,
 #if ME_USE_SLEEF
-                  "on",
+               "on",
 #else
-                  "off",
+               "off",
 #endif
 #if ME_ENABLE_SLEEF_SIMD
-                  "on",
+               "on",
 #else
-                  "off",
+               "off",
 #endif
-                  use_u35 ? "u35" : "u10");
+               use_u35 ? "u35" : "u10");
 }
 
 void me_sincos_eval_start(void) {
