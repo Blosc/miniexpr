@@ -230,6 +230,7 @@ static inline const char *dsl_compiler_name(me_dsl_compiler compiler) {
 bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program);
 const char *dsl_jit_libtcc_error_message(void);
 void dsl_jit_libtcc_delete_state(void *state);
+bool dsl_jit_cc_math_bridge_available(void);
 uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program);
 void dsl_jit_fill_cache_meta(me_dsl_jit_cache_meta *meta,
                              const me_dsl_compiled_program *program,
