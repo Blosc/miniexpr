@@ -10,6 +10,18 @@ Capture the current main components of the repo and list the highest-leverage cl
 
 The codebase still has a fairly clear product split, but the implementation has accumulated complexity in a few very large translation units and in cross-cutting platform/backend branches.
 
+Cleanup progress since this note was started:
+
+- DSL/JIT config parsing was centralized in `src/dsl_config.h`
+- JIT runtime drivers were split into `src/dsl_jit_runtime_host.c` and `src/dsl_jit_runtime_nonhost.c`
+- shared JIT cache/meta helpers were moved into `src/dsl_jit_runtime_cache.c`
+- JIT backends were split into `src/dsl_jit_backend_cc.c`, `src/dsl_jit_backend_libtcc.c`, and `src/dsl_jit_backend_wasm32.c`
+- DSL compile support was split into `src/dsl_compile_support.c`
+- the DSL compile pipeline was moved into `src/dsl_compile.c`
+- the DSL evaluator/runtime path was moved into `src/dsl_eval.c`
+
+That means the main remaining cleanup pressure has shifted away from DSL/JIT/backend entanglement and back toward the classic evaluator, ND orchestration, builtin metadata, and build/support-surface sprawl.
+
 Current size signals from `src/`:
 
 - `src/miniexpr.c`: about 11.4k lines
@@ -89,11 +101,14 @@ Primary files:
 
 - `src/dsl_parser.c`
 - `src/dsl_parser.h`
+- `src/dsl_compile.c`
+- `src/dsl_compile_support.c`
+- `src/dsl_eval.c`
 - `src/dsl_jit_ir.c`
 - `src/dsl_jit_ir.h`
 - `src/dsl_jit_cgen.c`
 - `src/dsl_jit_cgen.h`
-- large DSL runtime sections inside `src/miniexpr.c`
+- `src/dsl_config.h`
 
 Responsibilities:
 
@@ -108,7 +123,13 @@ Responsibilities:
 
 Primary files:
 
-- `src/miniexpr.c`
+- `src/dsl_jit_runtime_host.c`
+- `src/dsl_jit_runtime_nonhost.c`
+- `src/dsl_jit_runtime_cache.c`
+- `src/dsl_jit_backend_cc.c`
+- `src/dsl_jit_backend_libtcc.c`
+- `src/dsl_jit_backend_wasm32.c`
+- `src/dsl_jit_runtime_internal.h`
 - `src/me_jit_glue.js`
 - `CMakeLists.txt`
 
@@ -168,7 +189,19 @@ Suggested internal split:
 - `src/jit_platform_windows.c`
 - `src/jit_platform_wasm.c`
 
-Even if the exact filenames differ, separating those concerns would shrink review scope and reduce merge conflicts immediately.
+Progress so far:
+
+- `src/dsl_compile.c`
+- `src/dsl_compile_support.c`
+- `src/dsl_eval.c`
+- `src/dsl_jit_runtime_host.c`
+- `src/dsl_jit_runtime_nonhost.c`
+- `src/dsl_jit_runtime_cache.c`
+- `src/dsl_jit_backend_cc.c`
+- `src/dsl_jit_backend_libtcc.c`
+- `src/dsl_jit_backend_wasm32.c`
+
+Even if the exact remaining filenames differ, separating the rest of the classic evaluator and ND paths would shrink review scope and reduce merge conflicts immediately.
 
 ### 2. Give the DSL/JIT path a narrower internal boundary
 
@@ -345,3 +378,21 @@ This is not the biggest design problem, but it would improve day-to-day cleanlin
 
 - If manual metadata cleanup stops paying off, consider generating parts of the builtin registry or SIMD wrapper boilerplate.
 - If the DSL/JIT path keeps growing faster than the classic evaluator, consider making it an optional internal library target instead of keeping everything in one core library.
+
+## Future work
+
+Good next slices after today:
+
+- split ND evaluation/orchestration helpers out of `src/miniexpr.c`
+- separate classic expression compile/eval helpers from public API glue
+- narrow the remaining internal boundary between `src/miniexpr.c`, `src/functions.c`, and the DSL modules
+- break `src/functions-simd.c` into dispatch/init code plus backend-specific chunks
+- centralize builtin metadata in a single source of truth
+- move more JIT/dependency logic from `CMakeLists.txt` into `cmake/` modules
+- tighten `.gitignore` and local scratch/build hygiene
+
+Rules for the next cleanup round:
+
+- keep changes structural and avoid semantic cleanups in the same patch
+- continue using focused DSL/JIT regression tests after each extraction
+- prefer real `.c` modules over private implementation headers
