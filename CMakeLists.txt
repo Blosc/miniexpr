@@ -86,6 +86,7 @@ endif()
 
 set(MINIEXPR_SOURCES
   src/miniexpr.c
+  src/dsl_compile.c
   src/dsl_compile_support.c
   src/dsl_parser.c
   src/dsl_jit_ir.c

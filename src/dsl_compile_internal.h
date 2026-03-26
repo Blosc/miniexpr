@@ -26,6 +26,20 @@ int dsl_var_table_add(me_dsl_var_table *table, const char *name, me_dtype dtype)
 
 extern char synthetic_var_addresses[ME_MAX_VARS];
 
+int private_compile_ex(const char *expression, const me_variable *variables, int var_count,
+                       void *output, int nitems, me_dtype dtype, int *error, me_expr **out);
+bool contains_reduction(const me_expr *n);
+bool output_is_scalar(const me_expr *n);
+me_dsl_compiled_program *dsl_compile_program(const char *source,
+                                             const me_variable *variables,
+                                             int var_count,
+                                             me_dtype dtype,
+                                             int compile_ndims,
+                                             int jit_mode,
+                                             int *error_pos,
+                                             bool *is_dsl,
+                                             char *error_reason,
+                                             size_t error_reason_cap);
 me_dsl_compiled_program *dsl_compiled_program_alloc(const me_dsl_program *parsed,
                                                     const char *source,
                                                     int compile_ndims,
