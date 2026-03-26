@@ -88,9 +88,8 @@ For log = base 10 log comment the next line. */
 #include "dsl_jit_cgen.h"
 #include "dsl_jit_bridge_contract.h"
 #include "dsl_jit_test.h"
+#include "dsl_jit_runtime_internal.h"
 
-#define ME_DSL_MAX_NDIM 8
-#define ME_DSL_JIT_SYMBOL_NAME "me_dsl_jit_kernel"
 #define ME_DSL_JIT_SYNTH_ND_CTX_PARAM "__me_nd_ctx"
 #define ME_DSL_JIT_CGEN_VERSION 8
 /* Runtime math bridge ABI for JIT-generated symbols (frozen list v1). */
@@ -138,13 +137,6 @@ static const char *const dsl_jit_bridge_symbol_names[] = {
 #endif
 
 #if ME_USE_WASM32_JIT
-/* wasm32 kernels use int for nitems (TCC wasm32 int64_t limitation). */
-typedef int (*me_dsl_jit_kernel_fn)(const void **inputs, void *output, int nitems);
-#else
-typedef int (*me_dsl_jit_kernel_fn)(const void **inputs, void *output, int64_t nitems);
-#endif
-
-#if ME_USE_WASM32_JIT
 #if !ME_WASM32_SIDE_MODULE
 /* Forward declarations for main-module EM_JS helpers defined later in the file. */
 int me_wasm_jit_instantiate(const unsigned char *wasm_bytes, int wasm_len,
@@ -156,7 +148,7 @@ static me_wasm_jit_instantiate_helper g_me_wasm_jit_instantiate_helper = NULL;
 static me_wasm_jit_free_helper g_me_wasm_jit_free_helper = NULL;
 
 #if ME_WASM32_SIDE_MODULE
-static bool me_wasm_jit_helpers_available(void) {
+bool me_wasm_jit_helpers_available(void) {
     return g_me_wasm_jit_instantiate_helper != NULL &&
            g_me_wasm_jit_free_helper != NULL;
 }
@@ -242,149 +234,11 @@ static bool is_variable_entry(const me_variable *var) {
     return TYPE_MASK(var->type) == ME_VARIABLE;
 }
 
-typedef struct {
-    me_expr *expr;
-    int *var_indices;
-    int n_vars;
-} me_dsl_compiled_expr;
-
-typedef struct me_dsl_compiled_stmt me_dsl_compiled_stmt;
-
-typedef struct {
-    me_dsl_compiled_stmt **stmts;
-    int nstmts;
-    int capacity;
-} me_dsl_compiled_block;
-
-typedef struct {
-    me_dsl_compiled_expr cond;
-    me_dsl_compiled_block block;
-} me_dsl_compiled_if_branch;
-
-struct me_dsl_compiled_stmt {
-    me_dsl_stmt_kind kind;
-    int line;
-    int column;
-    union {
-        struct {
-            int local_slot;
-            me_dsl_compiled_expr value;
-        } assign;
-        struct {
-            me_dsl_compiled_expr expr;
-        } expr_stmt;
-        struct {
-            me_dsl_compiled_expr expr;
-        } return_stmt;
-        struct {
-            char *format;
-            me_dsl_compiled_expr *args;
-            int nargs;
-        } print_stmt;
-        struct {
-            me_dsl_compiled_expr cond;
-            me_dsl_compiled_block then_block;
-            me_dsl_compiled_if_branch *elif_branches;
-            int n_elifs;
-            int elif_capacity;
-            me_dsl_compiled_block else_block;
-            bool has_else;
-        } if_stmt;
-        struct {
-            int loop_var_slot;
-            me_dsl_compiled_expr start;
-            me_dsl_compiled_expr stop;
-            me_dsl_compiled_expr step;
-            me_dsl_compiled_block body;
-        } for_loop;
-        struct {
-            me_dsl_compiled_expr cond;
-            me_dsl_compiled_block body;
-        } while_loop;
-        struct {
-            me_dsl_compiled_expr cond;
-        } flow;
-    } as;
-};
-
-typedef struct {
-    char **names;
-    me_dtype *dtypes;
-    size_t *itemsizes;
-    bool *uniform;
-    int count;
-    int capacity;
-} me_dsl_var_table;
-
-typedef enum {
-    ME_DSL_JIT_BIND_USER_INPUT = 0,
-    ME_DSL_JIT_BIND_RESERVED_I = 1,
-    ME_DSL_JIT_BIND_RESERVED_N = 2,
-    ME_DSL_JIT_BIND_RESERVED_NDIM = 3,
-    ME_DSL_JIT_BIND_RESERVED_GLOBAL_LINEAR_IDX = 4,
-    ME_DSL_JIT_BIND_SYNTH_ND_CTX = 5
-} me_dsl_jit_param_binding_kind;
-
-typedef struct {
-    int var_index;
-    int dim;
-    me_dsl_jit_param_binding_kind kind;
-} me_dsl_jit_param_binding;
-
-typedef struct {
-    me_dsl_compiled_block block;
-    me_dsl_var_table vars;
-    int n_inputs;
-    int n_locals;
-    int *local_var_indices;
-    int *local_slots;
-    int idx_ndim;
-    int idx_flat_idx;
-    int idx_i[ME_DSL_MAX_NDIM];
-    int idx_n[ME_DSL_MAX_NDIM];
-    int uses_i_mask;
-    int uses_n_mask;
-    bool uses_ndim;
-    bool uses_flat_idx;
-    int compile_ndims;
-    me_dsl_fp_mode fp_mode;
-    me_dsl_compiler compiler;
-    bool guaranteed_return;
-    bool output_is_scalar;
-    me_dtype output_dtype;
-    me_dsl_jit_ir_program *jit_ir;
-    uint64_t jit_ir_fingerprint;
-    int jit_ir_error_line;
-    int jit_ir_error_column;
-    char jit_ir_error[128];
-    char *jit_c_source;
-    bool jit_use_runtime_math_bridge;
-    bool jit_scalar_math_bridge_enabled;
-    bool jit_synth_reserved_non_nd;
-    bool jit_synth_reserved_nd;
-    bool jit_vec_math_enabled;
-    bool jit_branch_aware_if_lowering_enabled;
-    bool jit_hybrid_expr_vec_math_enabled;
-    int jit_c_error_line;
-    int jit_c_error_column;
-    char jit_c_error[128];
-    char jit_lowering_mode[16];
-    char jit_vector_ops[128];
-    char jit_lowering_reason[128];
-    me_dsl_jit_param_binding *jit_param_bindings;
-    int jit_nparams;
-    me_dsl_jit_kernel_fn jit_kernel_fn;
-    void *jit_dl_handle;
-    void *jit_tcc_state;
-    uint64_t jit_runtime_key;
-    bool jit_dl_handle_cached;
-} me_dsl_compiled_program;
-
-static void dsl_jit_libtcc_delete_state(void *state);
-static bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program);
-static const char *dsl_jit_libtcc_error_message(void);
+void dsl_jit_libtcc_delete_state(void *state);
+bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program);
+const char *dsl_jit_libtcc_error_message(void);
 #if !defined(_WIN32) && !defined(_WIN64) && !defined(__EMSCRIPTEN__)
-static bool dsl_jit_c_compiler_available(void);
+bool dsl_jit_c_compiler_available(void);
 #endif
 static bool dsl_jit_cc_math_bridge_available(void);
 
@@ -2878,19 +2732,6 @@ static void dsl_set_error_reason(dsl_compile_ctx *ctx, const char *msg) {
     snprintf(ctx->error_reason, ctx->error_reason_cap, "%s", msg);
 }
 
-static const char *dsl_fp_mode_name(me_dsl_fp_mode fp_mode) {
-    switch (fp_mode) {
-    case ME_DSL_FP_STRICT:
-        return "strict";
-    case ME_DSL_FP_CONTRACT:
-        return "contract";
-    case ME_DSL_FP_FAST:
-        return "fast";
-    default:
-        return "unknown";
-    }
-}
-
 static bool dsl_source_has_fp_pragma(const char *source) {
     if (!source) {
         return false;
@@ -2928,17 +2769,6 @@ static bool dsl_source_has_fp_pragma(const char *source) {
         line = line_end + 1;
     }
     return false;
-}
-
-static const char *dsl_compiler_name(me_dsl_compiler compiler) {
-    switch (compiler) {
-    case ME_DSL_COMPILER_LIBTCC:
-        return "tcc";
-    case ME_DSL_COMPILER_CC:
-        return "cc";
-    default:
-        return "unknown";
-    }
 }
 
 static int dsl_offset_from_linecol(const char *source, int line, int column) {
@@ -3952,7 +3782,7 @@ static int dsl_jit_backend_tag(const me_dsl_compiled_program *program) {
     return 1;
 }
 
-static uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program) {
+uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program) {
     uint64_t h = 1469598103934665603ULL;
     if (!program) {
         return h;
@@ -4043,7 +3873,7 @@ static int dsl_jit_wasm_pos_cache_find_free_slot(void) {
     return -1;
 }
 
-static bool dsl_jit_wasm_pos_cache_bind_program(me_dsl_compiled_program *program, uint64_t key) {
+bool dsl_jit_wasm_pos_cache_bind_program(me_dsl_compiled_program *program, uint64_t key) {
     if (!program) {
         return false;
     }
@@ -4103,29 +3933,6 @@ static bool dsl_jit_wasm_pos_cache_store_program(me_dsl_compiled_program *progra
 }
 #endif
 
-#define ME_DSL_JIT_META_MAGIC 0x4d454a49544d4554ULL
-#define ME_DSL_JIT_META_VERSION 7
-
-typedef struct {
-    uint64_t magic;
-    uint32_t version;
-    uint32_t cgen_version;
-    uint32_t bridge_abi_version;
-    uint32_t target_tag;
-    uint32_t ptr_size;
-    uint64_t cache_key;
-    uint64_t ir_fingerprint;
-    int32_t output_dtype;
-    int32_t fp_mode;
-    int32_t compiler;
-    int32_t nparams;
-    int32_t param_dtypes[ME_MAX_VARS];
-    int32_t binding_kinds[ME_MAX_VARS];
-    int32_t binding_dims[ME_MAX_VARS];
-    int32_t binding_var_indices[ME_MAX_VARS];
-    uint64_t toolchain_hash;
-} me_dsl_jit_cache_meta;
-
 static uint64_t dsl_jit_hash_cstr(uint64_t h, const char *s) {
     if (!s) {
         return dsl_jit_hash_i32(h, 0);
@@ -4161,9 +3968,9 @@ static uint64_t dsl_jit_toolchain_hash(const me_dsl_compiled_program *program) {
     return dsl_jit_hash_cstr(h, cflags);
 }
 
-static void dsl_jit_fill_cache_meta(me_dsl_jit_cache_meta *meta,
-                                    const me_dsl_compiled_program *program,
-                                    uint64_t key) {
+void dsl_jit_fill_cache_meta(me_dsl_jit_cache_meta *meta,
+                             const me_dsl_compiled_program *program,
+                             uint64_t key) {
     if (!meta) {
         return;
     }
@@ -4206,7 +4013,7 @@ static void dsl_jit_fill_cache_meta(me_dsl_jit_cache_meta *meta,
     meta->toolchain_hash = dsl_jit_toolchain_hash(program);
 }
 
-static bool dsl_jit_write_meta_file(const char *path, const me_dsl_jit_cache_meta *meta) {
+bool dsl_jit_write_meta_file(const char *path, const me_dsl_jit_cache_meta *meta) {
     if (!path || !meta) {
         return false;
     }
@@ -4236,7 +4043,7 @@ static bool dsl_jit_read_meta_file(const char *path, me_dsl_jit_cache_meta *out_
     return ok;
 }
 
-static bool dsl_jit_meta_file_matches(const char *path, const me_dsl_jit_cache_meta *expected) {
+bool dsl_jit_meta_file_matches(const char *path, const me_dsl_jit_cache_meta *expected) {
     if (!path || !expected) {
         return false;
     }
@@ -4264,7 +4071,7 @@ static bool dsl_jit_ensure_dir(const char *path) {
     return false;
 }
 
-static bool dsl_jit_get_cache_dir(char *out, size_t out_size) {
+bool dsl_jit_get_cache_dir(char *out, size_t out_size) {
     if (!out || out_size == 0) {
         return false;
     }
@@ -4282,7 +4089,7 @@ static bool dsl_jit_get_cache_dir(char *out, size_t out_size) {
     return dsl_jit_ensure_dir(out);
 }
 
-static bool dsl_jit_write_text_file(const char *path, const char *text) {
+bool dsl_jit_write_text_file(const char *path, const char *text) {
     if (!path || !text) {
         return false;
     }
@@ -4298,7 +4105,7 @@ static bool dsl_jit_write_text_file(const char *path, const char *text) {
     return ok;
 }
 
-static bool dsl_jit_copy_file(const char *src, const char *dst) {
+bool dsl_jit_copy_file(const char *src, const char *dst) {
     if (!src || !dst) {
         return false;
     }
@@ -4400,7 +4207,7 @@ static bool dsl_jit_command_exists(const char *cmd) {
     return false;
 }
 
-static bool dsl_jit_c_compiler_available(void) {
+bool dsl_jit_c_compiler_available(void) {
     const char *cc = getenv("CC");
     if (!cc || cc[0] == '\0') {
         cc = "cc";
@@ -4443,7 +4250,7 @@ typedef struct {
 
 static me_dsl_tcc_api g_dsl_tcc_api;
 
-static const char *dsl_jit_libtcc_error_message(void) {
+const char *dsl_jit_libtcc_error_message(void) {
     if (g_dsl_tcc_api.error[0]) {
         return g_dsl_tcc_api.error;
     }
@@ -5375,7 +5182,7 @@ static bool dsl_jit_libtcc_load_api(void) {
     return true;
 }
 
-static void dsl_jit_libtcc_delete_state(void *state) {
+void dsl_jit_libtcc_delete_state(void *state) {
     if (!state) {
         return;
     }
@@ -5385,7 +5192,7 @@ static void dsl_jit_libtcc_delete_state(void *state) {
     g_dsl_tcc_api.tcc_delete_fn((me_tcc_state *)state);
 }
 
-static bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
+bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
     if (!program || !program->jit_c_source) {
         return false;
     }
@@ -5464,15 +5271,15 @@ static bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
     return true;
 }
 #else
-static const char *dsl_jit_libtcc_error_message(void) {
+const char *dsl_jit_libtcc_error_message(void) {
     return "tcc backend not built";
 }
 
-static void dsl_jit_libtcc_delete_state(void *state) {
+void dsl_jit_libtcc_delete_state(void *state) {
     (void)state;
 }
 
-static bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
+bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
     (void)program;
     return false;
 }
@@ -5520,7 +5327,7 @@ static bool dsl_jit_cc_math_bridge_available(void) {
 /* Linux-specific workaround: bridge symbols must be globally visible so
    generated cc JIT modules can resolve me_jit_vec_* at dlopen() time. */
 #if defined(__linux__)
-static bool dsl_jit_cc_promote_self_symbols_global(void) {
+bool dsl_jit_cc_promote_self_symbols_global(void) {
     /* cc JIT bridge calls resolve at dlopen() time; make libminiexpr symbols
        visible from the global loader scope even if host loaded us RTLD_LOCAL. */
     char self_path[PATH_MAX];
@@ -5600,8 +5407,8 @@ static void dsl_jit_cc_add_multiarch_library_flags(char *flags, size_t flags_siz
 #endif
 }
 
-static bool dsl_jit_compile_shared(const me_dsl_compiled_program *program,
-                                   const char *src_path, const char *so_path) {
+bool dsl_jit_compile_shared(const me_dsl_compiled_program *program,
+                            const char *src_path, const char *so_path) {
     if (!program || !src_path || !so_path) {
         return false;
     }
@@ -5651,8 +5458,8 @@ static bool dsl_jit_compile_shared(const me_dsl_compiled_program *program,
     return rc == 0;
 }
 
-static bool dsl_jit_load_kernel(me_dsl_compiled_program *program, const char *shared_path,
-                                char *detail, size_t detail_cap) {
+bool dsl_jit_load_kernel(me_dsl_compiled_program *program, const char *shared_path,
+                         char *detail, size_t detail_cap) {
     if (!program || !shared_path) {
         return false;
     }
@@ -5692,7 +5499,6 @@ static bool dsl_jit_load_kernel(me_dsl_compiled_program *program, const char *sh
     return true;
 }
 
-#include "dsl_jit_runtime_host.h"
 #else
 static bool dsl_jit_cc_math_bridge_available(void) {
     return false;
@@ -6281,7 +6087,7 @@ static bool dsl_wasm32_register_required_symbols(TCCState *state, const char *sr
 #undef ME_WASM32_BRIDGE_SYM
 #undef ME_WASM32_BRIDGE_CONTRACT_SYM
 
-static bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
+bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
     if (!program || !program->jit_c_source) {
         return false;
     }
@@ -6399,7 +6205,6 @@ static bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t ke
 }
 #endif /* ME_USE_WASM32_JIT */
 
-#include "dsl_jit_runtime_nonhost.h"
 #endif
 
 static bool dsl_compiled_block_guarantees_return(const me_dsl_compiled_block *block);

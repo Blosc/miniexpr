@@ -89,6 +89,8 @@ set(MINIEXPR_SOURCES
   src/dsl_parser.c
   src/dsl_jit_ir.c
   src/dsl_jit_cgen.c
+  src/dsl_jit_runtime_host.c
+  src/dsl_jit_runtime_nonhost.c
   src/functions.c
   src/functions-simd.c
 )

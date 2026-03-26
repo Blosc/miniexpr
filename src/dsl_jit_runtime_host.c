@@ -8,8 +8,26 @@
   See LICENSE.txt for details about copyright and rights to use.
 **********************************************************************/
 
-#ifndef MINIEXPR_DSL_JIT_RUNTIME_HOST_H
-#define MINIEXPR_DSL_JIT_RUNTIME_HOST_H
+#include "dsl_jit_runtime_internal.h"
+#include "dsl_jit_test.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#if defined(_WIN32) || defined(_WIN64)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__EMSCRIPTEN__)
 
 /* In-process negative cache for recent JIT runtime failures. */
 #define ME_DSL_JIT_NEG_CACHE_SLOTS 64
@@ -200,7 +218,7 @@ static bool dsl_jit_pos_cache_store_program(me_dsl_compiled_program *program, ui
     return true;
 }
 
-static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
+void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
     if (!program || !program->jit_ir || !program->jit_c_source) {
         return;
     }

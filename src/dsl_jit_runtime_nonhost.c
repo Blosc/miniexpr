@@ -8,10 +8,13 @@
   See LICENSE.txt for details about copyright and rights to use.
 **********************************************************************/
 
-#ifndef MINIEXPR_DSL_JIT_RUNTIME_NONHOST_H
-#define MINIEXPR_DSL_JIT_RUNTIME_NONHOST_H
+#include "dsl_jit_runtime_internal.h"
 
-static void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
+#include <stdio.h>
+
+#if defined(_WIN32) || defined(_WIN64) || defined(__EMSCRIPTEN__)
+
+void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
 #if ME_USE_WASM32_JIT
     if (!program || !program->jit_c_source || program->jit_kernel_fn) {
         return;
