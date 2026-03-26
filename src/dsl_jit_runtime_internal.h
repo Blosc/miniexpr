@@ -27,6 +27,15 @@
 #define ME_DSL_JIT_SYMBOL_NAME "me_dsl_jit_kernel"
 #endif
 
+#ifndef ME_DSL_JIT_CGEN_VERSION
+#define ME_DSL_JIT_CGEN_VERSION 8
+#endif
+
+#ifndef ME_DSL_JIT_BRIDGE_ABI_VERSION
+/* Runtime math bridge ABI for JIT-generated symbols (frozen list v1). */
+#define ME_DSL_JIT_BRIDGE_ABI_VERSION 1
+#endif
+
 #define ME_DSL_JIT_META_MAGIC 0x4d454a49544d4554ULL
 #define ME_DSL_JIT_META_VERSION 7
 
