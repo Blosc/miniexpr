@@ -90,6 +90,7 @@ set(MINIEXPR_SOURCES
   src/dsl_jit_ir.c
   src/dsl_jit_cgen.c
   src/dsl_jit_backend_cc.c
+  src/dsl_jit_backend_libtcc.c
   src/dsl_jit_runtime_cache.c
   src/dsl_jit_runtime_host.c
   src/dsl_jit_runtime_nonhost.c
