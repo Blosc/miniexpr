@@ -661,8 +661,22 @@ typedef struct {
     const void *addr;
 } dsl_wasm32_symbol_binding;
 
-#define ME_WASM32_BRIDGE_DECL(pub_sym, bridge_fn, sig_type, decl) decl
+#define ME_WASM32_DECL_me_dsl_jit_sig_scalar_unary_fn(name) extern double name(double);
+#define ME_WASM32_DECL_me_dsl_jit_sig_scalar_binary_fn(name) extern double name(double, double);
+#define ME_WASM32_DECL_me_dsl_jit_sig_scalar_ternary_fn(name) extern double name(double, double, double);
+#define ME_WASM32_DECL_me_dsl_jit_sig_vec_unary_f64_fn(name) extern void name(const double *, double *, int64_t);
+#define ME_WASM32_DECL_me_dsl_jit_sig_vec_binary_f64_fn(name) extern void name(const double *, const double *, double *, int64_t);
+#define ME_WASM32_DECL_me_dsl_jit_sig_vec_unary_f32_fn(name) extern void name(const float *, float *, int64_t);
+#define ME_WASM32_DECL_me_dsl_jit_sig_vec_binary_f32_fn(name) extern void name(const float *, const float *, float *, int64_t);
+#define ME_WASM32_BRIDGE_DECL(pub_sym, bridge_fn, sig_type, decl) ME_WASM32_DECL_##sig_type(pub_sym)
 ME_DSL_JIT_BRIDGE_SYMBOL_CONTRACT(ME_WASM32_BRIDGE_DECL)
+#undef ME_WASM32_DECL_me_dsl_jit_sig_scalar_unary_fn
+#undef ME_WASM32_DECL_me_dsl_jit_sig_scalar_binary_fn
+#undef ME_WASM32_DECL_me_dsl_jit_sig_scalar_ternary_fn
+#undef ME_WASM32_DECL_me_dsl_jit_sig_vec_unary_f64_fn
+#undef ME_WASM32_DECL_me_dsl_jit_sig_vec_binary_f64_fn
+#undef ME_WASM32_DECL_me_dsl_jit_sig_vec_unary_f32_fn
+#undef ME_WASM32_DECL_me_dsl_jit_sig_vec_binary_f32_fn
 #undef ME_WASM32_BRIDGE_DECL
 
 #define ME_WASM32_BRIDGE_SYM(fn) { #fn, (const void *)&fn }
