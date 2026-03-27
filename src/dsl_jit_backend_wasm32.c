@@ -661,6 +661,10 @@ typedef struct {
     const void *addr;
 } dsl_wasm32_symbol_binding;
 
+#define ME_WASM32_BRIDGE_DECL(pub_sym, bridge_fn, sig_type, decl) decl
+ME_DSL_JIT_BRIDGE_SYMBOL_CONTRACT(ME_WASM32_BRIDGE_DECL)
+#undef ME_WASM32_BRIDGE_DECL
+
 #define ME_WASM32_BRIDGE_SYM(fn) { #fn, (const void *)&fn }
 #define ME_WASM32_BRIDGE_CONTRACT_SYM(pub_sym, bridge_fn, sig_type, decl) \
     ME_WASM32_BRIDGE_SYM(pub_sym),
