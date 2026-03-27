@@ -14,6 +14,10 @@ Primary files:
 
 - `src/miniexpr.h`
 - `src/miniexpr.c`
+- `src/miniexpr_internal.h`
+- `src/miniexpr_eval_nd.c`
+- `src/miniexpr_eval_dsl_nd.c`
+- `src/miniexpr_eval_reduce.c`
 - `src/functions.h`
 - `src/functions.c`
 
@@ -23,8 +27,9 @@ Responsibilities:
 - classic expression parsing and AST construction
 - dtype inference and promotion
 - scalar/vector evaluation
-- reductions
-- ND orchestration still coupled to the classic evaluator
+- reduction helpers and scalar conversion logic
+- classic ND block/chunk evaluation
+- DSL-specific ND block/chunk evaluation dispatch
 
 ### DSL frontend and runtime
 
@@ -44,6 +49,7 @@ Responsibilities:
 - build JIT IR
 - emit JIT C source
 - interpret DSL when JIT is skipped or unavailable
+- provide shared DSL runtime helpers used by the ND DSL evaluator
 
 ### JIT policy and backend layer
 
@@ -80,7 +86,8 @@ Responsibilities:
 
 ## Desired next boundary shifts
 
-- move more ND orchestration out of `src/miniexpr.c`
-- separate classic compile/eval helpers from public API glue
+- separate more classic compile/eval helpers from public API glue in `src/miniexpr.c`
+- narrow `src/miniexpr_internal.h` so it does not become a catch-all private header
+- decide whether scalar conversion and reduction helpers deserve narrower private headers of their own
 - keep backend-specific JIT logic behind a narrower runtime interface
 - keep policy parsing centralized and avoid new direct env reads outside `src/dsl_config.h` unless clearly justified

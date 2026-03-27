@@ -1,6 +1,6 @@
 # Plan: High-Level Codebase Simplification
 
-Last updated: 2026-03-26
+Last updated: 2026-03-27
 
 ## Goal
 
@@ -19,14 +19,13 @@ Cleanup progress since this note was started:
 - DSL compile support was split into `src/dsl_compile_support.c`
 - the DSL compile pipeline was moved into `src/dsl_compile.c`
 - the DSL evaluator/runtime path was moved into `src/dsl_eval.c`
+- classic ND evaluation was split into `src/miniexpr_eval_nd.c`
+- DSL ND evaluation was split into `src/miniexpr_eval_dsl_nd.c`
+- scalar conversion and reduction fast-path helpers were split into `src/miniexpr_eval_reduce.c`
 
 That means the main remaining cleanup pressure has shifted away from DSL/JIT/backend entanglement and back toward the classic evaluator, ND orchestration, builtin metadata, and build/support-surface sprawl.
 
-Current size signals from `src/`:
-
-- `src/miniexpr.c`: about 11.4k lines
-- `src/functions.c`: about 8.2k lines
-- `src/functions-simd.c`: about 5.0k lines
+Current size signals from `src/` are now less about ND/JIT crowding inside `src/miniexpr.c` and more about the remaining classic compile/eval core plus the still-large builtin and SIMD layers.
 
 Current support surface:
 
@@ -61,8 +60,9 @@ Responsibilities:
 - classic expression parsing and AST construction
 - dtype inference and promotion
 - scalar/vector evaluation
-- reductions
-- ND block/chunk evaluation
+- public ND dispatch
+- reduction and scalar-conversion helpers now mostly live outside `src/miniexpr.c`
+- ND block/chunk evaluation now lives in dedicated files
 - string and complex-number semantics
 
 ### 2. Builtin function/type system layer
@@ -163,25 +163,20 @@ Responsibilities:
 
 ### 1. Split `src/miniexpr.c` by responsibility
 
-This is the single biggest simplification opportunity.
+This remains a high-value simplification opportunity, but the problem is narrower than when this note started.
 
 Today `src/miniexpr.c` mixes:
 
 - public API entry points
 - core expression compile/eval helpers
-- ND/padding helpers
 - DSL compilation
-- DSL interpretation
-- JIT runtime policy
-- platform-specific loader/compiler glue
-- wasm-specific handling
-- environment parsing and tracing
+- expression typing and validation helpers
+- some remaining classic evaluator support logic
 
 Suggested internal split:
 
 - `src/expr_compile.c`
 - `src/expr_eval.c`
-- `src/expr_eval_nd.c`
 - `src/dsl_compile.c`
 - `src/dsl_eval.c`
 - `src/jit_runtime.c`
@@ -200,8 +195,11 @@ Progress so far:
 - `src/dsl_jit_backend_cc.c`
 - `src/dsl_jit_backend_libtcc.c`
 - `src/dsl_jit_backend_wasm32.c`
+- `src/miniexpr_eval_nd.c`
+- `src/miniexpr_eval_dsl_nd.c`
+- `src/miniexpr_eval_reduce.c`
 
-Even if the exact remaining filenames differ, separating the rest of the classic evaluator and ND paths would shrink review scope and reduce merge conflicts immediately.
+Even if the exact remaining filenames differ, separating the rest of the classic compile/eval core from API glue would still shrink review scope and reduce merge conflicts immediately.
 
 ### 2. Give the DSL/JIT path a narrower internal boundary
 
@@ -217,13 +215,13 @@ This would make it much easier to reason about DSL work without reopening the wh
 
 ### 3. Centralize runtime policy and environment parsing
 
-This area has improved, but the job is not fully finished.
+This area has improved substantially, but the job is not fully finished.
 
 Current state:
 
 - DSL/JIT env parsing helpers were centralized in `src/dsl_config.h`
 - backend/runtime code now mostly consumes normalized helper accessors instead of ad hoc parsing
-- some direct env reads still remain in backend-specific code for toolchain overrides, temp/cache location, and test/debug hooks
+- some direct env reads still remain in backend-specific code for toolchain overrides, temp/cache location, cache dirs, and test/debug hooks
 
 The remaining policy surface still covers:
 
@@ -310,7 +308,7 @@ The top-level `CMakeLists.txt` currently owns too much:
 
 High-level cleanup:
 
-- move dependency/JIT/wasm logic into `cmake/` modules
+- continue moving target/install/test wiring into `cmake/` modules
 - keep the top-level file focused on product assembly
 - replace `file(GLOB ...)` in `tests/`, `examples/`, and `bench/` with explicit lists once the tree stabilizes
 
@@ -391,13 +389,12 @@ This is not the biggest design problem, but it would improve day-to-day cleanlin
 
 Good next slices after today:
 
-- split ND evaluation/orchestration helpers out of `src/miniexpr.c`
 - separate classic expression compile/eval helpers from public API glue
+- narrow `src/miniexpr_internal.h` into more focused private headers if it starts growing too quickly
 - narrow the remaining internal boundary between `src/miniexpr.c`, `src/functions.c`, and the DSL modules
 - break `src/functions-simd.c` into dispatch/init code plus backend-specific chunks
 - centralize builtin metadata in a single source of truth
-- move more JIT/dependency logic from `CMakeLists.txt` into `cmake/` modules
-- tighten `.gitignore` and local scratch/build hygiene
+- move more target/install/test logic from `CMakeLists.txt` into `cmake/` modules
 
 Rules for the next cleanup round:
 
