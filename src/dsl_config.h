@@ -31,6 +31,14 @@
 #define ME_DSL_WHILE_MAX_ITERS_DEFAULT 10000000LL
 #endif
 
+#ifndef ME_DSL_JIT_LIBTCC_DEFAULT_PATH
+#define ME_DSL_JIT_LIBTCC_DEFAULT_PATH ""
+#endif
+
+#ifndef ME_DSL_JIT_WASM_POS_CACHE_SLOTS
+#define ME_DSL_JIT_WASM_POS_CACHE_SLOTS 64
+#endif
+
 static inline bool dsl_env_flag_enabled(const char *name, bool default_value) {
     const char *env = getenv(name);
     if (!env || env[0] == '\0') {

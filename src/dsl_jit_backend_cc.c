@@ -8,6 +8,10 @@
   See LICENSE.txt for details about copyright and rights to use.
 **********************************************************************/
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "dsl_jit_bridge_contract.h"
 #include "dsl_jit_runtime_internal.h"
 

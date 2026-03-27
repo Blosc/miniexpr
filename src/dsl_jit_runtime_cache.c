@@ -20,9 +20,18 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <direct.h>
+#include <sys/stat.h>
+#ifndef S_ISDIR
+#define S_ISDIR(mode) (((mode) & _S_IFDIR) != 0)
+#endif
+#define me_stat _stat
+#define me_mkdir(path, mode) _mkdir(path)
 #else
 #include <sys/stat.h>
 #include <unistd.h>
+#define me_stat stat
+#define me_mkdir(path, mode) mkdir((path), (mode))
 #endif
 
 static uint64_t dsl_jit_hash_bytes(uint64_t h, const void *ptr, size_t n) {
@@ -235,10 +244,10 @@ static bool dsl_jit_ensure_dir(const char *path) {
         return false;
     }
     struct stat st;
-    if (stat(path, &st) == 0) {
+    if (me_stat(path, &st) == 0) {
         return S_ISDIR(st.st_mode);
     }
-    if (mkdir(path, 0700) == 0) {
+    if (me_mkdir(path, 0700) == 0) {
         return true;
     }
     if (errno == EEXIST) {
@@ -251,6 +260,19 @@ bool dsl_jit_get_cache_dir(char *out, size_t out_size) {
     if (!out || out_size == 0) {
         return false;
     }
+#if defined(_WIN32) || defined(_WIN64)
+    const char *tmpdir = getenv("TEMP");
+    if (!tmpdir || tmpdir[0] == '\0') {
+        tmpdir = getenv("TMP");
+    }
+    if (!tmpdir || tmpdir[0] == '\0') {
+        tmpdir = ".";
+    }
+    if (snprintf(out, out_size, "%s\\miniexpr-jit", tmpdir) >= (int)out_size) {
+        return false;
+    }
+    return dsl_jit_ensure_dir(out);
+#else
     const char *tmpdir = getenv("TMPDIR");
     if (!tmpdir || tmpdir[0] == '\0') {
         /* Avoid cross-user permission conflicts when TMPDIR is not set. */
@@ -263,6 +285,7 @@ bool dsl_jit_get_cache_dir(char *out, size_t out_size) {
         return false;
     }
     return dsl_jit_ensure_dir(out);
+#endif
 }
 
 bool dsl_jit_write_text_file(const char *path, const char *text) {
