@@ -80,6 +80,7 @@ The main [README.md](README.md) keeps the simplest supported build path. This se
 - `-DMINIEXPR_BUILD_EXAMPLES=ON|OFF`
 - `-DMINIEXPR_BUILD_BENCH=ON|OFF`
 - `-DMINIEXPR_USE_SLEEF=ON|OFF`
+- `-DMINIEXPR_USE_ACCELERATE=ON|OFF` (macOS only)
 - `-DMINIEXPR_ENABLE_TCC_JIT=ON|OFF`
 - `-DMINIEXPR_BUILD_BUNDLED_LIBTCC=ON|OFF` (build bundled libtcc from minicc when TCC JIT is enabled)
 - `-DMINIEXPR_DSL_TRACE_DEFAULT=ON|OFF` (emit DSL trace logs by default when `ME_DSL_TRACE` is unset)
@@ -91,6 +92,8 @@ The main [README.md](README.md) keeps the simplest supported build path. This se
 - On Emscripten, setting `MINIEXPR_ENABLE_TCC_JIT=ON` enables wasm32 JIT support automatically.
 - Setting `MINIEXPR_ENABLE_TCC_JIT=OFF` disables TCC-based JIT backends; on Linux/macOS, the separate `# me:compiler=cc` runtime path may still be available.
 - `MINIEXPR_USE_SLEEF=ON` fetches SLEEF and enables SIMD math acceleration; set it to `OFF` to build without SLEEF.
+- `MINIEXPR_USE_ACCELERATE=ON` enables the macOS Accelerate/vForce backend; in `auto` mode on macOS it is preferred by default, and unsupported functions still fall back to scalar kernels.
+- When `ME_SIMD_MATH_BACKEND=accelerate` is active, the `ME_SIMD_ULP_1` / `ME_SIMD_ULP_3_5` distinction does not select different kernels. Those accuracy modes remain meaningful for the SLEEF backend.
 
 ### Alternative Build Invocations
 
@@ -118,6 +121,8 @@ The public/runtime-stable DSL JIT controls remain documented in [README.md](READ
 
 ### Internal/Test-Only Environment Variables
 
+- `ME_SIMD_MATH_BACKEND=auto|sleef|accelerate|scalar`: Force the SIMD math backend selection used by `src/functions-simd.c` for benchmarking and debugging. Default: `auto` (`accelerate` on macOS when enabled, otherwise the existing platform backend selection).
+- The SIMD math benchmarks print backend-aware columns. For `accelerate` and `scalar`, do not interpret the `ME_SIMD_ULP_1` / `ME_SIMD_ULP_3_5` labels as distinct math implementations.
 - `ME_DSL_WHILE_MAX_ITERS=<n>`: Override the runtime safety cap for DSL `while` loops.
 - `ME_DSL_JIT_MATH_BRIDGE=0|1`: Enable or disable runtime math-bridge lowering globally. Default: `1`.
 - `ME_DSL_JIT_SCALAR_MATH_BRIDGE=0|1`: Enable scalar math-bridge lowering for the `cc` backend. Default: `0`.

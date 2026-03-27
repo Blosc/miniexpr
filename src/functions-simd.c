@@ -18,6 +18,14 @@
 #include <stdint.h>
 #include <string.h>
 
+#ifndef ME_USE_ACCELERATE
+#define ME_USE_ACCELERATE 0
+#endif
+
+#if ME_USE_ACCELERATE && defined(__APPLE__)
+#include <Accelerate/Accelerate.h>
+#endif
+
 #if defined(_MSC_VER)
 #include <intrin.h>
 #endif
@@ -38,6 +46,13 @@ static ME_THREAD_LOCAL unsigned long long me_eval_cookie = 0;
 static ME_THREAD_LOCAL int me_simd_force_scalar = 0;
 static ME_THREAD_LOCAL int me_simd_use_u35_override = -1;
 static void me_init_simd(void);
+
+typedef enum {
+    ME_SIMD_BACKEND_AUTO = 0,
+    ME_SIMD_BACKEND_SLEEF = 1,
+    ME_SIMD_BACKEND_ACCELERATE = 2,
+    ME_SIMD_BACKEND_SCALAR = 3
+} me_simd_backend_preference_t;
 
 #ifndef ME_USE_SLEEF
 #define ME_USE_SLEEF 1
@@ -138,6 +153,9 @@ typedef void (*me_vec_ternary_f64)(const double* a, const double* b, const doubl
 typedef void (*me_vec_ternary_f32)(const float* a, const float* b, const float* c, float* out, int n);
 typedef void (*me_vec_sincos_f64)(const double* a, double* sin_out, double* cos_out, int n);
 typedef void (*me_vec_sincos_f32)(const float* a, float* sin_out, float* cos_out, int n);
+
+static me_simd_backend_preference_t me_simd_backend_preference = ME_SIMD_BACKEND_AUTO;
+static int me_simd_backend_preference_initialized = 0;
 
 /* Default to ME_SIMD_ULP_DEFAULT_MODE for SIMD transcendentals. */
 static int me_simd_use_u35_default = (ME_SIMD_ULP_DEFAULT_MODE == ME_SIMD_ULP_3_5) ? 1 : 0;
@@ -955,6 +973,113 @@ IVDEP
         cos_out[i] = cosf(a[i]);
     }
 }
+
+#if ME_USE_ACCELERATE && defined(__APPLE__)
+#define ME_VFORCE_UNARY_F64(name, fn) \
+static void name(const double* a, double* out, int n) { \
+    fn(out, a, &n); \
+}
+
+#define ME_VFORCE_UNARY_F32(name, fn) \
+static void name(const float* a, float* out, int n) { \
+    fn(out, a, &n); \
+}
+
+#define ME_VFORCE_BINARY_F64(name, fn) \
+static void name(const double* a, const double* b, double* out, int n) { \
+    fn(out, a, b, &n); \
+}
+
+#define ME_VFORCE_BINARY_F32(name, fn) \
+static void name(const float* a, const float* b, float* out, int n) { \
+    fn(out, a, b, &n); \
+}
+
+ME_VFORCE_UNARY_F64(vec_sin_accelerate, vvsin)
+ME_VFORCE_UNARY_F64(vec_cos_accelerate, vvcos)
+ME_VFORCE_UNARY_F64(vec_tan_accelerate, vvtan)
+ME_VFORCE_UNARY_F64(vec_asin_accelerate, vvasin)
+ME_VFORCE_UNARY_F64(vec_acos_accelerate, vvacos)
+ME_VFORCE_UNARY_F64(vec_atan_accelerate, vvatan)
+ME_VFORCE_UNARY_F64(vec_abs_accelerate, vvfabs)
+ME_VFORCE_UNARY_F64(vec_exp_accelerate, vvexp)
+ME_VFORCE_UNARY_F64(vec_expm1_accelerate, vvexpm1)
+ME_VFORCE_UNARY_F64(vec_log_accelerate, vvlog)
+ME_VFORCE_UNARY_F64(vec_log10_accelerate, vvlog10)
+ME_VFORCE_UNARY_F64(vec_log1p_accelerate, vvlog1p)
+ME_VFORCE_UNARY_F64(vec_log2_accelerate, vvlog2)
+ME_VFORCE_UNARY_F64(vec_sqrt_accelerate, vvsqrt)
+ME_VFORCE_UNARY_F64(vec_sinh_accelerate, vvsinh)
+ME_VFORCE_UNARY_F64(vec_cosh_accelerate, vvcosh)
+ME_VFORCE_UNARY_F64(vec_tanh_accelerate, vvtanh)
+ME_VFORCE_UNARY_F64(vec_acosh_accelerate, vvacosh)
+ME_VFORCE_UNARY_F64(vec_asinh_accelerate, vvasinh)
+ME_VFORCE_UNARY_F64(vec_atanh_accelerate, vvatanh)
+ME_VFORCE_UNARY_F64(vec_ceil_accelerate, vvceil)
+ME_VFORCE_UNARY_F64(vec_floor_accelerate, vvfloor)
+ME_VFORCE_UNARY_F64(vec_cbrt_accelerate, vvcbrt)
+ME_VFORCE_UNARY_F64(vec_sinpi_accelerate, vvsinpi)
+ME_VFORCE_UNARY_F64(vec_cospi_accelerate, vvcospi)
+
+ME_VFORCE_UNARY_F32(vec_sin_f32_accelerate, vvsinf)
+ME_VFORCE_UNARY_F32(vec_cos_f32_accelerate, vvcosf)
+ME_VFORCE_UNARY_F32(vec_tan_f32_accelerate, vvtanf)
+ME_VFORCE_UNARY_F32(vec_asin_f32_accelerate, vvasinf)
+ME_VFORCE_UNARY_F32(vec_acos_f32_accelerate, vvacosf)
+ME_VFORCE_UNARY_F32(vec_atan_f32_accelerate, vvatanf)
+ME_VFORCE_UNARY_F32(vec_abs_f32_accelerate, vvfabsf)
+ME_VFORCE_UNARY_F32(vec_exp_f32_accelerate, vvexpf)
+ME_VFORCE_UNARY_F32(vec_expm1_f32_accelerate, vvexpm1f)
+ME_VFORCE_UNARY_F32(vec_log_f32_accelerate, vvlogf)
+ME_VFORCE_UNARY_F32(vec_log10_f32_accelerate, vvlog10f)
+ME_VFORCE_UNARY_F32(vec_log1p_f32_accelerate, vvlog1pf)
+ME_VFORCE_UNARY_F32(vec_log2_f32_accelerate, vvlog2f)
+ME_VFORCE_UNARY_F32(vec_sqrt_f32_accelerate, vvsqrtf)
+ME_VFORCE_UNARY_F32(vec_sinh_f32_accelerate, vvsinhf)
+ME_VFORCE_UNARY_F32(vec_cosh_f32_accelerate, vvcoshf)
+ME_VFORCE_UNARY_F32(vec_tanh_f32_accelerate, vvtanhf)
+ME_VFORCE_UNARY_F32(vec_acosh_f32_accelerate, vvacoshf)
+ME_VFORCE_UNARY_F32(vec_asinh_f32_accelerate, vvasinhf)
+ME_VFORCE_UNARY_F32(vec_atanh_f32_accelerate, vvatanhf)
+ME_VFORCE_UNARY_F32(vec_ceil_f32_accelerate, vvceilf)
+ME_VFORCE_UNARY_F32(vec_floor_f32_accelerate, vvfloorf)
+ME_VFORCE_UNARY_F32(vec_cbrt_f32_accelerate, vvcbrtf)
+ME_VFORCE_UNARY_F32(vec_sinpi_f32_accelerate, vvsinpif)
+ME_VFORCE_UNARY_F32(vec_cospi_f32_accelerate, vvcospif)
+
+ME_VFORCE_BINARY_F64(vec_atan2_accelerate, vvatan2)
+ME_VFORCE_BINARY_F64(vec_copysign_accelerate, vvcopysign)
+ME_VFORCE_BINARY_F64(vec_fmod_accelerate, vvfmod)
+ME_VFORCE_BINARY_F64(vec_remainder_accelerate, vvremainder)
+ME_VFORCE_BINARY_F64(vec_nextafter_accelerate, vvnextafter)
+
+ME_VFORCE_BINARY_F32(vec_atan2_f32_accelerate, vvatan2f)
+ME_VFORCE_BINARY_F32(vec_copysign_f32_accelerate, vvcopysignf)
+ME_VFORCE_BINARY_F32(vec_fmod_f32_accelerate, vvfmodf)
+ME_VFORCE_BINARY_F32(vec_remainder_f32_accelerate, vvremainderf)
+ME_VFORCE_BINARY_F32(vec_nextafter_f32_accelerate, vvnextafterf)
+
+static void vec_pow_accelerate(const double* a, const double* b, double* out, int n) {
+    vvpow(out, b, a, &n);
+}
+
+static void vec_pow_f32_accelerate(const float* a, const float* b, float* out, int n) {
+    vvpowf(out, b, a, &n);
+}
+
+static void vec_sincos_accelerate(const double* a, double* sin_out, double* cos_out, int n) {
+    vvsincos(sin_out, cos_out, a, &n);
+}
+
+static void vec_sincos_f32_accelerate(const float* a, float* sin_out, float* cos_out, int n) {
+    vvsincosf(sin_out, cos_out, a, &n);
+}
+
+#undef ME_VFORCE_UNARY_F64
+#undef ME_VFORCE_UNARY_F32
+#undef ME_VFORCE_BINARY_F64
+#undef ME_VFORCE_BINARY_F32
+#endif
 
 #if ME_ENABLE_SLEEF_SIMD && (defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64))
 static ME_AVX2_TARGET void vec_sincos_avx2(const double* a, double* sin_out, double* cos_out, int n) {
@@ -3618,6 +3743,195 @@ static int me_simd_initialized = 0;
 static int me_simd_enabled = 1;
 static const char *me_simd_backend = "scalar";
 
+static void me_set_scalar_backend(void) {
+    vec_sin_impl = vec_sin_scalar;
+    vec_cos_impl = vec_cos_scalar;
+    vec_tan_impl = vec_tan_scalar;
+    vec_asin_impl = vec_asin_scalar;
+    vec_acos_impl = vec_acos_scalar;
+    vec_atan_impl = vec_atan_scalar;
+    vec_atan2_impl = vec_atan2_scalar;
+    vec_abs_impl = vec_abs_scalar;
+    vec_exp_impl = vec_exp_scalar;
+    vec_expm1_impl = vec_expm1_scalar;
+    vec_log_impl = vec_log_scalar;
+    vec_log10_impl = vec_log10_scalar;
+    vec_log1p_impl = vec_log1p_scalar;
+    vec_log2_impl = vec_log2_scalar;
+    vec_sqrt_impl = vec_sqrt_scalar;
+    vec_sinh_impl = vec_sinh_scalar;
+    vec_cosh_impl = vec_cosh_scalar;
+    vec_tanh_impl = vec_tanh_scalar;
+    vec_acosh_impl = vec_acosh_scalar;
+    vec_asinh_impl = vec_asinh_scalar;
+    vec_atanh_impl = vec_atanh_scalar;
+    vec_ceil_impl = vec_ceil_scalar;
+    vec_floor_impl = vec_floor_scalar;
+    vec_round_impl = vec_round_scalar;
+    vec_trunc_impl = vec_trunc_scalar;
+    vec_exp2_impl = vec_exp2_scalar;
+    vec_exp10_impl = vec_exp10_scalar;
+    vec_cbrt_impl = vec_cbrt_scalar;
+    vec_erf_impl = vec_erf_scalar;
+    vec_erfc_impl = vec_erfc_scalar;
+    vec_sinpi_impl = vec_sinpi_scalar;
+    vec_cospi_impl = vec_cospi_scalar;
+    vec_tgamma_impl = vec_tgamma_scalar;
+    vec_lgamma_impl = vec_lgamma_scalar;
+    vec_rint_impl = vec_rint_scalar;
+    vec_pow_impl = vec_pow_scalar;
+    vec_copysign_impl = vec_copysign_scalar;
+    vec_fdim_impl = vec_fdim_scalar;
+    vec_fmax_impl = vec_fmax_scalar;
+    vec_fmin_impl = vec_fmin_scalar;
+    vec_fmod_impl = vec_fmod_scalar;
+    vec_hypot_impl = vec_hypot_scalar;
+    vec_ldexp_impl = vec_ldexp_scalar;
+    vec_nextafter_impl = vec_nextafter_scalar;
+    vec_remainder_impl = vec_remainder_scalar;
+    vec_fma_impl = vec_fma_scalar;
+    vec_sin_f32_impl = vec_sin_f32_scalar;
+    vec_cos_f32_impl = vec_cos_f32_scalar;
+    vec_tan_f32_impl = vec_tan_f32_scalar;
+    vec_asin_f32_impl = vec_asin_f32_scalar;
+    vec_acos_f32_impl = vec_acos_f32_scalar;
+    vec_atan_f32_impl = vec_atan_f32_scalar;
+    vec_atan2_f32_impl = vec_atan2_f32_scalar;
+    vec_abs_f32_impl = vec_abs_f32_scalar;
+    vec_exp_f32_impl = vec_exp_f32_scalar;
+    vec_expm1_f32_impl = vec_expm1_f32_scalar;
+    vec_log_f32_impl = vec_log_f32_scalar;
+    vec_log10_f32_impl = vec_log10_f32_scalar;
+    vec_log1p_f32_impl = vec_log1p_f32_scalar;
+    vec_log2_f32_impl = vec_log2_f32_scalar;
+    vec_sqrt_f32_impl = vec_sqrt_f32_scalar;
+    vec_sinh_f32_impl = vec_sinh_f32_scalar;
+    vec_cosh_f32_impl = vec_cosh_f32_scalar;
+    vec_tanh_f32_impl = vec_tanh_f32_scalar;
+    vec_acosh_f32_impl = vec_acosh_f32_scalar;
+    vec_asinh_f32_impl = vec_asinh_f32_scalar;
+    vec_atanh_f32_impl = vec_atanh_f32_scalar;
+    vec_ceil_f32_impl = vec_ceil_f32_scalar;
+    vec_floor_f32_impl = vec_floor_f32_scalar;
+    vec_round_f32_impl = vec_round_f32_scalar;
+    vec_trunc_f32_impl = vec_trunc_f32_scalar;
+    vec_exp2_f32_impl = vec_exp2_f32_scalar;
+    vec_exp10_f32_impl = vec_exp10_f32_scalar;
+    vec_cbrt_f32_impl = vec_cbrt_f32_scalar;
+    vec_erf_f32_impl = vec_erf_f32_scalar;
+    vec_erfc_f32_impl = vec_erfc_f32_scalar;
+    vec_sinpi_f32_impl = vec_sinpi_f32_scalar;
+    vec_cospi_f32_impl = vec_cospi_f32_scalar;
+    vec_tgamma_f32_impl = vec_tgamma_f32_scalar;
+    vec_lgamma_f32_impl = vec_lgamma_f32_scalar;
+    vec_rint_f32_impl = vec_rint_f32_scalar;
+    vec_pow_f32_impl = vec_pow_f32_scalar;
+    vec_copysign_f32_impl = vec_copysign_f32_scalar;
+    vec_fdim_f32_impl = vec_fdim_f32_scalar;
+    vec_fmax_f32_impl = vec_fmax_f32_scalar;
+    vec_fmin_f32_impl = vec_fmin_f32_scalar;
+    vec_fmod_f32_impl = vec_fmod_f32_scalar;
+    vec_hypot_f32_impl = vec_hypot_f32_scalar;
+    vec_ldexp_f32_impl = vec_ldexp_f32_scalar;
+    vec_nextafter_f32_impl = vec_nextafter_f32_scalar;
+    vec_remainder_f32_impl = vec_remainder_f32_scalar;
+    vec_fma_f32_impl = vec_fma_f32_scalar;
+    vec_sincos_impl = vec_sincos_scalar;
+    vec_sincos_f32_impl = vec_sincos_f32_scalar;
+}
+
+#if ME_USE_ACCELERATE && defined(__APPLE__)
+static void me_set_accelerate_backend(void) {
+    me_set_scalar_backend();
+    vec_sin_impl = vec_sin_accelerate;
+    vec_cos_impl = vec_cos_accelerate;
+    vec_tan_impl = vec_tan_accelerate;
+    vec_asin_impl = vec_asin_accelerate;
+    vec_acos_impl = vec_acos_accelerate;
+    vec_atan_impl = vec_atan_accelerate;
+    vec_atan2_impl = vec_atan2_accelerate;
+    vec_abs_impl = vec_abs_accelerate;
+    vec_exp_impl = vec_exp_accelerate;
+    vec_expm1_impl = vec_expm1_accelerate;
+    vec_log_impl = vec_log_accelerate;
+    vec_log10_impl = vec_log10_accelerate;
+    vec_log1p_impl = vec_log1p_accelerate;
+    vec_log2_impl = vec_log2_accelerate;
+    vec_sqrt_impl = vec_sqrt_accelerate;
+    vec_sinh_impl = vec_sinh_accelerate;
+    vec_cosh_impl = vec_cosh_accelerate;
+    vec_tanh_impl = vec_tanh_accelerate;
+    vec_acosh_impl = vec_acosh_accelerate;
+    vec_asinh_impl = vec_asinh_accelerate;
+    vec_atanh_impl = vec_atanh_accelerate;
+    vec_ceil_impl = vec_ceil_accelerate;
+    vec_floor_impl = vec_floor_accelerate;
+    vec_cbrt_impl = vec_cbrt_accelerate;
+    vec_sinpi_impl = vec_sinpi_accelerate;
+    vec_cospi_impl = vec_cospi_accelerate;
+    vec_pow_impl = vec_pow_accelerate;
+    vec_copysign_impl = vec_copysign_accelerate;
+    vec_fmod_impl = vec_fmod_accelerate;
+    vec_nextafter_impl = vec_nextafter_accelerate;
+    vec_remainder_impl = vec_remainder_accelerate;
+    vec_sin_f32_impl = vec_sin_f32_accelerate;
+    vec_cos_f32_impl = vec_cos_f32_accelerate;
+    vec_tan_f32_impl = vec_tan_f32_accelerate;
+    vec_asin_f32_impl = vec_asin_f32_accelerate;
+    vec_acos_f32_impl = vec_acos_f32_accelerate;
+    vec_atan_f32_impl = vec_atan_f32_accelerate;
+    vec_atan2_f32_impl = vec_atan2_f32_accelerate;
+    vec_abs_f32_impl = vec_abs_f32_accelerate;
+    vec_exp_f32_impl = vec_exp_f32_accelerate;
+    vec_expm1_f32_impl = vec_expm1_f32_accelerate;
+    vec_log_f32_impl = vec_log_f32_accelerate;
+    vec_log10_f32_impl = vec_log10_f32_accelerate;
+    vec_log1p_f32_impl = vec_log1p_f32_accelerate;
+    vec_log2_f32_impl = vec_log2_f32_accelerate;
+    vec_sqrt_f32_impl = vec_sqrt_f32_accelerate;
+    vec_sinh_f32_impl = vec_sinh_f32_accelerate;
+    vec_cosh_f32_impl = vec_cosh_f32_accelerate;
+    vec_tanh_f32_impl = vec_tanh_f32_accelerate;
+    vec_acosh_f32_impl = vec_acosh_f32_accelerate;
+    vec_asinh_f32_impl = vec_asinh_f32_accelerate;
+    vec_atanh_f32_impl = vec_atanh_f32_accelerate;
+    vec_ceil_f32_impl = vec_ceil_f32_accelerate;
+    vec_floor_f32_impl = vec_floor_f32_accelerate;
+    vec_cbrt_f32_impl = vec_cbrt_f32_accelerate;
+    vec_sinpi_f32_impl = vec_sinpi_f32_accelerate;
+    vec_cospi_f32_impl = vec_cospi_f32_accelerate;
+    vec_pow_f32_impl = vec_pow_f32_accelerate;
+    vec_copysign_f32_impl = vec_copysign_f32_accelerate;
+    vec_fmod_f32_impl = vec_fmod_f32_accelerate;
+    vec_nextafter_f32_impl = vec_nextafter_f32_accelerate;
+    vec_remainder_f32_impl = vec_remainder_f32_accelerate;
+    vec_sincos_impl = vec_sincos_accelerate;
+    vec_sincos_f32_impl = vec_sincos_f32_accelerate;
+}
+#endif
+
+static void me_init_simd_backend_preference(void) {
+    const char *value;
+
+    if (me_simd_backend_preference_initialized) {
+        return;
+    }
+    me_simd_backend_preference_initialized = 1;
+    value = getenv("ME_SIMD_MATH_BACKEND");
+    if (!value || !value[0]) {
+        return;
+    }
+    if (strcmp(value, "auto") == 0) {
+        me_simd_backend_preference = ME_SIMD_BACKEND_AUTO;
+    } else if (strcmp(value, "sleef") == 0) {
+        me_simd_backend_preference = ME_SIMD_BACKEND_SLEEF;
+    } else if (strcmp(value, "accelerate") == 0) {
+        me_simd_backend_preference = ME_SIMD_BACKEND_ACCELERATE;
+    } else if (strcmp(value, "scalar") == 0) {
+        me_simd_backend_preference = ME_SIMD_BACKEND_SCALAR;
+    }
+}
+
 static void me_dsl_trace_simd_init(int use_u35) {
     dsl_tracef("simd init: backend=%s sleef=%s simd=%s ulp=%s",
                me_simd_backend,
@@ -3835,114 +4149,46 @@ static int me_cpu_supports_advsimd(void) {
 
 static void me_init_simd(void) {
     const int use_u35 = me_simd_use_u35_active();
+    me_init_simd_backend_preference();
     if (me_simd_initialized) {
         return;
     }
     me_simd_initialized = 1;
 
-    if (!me_simd_enabled) {
-        vec_sin_impl = vec_sin_scalar;
-        vec_cos_impl = vec_cos_scalar;
-        vec_tan_impl = vec_tan_scalar;
-        vec_asin_impl = vec_asin_scalar;
-        vec_acos_impl = vec_acos_scalar;
-        vec_atan_impl = vec_atan_scalar;
-        vec_atan2_impl = vec_atan2_scalar;
-        vec_abs_impl = vec_abs_scalar;
-        vec_exp_impl = vec_exp_scalar;
-        vec_expm1_impl = vec_expm1_scalar;
-        vec_log_impl = vec_log_scalar;
-        vec_log10_impl = vec_log10_scalar;
-        vec_log1p_impl = vec_log1p_scalar;
-        vec_log2_impl = vec_log2_scalar;
-        vec_sqrt_impl = vec_sqrt_scalar;
-        vec_sinh_impl = vec_sinh_scalar;
-        vec_cosh_impl = vec_cosh_scalar;
-        vec_tanh_impl = vec_tanh_scalar;
-        vec_acosh_impl = vec_acosh_scalar;
-        vec_asinh_impl = vec_asinh_scalar;
-        vec_atanh_impl = vec_atanh_scalar;
-        vec_ceil_impl = vec_ceil_scalar;
-        vec_floor_impl = vec_floor_scalar;
-        vec_round_impl = vec_round_scalar;
-        vec_trunc_impl = vec_trunc_scalar;
-        vec_exp2_impl = vec_exp2_scalar;
-        vec_exp10_impl = vec_exp10_scalar;
-        vec_cbrt_impl = vec_cbrt_scalar;
-        vec_erf_impl = vec_erf_scalar;
-        vec_erfc_impl = vec_erfc_scalar;
-        vec_sinpi_impl = vec_sinpi_scalar;
-        vec_cospi_impl = vec_cospi_scalar;
-        vec_tgamma_impl = vec_tgamma_scalar;
-        vec_lgamma_impl = vec_lgamma_scalar;
-        vec_rint_impl = vec_rint_scalar;
-        vec_pow_impl = vec_pow_scalar;
-        vec_copysign_impl = vec_copysign_scalar;
-        vec_fdim_impl = vec_fdim_scalar;
-        vec_fmax_impl = vec_fmax_scalar;
-        vec_fmin_impl = vec_fmin_scalar;
-        vec_fmod_impl = vec_fmod_scalar;
-        vec_hypot_impl = vec_hypot_scalar;
-        vec_ldexp_impl = vec_ldexp_scalar;
-        vec_nextafter_impl = vec_nextafter_scalar;
-        vec_remainder_impl = vec_remainder_scalar;
-        vec_fma_impl = vec_fma_scalar;
-        vec_sin_f32_impl = vec_sin_f32_scalar;
-        vec_cos_f32_impl = vec_cos_f32_scalar;
-        vec_tan_f32_impl = vec_tan_f32_scalar;
-        vec_asin_f32_impl = vec_asin_f32_scalar;
-        vec_acos_f32_impl = vec_acos_f32_scalar;
-        vec_atan_f32_impl = vec_atan_f32_scalar;
-        vec_atan2_f32_impl = vec_atan2_f32_scalar;
-        vec_abs_f32_impl = vec_abs_f32_scalar;
-        vec_exp_f32_impl = vec_exp_f32_scalar;
-        vec_expm1_f32_impl = vec_expm1_f32_scalar;
-        vec_log_f32_impl = vec_log_f32_scalar;
-        vec_log10_f32_impl = vec_log10_f32_scalar;
-        vec_log1p_f32_impl = vec_log1p_f32_scalar;
-        vec_log2_f32_impl = vec_log2_f32_scalar;
-        vec_sqrt_f32_impl = vec_sqrt_f32_scalar;
-        vec_sinh_f32_impl = vec_sinh_f32_scalar;
-        vec_cosh_f32_impl = vec_cosh_f32_scalar;
-        vec_tanh_f32_impl = vec_tanh_f32_scalar;
-        vec_acosh_f32_impl = vec_acosh_f32_scalar;
-        vec_asinh_f32_impl = vec_asinh_f32_scalar;
-        vec_atanh_f32_impl = vec_atanh_f32_scalar;
-        vec_ceil_f32_impl = vec_ceil_f32_scalar;
-        vec_floor_f32_impl = vec_floor_f32_scalar;
-        vec_round_f32_impl = vec_round_f32_scalar;
-        vec_trunc_f32_impl = vec_trunc_f32_scalar;
-        vec_exp2_f32_impl = vec_exp2_f32_scalar;
-        vec_exp10_f32_impl = vec_exp10_f32_scalar;
-        vec_cbrt_f32_impl = vec_cbrt_f32_scalar;
-        vec_erf_f32_impl = vec_erf_f32_scalar;
-        vec_erfc_f32_impl = vec_erfc_f32_scalar;
-        vec_sinpi_f32_impl = vec_sinpi_f32_scalar;
-        vec_cospi_f32_impl = vec_cospi_f32_scalar;
-        vec_tgamma_f32_impl = vec_tgamma_f32_scalar;
-        vec_lgamma_f32_impl = vec_lgamma_f32_scalar;
-        vec_rint_f32_impl = vec_rint_f32_scalar;
-        vec_pow_f32_impl = vec_pow_f32_scalar;
-        vec_copysign_f32_impl = vec_copysign_f32_scalar;
-        vec_fdim_f32_impl = vec_fdim_f32_scalar;
-        vec_fmax_f32_impl = vec_fmax_f32_scalar;
-        vec_fmin_f32_impl = vec_fmin_f32_scalar;
-        vec_fmod_f32_impl = vec_fmod_f32_scalar;
-        vec_hypot_f32_impl = vec_hypot_f32_scalar;
-        vec_ldexp_f32_impl = vec_ldexp_f32_scalar;
-        vec_nextafter_f32_impl = vec_nextafter_f32_scalar;
-        vec_remainder_f32_impl = vec_remainder_f32_scalar;
-        vec_fma_f32_impl = vec_fma_f32_scalar;
-        vec_sincos_impl = vec_sincos_scalar;
-        vec_sincos_f32_impl = vec_sincos_f32_scalar;
+    if (!me_simd_enabled || me_simd_backend_preference == ME_SIMD_BACKEND_SCALAR) {
+        me_set_scalar_backend();
         me_simd_backend = "scalar";
         me_dsl_trace_simd_init(use_u35);
         return;
     }
 
+    if (me_simd_backend_preference == ME_SIMD_BACKEND_ACCELERATE) {
+#if ME_USE_ACCELERATE && defined(__APPLE__)
+        me_set_accelerate_backend();
+        me_simd_backend = "accelerate";
+        me_dsl_trace_simd_init(use_u35);
+        return;
+#else
+        me_set_scalar_backend();
+        me_simd_backend = "scalar";
+        me_dsl_trace_simd_init(use_u35);
+        return;
+#endif
+    }
+
+#if ME_USE_ACCELERATE && defined(__APPLE__)
+    if (me_simd_backend_preference == ME_SIMD_BACKEND_AUTO) {
+        me_set_accelerate_backend();
+        me_simd_backend = "accelerate";
+        me_dsl_trace_simd_init(use_u35);
+        return;
+    }
+#endif
+
     /* Use SLEEF SIMD kernels when the CPU supports them. */
 #if ME_ENABLE_SLEEF_SIMD && (defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64))
-    if (me_cpu_supports_avx2()) {
+    if (me_simd_backend_preference != ME_SIMD_BACKEND_ACCELERATE &&
+        me_cpu_supports_avx2()) {
         vec_sin_impl = vec_sin_avx2;
         vec_cos_impl = vec_cos_avx2;
         vec_tan_impl = vec_tan_avx2;
@@ -4052,7 +4298,8 @@ static void me_init_simd(void) {
 #endif
 
 #if ME_ENABLE_SLEEF_SIMD && (defined(__aarch64__) || defined(_M_ARM64))
-    if (me_cpu_supports_advsimd()) {
+    if (me_simd_backend_preference != ME_SIMD_BACKEND_ACCELERATE &&
+        me_cpu_supports_advsimd()) {
         vec_sin_impl = vec_sin_advsimd;
         vec_cos_impl = vec_cos_advsimd;
         vec_tan_impl = vec_tan_advsimd;
@@ -4156,12 +4403,22 @@ static void me_init_simd(void) {
         vec_sincos_impl = vec_sincos_advsimd;
         vec_sincos_f32_impl = vec_sincos_f32_advsimd;
         me_simd_backend = use_u35 ? "advsimd-u35" : "advsimd-u10";
+        me_dsl_trace_simd_init(use_u35);
+        return;
     }
 #endif
 
-    if (me_simd_backend[0] == '\0') {
-        me_simd_backend = "scalar";
+    if (me_simd_backend_preference != ME_SIMD_BACKEND_SLEEF) {
+#if ME_USE_ACCELERATE && defined(__APPLE__)
+        me_set_accelerate_backend();
+        me_simd_backend = "accelerate";
+        me_dsl_trace_simd_init(use_u35);
+        return;
+#endif
     }
+
+    me_set_scalar_backend();
+    me_simd_backend = "scalar";
     me_dsl_trace_simd_init(use_u35);
 }
 
@@ -4171,6 +4428,8 @@ int me_simd_initialized_for_tests(void) {
 
 void me_simd_reset_for_tests(void) {
     me_simd_initialized = 0;
+    me_simd_backend_preference = ME_SIMD_BACKEND_AUTO;
+    me_simd_backend_preference_initialized = 0;
     me_simd_backend = "scalar";
 }
 

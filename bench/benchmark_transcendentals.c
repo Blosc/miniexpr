@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/time.h>
 #include "miniexpr.h"
 
@@ -21,6 +22,22 @@ typedef struct {
     me_dtype dtype;
     size_t elem_size;
 } dtype_info_t;
+
+typedef enum {
+    BENCH_REPORT_U35 = 0,
+    BENCH_REPORT_ACCELERATE = 1,
+    BENCH_REPORT_SCALAR = 2
+} bench_report_mode_t;
+
+static bench_report_mode_t get_report_mode(const char *backend) {
+    if (!backend || backend[0] == '\0' || strcmp(backend, "auto") == 0 || strcmp(backend, "sleef") == 0) {
+        return BENCH_REPORT_U35;
+    }
+    if (strcmp(backend, "accelerate") == 0) {
+        return BENCH_REPORT_ACCELERATE;
+    }
+    return BENCH_REPORT_SCALAR;
+}
 
 static void fill_data(void *data, const dtype_info_t *info, int nitems) {
     const double min = -5.0;
@@ -94,7 +111,7 @@ static double run_c(const void *data, void *out, int nitems,
     return (get_time() - start) / iterations;
 }
 
-static void benchmark_dtype(const dtype_info_t *info, const int *blocks, int nblocks) {
+static void benchmark_dtype(const dtype_info_t *info, const int *blocks, int nblocks, bench_report_mode_t report_mode) {
     const int max_block = blocks[nblocks - 1];
     void *data = malloc((size_t)max_block * info->elem_size);
     void *out = malloc((size_t)max_block * info->elem_size);
@@ -124,7 +141,13 @@ static void benchmark_dtype(const dtype_info_t *info, const int *blocks, int nbl
     printf("\n========================================\n");
     printf("Transcendentals chain (%s)\n", info->name);
     printf("========================================\n");
-    printf("BlockKiB ME_U10    ME_U35  ME_SCAL       C\n");
+    if (report_mode == BENCH_REPORT_U35) {
+        printf("BlockKiB ME_U10    ME_U35  ME_SCAL       C\n");
+    } else if (report_mode == BENCH_REPORT_ACCELERATE) {
+        printf("BlockKiB ME_ACCEL  ME_SCAL       C\n");
+    } else {
+        printf("BlockKiB ME_SCAL       C\n");
+    }
 
     me_eval_params params_u10 = ME_EVAL_PARAMS_DEFAULTS;
     params_u10.simd_ulp_mode = ME_SIMD_ULP_1;
@@ -147,8 +170,16 @@ static void benchmark_dtype(const dtype_info_t *info, const int *blocks, int nbl
         double c_gbps = data_gb / c_time;
 
         int kib = (int)((nitems * info->elem_size) / 1024);
-        printf("%6d  %7.2f  %7.2f  %7.2f  %7.2f\n",
-               kib, me_gbps_u10, me_gbps_u35, me_scalar_gbps, c_gbps);
+        if (report_mode == BENCH_REPORT_U35) {
+            printf("%6d  %7.2f  %7.2f  %7.2f  %7.2f\n",
+                   kib, me_gbps_u10, me_gbps_u35, me_scalar_gbps, c_gbps);
+        } else if (report_mode == BENCH_REPORT_ACCELERATE) {
+            printf("%6d  %8.2f  %7.2f  %7.2f\n",
+                   kib, me_gbps_u10, me_scalar_gbps, c_gbps);
+        } else {
+            printf("%6d  %7.2f  %7.2f\n",
+                   kib, me_scalar_gbps, c_gbps);
+        }
     }
 
     me_free(expr);
@@ -157,6 +188,8 @@ static void benchmark_dtype(const dtype_info_t *info, const int *blocks, int nbl
 }
 
 int main(void) {
+    const char *backend = getenv("ME_SIMD_MATH_BACKEND");
+    const bench_report_mode_t report_mode = get_report_mode(backend);
     const dtype_info_t infos[] = {
         {"float32", ME_FLOAT32, sizeof(float)},
         {"float64", ME_FLOAT64, sizeof(double)}
@@ -167,10 +200,11 @@ int main(void) {
     printf("========================================\n");
     printf("MiniExpr Transcendentals Benchmark (Block Sizes)\n");
     printf("========================================\n");
+    printf("Backend: %s\n", backend ? backend : "auto");
     printf("Expression: log(exp(x) + tanh(x) + log1p(abs(x)) + sqrt(abs(x)) + expm1(x))\n");
 
     for (size_t i = 0; i < sizeof(infos) / sizeof(infos[0]); i++) {
-        benchmark_dtype(&infos[i], blocks, nblocks);
+        benchmark_dtype(&infos[i], blocks, nblocks, report_mode);
     }
 
     printf("\n========================================\n");
