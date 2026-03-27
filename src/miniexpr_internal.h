@@ -54,5 +54,8 @@ int me_nd_compute_valid_items(const me_expr *expr, int64_t nchunk, int64_t nbloc
 int me_eval_nd_classic(const me_expr *expr, const void **vars_block,
                        int n_vars, void *output_block, int block_nitems,
                        int64_t nchunk, int64_t nblock, const me_eval_params *params);
+int me_eval_nd_dsl(const me_expr *expr, const void **vars_block,
+                   int n_vars, void *output_block, int block_nitems,
+                   int64_t nchunk, int64_t nblock, const me_eval_params *params);
 
 #endif
