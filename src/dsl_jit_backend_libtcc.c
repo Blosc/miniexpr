@@ -221,11 +221,6 @@ static bool dsl_jit_libtcc_runtime_dir(char *out, size_t out_size) {
     if (!out || out_size == 0) {
         return false;
     }
-    const char *env = getenv("ME_DSL_JIT_TCC_LIB_PATH");
-    if (env && env[0] != '\0') {
-        int n = snprintf(out, out_size, "%s", env);
-        return n > 0 && (size_t)n < out_size;
-    }
     if (!g_dsl_tcc_api.tcc_new_fn) {
         return false;
     }
@@ -361,14 +356,10 @@ static bool dsl_jit_libtcc_load_api(void) {
     }
     g_dsl_tcc_api.attempted = true;
 
-    const char *env_path = getenv("ME_DSL_JIT_LIBTCC_PATH");
     const char *default_path = ME_DSL_JIT_LIBTCC_DEFAULT_PATH;
     const char *candidates[12];
     char self_candidate[PATH_MAX];
     int ncandidates = 0;
-    if (env_path && env_path[0] != '\0') {
-        candidates[ncandidates++] = env_path;
-    }
     if (default_path && default_path[0] != '\0') {
         candidates[ncandidates++] = default_path;
     }

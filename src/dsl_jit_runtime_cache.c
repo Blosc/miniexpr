@@ -124,10 +124,8 @@ static uint64_t dsl_jit_toolchain_hash(const me_dsl_compiled_program *program) {
     }
     if (program->compiler == ME_DSL_COMPILER_LIBTCC) {
         const char *tcc_opts = getenv("ME_DSL_JIT_TCC_OPTIONS");
-        const char *tcc_lib_path = getenv("ME_DSL_JIT_TCC_LIB_PATH");
         uint64_t h = dsl_jit_hash_cstr(1469598103934665603ULL, "tcc");
-        h = dsl_jit_hash_cstr(h, tcc_opts ? tcc_opts : "");
-        return dsl_jit_hash_cstr(h, tcc_lib_path ? tcc_lib_path : "");
+        return dsl_jit_hash_cstr(h, tcc_opts ? tcc_opts : "");
     }
     const char *cc = getenv("CC");
     const char *cflags = getenv("CFLAGS");
