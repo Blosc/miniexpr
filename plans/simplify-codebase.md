@@ -217,7 +217,15 @@ This would make it much easier to reason about DSL work without reopening the wh
 
 ### 3. Centralize runtime policy and environment parsing
 
-`src/miniexpr.c` currently reads many environment variables directly for:
+This area has improved, but the job is not fully finished.
+
+Current state:
+
+- DSL/JIT env parsing helpers were centralized in `src/dsl_config.h`
+- backend/runtime code now mostly consumes normalized helper accessors instead of ad hoc parsing
+- some direct env reads still remain in backend-specific code for toolchain overrides, temp/cache location, and test/debug hooks
+
+The remaining policy surface still covers:
 
 - JIT enable/disable
 - JIT backend tuning
@@ -226,7 +234,7 @@ This would make it much easier to reason about DSL work without reopening the wh
 - cache behavior
 - compiler/toolchain overrides
 
-That policy should move into one lazily-built config/capabilities object with clear responsibilities:
+A good next step would be a single lazily-built config/capabilities object with clear responsibilities:
 
 - parse environment once
 - normalize defaults
