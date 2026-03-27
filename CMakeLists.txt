@@ -19,6 +19,7 @@ include(cmake/MiniexprOptions.cmake)
 
 set(MINIEXPR_SOURCES
   src/miniexpr.c
+  src/miniexpr_eval_nd.c
   src/dsl_compile.c
   src/dsl_compile_support.c
   src/dsl_eval.c
