@@ -21,6 +21,7 @@ set(MINIEXPR_SOURCES
   src/miniexpr.c
   src/miniexpr_eval_nd.c
   src/miniexpr_eval_dsl_nd.c
+  src/miniexpr_eval_reduce.c
   src/dsl_compile.c
   src/dsl_compile_support.c
   src/dsl_eval.c
