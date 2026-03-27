@@ -14,15 +14,18 @@ miniexpr is designed to be embedded directly into larger projects, not distribut
 **Note**: This is a beta project.
 **Windows note**: Complex types are not supported on Windows because the C99 complex ABI is not stable across MSVC/clang-cl. `me_compile()` will reject expressions that involve complex variables or outputs.
 
-## Versioning
+## Usage
 
-miniexpr follows semantic versioning. The library version is available at compile time via `ME_VERSION_*` macros and at runtime via `me_version()`.
+To use miniexpr in your project, simply include the source files (`miniexpr.c` and `miniexpr.h`) directly in your build system.
 
-## API Functions
+For dtype rules, reduction semantics, and versioning details, see [README_DEVELOPERS.md](README_DEVELOPERS.md), [doc/get-started.md](doc/get-started.md), and [src/miniexpr.h](src/miniexpr.h).
 
-miniexpr provides a simple, focused API with just two main functions:
+## API Reference
+
+miniexpr provides a simple, focused API with just two main functions plus cleanup.
 
 ### `me_compile()`, `me_compile_nd()`, and `me_compile_nd_jit()`
+
 ```c
 int me_compile(const char *expression, const me_variable *variables,
                int var_count, me_dtype dtype, int *error, me_expr **out);
@@ -38,50 +41,19 @@ int me_compile_nd_jit(const char *expression, const me_variable *variables,
                       const int32_t *blockshape, int jit_mode,
                       int *error, me_expr **out);
 ```
+
 Compiles an expression for evaluation. Variable and output pointers are provided during evaluation rather than compilation.
 
-**Simple Usage**: Just provide variable names - everything else is optional:
-
-```c
-me_variable vars[] = {{"x"}, {"y"}};  // Just the names!
-me_expr *expr = NULL;
-if (me_compile("x + y", vars, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
-// Later, provide data in the same order as vars array
-const void *data[] = {x_array, y_array};  // x first, y second
-if (me_eval(expr, data, 2, output, nitems, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
-```
-
-For mixed types (use `ME_AUTO` for output dtype to infer from variables):
-```c
-me_variable vars[] = {{"temp", ME_FLOAT64}, {"count", ME_INT32}};
-me_expr *expr = NULL;
-if (me_compile("temp * count", vars, 2, ME_AUTO, &err, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
-// Result type will be inferred (ME_FLOAT64 in this case)
-```
-
-Variables are matched by position (order) in the arrays. Unspecified fields default to NULL/0.
-
-#### `dtype` Parameter Rules
-
-The `dtype` parameter has two mutually exclusive modes:
-
-1. **Uniform Type** (Simple): Set `dtype` to a specific type (e.g., `ME_FLOAT64`)
-   - All variables must be `ME_AUTO`
-   - All data uses the specified type
-
-2. **Mixed Types** (Advanced): Set `dtype` to `ME_AUTO`
-   - All variables must have explicit types
-   - Result type is inferred from type promotion rules
-   - Check `expr->dtype` for the inferred type
-
-Mixing modes (some vars with types, some `ME_AUTO`) will cause compilation to fail.
+Variables are matched by position in the arrays. Unspecified fields default to NULL/0.
 
 `me_compile_nd_jit(...)` adds a compile-time JIT policy hint:
+
 - `jit_mode = 0` (`ME_JIT_DEFAULT`): default behavior.
 - `jit_mode = 1` (`ME_JIT_ON`): prefer runtime JIT preparation.
 - `jit_mode = 2` (`ME_JIT_OFF`): skip runtime JIT preparation at compile time.
 
 ### `me_eval()` and `me_eval_nd()`
+
 ```c
 int me_eval(const me_expr *expr, const void **vars_block,
             int n_vars, void *output_block, int block_nitems,
@@ -93,18 +65,11 @@ int me_eval_nd(const me_expr *expr, const void **vars_block,
 
 int me_nd_valid_nitems(const me_expr *expr, int64_t nchunk, int64_t nblock, int64_t *valid_nitems);
 ```
-Evaluates the compiled expression with new variable and output pointers. This allows processing arrays in chunks without recompilation, and is thread-safe for parallel evaluation across multiple threads.
 
-**Parameters:**
-- `expr`: Compiled expression (from `me_compile`)
-- `vars_block`: Array of pointers to variable block buffers (same order as in `me_compile`)
-- `n_vars`: Number of variables (must match the number used in `me_compile`)
-- `output_block`: Pointer to output buffer for this block
-- `block_nitems`: Number of elements in this block (padded size for `me_eval_nd`)
-- `params`: Optional SIMD evaluation settings (`NULL` for defaults)
-- Return value: `ME_EVAL_SUCCESS` (0) on success, or a negative `ME_EVAL_ERR_*` code on failure
+Evaluates the compiled expression with new variable and output pointers. This allows processing arrays in chunks without recompilation and is thread-safe for parallel evaluation.
 
 Use `ME_EVAL_PARAMS_DEFAULTS` to start from defaults and override only what you need:
+
 ```c
 me_eval_params params = ME_EVAL_PARAMS_DEFAULTS;
 params.disable_simd = true;
@@ -112,58 +77,20 @@ if (me_eval(expr, var_ptrs, 2, result, 3, &params) != ME_EVAL_SUCCESS) { /* hand
 ```
 
 JIT policy can also be controlled per-evaluation call:
+
 ```c
 me_eval_params params = ME_EVAL_PARAMS_DEFAULTS;
-params.jit_mode = ME_JIT_OFF;  // disable runtime JIT execution for this call
+params.jit_mode = ME_JIT_OFF;
 if (me_eval(expr, var_ptrs, 2, result, 3, &params) != ME_EVAL_SUCCESS) { /* handle error */ }
 ```
 
-**ND/padded blocks (b2nd-style):**
-- `shape`, `chunkshape`, `blockshape` are C-order arrays (`ndims` length).
-- `nchunk` is the chunk index over the full array (C-order); `nblock` is the block index inside that chunk (C-order).
-- Callers pass padded blocks of size `prod(blockshape)`. `me_eval_nd` evaluates only valid elements and zero-fills the padded tail in the output. Use `me_nd_valid_nitems` to know how many outputs are real for a given `(nchunk, nblock)`.
-- For expressions whose overall result is a scalar (e.g., `sum(x)` or `sum(x) + 1`), `output_block` only needs space for one item. In this case `me_eval_nd` writes a single element and does not zero any tail.
-
-See `examples/11_nd_padding_example.c` and `doc/chunk-processing.md` for a walkthrough, and `bench/benchmark_nd_padding` to gauge performance with different padding patterns.
-
 ### `me_free()`
+
 ```c
 void me_free(me_expr *n);
 ```
-Frees the compiled expression. Safe to call on `NULL` pointers.
 
-## Data Types
-
-miniexpr supports various data types through the `me_dtype` enumeration:
-- Booleans: `ME_BOOL`
-- Signed integers: `ME_INT8`, `ME_INT16`, `ME_INT32`, `ME_INT64`
-- Unsigned integers: `ME_UINT8`, `ME_UINT16`, `ME_UINT32`, `ME_UINT64`
-- Floating point: `ME_FLOAT32`, `ME_FLOAT64`
-- Complex numbers: `ME_COMPLEX64`, `ME_COMPLEX128`
-
-## Reductions
-
-miniexpr provides scalar reductions over a single variable or constant:
-- `sum(x)`, `prod(x)` (sum/product)
-- `min(x)`, `max(x)`
-- `any(x)`, `all(x)` (truthiness over nonzero values)
-
-**Rules:**
-- The argument may be any expression that does not itself contain reductions (e.g., `sum(x + 1)` is valid, `sum(sum(x))` is not).
-- Reductions may appear inside larger expressions; their scalar result is broadcast (e.g., `x + sum(x)` is valid).
-
-**Result types:**
-- `sum`/`prod`: integer inputs promote to 64-bit (`int64`/`uint64`); floats keep their type.
-- `min`/`max`: same dtype as the input.
-- `any`/`all`: `bool` output for any input type (nonzero is true).
-- Note: `sum`/`prod` on `float32` inputs accumulate in `float64` and cast back to `float32`.
-
-**Floating-point NaNs:**
-- `min`/`max` propagate NaNs if any element is NaN.
-
-## Usage
-
-To use miniexpr in your project, simply include the source files (`miniexpr.c` and `miniexpr.h`) directly in your build system.
+Frees the compiled expression. Safe to call on `NULL`.
 
 ### Quick Example
 
@@ -218,39 +145,7 @@ cmake -S . -B build -G Ninja
 cmake --build build -j
 ctest --test-dir build
 ```
-Tip: run a subset of tests with `ctest --test-dir build -R <pattern>`.
-
-Options:
-- `-DMINIEXPR_BUILD_TESTS=ON|OFF`
-- `-DMINIEXPR_BUILD_EXAMPLES=ON|OFF`
-- `-DMINIEXPR_BUILD_BENCH=ON|OFF`
-- `-DMINIEXPR_USE_SLEEF=ON|OFF`
-- `-DMINIEXPR_ENABLE_TCC_JIT=ON|OFF`
-- `-DMINIEXPR_BUILD_BUNDLED_LIBTCC=ON|OFF` (build bundled libtcc from minicc when TCC JIT is enabled)
-- `-DMINIEXPR_DSL_TRACE_DEFAULT=ON|OFF` (emit DSL trace logs by default when `ME_DSL_TRACE` is unset)
-
-Notes:
-- On Windows, TCC JIT is enabled by default (`MINIEXPR_ENABLE_TCC_JIT=ON`).
-- On Emscripten, setting `MINIEXPR_ENABLE_TCC_JIT=ON` enables wasm32 JIT support automatically.
-- Setting `MINIEXPR_ENABLE_TCC_JIT=OFF` disables TCC-based JIT backends; on Linux/macOS, the separate `# me:compiler=cc` runtime path may still be available.
-
-### SLEEF SIMD acceleration
-
-miniexpr can use SLEEF to accelerate transcendentals and other math kernels via SIMD. The CMake option `-DMINIEXPR_USE_SLEEF=ON` (default) fetches SLEEF and enables the SIMD paths; set it to `OFF` to build without SLEEF. At runtime you can force scalar evaluation by setting `me_eval_params.disable_simd = true`, which disables SIMD regardless of whether SLEEF was compiled in.
-
-Windows (clang-cl):
-```bash
-mkdir build
-cd build
-cmake .. -G "Visual Studio 17 2022" -T ClangCL
-cmake --build .
-```
-
-Makefile fallback:
-```bash
-make lib
-make examples
-```
+For build variants, CMake options, SLEEF notes, platform-specific invocations, and contributor workflow, see [README_DEVELOPERS.md](README_DEVELOPERS.md).
 
 ## Documentation
 
@@ -300,7 +195,12 @@ On Linux/macOS, DSL kernels may use runtime JIT compilation when eligible. The f
 - `ME_DSL_JIT=0`: Disable runtime JIT and always use interpreter fallback.
 - `ME_DSL_JIT_POS_CACHE=0`: Disable process-local positive cache reuse for loaded JIT kernels.
 - `ME_DSL_JIT_INDEX_VARS=0`: Disable runtime JIT for DSL kernels that use reserved index vars (`_i*`, `_n*`, `_ndim`, `_flat_idx`).
+- `ME_DSL_TRACE=1`: Print DSL compile/JIT trace lines to stderr. When unset, the default comes from `MINIEXPR_DSL_TRACE_DEFAULT`.
+- `ME_DSL_FP_MODE=strict|contract|fast|relaxed`: Select default floating-point mode for DSL JIT kernels. `strict` is the default; `relaxed` is an alias of `fast`.
+- `ME_DSL_JIT_TCC_OPTIONS="..."`: Extra options passed to `tcc_set_options()` for the `libtcc` backend.
+- `CC=...`: Compiler executable used by the `# me:compiler=cc` runtime JIT backend. Defaults to `cc`.
 - `CFLAGS="..."`: Standard C compiler flags honored by the `cc` backend runtime JIT path.
+- `TMPDIR=...`: Root directory for runtime JIT cache artifacts. When unset, miniexpr uses a per-user directory under `/tmp`.
 
 Per-call policy overrides are available via API:
 - `me_eval_params.jit_mode = ME_JIT_ON|ME_JIT_OFF|ME_JIT_DEFAULT`
@@ -314,31 +214,10 @@ Backend selection is done in DSL source via pragma:
 
 - `# me:compiler=tcc` (default when omitted)
 - `# me:compiler=cc`
-- For `# me:compiler=cc`, runtime uses `CC` (default: `cc`) as the compiler executable.
-
-Operational `libtcc` runtime options remain configurable:
-
-- `ME_DSL_JIT_TCC_OPTIONS="..."`: Extra options passed to `tcc_set_options()`.
 - On Linux, the libtcc JIT automatically appends common multiarch library directories
   (for example `/usr/lib/x86_64-linux-gnu`) to help `-lm` resolve without extra flags.
 
-Build-time note:
-
-- On Linux/macOS, libtcc support is built by default and required for DSL JIT's default
-  `# me:compiler=tcc` mode.
-- CMake uses local MiniCC sources at `../minicc` and builds `libtcc` as a separate shared library.
-  `libtcc` is staged in the same directory as `libminiexpr`, and miniexpr embeds that staged
-  `libtcc` path as a default runtime lookup candidate.
-
-## Contributing
-
-After cloning the repository, install the Git hooks:
-
-```bash
-./scripts/install-hooks.sh
-```
-
-This sets up automatic checks for code quality (e.g., trailing whitespace).
+Developer-oriented/internal DSL JIT knobs and build-time notes are documented in [README_DEVELOPERS.md](README_DEVELOPERS.md).
 
 ## License
 

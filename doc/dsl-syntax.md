@@ -162,7 +162,7 @@ Rules:
 ### `while`
 
 - `while` condition is a regular DSL expression.
-- Runtime iteration cap is enforced by `ME_DSL_WHILE_MAX_ITERS`.
+- Runtime iteration cap is enforced to prevent runaway `while` loops.
 
 ## `print(...)`
 

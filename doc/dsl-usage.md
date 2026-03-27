@@ -120,7 +120,7 @@ def kernel(x):
 
 ### Loops and control flow
 
-`for` and `while` are supported. `while` loops are protected by an iteration cap (`ME_DSL_WHILE_MAX_ITERS`).
+`for` and `while` are supported. `while` loops are protected by a runtime iteration cap.
 
 ```python
 def kernel(n):
