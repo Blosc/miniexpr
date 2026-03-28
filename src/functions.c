@@ -5054,13 +5054,57 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                 me_expr *xexpr = (me_expr*)n->parameters[1]; \
                 me_expr *yexpr = (me_expr*)n->parameters[2]; \
                 \
-                const TYPE *cdata = (const TYPE*)((cond->type == ME_VARIABLE) ? cond->bound : cond->output); \
-                const TYPE *xdata = (const TYPE*)((xexpr->type == ME_VARIABLE) ? xexpr->bound : xexpr->output); \
-                const TYPE *ydata = (const TYPE*)((yexpr->type == ME_VARIABLE) ? yexpr->bound : yexpr->output); \
+                const TYPE *cdata = (cond->type == ME_CONSTANT) ? NULL : \
+                                   (cond->type == ME_VARIABLE) ? (const TYPE*)cond->bound : (const TYPE*)cond->output; \
+                const TYPE *xdata = (xexpr->type == ME_CONSTANT) ? NULL : \
+                                   (xexpr->type == ME_VARIABLE) ? (const TYPE*)xexpr->bound : (const TYPE*)xexpr->output; \
+                const TYPE *ydata = (yexpr->type == ME_CONSTANT) ? NULL : \
+                                   (yexpr->type == ME_VARIABLE) ? (const TYPE*)yexpr->bound : (const TYPE*)yexpr->output; \
+                void *cond_temp = NULL; \
+                void *x_temp = NULL; \
+                void *y_temp = NULL; \
+                if (cond->type != ME_CONSTANT && cond->dtype != n->dtype) { \
+                    convert_func_t conv = get_convert_func(cond->dtype, n->dtype); \
+                    if (conv) { \
+                        cond_temp = malloc((size_t)n->nitems * sizeof(TYPE)); \
+                        if (cond_temp) { \
+                            conv((cond->type == ME_VARIABLE) ? cond->bound : cond->output, cond_temp, n->nitems); \
+                            cdata = (const TYPE*)cond_temp; \
+                        } \
+                    } \
+                } \
+                if (xexpr->type != ME_CONSTANT && xexpr->dtype != n->dtype) { \
+                    convert_func_t conv = get_convert_func(xexpr->dtype, n->dtype); \
+                    if (conv) { \
+                        x_temp = malloc((size_t)n->nitems * sizeof(TYPE)); \
+                        if (x_temp) { \
+                            conv((xexpr->type == ME_VARIABLE) ? xexpr->bound : xexpr->output, x_temp, n->nitems); \
+                            xdata = (const TYPE*)x_temp; \
+                        } \
+                    } \
+                } \
+                if (yexpr->type != ME_CONSTANT && yexpr->dtype != n->dtype) { \
+                    convert_func_t conv = get_convert_func(yexpr->dtype, n->dtype); \
+                    if (conv) { \
+                        y_temp = malloc((size_t)n->nitems * sizeof(TYPE)); \
+                        if (y_temp) { \
+                            conv((yexpr->type == ME_VARIABLE) ? yexpr->bound : yexpr->output, y_temp, n->nitems); \
+                            ydata = (const TYPE*)y_temp; \
+                        } \
+                    } \
+                } \
                 \
                 for (i = 0; i < n->nitems; i++) { \
-                    output[i] = (IS_NONZERO_##SUFFIX(cdata[i])) ? xdata[i] : ydata[i]; \
+                    bool cond_true = (cond->type == ME_CONSTANT) ? \
+                                     IS_NONZERO_##SUFFIX(TO_TYPE_##SUFFIX(cond->value)) : \
+                                     IS_NONZERO_##SUFFIX(cdata[i]); \
+                    TYPE xval = (xexpr->type == ME_CONSTANT) ? TO_TYPE_##SUFFIX(xexpr->value) : xdata[i]; \
+                    TYPE yval = (yexpr->type == ME_CONSTANT) ? TO_TYPE_##SUFFIX(yexpr->value) : ydata[i]; \
+                    output[i] = cond_true ? xval : yval; \
                 } \
+                free(cond_temp); \
+                free(x_temp); \
+                free(y_temp); \
             } \
             else if (arity == 1 && IS_FUNCTION(n->type)) { \
                 me_expr *arg = (me_expr*)n->parameters[0]; \

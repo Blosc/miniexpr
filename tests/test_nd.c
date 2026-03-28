@@ -916,6 +916,99 @@ cleanup:
     return status;
 }
 
+static int test_nd_dsl_where_padding(void) {
+    enum {
+        me_where_shape0 = 3,
+        me_where_shape1 = 5,
+        me_where_chunk0 = 2,
+        me_where_chunk1 = 4,
+        me_where_block0 = 2,
+        me_where_block1 = 3,
+        me_where_valid0 = 2,
+        me_where_valid1 = 1,
+        me_where_padded_items = me_where_block0 * me_where_block1
+    };
+    const int64_t shape[2] = {me_where_shape0, me_where_shape1};
+    const int32_t chunkshape[2] = {me_where_chunk0, me_where_chunk1};
+    const int32_t blockshape[2] = {me_where_block0, me_where_block1};
+    const int64_t nchunk = 1;
+    const int64_t nblock = 0;
+    float a_block[me_where_padded_items];
+    float b_block[me_where_padded_items];
+    double out[me_where_padded_items];
+    me_variable vars[] = {{"x", ME_FLOAT32}, {"y", ME_FLOAT32}};
+    const void *inputs[] = {a_block, b_block};
+    const char *source = "where(x + y > 1.5, x + y, 1.5)";
+
+    for (int i = 0; i < me_where_padded_items; i++) {
+        a_block[i] = 0.0f;
+        b_block[i] = 0.0f;
+        out[i] = -1.0;
+    }
+
+    for (int i0 = 0; i0 < me_where_valid0; i0++) {
+        for (int i1 = 0; i1 < me_where_valid1; i1++) {
+            int local_idx = i0 * blockshape[1] + i1;
+            int64_t global_i0 = i0;
+            int64_t global_i1 = 4 + i1;
+            int64_t flat_idx = global_i0 * shape[1] + global_i1;
+            a_block[local_idx] = (float)((double)flat_idx / 14.0);
+            b_block[local_idx] = (float)(0.5 + (double)flat_idx / 14.0);
+        }
+    }
+
+    int err = 0;
+    me_expr *expr = NULL;
+    int rc = me_compile_nd_jit(source, vars, 2, ME_FLOAT64, 2,
+                               shape, chunkshape, blockshape,
+                               ME_JIT_OFF, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("FAILED DSL where padding me_compile_nd_jit: rc=%d err=%d\n", rc, err);
+        return 1;
+    }
+
+    int64_t valid = -1;
+    rc = me_nd_valid_nitems(expr, nchunk, nblock, &valid);
+    if (rc != ME_EVAL_SUCCESS || valid != 2) {
+        printf("FAILED DSL where padding me_nd_valid_nitems: rc=%d valid=%lld\n",
+               rc, (long long)valid);
+        me_free(expr);
+        return 1;
+    }
+
+    me_eval_params eval_params = {0};
+    eval_params.disable_simd = false;
+    eval_params.simd_ulp_mode = ME_SIMD_ULP_3_5;
+    eval_params.jit_mode = ME_JIT_OFF;
+    rc = me_eval_nd(expr, inputs, 2, out, me_where_padded_items, nchunk, nblock, &eval_params);
+    if (rc != ME_EVAL_SUCCESS) {
+        printf("FAILED DSL where padding me_eval_nd: rc=%d\n", rc);
+        me_free(expr);
+        return 1;
+    }
+
+    for (int i0 = 0; i0 < blockshape[0]; i0++) {
+        for (int i1 = 0; i1 < blockshape[1]; i1++) {
+            int idx = i0 * blockshape[1] + i1;
+            double expected = 0.0;
+            if (i0 < me_where_valid0 && i1 < me_where_valid1) {
+                double a = (double)a_block[idx];
+                double b = (double)b_block[idx];
+                expected = (a + b > 1.5) ? (a + b) : 1.5;
+            }
+            if (fabs(out[idx] - expected) > 1e-6) {
+                printf("FAILED DSL where padding mismatch at idx=%d: got=%.15f expected=%.15f\n",
+                       idx, out[idx], expected);
+                me_free(expr);
+                return 1;
+            }
+        }
+    }
+
+    me_free(expr);
+    return 0;
+}
+
 static int run_nd_compile_failure_reason_case(const char *case_name,
                                               const char *source,
                                               const me_variable *vars,
@@ -1959,6 +2052,11 @@ int main(void) {
     int t27 = test_nd_python_blosc2_contract_float32_div_literal_jit_modes();
     failed |= t27;
     printf("Result: %s\n\n", t27 ? "FAIL" : "PASS");
+
+    printf("Test 28: DSL where() edge-block padding regression (jit off)\n");
+    int t28 = test_nd_dsl_where_padding();
+    failed |= t28;
+    printf("Result: %s\n\n", t28 ? "FAIL" : "PASS");
 
     printf("=====================\n");
     printf("Summary: %s\n", failed ? "FAIL" : "PASS");
