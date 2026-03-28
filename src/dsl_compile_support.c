@@ -103,6 +103,23 @@ static bool dsl_source_has_fp_pragma(const char *source) {
     return false;
 }
 
+static bool dsl_env_jit_compiler_override(me_dsl_compiler *out_compiler) {
+    const char *env = getenv("ME_DSL_JIT_COMPILER");
+
+    if (!out_compiler || !env || env[0] == '\0') {
+        return false;
+    }
+    if (strcmp(env, "tcc") == 0) {
+        *out_compiler = ME_DSL_COMPILER_LIBTCC;
+        return true;
+    }
+    if (strcmp(env, "cc") == 0) {
+        *out_compiler = ME_DSL_COMPILER_CC;
+        return true;
+    }
+    return false;
+}
+
 static void dsl_compiled_block_free(me_dsl_compiled_block *block);
 
 void dsl_compiled_expr_free(me_dsl_compiled_expr *expr) {
@@ -266,6 +283,7 @@ me_dsl_compiled_program *dsl_compiled_program_alloc(const me_dsl_program *parsed
         program->fp_mode = dsl_default_fp_mode_from_env();
     }
     program->compiler = parsed->compiler;
+    (void)dsl_env_jit_compiler_override(&program->compiler);
     program->compile_ndims = compile_ndims;
     dsl_var_table_init(&program->vars);
     program->idx_ndim = -1;

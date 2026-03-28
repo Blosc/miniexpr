@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../src/dsl_compile_internal.h"
 #include "../src/dsl_jit_ir.h"
 #include "../src/dsl_parser.h"
 #include "minctest.h"
@@ -437,6 +438,71 @@ static int test_parser_pragmas(void) {
     return 0;
 }
 
+static int test_env_jit_compiler_override(void) {
+    printf("\n=== JIT IR Test 6b: env compiler override ===\n");
+
+    const char *src =
+        "# me:compiler=tcc\n"
+        "def kernel(x):\n"
+        "    return x\n";
+    me_dsl_error error;
+    me_dsl_program *parsed = me_dsl_parse(src, &error);
+    me_dsl_compiled_program *compiled = NULL;
+
+    if (!parsed) {
+        printf("  FAILED: parse error for env compiler override source\n");
+        return 1;
+    }
+
+    if (setenv("ME_DSL_JIT_COMPILER", "cc", 1) != 0) {
+        printf("  FAILED: could not set ME_DSL_JIT_COMPILER=cc\n");
+        me_dsl_program_free(parsed);
+        return 1;
+    }
+    compiled = dsl_compiled_program_alloc(parsed, src, 1, NULL, 0);
+    if (!compiled) {
+        printf("  FAILED: could not allocate compiled program for cc override\n");
+        unsetenv("ME_DSL_JIT_COMPILER");
+        me_dsl_program_free(parsed);
+        return 1;
+    }
+    if (compiled->compiler != ME_DSL_COMPILER_CC) {
+        printf("  FAILED: env compiler override did not force cc backend\n");
+        dsl_compiled_program_free(compiled);
+        unsetenv("ME_DSL_JIT_COMPILER");
+        me_dsl_program_free(parsed);
+        return 1;
+    }
+    dsl_compiled_program_free(compiled);
+
+    if (setenv("ME_DSL_JIT_COMPILER", "tcc", 1) != 0) {
+        printf("  FAILED: could not set ME_DSL_JIT_COMPILER=tcc\n");
+        unsetenv("ME_DSL_JIT_COMPILER");
+        me_dsl_program_free(parsed);
+        return 1;
+    }
+    compiled = dsl_compiled_program_alloc(parsed, src, 1, NULL, 0);
+    if (!compiled) {
+        printf("  FAILED: could not allocate compiled program for tcc override\n");
+        unsetenv("ME_DSL_JIT_COMPILER");
+        me_dsl_program_free(parsed);
+        return 1;
+    }
+    if (compiled->compiler != ME_DSL_COMPILER_LIBTCC) {
+        printf("  FAILED: env compiler override did not force tcc backend\n");
+        dsl_compiled_program_free(compiled);
+        unsetenv("ME_DSL_JIT_COMPILER");
+        me_dsl_program_free(parsed);
+        return 1;
+    }
+
+    dsl_compiled_program_free(compiled);
+    unsetenv("ME_DSL_JIT_COMPILER");
+    me_dsl_program_free(parsed);
+    printf("  PASSED\n");
+    return 0;
+}
+
 static int test_ir_fingerprint_includes_fp_mode(void) {
     printf("\n=== JIT IR Test 6: fingerprint includes fp mode ===\n");
 
@@ -593,6 +659,7 @@ int main(void) {
     fail |= test_ir_rejects_unsupported_statements();
     fail |= test_ir_fingerprint_is_deterministic();
     fail |= test_parser_pragmas();
+    fail |= test_env_jit_compiler_override();
     fail |= test_ir_fingerprint_includes_fp_mode();
     fail |= test_ir_accepts_while_loops();
     fail |= test_ir_accepts_reassignment_dtype_coercion();

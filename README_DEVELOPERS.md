@@ -124,6 +124,7 @@ The public/runtime-stable DSL JIT controls remain documented in [README.md](READ
 - `ME_SIMD_MATH_BACKEND=auto|sleef|accelerate|scalar`: Force the SIMD math backend selection used by `src/functions-simd.c` for benchmarking and debugging. Default: `auto` (prefers SLEEF when available, otherwise falls back to Accelerate on macOS when enabled, then the existing scalar fallback).
 - The SIMD math benchmarks print backend-aware columns. For `accelerate` and `scalar`, do not interpret the `ME_SIMD_ULP_1` / `ME_SIMD_ULP_3_5` labels as distinct math implementations.
 - `ME_DSL_WHILE_MAX_ITERS=<n>`: Override the runtime safety cap for DSL `while` loops.
+- `ME_DSL_JIT_COMPILER=tcc|cc`: Force the DSL JIT compiler backend at compile time. When unset, the parsed DSL compiler selection is used.
 - `ME_DSL_JIT_MATH_BRIDGE=0|1`: Enable or disable runtime math-bridge lowering globally. Default: `1`.
 - `ME_DSL_JIT_SCALAR_MATH_BRIDGE=0|1`: Enable scalar math-bridge lowering for the `cc` backend. Default: `0`.
 - `ME_DSL_JIT_VEC_MATH=0|1`: Enable vector math lowering where available. Default: `1`.
