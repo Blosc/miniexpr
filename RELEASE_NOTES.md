@@ -4,9 +4,9 @@ Release notes for miniexpr
 Changes from 0.2.0 to 0.2.1
 ===========================
 
-* macOS SIMD math now prefers Accelerate/vForce by default when enabled at build time.
+* macOS SIMD math now prefers SLEEF by default when it is available at build time.
   - New CMake option: `MINIEXPR_USE_ACCELERATE=ON|OFF` (enabled by default on macOS, off elsewhere).
-  - In runtime `auto` mode, macOS uses Accelerate first and falls back to scalar kernels for functions without Accelerate coverage.
+  - In runtime `auto` mode, macOS prefers SLEEF first, then falls back to Accelerate when enabled, then to scalar kernels.
   - Added `ME_SIMD_MATH_BACKEND=auto|sleef|accelerate|scalar` for backend forcing during debugging and benchmarking.
   - Updated SIMD math benchmarks to report backend-appropriate columns instead of implying fake `U10/U35` distinctions for Accelerate/scalar runs.
 

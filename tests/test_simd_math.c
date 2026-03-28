@@ -1738,11 +1738,56 @@ static int test_simd_init(void) {
     return 0;
 }
 
+static int test_simd_auto_backend_selection(void) {
+    double data[] = {0.1, 0.2, 0.3, 0.4};
+    double out[4] = {0};
+    const void *vars[] = {data};
+    me_variable v[] = {{"x", ME_FLOAT64, data}};
+    me_expr *expr = NULL;
+    int err = 0;
+    const char *backend;
+
+    if (setenv("ME_SIMD_MATH_BACKEND", "auto", 1) != 0) {
+        printf("Failed to set ME_SIMD_MATH_BACKEND=auto\n");
+        return 1;
+    }
+
+    me_simd_reset_for_tests();
+    if (me_compile("sin(x) + cos(x)", v, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("Failed to compile simd auto backend test (err=%d)\n", err);
+        unsetenv("ME_SIMD_MATH_BACKEND");
+        return 1;
+    }
+
+    if (me_eval(expr, vars, 1, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("me_eval failed in simd auto backend test\n");
+        me_free(expr);
+        unsetenv("ME_SIMD_MATH_BACKEND");
+        return 1;
+    }
+
+    backend = me_simd_backend_for_tests();
+#if defined(__APPLE__) && ME_USE_SLEEF && ME_ENABLE_SLEEF_SIMD && \
+    (defined(__aarch64__) || defined(_M_ARM64))
+    if (strcmp(backend, "advsimd-u10") != 0 && strcmp(backend, "advsimd-u35") != 0) {
+        printf("Expected auto backend to prefer SLEEF on macOS arm64, got %s\n", backend);
+        me_free(expr);
+        unsetenv("ME_SIMD_MATH_BACKEND");
+        return 1;
+    }
+#endif
+
+    me_free(expr);
+    unsetenv("ME_SIMD_MATH_BACKEND");
+    return 0;
+}
+
 int main(void) {
     int failures = 0;
     const int n = 1024;
 
     failures += test_simd_init();
+    failures += test_simd_auto_backend_selection();
     failures += run_unary_pair_f64("abs", fabs, n, -10.0, 10.0, 1e-12);
     failures += run_unary_pair_f64("exp", exp, n, -5.0, 5.0, 1e-12);
     failures += run_unary_pair_f64("expm1", expm1, n, -3.0, 3.0, 1e-12);

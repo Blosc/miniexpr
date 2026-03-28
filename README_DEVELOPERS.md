@@ -92,7 +92,7 @@ The main [README.md](README.md) keeps the simplest supported build path. This se
 - On Emscripten, setting `MINIEXPR_ENABLE_TCC_JIT=ON` enables wasm32 JIT support automatically.
 - Setting `MINIEXPR_ENABLE_TCC_JIT=OFF` disables TCC-based JIT backends; on Linux/macOS, the separate `# me:compiler=cc` runtime path may still be available.
 - `MINIEXPR_USE_SLEEF=ON` fetches SLEEF and enables SIMD math acceleration; set it to `OFF` to build without SLEEF.
-- `MINIEXPR_USE_ACCELERATE=ON` enables the macOS Accelerate/vForce backend; in `auto` mode on macOS it is preferred by default, and unsupported functions still fall back to scalar kernels.
+- `MINIEXPR_USE_ACCELERATE=ON` enables the macOS Accelerate/vForce backend; in `auto` mode on macOS, SLEEF is preferred when available and Accelerate remains available as a fallback backend.
 - When `ME_SIMD_MATH_BACKEND=accelerate` is active, the `ME_SIMD_ULP_1` / `ME_SIMD_ULP_3_5` distinction does not select different kernels. Those accuracy modes remain meaningful for the SLEEF backend.
 
 ### Alternative Build Invocations
@@ -121,7 +121,7 @@ The public/runtime-stable DSL JIT controls remain documented in [README.md](READ
 
 ### Internal/Test-Only Environment Variables
 
-- `ME_SIMD_MATH_BACKEND=auto|sleef|accelerate|scalar`: Force the SIMD math backend selection used by `src/functions-simd.c` for benchmarking and debugging. Default: `auto` (`accelerate` on macOS when enabled, otherwise the existing platform backend selection).
+- `ME_SIMD_MATH_BACKEND=auto|sleef|accelerate|scalar`: Force the SIMD math backend selection used by `src/functions-simd.c` for benchmarking and debugging. Default: `auto` (prefers SLEEF when available, otherwise falls back to Accelerate on macOS when enabled, then the existing scalar fallback).
 - The SIMD math benchmarks print backend-aware columns. For `accelerate` and `scalar`, do not interpret the `ME_SIMD_ULP_1` / `ME_SIMD_ULP_3_5` labels as distinct math implementations.
 - `ME_DSL_WHILE_MAX_ITERS=<n>`: Override the runtime safety cap for DSL `while` loops.
 - `ME_DSL_JIT_MATH_BRIDGE=0|1`: Enable or disable runtime math-bridge lowering globally. Default: `1`.

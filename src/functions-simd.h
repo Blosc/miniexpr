@@ -23,6 +23,7 @@ void me_simd_params_pop(const me_simd_params_state *state);
 void me_sincos_eval_start(void);
 int me_simd_initialized_for_tests(void);
 void me_simd_reset_for_tests(void);
+const char *me_simd_backend_for_tests(void);
 
 void vec_sin_dispatch(const double* a, double* out, int n);
 void vec_cos_dispatch(const double* a, double* out, int n);

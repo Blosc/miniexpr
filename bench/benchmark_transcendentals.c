@@ -141,6 +141,7 @@ static void benchmark_dtype(const dtype_info_t *info, const int *blocks, int nbl
     printf("\n========================================\n");
     printf("Transcendentals chain (%s)\n", info->name);
     printf("========================================\n");
+    printf("Units: BlockKiB = input bytes in KiB, throughput columns = GB/s (10^9 bytes/s)\n");
     if (report_mode == BENCH_REPORT_U35) {
         printf("BlockKiB ME_U10    ME_U35  ME_SCAL       C\n");
     } else if (report_mode == BENCH_REPORT_ACCELERATE) {
@@ -194,7 +195,7 @@ int main(void) {
         {"float32", ME_FLOAT32, sizeof(float)},
         {"float64", ME_FLOAT64, sizeof(double)}
     };
-    const int blocks[] = {1024, 4096, 16384, 65536, 262144, 1048576};
+    const int blocks[] = {4096, 16384, 65536, 262144, 1048576, 4194304};
     const int nblocks = (int)(sizeof(blocks) / sizeof(blocks[0]));
 
     printf("========================================\n");
@@ -202,6 +203,7 @@ int main(void) {
     printf("========================================\n");
     printf("Backend: %s\n", backend ? backend : "auto");
     printf("Expression: log(exp(x) + tanh(x) + log1p(abs(x)) + sqrt(abs(x)) + expm1(x))\n");
+    printf("Units: block size in KiB, throughput in GB/s (10^9 bytes/s)\n");
 
     for (size_t i = 0; i < sizeof(infos) / sizeof(infos[0]); i++) {
         benchmark_dtype(&infos[i], blocks, nblocks, report_mode);

@@ -4176,15 +4176,6 @@ static void me_init_simd(void) {
 #endif
     }
 
-#if ME_USE_ACCELERATE && defined(__APPLE__)
-    if (me_simd_backend_preference == ME_SIMD_BACKEND_AUTO) {
-        me_set_accelerate_backend();
-        me_simd_backend = "accelerate";
-        me_dsl_trace_simd_init(use_u35);
-        return;
-    }
-#endif
-
     /* Use SLEEF SIMD kernels when the CPU supports them. */
 #if ME_ENABLE_SLEEF_SIMD && (defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64))
     if (me_simd_backend_preference != ME_SIMD_BACKEND_ACCELERATE &&
@@ -4431,6 +4422,10 @@ void me_simd_reset_for_tests(void) {
     me_simd_backend_preference = ME_SIMD_BACKEND_AUTO;
     me_simd_backend_preference_initialized = 0;
     me_simd_backend = "scalar";
+}
+
+const char *me_simd_backend_for_tests(void) {
+    return me_simd_backend;
 }
 
 void vec_sin_dispatch(const double* a, double* out, int n) {
