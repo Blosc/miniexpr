@@ -3028,6 +3028,8 @@ cleanup:
 #endif
 
 int main(void) {
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
 #if defined(_WIN32) || defined(_WIN64)
     printf("\n=== DSL JIT Runtime Cache Test 1: Windows compiler=tcc smoke ===\n");
 
