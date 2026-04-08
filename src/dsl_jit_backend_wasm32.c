@@ -511,6 +511,19 @@ typedef struct {
 static me_dsl_jit_wasm_pos_cache_entry g_dsl_jit_wasm_pos_cache[ME_DSL_JIT_WASM_POS_CACHE_SLOTS];
 static int g_dsl_jit_wasm_pos_cache_cursor = 0;
 
+void dsl_jit_wasm_pos_cache_reset_for_tests(void) {
+    for (int i = 0; i < ME_DSL_JIT_WASM_POS_CACHE_SLOTS; i++) {
+        if (g_dsl_jit_wasm_pos_cache[i].valid) {
+            if (g_dsl_jit_wasm_pos_cache[i].fn_idx != 0) {
+                dsl_wasm_jit_free_dispatch(g_dsl_jit_wasm_pos_cache[i].fn_idx);
+            }
+            free(g_dsl_jit_wasm_pos_cache[i].scratch);
+            memset(&g_dsl_jit_wasm_pos_cache[i], 0, sizeof(g_dsl_jit_wasm_pos_cache[i]));
+        }
+    }
+    g_dsl_jit_wasm_pos_cache_cursor = 0;
+}
+
 static int dsl_jit_wasm_pos_cache_find_slot(uint64_t key) {
     for (int i = 0; i < ME_DSL_JIT_WASM_POS_CACHE_SLOTS; i++) {
         if (g_dsl_jit_wasm_pos_cache[i].valid && g_dsl_jit_wasm_pos_cache[i].key == key) {

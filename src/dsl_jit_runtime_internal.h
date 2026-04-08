@@ -263,6 +263,7 @@ bool dsl_jit_cc_promote_self_symbols_global(void);
 #if ME_USE_WASM32_JIT
 bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key);
 bool dsl_jit_wasm_pos_cache_bind_program(me_dsl_compiled_program *program, uint64_t key);
+void dsl_jit_wasm_pos_cache_reset_for_tests(void);
 void dsl_wasm_jit_free_dispatch(int idx);
 void dsl_register_wasm_jit_helpers(me_wasm_jit_instantiate_helper instantiate_helper,
                                    me_wasm_jit_free_helper free_helper);

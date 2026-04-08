@@ -2151,6 +2151,7 @@ static int test_wasm_reserved_index_cache_key_differentiation(void) {
         printf("  FAILED: setenv ME_DSL_JIT=1 failed\n");
         goto cleanup;
     }
+    dsl_jit_wasm_pos_cache_reset_for_tests();
     test_wasm_runtime_cache_reset_instantiate_count();
 
     if (me_compile(src_global, NULL, 0, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
@@ -2264,6 +2265,7 @@ static int test_wasm_runtime_cache_eviction_policy(void) {
         printf("  FAILED: setenv ME_DSL_JIT=1 failed\n");
         goto cleanup;
     }
+    dsl_jit_wasm_pos_cache_reset_for_tests();
     test_wasm_runtime_cache_reset_instantiate_count();
 
     if (snprintf(src, sizeof(src),
@@ -2482,14 +2484,17 @@ static int test_wasm_instantiate_warning_policy(void) {
     printf("\n=== DSL JIT Runtime Cache Test: wasm instantiate warning policy ===\n");
 
     static const char *src_default =
+        "# me:compiler=cc\n"
         "def kernel_warn_default(x):\n"
         "    y = x + 41.0\n"
         "    return y\n";
     static const char *src_on =
+        "# me:compiler=cc\n"
         "def kernel_warn_on(x):\n"
         "    y = x + 42.0\n"
         "    return y\n";
     static const char *src_trace =
+        "# me:compiler=cc\n"
         "def kernel_warn_trace(x):\n"
         "    y = x + 43.0\n"
         "    return y\n";
