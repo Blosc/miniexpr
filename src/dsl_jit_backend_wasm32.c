@@ -20,14 +20,16 @@
 
 #include "libtcc.h"
 
-#if !ME_WASM32_SIDE_MODULE
 #include <emscripten.h>
-#endif
 
 #if !ME_WASM32_SIDE_MODULE
 EM_JS(int, me_wasm_jit_instantiate,
-      (const unsigned char *wasm_bytes, int wasm_len, int bridge_lookup_fn_idx), {
+      (const unsigned char *wasm_bytes, int wasm_len, int bridge_lookup_fn_idx,
+       int emit_warnings, int force_invalid), {
     var src = HEAPU8.subarray(wasm_bytes, wasm_bytes + wasm_len);
+    if (force_invalid) {
+        src = new Uint8Array([0x00]);
+    }
     var enc = new TextEncoder();
     var dec = new TextDecoder();
     function readULEB(buf, pos) {
@@ -422,11 +424,22 @@ EM_JS(int, me_wasm_jit_instantiate,
         var mod = new WebAssembly.Module(patched);
         var inst = new WebAssembly.Instance(mod, { env: buildEnvImports() });
     } catch (e) {
-        err("[me-wasm-jit] " + e.message);
+        if (emit_warnings) {
+            globalThis.__meJitWarningCount = ((globalThis.__meJitWarningCount | 0) + 1) | 0;
+            globalThis.__meJitLastWarning = "[me-wasm-jit] " + e.message;
+            err(globalThis.__meJitLastWarning);
+        }
         return 0;
     }
     var fn = inst.exports["me_dsl_jit_kernel"];
-    if (!fn) { err("[me-wasm-jit] missing export"); return 0; }
+    if (!fn) {
+        if (emit_warnings) {
+            globalThis.__meJitWarningCount = ((globalThis.__meJitWarningCount | 0) + 1) | 0;
+            globalThis.__meJitLastWarning = "[me-wasm-jit] missing export";
+            err(globalThis.__meJitLastWarning);
+        }
+        return 0;
+    }
     return addFunction(fn, "iiii");
 });
 
@@ -434,6 +447,14 @@ EM_JS(void, me_wasm_jit_free_fn, (int idx), {
     if (idx) removeFunction(idx);
 });
 #endif
+
+EM_JS(void, me_wasm_jit_set_emit_warnings, (int emit_warnings), {
+    globalThis.__meJitEmitWarnings = !!emit_warnings;
+});
+
+EM_JS(void, me_wasm_jit_set_force_invalid, (int force_invalid), {
+    globalThis.__meJitForceInvalidWasm = !!force_invalid;
+});
 
 static me_wasm_jit_instantiate_helper g_me_wasm_jit_instantiate_helper = NULL;
 static me_wasm_jit_free_helper g_me_wasm_jit_free_helper = NULL;
@@ -452,14 +473,19 @@ void dsl_register_wasm_jit_helpers(me_wasm_jit_instantiate_helper instantiate_he
 }
 
 static int me_wasm_jit_instantiate_dispatch(const unsigned char *wasm_bytes, int wasm_len,
-                                            int bridge_lookup_fn_idx) {
+                                            int bridge_lookup_fn_idx,
+                                            int emit_warnings,
+                                            int force_invalid) {
 #if ME_WASM32_SIDE_MODULE
     if (!g_me_wasm_jit_instantiate_helper) {
         return 0;
     }
+    me_wasm_jit_set_emit_warnings(emit_warnings);
+    me_wasm_jit_set_force_invalid(force_invalid);
     return g_me_wasm_jit_instantiate_helper(wasm_bytes, wasm_len, bridge_lookup_fn_idx);
 #else
-    return me_wasm_jit_instantiate(wasm_bytes, wasm_len, bridge_lookup_fn_idx);
+    return me_wasm_jit_instantiate(wasm_bytes, wasm_len, bridge_lookup_fn_idx,
+                                   emit_warnings, force_invalid);
 #endif
 }
 
@@ -830,8 +856,11 @@ bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
     fclose(fp);
     remove(wasm_path);
 
+    int force_invalid = dsl_env_flag_enabled("ME_WASM_JIT_TEST_FORCE_INVALID", false) ? 1 : 0;
     int fn_idx = me_wasm_jit_instantiate_dispatch(wasm_bytes, (int)wasm_len,
-                                                  (int)(uintptr_t)&dsl_wasm32_lookup_bridge_symbol);
+                                                  (int)(uintptr_t)&dsl_wasm32_lookup_bridge_symbol,
+                                                  dsl_wasm_jit_emit_warnings(program) ? 1 : 0,
+                                                  force_invalid);
     free(wasm_bytes);
     if (fn_idx == 0) {
         free(jit_scratch);

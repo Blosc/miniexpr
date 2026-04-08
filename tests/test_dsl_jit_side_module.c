@@ -30,10 +30,12 @@ EM_JS(int, test_wasm_side_instantiate,
         lengthBytesUTF8: lengthBytesUTF8,
         stringToUTF8: stringToUTF8,
         addFunction: addFunction,
+        meJitEmitWarnings: !!globalThis.__meJitEmitWarnings,
         err: err
     };
     var src = HEAPU8.subarray(wasm_bytes, wasm_bytes + wasm_len);
-    return _meJitInstantiate(runtime, src, bridge_lookup_fn_idx) | 0;
+    return _meJitInstantiate(runtime, src, bridge_lookup_fn_idx,
+                             runtime.meJitEmitWarnings) | 0;
 });
 
 EM_JS(void, test_wasm_side_free, (int idx), {

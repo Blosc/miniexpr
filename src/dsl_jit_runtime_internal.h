@@ -152,6 +152,7 @@ typedef struct {
     int compile_ndims;
     me_dsl_fp_mode fp_mode;
     me_dsl_compiler compiler;
+    me_jit_mode jit_request_mode;
     bool guaranteed_return;
     bool output_is_scalar;
     me_dtype output_dtype;
@@ -225,6 +226,13 @@ static inline const char *dsl_compiler_name(me_dsl_compiler compiler) {
     default:
         return "unknown";
     }
+}
+
+static inline bool dsl_wasm_jit_emit_warnings(const me_dsl_compiled_program *program) {
+    if (dsl_trace_enabled()) {
+        return true;
+    }
+    return program && program->jit_request_mode == ME_JIT_ON;
 }
 
 bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program);

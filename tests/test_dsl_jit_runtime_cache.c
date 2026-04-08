@@ -53,10 +53,18 @@ EM_JS(int, test_wasm_runtime_cache_instantiate,
         lengthBytesUTF8: lengthBytesUTF8,
         stringToUTF8: stringToUTF8,
         addFunction: addFunction,
-        err: err
+        meJitEmitWarnings: !!globalThis.__meJitEmitWarnings,
+        err: function(message) {
+            globalThis.__meJitWarningCount = ((globalThis.__meJitWarningCount | 0) + 1) | 0;
+            globalThis.__meJitLastWarning = String(message);
+        }
     };
     var src = HEAPU8.subarray(wasm_bytes, wasm_bytes + wasm_len);
-    return _meJitInstantiate(runtime, src, bridge_lookup_fn_idx) | 0;
+    if (globalThis.__meJitForceInvalidWasm) {
+        src = new Uint8Array([0x00]);
+    }
+    return _meJitInstantiate(runtime, src, bridge_lookup_fn_idx,
+                             runtime.meJitEmitWarnings) | 0;
 });
 
 EM_JS(void, test_wasm_runtime_cache_free, (int idx), {
@@ -78,6 +86,23 @@ EM_JS(int, test_wasm_runtime_cache_get_instantiate_count, (), {
         return 0;
     }
     return globalThis.__meJitInstantiateCount | 0;
+});
+
+EM_JS(void, test_wasm_runtime_cache_reset_warning_state, (), {
+    globalThis.__meJitWarningCount = 0;
+    globalThis.__meJitLastWarning = "";
+    globalThis.__meJitForceInvalidWasm = false;
+});
+
+EM_JS(void, test_wasm_runtime_cache_set_force_invalid_wasm, (int enabled), {
+    globalThis.__meJitForceInvalidWasm = !!enabled;
+});
+
+EM_JS(int, test_wasm_runtime_cache_get_warning_count, (), {
+    if (typeof globalThis.__meJitWarningCount !== "number") {
+        return 0;
+    }
+    return globalThis.__meJitWarningCount | 0;
 });
 #endif
 
@@ -198,6 +223,50 @@ static int compile_and_eval_simple_dsl(const char *src, double expected_offset) 
     double out[4] = {0.0, 0.0, 0.0, 0.0};
     const void *inputs[] = {in};
     if (me_eval(expr, inputs, 1, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        printf("  FAILED: eval failed\n");
+        me_free(expr);
+        return 1;
+    }
+    me_free(expr);
+
+    for (int i = 0; i < 4; i++) {
+        if (out[i] != in[i] + expected_offset) {
+            printf("  FAILED: eval mismatch at %d\n", i);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int compile_and_eval_simple_dsl_jit_mode(const char *src, double expected_offset,
+                                                me_jit_mode jit_mode) {
+    if (!src) {
+        return 1;
+    }
+    const int64_t shape[] = {4};
+    const int32_t chunkshape[] = {4};
+    const int32_t blockshape[] = {4};
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    int err = 0;
+    me_expr *expr = NULL;
+    if (me_compile_nd_jit(src, vars, 1, ME_FLOAT64, 1, shape, chunkshape, blockshape,
+                          jit_mode, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+        const char *reason = me_get_last_error_message();
+        printf("  FAILED: compile error at %d", err);
+        if (reason && reason[0] != '\0') {
+            printf(" (%s)", reason);
+        }
+        printf("\n");
+        me_free(expr);
+        return 1;
+    }
+
+    double in[4] = {0.0, 1.0, 2.0, 3.0};
+    double out[4] = {0.0, 0.0, 0.0, 0.0};
+    const void *inputs[] = {in};
+    me_eval_params params = ME_EVAL_PARAMS_DEFAULTS;
+    params.jit_mode = jit_mode;
+    if (me_eval_nd(expr, inputs, 1, out, 4, 0, 0, &params) != ME_EVAL_SUCCESS) {
         printf("  FAILED: eval failed\n");
         me_free(expr);
         return 1;
@@ -2408,6 +2477,79 @@ cleanup:
     return rc;
 }
 
+#if defined(__EMSCRIPTEN__)
+static int test_wasm_instantiate_warning_policy(void) {
+    printf("\n=== DSL JIT Runtime Cache Test: wasm instantiate warning policy ===\n");
+
+    static const char *src_default =
+        "def kernel_warn_default(x):\n"
+        "    y = x + 41.0\n"
+        "    return y\n";
+    static const char *src_on =
+        "def kernel_warn_on(x):\n"
+        "    y = x + 42.0\n"
+        "    return y\n";
+    static const char *src_trace =
+        "def kernel_warn_trace(x):\n"
+        "    y = x + 43.0\n"
+        "    return y\n";
+    char *saved_trace = dup_env_value("ME_DSL_TRACE");
+    char *saved_force_invalid = dup_env_value("ME_WASM_JIT_TEST_FORCE_INVALID");
+    int rc = 1;
+
+    if (setenv("ME_WASM_JIT_TEST_FORCE_INVALID", "1", 1) != 0) {
+        printf("  FAILED: setenv ME_WASM_JIT_TEST_FORCE_INVALID failed\n");
+        goto cleanup;
+    }
+
+    if (setenv("ME_DSL_TRACE", "0", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_TRACE=0 failed\n");
+        goto cleanup;
+    }
+    test_wasm_runtime_cache_reset_warning_state();
+    if (compile_and_eval_simple_dsl_jit_mode(src_default, 41.0, ME_JIT_DEFAULT) != 0) {
+        goto cleanup;
+    }
+    if (test_wasm_runtime_cache_get_warning_count() != 0) {
+        printf("  FAILED: expected no warnings for ME_JIT_DEFAULT\n");
+        goto cleanup;
+    }
+
+    test_wasm_runtime_cache_reset_warning_state();
+    if (compile_and_eval_simple_dsl_jit_mode(src_on, 42.0, ME_JIT_ON) != 0) {
+        goto cleanup;
+    }
+    if (test_wasm_runtime_cache_get_warning_count() <= 0) {
+        printf("  FAILED: expected warnings for ME_JIT_ON\n");
+        goto cleanup;
+    }
+
+    if (setenv("ME_DSL_TRACE", "1", 1) != 0) {
+        printf("  FAILED: setenv ME_DSL_TRACE failed\n");
+        goto cleanup;
+    }
+    test_wasm_runtime_cache_reset_warning_state();
+    if (compile_and_eval_simple_dsl_jit_mode(src_trace, 43.0, ME_JIT_DEFAULT) != 0) {
+        goto cleanup;
+    }
+    if (test_wasm_runtime_cache_get_warning_count() <= 0) {
+        printf("  FAILED: expected warnings for ME_DSL_TRACE=1\n");
+        goto cleanup;
+    }
+
+    printf("  PASSED\n");
+    rc = 0;
+
+cleanup:
+    restore_env_value("ME_WASM_JIT_TEST_FORCE_INVALID", saved_force_invalid);
+    test_wasm_runtime_cache_reset_warning_state();
+    restore_env_value("ME_DSL_TRACE", saved_trace);
+    free(saved_force_invalid);
+    free(saved_trace);
+    return rc;
+}
+#endif
+
 static int test_range_start_stop_step_jit_lowering(void) {
     printf("\n=== DSL JIT Runtime Cache Test 10: range(start, stop, step) JIT lowering ===\n");
 
@@ -2945,6 +3087,7 @@ int main(void) {
     fail |= test_default_tcc_skips_cc_backend();
     fail |= test_cast_interpreter_jit_parity_compilers();
     fail |= test_wasm_cast_intrinsics_jit_enabled();
+    fail |= test_wasm_instantiate_warning_policy();
     fail |= test_wasm_reserved_index_vars_jit_parity();
     fail |= test_wasm_reserved_index_cache_key_differentiation();
     fail |= test_wasm_runtime_cache_eviction_policy();

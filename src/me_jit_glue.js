@@ -4,7 +4,7 @@
 (function(root) {
     'use strict';
 
-    function _meJitInstantiate(runtime, wasmBytes, bridgeLookupFnIdx) {
+    function _meJitInstantiate(runtime, wasmBytes, bridgeLookupFnIdx, emitWarnings) {
         if (!runtime || !wasmBytes) {
             return 0;
         }
@@ -24,6 +24,13 @@
                 console.error(message);
             }
         };
+        var meJitEmitWarnings = true;
+
+        if (typeof emitWarnings === 'boolean') {
+            meJitEmitWarnings = emitWarnings;
+        } else if (typeof runtime.meJitEmitWarnings === 'boolean') {
+            meJitEmitWarnings = runtime.meJitEmitWarnings;
+        }
 
         if (!HEAPF64 || !HEAPF32 || !wasmMemory || !wasmTable ||
             typeof stackSave !== 'function' || typeof stackAlloc !== 'function' ||
@@ -433,11 +440,18 @@
         var mod = new WebAssembly.Module(patched);
         var inst = new WebAssembly.Instance(mod, { env: buildEnvImports() });
     } catch (e) {
-        err("[me-wasm-jit] " + e.message);
+        if (meJitEmitWarnings) {
+            err("[me-wasm-jit] " + e.message);
+        }
         return 0;
     }
     var fn = inst.exports["me_dsl_jit_kernel"];
-    if (!fn) { err("[me-wasm-jit] missing export"); return 0; }
+    if (!fn) {
+        if (meJitEmitWarnings) {
+            err("[me-wasm-jit] missing export");
+        }
+        return 0;
+    }
     return addFunction(fn, "iiii");
     }
 

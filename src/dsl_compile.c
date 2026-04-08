@@ -2142,6 +2142,12 @@ me_dsl_compiled_program *dsl_compile_program(const char *source,
         }
         return NULL;
     }
+    if (jit_mode == ME_JIT_ON || jit_mode == ME_JIT_OFF) {
+        program->jit_request_mode = (me_jit_mode)jit_mode;
+    }
+    else {
+        program->jit_request_mode = ME_JIT_DEFAULT;
+    }
 
     me_variable *funcs = NULL;
     int func_count = 0;
