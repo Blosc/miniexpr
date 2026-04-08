@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "functions-simd.h"
+#include "minctest.h"
 #include "miniexpr.h"
 
 static int nearly_equal(double a, double b, double tol) {
