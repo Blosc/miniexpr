@@ -448,6 +448,7 @@ EM_JS(void, me_wasm_jit_free_fn, (int idx), {
 });
 #endif
 
+#if !ME_WASM32_SIDE_MODULE
 EM_JS(void, me_wasm_jit_set_emit_warnings, (int emit_warnings), {
     globalThis.__meJitEmitWarnings = !!emit_warnings;
 });
@@ -455,6 +456,7 @@ EM_JS(void, me_wasm_jit_set_emit_warnings, (int emit_warnings), {
 EM_JS(void, me_wasm_jit_set_force_invalid, (int force_invalid), {
     globalThis.__meJitForceInvalidWasm = !!force_invalid;
 });
+#endif
 
 static me_wasm_jit_instantiate_helper g_me_wasm_jit_instantiate_helper = NULL;
 static me_wasm_jit_free_helper g_me_wasm_jit_free_helper = NULL;
@@ -480,8 +482,8 @@ static int me_wasm_jit_instantiate_dispatch(const unsigned char *wasm_bytes, int
     if (!g_me_wasm_jit_instantiate_helper) {
         return 0;
     }
-    me_wasm_jit_set_emit_warnings(emit_warnings);
-    me_wasm_jit_set_force_invalid(force_invalid);
+    // emit_warnings / force_invalid use JS-side defaults in side module builds
+    // (EM_JS is not available in SIDE_MODULE).
     return g_me_wasm_jit_instantiate_helper(wasm_bytes, wasm_len, bridge_lookup_fn_idx);
 #else
     return me_wasm_jit_instantiate(wasm_bytes, wasm_len, bridge_lookup_fn_idx,
