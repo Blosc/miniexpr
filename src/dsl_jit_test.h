@@ -7,4 +7,8 @@
 #define ME_DSL_JIT_WASM_POS_CACHE_SLOTS 64
 #endif
 
+#if defined(__EMSCRIPTEN__)
+void dsl_jit_wasm_pos_cache_reset_for_tests(void);
+#endif
+
 #endif
