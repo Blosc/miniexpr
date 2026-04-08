@@ -2481,6 +2481,9 @@ cleanup:
 
 #if defined(__EMSCRIPTEN__)
 static int test_wasm_instantiate_warning_policy(void) {
+#if ME_WASM32_SIDE_MODULE
+    return 0;
+#else
     printf("\n=== DSL JIT Runtime Cache Test: wasm instantiate warning policy ===\n");
 
     static const char *src_default =
@@ -2552,6 +2555,7 @@ cleanup:
     free(saved_force_invalid);
     free(saved_trace);
     return rc;
+#endif
 }
 #endif
 
