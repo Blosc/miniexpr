@@ -1262,11 +1262,11 @@ static int test_reserved_index_cache_key_and_param_order(void) {
     const double expected_linear[4] = {1.0, 2.0, 3.0, 4.0};
     double out[4] = {0.0, 0.0, 0.0, 0.0};
     const char *const expected_decl_lines[] = {
-        "const double *in_x = (const double *)inputs[0];",
-        "int64_t _i0 = (int64_t)idx;",
-        "int64_t _n0 = (int64_t)nitems;",
+        "const double *__me_in_x = (const double *)__me_inputs[0];",
+        "int64_t _i0 = (int64_t)__me_idx;",
+        "int64_t _n0 = (int64_t)__me_nitems;",
         "int64_t _ndim = (int64_t)1;",
-        "int64_t _flat_idx = (int64_t)idx;"
+        "int64_t _flat_idx = (int64_t)__me_idx;"
     };
 
     if (!tmp_root) {
@@ -1350,11 +1350,11 @@ static int test_reserved_index_cache_key_and_param_order(void) {
         printf("  FAILED: generated source param declaration order mismatch for reserved order test A\n");
         goto cleanup;
     }
-    if (file_contains_text(src_path, "const int64_t *in__i0 = (const int64_t *)inputs[")) {
+    if (file_contains_text(src_path, "const int64_t *__me_in__i0 = (const int64_t *)__me_inputs[")) {
         printf("  FAILED: generated source unexpectedly declares reserved _i0 input under synth path\n");
         goto cleanup;
     }
-    if (file_contains_text(src_path, "const int64_t *in__flat_idx = (const int64_t *)inputs[")) {
+    if (file_contains_text(src_path, "const int64_t *__me_in__flat_idx = (const int64_t *)__me_inputs[")) {
         printf("  FAILED: generated source unexpectedly declares reserved _flat_idx input under synth path\n");
         goto cleanup;
     }
@@ -1566,7 +1566,7 @@ static int test_nd_reserved_index_synth_codegen_and_parity(void) {
         printf("  FAILED: expected one generated source file for ND synth test\n");
         goto cleanup;
     }
-    if (!file_contains_text(src_path, "const int64_t *in___me_nd_ctx = (const int64_t *)inputs[")) {
+    if (!file_contains_text(src_path, "const int64_t *__me_in___me_nd_ctx = (const int64_t *)__me_inputs[")) {
         printf("  FAILED: ND synth source missing __me_nd_ctx input declaration\n");
         goto cleanup;
     }
@@ -1574,11 +1574,11 @@ static int test_nd_reserved_index_synth_codegen_and_parity(void) {
         printf("  FAILED: ND synth source missing synthesized global-linear computation\n");
         goto cleanup;
     }
-    if (file_contains_text(src_path, "const int64_t *in__i0 = (const int64_t *)inputs[")) {
+    if (file_contains_text(src_path, "const int64_t *__me_in__i0 = (const int64_t *)__me_inputs[")) {
         printf("  FAILED: ND synth source still declares reserved _i0 input\n");
         goto cleanup;
     }
-    if (file_contains_text(src_path, "const int64_t *in__flat_idx = (const int64_t *)inputs[")) {
+    if (file_contains_text(src_path, "const int64_t *__me_in__flat_idx = (const int64_t *)__me_inputs[")) {
         printf("  FAILED: ND synth source still declares reserved _flat_idx input\n");
         goto cleanup;
     }
@@ -2704,8 +2704,8 @@ static int test_cc_backend_bridge_path(void) {
         printf("  FAILED: expected one generated source file for cc bridge path (got %d)\n", n_c);
         goto cleanup;
     }
-    bool has_bridge = file_contains_text(c_path, "me_jit_vec_exp_f64(in_x, out, nitems);");
-    bool has_scalar = file_contains_text(c_path, "for (int64_t idx = 0; idx < nitems; idx++) {");
+    bool has_bridge = file_contains_text(c_path, "me_jit_vec_exp_f64(__me_in_x, __me_outp, __me_nitems);");
+    bool has_scalar = file_contains_text(c_path, "for (int64_t __me_idx = 0; __me_idx < __me_nitems; __me_idx++) {");
     if (has_bridge) {
         printf("  NOTE: cc backend bridge lowering active\n");
     }
@@ -2825,8 +2825,8 @@ static int test_cc_backend_bridge_and_vec_math_gates(void) {
         printf("  FAILED: expected generated source for vec-gate check\n");
         goto cleanup;
     }
-    if (file_contains_text(c_path, "me_jit_vec_exp_f64(in_x, out, nitems);") ||
-        !file_contains_text(c_path, "for (int64_t idx = 0; idx < nitems; idx++) {") ||
+    if (file_contains_text(c_path, "me_jit_vec_exp_f64(__me_in_x, __me_outp, __me_nitems);") ||
+        !file_contains_text(c_path, "for (int64_t __me_idx = 0; __me_idx < __me_nitems; __me_idx++) {") ||
         file_contains_text(c_path, "me_jit_exp(x));")) {
         printf("  FAILED: scalar gate=0 + vec gate=0 did not keep libm scalar lowering\n");
         goto cleanup;

@@ -1110,7 +1110,7 @@ static bool me_jit_expr_to_c_vector(const char *expr,
                     continue;
                 }
                 if (me_jit_ident_equals(id_start, id_len, program->params[pidx])) {
-                    if (snprintf(mapped, sizeof(mapped), "in_%s[__me_i]", program->params[pidx]) >= (int)sizeof(mapped)) {
+                    if (snprintf(mapped, sizeof(mapped), "__me_in_%s[__me_i]", program->params[pidx]) >= (int)sizeof(mapped)) {
                         free(out);
                         return false;
                     }
@@ -1947,7 +1947,7 @@ static bool me_jit_stmt_vec_source_name(const me_dsl_jit_ir_program *program,
             !program->params[ref.index]) {
             return false;
         }
-        return snprintf(out_name, out_name_cap, "in_%s", program->params[ref.index]) < (int)out_name_cap;
+        return snprintf(out_name, out_name_cap, "__me_in_%s", program->params[ref.index]) < (int)out_name_cap;
     }
     if (ref.kind == ME_JIT_VEC_VALUE_TMP) {
         return snprintf(out_name, out_name_cap, "__me_vec_tmp_%d", ref.index) < (int)out_name_cap;
@@ -2025,12 +2025,12 @@ static bool me_jit_emit_vec_unary_call(me_jit_codegen_ctx *ctx,
         return false;
     }
     if (!has_offset) {
-        size_t need = strlen(vec_sym) + strlen(param_name) + 32;
+        size_t need = strlen(vec_sym) + strlen(param_name) + 96;
         char *line = malloc(need);
         if (!line) {
             return false;
         }
-        snprintf(line, need, "%s(in_%s, out, nitems);", vec_sym, param_name);
+        snprintf(line, need, "%s(__me_in_%s, __me_outp, __me_nitems);", vec_sym, param_name);
         bool ok = me_jit_emit_line(&ctx->source, 1, line);
         free(line);
         return ok;
@@ -2040,7 +2040,7 @@ static bool me_jit_emit_vec_unary_call(me_jit_codegen_ctx *ctx,
     char offset_buf[96];
     snprintf(offset_buf, sizeof(offset_buf), "%.17g", offset);
 
-    if (!me_jit_emit_line(&ctx->source, 1, "for (int64_t __me_i = 0; __me_i < nitems; __me_i++) {")) {
+    if (!me_jit_emit_line(&ctx->source, 1, "for (int64_t __me_i = 0; __me_i < __me_nitems; __me_i++) {")) {
         return false;
     }
     size_t prep_need = strlen(ctype) * 2 + strlen(param_name) + strlen(offset_buf) + 64;
@@ -2049,7 +2049,7 @@ static bool me_jit_emit_vec_unary_call(me_jit_codegen_ctx *ctx,
         return false;
     }
     snprintf(prep_line, prep_need,
-             "out[__me_i] = (%s)(in_%s[__me_i] + (%s)%s);",
+             "__me_outp[__me_i] = (%s)(__me_in_%s[__me_i] + (%s)%s);",
              ctype, param_name, ctype, offset_buf);
     bool ok = me_jit_emit_line(&ctx->source, 2, prep_line);
     free(prep_line);
@@ -2062,7 +2062,7 @@ static bool me_jit_emit_vec_unary_call(me_jit_codegen_ctx *ctx,
     if (!call_line) {
         return false;
     }
-    snprintf(call_line, call_need, "%s(out, out, nitems);", vec_sym);
+    snprintf(call_line, call_need, "%s(__me_outp, __me_outp, __me_nitems);", vec_sym);
     ok = me_jit_emit_line(&ctx->source, 1, call_line);
     free(call_line);
     if (!ok) {
@@ -2089,12 +2089,12 @@ static bool me_jit_emit_vec_binary_call(me_jit_codegen_ctx *ctx,
         if (!arg_a_param || !arg_b_param) {
             return false;
         }
-        size_t need = strlen(vec_sym) + strlen(arg_a_param) + strlen(arg_b_param) + 40;
+        size_t need = strlen(vec_sym) + strlen(arg_a_param) + strlen(arg_b_param) + 96;
         char *line = malloc(need);
         if (!line) {
             return false;
         }
-        snprintf(line, need, "%s(in_%s, in_%s, out, nitems);",
+        snprintf(line, need, "%s(__me_in_%s, __me_in_%s, __me_outp, __me_nitems);",
                  vec_sym, arg_a_param, arg_b_param);
         bool ok = me_jit_emit_line(&ctx->source, 1, line);
         free(line);
@@ -2104,7 +2104,7 @@ static bool me_jit_emit_vec_binary_call(me_jit_codegen_ctx *ctx,
     char const_buf[96];
     double fill_value = arg_a_const ? arg_a_const_value : arg_b_const_value;
     snprintf(const_buf, sizeof(const_buf), "%.17g", fill_value);
-    if (!me_jit_emit_line(&ctx->source, 1, "for (int64_t __me_i = 0; __me_i < nitems; __me_i++) {")) {
+    if (!me_jit_emit_line(&ctx->source, 1, "for (int64_t __me_i = 0; __me_i < __me_nitems; __me_i++) {")) {
         return false;
     }
     size_t fill_need = strlen(ctype) + strlen(const_buf) + 48;
@@ -2112,7 +2112,7 @@ static bool me_jit_emit_vec_binary_call(me_jit_codegen_ctx *ctx,
     if (!fill_line) {
         return false;
     }
-    snprintf(fill_line, fill_need, "out[__me_i] = (%s)%s;", ctype, const_buf);
+    snprintf(fill_line, fill_need, "__me_outp[__me_i] = (%s)%s;", ctype, const_buf);
     bool ok = me_jit_emit_line(&ctx->source, 2, fill_line);
     free(fill_line);
     if (!ok ||
@@ -2124,12 +2124,12 @@ static bool me_jit_emit_vec_binary_call(me_jit_codegen_ctx *ctx,
         if (!arg_b_param) {
             return false;
         }
-        size_t need = strlen(vec_sym) + strlen(arg_b_param) + 32;
+        size_t need = strlen(vec_sym) + strlen(arg_b_param) + 96;
         char *line = malloc(need);
         if (!line) {
             return false;
         }
-        snprintf(line, need, "%s(out, in_%s, out, nitems);", vec_sym, arg_b_param);
+        snprintf(line, need, "%s(__me_outp, __me_in_%s, __me_outp, __me_nitems);", vec_sym, arg_b_param);
         ok = me_jit_emit_line(&ctx->source, 1, line);
         free(line);
         return ok;
@@ -2138,12 +2138,12 @@ static bool me_jit_emit_vec_binary_call(me_jit_codegen_ctx *ctx,
     if (!arg_a_param) {
         return false;
     }
-    size_t need = strlen(vec_sym) + strlen(arg_a_param) + 32;
+    size_t need = strlen(vec_sym) + strlen(arg_a_param) + 96;
     char *line = malloc(need);
     if (!line) {
         return false;
     }
-    snprintf(line, need, "%s(in_%s, out, out, nitems);", vec_sym, arg_a_param);
+    snprintf(line, need, "%s(__me_in_%s, __me_outp, __me_outp, __me_nitems);", vec_sym, arg_a_param);
     ok = me_jit_emit_line(&ctx->source, 1, line);
     free(line);
     return ok;
@@ -2163,7 +2163,7 @@ static bool me_jit_emit_stmt_vec_precompute(me_jit_codegen_ctx *ctx,
         }
         char line[192];
         if (p->tmp_slot == ctx->stmt_vec_out_tmp_slot) {
-            if (snprintf(line, sizeof(line), "%s *__me_vec_tmp_%d = (%s *)out;",
+            if (snprintf(line, sizeof(line), "%s *__me_vec_tmp_%d = (%s *)__me_outp;",
                          ctype, p->tmp_slot, ctype) >= (int)sizeof(line) ||
                 !me_jit_emit_line(&ctx->source, 1, line)) {
                 me_jit_set_error(ctx->error, 0, 0, "out of memory");
@@ -2176,7 +2176,7 @@ static bool me_jit_emit_stmt_vec_precompute(me_jit_codegen_ctx *ctx,
             return false;
         }
     }
-    if (!me_jit_emit_line(&ctx->source, 1, "if (nitems > 0) {")) {
+    if (!me_jit_emit_line(&ctx->source, 1, "if (__me_nitems > 0) {")) {
         me_jit_set_error(ctx->error, 0, 0, "out of memory");
         return false;
     }
@@ -2188,7 +2188,7 @@ static bool me_jit_emit_stmt_vec_precompute(me_jit_codegen_ctx *ctx,
         const char *ctype = me_jit_c_type(p->dtype);
         char line[384];
         if (snprintf(line, sizeof(line),
-                     "__me_vec_tmp_%d = (%s *)malloc((unsigned long long)nitems * (unsigned long long)sizeof(%s));",
+                     "__me_vec_tmp_%d = (%s *)malloc((unsigned long long)__me_nitems * (unsigned long long)sizeof(%s));",
                      p->tmp_slot, ctype, ctype) >= (int)sizeof(line) ||
             !me_jit_emit_line(&ctx->source, 2, line) ||
             snprintf(line, sizeof(line), "if (!__me_vec_tmp_%d) {", p->tmp_slot) >= (int)sizeof(line) ||
@@ -2237,7 +2237,7 @@ static bool me_jit_emit_stmt_vec_precompute(me_jit_codegen_ctx *ctx,
                 char off_buf[96];
                 snprintf(off_buf, sizeof(off_buf), "%.17g", p->unary_offset);
                 char line[512];
-                if (!me_jit_emit_line(&ctx->source, 2, "for (int64_t __me_i = 0; __me_i < nitems; __me_i++) {") ||
+                if (!me_jit_emit_line(&ctx->source, 2, "for (int64_t __me_i = 0; __me_i < __me_nitems; __me_i++) {") ||
                     snprintf(line, sizeof(line),
                              "%s[__me_i] = (%s)(%s[__me_i] + (%s)%s);",
                              dst_name, ctype, src_name, ctype, off_buf) >= (int)sizeof(line) ||
@@ -2246,7 +2246,7 @@ static bool me_jit_emit_stmt_vec_precompute(me_jit_codegen_ctx *ctx,
                     me_jit_set_error(ctx->error, 0, 0, "out of memory");
                     return false;
                 }
-                if (snprintf(line, sizeof(line), "%s(%s, %s, nitems);", vec_sym, dst_name, dst_name) >= (int)sizeof(line) ||
+                if (snprintf(line, sizeof(line), "%s(%s, %s, __me_nitems);", vec_sym, dst_name, dst_name) >= (int)sizeof(line) ||
                     !me_jit_emit_line(&ctx->source, 2, line)) {
                     me_jit_set_error(ctx->error, 0, 0, "out of memory");
                     return false;
@@ -2254,7 +2254,7 @@ static bool me_jit_emit_stmt_vec_precompute(me_jit_codegen_ctx *ctx,
             }
             else {
                 char line[384];
-                if (snprintf(line, sizeof(line), "%s(%s, %s, nitems);", vec_sym, src_name, dst_name) >= (int)sizeof(line) ||
+                if (snprintf(line, sizeof(line), "%s(%s, %s, __me_nitems);", vec_sym, src_name, dst_name) >= (int)sizeof(line) ||
                     !me_jit_emit_line(&ctx->source, 2, line)) {
                     me_jit_set_error(ctx->error, 0, 0, "out of memory");
                     return false;
@@ -2276,7 +2276,7 @@ static bool me_jit_emit_stmt_vec_precompute(me_jit_codegen_ctx *ctx,
             }
             if (!p->arg0_const && !p->arg1_const) {
                 char line[512];
-                if (snprintf(line, sizeof(line), "%s(%s, %s, %s, nitems);",
+                if (snprintf(line, sizeof(line), "%s(%s, %s, %s, __me_nitems);",
                              vec_sym, src0_name, src1_name, dst_name) >= (int)sizeof(line) ||
                     !me_jit_emit_line(&ctx->source, 2, line)) {
                     me_jit_set_error(ctx->error, 0, 0, "out of memory");
@@ -2288,7 +2288,7 @@ static bool me_jit_emit_stmt_vec_precompute(me_jit_codegen_ctx *ctx,
             char const_buf[96];
             snprintf(const_buf, sizeof(const_buf), "%.17g", fill_value);
             char line[512];
-            if (!me_jit_emit_line(&ctx->source, 2, "for (int64_t __me_i = 0; __me_i < nitems; __me_i++) {") ||
+            if (!me_jit_emit_line(&ctx->source, 2, "for (int64_t __me_i = 0; __me_i < __me_nitems; __me_i++) {") ||
                 snprintf(line, sizeof(line), "%s[__me_i] = (%s)%s;", dst_name, ctype, const_buf) >= (int)sizeof(line) ||
                 !me_jit_emit_line(&ctx->source, 3, line) ||
                 !me_jit_emit_line(&ctx->source, 2, "}")) {
@@ -2296,7 +2296,7 @@ static bool me_jit_emit_stmt_vec_precompute(me_jit_codegen_ctx *ctx,
                 return false;
             }
             if (p->arg0_const) {
-                if (snprintf(line, sizeof(line), "%s(%s, %s, %s, nitems);",
+                if (snprintf(line, sizeof(line), "%s(%s, %s, %s, __me_nitems);",
                              vec_sym, dst_name, src1_name, dst_name) >= (int)sizeof(line) ||
                     !me_jit_emit_line(&ctx->source, 2, line)) {
                     me_jit_set_error(ctx->error, 0, 0, "out of memory");
@@ -2304,7 +2304,7 @@ static bool me_jit_emit_stmt_vec_precompute(me_jit_codegen_ctx *ctx,
                 }
             }
             else {
-                if (snprintf(line, sizeof(line), "%s(%s, %s, %s, nitems);",
+                if (snprintf(line, sizeof(line), "%s(%s, %s, %s, __me_nitems);",
                              vec_sym, src0_name, dst_name, dst_name) >= (int)sizeof(line) ||
                     !me_jit_emit_line(&ctx->source, 2, line)) {
                     me_jit_set_error(ctx->error, 0, 0, "out of memory");
@@ -2324,7 +2324,7 @@ static bool me_jit_emit_stmt_vec_precompute(me_jit_codegen_ctx *ctx,
                 me_jit_set_error(ctx->error, 0, 0, "out of memory");
                 return false;
             }
-            bool ok = me_jit_emit_line(&ctx->source, 2, "for (int64_t __me_i = 0; __me_i < nitems; __me_i++) {") &&
+            bool ok = me_jit_emit_line(&ctx->source, 2, "for (int64_t __me_i = 0; __me_i < __me_nitems; __me_i++) {") &&
                       (snprintf(line, line_need, "%s[__me_i] = (%s)(%s);", dst_name, ctype, p->expr_c) < (int)line_need) &&
                       me_jit_emit_line(&ctx->source, 3, line) &&
                       me_jit_emit_line(&ctx->source, 2, "}");
@@ -2352,7 +2352,7 @@ static bool me_jit_emit_stmt_vec_precompute(me_jit_codegen_ctx *ctx,
                 me_jit_set_error(ctx->error, 0, 0, "out of memory");
                 return false;
             }
-            bool ok = me_jit_emit_line(&ctx->source, 2, "for (int64_t __me_i = 0; __me_i < nitems; __me_i++) {") &&
+            bool ok = me_jit_emit_line(&ctx->source, 2, "for (int64_t __me_i = 0; __me_i < __me_nitems; __me_i++) {") &&
                       (snprintf(arg_line, arg_need, "%s[__me_i] = (%s)(%s);", dst_name, ctype, p->lift_arg_c) < (int)arg_need) &&
                       me_jit_emit_line(&ctx->source, 3, arg_line) &&
                       me_jit_emit_line(&ctx->source, 2, "}");
@@ -2362,7 +2362,7 @@ static bool me_jit_emit_stmt_vec_precompute(me_jit_codegen_ctx *ctx,
                 return false;
             }
             char vec_line[384];
-            if (snprintf(vec_line, sizeof(vec_line), "%s(%s, %s, nitems);",
+            if (snprintf(vec_line, sizeof(vec_line), "%s(%s, %s, __me_nitems);",
                          vec_sym, dst_name, dst_name) >= (int)sizeof(vec_line) ||
                 !me_jit_emit_line(&ctx->source, 2, vec_line)) {
                 me_jit_set_error(ctx->error, 0, 0, "out of memory");
@@ -2375,7 +2375,7 @@ static bool me_jit_emit_stmt_vec_precompute(me_jit_codegen_ctx *ctx,
                     me_jit_set_error(ctx->error, 0, 0, "out of memory");
                     return false;
                 }
-                if (!me_jit_emit_line(&ctx->source, 2, "for (int64_t __me_i = 0; __me_i < nitems; __me_i++) {") ||
+                if (!me_jit_emit_line(&ctx->source, 2, "for (int64_t __me_i = 0; __me_i < __me_nitems; __me_i++) {") ||
                     snprintf(combine_line, combine_need, "%s __me_call = (%s)%s[__me_i];",
                              ctype, ctype, dst_name) >= (int)combine_need ||
                     !me_jit_emit_line(&ctx->source, 3, combine_line) ||
@@ -2717,7 +2717,7 @@ static bool me_jit_emit_stmt(me_jit_codegen_ctx *ctx, const me_dsl_jit_ir_stmt *
                 me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
                 return false;
             }
-            snprintf(line, need, "%s = (%s)__me_vec_tmp_%d[idx];",
+            snprintf(line, need, "%s = (%s)__me_vec_tmp_%d[__me_idx];",
                      stmt->as.assign.name, ctype, vec_stmt_plan->tmp_slot);
             bool ok = me_jit_emit_line(&ctx->source, indent, line);
             free(line);
@@ -3345,7 +3345,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         free(ctx.source.data);
         return false;
     }
-    snprintf(sig, sig_need, "int %s(const void **inputs, void *output, int64_t nitems) {", symbol);
+    snprintf(sig, sig_need, "int %s(const void **__me_inputs, void *__me_output, int64_t __me_nitems) {", symbol);
     if (!me_jit_emit_line(&ctx.source, 0, sig)) {
         free(sig);
         me_jit_set_error(error, 0, 0, "out of memory");
@@ -3356,7 +3356,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
     }
     free(sig);
 
-    if (!me_jit_emit_line(&ctx.source, 1, "if (!output || nitems < 0) {") ||
+    if (!me_jit_emit_line(&ctx.source, 1, "if (!__me_output || __me_nitems < 0) {") ||
         !me_jit_emit_line(&ctx.source, 2, "return -1;") ||
         !me_jit_emit_line(&ctx.source, 1, "}")) {
         me_jit_set_error(error, 0, 0, "out of memory");
@@ -3380,7 +3380,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         }
     }
     if (needs_inputs) {
-        if (!me_jit_emit_line(&ctx.source, 1, "if (!inputs) {") ||
+        if (!me_jit_emit_line(&ctx.source, 1, "if (!__me_inputs) {") ||
             !me_jit_emit_line(&ctx.source, 2, "return -1;") ||
             !me_jit_emit_line(&ctx.source, 1, "}")) {
             me_jit_set_error(error, 0, 0, "out of memory");
@@ -3392,7 +3392,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
     }
 
     const char *out_ctype = me_jit_c_type(output_dtype);
-    size_t out_need = strlen(out_ctype) + 32;
+    size_t out_need = strlen(out_ctype) + 96;
     char *out_decl = malloc(out_need);
     if (!out_decl) {
         me_jit_set_error(error, 0, 0, "out of memory");
@@ -3401,7 +3401,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         free(ctx.source.data);
         return false;
     }
-    snprintf(out_decl, out_need, "%s *out = (%s *)output;", out_ctype, out_ctype);
+    snprintf(out_decl, out_need, "%s *__me_outp = (%s *)__me_output;", out_ctype, out_ctype);
     if (!me_jit_emit_line(&ctx.source, 1, out_decl)) {
         free(out_decl);
         me_jit_set_error(error, 0, 0, "out of memory");
@@ -3435,7 +3435,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
             free(ctx.source.data);
             return false;
         }
-        snprintf(line, need, "const %s *in_%s = (const %s *)inputs[%d];",
+        snprintf(line, need, "const %s *__me_in_%s = (const %s *)__me_inputs[%d];",
                  ptype, program->params[i], ptype, i);
         bool ok = me_jit_emit_line(&ctx.source, 1, line);
         free(line);
@@ -3566,7 +3566,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
     }
 
     if (synth_nd_global_only) {
-        if (!me_jit_emit_line(&ctx.source, 1, "const int64_t *__me_nd_ctx = in___me_nd_ctx;")) {
+        if (!me_jit_emit_line(&ctx.source, 1, "const int64_t *__me_nd_ctx = __me_in___me_nd_ctx;")) {
             me_jit_set_error(error, 0, 0, "out of memory");
             me_jit_locals_free(&ctx.locals);
             me_jit_stmt_vec_plans_release(stmt_vec_plans, n_stmt_vec_plans);
@@ -3706,7 +3706,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         }
     }
 
-    if (!me_jit_emit_line(&ctx.source, 1, "for (int64_t idx = 0; idx < nitems; idx++) {")) {
+    if (!me_jit_emit_line(&ctx.source, 1, "for (int64_t __me_idx = 0; __me_idx < __me_nitems; __me_idx++) {")) {
         me_jit_set_error(error, 0, 0, "out of memory");
         me_jit_locals_free(&ctx.locals);
         me_jit_stmt_vec_plans_release(stmt_vec_plans, n_stmt_vec_plans);
@@ -3715,7 +3715,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
     }
     if (synth_reserved_nd) {
         if (synth_nd_global_only) {
-            if (!me_jit_emit_line(&ctx.source, 2, "int64_t __me_flat_idx_rt = __me_seq ? me_jit_i64_add_wrap(__me_glin, idx) : __me_glin;")) {
+            if (!me_jit_emit_line(&ctx.source, 2, "int64_t __me_flat_idx_rt = __me_seq ? me_jit_i64_add_wrap(__me_glin, __me_idx) : __me_glin;")) {
                 me_jit_set_error(error, 0, 0, "out of memory");
                 me_jit_locals_free(&ctx.locals);
                 me_jit_stmt_vec_plans_release(stmt_vec_plans, n_stmt_vec_plans);
@@ -3724,7 +3724,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
             }
         }
         else {
-            if (!me_jit_emit_line(&ctx.source, 2, "const int64_t *__me_nd_ctx = in___me_nd_ctx;")) {
+            if (!me_jit_emit_line(&ctx.source, 2, "const int64_t *__me_nd_ctx = __me_in___me_nd_ctx;")) {
                 me_jit_set_error(error, 0, 0, "out of memory");
                 me_jit_locals_free(&ctx.locals);
                 me_jit_stmt_vec_plans_release(stmt_vec_plans, n_stmt_vec_plans);
@@ -3752,7 +3752,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
             }
             if (synth_nd_needs_coord) {
                 if (!me_jit_emit_line(&ctx.source, 2, "int64_t __me_coord[8] = {0};") ||
-                    !me_jit_emit_line(&ctx.source, 2, "int64_t __me_rem = idx;")) {
+                    !me_jit_emit_line(&ctx.source, 2, "int64_t __me_rem = __me_idx;")) {
                     me_jit_set_error(error, 0, 0, "out of memory");
                     me_jit_locals_free(&ctx.locals);
                     me_jit_stmt_vec_plans_release(stmt_vec_plans, n_stmt_vec_plans);
@@ -3862,18 +3862,18 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
             return false;
         }
         if (synth_reserved_non_nd && reserved_kind == ME_JIT_RESERVED_PARAM_I) {
-            const char *value = (reserved_dim == 0) ? "idx" : "0";
+            const char *value = (reserved_dim == 0) ? "__me_idx" : "0";
             snprintf(line, need, "%s %s = (%s)%s;", ptype, program->params[i], ptype, value);
         }
         else if (synth_reserved_non_nd && reserved_kind == ME_JIT_RESERVED_PARAM_N) {
-            const char *value = (reserved_dim == 0) ? "nitems" : "1";
+            const char *value = (reserved_dim == 0) ? "__me_nitems" : "1";
             snprintf(line, need, "%s %s = (%s)%s;", ptype, program->params[i], ptype, value);
         }
         else if (synth_reserved_non_nd && reserved_kind == ME_JIT_RESERVED_PARAM_NDIM) {
             snprintf(line, need, "%s %s = (%s)1;", ptype, program->params[i], ptype);
         }
         else if (synth_reserved_non_nd && reserved_kind == ME_JIT_RESERVED_PARAM_GLOBAL_LINEAR_IDX) {
-            snprintf(line, need, "%s %s = (%s)idx;", ptype, program->params[i], ptype);
+            snprintf(line, need, "%s %s = (%s)__me_idx;", ptype, program->params[i], ptype);
         }
         else if (synth_reserved_nd && reserved_kind == ME_JIT_RESERVED_PARAM_I) {
             if (synth_nd_fixed_ndim) {
@@ -3922,7 +3922,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
                      ptype, program->params[i], ptype);
         }
         else {
-            snprintf(line, need, "%s %s = in_%s[idx];", ptype, program->params[i], program->params[i]);
+            snprintf(line, need, "%s %s = __me_in_%s[__me_idx];", ptype, program->params[i], program->params[i]);
         }
         bool ok = me_jit_emit_line(&ctx.source, 2, line);
         free(line);
@@ -3993,7 +3993,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
     }
 
     if (!me_jit_emit_line(&ctx.source, 2, "__me_return_idx:") ||
-        !me_jit_emit_line(&ctx.source, 2, "out[idx] = __me_out;")) {
+        !me_jit_emit_line(&ctx.source, 2, "__me_outp[__me_idx] = __me_out;")) {
         me_jit_set_error(error, 0, 0, "out of memory");
         me_jit_locals_free(&ctx.locals);
         me_jit_stmt_vec_plans_release(stmt_vec_plans, n_stmt_vec_plans);
@@ -4003,7 +4003,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
 
     if (synth_nd_global_only) {
         if (synth_nd_fixed_ndim) {
-            if (!me_jit_emit_line(&ctx.source, 2, "if (!__me_seq && idx + 1 < nitems) {") ||
+            if (!me_jit_emit_line(&ctx.source, 2, "if (!__me_seq && __me_idx + 1 < __me_nitems) {") ||
                 !me_jit_emit_line(&ctx.source, 3, "bool __me_advanced = false;")) {
                 me_jit_set_error(error, 0, 0, "out of memory");
                 me_jit_locals_free(&ctx.locals);
@@ -4049,7 +4049,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
                 return false;
             }
         }
-        else if (!me_jit_emit_line(&ctx.source, 2, "if (!__me_seq && idx + 1 < nitems) {") ||
+        else if (!me_jit_emit_line(&ctx.source, 2, "if (!__me_seq && __me_idx + 1 < __me_nitems) {") ||
                  !me_jit_emit_line(&ctx.source, 3, "for (int64_t __me_d = __me_ndim_rt - 1; __me_d >= 0; __me_d--) {") ||
                  !me_jit_emit_line(&ctx.source, 4, "int64_t __me_len = __me_nd_ctx[1 + 3 * __me_ndim_rt + __me_d];") ||
                  !me_jit_emit_line(&ctx.source, 4, "if (__me_len <= 0) { continue; }") ||

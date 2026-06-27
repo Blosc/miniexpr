@@ -625,13 +625,13 @@ static char *dsl_wasm32_patch_source(const char *src) {
         { "(uint64_t)", "(unsigned int)" },
         { "int64_t ", "int " },
         { "(int64_t)", "(int)" },
-        { "if (!output || nitems < 0) {\n"
+        { "if (!__me_output || __me_nitems < 0) {\n"
           "        return -1;\n"
           "    }",
-          "if (!output) {\n"
+          "if (!__me_output) {\n"
           "        return -1;\n"
           "    }\n"
-          "    if (nitems < 0) {\n"
+          "    if (__me_nitems < 0) {\n"
           "        return -1;\n"
           "    }" },
     };

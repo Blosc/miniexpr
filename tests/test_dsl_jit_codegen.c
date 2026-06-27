@@ -539,11 +539,11 @@ static int test_codegen_runtime_math_bridge_vector_lowering(void) {
         return 1;
     }
 
-    if (!strstr(c_source, "me_jit_vec_exp_f64(in_x, out, nitems);") ||
+    if (!strstr(c_source, "me_jit_vec_exp_f64(__me_in_x, __me_outp, __me_nitems);") ||
         strcmp(lowering_mode, "vector") != 0 ||
         strcmp(vector_ops, "exp") != 0 ||
         strcmp(lowering_reason, "vector-lowered") != 0 ||
-        strstr(c_source, "for (int64_t idx = 0; idx < nitems; idx++) {")) {
+        strstr(c_source, "for (int64_t __me_idx = 0; __me_idx < __me_nitems; __me_idx++) {")) {
         printf("  FAILED: vector bridge lowering markers not emitted as expected\n");
         free(c_source);
         return 1;
@@ -599,8 +599,8 @@ static int test_codegen_runtime_math_bridge_vector_lowering_binary(void) {
         return 1;
     }
 
-    if (!strstr(c_source, "me_jit_vec_atan2_f64(in_y, in_x, out, nitems);") ||
-        strstr(c_source, "for (int64_t idx = 0; idx < nitems; idx++) {")) {
+    if (!strstr(c_source, "me_jit_vec_atan2_f64(__me_in_y, __me_in_x, __me_outp, __me_nitems);") ||
+        strstr(c_source, "for (int64_t __me_idx = 0; __me_idx < __me_nitems; __me_idx++) {")) {
         printf("  FAILED: vector binary bridge lowering markers not emitted as expected\n");
         free(c_source);
         return 1;
@@ -656,8 +656,8 @@ static int test_codegen_runtime_math_bridge_vector_lowering_binary_pow(void) {
         return 1;
     }
 
-    if (!strstr(c_source, "me_jit_vec_pow_f64(in_x, in_y, out, nitems);") ||
-        strstr(c_source, "for (int64_t idx = 0; idx < nitems; idx++) {")) {
+    if (!strstr(c_source, "me_jit_vec_pow_f64(__me_in_x, __me_in_y, __me_outp, __me_nitems);") ||
+        strstr(c_source, "for (int64_t __me_idx = 0; __me_idx < __me_nitems; __me_idx++) {")) {
         printf("  FAILED: vector binary pow bridge lowering markers not emitted as expected\n");
         free(c_source);
         return 1;
@@ -677,10 +677,10 @@ static int test_codegen_runtime_math_bridge_vector_lowering_binary_minmax(void) 
     } cases[] = {
         {"def kernel(x, y):\n"
          "    return fmax(x, y)\n",
-         "me_jit_vec_fmax_f64(in_x, in_y, out, nitems);"},
+         "me_jit_vec_fmax_f64(__me_in_x, __me_in_y, __me_outp, __me_nitems);"},
         {"def kernel(x, y):\n"
          "    return fmin(x, y)\n",
-         "me_jit_vec_fmin_f64(in_x, in_y, out, nitems);"},
+         "me_jit_vec_fmin_f64(__me_in_x, __me_in_y, __me_outp, __me_nitems);"},
     };
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
@@ -724,7 +724,7 @@ static int test_codegen_runtime_math_bridge_vector_lowering_binary_minmax(void) 
         }
 
         if (!strstr(c_source, cases[i].marker) ||
-            strstr(c_source, "for (int64_t idx = 0; idx < nitems; idx++) {")) {
+            strstr(c_source, "for (int64_t __me_idx = 0; __me_idx < __me_nitems; __me_idx++) {")) {
             printf("  FAILED: vector binary min/max bridge lowering markers not emitted as expected\n");
             free(c_source);
             return 1;
@@ -747,12 +747,12 @@ static int test_codegen_runtime_math_bridge_vector_lowering_binary_minmax_broadc
     } cases[] = {
         {"def kernel(x):\n"
          "    return fmax(x, 1.25)\n",
-         "out[__me_i] = (double)1.25;",
-         "me_jit_vec_fmax_f64(in_x, out, out, nitems);"},
+         "__me_outp[__me_i] = (double)1.25;",
+         "me_jit_vec_fmax_f64(__me_in_x, __me_outp, __me_outp, __me_nitems);"},
         {"def kernel(x):\n"
          "    return fmin(1.25, x)\n",
-         "out[__me_i] = (double)1.25;",
-         "me_jit_vec_fmin_f64(out, in_x, out, nitems);"},
+         "__me_outp[__me_i] = (double)1.25;",
+         "me_jit_vec_fmin_f64(__me_outp, __me_in_x, __me_outp, __me_nitems);"},
     };
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
@@ -797,7 +797,7 @@ static int test_codegen_runtime_math_bridge_vector_lowering_binary_minmax_broadc
 
         bool marker_ok = strstr(c_source, cases[i].const_line) != NULL &&
                          strstr(c_source, cases[i].call_line) != NULL;
-        if (!marker_ok || strstr(c_source, "for (int64_t idx = 0; idx < nitems; idx++) {")) {
+        if (!marker_ok || strstr(c_source, "for (int64_t __me_idx = 0; __me_idx < __me_nitems; __me_idx++) {")) {
             printf("  FAILED: vector binary min/max broadcast lowering markers not emitted as expected\n");
             free(c_source);
             return 1;
@@ -860,14 +860,14 @@ static int test_codegen_runtime_math_bridge_vector_lowering_binary_pow_broadcast
 
         bool marker_ok = false;
         if (c == 0) {
-            marker_ok = strstr(c_source, "out[__me_i] = (double)1.25;") != NULL &&
-                        strstr(c_source, "me_jit_vec_pow_f64(in_x, out, out, nitems);") != NULL;
+            marker_ok = strstr(c_source, "__me_outp[__me_i] = (double)1.25;") != NULL &&
+                        strstr(c_source, "me_jit_vec_pow_f64(__me_in_x, __me_outp, __me_outp, __me_nitems);") != NULL;
         }
         else {
-            marker_ok = strstr(c_source, "out[__me_i] = (double)1.25;") != NULL &&
-                        strstr(c_source, "me_jit_vec_pow_f64(out, in_x, out, nitems);") != NULL;
+            marker_ok = strstr(c_source, "__me_outp[__me_i] = (double)1.25;") != NULL &&
+                        strstr(c_source, "me_jit_vec_pow_f64(__me_outp, __me_in_x, __me_outp, __me_nitems);") != NULL;
         }
-        if (!marker_ok || strstr(c_source, "for (int64_t idx = 0; idx < nitems; idx++) {")) {
+        if (!marker_ok || strstr(c_source, "for (int64_t __me_idx = 0; __me_idx < __me_nitems; __me_idx++) {")) {
             printf("  FAILED: vector binary pow broadcast lowering markers not emitted as expected\n");
             free(c_source);
             return 1;
@@ -924,9 +924,9 @@ static int test_codegen_runtime_math_bridge_vector_lowering_unary_affine(void) {
         return 1;
     }
 
-    if (!strstr(c_source, "me_jit_vec_log_f64(out, out, nitems);") ||
-        !strstr(c_source, "out[__me_i] = (double)(in_x[__me_i] + (double)1.5);") ||
-        strstr(c_source, "for (int64_t idx = 0; idx < nitems; idx++) {")) {
+    if (!strstr(c_source, "me_jit_vec_log_f64(__me_outp, __me_outp, __me_nitems);") ||
+        !strstr(c_source, "__me_outp[__me_i] = (double)(__me_in_x[__me_i] + (double)1.5);") ||
+        strstr(c_source, "for (int64_t __me_idx = 0; __me_idx < __me_nitems; __me_idx++) {")) {
         printf("  FAILED: vector unary affine lowering markers not emitted as expected\n");
         free(c_source);
         return 1;
@@ -944,11 +944,11 @@ static int test_codegen_runtime_math_bridge_vector_lowering_unary_extra(void) {
         const char *name;
         const char *marker;
     } cases[] = {
-        {"abs", "me_jit_vec_abs_f64(in_x, out, nitems);"},
-        {"sqrt", "me_jit_vec_sqrt_f64(in_x, out, nitems);"},
-        {"log1p", "me_jit_vec_log1p_f64(in_x, out, nitems);"},
-        {"exp2", "me_jit_vec_exp2_f64(in_x, out, nitems);"},
-        {"log2", "me_jit_vec_log2_f64(in_x, out, nitems);"},
+        {"abs", "me_jit_vec_abs_f64(__me_in_x, __me_outp, __me_nitems);"},
+        {"sqrt", "me_jit_vec_sqrt_f64(__me_in_x, __me_outp, __me_nitems);"},
+        {"log1p", "me_jit_vec_log1p_f64(__me_in_x, __me_outp, __me_nitems);"},
+        {"exp2", "me_jit_vec_exp2_f64(__me_in_x, __me_outp, __me_nitems);"},
+        {"log2", "me_jit_vec_log2_f64(__me_in_x, __me_outp, __me_nitems);"},
     };
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
@@ -996,7 +996,7 @@ static int test_codegen_runtime_math_bridge_vector_lowering_unary_extra(void) {
         }
 
         bool marker_ok = strstr(c_source, cases[i].marker) != NULL;
-        bool has_scalar = strstr(c_source, "for (int64_t idx = 0; idx < nitems; idx++) {") != NULL;
+        bool has_scalar = strstr(c_source, "for (int64_t __me_idx = 0; __me_idx < __me_nitems; __me_idx++) {") != NULL;
         if (!marker_ok || has_scalar) {
             printf("  FAILED: vector extra lowering for %s not emitted as expected\n", cases[i].name);
             free(c_source);
@@ -1017,14 +1017,14 @@ static int test_codegen_runtime_math_bridge_vector_lowering_unary_extended(void)
         const char *name;
         const char *marker;
     } cases[] = {
-        {"expm1", "me_jit_vec_expm1_f64(in_x, out, nitems);"},
-        {"log10", "me_jit_vec_log10_f64(in_x, out, nitems);"},
-        {"sinh", "me_jit_vec_sinh_f64(in_x, out, nitems);"},
-        {"cosh", "me_jit_vec_cosh_f64(in_x, out, nitems);"},
-        {"tanh", "me_jit_vec_tanh_f64(in_x, out, nitems);"},
-        {"asinh", "me_jit_vec_asinh_f64(in_x, out, nitems);"},
-        {"acosh", "me_jit_vec_acosh_f64(in_x, out, nitems);"},
-        {"atanh", "me_jit_vec_atanh_f64(in_x, out, nitems);"},
+        {"expm1", "me_jit_vec_expm1_f64(__me_in_x, __me_outp, __me_nitems);"},
+        {"log10", "me_jit_vec_log10_f64(__me_in_x, __me_outp, __me_nitems);"},
+        {"sinh", "me_jit_vec_sinh_f64(__me_in_x, __me_outp, __me_nitems);"},
+        {"cosh", "me_jit_vec_cosh_f64(__me_in_x, __me_outp, __me_nitems);"},
+        {"tanh", "me_jit_vec_tanh_f64(__me_in_x, __me_outp, __me_nitems);"},
+        {"asinh", "me_jit_vec_asinh_f64(__me_in_x, __me_outp, __me_nitems);"},
+        {"acosh", "me_jit_vec_acosh_f64(__me_in_x, __me_outp, __me_nitems);"},
+        {"atanh", "me_jit_vec_atanh_f64(__me_in_x, __me_outp, __me_nitems);"},
     };
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
@@ -1072,7 +1072,7 @@ static int test_codegen_runtime_math_bridge_vector_lowering_unary_extended(void)
         }
 
         bool marker_ok = strstr(c_source, cases[i].marker) != NULL;
-        bool has_scalar = strstr(c_source, "for (int64_t idx = 0; idx < nitems; idx++) {") != NULL;
+        bool has_scalar = strstr(c_source, "for (int64_t __me_idx = 0; __me_idx < __me_nitems; __me_idx++) {") != NULL;
         if (!marker_ok || has_scalar) {
             printf("  FAILED: vector extended lowering for %s not emitted as expected\n", cases[i].name);
             free(c_source);
@@ -1133,8 +1133,8 @@ static int test_codegen_runtime_math_bridge_vector_lowering_assign_return(void) 
         return 1;
     }
 
-    if (!strstr(c_source, "me_jit_vec_exp_f64(in_x, out, nitems);") ||
-        strstr(c_source, "for (int64_t idx = 0; idx < nitems; idx++) {")) {
+    if (!strstr(c_source, "me_jit_vec_exp_f64(__me_in_x, __me_outp, __me_nitems);") ||
+        strstr(c_source, "for (int64_t __me_idx = 0; __me_idx < __me_nitems; __me_idx++) {")) {
         printf("  FAILED: assign+return vector lowering markers not emitted as expected\n");
         free(c_source);
         return 1;
@@ -1202,11 +1202,11 @@ static int test_codegen_runtime_math_bridge_hybrid_stmt_lowering(void) {
         return 1;
     }
 
-    bool has_vec_call = strstr(c_source, "me_jit_vec_sqrt_f64(in_x, __me_vec_tmp_0, nitems);") != NULL ||
-                        strstr(c_source, "me_jit_vec_sqrt_f64(in_x, out, nitems);") != NULL;
+    bool has_vec_call = strstr(c_source, "me_jit_vec_sqrt_f64(__me_in_x, __me_vec_tmp_0, __me_nitems);") != NULL ||
+                        strstr(c_source, "me_jit_vec_sqrt_f64(__me_in_x, __me_outp, __me_nitems);") != NULL;
     bool marker_ok = has_vec_call &&
-                     strstr(c_source, "t = (double)__me_vec_tmp_0[idx];") != NULL &&
-                     strstr(c_source, "for (int64_t idx = 0; idx < nitems; idx++) {") != NULL;
+                     strstr(c_source, "t = (double)__me_vec_tmp_0[__me_idx];") != NULL &&
+                     strstr(c_source, "for (int64_t __me_idx = 0; __me_idx < __me_nitems; __me_idx++) {") != NULL;
     if (!marker_ok ||
         strcmp(lowering_mode, "hybrid") != 0 ||
         strcmp(vector_ops, "sqrt") != 0 ||
@@ -1275,8 +1275,8 @@ static int test_codegen_runtime_math_bridge_vector_gate_disable(void) {
         return 1;
     }
 
-    if (strstr(c_source, "me_jit_vec_exp_f64(in_x, out, nitems);") ||
-        !strstr(c_source, "for (int64_t idx = 0; idx < nitems; idx++) {") ||
+    if (strstr(c_source, "me_jit_vec_exp_f64(__me_in_x, __me_outp, __me_nitems);") ||
+        !strstr(c_source, "for (int64_t __me_idx = 0; __me_idx < __me_nitems; __me_idx++) {") ||
         strcmp(lowering_mode, "scalar") != 0 ||
         strcmp(lowering_reason, "vector-math-disabled") != 0) {
         printf("  FAILED: vector gate disable did not keep scalar lowering as expected\n");
@@ -1421,8 +1421,8 @@ static int test_codegen_runtime_math_bridge_hybrid_gate_disable(void) {
         return 1;
     }
 
-    bool has_vec_call = strstr(c_source, "me_jit_vec_sqrt_f64(in_x, __me_vec_tmp_0, nitems);") != NULL ||
-                        strstr(c_source, "me_jit_vec_sqrt_f64(in_x, out, nitems);") != NULL;
+    bool has_vec_call = strstr(c_source, "me_jit_vec_sqrt_f64(__me_in_x, __me_vec_tmp_0, __me_nitems);") != NULL ||
+                        strstr(c_source, "me_jit_vec_sqrt_f64(__me_in_x, __me_outp, __me_nitems);") != NULL;
     if (has_vec_call ||
         strcmp(lowering_mode, "scalar") != 0 ||
         strcmp(lowering_reason, "statement-vector-math-disabled") != 0) {
