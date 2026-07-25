@@ -1715,6 +1715,67 @@ static int test_reduction_any_remains_global(void) {
     return rc;
 }
 
+static int test_non_libc_builtins_jit_parity(void) {
+    printf("\n=== DSL Test 14b: non-libc builtins interpreter/JIT parity ===\n");
+
+    const char *src =
+        "def kernel(x):\n"
+        "    t = square(x) + fac(x) + ncr(x, 2.0) + npr(x, 2.0)\n"
+        "    return t + ln(x + 1.0) + conj(x) + real(x) + imag(x)\n";
+
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    double x[4] = {2.0, 3.0, 5.0, 10.0};
+    const void *inputs[] = {x};
+    double out_interp[4] = {0.0, 0.0, 0.0, 0.0};
+    double out_jit[4] = {0.0, 0.0, 0.0, 0.0};
+
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+
+    if (setenv("ME_DSL_JIT", "0", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=0 failed\n");
+        free(saved_jit);
+        return 1;
+    }
+    if (compile_eval_double(src, vars, 1, inputs, 4, out_interp) != 0) {
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+
+    if (setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  ❌ FAILED: setenv ME_DSL_JIT=1 failed\n");
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+    if (compile_eval_double(src, vars, 1, inputs, 4, out_jit) != 0) {
+        restore_env_value("ME_DSL_JIT", saved_jit);
+        free(saved_jit);
+        return 1;
+    }
+
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    free(saved_jit);
+
+    for (int i = 0; i < 4; i++) {
+        if (out_interp[i] != out_jit[i]) {
+            printf("  ❌ FAILED: mismatch at %d (interp=%.17g jit=%.17g)\n",
+                   i, out_interp[i], out_jit[i]);
+            return 1;
+        }
+    }
+
+    double expected[4] = {14.09861228866811, 31.38629436111989,
+                          186.79175946922805, 3629057.397895273};
+    if (check_all_close(out_interp, expected, 4, 1e-9) != 0) {
+        printf("  ❌ FAILED: unexpected non-libc builtin output\n");
+        return 1;
+    }
+
+    printf("  ✅ PASSED\n");
+    return 0;
+}
+
 static int test_interpreter_jit_parity(void) {
     printf("\n=== DSL Test 14: interpreter/JIT parity ===\n");
 
@@ -2384,6 +2445,7 @@ int main(void) {
     fail |= test_elementwise_break();
     fail |= test_reduction_any_remains_global();
     fail |= test_interpreter_jit_parity();
+    fail |= test_non_libc_builtins_jit_parity();
     fail |= test_unknown_me_pragma_rejected();
     fail |= test_return_inside_loop_interpreter_jit_parity();
     fail |= test_missing_return_runtime_error_with_jit_enabled();

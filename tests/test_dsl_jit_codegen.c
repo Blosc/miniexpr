@@ -353,8 +353,12 @@ static int test_codegen_math_alias_rewrite(void) {
     const char *src =        "def kernel(x):\n"
         "    t0 = sinpi(x) + cospi(x)\n"
         "    t1 = exp10(x) + logaddexp(x, 1.0)\n"
-        "    t2 = where(1, t0, t1) * sign(x)\n"
-        "    return arctan2(t2, 1.0)\n";
+        "    t2 = where(1, t0, t1) * sign(x) + square(x) + ln(x)\n"
+        "    t3 = fac(x) + ncr(x, 2.0) + npr(x, 2.0)\n"
+        "    t4 = conj(x) + real(x) + imag(x)\n"
+        "    t5 = arcsin(x) + arccos(x) + arctan(x)\n"
+        "    t6 = arcsinh(x) + arccosh(x) + arctanh(x)\n"
+        "    return arctan2(t2 + t3 + t4 + t5 + t6, 1.0)\n";
 
     me_dsl_error parse_error;
     me_dsl_program *program = me_dsl_parse(src, &parse_error);
@@ -398,8 +402,22 @@ static int test_codegen_math_alias_rewrite(void) {
         !strstr(c_source, "me_jit_logaddexp(") ||
         !strstr(c_source, "me_jit_where(") ||
         !strstr(c_source, "me_jit_sign(") ||
+        !strstr(c_source, "me_jit_square(") ||
+        !strstr(c_source, "me_jit_fac(") ||
+        !strstr(c_source, "me_jit_ncr(") ||
+        !strstr(c_source, "me_jit_npr(") ||
+        !strstr(c_source, "me_jit_imag(") ||
+        !strstr(c_source, "me_jit_real(") ||
         !strstr(c_source, "atan2(") ||
-        strstr(c_source, "arctan2(")) {
+        strstr(c_source, "arctan2(") ||
+        strstr(c_source, "ln(") ||
+        strstr(c_source, "conj(") ||
+        strstr(c_source, "arcsin(") ||
+        strstr(c_source, "arccos(") ||
+        strstr(c_source, "arctan(") ||
+        strstr(c_source, "arcsinh(") ||
+        strstr(c_source, "arccosh(") ||
+        strstr(c_source, "arctanh(")) {
         printf("  FAILED: expected math alias rewrite markers not found in generated source\n");
         free(c_source);
         return 1;
@@ -1532,6 +1550,77 @@ static int test_codegen_branch_aware_if_select_lowering(void) {
     return 0;
 }
 
+static int test_codegen_alias_vector_lowering(void) {
+    printf("\n=== JIT C Codegen Test 21: alias spellings keep vector lowering ===\n");
+
+    /* Aliases are rewritten to their libc name for the scalar path; the vector
+       matcher sees the source spelling, so it has to know them too. */
+    const struct { const char *alias; const char *vec_op; } cases[] = {
+        {"ln", "log"}, {"arcsinh", "asinh"}, {"arccosh", "acosh"}, {"arctanh", "atanh"},
+    };
+
+    for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); c++) {
+        char src[64];
+        snprintf(src, sizeof(src), "def kernel(x):\n    return %s(x)\n", cases[c].alias);
+
+        me_dsl_error parse_error;
+        me_dsl_program *program = me_dsl_parse(src, &parse_error);
+        if (!program) {
+            printf("  FAILED: parse error at %d:%d (%s)\n",
+                   parse_error.line, parse_error.column, parse_error.message);
+            return 1;
+        }
+
+        const char *param_names[] = {"x"};
+        me_dtype param_dtypes[] = {ME_FLOAT64};
+        dtype_resolve_ctx rctx;
+        rctx.value_dtype = ME_FLOAT64;
+
+        me_dsl_error ir_error;
+        me_dsl_jit_ir_program *ir = NULL;
+        bool ok = me_dsl_jit_ir_build(program, param_names, param_dtypes, 1,
+                                      mock_resolve_dtype, &rctx, &ir, &ir_error);
+        me_dsl_program_free(program);
+        if (!ok || !ir) {
+            printf("  FAILED: ir build rejected %s at %d:%d (%s)\n",
+                   cases[c].alias, ir_error.line, ir_error.column, ir_error.message);
+            me_dsl_jit_ir_free(ir);
+            return 1;
+        }
+
+        me_dsl_error cg_error;
+        me_dsl_jit_cgen_options options;
+        memset(&options, 0, sizeof(options));
+        options.use_runtime_math_bridge = true;
+        char lowering_mode[16] = {0};
+        char vector_ops[64] = {0};
+        options.trace_lowering_mode = lowering_mode;
+        options.trace_lowering_mode_cap = sizeof(lowering_mode);
+        options.trace_vector_ops = vector_ops;
+        options.trace_vector_ops_cap = sizeof(vector_ops);
+        char *c_source = NULL;
+        ok = me_dsl_jit_codegen_c(ir, ME_FLOAT64, &options, &c_source, &cg_error);
+        me_dsl_jit_ir_free(ir);
+        if (!ok || !c_source) {
+            printf("  FAILED: codegen rejected %s at %d:%d (%s)\n",
+                   cases[c].alias, cg_error.line, cg_error.column, cg_error.message);
+            free(c_source);
+            return 1;
+        }
+
+        if (strcmp(lowering_mode, "vector") != 0 || strcmp(vector_ops, cases[c].vec_op) != 0) {
+            printf("  FAILED: %s lowered as mode=%s ops=%s, expected vector/%s\n",
+                   cases[c].alias, lowering_mode, vector_ops, cases[c].vec_op);
+            free(c_source);
+            return 1;
+        }
+        free(c_source);
+    }
+
+    printf("  PASSED\n");
+    return 0;
+}
+
 int main(void) {
     int fail = 0;
     fail |= test_codegen_all_noncomplex_dtypes();
@@ -1554,5 +1643,6 @@ int main(void) {
     fail |= test_codegen_runtime_math_bridge_vector_gate_disable();
     fail |= test_codegen_runtime_math_bridge_hybrid_gate_disable();
     fail |= test_codegen_branch_aware_if_select_lowering();
+    fail |= test_codegen_alias_vector_lowering();
     return fail;
 }

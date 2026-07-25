@@ -554,8 +554,17 @@ static const char *me_jit_function_name_rewrite(const char *start, size_t ident_
     if (me_jit_ident_equals(start, ident_len, "bool")) {
         return "ME_DSL_CAST_BOOL";
     }
-    if (me_jit_ident_equals(start, ident_len, "arctan2")) {
-        return "atan2";
+    /* Builtin spellings that are plain aliases of a libc name. Without these the
+       alias reaches C verbatim and the kernel fails to link. */
+    static const struct { const char *alias; const char *libc; } libc_aliases[] = {
+        {"arctan2", "atan2"}, {"arcsin", "asin"},   {"arccos", "acos"},
+        {"arctan", "atan"},   {"arcsinh", "asinh"}, {"arccosh", "acosh"},
+        {"arctanh", "atanh"}, {"ln", "log"},
+    };
+    for (size_t i = 0; i < sizeof(libc_aliases) / sizeof(libc_aliases[0]); i++) {
+        if (me_jit_ident_equals(start, ident_len, libc_aliases[i].alias)) {
+            return libc_aliases[i].libc;
+        }
     }
     if (me_jit_ident_equals(start, ident_len, "abs")) {
 #if defined(__EMSCRIPTEN__)
@@ -598,6 +607,27 @@ static const char *me_jit_function_name_rewrite(const char *start, size_t ident_
     }
     if (me_jit_ident_equals(start, ident_len, "sign")) {
         return "me_jit_sign";
+    }
+    if (me_jit_ident_equals(start, ident_len, "square")) {
+        return "me_jit_square";
+    }
+    if (me_jit_ident_equals(start, ident_len, "fac")) {
+        return "me_jit_fac";
+    }
+    if (me_jit_ident_equals(start, ident_len, "ncr")) {
+        return "me_jit_ncr";
+    }
+    if (me_jit_ident_equals(start, ident_len, "npr")) {
+        return "me_jit_npr";
+    }
+    /* Kernels only ever compile for real dtypes (me_jit_c_type rejects complex),
+       so these collapse the same way the interpreter wrappers do. */
+    if (me_jit_ident_equals(start, ident_len, "conj") ||
+        me_jit_ident_equals(start, ident_len, "real")) {
+        return "me_jit_real";
+    }
+    if (me_jit_ident_equals(start, ident_len, "imag")) {
+        return "me_jit_imag";
     }
     return NULL;
 }
@@ -1500,7 +1530,8 @@ static me_jit_vec_unary_kind me_jit_vec_unary_kind_from_ident(const char *fn_sta
     if (me_jit_ident_equals(fn_start, fn_len, "exp")) {
         return ME_JIT_VEC_UNARY_EXP;
     }
-    if (me_jit_ident_equals(fn_start, fn_len, "log")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "log") ||
+        me_jit_ident_equals(fn_start, fn_len, "ln")) {
         return ME_JIT_VEC_UNARY_LOG;
     }
     if (me_jit_ident_equals(fn_start, fn_len, "sinpi")) {
@@ -1542,13 +1573,16 @@ static me_jit_vec_unary_kind me_jit_vec_unary_kind_from_ident(const char *fn_sta
     if (me_jit_ident_equals(fn_start, fn_len, "tanh")) {
         return ME_JIT_VEC_UNARY_TANH;
     }
-    if (me_jit_ident_equals(fn_start, fn_len, "asinh")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "asinh") ||
+        me_jit_ident_equals(fn_start, fn_len, "arcsinh")) {
         return ME_JIT_VEC_UNARY_ASINH;
     }
-    if (me_jit_ident_equals(fn_start, fn_len, "acosh")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "acosh") ||
+        me_jit_ident_equals(fn_start, fn_len, "arccosh")) {
         return ME_JIT_VEC_UNARY_ACOSH;
     }
-    if (me_jit_ident_equals(fn_start, fn_len, "atanh")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "atanh") ||
+        me_jit_ident_equals(fn_start, fn_len, "arctanh")) {
         return ME_JIT_VEC_UNARY_ATANH;
     }
     return ME_JIT_VEC_UNARY_NONE;
@@ -1556,7 +1590,8 @@ static me_jit_vec_unary_kind me_jit_vec_unary_kind_from_ident(const char *fn_sta
 
 static me_jit_vec_binary_kind me_jit_vec_binary_kind_from_ident(const char *fn_start,
                                                                  size_t fn_len) {
-    if (me_jit_ident_equals(fn_start, fn_len, "atan2")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "atan2") ||
+        me_jit_ident_equals(fn_start, fn_len, "arctan2")) {
         return ME_JIT_VEC_BINARY_ATAN2;
     }
     if (me_jit_ident_equals(fn_start, fn_len, "hypot")) {
@@ -3297,11 +3332,43 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         !me_jit_emit_line(&ctx.source, 0, "extern double tanh(double);") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double tgamma(double);") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double trunc(double);") ||
-        /* sign() has no libc counterpart, so it is always emitted inline (the
-           runtime math bridge does not carry a symbol for it). */
+        /* Builtins with no libc counterpart are always emitted inline (the
+           runtime math bridge carries no symbols for them). Ports of the
+           interpreter versions in functions.c; keep the two in step. */
         !me_jit_emit_line(&ctx.source, 0,
                           "static double me_jit_sign(double x) { if (x != x) return x; "
                           "return (x > 0.0) ? 1.0 : ((x < 0.0) ? -1.0 : 0.0); }") ||
+        !me_jit_emit_line(&ctx.source, 0, "static double me_jit_square(double x) { return x * x; }") ||
+        !me_jit_emit_line(&ctx.source, 0, "static double me_jit_real(double x) { return x; }") ||
+        !me_jit_emit_line(&ctx.source, 0, "static double me_jit_imag(double x) { (void)x; return 0.0; }") ||
+        /* No <math.h> here, so NAN/INFINITY come from their bit patterns:
+           arithmetic like 0.0/0.0 would not survive -ffast-math kernels. */
+        !me_jit_emit_line(&ctx.source, 0,
+                          "static double me_jit_nan(void) { union { unsigned long long u; double d; } v; "
+                          "v.u = 0x7FF8000000000000ULL; return v.d; }") ||
+        !me_jit_emit_line(&ctx.source, 0,
+                          "static double me_jit_inf(void) { union { unsigned long long u; double d; } v; "
+                          "v.u = 0x7FF0000000000000ULL; return v.d; }") ||
+        !me_jit_emit_line(&ctx.source, 0,
+                          "static double me_jit_fac(double a) { if (a < 0.0) return me_jit_nan(); "
+                          "if (a > 4294967295.0) return me_jit_inf(); "
+                          "unsigned int ua = (unsigned int)(a); unsigned long result = 1, i; "
+                          "for (i = 1; i <= ua; i++) { "
+                          "if (i > (unsigned long)-1 / result) return me_jit_inf(); result *= i; } "
+                          "return (double)result; }") ||
+        !me_jit_emit_line(&ctx.source, 0,
+                          "static double me_jit_ncr(double n, double r) { "
+                          "if (n < 0.0 || r < 0.0 || n < r) return me_jit_nan(); "
+                          "if (n > 4294967295.0 || r > 4294967295.0) return me_jit_inf(); "
+                          "unsigned long un = (unsigned int)(n), ur = (unsigned int)(r), i; "
+                          "unsigned long result = 1; if (ur > un / 2) ur = un - ur; "
+                          "for (i = 1; i <= ur; i++) { "
+                          "if (result > (unsigned long)-1 / (un - ur + i)) return me_jit_inf(); "
+                          "result *= un - ur + i; result /= i; } "
+                          "return (double)result; }") ||
+        !me_jit_emit_line(&ctx.source, 0,
+                          "static double me_jit_npr(double n, double r) "
+                          "{ return me_jit_ncr(n, r) * me_jit_fac(r); }") ||
         !me_jit_emit_line(&ctx.source, 0, "")) {
         me_jit_set_error(error, 0, 0, "out of memory");
         me_jit_locals_free(&ctx.locals);
