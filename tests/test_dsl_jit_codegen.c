@@ -353,7 +353,7 @@ static int test_codegen_math_alias_rewrite(void) {
     const char *src =        "def kernel(x):\n"
         "    t0 = sinpi(x) + cospi(x)\n"
         "    t1 = exp10(x) + logaddexp(x, 1.0)\n"
-        "    t2 = where(1, t0, t1)\n"
+        "    t2 = where(1, t0, t1) * sign(x)\n"
         "    return arctan2(t2, 1.0)\n";
 
     me_dsl_error parse_error;
@@ -397,12 +397,22 @@ static int test_codegen_math_alias_rewrite(void) {
         !strstr(c_source, "me_jit_exp10(") ||
         !strstr(c_source, "me_jit_logaddexp(") ||
         !strstr(c_source, "me_jit_where(") ||
+        !strstr(c_source, "me_jit_sign(") ||
         !strstr(c_source, "atan2(") ||
         strstr(c_source, "arctan2(")) {
         printf("  FAILED: expected math alias rewrite markers not found in generated source\n");
         free(c_source);
         return 1;
     }
+
+#if !defined(_WIN32) && !defined(_WIN64)
+    /* Catches rewrites that name a helper nothing declares or defines. */
+    if (compile_generated_source(c_source) != 0) {
+        printf("  FAILED: generated C did not compile for math alias source\n");
+        free(c_source);
+        return 1;
+    }
+#endif
 
     free(c_source);
     printf("  PASSED\n");
@@ -413,7 +423,7 @@ static int test_codegen_runtime_math_bridge_emission(void) {
     printf("\n=== JIT C Codegen Test 5: runtime math bridge emission ===\n");
 
     const char *src =        "def kernel(x):\n"
-        "    return sinpi(x) + exp10(x) + where(1, x, 0)\n";
+        "    return sinpi(x) + exp10(x) + where(1, x, 0) + sign(x)\n";
 
     me_dsl_error parse_error;
     me_dsl_program *program = me_dsl_parse(src, &parse_error);
@@ -474,7 +484,9 @@ static int test_codegen_runtime_math_bridge_emission(void) {
         !strstr(c_source, "extern double me_jit_where(double, double, double);") ||
         strstr(c_source, "static double me_jit_exp10(") ||
         strstr(c_source, "static double me_jit_sinpi(") ||
-        strstr(c_source, "static double me_jit_where(")) {
+        strstr(c_source, "static double me_jit_where(") ||
+        /* sign() has no bridge symbol, so it stays inline in both modes */
+        !strstr(c_source, "static double me_jit_sign(")) {
         printf("  FAILED: runtime bridge codegen markers not emitted as expected\n");
         free(c_source);
         return 1;

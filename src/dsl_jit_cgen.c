@@ -596,6 +596,9 @@ static const char *me_jit_function_name_rewrite(const char *start, size_t ident_
     if (me_jit_ident_equals(start, ident_len, "where")) {
         return "me_jit_where";
     }
+    if (me_jit_ident_equals(start, ident_len, "sign")) {
+        return "me_jit_sign";
+    }
     return NULL;
 }
 
@@ -3294,6 +3297,11 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         !me_jit_emit_line(&ctx.source, 0, "extern double tanh(double);") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double tgamma(double);") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double trunc(double);") ||
+        /* sign() has no libc counterpart, so it is always emitted inline (the
+           runtime math bridge does not carry a symbol for it). */
+        !me_jit_emit_line(&ctx.source, 0,
+                          "static double me_jit_sign(double x) { if (x != x) return x; "
+                          "return (x > 0.0) ? 1.0 : ((x < 0.0) ? -1.0 : 0.0); }") ||
         !me_jit_emit_line(&ctx.source, 0, "")) {
         me_jit_set_error(error, 0, 0, "out of memory");
         me_jit_locals_free(&ctx.locals);
