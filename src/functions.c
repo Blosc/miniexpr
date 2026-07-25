@@ -88,10 +88,23 @@ static inline _Fcomplex neg_c64(_Fcomplex a) { return _FCbuild(-crealf(a), -cima
 static inline _Fcomplex mul_c64(_Fcomplex a, _Fcomplex b) {
     return _FCbuild(crealf(a) * crealf(b) - cimagf(a) * cimagf(b), crealf(a) * cimagf(b) + cimagf(a) * crealf(b));
 }
+/* Smith's algorithm, matching NumPy's nc_quot (and what C's native `/` does on
+   the non-MSVC path below): the naive (ac+bd)/(c^2+d^2) form overflows early and
+   returns nan+nanj for x/0 where NumPy returns inf+nanj. */
 static inline _Fcomplex div_c64(_Fcomplex a, _Fcomplex b) {
-    float denom = crealf(b) * crealf(b) + cimagf(b) * cimagf(b);
-    return _FCbuild((crealf(a) * crealf(b) + cimagf(a) * cimagf(b)) / denom,
-                    (cimagf(a) * crealf(b) - crealf(a) * cimagf(b)) / denom);
+    float ar = crealf(a), ai = cimagf(a), br = crealf(b), bi = cimagf(b);
+    float abs_br = fabsf(br), abs_bi = fabsf(bi);
+    if (abs_br >= abs_bi) {
+        if (abs_br == 0.0f && abs_bi == 0.0f) {
+            return _FCbuild(ar / abs_br, ai / abs_bi);
+        }
+        float rat = bi / br;
+        float scl = 1.0f / (br + bi * rat);
+        return _FCbuild((ar + ai * rat) * scl, (ai - ar * rat) * scl);
+    }
+    float rat = br / bi;
+    float scl = 1.0f / (bi + br * rat);
+    return _FCbuild((ar * rat + ai) * scl, (ai * rat - ar) * scl);
 }
 static inline _Dcomplex add_c128(_Dcomplex a, _Dcomplex b) { return _Cbuild(creal(a) + creal(b), cimag(a) + cimag(b)); }
 static inline _Dcomplex sub_c128(_Dcomplex a, _Dcomplex b) { return _Cbuild(creal(a) - creal(b), cimag(a) - cimag(b)); }
@@ -99,10 +112,21 @@ static inline _Dcomplex neg_c128(_Dcomplex a) { return _Cbuild(-creal(a), -cimag
 static inline _Dcomplex mul_c128(_Dcomplex a, _Dcomplex b) {
     return _Cbuild(creal(a) * creal(b) - cimag(a) * cimag(b), creal(a) * cimag(b) + cimag(a) * creal(b));
 }
+/* Smith's algorithm; see div_c64 above. */
 static inline _Dcomplex div_c128(_Dcomplex a, _Dcomplex b) {
-    double denom = creal(b) * creal(b) + cimag(b) * cimag(b);
-    return _Cbuild((creal(a) * creal(b) + cimag(a) * cimag(b)) / denom,
-                   (cimag(a) * creal(b) - creal(a) * cimag(b)) / denom);
+    double ar = creal(a), ai = cimag(a), br = creal(b), bi = cimag(b);
+    double abs_br = fabs(br), abs_bi = fabs(bi);
+    if (abs_br >= abs_bi) {
+        if (abs_br == 0.0 && abs_bi == 0.0) {
+            return _Cbuild(ar / abs_br, ai / abs_bi);
+        }
+        double rat = bi / br;
+        double scl = 1.0 / (br + bi * rat);
+        return _Cbuild((ar + ai * rat) * scl, (ai - ar * rat) * scl);
+    }
+    double rat = br / bi;
+    double scl = 1.0 / (bi + br * rat);
+    return _Cbuild((ar * rat + ai) * scl, (ai * rat - ar) * scl);
 }
 #else
 #define float_complex float _Complex
@@ -4741,6 +4765,23 @@ typedef double (*me_fun1)(double);
 typedef float (*me_fun1_f32)(float);
 
 /* Template for type-specific evaluator */
+/* The generic binary fallback narrows both operands through double, which drops
+   the imaginary part. Ops with a scalar specialization (+, *, pow) never reach
+   it; divide has none, so complex types need a typed path for that case. Folded
+   at compile time, so the other types keep their exact current behaviour. */
+#define ME_EVAL_IS_COMPLEX_f32 0
+#define ME_EVAL_IS_COMPLEX_f64 0
+#define ME_EVAL_IS_COMPLEX_i8 0
+#define ME_EVAL_IS_COMPLEX_i16 0
+#define ME_EVAL_IS_COMPLEX_i32 0
+#define ME_EVAL_IS_COMPLEX_i64 0
+#define ME_EVAL_IS_COMPLEX_u8 0
+#define ME_EVAL_IS_COMPLEX_u16 0
+#define ME_EVAL_IS_COMPLEX_u32 0
+#define ME_EVAL_IS_COMPLEX_u64 0
+#define ME_EVAL_IS_COMPLEX_c64 1
+#define ME_EVAL_IS_COMPLEX_c128 1
+
 #define DEFINE_ME_EVAL(SUFFIX, TYPE, VEC_ADD, VEC_SUB, VEC_MUL, VEC_DIV, VEC_POW, \
     VEC_ADD_SCALAR, VEC_MUL_SCALAR, VEC_POW_SCALAR, \
     VEC_SQRT, VEC_SIN, VEC_COS, VEC_TAN, \
@@ -4942,6 +4983,12 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                 } else if (func == divide) { \
                     if (ldata && rdata) { \
                         VEC_DIV(ldata, rdata, output, n->nitems); \
+                    } else if (ME_EVAL_IS_COMPLEX_##SUFFIX && ldata && right->type == ME_CONSTANT) { \
+                        for (i = 0; i < n->nitems; i++) output[i] = TO_TYPE_##SUFFIX(right->value); \
+                        VEC_DIV(ldata, output, output, n->nitems); \
+                    } else if (ME_EVAL_IS_COMPLEX_##SUFFIX && left->type == ME_CONSTANT && rdata) { \
+                        for (i = 0; i < n->nitems; i++) output[i] = TO_TYPE_##SUFFIX(left->value); \
+                        VEC_DIV(output, rdata, output, n->nitems); \
                     } else { \
                         goto general_case_binary_##SUFFIX; \
                     } \

@@ -448,6 +448,38 @@ void test_real_auto_dtype() {
     printf("  PASS\n");
 }
 
+/* A scalar operand used to send divide through the generic binary fallback,
+   which narrows through double and silently dropped the imaginary part. */
+void test_scalar_complex_divide() {
+    TEST("scalar / complex and complex / scalar keep the imaginary part");
+
+    double _Complex z[VECTOR_SIZE] = {
+        3.0 + 4.0*I,  1.0 + 1.0*I,  -2.0 + 0.5*I, 0.25 - 3.0*I, 5.0 + 0.0*I,
+        -1.5 - 2.5*I, 0.0 + 2.0*I,  7.0 - 1.0*I,  -0.5 + 0.5*I, 2.5 + 3.7*I
+    };
+    double _Complex result[VECTOR_SIZE] = {0};
+    me_variable vars[] = {{"z", ME_COMPLEX128}};
+    const void *var_ptrs[] = {z};
+
+    const char *sources[] = {"1.0 / z", "z / 2.0"};
+    for (int s = 0; s < 2; s++) {
+        int err;
+        me_expr *expr = NULL;
+        if (me_compile(sources[s], vars, 1, ME_COMPLEX128, &err, &expr) != ME_COMPILE_SUCCESS) {
+            printf("  FAIL: compilation error at position %d\n", err);
+            tests_failed++;
+            return;
+        }
+        ME_EVAL_CHECK(expr, var_ptrs, 1, result, VECTOR_SIZE);
+        for (int i = 0; i < VECTOR_SIZE; i++) {
+            double _Complex expected = (s == 0) ? 1.0 / z[i] : z[i] / 2.0;
+            ASSERT_COMPLEX_NEAR(expected, result[i], i);
+        }
+        me_free(expr);
+    }
+    printf("  PASS\n");
+}
+
 int main() {
     printf("=== Testing Complex Functions (conj, imag, real) ===\n\n");
 
@@ -465,6 +497,7 @@ int main() {
     test_real_c128();
     test_imag_auto_dtype();
     test_real_auto_dtype();
+    test_scalar_complex_divide();
 
     printf("\n=== Test Summary ===\n");
     printf("Tests run: %d\n", tests_run);
