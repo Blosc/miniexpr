@@ -729,6 +729,7 @@ static const me_variable functions[] = {
     {"npr", 0, npr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"pi", 0, pi, ME_FUNCTION0 | ME_FLAG_PURE, 0},
     {"pow", 0, pow, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"power", 0, pow, ME_FUNCTION2 | ME_FLAG_PURE, 0},  /* NumPy's spelling of pow */
     {"prod", 0, prod_reduce, ME_FUNCTION1, 0},
     {"real", 0, real_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"remainder", 0, remainder, ME_FUNCTION2 | ME_FLAG_PURE, 0},

@@ -562,7 +562,7 @@ static const char *me_jit_function_name_rewrite(const char *start, size_t ident_
     static const struct { const char *alias; const char *libc; } libc_aliases[] = {
         {"arctan2", "atan2"}, {"arcsin", "asin"},   {"arccos", "acos"},
         {"arctan", "atan"},   {"arcsinh", "asinh"}, {"arccosh", "acosh"},
-        {"arctanh", "atanh"}, {"ln", "log"},
+        {"arctanh", "atanh"}, {"ln", "log"},      {"power", "pow"},
     };
     for (size_t i = 0; i < sizeof(libc_aliases) / sizeof(libc_aliases[0]); i++) {
         if (me_jit_ident_equals(start, ident_len, libc_aliases[i].alias)) {
@@ -1621,7 +1621,8 @@ static me_jit_vec_binary_kind me_jit_vec_binary_kind_from_ident(const char *fn_s
     if (me_jit_ident_equals(fn_start, fn_len, "hypot")) {
         return ME_JIT_VEC_BINARY_HYPOT;
     }
-    if (me_jit_ident_equals(fn_start, fn_len, "pow")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "pow") ||
+        me_jit_ident_equals(fn_start, fn_len, "power")) {
         return ME_JIT_VEC_BINARY_POW;
     }
     if (me_jit_ident_equals(fn_start, fn_len, "fmax")) {

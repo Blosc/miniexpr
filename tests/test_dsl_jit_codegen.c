@@ -358,7 +358,8 @@ static int test_codegen_math_alias_rewrite(void) {
         "    t4 = conj(x) + real(x) + imag(x)\n"
         "    t5 = arcsin(x) + arccos(x) + arctan(x)\n"
         "    t6 = arcsinh(x) + arccosh(x) + arctanh(x)\n"
-        "    return arctan2(t2 + t3 + t4 + t5 + t6, 1.0)\n";
+        "    t7 = power(x, 2.0)\n"
+        "    return arctan2(t2 + t3 + t4 + t5 + t6 + t7, 1.0)\n";
 
     me_dsl_error parse_error;
     me_dsl_program *program = me_dsl_parse(src, &parse_error);
@@ -417,7 +418,8 @@ static int test_codegen_math_alias_rewrite(void) {
         strstr(c_source, "arctan(") ||
         strstr(c_source, "arcsinh(") ||
         strstr(c_source, "arccosh(") ||
-        strstr(c_source, "arctanh(")) {
+        strstr(c_source, "arctanh(") ||
+        strstr(c_source, "power(")) {
         printf("  FAILED: expected math alias rewrite markers not found in generated source\n");
         free(c_source);
         return 1;
@@ -645,7 +647,8 @@ static int test_codegen_runtime_math_bridge_vector_lowering_binary_pow(void) {
     printf("\n=== JIT C Codegen Test 8: runtime math bridge vector binary pow lowering ===\n");
 
     const char *src =        "def kernel(x, y):\n"
-        "    return pow(x, y)\n";
+        /* `power` is NumPy's spelling of pow; it must reach the same vector op */
+        "    return power(x, y)\n";
 
     me_dsl_error parse_error;
     me_dsl_program *program = me_dsl_parse(src, &parse_error);
