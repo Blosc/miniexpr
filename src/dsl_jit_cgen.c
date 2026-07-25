@@ -68,7 +68,10 @@ typedef enum {
     ME_JIT_VEC_UNARY_TANH,
     ME_JIT_VEC_UNARY_ASINH,
     ME_JIT_VEC_UNARY_ACOSH,
-    ME_JIT_VEC_UNARY_ATANH
+    ME_JIT_VEC_UNARY_ATANH,
+    ME_JIT_VEC_UNARY_ASIN,
+    ME_JIT_VEC_UNARY_ACOS,
+    ME_JIT_VEC_UNARY_ATAN
 } me_jit_vec_unary_kind;
 
 typedef struct {
@@ -1456,6 +1459,12 @@ static const char *me_jit_vec_unary_symbol(me_jit_vec_unary_kind kind, me_dtype 
         return (dtype == ME_FLOAT64) ? "me_jit_vec_acosh_f64" : "me_jit_vec_acosh_f32";
     case ME_JIT_VEC_UNARY_ATANH:
         return (dtype == ME_FLOAT64) ? "me_jit_vec_atanh_f64" : "me_jit_vec_atanh_f32";
+    case ME_JIT_VEC_UNARY_ASIN:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_asin_f64" : "me_jit_vec_asin_f32";
+    case ME_JIT_VEC_UNARY_ACOS:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_acos_f64" : "me_jit_vec_acos_f32";
+    case ME_JIT_VEC_UNARY_ATAN:
+        return (dtype == ME_FLOAT64) ? "me_jit_vec_atan_f64" : "me_jit_vec_atan_f32";
     case ME_JIT_VEC_UNARY_NONE:
         return NULL;
     }
@@ -1502,6 +1511,9 @@ static const char *me_jit_vec_unary_op_name(me_jit_vec_unary_kind kind) {
     case ME_JIT_VEC_UNARY_ASINH: return "asinh";
     case ME_JIT_VEC_UNARY_ACOSH: return "acosh";
     case ME_JIT_VEC_UNARY_ATANH: return "atanh";
+    case ME_JIT_VEC_UNARY_ASIN: return "asin";
+    case ME_JIT_VEC_UNARY_ACOS: return "acos";
+    case ME_JIT_VEC_UNARY_ATAN: return "atan";
     case ME_JIT_VEC_UNARY_NONE: return "";
     }
     return "";
@@ -1584,6 +1596,18 @@ static me_jit_vec_unary_kind me_jit_vec_unary_kind_from_ident(const char *fn_sta
     if (me_jit_ident_equals(fn_start, fn_len, "atanh") ||
         me_jit_ident_equals(fn_start, fn_len, "arctanh")) {
         return ME_JIT_VEC_UNARY_ATANH;
+    }
+    if (me_jit_ident_equals(fn_start, fn_len, "asin") ||
+        me_jit_ident_equals(fn_start, fn_len, "arcsin")) {
+        return ME_JIT_VEC_UNARY_ASIN;
+    }
+    if (me_jit_ident_equals(fn_start, fn_len, "acos") ||
+        me_jit_ident_equals(fn_start, fn_len, "arccos")) {
+        return ME_JIT_VEC_UNARY_ACOS;
+    }
+    if (me_jit_ident_equals(fn_start, fn_len, "atan") ||
+        me_jit_ident_equals(fn_start, fn_len, "arctan")) {
+        return ME_JIT_VEC_UNARY_ATAN;
     }
     return ME_JIT_VEC_UNARY_NONE;
 }

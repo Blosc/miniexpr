@@ -44,6 +44,9 @@
     X(me_jit_vec_asinh_f64, dsl_jit_bridge_vec_asinh_f64, me_dsl_jit_sig_vec_unary_f64_fn, "extern void me_jit_vec_asinh_f64(const double *, double *, int64_t);") \
     X(me_jit_vec_acosh_f64, dsl_jit_bridge_vec_acosh_f64, me_dsl_jit_sig_vec_unary_f64_fn, "extern void me_jit_vec_acosh_f64(const double *, double *, int64_t);") \
     X(me_jit_vec_atanh_f64, dsl_jit_bridge_vec_atanh_f64, me_dsl_jit_sig_vec_unary_f64_fn, "extern void me_jit_vec_atanh_f64(const double *, double *, int64_t);") \
+    X(me_jit_vec_asin_f64, dsl_jit_bridge_vec_asin_f64, me_dsl_jit_sig_vec_unary_f64_fn, "extern void me_jit_vec_asin_f64(const double *, double *, int64_t);") \
+    X(me_jit_vec_acos_f64, dsl_jit_bridge_vec_acos_f64, me_dsl_jit_sig_vec_unary_f64_fn, "extern void me_jit_vec_acos_f64(const double *, double *, int64_t);") \
+    X(me_jit_vec_atan_f64, dsl_jit_bridge_vec_atan_f64, me_dsl_jit_sig_vec_unary_f64_fn, "extern void me_jit_vec_atan_f64(const double *, double *, int64_t);") \
     X(me_jit_vec_sin_f32, dsl_jit_bridge_vec_sin_f32, me_dsl_jit_sig_vec_unary_f32_fn, "extern void me_jit_vec_sin_f32(const float *, float *, int64_t);") \
     X(me_jit_vec_cos_f32, dsl_jit_bridge_vec_cos_f32, me_dsl_jit_sig_vec_unary_f32_fn, "extern void me_jit_vec_cos_f32(const float *, float *, int64_t);") \
     X(me_jit_vec_exp_f32, dsl_jit_bridge_vec_exp_f32, me_dsl_jit_sig_vec_unary_f32_fn, "extern void me_jit_vec_exp_f32(const float *, float *, int64_t);") \
@@ -64,6 +67,9 @@
     X(me_jit_vec_asinh_f32, dsl_jit_bridge_vec_asinh_f32, me_dsl_jit_sig_vec_unary_f32_fn, "extern void me_jit_vec_asinh_f32(const float *, float *, int64_t);") \
     X(me_jit_vec_acosh_f32, dsl_jit_bridge_vec_acosh_f32, me_dsl_jit_sig_vec_unary_f32_fn, "extern void me_jit_vec_acosh_f32(const float *, float *, int64_t);") \
     X(me_jit_vec_atanh_f32, dsl_jit_bridge_vec_atanh_f32, me_dsl_jit_sig_vec_unary_f32_fn, "extern void me_jit_vec_atanh_f32(const float *, float *, int64_t);") \
+    X(me_jit_vec_asin_f32, dsl_jit_bridge_vec_asin_f32, me_dsl_jit_sig_vec_unary_f32_fn, "extern void me_jit_vec_asin_f32(const float *, float *, int64_t);") \
+    X(me_jit_vec_acos_f32, dsl_jit_bridge_vec_acos_f32, me_dsl_jit_sig_vec_unary_f32_fn, "extern void me_jit_vec_acos_f32(const float *, float *, int64_t);") \
+    X(me_jit_vec_atan_f32, dsl_jit_bridge_vec_atan_f32, me_dsl_jit_sig_vec_unary_f32_fn, "extern void me_jit_vec_atan_f32(const float *, float *, int64_t);") \
     X(me_jit_vec_abs_f64, dsl_jit_bridge_vec_abs_f64, me_dsl_jit_sig_vec_unary_f64_fn, "extern void me_jit_vec_abs_f64(const double *, double *, int64_t);") \
     X(me_jit_vec_sqrt_f64, dsl_jit_bridge_vec_sqrt_f64, me_dsl_jit_sig_vec_unary_f64_fn, "extern void me_jit_vec_sqrt_f64(const double *, double *, int64_t);") \
     X(me_jit_vec_log1p_f64, dsl_jit_bridge_vec_log1p_f64, me_dsl_jit_sig_vec_unary_f64_fn, "extern void me_jit_vec_log1p_f64(const double *, double *, int64_t);") \

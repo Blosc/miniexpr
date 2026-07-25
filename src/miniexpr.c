@@ -2106,6 +2106,18 @@ static void dsl_jit_bridge_vec_atanh_f64(const double *in, double *out, int64_t 
     dsl_jit_bridge_apply_unary_vector_f64(vec_atanh_dispatch, in, out, nitems);
 }
 
+static void dsl_jit_bridge_vec_asin_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f64(vec_asin_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_acos_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f64(vec_acos_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_atan_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f64(vec_atan_dispatch, in, out, nitems);
+}
+
 static void dsl_jit_bridge_vec_expm1_f32(const float *in, float *out, int64_t nitems) {
     dsl_jit_bridge_apply_unary_vector_f32(vec_expm1_f32_dispatch, in, out, nitems);
 }
@@ -2136,6 +2148,18 @@ static void dsl_jit_bridge_vec_acosh_f32(const float *in, float *out, int64_t ni
 
 static void dsl_jit_bridge_vec_atanh_f32(const float *in, float *out, int64_t nitems) {
     dsl_jit_bridge_apply_unary_vector_f32(vec_atanh_f32_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_asin_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f32(vec_asin_f32_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_acos_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f32(vec_acos_f32_dispatch, in, out, nitems);
+}
+
+static void dsl_jit_bridge_vec_atan_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_apply_unary_vector_f32(vec_atan_f32_dispatch, in, out, nitems);
 }
 
 double me_jit_exp10(double x) {
@@ -2310,6 +2334,18 @@ void me_jit_vec_atanh_f64(const double *in, double *out, int64_t nitems) {
     dsl_jit_bridge_vec_atanh_f64(in, out, nitems);
 }
 
+void me_jit_vec_asin_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_asin_f64(in, out, nitems);
+}
+
+void me_jit_vec_acos_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_acos_f64(in, out, nitems);
+}
+
+void me_jit_vec_atan_f64(const double *in, double *out, int64_t nitems) {
+    dsl_jit_bridge_vec_atan_f64(in, out, nitems);
+}
+
 void me_jit_vec_expm1_f32(const float *in, float *out, int64_t nitems) {
     dsl_jit_bridge_vec_expm1_f32(in, out, nitems);
 }
@@ -2340,6 +2376,18 @@ void me_jit_vec_acosh_f32(const float *in, float *out, int64_t nitems) {
 
 void me_jit_vec_atanh_f32(const float *in, float *out, int64_t nitems) {
     dsl_jit_bridge_vec_atanh_f32(in, out, nitems);
+}
+
+void me_jit_vec_asin_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_asin_f32(in, out, nitems);
+}
+
+void me_jit_vec_acos_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_acos_f32(in, out, nitems);
+}
+
+void me_jit_vec_atan_f32(const float *in, float *out, int64_t nitems) {
+    dsl_jit_bridge_vec_atan_f32(in, out, nitems);
 }
 
 void me_jit_vec_abs_f64(const double *in, double *out, int64_t nitems) {

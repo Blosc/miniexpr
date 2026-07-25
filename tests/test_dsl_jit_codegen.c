@@ -1055,6 +1055,9 @@ static int test_codegen_runtime_math_bridge_vector_lowering_unary_extended(void)
         {"asinh", "me_jit_vec_asinh_f64(__me_in_x, __me_outp, __me_nitems);"},
         {"acosh", "me_jit_vec_acosh_f64(__me_in_x, __me_outp, __me_nitems);"},
         {"atanh", "me_jit_vec_atanh_f64(__me_in_x, __me_outp, __me_nitems);"},
+        {"asin", "me_jit_vec_asin_f64(__me_in_x, __me_outp, __me_nitems);"},
+        {"acos", "me_jit_vec_acos_f64(__me_in_x, __me_outp, __me_nitems);"},
+        {"atan", "me_jit_vec_atan_f64(__me_in_x, __me_outp, __me_nitems);"},
     };
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
@@ -1557,6 +1560,7 @@ static int test_codegen_alias_vector_lowering(void) {
        matcher sees the source spelling, so it has to know them too. */
     const struct { const char *alias; const char *vec_op; } cases[] = {
         {"ln", "log"}, {"arcsinh", "asinh"}, {"arccosh", "acosh"}, {"arctanh", "atanh"},
+        {"arcsin", "asin"}, {"arccos", "acos"}, {"arctan", "atan"},
     };
 
     for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); c++) {

@@ -350,6 +350,9 @@
         env.me_jit_vec_asinh_f64 = bindBridge("me_jit_vec_asinh_f64", function(inPtr, outPtr, n) { vecUnaryF64(inPtr, outPtr, n, Math.asinh); });
         env.me_jit_vec_acosh_f64 = bindBridge("me_jit_vec_acosh_f64", function(inPtr, outPtr, n) { vecUnaryF64(inPtr, outPtr, n, Math.acosh); });
         env.me_jit_vec_atanh_f64 = bindBridge("me_jit_vec_atanh_f64", function(inPtr, outPtr, n) { vecUnaryF64(inPtr, outPtr, n, Math.atanh); });
+        env.me_jit_vec_asin_f64 = bindBridge("me_jit_vec_asin_f64", function(inPtr, outPtr, n) { vecUnaryF64(inPtr, outPtr, n, Math.asin); });
+        env.me_jit_vec_acos_f64 = bindBridge("me_jit_vec_acos_f64", function(inPtr, outPtr, n) { vecUnaryF64(inPtr, outPtr, n, Math.acos); });
+        env.me_jit_vec_atan_f64 = bindBridge("me_jit_vec_atan_f64", function(inPtr, outPtr, n) { vecUnaryF64(inPtr, outPtr, n, Math.atan); });
         env.me_jit_vec_abs_f64 = bindBridge("me_jit_vec_abs_f64", function(inPtr, outPtr, n) { vecUnaryF64(inPtr, outPtr, n, Math.abs); });
         env.me_jit_vec_sqrt_f64 = bindBridge("me_jit_vec_sqrt_f64", function(inPtr, outPtr, n) { vecUnaryF64(inPtr, outPtr, n, Math.sqrt); });
         env.me_jit_vec_log1p_f64 = bindBridge("me_jit_vec_log1p_f64", function(inPtr, outPtr, n) { vecUnaryF64(inPtr, outPtr, n, Math.log1p); });
@@ -375,6 +378,9 @@
         env.me_jit_vec_asinh_f32 = bindBridge("me_jit_vec_asinh_f32", function(inPtr, outPtr, n) { vecUnaryF32(inPtr, outPtr, n, Math.asinh); });
         env.me_jit_vec_acosh_f32 = bindBridge("me_jit_vec_acosh_f32", function(inPtr, outPtr, n) { vecUnaryF32(inPtr, outPtr, n, Math.acosh); });
         env.me_jit_vec_atanh_f32 = bindBridge("me_jit_vec_atanh_f32", function(inPtr, outPtr, n) { vecUnaryF32(inPtr, outPtr, n, Math.atanh); });
+        env.me_jit_vec_asin_f32 = bindBridge("me_jit_vec_asin_f32", function(inPtr, outPtr, n) { vecUnaryF32(inPtr, outPtr, n, Math.asin); });
+        env.me_jit_vec_acos_f32 = bindBridge("me_jit_vec_acos_f32", function(inPtr, outPtr, n) { vecUnaryF32(inPtr, outPtr, n, Math.acos); });
+        env.me_jit_vec_atan_f32 = bindBridge("me_jit_vec_atan_f32", function(inPtr, outPtr, n) { vecUnaryF32(inPtr, outPtr, n, Math.atan); });
         env.me_jit_vec_abs_f32 = bindBridge("me_jit_vec_abs_f32", function(inPtr, outPtr, n) { vecUnaryF32(inPtr, outPtr, n, Math.abs); });
         env.me_jit_vec_sqrt_f32 = bindBridge("me_jit_vec_sqrt_f32", function(inPtr, outPtr, n) { vecUnaryF32(inPtr, outPtr, n, Math.sqrt); });
         env.me_jit_vec_log1p_f32 = bindBridge("me_jit_vec_log1p_f32", function(inPtr, outPtr, n) { vecUnaryF32(inPtr, outPtr, n, Math.log1p); });
