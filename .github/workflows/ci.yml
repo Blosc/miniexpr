@@ -14,7 +14,9 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         compiler: [gcc]
         include:
-          - os: windows-latest
+          # Pinned, not windows-latest: that label now resolves to an image
+          # carrying VS 2026, and the generator below names VS 2022 explicitly.
+          - os: windows-2022
             compiler: clang-cl
     runs-on: ${{ matrix.os }}
     
