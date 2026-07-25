@@ -26,11 +26,15 @@
 #define S_ISDIR(mode) (((mode) & _S_IFDIR) != 0)
 #endif
 #define me_stat _stat
+/* _stat() takes struct _stat, which is not struct stat on MSVC; newer clang-cl
+   rejects the mismatch outright rather than warning. */
+#define me_stat_struct struct _stat
 #define me_mkdir(path, mode) _mkdir(path)
 #else
 #include <sys/stat.h>
 #include <unistd.h>
 #define me_stat stat
+#define me_stat_struct struct stat
 #define me_mkdir(path, mode) mkdir((path), (mode))
 #endif
 
@@ -243,7 +247,7 @@ static bool dsl_jit_ensure_dir(const char *path) {
     if (!path || !path[0]) {
         return false;
     }
-    struct stat st;
+    me_stat_struct st;
     if (me_stat(path, &st) == 0) {
         return S_ISDIR(st.st_mode);
     }
