@@ -14,9 +14,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         compiler: [gcc]
         include:
-          # Pinned, not windows-latest: that label now resolves to an image
-          # carrying VS 2026, and the generator below names VS 2022 explicitly.
-          - os: windows-2022
+          - os: windows-latest
             compiler: clang-cl
     runs-on: ${{ matrix.os }}
     
@@ -31,8 +29,10 @@ jobs:
       shell: bash
       run: |
         if [ "$RUNNER_OS" == "Windows" ]; then
+          # No -G: CMake defaults to the newest Visual Studio installed, so the
+          # runner image can move to a new VS without breaking the build.
           # Visual Studio generators are multi-config; select Release at build time.
-          cmake -S . -B build -G "Visual Studio 17 2022" -T ClangCL \
+          cmake -S . -B build -T ClangCL \
             -DCMAKE_C_COMPILER=clang-cl
           grep -Ei '^CMAKE_C_COMPILER:(FILEPATH|STRING|UNINITIALIZED)=.*clang-cl' build/CMakeCache.txt
         else
