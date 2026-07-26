@@ -48,6 +48,7 @@ For log = base 10 log comment the next line. */
 
 #include "functions.h"
 #include "functions-simd.h"
+#include "unicode_case_table.h"
 #include <stdbool.h>
 #include <stdlib.h>
 #include <math.h>
@@ -626,6 +627,16 @@ static double str_startswith(double a, double b);
 static double str_endswith(double a, double b);
 static double str_contains(double a, double b);
 static double str_concat(double a, double b);
+static double str_lower(double a);
+static double str_upper(double a);
+static double str_strip(double a);
+static double str_lstrip(double a);
+static double str_rstrip(double a);
+static double str_removeprefix(double a, double b);
+static double str_removesuffix(double a, double b);
+static double str_split_part(double a, double b, double c);
+static double str_replace(double a, double b, double c);
+static double str_substr(double a, double b, double c);
 
 static double fac(double a) {
     /* simplest version of fac */
@@ -722,6 +733,8 @@ static const me_variable functions[] = {
     {"log1p", 0, log1p_wrapper, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"log2", 0, log2_wrapper, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"logaddexp", 0, logaddexp, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"lower", 0, str_lower, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"lstrip", 0, str_lstrip, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"max", 0, max_reduce, ME_FUNCTION1, 0},
     {"mean", 0, mean_reduce, ME_FUNCTION1, 0},
     {"min", 0, min_reduce, ME_FUNCTION1, 0},
@@ -734,20 +747,28 @@ static const me_variable functions[] = {
     {"prod", 0, prod_reduce, ME_FUNCTION1, 0},
     {"real", 0, real_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"remainder", 0, remainder, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"removeprefix", 0, str_removeprefix, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"removesuffix", 0, str_removesuffix, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"replace", 0, str_replace, ME_FUNCTION3 | ME_FLAG_PURE, 0},
     {"rint", 0, rint, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"round", 0, round_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"rstrip", 0, str_rstrip, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"sign", 0, sign, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"sin", 0, sin, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"sinh", 0, sinh, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"sinpi", 0, sinpi_wrapper, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
+    {"split_part", 0, str_split_part, ME_FUNCTION3 | ME_FLAG_PURE, 0},
     {"sqrt", 0, sqrt, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"square", 0, square, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"startswith", 0, str_startswith, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"strip", 0, str_strip, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"substr", 0, str_substr, ME_FUNCTION3 | ME_FLAG_PURE, 0},
     {"sum", 0, sum_reduce, ME_FUNCTION1, 0},
     {"tan", 0, tan, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"tanh", 0, tanh, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"tgamma", 0, tgamma, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"trunc", 0, trunc_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"upper", 0, str_upper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"where", 0, where_scalar, ME_FUNCTION3 | ME_FLAG_PURE, 0},
     {0, 0, 0, 0, 0}
 };
@@ -2252,6 +2273,30 @@ static double str_concat(double a, double b) {
     return 4.0;
 }
 
+static double str_lower(double a) { (void)a; return 5.0; }
+static double str_upper(double a) { (void)a; return 6.0; }
+static double str_strip(double a) { (void)a; return 7.0; }
+static double str_lstrip(double a) { (void)a; return 8.0; }
+static double str_rstrip(double a) { (void)a; return 9.0; }
+
+static double str_removeprefix(double a, double b) { (void)a; (void)b; return 11.0; }
+static double str_removesuffix(double a, double b) { (void)a; (void)b; return 12.0; }
+
+static double str_split_part(double a, double b, double c) {
+    (void)a; (void)b; (void)c;
+    return 13.0;
+}
+
+static double str_replace(double a, double b, double c) {
+    (void)a; (void)b; (void)c;
+    return 14.0;
+}
+
+static double str_substr(double a, double b, double c) {
+    (void)a; (void)b; (void)c;
+    return 15.0;
+}
+
 static bool is_comparison_function(const void* func) {
     return func == (void*)cmp_eq || func == (void*)cmp_ne ||
         func == (void*)cmp_lt || func == (void*)cmp_le ||
@@ -2265,7 +2310,13 @@ static bool is_string_function(const void* func) {
 
 /* Functions whose result is itself a string (as opposed to the predicates above). */
 bool is_string_returning_function(const void* func) {
-    return func == (void*)str_concat;
+    return func == (void*)str_concat ||
+        func == (void*)str_lower || func == (void*)str_upper ||
+        func == (void*)str_strip || func == (void*)str_lstrip ||
+        func == (void*)str_rstrip ||
+        func == (void*)str_removeprefix || func == (void*)str_removesuffix ||
+        func == (void*)str_split_part || func == (void*)str_replace ||
+        func == (void*)str_substr;
 }
 
 bool is_comparison_node(const me_expr* n) {
@@ -2339,6 +2390,99 @@ static bool string_ends_with(const uint32_t* s, size_t slen, const uint32_t* suf
     return memcmp(s + (slen - plen), suffix, plen * sizeof(uint32_t)) == 0;
 }
 
+static const me_case_pair* case_lookup_simple(const me_case_pair* table, int count, uint32_t cp) {
+    int lo = 0, hi = count - 1;
+    while (lo <= hi) {
+        const int mid = lo + (hi - lo) / 2;
+        if (table[mid].from == cp) return &table[mid];
+        if (table[mid].from < cp) lo = mid + 1;
+        else hi = mid - 1;
+    }
+    return NULL;
+}
+
+static const me_case_expansion* case_lookup_expand(const me_case_expansion* table, int count,
+                                                   uint32_t cp) {
+    int lo = 0, hi = count - 1;
+    while (lo <= hi) {
+        const int mid = lo + (hi - lo) / 2;
+        if (table[mid].from == cp) return &table[mid];
+        if (table[mid].from < cp) lo = mid + 1;
+        else hi = mid - 1;
+    }
+    return NULL;
+}
+
+/* Full Unicode case mapping, matching NumPy (i.e. Python) semantics including
+ * the expanding cases.  Writes at most out_units codepoints and returns the
+ * number written. */
+static size_t string_case_map(const uint32_t* s, size_t slen, uint32_t* out, size_t out_units,
+                              bool to_upper) {
+    const me_case_pair* simple = to_upper ? me_case_upper_simple : me_case_lower_simple;
+    const int simple_count = to_upper ? ME_CASE_UPPER_SIMPLE_COUNT : ME_CASE_LOWER_SIMPLE_COUNT;
+    const me_case_expansion* expand = to_upper ? me_case_upper_expand : me_case_lower_expand;
+    const int expand_count = to_upper ? ME_CASE_UPPER_EXPAND_COUNT : ME_CASE_LOWER_EXPAND_COUNT;
+
+    size_t w = 0;
+    for (size_t i = 0; i < slen && w < out_units; i++) {
+        const uint32_t cp = s[i];
+        const me_case_pair* hit = case_lookup_simple(simple, simple_count, cp);
+        if (hit) {
+            out[w++] = hit->to;
+            continue;
+        }
+        const me_case_expansion* exp = case_lookup_expand(expand, expand_count, cp);
+        if (exp) {
+            for (uint8_t k = 0; k < exp->len && w < out_units; k++) {
+                out[w++] = exp->to[k];
+            }
+            continue;
+        }
+        out[w++] = cp;
+    }
+    return w;
+}
+
+/* Python str.strip() with no argument: ASCII/Unicode whitespace. */
+static bool string_is_space(uint32_t cp) {
+    switch (cp) {
+    case 0x09: case 0x0A: case 0x0B: case 0x0C: case 0x0D: case 0x20:
+    case 0x1C: case 0x1D: case 0x1E: case 0x1F:
+    case 0x85: case 0xA0: case 0x1680:
+    case 0x2000: case 0x2001: case 0x2002: case 0x2003: case 0x2004:
+    case 0x2005: case 0x2006: case 0x2007: case 0x2008: case 0x2009:
+    case 0x200A: case 0x2028: case 0x2029: case 0x202F: case 0x205F:
+    case 0x3000:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/* Narrow [*start, *end) to the stripped range. */
+static void string_strip_range(const uint32_t* s, size_t slen, bool left, bool right,
+                               size_t* start, size_t* end) {
+    size_t a = 0, b = slen;
+    if (left) {
+        while (a < b && string_is_space(s[a])) a++;
+    }
+    if (right) {
+        while (b > a && string_is_space(s[b - 1])) b--;
+    }
+    *start = a;
+    *end = b;
+}
+
+/* Index of the first occurrence of needle in s, or (size_t)-1. */
+static size_t string_find(const uint32_t* s, size_t slen, const uint32_t* needle, size_t nlen) {
+    if (nlen == 0) return 0;
+    if (nlen > slen) return (size_t)-1;
+    for (size_t i = 0; i + nlen <= slen; i++) {
+        if (memcmp(s + i, needle, nlen * sizeof(uint32_t)) == 0) return i;
+    }
+    return (size_t)-1;
+}
+
 static bool string_contains(const uint32_t* s, size_t slen, const uint32_t* needle, size_t nlen) {
     if (nlen == 0) return true;
     if (nlen > slen) return false;
@@ -2401,6 +2545,57 @@ size_t infer_output_itemsize(const me_expr* n) {
         if (arg0 == 0 || b == 0) return 0;
         /* Both operands carry a NUL terminator; the result needs only one. */
         return arg0 + b - sizeof(uint32_t);
+    }
+
+    /* Case mapping can expand: U+00DF -> "SS" on upper, U+0130 -> 2 cp on lower.
+     * ponytail: flat 3x/2x worst-case bound.  A tight bound needs a pass over
+     * the data, which the python-blosc2 span driver could do since it already
+     * scans each span; revisit there if the width inflation shows up. */
+    if (n->function == (void*)str_upper) {
+        if (arg0 == 0) return 0;
+        return (arg0 - sizeof(uint32_t)) * 3 + sizeof(uint32_t);
+    }
+    if (n->function == (void*)str_lower) {
+        if (arg0 == 0) return 0;
+        return (arg0 - sizeof(uint32_t)) * 2 + sizeof(uint32_t);
+    }
+
+    /* Ops that can only shrink or preserve their first operand. */
+    if (n->function == (void*)str_strip || n->function == (void*)str_lstrip ||
+        n->function == (void*)str_rstrip ||
+        n->function == (void*)str_removeprefix || n->function == (void*)str_removesuffix ||
+        n->function == (void*)str_split_part) {
+        return arg0;
+    }
+
+    if (n->function == (void*)str_substr) {
+        /* A literal length gives an exact bound; otherwise fall back to the input. */
+        const me_expr* len_arg = (const me_expr*)n->parameters[2];
+        double len_val;
+        if (string_const_number(len_arg, &len_val) && len_val >= 0) {
+            const size_t want = ((size_t)len_val + 1) * sizeof(uint32_t);
+            return (arg0 != 0 && want > arg0) ? arg0 : want;
+        }
+        return arg0;
+    }
+
+    if (n->function == (void*)str_replace) {
+        const me_expr* old_arg = (const me_expr*)n->parameters[1];
+        const me_expr* new_arg = (const me_expr*)n->parameters[2];
+        if (arg0 == 0 || !old_arg || !new_arg) return 0;
+        /* Only literal needles let us bound the growth. */
+        if (TYPE_MASK(old_arg->type) != ME_STRING_CONSTANT ||
+            TYPE_MASK(new_arg->type) != ME_STRING_CONSTANT) {
+            return 0;
+        }
+        const size_t old_len = old_arg->str_len;
+        const size_t new_len = new_arg->str_len;
+        if (old_len == 0) return 0;  /* empty needle would match unboundedly */
+        if (new_len <= old_len) return arg0;
+        const size_t chars = arg0 / sizeof(uint32_t) - 1;
+        /* At most floor(chars / old_len) replacements, each growing the result. */
+        const size_t grown = chars + (chars / old_len) * (new_len - old_len);
+        return (grown + 1) * sizeof(uint32_t);
     }
 
     return 0;
@@ -2484,6 +2679,14 @@ static bool validate_string_usage_node(const me_expr* n) {
             for (int i = 1; i < arity; i++) {
                 const me_expr* child = (const me_expr*)n->parameters[i];
                 if (!child) return false;
+                const bool wants_number =
+                    (n->function == (void*)str_split_part && i == 2) ||
+                    (n->function == (void*)str_substr && (i == 1 || i == 2));
+                if (wants_number) {
+                    double ignored;
+                    if (!string_const_number(child, &ignored)) return false;
+                    continue;
+                }
                 if (!is_string_producing_node(child)) return false;
                 if (!validate_string_usage_node(child)) return false;
             }
@@ -2756,6 +2959,7 @@ static bool eval_string_expr(const me_expr* n) {
 
     const me_expr* left = (const me_expr*)n->parameters[0];
     const me_expr* right = (arity > 1) ? (const me_expr*)n->parameters[1] : NULL;
+    const me_expr* third = (arity > 2) ? (const me_expr*)n->parameters[2] : NULL;
     const size_t slot_units = n->itemsize / sizeof(uint32_t);
     const size_t cap = slot_units - 1;  /* usable codepoints, excluding the NUL */
 
@@ -2764,7 +2968,10 @@ static bool eval_string_expr(const me_expr* n) {
         const uint32_t* rdata = NULL;
         size_t llen = 0, rlen = 0;
         if (!string_view_at(left, i, &ldata, &llen)) return false;
-        if (right && !string_view_at(right, i, &rdata, &rlen)) return false;
+        if (right && is_string_producing_node(right) &&
+            !string_view_at(right, i, &rdata, &rlen)) {
+            return false;
+        }
 
         uint32_t* slot = (uint32_t*)n->output + (size_t)i * slot_units;
         size_t w = 0;
@@ -2775,6 +2982,94 @@ static bool eval_string_expr(const me_expr* n) {
             if (la) memcpy(slot, ldata, la * sizeof(uint32_t));
             if (lb) memcpy(slot + la, rdata, lb * sizeof(uint32_t));
             w = la + lb;
+        }
+        else if (n->function == (void*)str_lower || n->function == (void*)str_upper) {
+            w = string_case_map(ldata, llen, slot, cap, n->function == (void*)str_upper);
+        }
+        else if (n->function == (void*)str_strip || n->function == (void*)str_lstrip ||
+                 n->function == (void*)str_rstrip) {
+            size_t a, b;
+            string_strip_range(ldata, llen,
+                               n->function != (void*)str_rstrip,
+                               n->function != (void*)str_lstrip, &a, &b);
+            w = b - a;
+            if (w > cap) w = cap;
+            if (w) memcpy(slot, ldata + a, w * sizeof(uint32_t));
+        }
+        else if (n->function == (void*)str_removeprefix) {
+            size_t off = string_starts_with(ldata, llen, rdata, rlen) ? rlen : 0;
+            w = llen - off;
+            if (w > cap) w = cap;
+            if (w) memcpy(slot, ldata + off, w * sizeof(uint32_t));
+        }
+        else if (n->function == (void*)str_removesuffix) {
+            w = string_ends_with(ldata, llen, rdata, rlen) ? llen - rlen : llen;
+            if (w > cap) w = cap;
+            if (w) memcpy(slot, ldata, w * sizeof(uint32_t));
+        }
+        else if (n->function == (void*)str_split_part) {
+            /* split_part(s, sep, k): k==0 is the head, k==1 the remainder after
+             * the first separator.  Absent separator -> whole string for k==0,
+             * empty for k>0.  This differs from Python's str.split(), which
+             * raises when unpacking a missing separator. */
+            double kv;
+            if (!string_const_number(third, &kv)) return false;
+            const long k = (long)kv;
+            const size_t at = string_find(ldata, llen, rdata, rlen);
+            if (k <= 0) {
+                w = (at == (size_t)-1) ? llen : at;
+            }
+            else if (at == (size_t)-1) {
+                w = 0;
+            }
+            else {
+                const size_t off = at + rlen;
+                w = llen - off;
+                if (w > cap) w = cap;
+                if (w) memcpy(slot, ldata + off, w * sizeof(uint32_t));
+                memset(slot + w, 0, (slot_units - w) * sizeof(uint32_t));
+                continue;
+            }
+            if (w > cap) w = cap;
+            if (w) memcpy(slot, ldata, w * sizeof(uint32_t));
+        }
+        else if (n->function == (void*)str_replace) {
+            const uint32_t* nd = NULL;
+            size_t ndlen = 0;
+            if (!third || !string_view_at(third, i, &nd, &ndlen)) return false;
+            size_t pos = 0;
+            while (pos < llen && w < cap) {
+                if (rlen > 0 && pos + rlen <= llen &&
+                    memcmp(ldata + pos, rdata, rlen * sizeof(uint32_t)) == 0) {
+                    const size_t take = (ndlen > cap - w) ? cap - w : ndlen;
+                    if (take) memcpy(slot + w, nd, take * sizeof(uint32_t));
+                    w += take;
+                    pos += rlen;
+                }
+                else {
+                    slot[w++] = ldata[pos++];
+                }
+            }
+        }
+        else if (n->function == (void*)str_substr) {
+            /* substr(s, start, len); a negative start counts from the end. */
+            double sv, wv;
+            if (!string_const_number(right, &sv)) return false;
+            if (!string_const_number(third, &wv)) return false;
+            long start = (long)sv;
+            long want = (long)wv;
+            if (start < 0) start += (long)llen;
+            if (start < 0) start = 0;
+            if (want < 0) want = 0;
+            if ((size_t)start >= llen) {
+                w = 0;
+            }
+            else {
+                w = llen - (size_t)start;
+                if (w > (size_t)want) w = (size_t)want;
+                if (w > cap) w = cap;
+                if (w) memcpy(slot, ldata + start, w * sizeof(uint32_t));
+            }
         }
         else {
             return false;

@@ -290,6 +290,175 @@ static void test_numeric_add_unaffected(void) {
     me_free(expr);
 }
 
+/* Run a single-operand string expression over `in` and check each result. */
+static void run_unary(const char *expr_str, size_t in_units, const char *const *inputs,
+                      const char *const *expected, size_t out_units) {
+    TEST(expr_str);
+    uint32_t *a = calloc(ITEMS * in_units, sizeof(uint32_t));
+    uint32_t *out = calloc(ITEMS * out_units, sizeof(uint32_t));
+    for (int i = 0; i < ITEMS; i++) {
+        put(a, in_units, i, inputs[i]);
+    }
+
+    me_variable vars[] = {
+        {"a", ME_STRING, a, ME_VARIABLE, NULL, in_units * sizeof(uint32_t)},
+    };
+
+    int err;
+    me_expr *expr = NULL;
+    int rc = me_compile(expr_str, vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: compilation error %d at %d\n", rc, err);
+        tests_failed++;
+        free(a); free(out);
+        return;
+    }
+
+    size_t got_units = me_get_itemsize(expr) / sizeof(uint32_t);
+    if (got_units > out_units) {
+        printf("  FAIL: inferred %zu units exceeds test buffer %zu\n", got_units, out_units);
+        tests_failed++;
+        me_free(expr); free(a); free(out);
+        return;
+    }
+
+    const void *ptrs[] = {a};
+    ME_EVAL_CHECK(expr, ptrs, 1, out, ITEMS);
+    for (int i = 0; i < ITEMS; i++) {
+        expect_slot(out, got_units, i, expected[i], expr_str);
+    }
+    printf("  PASS %s\n", expr_str);
+
+    me_free(expr);
+    free(a);
+    free(out);
+}
+
+static void test_case_mapping(void) {
+    static const char *in[ITEMS] = {"Hello", "WORLD", "MiXeD", ""};
+    static const char *lo[ITEMS] = {"hello", "world", "mixed", ""};
+    static const char *up[ITEMS] = {"HELLO", "WORLD", "MIXED", ""};
+    run_unary("lower(a)", 8, in, lo, 32);
+    run_unary("upper(a)", 8, in, up, 48);
+}
+
+static void test_case_expansion(void) {
+    /* NumPy (and Python) expand these; a 1:1 table would silently disagree. */
+    TEST("upper() expands eszett like NumPy");
+    const size_t au = 8;
+    uint32_t a[ITEMS * 8];
+    const uint32_t src[] = {'s', 't', 'r', 'a', 0x00DF, 'e'};
+    for (int i = 0; i < ITEMS; i++) {
+        memset(a + (size_t)i * au, 0, au * sizeof(uint32_t));
+        memcpy(a + (size_t)i * au, src, sizeof(src));
+    }
+
+    me_variable vars[] = {
+        {"a", ME_STRING, a, ME_VARIABLE, NULL, au * sizeof(uint32_t)},
+    };
+
+    int err;
+    me_expr *expr = NULL;
+    int rc = me_compile("upper(a)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: compilation error %d at %d\n", rc, err);
+        tests_failed++;
+        return;
+    }
+
+    const size_t ou = me_get_itemsize(expr) / sizeof(uint32_t);
+    uint32_t *out = calloc(ITEMS * ou, sizeof(uint32_t));
+    const void *ptrs[] = {a};
+    ME_EVAL_CHECK(expr, ptrs, 1, out, ITEMS);
+    for (int i = 0; i < ITEMS; i++) {
+        expect_slot(out, ou, i, "STRASSE", "upper eszett");
+    }
+    printf("  PASS upper() expands eszett\n");
+
+    free(out);
+    me_free(expr);
+}
+
+static void test_strip_family(void) {
+    static const char *in[ITEMS] = {"  pad  ", "left  ", "  right", "none"};
+    static const char *both[ITEMS] = {"pad", "left", "right", "none"};
+    static const char *lft[ITEMS] = {"pad  ", "left  ", "right", "none"};
+    static const char *rgt[ITEMS] = {"  pad", "left", "  right", "none"};
+    run_unary("strip(a)", 10, in, both, 10);
+    run_unary("lstrip(a)", 10, in, lft, 10);
+    run_unary("rstrip(a)", 10, in, rgt, 10);
+}
+
+static void test_prefix_suffix(void) {
+    static const char *in[ITEMS] = {"double room", "suite", "single room", "room"};
+    static const char *nosuf[ITEMS] = {"double", "suite", "single", "room"};
+    run_unary("removesuffix(a, ' room')", 14, in, nosuf, 14);
+
+    static const char *in2[ITEMS] = {"pre_a", "pre_b", "c", "pre_"};
+    static const char *nopre[ITEMS] = {"a", "b", "c", ""};
+    run_unary("removeprefix(a, 'pre_')", 8, in2, nopre, 8);
+}
+
+static void test_split_part(void) {
+    static const char *in[ITEMS] = {"loft with view", "plain", "a with b with c", " with x"};
+    static const char *head[ITEMS] = {"loft", "plain", "a", ""};
+    static const char *tail[ITEMS] = {"view", "", "b with c", "x"};
+    run_unary("split_part(a, \' with \', 0)", 18, in, head, 18);
+    run_unary("split_part(a, \' with \', 1)", 18, in, tail, 18);
+}
+
+static void test_replace_and_substr(void) {
+    static const char *in[ITEMS] = {"a-b-c", "no", "---", ""};
+    static const char *rep[ITEMS] = {"a+b+c", "no", "+++", ""};
+    run_unary("replace(a, '-', '+')", 8, in, rep, 24);
+
+    static const char *in2[ITEMS] = {"abcdef", "ab", "", "xyz"};
+    static const char *sub[ITEMS] = {"bcd", "b", "", "yz"};
+    run_unary("substr(a, 1, 3)", 8, in2, sub, 8);
+
+    static const char *tailc[ITEMS] = {"ef", "ab", "", "yz"};
+    run_unary("substr(a, -2, 2)", 8, in2, tailc, 8);
+}
+
+static void test_blog_kernel_shape(void) {
+    /* The pandas-3 blog kernel's core expression, in function-call form. */
+    TEST("nested lower/removesuffix/concat");
+    const size_t au = 32;
+    uint32_t a[ITEMS * 32];
+    put(a, au, 0, "Cozy Loft With City View");
+    put(a, au, 1, "Small Single Room");
+    put(a, au, 2, "Studio");
+    put(a, au, 3, "Double Room");
+
+    me_variable vars[] = {
+        {"a", ME_STRING, a, ME_VARIABLE, NULL, au * sizeof(uint32_t)},
+    };
+
+    int err;
+    me_expr *expr = NULL;
+    int rc = me_compile("'room_type=' + removesuffix(lower(a), ' room')",
+                        vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: compilation error %d at %d\n", rc, err);
+        tests_failed++;
+        return;
+    }
+
+    const size_t ou = me_get_itemsize(expr) / sizeof(uint32_t);
+    uint32_t *out = calloc(ITEMS * ou, sizeof(uint32_t));
+    const void *ptrs[] = {a};
+    ME_EVAL_CHECK(expr, ptrs, 1, out, ITEMS);
+
+    expect_slot(out, ou, 0, "room_type=cozy loft with city view", "blog kernel");
+    expect_slot(out, ou, 1, "room_type=small single", "blog kernel");
+    expect_slot(out, ou, 2, "room_type=studio", "blog kernel");
+    expect_slot(out, ou, 3, "room_type=double", "blog kernel");
+    printf("  PASS nested lower/removesuffix/concat\n");
+
+    free(out);
+    me_free(expr);
+}
+
 static void test_literal_with_dsl_chars(void) {
     /* Regression: dsl_is_candidate() used to scan the raw source for '=', ';'
      * and DSL keywords without skipping string literals, so any expression
@@ -325,6 +494,13 @@ int main(void) {
     test_concat_fills_bound();
     test_non_ascii();
     test_numeric_add_unaffected();
+    test_case_mapping();
+    test_case_expansion();
+    test_strip_family();
+    test_prefix_suffix();
+    test_split_part();
+    test_replace_and_substr();
+    test_blog_kernel_shape();
     test_literal_with_dsl_chars();
 
     printf("\n=== %d tests run, %d failures ===\n", tests_run, tests_failed);
