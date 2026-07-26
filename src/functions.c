@@ -2531,7 +2531,10 @@ size_t infer_output_itemsize(const me_expr* n) {
     if (!n) return 0;
 
     if (TYPE_MASK(n->type) == ME_STRING_CONSTANT) {
-        return (n->str_len + 1) * sizeof(uint32_t);
+        /* NumPy fixed-width semantics: an <Un slot holds n codepoints, padded
+         * with NULs only when the value is shorter.  A full-width value has no
+         * terminator, so the width is str_len, not str_len + 1. */
+        return (n->str_len ? n->str_len : 1) * sizeof(uint32_t);
     }
     if (TYPE_MASK(n->type) == ME_VARIABLE && n->dtype == ME_STRING) {
         return n->itemsize;
@@ -2543,8 +2546,7 @@ size_t infer_output_itemsize(const me_expr* n) {
     if (n->function == (void*)str_concat) {
         const size_t b = infer_output_itemsize((const me_expr*)n->parameters[1]);
         if (arg0 == 0 || b == 0) return 0;
-        /* Both operands carry a NUL terminator; the result needs only one. */
-        return arg0 + b - sizeof(uint32_t);
+        return arg0 + b;
     }
 
     /* Case mapping can expand: U+00DF -> "SS" on upper, U+0130 -> 2 cp on lower.
@@ -2553,11 +2555,11 @@ size_t infer_output_itemsize(const me_expr* n) {
      * scans each span; revisit there if the width inflation shows up. */
     if (n->function == (void*)str_upper) {
         if (arg0 == 0) return 0;
-        return (arg0 - sizeof(uint32_t)) * 3 + sizeof(uint32_t);
+        return arg0 * 3;
     }
     if (n->function == (void*)str_lower) {
         if (arg0 == 0) return 0;
-        return (arg0 - sizeof(uint32_t)) * 2 + sizeof(uint32_t);
+        return arg0 * 2;
     }
 
     /* Ops that can only shrink or preserve their first operand. */
@@ -2572,8 +2574,8 @@ size_t infer_output_itemsize(const me_expr* n) {
         /* A literal length gives an exact bound; otherwise fall back to the input. */
         const me_expr* len_arg = (const me_expr*)n->parameters[2];
         double len_val;
-        if (string_const_number(len_arg, &len_val) && len_val >= 0) {
-            const size_t want = ((size_t)len_val + 1) * sizeof(uint32_t);
+        if (string_const_number(len_arg, &len_val) && len_val > 0) {
+            const size_t want = (size_t)len_val * sizeof(uint32_t);
             return (arg0 != 0 && want > arg0) ? arg0 : want;
         }
         return arg0;
@@ -2592,10 +2594,10 @@ size_t infer_output_itemsize(const me_expr* n) {
         const size_t new_len = new_arg->str_len;
         if (old_len == 0) return 0;  /* empty needle would match unboundedly */
         if (new_len <= old_len) return arg0;
-        const size_t chars = arg0 / sizeof(uint32_t) - 1;
+        const size_t chars = arg0 / sizeof(uint32_t);
         /* At most floor(chars / old_len) replacements, each growing the result. */
         const size_t grown = chars + (chars / old_len) * (new_len - old_len);
-        return (grown + 1) * sizeof(uint32_t);
+        return grown * sizeof(uint32_t);
     }
 
     return 0;
@@ -2914,7 +2916,7 @@ static bool compare_to_bool_output(const me_expr* n, me_dtype eval_type,
 static void string_store(uint32_t* slot, size_t slot_units, const uint32_t* src, size_t len) {
     if (slot_units == 0) return;
     size_t n = len;
-    if (n > slot_units - 1) n = slot_units - 1;
+    if (n > slot_units) n = slot_units;
     if (n > 0) memcpy(slot, src, n * sizeof(uint32_t));
     memset(slot + n, 0, (slot_units - n) * sizeof(uint32_t));
 }
@@ -2961,7 +2963,9 @@ static bool eval_string_expr(const me_expr* n) {
     const me_expr* right = (arity > 1) ? (const me_expr*)n->parameters[1] : NULL;
     const me_expr* third = (arity > 2) ? (const me_expr*)n->parameters[2] : NULL;
     const size_t slot_units = n->itemsize / sizeof(uint32_t);
-    const size_t cap = slot_units - 1;  /* usable codepoints, excluding the NUL */
+    /* NumPy fixed-width semantics: all slot_units codepoints are usable; the
+     * tail is NUL-padded only when the value is shorter. */
+    const size_t cap = slot_units;
 
     for (int i = 0; i < n->nitems; i++) {
         const uint32_t* ldata = NULL;

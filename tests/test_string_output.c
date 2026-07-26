@@ -36,8 +36,10 @@ static void expect_slot(const uint32_t *base, size_t units, int idx,
             return;
         }
     }
-    if (i >= units || slot[i] != 0) {
-        printf("  FAIL %s at [%d]: missing NUL terminator\n", label, idx);
+    /* A value that exactly fills the slot carries no terminator (NumPy does
+     * the same); a shorter one must be NUL-padded. */
+    if (i < units && slot[i] != 0) {
+        printf("  FAIL %s at [%d]: missing NUL padding\n", label, idx);
         tests_failed++;
         return;
     }
@@ -80,11 +82,11 @@ static void test_concat_var_var(void) {
         me_free(expr);
         return;
     }
-    /* 32 + 24 - 4 = 52 bytes = 13 units */
-    const size_t ou = 13;
+    /* NumPy widths add directly: 8 + 6 = 14 units = 56 bytes */
+    const size_t ou = 14;
     expect_itemsize(expr, ou * sizeof(uint32_t), "a + b");
 
-    uint32_t out[ITEMS * 13];
+    uint32_t out[ITEMS * 14];
     memset(out, 0xFF, sizeof(out));
     const void *ptrs[] = {a, b};
     ME_EVAL_CHECK(expr, ptrs, 2, out, ITEMS);
@@ -120,7 +122,7 @@ static void test_concat_literal(void) {
         return;
     }
 
-    /* literal is 5 chars -> 24 bytes; 24 + 32 - 4 = 52 = 13 units */
+    /* literal is 5 chars = 5 units; 5 + 8 = 13 units */
     const size_t ou = 13;
     expect_itemsize(expr, ou * sizeof(uint32_t), "literal concat");
 
@@ -160,11 +162,11 @@ static void test_concat_nested(void) {
         return;
     }
 
-    /* (24 + 8 - 4) = 28, then 28 + 24 - 4 = 48 bytes = 12 units */
-    const size_t ou = 12;
+    /* (6 + 1) = 7 units, then 7 + 6 = 13 units */
+    const size_t ou = 13;
     expect_itemsize(expr, ou * sizeof(uint32_t), "nested concat");
 
-    uint32_t out[ITEMS * 12];
+    uint32_t out[ITEMS * 13];
     const void *ptrs[] = {a, b};
     ME_EVAL_CHECK(expr, ptrs, 2, out, ITEMS);
 
@@ -199,11 +201,11 @@ static void test_concat_fills_bound(void) {
         return;
     }
 
-    /* 16 + 16 - 4 = 28 bytes = 7 units: exactly 6 chars plus NUL */
-    const size_t ou = 7;
+    /* 4 + 4 = 8 units: exactly the 6 chars, with 2 NULs of padding */
+    const size_t ou = 8;
     expect_itemsize(expr, ou * sizeof(uint32_t), "bound-filling concat");
 
-    uint32_t out[ITEMS * 7];
+    uint32_t out[ITEMS * 8];
     const void *ptrs[] = {a, b};
     ME_EVAL_CHECK(expr, ptrs, 2, out, ITEMS);
 
@@ -238,7 +240,7 @@ static void test_non_ascii(void) {
         return;
     }
 
-    const size_t ou = 7; /* 24 + 8 - 4 = 28 */
+    const size_t ou = 7; /* 6 + 1 = 7 units */
     uint32_t out[ITEMS * 7];
     const void *ptrs[] = {a};
     ME_EVAL_CHECK(expr, ptrs, 1, out, ITEMS);
