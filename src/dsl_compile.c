@@ -39,6 +39,7 @@ typedef struct {
     me_dsl_compiled_expr *output_expr;
     bool has_return;
     me_dtype return_dtype;
+    size_t return_itemsize;   /* widest string return seen so far */
     me_dsl_compiled_program *program;
     const me_variable *funcs;
     int func_count;
@@ -1831,6 +1832,10 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 return false;
             }
             me_dtype return_dtype = me_get_dtype(compiled->as.return_stmt.expr.expr);
+            const size_t return_itemsize = me_get_itemsize(compiled->as.return_stmt.expr.expr);
+            if (return_itemsize > ctx->return_itemsize) {
+                ctx->return_itemsize = return_itemsize;
+            }
             if (!ctx->has_return) {
                 ctx->has_return = true;
                 ctx->return_dtype = return_dtype;
@@ -2557,6 +2562,7 @@ me_dsl_compiled_program *dsl_compile_program(const char *source,
     ctx.allow_new_locals = true;
     ctx.error_pos = error_pos;
     ctx.output_expr = NULL;
+    ctx.return_itemsize = 0;
     ctx.has_return = false;
     ctx.return_dtype = ME_AUTO;
     ctx.program = program;
@@ -2593,8 +2599,9 @@ me_dsl_compiled_program *dsl_compile_program(const char *source,
     /* A string-valued kernel needs its width bound published too, or callers
      * cannot size the output container. */
     program->output_itemsize = 0;
-    if (ctx.return_dtype == ME_STRING && ctx.output_expr && ctx.output_expr->expr) {
-        program->output_itemsize = me_get_itemsize(ctx.output_expr->expr);
+    if (ctx.return_dtype == ME_STRING) {
+        /* The widest branch wins: narrower returns are NUL-padded on the way out. */
+        program->output_itemsize = ctx.return_itemsize;
     }
     program->guaranteed_return = dsl_compiled_block_guarantees_return(&program->block);
     program->output_is_scalar = contains_reduction(ctx.output_expr->expr) &&

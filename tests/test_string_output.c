@@ -538,6 +538,51 @@ static void test_nd_string_output(void) {
     printf("  PASS me_eval_nd string output\n");
 }
 
+/* A DSL kernel whose branches return strings of different widths: the output
+ * slot is the widest of them, so the narrow branch must be NUL-padded into it
+ * rather than written at its own stride. */
+static void test_dsl_branch_widths(void) {
+    TEST("DSL kernel with returns of differing widths");
+    const size_t au = 8;
+    static uint32_t a[ITEMS * 8];
+    put(a, au, 0, "yes x");
+    put(a, au, 1, "no");
+    put(a, au, 2, "yes y");
+    put(a, au, 3, "no");
+
+    me_variable vars[] = {
+        {"a", ME_STRING, a, ME_VARIABLE, NULL, au * sizeof(uint32_t)},
+    };
+
+    int err;
+    me_expr *expr = NULL;
+    const char *src = "def k(a):\n"
+                      "    if contains(a, 'yes'):\n"
+                      "        return a\n"
+                      "    return 'long-prefix-' + a\n";
+    int rc = me_compile(src, vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: compilation error %d at %d\n", rc, err);
+        tests_failed++;
+        return;
+    }
+    /* 'long-prefix-' is 12 units, so the wide branch is 8 + 12 = 20 units */
+    const size_t ou = 20;
+    expect_itemsize(expr, ou * sizeof(uint32_t), "branch widths");
+
+    uint32_t *out = calloc(ITEMS, ou * sizeof(uint32_t));
+    const void *ptrs[] = {a};
+    ME_EVAL_CHECK(expr, ptrs, 1, out, ITEMS);
+    expect_slot(out, ou, 0, "yes x", "branch widths");
+    expect_slot(out, ou, 1, "long-prefix-no", "branch widths");
+    expect_slot(out, ou, 2, "yes y", "branch widths");
+    expect_slot(out, ou, 3, "long-prefix-no", "branch widths");
+    printf("  PASS DSL branch widths\n");
+
+    free(out);
+    me_free(expr);
+}
+
 int main(void) {
     printf("=== String output tests ===\n\n");
 
@@ -556,6 +601,7 @@ int main(void) {
     test_blog_kernel_shape();
     test_literal_with_dsl_chars();
     test_nd_string_output();
+    test_dsl_branch_widths();
 
     printf("\n=== %d tests run, %d failures ===\n", tests_run, tests_failed);
     return tests_failed != 0;

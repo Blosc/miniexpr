@@ -149,13 +149,31 @@ static bool dsl_value_nonzero_at(const void *data, me_dtype dtype, size_t item_s
     }
 }
 
+/* Copy the value of `expr` into `dst` for the items `mask` selects.
+ *
+ * `dst_item_size` is the destination slot width, which for strings need not be
+ * the expression's own: the program's output width is the widest of its return
+ * expressions, so a narrower branch must be widened (NUL-padded) on the way in.
+ * Pass 0 when the widths are known to agree (numeric output). */
 static int dsl_eval_expr_masked_copy(dsl_eval_ctx *ctx, const me_dsl_compiled_expr *expr,
-                                     void *dst, const uint8_t *mask, int nitems) {
+                                     void *dst, const uint8_t *mask, int nitems,
+                                     size_t dst_item_size) {
     if (!ctx || !expr || !expr->expr || !dst || nitems < 0) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
     if (nitems == 0) {
         return ME_EVAL_SUCCESS;
+    }
+
+    const size_t item_size = me_get_itemsize(expr->expr);
+    if (item_size == 0) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+    if (dst_item_size == 0) {
+        dst_item_size = item_size;
+    }
+    if (dst_item_size < item_size) {
+        return ME_EVAL_ERR_INVALID_ARG;
     }
 
     bool all_active = (mask == NULL);
@@ -168,14 +186,8 @@ static int dsl_eval_expr_masked_copy(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
             }
         }
     }
-    if (all_active) {
+    if (all_active && dst_item_size == item_size) {
         return dsl_eval_expr_nitems(ctx, expr, dst, nitems);
-    }
-
-    me_dtype dtype = me_get_dtype(expr->expr);
-    size_t item_size = dtype_size(dtype);
-    if (item_size == 0) {
-        return ME_EVAL_ERR_INVALID_ARG;
     }
 
     void *tmp = malloc((size_t)nitems * item_size);
@@ -191,11 +203,14 @@ static int dsl_eval_expr_masked_copy(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
     unsigned char *dst_bytes = (unsigned char *)dst;
     const unsigned char *src_bytes = (const unsigned char *)tmp;
     for (int i = 0; i < nitems; i++) {
-        if (!mask[i]) {
+        if (mask && !mask[i]) {
             continue;
         }
-        memcpy(dst_bytes + (size_t)i * item_size,
-               src_bytes + (size_t)i * item_size, item_size);
+        unsigned char *slot = dst_bytes + (size_t)i * dst_item_size;
+        memcpy(slot, src_bytes + (size_t)i * item_size, item_size);
+        if (dst_item_size > item_size) {
+            memset(slot + item_size, 0, dst_item_size - item_size);
+        }
     }
 
     free(tmp);
@@ -431,7 +446,9 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
             int slot = stmt->as.assign.local_slot;
             void *out = ctx->local_buffers[slot];
             int rc = dsl_eval_expr_masked_copy(ctx, &stmt->as.assign.value, out,
-                                               run_mask, ctx->nitems);
+                                               run_mask, ctx->nitems,
+                                               dsl_var_item_size(ctx->program,
+                                                                 ctx->program->local_var_indices[slot]));
             if (rc != ME_EVAL_SUCCESS) {
                 return rc;
             }
@@ -439,7 +456,8 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
         }
         case ME_DSL_STMT_EXPR: {
             int rc = dsl_eval_expr_masked_copy(ctx, &stmt->as.expr_stmt.expr,
-                                               ctx->output_block, run_mask, ctx->nitems);
+                                               ctx->output_block, run_mask, ctx->nitems,
+                                               ctx->program->output_itemsize);
             if (rc != ME_EVAL_SUCCESS) {
                 return rc;
             }
@@ -447,7 +465,8 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
         }
         case ME_DSL_STMT_RETURN: {
             int rc = dsl_eval_expr_masked_copy(ctx, &stmt->as.return_stmt.expr,
-                                               ctx->output_block, run_mask, ctx->nitems);
+                                               ctx->output_block, run_mask, ctx->nitems,
+                                               ctx->program->output_itemsize);
             if (rc != ME_EVAL_SUCCESS) {
                 return rc;
             }
