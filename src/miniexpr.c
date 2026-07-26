@@ -1072,6 +1072,11 @@ me_dtype infer_result_type(const me_expr* n) {
                 return promote_float_math_result(param_type);
             }
 
+            /* String-returning ops compute in the string domain, not as bools. */
+            if (IS_FUNCTION(n->type) && is_string_returning_function(n->function)) {
+                return ME_STRING;
+            }
+
             if (ARITY(n->type) == 2) {
                 const me_expr* left = (const me_expr*)n->parameters[0];
                 const me_expr* right = (const me_expr*)n->parameters[1];
@@ -1163,6 +1168,12 @@ me_dtype infer_output_type(const me_expr* n) {
                 }
             }
 
+            /* String-returning ops yield a string whatever their other operands
+             * are (split_part and substr take numeric indices). */
+            if (IS_FUNCTION(n->type) && is_string_returning_function(n->function)) {
+                return ME_STRING;
+            }
+
             // Special case: where(cond, x, y) -> promote(x, y), regardless of cond type.
             if (IS_FUNCTION(n->type) && ARITY(n->type) == 3 &&
                 n->function == (void*)where_scalar) {
@@ -1212,6 +1223,9 @@ static me_expr* create_conversion_node(me_expr* source, me_dtype target_dtype) {
 
 void apply_type_promotion(me_expr* node) {
     if (!node || ARITY(node->type) < 2) return;
+
+    /* `str + str` is concatenation; it needs no numeric promotion at all. */
+    if (retag_string_concat(node)) return;
 
     me_expr* left = (me_expr*)node->parameters[0];
     me_expr* right = (me_expr*)node->parameters[1];
@@ -1420,10 +1434,8 @@ int private_compile_ex(const char* expression, const me_variable* variables, int
         if (error) *error = -1;
         return ME_COMPILE_ERR_INVALID_ARG_TYPE;
     }
-    if (dtype == ME_STRING) {
-        if (error) *error = -1;
-        return ME_COMPILE_ERR_INVALID_ARG_TYPE;
-    }
+    /* ME_STRING output is accepted; validate_string_usage() rejects it later if
+     * the width turns out not to be statically computable. */
 
     if (variables && var_count > 0) {
         for (int i = 0; i < var_count; i++) {
@@ -1663,6 +1675,18 @@ int private_compile_ex(const char* expression, const me_variable* variables, int
         // Mixed-type nested expressions now handled via conversion nodes
         // (see apply_type_promotion which inserts conversion nodes when needed)
 
+        /* Freeze the statically inferred string width on the root, so eval and
+         * callers (me_get_itemsize) do not have to recompute it. */
+        if (root->dtype == ME_STRING) {
+            root->itemsize = infer_output_itemsize(root);
+            if (root->itemsize == 0) {
+                me_free(root);
+                if (error) *error = -1;
+                if (vars_copy) free(vars_copy);
+                return ME_COMPILE_ERR_INVALID_ARG_TYPE;
+            }
+        }
+
         if (error) *error = 0;
         if (vars_copy) free(vars_copy);
         *out = root;
@@ -1681,6 +1705,18 @@ static bool dsl_is_candidate(const char *source) {
     const unsigned char *p = (const unsigned char *)source;
     while (*p) {
         unsigned char c = *p;
+        /* Skip over string literals: their contents are data, not syntax.  A
+         * literal such as 'property_type=' must not look like an assignment. */
+        if (c == '\'' || c == '"') {
+            const unsigned char quote = c;
+            p++;
+            while (*p && *p != quote) {
+                if (*p == '\\' && p[1]) p++;
+                p++;
+            }
+            if (*p) p++;  /* consume the closing quote */
+            continue;
+        }
         if (c == '\n' || c == ';' || c == '{' || c == '}') {
             return true;
         }
@@ -2752,6 +2788,12 @@ void me_print(const me_expr* n) {
 
 me_dtype me_get_dtype(const me_expr* expr) {
     return expr ? expr->dtype : ME_AUTO;
+}
+
+size_t me_get_itemsize(const me_expr* expr) {
+    if (!expr) return 0;
+    if (expr->dtype == ME_STRING) return expr->itemsize;
+    return dtype_size(expr->dtype);
 }
 
 const char *me_get_last_error_message(void) {

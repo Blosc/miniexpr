@@ -625,6 +625,7 @@ double real_wrapper(double x) { return x; }
 static double str_startswith(double a, double b);
 static double str_endswith(double a, double b);
 static double str_contains(double a, double b);
+static double str_concat(double a, double b);
 
 static double fac(double a) {
     /* simplest version of fac */
@@ -2243,6 +2244,14 @@ static double str_contains(double a, double b) {
     return 3.0;
 }
 
+/* String-returning ops.  Like the predicates above these are identity tags only,
+ * never called; keep the return values distinct so ICF cannot fold them. */
+static double str_concat(double a, double b) {
+    (void)a;
+    (void)b;
+    return 4.0;
+}
+
 static bool is_comparison_function(const void* func) {
     return func == (void*)cmp_eq || func == (void*)cmp_ne ||
         func == (void*)cmp_lt || func == (void*)cmp_le ||
@@ -2252,6 +2261,11 @@ static bool is_comparison_function(const void* func) {
 static bool is_string_function(const void* func) {
     return func == (void*)str_startswith || func == (void*)str_endswith ||
         func == (void*)str_contains;
+}
+
+/* Functions whose result is itself a string (as opposed to the predicates above). */
+bool is_string_returning_function(const void* func) {
+    return func == (void*)str_concat;
 }
 
 bool is_comparison_node(const me_expr* n) {
@@ -2292,6 +2306,18 @@ static bool string_view_at(const me_expr* n, int idx, const uint32_t** data, siz
         *len = string_len_u32(s, max_units);
         return true;
     }
+    /* Computed string node: its value lives in the per-node output buffer that
+     * eval_string_expr() filled in before the parent runs. */
+    if (IS_FUNCTION(n->type) && n->dtype == ME_STRING && n->output) {
+        if (n->itemsize == 0 || (n->itemsize % sizeof(uint32_t)) != 0) {
+            return false;
+        }
+        const char* base = (const char*)n->output + (size_t)idx * n->itemsize;
+        const uint32_t* s = (const uint32_t*)base;
+        *data = s;
+        *len = string_len_u32(s, n->itemsize / sizeof(uint32_t));
+        return true;
+    }
     return false;
 }
 
@@ -2322,6 +2348,77 @@ static bool string_contains(const uint32_t* s, size_t slen, const uint32_t* need
         }
     }
     return false;
+}
+
+/* Resolve a compile-time numeric argument.  Literal negatives parse as
+ * negate(constant) and are only folded by optimize(), which runs after
+ * validation, so unwrap that shape here too. */
+static bool string_const_number(const me_expr* n, double* out) {
+    if (!n) return false;
+    if (TYPE_MASK(n->type) == ME_CONSTANT) {
+        *out = n->value;
+        return true;
+    }
+    if (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == (void*)negate) {
+        double inner = 0.0;
+        if (!string_const_number((const me_expr*)n->parameters[0], &inner)) return false;
+        *out = -inner;
+        return true;
+    }
+    return false;
+}
+
+/* Like is_string_node(), but also true for computed nodes that yield a string
+ * (e.g. a concat).  is_string_node() stays leaf-only because the predicate
+ * evaluator reads its operands directly from the input buffers. */
+bool is_string_producing_node(const me_expr* n) {
+    if (!n) return false;
+    if (is_string_node(n)) return true;
+    return IS_FUNCTION(n->type) && is_string_returning_function(n->function);
+}
+
+/* Compile-time upper bound, in bytes, on one element of a string-valued node.
+ * Returns 0 when the node is not a string or the bound is not computable, which
+ * is what callers use to reject unbounded string output.
+ *
+ * The bound is conservative: it never depends on the data, only on the operand
+ * itemsizes. */
+size_t infer_output_itemsize(const me_expr* n) {
+    if (!n) return 0;
+
+    if (TYPE_MASK(n->type) == ME_STRING_CONSTANT) {
+        return (n->str_len + 1) * sizeof(uint32_t);
+    }
+    if (TYPE_MASK(n->type) == ME_VARIABLE && n->dtype == ME_STRING) {
+        return n->itemsize;
+    }
+    if (!IS_FUNCTION(n->type)) return 0;
+
+    const size_t arg0 = infer_output_itemsize((const me_expr*)n->parameters[0]);
+
+    if (n->function == (void*)str_concat) {
+        const size_t b = infer_output_itemsize((const me_expr*)n->parameters[1]);
+        if (arg0 == 0 || b == 0) return 0;
+        /* Both operands carry a NUL terminator; the result needs only one. */
+        return arg0 + b - sizeof(uint32_t);
+    }
+
+    return 0;
+}
+
+/* `+` between two strings means concatenation, not arithmetic.  Retag the node
+ * so the rest of the pipeline sees a string-returning function.  Called from
+ * apply_type_promotion(), i.e. once per binary node at parse time. */
+bool retag_string_concat(me_expr* node) {
+    if (!node || ARITY(node->type) != 2) return false;
+    if (node->function != (void*)add) return false;
+    if (!is_string_producing_node((const me_expr*)node->parameters[0])) return false;
+    if (!is_string_producing_node((const me_expr*)node->parameters[1])) return false;
+
+    node->function = (void*)str_concat;
+    node->dtype = ME_STRING;
+    node->itemsize = infer_output_itemsize(node);
+    return node->itemsize != 0;
 }
 
 static bool contains_string_node(const me_expr* n) {
@@ -2376,6 +2473,23 @@ static bool validate_string_usage_node(const me_expr* n) {
             return is_string_node(left) && is_string_node(right);
         }
 
+        if (is_string_returning_function(n->function)) {
+            /* First operand is always the subject string.  Later operands are
+             * strings too, except the numeric ones noted below, which must be
+             * compile-time constants so the width bound stays static. */
+            const me_expr* subject = (const me_expr*)n->parameters[0];
+            if (!is_string_producing_node(subject)) return false;
+            if (!validate_string_usage_node(subject)) return false;
+
+            for (int i = 1; i < arity; i++) {
+                const me_expr* child = (const me_expr*)n->parameters[i];
+                if (!child) return false;
+                if (!is_string_producing_node(child)) return false;
+                if (!validate_string_usage_node(child)) return false;
+            }
+            return true;
+        }
+
         if (is_comparison_node(n)) {
             const me_expr* left = (const me_expr*)n->parameters[0];
             const me_expr* right = (const me_expr*)n->parameters[1];
@@ -2407,7 +2521,8 @@ bool validate_string_usage(const me_expr* n) {
     if (!validate_string_usage_node(n)) {
         return false;
     }
-    if (infer_output_type(n) == ME_STRING) {
+    /* String output is fine, but only with a statically computable width. */
+    if (infer_output_type(n) == ME_STRING && infer_output_itemsize(n) == 0) {
         return false;
     }
     return true;
@@ -2588,6 +2703,86 @@ static bool compare_to_bool_output(const me_expr* n, me_dtype eval_type,
 
 #undef CMP_SWITCH
 #undef CMP_LOOP_OP
+    return true;
+}
+
+/* Write one string into a fixed-width UCS4 slot, truncating at the slot size and
+ * zero-filling the tail so the result is always NUL-terminated and padded. */
+static void string_store(uint32_t* slot, size_t slot_units, const uint32_t* src, size_t len) {
+    if (slot_units == 0) return;
+    size_t n = len;
+    if (n > slot_units - 1) n = slot_units - 1;
+    if (n > 0) memcpy(slot, src, n * sizeof(uint32_t));
+    memset(slot + n, 0, (slot_units - n) * sizeof(uint32_t));
+}
+
+/* Evaluate a string-valued node into its own output buffer, bottom-up.
+ * Children get a scratch buffer allocated here and freed by me_free() with the
+ * rest of the tree, mirroring how the numeric evaluator manages intermediates. */
+static bool eval_string_expr(const me_expr* n) {
+    if (!n || !n->output) return false;
+    if (n->itemsize == 0 || (n->itemsize % sizeof(uint32_t)) != 0) return false;
+
+    /* A bare variable or literal as the whole expression: copy it out. */
+    if (!IS_FUNCTION(n->type)) {
+        const size_t slot_units = n->itemsize / sizeof(uint32_t);
+        for (int i = 0; i < n->nitems; i++) {
+            const uint32_t* sv = NULL;
+            size_t len = 0;
+            if (!string_view_at(n, i, &sv, &len)) return false;
+            string_store((uint32_t*)n->output + (size_t)i * slot_units, slot_units, sv, len);
+        }
+        return true;
+    }
+
+    if (!is_string_returning_function(n->function)) return false;
+
+    /* Materialise any computed children first. */
+    const int arity = ARITY(n->type);
+    for (int a = 0; a < arity; a++) {
+        me_expr* child = (me_expr*)n->parameters[a];
+        if (!child || !IS_FUNCTION(child->type)) continue;
+        if (!is_string_returning_function(child->function)) continue;
+        if (!child->output) {
+            child->itemsize = infer_output_itemsize(child);
+            if (child->itemsize == 0) return false;
+            child->nitems = n->nitems;
+            child->dtype = ME_STRING;
+            child->output = malloc((size_t)n->nitems * child->itemsize);
+            if (!child->output) return false;
+        }
+        if (!eval_string_expr(child)) return false;
+    }
+
+    const me_expr* left = (const me_expr*)n->parameters[0];
+    const me_expr* right = (arity > 1) ? (const me_expr*)n->parameters[1] : NULL;
+    const size_t slot_units = n->itemsize / sizeof(uint32_t);
+    const size_t cap = slot_units - 1;  /* usable codepoints, excluding the NUL */
+
+    for (int i = 0; i < n->nitems; i++) {
+        const uint32_t* ldata = NULL;
+        const uint32_t* rdata = NULL;
+        size_t llen = 0, rlen = 0;
+        if (!string_view_at(left, i, &ldata, &llen)) return false;
+        if (right && !string_view_at(right, i, &rdata, &rlen)) return false;
+
+        uint32_t* slot = (uint32_t*)n->output + (size_t)i * slot_units;
+        size_t w = 0;
+
+        if (n->function == (void*)str_concat) {
+            size_t la = llen > cap ? cap : llen;
+            size_t lb = rlen > cap - la ? cap - la : rlen;
+            if (la) memcpy(slot, ldata, la * sizeof(uint32_t));
+            if (lb) memcpy(slot + la, rdata, lb * sizeof(uint32_t));
+            w = la + lb;
+        }
+        else {
+            return false;
+        }
+
+        memset(slot + w, 0, (slot_units - w) * sizeof(uint32_t));
+    }
+
     return true;
 }
 
@@ -7222,6 +7417,11 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
 static void private_eval(const me_expr* n) {
     if (!n) return;
 
+    if (n->dtype == ME_STRING) {
+        eval_string_expr(n);
+        return;
+    }
+
     if (is_reduction_node(n)) {
         eval_reduction(n, 1);
         return;
@@ -7940,7 +8140,8 @@ int me_eval(const me_expr* expr, const void** vars_block,
             int n_vars, void* output_block, int block_nitems,
             const me_eval_params* params) {
     if (!expr) return ME_EVAL_ERR_NULL_EXPR;
-    if (expr->dtype == ME_STRING) return ME_EVAL_ERR_INVALID_ARG;
+    /* String output is allowed as long as its width is statically bounded. */
+    if (expr->dtype == ME_STRING && expr->itemsize == 0) return ME_EVAL_ERR_INVALID_ARG;
     if (expr->dsl_program) {
         return me_eval_dsl_program(expr, vars_block, n_vars, output_block, block_nitems, params);
     }

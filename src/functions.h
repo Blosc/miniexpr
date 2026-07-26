@@ -95,6 +95,12 @@ int is_synthetic_address(const void* ptr);
 
 me_expr* new_expr(const int type, const me_expr* parameters[]);
 void apply_type_promotion(me_expr* node);
+
+/* String-output support (implemented in functions.c, where the op tags live). */
+bool is_string_returning_function(const void* func);
+bool is_string_producing_node(const me_expr* n);
+bool retag_string_concat(me_expr* node);
+size_t infer_output_itemsize(const me_expr* n);
 me_dtype infer_output_type(const me_expr* n);
 me_dtype infer_result_type(const me_expr* n);
 void me_free_parameters(me_expr* n);
