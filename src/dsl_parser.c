@@ -1414,6 +1414,23 @@ static bool parse_indented_block(me_dsl_lexer *lex, me_dsl_block *block, int min
          * But if we're already at a line start (column 1), the statement
          * parser (e.g., for-loop) already positioned us correctly. */
         if (lex->column != 1) {
+            /* Anything left on this line other than blanks or a comment would
+             * be silently discarded here.  That used to swallow ';'-joined
+             * statements whole -- inside an `if` body they simply never ran --
+             * so reject it instead of dropping code on the floor. */
+            skip_line_whitespace(lex);
+            if (*lex->current == ';') {
+                /* A bare trailing ';' is harmless (and valid Python); only a
+                 * further statement after it is a problem. */
+                lexer_advance(lex);
+                skip_line_whitespace(lex);
+            }
+            if (*lex->current && *lex->current != '\n' && *lex->current != '#') {
+                dsl_set_error(error, lex->line, lex->column,
+                              "only one statement per line is supported; "
+                              "put ';'-joined statements on separate lines");
+                return false;
+            }
             while (*lex->current && *lex->current != '\n') {
                 lexer_advance(lex);
             }

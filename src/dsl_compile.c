@@ -13,6 +13,9 @@
 #include "dsl_jit_cgen.h"
 #include "functions.h"
 
+/* Defined in miniexpr.c. */
+bool contains_reduction(const me_expr *n);
+
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +32,8 @@ typedef struct {
     me_dtype output_dtype;
     bool output_dtype_auto;
     int loop_depth;
+    int control_depth;   /* nesting inside if/while/for bodies */
+    int in_condition;    /* compiling an if/while condition */
     bool allow_new_locals;
     int *error_pos;
     me_dsl_compiled_expr *output_expr;
@@ -959,6 +964,21 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
         free(indices);
         return false;
     }
+    /* A reduction inside per-element control flow silently produces wrong
+     * results past element 0 (the reduction collapses the whole block while the
+     * surrounding mask is per-element).  Reject it rather than mislead.
+     * Conditions are exempt: any()/all() collapsing to a scalar is the
+     * documented idiom there. */
+    if (ctx->control_depth > 0 && ctx->in_condition == 0 && contains_reduction(compiled)) {
+        dsl_set_error_reason(ctx,
+            "reductions (sum/mean/prod/min/max/any/all) are not supported inside "
+            "if/for/while bodies; compute the reduction outside the control flow");
+        me_free(compiled);
+        free(indices);
+        memset(out_expr, 0, sizeof(*out_expr));
+        return false;
+    }
+
     out_expr->expr = compiled;
     out_expr->var_indices = indices;
     out_expr->n_vars = count;
@@ -975,7 +995,10 @@ static bool dsl_compile_condition_expr(dsl_compile_ctx *ctx, const me_dsl_expr *
         saved_error = *ctx->error_pos;
     }
 
-    if (dsl_compile_expr(ctx, expr_node, ME_AUTO, out_expr)) {
+    ctx->in_condition++;
+    const bool cond_ok = dsl_compile_expr(ctx, expr_node, ME_AUTO, out_expr);
+    ctx->in_condition--;
+    if (cond_ok) {
         return true;
     }
 
@@ -1962,11 +1985,14 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 return false;
             }
 
+            ctx->control_depth++;
             if (!dsl_compile_block(ctx, &stmt->as.if_stmt.then_block,
                                    &compiled->as.if_stmt.then_block)) {
+                ctx->control_depth--;
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
+            ctx->control_depth--;
 
             compiled->as.if_stmt.n_elifs = stmt->as.if_stmt.n_elifs;
             compiled->as.if_stmt.elif_capacity = stmt->as.if_stmt.n_elifs;
@@ -1985,18 +2011,24 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
+                ctx->control_depth++;
                 if (!dsl_compile_block(ctx, &elif_branch->block, &out_branch->block)) {
+                    ctx->control_depth--;
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
+                ctx->control_depth--;
             }
 
             if (stmt->as.if_stmt.has_else) {
+                ctx->control_depth++;
                 if (!dsl_compile_block(ctx, &stmt->as.if_stmt.else_block,
                                        &compiled->as.if_stmt.else_block)) {
+                    ctx->control_depth--;
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
+                ctx->control_depth--;
                 compiled->as.if_stmt.has_else = true;
             }
             break;
@@ -2007,12 +2039,15 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 return false;
             }
             ctx->loop_depth++;
+            ctx->control_depth++;
             if (!dsl_compile_block(ctx, &stmt->as.while_loop.body, &compiled->as.while_loop.body)) {
                 ctx->loop_depth--;
+                ctx->control_depth--;
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
             ctx->loop_depth--;
+            ctx->control_depth--;
             break;
         }
         case ME_DSL_STMT_FOR: {
@@ -2055,12 +2090,15 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 return false;
             }
             ctx->loop_depth++;
+            ctx->control_depth++;
             if (!dsl_compile_block(ctx, &stmt->as.for_loop.body, &compiled->as.for_loop.body)) {
                 ctx->loop_depth--;
+                ctx->control_depth--;
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
             ctx->loop_depth--;
+            ctx->control_depth--;
             break;
         }
         case ME_DSL_STMT_BREAK:
@@ -2474,7 +2512,10 @@ me_dsl_compiled_program *dsl_compile_program(const char *source,
         }
     }
 
+    /* Zero first: this struct is initialised field by field below, so any field
+     * added later would otherwise silently read uninitialised stack. */
     dsl_compile_ctx ctx;
+    memset(&ctx, 0, sizeof(ctx));
     ctx.source = source;
     ctx.output_dtype = dtype;
     ctx.output_dtype_auto = (dtype == ME_AUTO);
