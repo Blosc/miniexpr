@@ -1757,12 +1757,46 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
+                /* A string local needs its width recorded, or every later
+                 * reference compiles against itemsize 0 and fails. */
+                size_t assigned_itemsize = 0;
+                if (assigned_dtype == ME_STRING) {
+                    assigned_itemsize = me_get_itemsize(compiled->as.assign.value.expr);
+                    if (assigned_itemsize == 0) {
+                        dsl_set_error_reason(ctx,
+                            "cannot infer a string width for this assignment");
+                        if (ctx->error_pos) {
+                            *ctx->error_pos =
+                                dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                        }
+                        dsl_compiled_stmt_free(compiled);
+                        return false;
+                    }
+                }
                 var_index = dsl_var_table_add_with_uniform(&ctx->program->vars, name,
-                                                           assigned_dtype, 0, is_uniform);
+                                                           assigned_dtype, assigned_itemsize,
+                                                           is_uniform);
                 if (var_index < 0) {
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
+            }
+            else if (assigned_dtype == ME_STRING &&
+                     ctx->program->vars.itemsizes &&
+                     me_get_itemsize(compiled->as.assign.value.expr) >
+                         ctx->program->vars.itemsizes[var_index]) {
+                /* Reassigning a string local to a wider value would invalidate
+                 * the width every earlier statement was compiled against.
+                 * Resolving it needs a fixed-point pass over the block; until
+                 * then, say so rather than truncate silently. */
+                dsl_set_error_reason(ctx,
+                    "reassigning a string variable to a wider value is not supported yet; "
+                    "use a separate variable for the longer result");
+                if (ctx->error_pos) {
+                    *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                }
+                dsl_compiled_stmt_free(compiled);
+                return false;
             }
             else if (ctx->program->vars.dtypes[var_index] != assigned_dtype) {
                 if (ctx->error_pos) {
@@ -2556,6 +2590,12 @@ me_dsl_compiled_program *dsl_compile_program(const char *source,
     }
 
     program->output_dtype = ctx.return_dtype;
+    /* A string-valued kernel needs its width bound published too, or callers
+     * cannot size the output container. */
+    program->output_itemsize = 0;
+    if (ctx.return_dtype == ME_STRING && ctx.output_expr && ctx.output_expr->expr) {
+        program->output_itemsize = me_get_itemsize(ctx.output_expr->expr);
+    }
     program->guaranteed_return = dsl_compiled_block_guarantees_return(&program->block);
     program->output_is_scalar = contains_reduction(ctx.output_expr->expr) &&
                                 output_is_scalar(ctx.output_expr->expr);

@@ -156,6 +156,7 @@ typedef struct {
     bool guaranteed_return;
     bool output_is_scalar;
     me_dtype output_dtype;
+    size_t output_itemsize;   /* width bound when output_dtype is ME_STRING */
     me_dsl_jit_ir_program *jit_ir;
     uint64_t jit_ir_fingerprint;
     int jit_ir_error_line;

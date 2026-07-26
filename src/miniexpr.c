@@ -2522,6 +2522,7 @@ static int compile_with_jit(const char* expression, const me_variable* variables
             }
             expr->dsl_program = program;
             expr->dtype = program->output_dtype;
+            expr->itemsize = program->output_itemsize;
             if (error) *error = 0;
             *out = expr;
             return ME_COMPILE_SUCCESS;
@@ -2586,6 +2587,7 @@ static int compile_with_jit(const char* expression, const me_variable* variables
                 }
                 expr->dsl_program = program;
                 expr->dtype = program->output_dtype;
+                expr->itemsize = program->output_itemsize;
                 if (error) *error = 0;
                 *out = expr;
                 return ME_COMPILE_SUCCESS;
