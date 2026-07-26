@@ -10,14 +10,65 @@ Branch `dsl-string-support` in both repos.  Build order **1 → 3 → 2 → 4 �
 | 1d string kernels + generated case table | **done** | miniexpr `9340d2a` |
 | 1e `me_get_itemsize` | **done** | folded into `e10390a` |
 | 1i DSL guards (`;`, reductions in control flow) | **done** | miniexpr `11fa57c` |
-| NumPy fixed-width semantics fix | **done** | miniexpr `f0f3a1e` |
+| NumPy fixed-width semantics fix | **done** | miniexpr `63491f6` |
 | 1f–1g blosc2 plumbing + tests | **done** | blosc2 `4598b435` |
-| 1h method syntax + tuple unpacking | **not started** | |
-| 1j documentation | **not started** | |
+| 1h miniexpr: string locals + DSL output width | **done** | miniexpr `adefe02` |
+| 1h blosc2: Python string syntax → DSL grammar | **done** | blosc2 `9a310e69` |
+| **DSL string kernels end-to-end** | **BLOCKED — see below** | |
+| 1j documentation | not started | |
 
-Suites green: miniexpr 34/34; python-blosc2 917 passed across `test_lazyexpr`,
-`test_stringarrays`, `test_pandas_udf_engine`, `test_jit_dsl_dispatch`, plus 9 new checks in
-`tests/ndarray/test_string_output.py`.
+Suites green: miniexpr 34/34; python-blosc2 833 passing across `test_string_output`,
+`test_lazyexpr`, `test_pandas_udf_engine`, plus `test_stringarrays` and `test_jit_dsl_dispatch`
+checked earlier.
+
+**Expression-level string ops work end to end.** `(arr + "XYZ")`, `blosc2.lower(arr)`,
+`"prefix=" + arr`, nested combinations — correct values, correct widths, no truncation, verified
+against NumPy.
+
+### Outstanding: DSL kernels still fail at evaluation
+
+`@blosc2.dsl_kernel` string kernels now *compile* — the syntax rewriter lowers the blog kernel
+correctly and miniexpr reports `dtype=ME_STRING, itemsize=256` for it — but evaluation fails with
+`Backend error: Could not compress the data`, even for the trivial case:
+
+```python
+@blosc2.dsl_kernel
+def k(prop, name):
+    r = 'p=' + prop
+    return r
+```
+
+The failure is downstream of compilation, in the prefilter/output path: the container is still not
+being created with miniexpr's string width, so blosc2 cannot compress the block it gets back.
+
+Next step is to find where the DSL path allocates its output. `LazyUDF.__init__` now calls
+`_dsl_kernel_string_dtype()` (lazyexpr.py), but the failure suggests that dtype either is not
+reaching `blosc2.uninit`/the prefilter, or the prefilter's `output_typesize` disagrees with what
+`me_eval_nd` writes. Worth checking in order:
+
+1. Whether `_dsl_kernel_string_dtype` actually returns non-None here — instrument it; the C-level
+   probe does return 256 bytes for the same source, so a mismatch means the Python-side operand
+   names or the `dsl_source` passed in differ from what the probe expects.
+2. `NDArray._set_pref_expr` (`blosc2_ext.pyx:4142-4238`) — the output-dtype gate at `:4174-4176`
+   and the per-operand `itemsize` line at `:4191`, which only sets itemsize when
+   `v.dtype.num == 19`; the *output* side has no equivalent.
+3. `aux_miniexpr` (`blosc2_ext.pyx:2516-2758`) — it passes `params.output_typesize` from blosc2's
+   own view of the array; if that is the numeric default the written UCS4 will not match.
+
+### Known limitation introduced deliberately
+
+Reassigning a string local to a **wider** value is rejected with a clear error, e.g.
+
+```python
+result = "a=" + prop
+result += ", b=" + desc     # rejected
+```
+
+Statements already compiled captured the narrower width, so widening after the fact desyncs them.
+Resolving it needs a fixed-point pass over the block: compile, note any string local whose inferred
+width exceeded its registered one, widen and recompile until stable (widths only grow and are
+bounded, so it terminates). Until then the workaround is a fresh variable per step, which is what
+the reconstructed blog kernel in the tests does.
 
 ### Local build wiring (do not commit)
 
