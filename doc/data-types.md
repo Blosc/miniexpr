@@ -290,6 +290,11 @@ Both methods require explicit variable dtypes when the computation type differs 
 
 ## ME_STRING: Fixed-Size UCS4 Strings
 
+`ME_STRING` and `ME_BYTES` are fixed-width strings differing only in code-unit
+width: 4-byte UCS4 codepoints for `ME_STRING` (NumPy `<Un`) and single bytes for
+`ME_BYTES` (NumPy `Sn`). They do not mix in one expression, and NumPy raises
+there too.
+
 `ME_STRING` represents fixed-size UCS4 (`uint32_t`) strings, laid out exactly
 like NumPy's `<Un`: a slot holds up to `itemsize / 4` codepoints and is
 NUL-padded when shorter, with no terminator on a value that fills it. You must

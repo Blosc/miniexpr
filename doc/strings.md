@@ -1,15 +1,26 @@
-# ME_STRING: Fixed-Size UCS4 Strings
+# ME_STRING / ME_BYTES: Fixed-Width Strings
 
-This document describes the `ME_STRING` type for miniexpr and the supported
-string operations.
+This document describes miniexpr's two fixed-width string types and the
+supported string operations. They differ only in code-unit width:
+
+| dtype | code unit | NumPy | case mapping |
+|---|---|---|---|
+| `ME_STRING` | 4 bytes (UCS4) | `<Un` | full Unicode, can expand |
+| `ME_BYTES` | 1 byte | `Sn` | ASCII-only, 1:1 |
+
+Everything below applies to both unless it says otherwise. The two **never mix**
+in one expression — NumPy raises there too, and mixing is a compile error.
 
 ## Representation
 
-- Each element is a fixed-size array of UCS4 codepoints (`uint32_t`).
-- `itemsize` is the per-element byte size and must be a multiple of 4.
-- The layout is NumPy's `<Un`: a slot holds up to `itemsize / 4` codepoints and
-  is NUL-padded when shorter. A value that exactly fills its slot carries **no**
-  terminator, so the maximum length is `itemsize / 4`, not `itemsize / 4 - 1`.
+- Each element is a fixed-size array of code units (UCS4 codepoints for
+  `ME_STRING`, bytes for `ME_BYTES`).
+- `itemsize` is the per-element byte size; for `ME_STRING` it must be a multiple
+  of 4, for `ME_BYTES` any positive size.
+- The layout is NumPy's: a slot holds up to `itemsize / unit` code units and is
+  NUL-padded when shorter. A value that exactly fills its slot carries **no**
+  terminator, so the maximum length is `itemsize / unit`, not
+  `itemsize / unit - 1`.
 - Embedded NULs are not supported: the first NUL ends the value.
 
 ## API: Variables and Compilation
@@ -57,9 +68,14 @@ With the separator absent it yields the whole string for `k == 0` and the empty
 string for `k > 0`, where Python's unpack would raise. Guard with `contains()`
 first if you need Python's behaviour.
 
-`upper`/`lower` are **not** width-preserving: Python's full case mapping expands
-(`ß` -> `SS`, `İ` -> two codepoints), so the bound is 3x for `upper` and 2x for
-`lower`. This matches NumPy; a 1:1 table would keep the width but disagree.
+For `ME_STRING`, `upper`/`lower` are **not** width-preserving: Python's full
+case mapping expands (`ß` -> `SS`, `İ` -> two codepoints), so the bound is 3x for
+`upper` and 2x for `lower`. This matches NumPy; a 1:1 table would keep the width
+but disagree. For `ME_BYTES` the mapping is ASCII-only, exactly as NumPy does for
+`S`, so the width is preserved and bytes >= 0x80 are left alone.
+
+`strip`/`lstrip`/`rstrip` trim Unicode whitespace for `ME_STRING` and
+`bytes.strip()`'s ASCII set for `ME_BYTES`, again matching NumPy.
 
 `slen` is not implemented: it is the only operation here that takes a string and
 returns a number, so it needs a path through the numeric evaluators that nothing
@@ -89,8 +105,14 @@ the single call to size any output buffer.
 
 ## String Literals
 
-Literals are UTF-8 and can be written with double or single quotes. Supported
-escapes:
+Literals are UTF-8 and can be written with double or single quotes, optionally
+with a `b` prefix (`b'x'`), which is accepted so that Python's `repr()` of a
+bytes scalar round-trips. The prefix does not change how the literal is stored:
+literals are always UCS4 and are read code-unit-wise against the operand. A
+literal with a **non-ASCII** codepoint against an `ME_BYTES` operand is a compile
+error, since a codepoint and a byte only agree below 0x80.
+
+Supported escapes:
 
 - `\\`, `\"`, `\'`, `\n`, `\t`
 - Unicode escapes: `\uXXXX`, `\UXXXXXXXX`

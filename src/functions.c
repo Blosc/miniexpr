@@ -3818,7 +3818,15 @@ void next_token(state* s) {
             return;
         }
 
-        if (s->next[0] == '"' || s->next[0] == '\'') {
+        /* A `b` prefix marks a bytes literal.  The value is stored as UCS4
+         * either way (validate_string_usage() rejects non-ASCII against a bytes
+         * operand); the prefix exists so `repr(b'x')` from Python round-trips. */
+        if ((s->next[0] == 'b' || s->next[0] == 'B') &&
+            (s->next[1] == '"' || s->next[1] == '\'')) {
+            s->next++;
+            read_string_token(s);
+        }
+        else if (s->next[0] == '"' || s->next[0] == '\'') {
             read_string_token(s);
         }
         else if ((s->next[0] >= '0' && s->next[0] <= '9') || s->next[0] == '.') {
