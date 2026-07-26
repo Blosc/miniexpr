@@ -16,6 +16,7 @@ Branch `dsl-string-support` in both repos.  Build order **1 → 3 → 2 → 4 �
 | 1h blosc2: Python string syntax → DSL grammar | **done** | blosc2 `9a310e69` |
 | **DSL string kernels end-to-end** | **done** | miniexpr `cad1456`, `efef0e9`; blosc2 `0f92c73b` |
 | 1j documentation | **done** | miniexpr `9dffb0a`; blosc2 `9d5ec14e` |
+| Phase 2 — bytes `S` / `ME_BYTES` | **done** | miniexpr `30267f1`, `665533a`; blosc2 `6f5c9fe9` |
 
 **Phase 1 is complete.** Suites green: miniexpr 34/34; python-blosc2 7670 passed / 22 skipped
 (full `tests/`). Acceptance form 1 passes — the blog kernel as a `@blosc2.dsl_kernel` over `<U`
@@ -164,9 +165,10 @@ syntax and no tuple unpacking (§1h, still outstanding).
 
 ## Sequencing
 
-Phase numbers are stable identifiers, **not** build order. Build **1 → 3 → 2 → 4 → 5**. Phase 3 is
-on the critical path for the motivating workload; Phase 2 blocks nothing; Phases 4 and 5 are gated
-on measurement and may never be built.
+Phase numbers are stable identifiers, **not** build order. Built **1 → 2**; Phase 3 is next. (The original order was 1 → 3 → 2; Phase 2 went first because it
+was bounded and self-contained, and Phase 3 grew a prerequisite — see §3b.) Phase 3 is on the
+critical path for the motivating workload; Phases 4 and 5 are gated on measurement and may never
+be built.
 
 ---
 
@@ -231,16 +233,33 @@ string columns).
 
 ---
 
-## Phase 2 — bytes `S` (~3–5 days)
+## Phase 2 — bytes `S` (**done**)
 
-Add `ME_BYTES` (1-byte code units). Cheap because the Phase 1 kernels are length-driven; parametrise
-on code-unit width. Only `lower`/`upper`/`substr` care about the distinction (ASCII-only for bytes,
-matching numpy).
+miniexpr `30267f1`, `665533a`; blosc2 `6f5c9fe9`. `ME_BYTES` is a 1-byte code
+unit; the kernels are shared with `ME_STRING` and parametrised on the width rather than duplicated.
+Reads go through an `sview` `{pointer, length, unit}` so a UCS4 literal can be matched against a
+1-byte operand with no conversion buffer, and same-width copies stay a `memcpy`.
 
-- `promote_types` — `ME_BYTES` and `ME_STRING` do **not** mix (numpy raises too).
-- `blosc2_ext.pyx:866-905` — `kind == "S"` → `ME_BYTES`; `:4191` and its duplicate at `:4282` both
-  hardcode `v.dtype.num == 19` and must accept `num == 18` (`NPY_STRING`).
-- `me_output_dtype` already returns `None` for `S`, so the fallback stays correct until this lands.
+Verified against `np.strings`: `S8 + S6` -> `S14`, `upper(S8)` -> `S8` with byte 0xE9 untouched,
+`strip`, `replace`, predicates, and a bytes DSL kernel with branches of different widths.
+
+Where `S` genuinely differs from `U`, and all of it matches NumPy:
+
+- case mapping is ASCII-only and 1:1, so `upper`/`lower` **keep** the width instead of paying the
+  3x/2x Unicode expansion bound;
+- `strip` uses `bytes.strip()`'s ASCII whitespace set, not the Unicode one;
+- the two families do not mix in one expression (NumPy raises too) — `promote_types` returns
+  `ME_AUTO` for the mismatch and `validate_string_usage()` rejects it;
+- a **non-ASCII literal** against a bytes operand is a compile error: literals are stored as UCS4
+  and read codepoint-against-byte, which is only exact below 0x80.
+
+One thing the plan did not anticipate: python-blosc2 builds its expression strings with `repr()`,
+so `arr + b"-x"` arrives as `(o0 + b'-x')`. The parser now accepts a `b` prefix on string literals.
+The prefix does not change storage — it exists so the Python spelling round-trips.
+
+blosc2 side: `kind == "S"` -> `ME_BYTES` in `_me_dtype_from_numpy_dtype`; both `v.dtype.num == 19`
+itemsize gates now accept `num == 18`; `me_output_dtype` reports `Sn` back; the string-dtype gates
+in `lazyexpr.py` test `kind in "US"`; and the DSL validator accepts `bytes` constants.
 
 ---
 
