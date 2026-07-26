@@ -14,46 +14,40 @@ Branch `dsl-string-support` in both repos.  Build order **1 → 3 → 2 → 4 �
 | 1f–1g blosc2 plumbing + tests | **done** | blosc2 `4598b435` |
 | 1h miniexpr: string locals + DSL output width | **done** | miniexpr `adefe02` |
 | 1h blosc2: Python string syntax → DSL grammar | **done** | blosc2 `9a310e69` |
-| **DSL string kernels end-to-end** | **BLOCKED — see below** | |
-| 1j documentation | not started | |
+| **DSL string kernels end-to-end** | **done** | miniexpr `cad1456`, `efef0e9`; blosc2 `0f92c73b` |
+| 1j documentation | **done** | miniexpr `9dffb0a`; blosc2 `9d5ec14e` |
 
-Suites green: miniexpr 34/34; python-blosc2 833 passing across `test_string_output`,
-`test_lazyexpr`, `test_pandas_udf_engine`, plus `test_stringarrays` and `test_jit_dsl_dispatch`
-checked earlier.
+**Phase 1 is complete.** Suites green: miniexpr 34/34; python-blosc2 7670 passed / 22 skipped
+(full `tests/`). Acceptance form 1 passes — the blog kernel as a `@blosc2.dsl_kernel` over `<U`
+NDArrays, byte-identical to the row-by-row Python version, with `strict_miniexpr=True`
+(`tests/ndarray/test_string_output.py::test_blog_kernel_as_dsl_kernel`). Acceptance form 2
+(pandas 3) is Phase 3 and is *not* done; see the newly found prerequisite below.
 
-**Expression-level string ops work end to end.** `(arr + "XYZ")`, `blosc2.lower(arr)`,
-`"prefix=" + arr`, nested combinations — correct values, correct widths, no truncation, verified
-against NumPy.
+### What the "Could not compress the data" blocker actually was
 
-### Outstanding: DSL kernels still fail at evaluation
+Four separate defects, none of them where the note above guessed:
 
-`@blosc2.dsl_kernel` string kernels now *compile* — the syntax rewriter lowers the blog kernel
-correctly and miniexpr reports `dtype=ME_STRING, itemsize=256` for it — but evaluation fails with
-`Backend error: Could not compress the data`, even for the trivial case:
+1. **`me_eval_nd()` rejected `ME_STRING` outright** (`miniexpr.c`) — a leftover guard from before
+   strings could be produced. This is the *chunked* entry point, i.e. the only one python-blosc2's
+   prefilter uses, so every string expression failed there.
+2. **Both nd evaluators sized the output with `dtype_size()`**, which returns 0 for `ME_STRING`, so
+   they bailed with `ME_EVAL_ERR_INVALID_ARG` even once the guard was gone. Now `me_get_itemsize()`.
+3. **Three places sized a DSL *variable* slot with `dtype_size()`** — string locals allocated 0
+   bytes. Folded into one `dsl_var_item_size()` helper.
+4. **Narrow returns were written at their own stride** into an output slot sized for the widest
+   branch, so everything after element 0 landed at the wrong offset. `dsl_eval_expr_masked_copy()`
+   now takes the destination width and NUL-pads into it, and `program->output_itemsize` is the
+   widest return rather than the first.
 
-```python
-@blosc2.dsl_kernel
-def k(prop, name):
-    r = 'p=' + prop
-    return r
-```
+On the blosc2 side, `lazyudf()` resolved a DSL kernel's dtype with `np.result_type` over the input
+dtypes *before* `LazyUDF.__init__` could consult miniexpr, so the container was allocated at the
+operand width and miniexpr wrote past it. `_set_pref_expr` now also verifies the compiled width
+against the container instead of overrunning the block.
 
-The failure is downstream of compilation, in the prefilter/output path: the container is still not
-being created with miniexpr's string width, so blosc2 cannot compress the block it gets back.
-
-Next step is to find where the DSL path allocates its output. `LazyUDF.__init__` now calls
-`_dsl_kernel_string_dtype()` (lazyexpr.py), but the failure suggests that dtype either is not
-reaching `blosc2.uninit`/the prefilter, or the prefilter's `output_typesize` disagrees with what
-`me_eval_nd` writes. Worth checking in order:
-
-1. Whether `_dsl_kernel_string_dtype` actually returns non-None here — instrument it; the C-level
-   probe does return 256 bytes for the same source, so a mismatch means the Python-side operand
-   names or the `dsl_source` passed in differ from what the probe expects.
-2. `NDArray._set_pref_expr` (`blosc2_ext.pyx:4142-4238`) — the output-dtype gate at `:4174-4176`
-   and the per-operand `itemsize` line at `:4191`, which only sets itemsize when
-   `v.dtype.num == 19`; the *output* side has no equivalent.
-3. `aux_miniexpr` (`blosc2_ext.pyx:2516-2758`) — it passes `params.output_typesize` from blosc2's
-   own view of the array; if that is the numeric default the written UCS4 will not match.
+**The expression-level path had been silently falling back to NumPy all along.** The
+`BLOSC_ME_JIT_TRACE` line is printed *before* the attempt, so `engine=miniexpr` in the trace proved
+nothing; the `except` in `fast_eval` then swallowed the failure. The blosc2 string tests now all
+pass `strict_miniexpr=True`, which is the only assertion that actually pins the engine.
 
 ### Known limitation introduced deliberately
 
@@ -224,14 +218,16 @@ function-call only.
 rather than silently wrong. Reductions remain valid at top level and as conditions, where
 `any()`/`all()` collapsing to a scalar is the documented idiom.
 
-### 1j. Documentation — **outstanding**
+### 1j. Documentation (done)
 
-- `python-blosc2/src/blosc2/schema.py:849-857` — the `utf8()` docstring still says string-expression
-  filters are unsupported. Also the `ChoosingStringType` reference.
-- `python-blosc2/RELEASE_NOTES.md:111-114` — same known-gaps note.
-- `python-blosc2/doc/guides/pandas_engine.md` — add the string kernel.
-- miniexpr `doc/strings.md` (string output, new builtins, NumPy fixed-width semantics),
-  `doc/data-types.md` (itemsize inference), `doc/dsl-syntax.md` (the §1i guards).
+Done: miniexpr `doc/strings.md` (output width inference, the builtins, NumPy fixed-width
+semantics), `doc/data-types.md` (itemsize inference), `doc/dsl-syntax.md` (string locals, branch
+widths, the §1i guards); python-blosc2 `RELEASE_NOTES.md` (new-features entry).
+
+Deliberately **not** touched, because they are still accurate until Phase 3 lands: the `utf8()`
+docstring in `schema.py` and the `ChoosingStringType` table (string-expression filters on utf8
+columns really are unsupported), and `doc/guides/pandas_engine.md` (the pandas engine still rejects
+string columns).
 
 ---
 
@@ -287,6 +283,31 @@ return *class* depend on a kwarg *value*. Reserved future spelling, if the conta
 `blosc2.array(seq, dtype=np.dtypes.StringDType())`.
 
 ### 3b. pandas 3 `str` columns as a span source
+
+**Newly found prerequisite, and it is not string-specific.** `df.apply(f, axis=1, engine=blosc2.jit)`
+cannot run *any* kernel that combines `row["colname"]` with control flow, numeric ones included:
+
+```python
+def f(row):
+    if row['a'] > 2:
+        return row['a'] + row['b']
+    return row['a'] - row['b']
+```
+
+`PandasUdfEngine.apply` sends `uses_subscript` kernels down the tracing route
+(`_PandasRowProxy`, `proxy.py:1303`), where the `if` hits
+`ValueError: The truth value of an array of shape (4,) is ambiguous`; the DSL route rejects it
+first with `Unsupported DSL expression: Subscript`. The blog kernel is exactly this shape, so
+acceptance form 2 is blocked on it regardless of string support.
+
+The fix belongs with the other §1h rewrites in `dsl_kernel.py`: a `_RowSubscriptRewriter` that,
+for a single-parameter function whose only use of that parameter is `param['literal']`, rewrites
+the signature to the referenced column names and each subscript to the matching `Name`. Then
+`DSLKernel` needs to remember the original column labels (`input_names` are sanitised
+identifiers, the labels are not), `_jit_dsl_wrapper` (`proxy.py:907`) needs to accept the single
+row-proxy argument and pull those columns out of it, and `_PandasRowProxy` needs to hand back raw
+arrays rather than `SimpleProxy` operands on that route.
+
 
 Reuses §3's span loop, bucketing and re-encode. What is new:
 
