@@ -487,6 +487,57 @@ static void test_literal_with_dsl_chars(void) {
     printf("  PASS literals with DSL characters\n");
 }
 
+/* The chunked entry point (me_compile_nd/me_eval_nd) is what python-blosc2's
+ * prefilter drives; it used to reject string output outright and to size
+ * buffers with dtype_size(), which is 0 for ME_STRING. */
+static void test_nd_string_output(void) {
+    TEST("me_eval_nd with string output (expression and DSL)");
+    const size_t au = 8;
+    static uint32_t a[ITEMS * 8];
+    put(a, au, 0, "foo");
+    put(a, au, 1, "bar");
+    put(a, au, 2, "");
+    put(a, au, 3, "abcdefg");
+
+    me_variable vars[] = {
+        {"a", ME_STRING, a, ME_VARIABLE, NULL, au * sizeof(uint32_t)},
+    };
+    const int64_t shape[1] = {ITEMS};
+    const int32_t chunkshape[1] = {ITEMS};
+    const int32_t blockshape[1] = {ITEMS};
+    const char *sources[] = {"'p=' + a", "def k(a):\n    r = 'p=' + a\n    return r", NULL};
+
+    for (int c = 0; sources[c]; c++) {
+        int err;
+        me_expr *expr = NULL;
+        int rc = me_compile_nd(sources[c], vars, 1, ME_AUTO, 1, shape, chunkshape,
+                               blockshape, &err, &expr);
+        if (rc != ME_COMPILE_SUCCESS) {
+            printf("  FAIL: case %d did not compile (rc=%d)\n", c, rc);
+            tests_failed++;
+            continue;
+        }
+        const size_t ou = me_get_itemsize(expr) / sizeof(uint32_t);
+        expect_itemsize(expr, (au + 2) * sizeof(uint32_t), "nd concat width");
+        uint32_t *out = calloc(ITEMS, me_get_itemsize(expr));
+        const void *ptrs[] = {a};
+        rc = me_eval_nd(expr, ptrs, 1, out, ITEMS, 0, 0, NULL);
+        if (rc != ME_EVAL_SUCCESS) {
+            printf("  FAIL: case %d did not evaluate (rc=%d)\n", c, rc);
+            tests_failed++;
+        }
+        else {
+            expect_slot(out, ou, 0, "p=foo", "nd concat");
+            expect_slot(out, ou, 1, "p=bar", "nd concat");
+            expect_slot(out, ou, 2, "p=", "nd concat");
+            expect_slot(out, ou, 3, "p=abcdefg", "nd concat");
+        }
+        free(out);
+        me_free(expr);
+    }
+    printf("  PASS me_eval_nd string output\n");
+}
+
 int main(void) {
     printf("=== String output tests ===\n\n");
 
@@ -504,6 +555,7 @@ int main(void) {
     test_replace_and_substr();
     test_blog_kernel_shape();
     test_literal_with_dsl_chars();
+    test_nd_string_output();
 
     printf("\n=== %d tests run, %d failures ===\n", tests_run, tests_failed);
     return tests_failed != 0;

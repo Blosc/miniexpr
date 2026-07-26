@@ -49,12 +49,7 @@ static int dsl_eval_expr_item(dsl_eval_ctx *ctx, const me_dsl_compiled_expr *exp
         if (var_index < 0 || var_index >= ctx->program->vars.count || !ctx->var_buffers[var_index]) {
             return ME_EVAL_ERR_INVALID_ARG;
         }
-        size_t var_size = dtype_size(ctx->program->vars.dtypes[var_index]);
-        if (ctx->program->vars.dtypes[var_index] == ME_STRING && ctx->program->vars.itemsizes) {
-            if (ctx->program->vars.itemsizes[var_index] > 0) {
-                var_size = ctx->program->vars.itemsizes[var_index];
-            }
-        }
+        size_t var_size = dsl_var_item_size(ctx->program, var_index);
         if (var_size == 0) {
             return ME_EVAL_ERR_INVALID_ARG;
         }
@@ -1207,7 +1202,7 @@ int dsl_eval_program(const me_dsl_compiled_program *program,
 
     for (int i = 0; i < program->n_locals; i++) {
         int var_index = program->local_var_indices[i];
-        size_t sz = dtype_size(program->vars.dtypes[var_index]);
+        size_t sz = dsl_var_item_size(program, var_index);
         if (sz == 0) {
             free(var_buffers);
             free(local_buffers);

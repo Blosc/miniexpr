@@ -107,7 +107,8 @@ int me_eval_nd_dsl(const me_expr *expr, const void **vars_block,
     const int64_t *chunkshape = shape + nd;
     const int64_t *blockshape = chunkshape + nd;
 
-    const size_t item_size = dtype_size(me_get_dtype(expr));
+    /* me_get_itemsize, not dtype_size: strings carry their width in the node. */
+    const size_t item_size = me_get_itemsize(expr);
     if (item_size == 0) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
@@ -278,7 +279,7 @@ int me_eval_nd_dsl(const me_expr *expr, const void **vars_block,
 
     size_t var_sizes[ME_MAX_VARS];
     for (int v = 0; v < n_vars; v++) {
-        var_sizes[v] = dtype_size(program->vars.dtypes[v]);
+        var_sizes[v] = dsl_var_item_size(program, v);
         if (var_sizes[v] == 0) {
             return ME_EVAL_ERR_INVALID_ARG;
         }

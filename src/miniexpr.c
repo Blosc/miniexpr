@@ -2847,7 +2847,8 @@ int me_eval_nd(const me_expr* expr, const void** vars_block,
     if (!expr) {
         return ME_EVAL_ERR_NULL_EXPR;
     }
-    if (expr->dtype == ME_STRING) {
+    /* String output is allowed as long as its width is statically bounded. */
+    if (expr->dtype == ME_STRING && expr->itemsize == 0) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
     if (expr->dsl_program) {

@@ -195,7 +195,8 @@ int me_eval_nd_classic(const me_expr *expr, const void **vars_block,
         return ME_EVAL_ERR_INVALID_ARG;
     }
 
-    const size_t item_size = dtype_size(me_get_dtype(expr));
+    /* me_get_itemsize, not dtype_size: strings carry their width in the node. */
+    const size_t item_size = me_get_itemsize(expr);
     if (item_size == 0) {
         return ME_EVAL_ERR_INVALID_ARG;
     }

@@ -185,6 +185,20 @@ typedef struct {
     bool jit_dl_handle_cached;
 } me_dsl_compiled_program;
 
+size_t dtype_size(me_dtype dtype);  /* functions.h; declared here to avoid the include cycle */
+
+/* Per-element size of a DSL variable slot.  Strings carry their width in the
+ * table's itemsizes array; dtype_size() returns 0 for them. */
+static inline size_t dsl_var_item_size(const me_dsl_compiled_program *program, int var_index) {
+    if (!program || var_index < 0 || var_index >= program->vars.count) {
+        return 0;
+    }
+    if (program->vars.dtypes[var_index] == ME_STRING && program->vars.itemsizes) {
+        return program->vars.itemsizes[var_index];
+    }
+    return dtype_size(program->vars.dtypes[var_index]);
+}
+
 typedef struct {
     uint64_t magic;
     uint32_t version;
