@@ -23,8 +23,8 @@ span-loop driver (§3, §3a) and the column-wise null policy (§3c).
 | 3b pandas 3 fixed-width `str` columns | **done** | blosc2 `729a2082` |
 | 3, 3a, 3c: utf8 span driver, `utf8_array`, null policy | not started | |
 
-**Phases 1 and 2 are complete.** Suites green: miniexpr 35/35; python-blosc2 7676 passed / 22 skipped
-(full `tests/`). Acceptance form 1 passes — the blog kernel as a `@blosc2.dsl_kernel` over `<U`
+**Phases 1 and 2 are complete**, and the fixed-width half of 3b. Suites green: miniexpr 35/35;
+python-blosc2 7681 passed / 22 skipped (full `tests/`). Acceptance form 1 passes — the blog kernel as a `@blosc2.dsl_kernel` over `<U`
 NDArrays, byte-identical to the row-by-row Python version, with `strict_miniexpr=True`
 (`tests/ndarray/test_string_output.py::test_blog_kernel_as_dsl_kernel`). Acceptance form 2
 (pandas 3) passes too, via §3b below — the blog kernel runs unmodified through
