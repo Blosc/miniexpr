@@ -2,7 +2,7 @@
 
 ## Status
 
-Branch `dsl-string-support` in both repos.  Build order **1 → 3 → 2 → 4 → 5**.
+Branch `dsl-string-support` in both repos.  Phases **1 and 2 are done**; Phase 3 is next.
 
 | step | state | commit |
 |---|---|---|
@@ -18,7 +18,7 @@ Branch `dsl-string-support` in both repos.  Build order **1 → 3 → 2 → 4 �
 | 1j documentation | **done** | miniexpr `9dffb0a`; blosc2 `9d5ec14e` |
 | Phase 2 — bytes `S` / `ME_BYTES` | **done** | miniexpr `30267f1`, `665533a`; blosc2 `6f5c9fe9` |
 
-**Phase 1 is complete.** Suites green: miniexpr 34/34; python-blosc2 7670 passed / 22 skipped
+**Phases 1 and 2 are complete.** Suites green: miniexpr 35/35; python-blosc2 7676 passed / 22 skipped
 (full `tests/`). Acceptance form 1 passes — the blog kernel as a `@blosc2.dsl_kernel` over `<U`
 NDArrays, byte-identical to the row-by-row Python version, with `strict_miniexpr=True`
 (`tests/ndarray/test_string_output.py::test_blog_kernel_as_dsl_kernel`). Acceptance form 2
@@ -130,8 +130,9 @@ before, after = desc.split(" with ", 1)
 
 Everything in it is **statically width-bounded**, which is why this is tractable without a
 variable-length evaluator. The kernel must run **unmodified** — that is the point of
-`df.apply(f, axis=1, engine=blosc2.jit)` — and today it does not parse: the DSL has no `.method()`
-syntax and no tuple unpacking (§1h, still outstanding).
+`df.apply(f, axis=1, engine=blosc2.jit)`. The `.method()` and tuple-unpacking rewrites landed in
+§1h, and the kernel now runs as a `@blosc2.dsl_kernel` over `<U` NDArrays. Through
+`df.apply(..., engine=blosc2.jit)` it still does not, for a reason unrelated to strings — see §3b.
 
 ## Decisions taken
 
