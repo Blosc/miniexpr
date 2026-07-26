@@ -2,7 +2,9 @@
 
 ## Status
 
-Branch `dsl-string-support` in both repos.  Phases **1 and 2 are done**; Phase 3 is next.
+Branch `dsl-string-support` in both repos.  Phases **1 and 2 are done**, and so is the
+fixed-width half of **3b** — both acceptance forms now pass.  What is left of Phase 3 is the utf8
+span-loop driver (§3, §3a) and the column-wise null policy (§3c).
 
 | step | state | commit |
 |---|---|---|
@@ -17,12 +19,17 @@ Branch `dsl-string-support` in both repos.  Phases **1 and 2 are done**; Phase 3
 | **DSL string kernels end-to-end** | **done** | miniexpr `cad1456`, `efef0e9`; blosc2 `0f92c73b` |
 | 1j documentation | **done** | miniexpr `9dffb0a`; blosc2 `9d5ec14e` |
 | Phase 2 — bytes `S` / `ME_BYTES` | **done** | miniexpr `30267f1`, `665533a`; blosc2 `6f5c9fe9` |
+| 3b prerequisite: `row["col"]` + control flow | **done** | blosc2 `729a2082` |
+| 3b pandas 3 fixed-width `str` columns | **done** | blosc2 `729a2082` |
+| 3, 3a, 3c: utf8 span driver, `utf8_array`, null policy | not started | |
 
 **Phases 1 and 2 are complete.** Suites green: miniexpr 35/35; python-blosc2 7676 passed / 22 skipped
 (full `tests/`). Acceptance form 1 passes — the blog kernel as a `@blosc2.dsl_kernel` over `<U`
 NDArrays, byte-identical to the row-by-row Python version, with `strict_miniexpr=True`
 (`tests/ndarray/test_string_output.py::test_blog_kernel_as_dsl_kernel`). Acceptance form 2
-(pandas 3) is Phase 3 and is *not* done; see the newly found prerequisite below.
+(pandas 3) passes too, via §3b below — the blog kernel runs unmodified through
+`df.apply(..., axis=1, engine=blosc2.jit)`. What remains of Phase 3 is variable-width `utf8()`
+columns, which no acceptance criterion covers.
 
 ### What the "Could not compress the data" blocker actually was
 
@@ -302,31 +309,37 @@ Export `utf8_array` and `Utf8Array`. **Deliberately not** `blosc2.array(seq, dty
 return *class* depend on a kwarg *value*. Reserved future spelling, if the containers ever converge:
 `blosc2.array(seq, dtype=np.dtypes.StringDType())`.
 
-### 3b. pandas 3 `str` columns as a span source
+### 3b. pandas 3 `str` columns — **fixed-width part done**
 
-**Newly found prerequisite, and it is not string-specific.** `df.apply(f, axis=1, engine=blosc2.jit)`
-cannot run *any* kernel that combines `row["colname"]` with control flow, numeric ones included:
+**A prerequisite the plan did not anticipate, and it was not string-specific.**
+`df.apply(f, axis=1, engine=blosc2.jit)` could not run *any* kernel combining `row["colname"]`
+with control flow, numeric ones included — tracing evaluated the `if` over a whole column
+(`truth value ... is ambiguous`) and the DSL parser rejected the subscript. Fixed with a
+`_RowSubscriptRewriter` alongside the other §1h rewrites: a single-parameter function whose every
+use of that parameter is `param['literal']` has its signature rewritten to the referenced column
+names. `DSLKernel` remembers the original labels (they need not be identifiers), `_jit_dsl_wrapper`
+accepts the single row-proxy argument and pulls those columns out, and `_PandasRowProxy` hands back
+raw arrays rather than `SimpleProxy` operands on that route.
 
-```python
-def f(row):
-    if row['a'] > 2:
-        return row['a'] + row['b']
-    return row['a'] - row['b']
-```
+**Acceptance form 2 passes** for fixed-width string columns: the blog kernel runs unmodified through
+`df.apply(..., axis=1, engine=blosc2.jit)`, byte-identical to the plain call, reporting
+`engine=miniexpr` (`tests/test_pandas_udf_engine.py::TestRowKernelsWithControlFlow`). The DSL route
+raises rather than falling back, so that trace line is now trustworthy.
 
-`PandasUdfEngine.apply` sends `uses_subscript` kernels down the tracing route
-(`_PandasRowProxy`, `proxy.py:1303`), where the `if` hits
-`ValueError: The truth value of an array of shape (4,) is ambiguous`; the DSL route rejects it
-first with `Unsupported DSL expression: Subscript`. The blog kernel is exactly this shape, so
-acceptance form 2 is blocked on it regardless of string support.
+What was done here, and what is left:
 
-The fix belongs with the other §1h rewrites in `dsl_kernel.py`: a `_RowSubscriptRewriter` that,
-for a single-parameter function whose only use of that parameter is `param['literal']`, rewrites
-the signature to the referenced column names and each subscript to the matching `Name`. Then
-`DSLKernel` needs to remember the original column labels (`input_names` are sanitised
-identifiers, the labels are not), `_jit_dsl_wrapper` (`proxy.py:907`) needs to accept the single
-row-proxy argument and pull those columns out of it, and `_PandasRowProxy` needs to hand back raw
-arrays rather than `SimpleProxy` operands on that route.
+- **`np.asarray` is bypassed** for string columns, as planned: `to_numpy(dtype=object).astype(str)`
+  gives the fixed-width array the kernels want. The gates test `pd.api.types.is_string_dtype`,
+  not `dtype.kind`, since pandas 3's `str` reports `kind == "O"`.
+- **Not yet zero-copy.** The `__arrow_c_stream__` / `LargeStringArray.buffers()` route is still to
+  do; it matters once the span-loop driver exists, which is the rest of §3.
+- **Nulls are rejected, not propagated.** §3c's policy is for *column-wise* expressions
+  (`.str.lower()`, `"x=" + s`), which propagate `NaN`. A row-wise kernel is different: pandas
+  itself raises (`"p=" + row["x"]` is a `TypeError`, `row["x"].lower()` an `AttributeError`), so
+  substituting `""` would invent a value pandas never produces. The error names the column and the
+  `.fillna("")` fix. §3c's path-sensitive `null_out` machinery is still needed for the column-wise
+  utf8 path.
+- **utf8 columns are untouched**; that is the span-loop driver in §3 proper.
 
 
 Reuses §3's span loop, bucketing and re-encode. What is new:
