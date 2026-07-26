@@ -63,6 +63,12 @@ General rules:
 - Empty blocks are invalid.
 - `elif`/`else` must belong to a matching `if`.
 - Deprecated forms like `break if cond` / `continue if cond` are not part of DSL syntax.
+- **One statement per line.** `;`-joined statements are a compile-time error.
+  They used to parse, with everything after the first `;` silently discarded.
+- **No reductions inside `if` / `for` / `while` bodies.** A reduction collapses
+  the block to a scalar, which is meaningless under a per-element mask. They
+  remain valid at top level and as a condition, which is the documented way to
+  turn an element-wise predicate into a scalar one.
 
 ### `if` / `elif` / `else` example
 
@@ -192,6 +198,32 @@ When referenced, these are synthesized by DSL compiler/runtime:
 - `_n0`, `_n1`, ... (shape per dimension)
 - `_ndim`
 - `_flat_idx` (global C-order linear index)
+
+## Strings in DSL kernels
+
+String locals and string-valued `return` statements work; the operation set is
+in `doc/strings.md`. The output width is the widest of the kernel's `return`
+expressions, and narrower branches are NUL-padded into it:
+
+```python
+def kernel(property_type, name):
+    result = 'property_type=' + property_type
+    desc = lower(name)
+    if not contains(desc, ' with '):
+        return result + ', room_type=' + removesuffix(desc, ' room')
+    before = split_part(desc, ' with ', 0)
+    after = split_part(desc, ' with ', 1)
+    r2 = result + ', room_type=' + removesuffix(before, ' room')
+    return r2 + ', amenity=' + after
+```
+
+Restrictions:
+
+- A string local's width is fixed by its first assignment. Reassigning it to a
+  **wider** value is a compile-time error, because statements already compiled
+  captured the narrower width. Use a fresh name per step, as `r2` does above.
+- There is no slicing syntax (`s[a:b]`); use `substr(s, start, len)`.
+- String kernels are never JIT-compiled; they run on the interpreter.
 
 ## Typing and return behavior
 

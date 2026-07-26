@@ -290,15 +290,20 @@ Both methods require explicit variable dtypes when the computation type differs 
 
 ## ME_STRING: Fixed-Size UCS4 Strings
 
-`ME_STRING` represents fixed-size UCS4 (`uint32_t`) strings. Each element is a
-NUL-terminated array of codepoints with no embedded NULs. You must provide the
-per-element byte size via `me_variable` (`itemsize` must be a multiple of 4
-and include the terminator). The maximum string length in codepoints is
-`itemsize / 4 - 1`.
+`ME_STRING` represents fixed-size UCS4 (`uint32_t`) strings, laid out exactly
+like NumPy's `<Un`: a slot holds up to `itemsize / 4` codepoints and is
+NUL-padded when shorter, with no terminator on a value that fills it. You must
+provide the per-element byte size via `me_variable` (`itemsize` must be a
+multiple of 4). Embedded NULs are not supported.
 
 String expressions support comparisons (`==`, `!=`) and string predicates
-(`startswith`, `endswith`, `contains`). These operations always yield boolean
-output; expressions cannot output `ME_STRING`.
+(`startswith`, `endswith`, `contains`), which yield boolean output, as well as
+concatenation and a set of string-valued builtins, which yield `ME_STRING`.
+
+For a string-valued expression the output width is inferred at compile time and
+read back with `me_get_itemsize()`; the caller must allocate the output with
+exactly that itemsize. See `doc/strings.md` for the operation set, the width
+bounds, and the `ME_AUTO` probing idiom.
 
 ```c
 #include <stdint.h>
@@ -321,6 +326,16 @@ if (me_compile("startswith(name, \"alp\")", vars, 1, ME_BOOL, &error, &expr) != 
 String literals are UTF-8 and support escapes like `\n`, `\t`, `\\`, `\"`, `\'`,
 and Unicode escapes (`\uXXXX`, `\UXXXXXXXX`) that map to UCS4 codepoints. For
 example, `"\u03B1"` matches U+03B1 (Greek alpha).
+
+A string-valued expression sizes its own output:
+
+```c
+me_expr *expr = NULL;
+me_compile("'kind=' + name", vars, 1, ME_AUTO, &error, &expr);
+size_t itemsize = me_get_itemsize(expr);     /* e.g. <U8> + 5 chars -> 13 * 4 */
+uint32_t *out = calloc(nitems, itemsize);
+me_eval(expr, ptrs, 1, out, nitems, NULL);
+```
 
 ## Example 6: Explicit Variable Types with Explicit Output Dtype
 
