@@ -202,8 +202,9 @@ When referenced, these are synthesized by DSL compiler/runtime:
 ## Strings in DSL kernels
 
 String locals and string-valued `return` statements work, for both `ME_STRING`
-and `ME_BYTES` operands; the operation set is in `doc/strings.md`. The output width is the widest of the kernel's `return`
-expressions, and narrower branches are NUL-padded into it:
+and `ME_BYTES` operands; the operation set is in `doc/strings.md`. The output
+width is the widest of the kernel's `return` expressions, and narrower branches
+are NUL-padded into it:
 
 ```python
 def kernel(property_type, name):
