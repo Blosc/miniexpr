@@ -156,7 +156,7 @@ typedef struct {
     bool guaranteed_return;
     bool output_is_scalar;
     me_dtype output_dtype;
-    size_t output_itemsize;   /* width bound when output_dtype is ME_STRING */
+    size_t output_itemsize;   /* width bound when output_dtype is a string type */
     me_dsl_jit_ir_program *jit_ir;
     uint64_t jit_ir_fingerprint;
     int jit_ir_error_line;
@@ -193,10 +193,11 @@ static inline size_t dsl_var_item_size(const me_dsl_compiled_program *program, i
     if (!program || var_index < 0 || var_index >= program->vars.count) {
         return 0;
     }
-    if (program->vars.dtypes[var_index] == ME_STRING && program->vars.itemsizes) {
+    const me_dtype vt = program->vars.dtypes[var_index];
+    if ((vt == ME_STRING || vt == ME_BYTES) && program->vars.itemsizes) {
         return program->vars.itemsizes[var_index];
     }
-    return dtype_size(program->vars.dtypes[var_index]);
+    return dtype_size(vt);
 }
 
 typedef struct {

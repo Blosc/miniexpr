@@ -65,7 +65,7 @@ static bool is_variable_entry(const me_variable *var) {
 }
 
 static bool is_valid_dtype(me_dtype dtype) {
-    return dtype >= ME_AUTO && dtype <= ME_STRING;
+    return dtype >= ME_AUTO && dtype <= ME_BYTES;
 }
 
 static void dsl_set_error_reason(dsl_compile_ctx *ctx, const char *msg) {
@@ -1761,7 +1761,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 /* A string local needs its width recorded, or every later
                  * reference compiles against itemsize 0 and fails. */
                 size_t assigned_itemsize = 0;
-                if (assigned_dtype == ME_STRING) {
+                if (is_string_dtype(assigned_dtype)) {
                     assigned_itemsize = me_get_itemsize(compiled->as.assign.value.expr);
                     if (assigned_itemsize == 0) {
                         dsl_set_error_reason(ctx,
@@ -1782,7 +1782,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                     return false;
                 }
             }
-            else if (assigned_dtype == ME_STRING &&
+            else if (is_string_dtype(assigned_dtype) &&
                      ctx->program->vars.itemsizes &&
                      me_get_itemsize(compiled->as.assign.value.expr) >
                          ctx->program->vars.itemsizes[var_index]) {
@@ -2288,7 +2288,7 @@ me_dsl_compiled_program *dsl_compile_program(const char *source,
                     return NULL;
                 }
             }
-            if (entry->dtype == ME_AUTO || !is_valid_dtype(entry->dtype) || entry->dtype == ME_STRING) {
+            if (entry->dtype == ME_AUTO || !is_valid_dtype(entry->dtype) || is_string_dtype(entry->dtype)) {
                 if (error_reason && error_reason_cap > 0) {
                     snprintf(error_reason, error_reason_cap,
                              "DSL function '%s' has unsupported return dtype", name);
@@ -2397,7 +2397,7 @@ me_dsl_compiled_program *dsl_compile_program(const char *source,
             vtype = dtype;
         }
         size_t itemsize = 0;
-        if (entry->dtype == ME_STRING) {
+        if (is_string_dtype(entry->dtype)) {
             itemsize = entry->itemsize;
         }
         int idx = dsl_var_table_add_with_uniform(&program->vars, name, vtype, itemsize, false);
@@ -2599,7 +2599,7 @@ me_dsl_compiled_program *dsl_compile_program(const char *source,
     /* A string-valued kernel needs its width bound published too, or callers
      * cannot size the output container. */
     program->output_itemsize = 0;
-    if (ctx.return_dtype == ME_STRING) {
+    if (is_string_dtype(ctx.return_dtype)) {
         /* The widest branch wins: narrower returns are NUL-padded on the way out. */
         program->output_itemsize = ctx.return_itemsize;
     }

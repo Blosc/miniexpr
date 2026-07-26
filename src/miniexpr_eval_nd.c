@@ -151,7 +151,7 @@ static int collect_var_sizes(const me_expr *expr, size_t *var_sizes, int n_vars)
         if (TYPE_MASK(n->type) == ME_VARIABLE && is_synthetic_address(n->bound)) {
             int idx = (int)((const char *)n->bound - synthetic_var_addresses);
             if (idx >= 0 && idx < n_vars && var_sizes[idx] == 0) {
-                if ((n->dtype == ME_STRING || n->input_dtype == ME_STRING) && n->itemsize > 0) {
+                if ((is_string_dtype(n->dtype) || is_string_dtype(n->input_dtype)) && n->itemsize > 0) {
                     var_sizes[idx] = n->itemsize;
                 }
                 else {

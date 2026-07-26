@@ -268,8 +268,13 @@ static me_dtype promote_types(me_dtype a, me_dtype b) {
 #endif
     }
 
-    if (a == ME_STRING || b == ME_STRING) {
-        return ME_STRING;
+    if (is_string_dtype(a) || is_string_dtype(b)) {
+        /* `S` and `U` do not mix, and NumPy raises on that too.  Returning the
+         * mismatch as-is lets validate_string_usage() reject it with context. */
+        if (is_string_dtype(a) && is_string_dtype(b) && a != b) {
+            return ME_AUTO;
+        }
+        return is_string_dtype(a) ? a : b;
     }
 
     // Adjust indices since table starts at ME_BOOL (index 1), not ME_AUTO (index 0)
@@ -287,18 +292,18 @@ static bool is_integral_or_bool(me_dtype dtype) {
 }
 
 static bool is_valid_dtype(me_dtype dtype) {
-    return dtype >= ME_AUTO && dtype <= ME_STRING;
+    return dtype >= ME_AUTO && dtype <= ME_BYTES;
 }
 
 static bool is_string_operand_node(const me_expr* n) {
     if (!n) return false;
     if (TYPE_MASK(n->type) == ME_STRING_CONSTANT) return true;
-    return TYPE_MASK(n->type) == ME_VARIABLE && n->dtype == ME_STRING;
+    return TYPE_MASK(n->type) == ME_VARIABLE && is_string_dtype(n->dtype);
 }
 
 static me_dtype promote_float_math_result(me_dtype param_type) {
-    if (param_type == ME_STRING) {
-        return ME_STRING;
+    if (is_string_dtype(param_type)) {
+        return param_type;
     }
     if (param_type == ME_COMPLEX64 || param_type == ME_COMPLEX128) {
         return param_type;
@@ -869,6 +874,7 @@ bool dsl_any_nonzero(const void *data, me_dtype dtype, int nitems) {
         return false;
     }
     case ME_STRING:
+    case ME_BYTES:
         return false;
     default:
         return false;
@@ -920,6 +926,7 @@ bool dsl_read_int64(const void *data, me_dtype dtype, int64_t *out) {
         return true;
     }
     case ME_STRING:
+    case ME_BYTES:
         return false;
     default:
         return false;
@@ -1072,9 +1079,10 @@ me_dtype infer_result_type(const me_expr* n) {
                 return promote_float_math_result(param_type);
             }
 
-            /* String-returning ops compute in the string domain, not as bools. */
+            /* String-returning ops compute in the string domain, not as bools,
+             * and keep their operand's code-unit width (`S` stays `S`). */
             if (IS_FUNCTION(n->type) && is_string_returning_function(n->function)) {
-                return ME_STRING;
+                return string_family_of(n);
             }
 
             if (ARITY(n->type) == 2) {
@@ -1169,9 +1177,10 @@ me_dtype infer_output_type(const me_expr* n) {
             }
 
             /* String-returning ops yield a string whatever their other operands
-             * are (split_part and substr take numeric indices). */
+             * are (split_part and substr take numeric indices), keeping the
+             * operand's code-unit width. */
             if (IS_FUNCTION(n->type) && is_string_returning_function(n->function)) {
-                return ME_STRING;
+                return string_family_of(n);
             }
 
             // Special case: where(cond, x, y) -> promote(x, y), regardless of cond type.
@@ -1448,7 +1457,7 @@ int private_compile_ex(const char* expression, const me_variable* variables, int
                     if (error) *error = -1;
                     return ME_COMPILE_ERR_INVALID_ARG;
                 }
-                if (variables[i].dtype == ME_STRING) {
+                if (is_string_dtype(variables[i].dtype)) {
                     if (error) *error = -1;
                     return ME_COMPILE_ERR_INVALID_ARG_TYPE;
                 }
@@ -1457,8 +1466,9 @@ int private_compile_ex(const char* expression, const me_variable* variables, int
                 if (error) *error = -1;
                 return ME_COMPILE_ERR_INVALID_ARG_TYPE;
             }
-            if (is_variable_entry(&variables[i]) && variables[i].dtype == ME_STRING) {
-                if (variables[i].itemsize == 0 || (variables[i].itemsize % 4) != 0) {
+            if (is_variable_entry(&variables[i]) && is_string_dtype(variables[i].dtype)) {
+                const size_t unit = dtype_code_unit(variables[i].dtype);
+                if (variables[i].itemsize == 0 || (variables[i].itemsize % unit) != 0) {
                     if (error) *error = -1;
                     return ME_COMPILE_ERR_INVALID_ARG_TYPE;
                 }
@@ -1543,7 +1553,7 @@ int private_compile_ex(const char* expression, const me_variable* variables, int
             if (!is_variable_entry(&variables[i])) {
                 continue;
             }
-            if (variables[i].dtype != ME_STRING) {
+            if (!is_string_dtype(variables[i].dtype)) {
                 s.target_dtype = variables[i].dtype;
                 break;
             }
@@ -1677,7 +1687,7 @@ int private_compile_ex(const char* expression, const me_variable* variables, int
 
         /* Freeze the statically inferred string width on the root, so eval and
          * callers (me_get_itemsize) do not have to recompute it. */
-        if (root->dtype == ME_STRING) {
+        if (is_string_dtype(root->dtype)) {
             root->itemsize = infer_output_itemsize(root);
             if (root->itemsize == 0) {
                 me_free(root);
@@ -2794,7 +2804,7 @@ me_dtype me_get_dtype(const me_expr* expr) {
 
 size_t me_get_itemsize(const me_expr* expr) {
     if (!expr) return 0;
-    if (expr->dtype == ME_STRING) return expr->itemsize;
+    if (is_string_dtype(expr->dtype)) return expr->itemsize;
     return dtype_size(expr->dtype);
 }
 
@@ -2848,7 +2858,7 @@ int me_eval_nd(const me_expr* expr, const void** vars_block,
         return ME_EVAL_ERR_NULL_EXPR;
     }
     /* String output is allowed as long as its width is statically bounded. */
-    if (expr->dtype == ME_STRING && expr->itemsize == 0) {
+    if (is_string_dtype(expr->dtype) && expr->itemsize == 0) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
     if (expr->dsl_program) {

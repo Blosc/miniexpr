@@ -14,6 +14,7 @@ Blosc - Blocked Shuffling and Compression Library
 #include "miniexpr.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 typedef double (*me_fun2)(double, double);
 
@@ -96,9 +97,22 @@ int is_synthetic_address(const void* ptr);
 me_expr* new_expr(const int type, const me_expr* parameters[]);
 void apply_type_promotion(me_expr* node);
 
+/* The two string dtypes differ only in code-unit width, so the kernels are
+ * shared and parametrised on it.  They never mix in one expression (NumPy
+ * raises too), so a tree has a single code unit throughout. */
+static inline bool is_string_dtype(me_dtype d) {
+    return d == ME_STRING || d == ME_BYTES;
+}
+
+static inline size_t dtype_code_unit(me_dtype d) {
+    return (d == ME_BYTES) ? 1u : sizeof(uint32_t);
+}
+
 /* String-output support (implemented in functions.c, where the op tags live). */
 bool is_string_returning_function(const void* func);
 bool is_string_producing_node(const me_expr* n);
+me_dtype string_family_of(const me_expr* n);
+bool string_families_mixed(const me_expr* n);
 bool retag_string_concat(me_expr* node);
 size_t infer_output_itemsize(const me_expr* n);
 me_dtype infer_output_type(const me_expr* n);

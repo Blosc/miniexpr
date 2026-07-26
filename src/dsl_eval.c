@@ -143,6 +143,7 @@ static bool dsl_value_nonzero_at(const void *data, me_dtype dtype, size_t item_s
         return (me_creal(v) != 0.0 || me_cimag(v) != 0.0);
     }
     case ME_STRING:
+    case ME_BYTES:
         return dsl_string_nonempty_at(data, item_size, idx);
     default:
         return false;
@@ -229,7 +230,7 @@ static int dsl_eval_condition_masked(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
 
     me_dtype cond_dtype = me_get_dtype(cond->expr);
     size_t cond_size = dtype_size(cond_dtype);
-    if (cond_dtype == ME_STRING) {
+    if (is_string_dtype(cond_dtype)) {
         cond_size = cond->expr->itemsize;
     }
     if (cond_size == 0) {

@@ -491,7 +491,8 @@ size_t dtype_size(me_dtype dtype) {
     case ME_FLOAT64: return sizeof(double);
     case ME_COMPLEX64: return sizeof(float _Complex);
     case ME_COMPLEX128: return sizeof(double _Complex);
-    case ME_STRING: return 0;
+    case ME_STRING:
+    case ME_BYTES: return 0;
     default: return 0;
     }
 }
@@ -2327,67 +2328,108 @@ bool is_comparison_node(const me_expr* n) {
 static bool is_string_node(const me_expr* n) {
     if (!n) return false;
     if (TYPE_MASK(n->type) == ME_STRING_CONSTANT) return true;
-    return TYPE_MASK(n->type) == ME_VARIABLE && n->dtype == ME_STRING;
+    return TYPE_MASK(n->type) == ME_VARIABLE && is_string_dtype(n->dtype);
 }
 
-static size_t string_len_u32(const uint32_t* s, size_t max_units) {
+/* A read-only view of one string value, carrying its own code-unit width so a
+ * UCS4 literal can be compared against a 1-byte operand without a conversion
+ * buffer.  Literals mixed with ME_BYTES are ASCII-only (checked at compile
+ * time), so a codepoint and a byte compare directly. */
+typedef struct {
+    const void* p;
+    size_t len;    /* code units, not bytes */
+    size_t unit;   /* bytes per code unit: 1 or 4 */
+} sview;
+
+static inline uint32_t sv_at(sview v, size_t i) {
+    return (v.unit == 1) ? (uint32_t)((const uint8_t*)v.p)[i] : ((const uint32_t*)v.p)[i];
+}
+
+static inline sview sv_slice(sview v, size_t from, size_t len) {
+    sview r = {(const char*)v.p + from * v.unit, len, v.unit};
+    return r;
+}
+
+static inline void su_put(void* dst, size_t unit, size_t i, uint32_t v) {
+    if (unit == 1) ((uint8_t*)dst)[i] = (uint8_t)v;
+    else ((uint32_t*)dst)[i] = v;
+}
+
+/* Copy `n` code units of `src` to slot index `at` of `dst`.  Same-width copies
+ * are a memcpy; a 4-byte literal into a 1-byte slot goes unit by unit. */
+static void sv_copy(void* dst, size_t dst_unit, size_t at, sview src, size_t n) {
+    if (n == 0) return;
+    if (src.unit == dst_unit) {
+        memcpy((char*)dst + at * dst_unit, src.p, n * dst_unit);
+        return;
+    }
+    for (size_t i = 0; i < n; i++) {
+        su_put(dst, dst_unit, at + i, sv_at(src, i));
+    }
+}
+
+static size_t string_len_units(const void* s, size_t unit, size_t max_units) {
     size_t len = 0;
     if (!s) return 0;
-    while (len < max_units && s[len] != 0) {
+    sview v = {s, max_units, unit};
+    while (len < max_units && sv_at(v, len) != 0) {
         len++;
     }
     return len;
 }
 
-static bool string_view_at(const me_expr* n, int idx, const uint32_t** data, size_t* len) {
-    if (!n || !data || !len) return false;
+static bool string_view_at(const me_expr* n, int idx, sview* out) {
+    if (!n || !out) return false;
     if (TYPE_MASK(n->type) == ME_STRING_CONSTANT) {
-        *data = (const uint32_t*)n->bound;
-        *len = n->str_len;
-        return *data != NULL;
+        /* Literals are always stored as UCS4, whatever the tree's code unit. */
+        out->p = n->bound;
+        out->len = n->str_len;
+        out->unit = sizeof(uint32_t);
+        return out->p != NULL;
     }
-    if (TYPE_MASK(n->type) == ME_VARIABLE && n->dtype == ME_STRING) {
-        if (n->itemsize == 0 || (n->itemsize % sizeof(uint32_t)) != 0) {
-            return false;
-        }
-        const char* base = (const char*)n->bound + (size_t)idx * n->itemsize;
-        const uint32_t* s = (const uint32_t*)base;
-        size_t max_units = n->itemsize / sizeof(uint32_t);
-        *data = s;
-        *len = string_len_u32(s, max_units);
-        return true;
+    const size_t unit = dtype_code_unit(n->dtype);
+    const void* base = NULL;
+    if (TYPE_MASK(n->type) == ME_VARIABLE && is_string_dtype(n->dtype)) {
+        base = n->bound;
     }
     /* Computed string node: its value lives in the per-node output buffer that
      * eval_string_expr() filled in before the parent runs. */
-    if (IS_FUNCTION(n->type) && n->dtype == ME_STRING && n->output) {
-        if (n->itemsize == 0 || (n->itemsize % sizeof(uint32_t)) != 0) {
-            return false;
-        }
-        const char* base = (const char*)n->output + (size_t)idx * n->itemsize;
-        const uint32_t* s = (const uint32_t*)base;
-        *data = s;
-        *len = string_len_u32(s, n->itemsize / sizeof(uint32_t));
-        return true;
+    else if (IS_FUNCTION(n->type) && is_string_dtype(n->dtype) && n->output) {
+        base = n->output;
     }
-    return false;
+    if (!base) return false;
+    if (n->itemsize == 0 || (n->itemsize % unit) != 0) return false;
+    const size_t max_units = n->itemsize / unit;
+    out->p = (const char*)base + (size_t)idx * n->itemsize;
+    out->unit = unit;
+    out->len = string_len_units(out->p, unit, max_units);
+    return true;
 }
 
-static bool string_equals(const uint32_t* a, size_t alen, const uint32_t* b, size_t blen) {
-    if (alen != blen) return false;
-    if (alen == 0) return true;
-    return memcmp(a, b, alen * sizeof(uint32_t)) == 0;
+static bool sv_equal_range(sview a, size_t aoff, sview b, size_t n) {
+    if (n == 0) return true;
+    if (a.unit == b.unit) {
+        return memcmp((const char*)a.p + aoff * a.unit, b.p, n * a.unit) == 0;
+    }
+    for (size_t i = 0; i < n; i++) {
+        if (sv_at(a, aoff + i) != sv_at(b, i)) return false;
+    }
+    return true;
 }
 
-static bool string_starts_with(const uint32_t* s, size_t slen, const uint32_t* prefix, size_t plen) {
-    if (plen > slen) return false;
-    if (plen == 0) return true;
-    return memcmp(s, prefix, plen * sizeof(uint32_t)) == 0;
+static bool string_equals(sview a, sview b) {
+    if (a.len != b.len) return false;
+    return sv_equal_range(a, 0, b, a.len);
 }
 
-static bool string_ends_with(const uint32_t* s, size_t slen, const uint32_t* suffix, size_t plen) {
-    if (plen > slen) return false;
-    if (plen == 0) return true;
-    return memcmp(s + (slen - plen), suffix, plen * sizeof(uint32_t)) == 0;
+static bool string_starts_with(sview s, sview prefix) {
+    if (prefix.len > s.len) return false;
+    return sv_equal_range(s, 0, prefix, prefix.len);
+}
+
+static bool string_ends_with(sview s, sview suffix) {
+    if (suffix.len > s.len) return false;
+    return sv_equal_range(s, s.len - suffix.len, suffix, suffix.len);
 }
 
 static const me_case_pair* case_lookup_simple(const me_case_pair* table, int count, uint32_t cp) {
@@ -2416,34 +2458,64 @@ static const me_case_expansion* case_lookup_expand(const me_case_expansion* tabl
 /* Full Unicode case mapping, matching NumPy (i.e. Python) semantics including
  * the expanding cases.  Writes at most out_units codepoints and returns the
  * number written. */
-static size_t string_case_map(const uint32_t* s, size_t slen, uint32_t* out, size_t out_units,
+/* Full Unicode case mapping, matching NumPy (i.e. Python) semantics including
+ * the expanding cases.  For ME_BYTES the mapping is ASCII-only, which is what
+ * NumPy does for `S`.  Writes at most out_units code units and returns the
+ * number written. */
+static size_t string_case_map(sview s, void* out, size_t out_unit, size_t out_units,
                               bool to_upper) {
+    if (out_unit == 1) {
+        size_t w = 0;
+        for (size_t i = 0; i < s.len && w < out_units; i++) {
+            uint32_t c = sv_at(s, i);
+            if (to_upper) {
+                if (c >= 'a' && c <= 'z') c -= 32;
+            }
+            else if (c >= 'A' && c <= 'Z') {
+                c += 32;
+            }
+            su_put(out, 1, w++, c);
+        }
+        return w;
+    }
+
     const me_case_pair* simple = to_upper ? me_case_upper_simple : me_case_lower_simple;
     const int simple_count = to_upper ? ME_CASE_UPPER_SIMPLE_COUNT : ME_CASE_LOWER_SIMPLE_COUNT;
     const me_case_expansion* expand = to_upper ? me_case_upper_expand : me_case_lower_expand;
     const int expand_count = to_upper ? ME_CASE_UPPER_EXPAND_COUNT : ME_CASE_LOWER_EXPAND_COUNT;
 
+    uint32_t* dst = (uint32_t*)out;
     size_t w = 0;
-    for (size_t i = 0; i < slen && w < out_units; i++) {
-        const uint32_t cp = s[i];
+    for (size_t i = 0; i < s.len && w < out_units; i++) {
+        const uint32_t cp = sv_at(s, i);
         const me_case_pair* hit = case_lookup_simple(simple, simple_count, cp);
         if (hit) {
-            out[w++] = hit->to;
+            dst[w++] = hit->to;
             continue;
         }
         const me_case_expansion* exp = case_lookup_expand(expand, expand_count, cp);
         if (exp) {
             for (uint8_t k = 0; k < exp->len && w < out_units; k++) {
-                out[w++] = exp->to[k];
+                dst[w++] = exp->to[k];
             }
             continue;
         }
-        out[w++] = cp;
+        dst[w++] = cp;
     }
     return w;
 }
 
-/* Python str.strip() with no argument: ASCII/Unicode whitespace. */
+/* Python str.strip() with no argument: ASCII/Unicode whitespace.  For bytes the
+ * set is bytes.strip()'s ASCII one, which is what NumPy uses for `S`. */
+static bool string_is_space_ascii(uint32_t cp) {
+    switch (cp) {
+    case 0x09: case 0x0A: case 0x0B: case 0x0C: case 0x0D: case 0x20:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static bool string_is_space(uint32_t cp) {
     switch (cp) {
     case 0x09: case 0x0A: case 0x0B: case 0x0C: case 0x0D: case 0x20:
@@ -2460,38 +2532,33 @@ static bool string_is_space(uint32_t cp) {
 }
 
 /* Narrow [*start, *end) to the stripped range. */
-static void string_strip_range(const uint32_t* s, size_t slen, bool left, bool right,
-                               size_t* start, size_t* end) {
-    size_t a = 0, b = slen;
+static void string_strip_range(sview s, bool left, bool right, size_t* start, size_t* end) {
+    size_t a = 0, b = s.len;
+    const bool ascii_only = (s.unit == 1);
+#define ME_IS_SPACE(cp) (ascii_only ? string_is_space_ascii(cp) : string_is_space(cp))
     if (left) {
-        while (a < b && string_is_space(s[a])) a++;
+        while (a < b && ME_IS_SPACE(sv_at(s, a))) a++;
     }
     if (right) {
-        while (b > a && string_is_space(s[b - 1])) b--;
+        while (b > a && ME_IS_SPACE(sv_at(s, b - 1))) b--;
     }
+#undef ME_IS_SPACE
     *start = a;
     *end = b;
 }
 
 /* Index of the first occurrence of needle in s, or (size_t)-1. */
-static size_t string_find(const uint32_t* s, size_t slen, const uint32_t* needle, size_t nlen) {
-    if (nlen == 0) return 0;
-    if (nlen > slen) return (size_t)-1;
-    for (size_t i = 0; i + nlen <= slen; i++) {
-        if (memcmp(s + i, needle, nlen * sizeof(uint32_t)) == 0) return i;
+static size_t string_find(sview s, sview needle) {
+    if (needle.len == 0) return 0;
+    if (needle.len > s.len) return (size_t)-1;
+    for (size_t i = 0; i + needle.len <= s.len; i++) {
+        if (sv_equal_range(s, i, needle, needle.len)) return i;
     }
     return (size_t)-1;
 }
 
-static bool string_contains(const uint32_t* s, size_t slen, const uint32_t* needle, size_t nlen) {
-    if (nlen == 0) return true;
-    if (nlen > slen) return false;
-    for (size_t i = 0; i + nlen <= slen; i++) {
-        if (memcmp(s + i, needle, nlen * sizeof(uint32_t)) == 0) {
-            return true;
-        }
-    }
-    return false;
+static bool string_contains(sview s, sview needle) {
+    return string_find(s, needle) != (size_t)-1;
 }
 
 /* Resolve a compile-time numeric argument.  Literal negatives parse as
@@ -2527,24 +2594,101 @@ bool is_string_producing_node(const me_expr* n) {
  *
  * The bound is conservative: it never depends on the data, only on the operand
  * itemsizes. */
-size_t infer_output_itemsize(const me_expr* n) {
+/* The code unit of a string tree, found at its first string variable leaf.
+ * Literals are stored as UCS4 whatever the tree's unit, so they do not decide
+ * it; a tree with only literals is `U`. */
+static size_t string_expr_unit(const me_expr* n) {
+    if (!n) return sizeof(uint32_t);
+    if (TYPE_MASK(n->type) == ME_VARIABLE && is_string_dtype(n->dtype)) {
+        return dtype_code_unit(n->dtype);
+    }
+    if (IS_FUNCTION(n->type) || IS_CLOSURE(n->type)) {
+        const int arity = ARITY(n->type);
+        for (int i = 0; i < arity; i++) {
+            const me_expr* p = (const me_expr*)n->parameters[i];
+            if (p && TYPE_MASK(p->type) == ME_VARIABLE && is_string_dtype(p->dtype)) {
+                return dtype_code_unit(p->dtype);
+            }
+        }
+        for (int i = 0; i < arity; i++) {
+            const size_t u = string_expr_unit((const me_expr*)n->parameters[i]);
+            if (u == 1) return 1;
+        }
+    }
+    return sizeof(uint32_t);
+}
+
+/* True when any string literal in the tree has a non-ASCII codepoint.  Literals
+ * are stored as UCS4 and compared against `S` operands codepoint-to-byte, which
+ * is only exact below 0x80; NumPy refuses `S`-vs-`str` comparison outright. */
+static bool string_has_non_ascii_literal(const me_expr* n) {
+    if (!n) return false;
+    if (TYPE_MASK(n->type) == ME_STRING_CONSTANT) {
+        const uint32_t* p = (const uint32_t*)n->bound;
+        if (!p) return false;
+        for (size_t i = 0; i < n->str_len; i++) {
+            if (p[i] > 0x7F) return true;
+        }
+        return false;
+    }
+    if (IS_FUNCTION(n->type) || IS_CLOSURE(n->type)) {
+        const int arity = ARITY(n->type);
+        for (int i = 0; i < arity; i++) {
+            if (string_has_non_ascii_literal((const me_expr*)n->parameters[i])) return true;
+        }
+    }
+    return false;
+}
+
+/* ME_BYTES when any string variable in the tree is `S`, else ME_STRING. */
+me_dtype string_family_of(const me_expr* n) {
+    return (string_expr_unit(n) == 1) ? ME_BYTES : ME_STRING;
+}
+
+/* True when the tree mixes `S` and `U` string variables, which NumPy rejects
+ * too and which the shared kernels cannot represent (one unit per tree). */
+bool string_families_mixed(const me_expr* n) {
+    if (!n) return false;
+    if (TYPE_MASK(n->type) == ME_VARIABLE && is_string_dtype(n->dtype)) return false;
+    bool saw_str = false, saw_bytes = false;
+    const me_expr* stack[256];
+    int top = 0;
+    stack[top++] = n;
+    while (top) {
+        const me_expr* c = stack[--top];
+        if (!c) continue;
+        if (TYPE_MASK(c->type) == ME_VARIABLE && is_string_dtype(c->dtype)) {
+            if (c->dtype == ME_BYTES) saw_bytes = true;
+            else saw_str = true;
+        }
+        else if (IS_FUNCTION(c->type) || IS_CLOSURE(c->type)) {
+            const int arity = ARITY(c->type);
+            for (int i = 0; i < arity && top < 256; i++) {
+                stack[top++] = (const me_expr*)c->parameters[i];
+            }
+        }
+    }
+    return saw_str && saw_bytes;
+}
+
+static size_t infer_output_itemsize_u(const me_expr* n, size_t unit) {
     if (!n) return 0;
 
     if (TYPE_MASK(n->type) == ME_STRING_CONSTANT) {
-        /* NumPy fixed-width semantics: an <Un slot holds n codepoints, padded
+        /* NumPy fixed-width semantics: an <Un slot holds n code units, padded
          * with NULs only when the value is shorter.  A full-width value has no
          * terminator, so the width is str_len, not str_len + 1. */
-        return (n->str_len ? n->str_len : 1) * sizeof(uint32_t);
+        return (n->str_len ? n->str_len : 1) * unit;
     }
-    if (TYPE_MASK(n->type) == ME_VARIABLE && n->dtype == ME_STRING) {
+    if (TYPE_MASK(n->type) == ME_VARIABLE && is_string_dtype(n->dtype)) {
         return n->itemsize;
     }
     if (!IS_FUNCTION(n->type)) return 0;
 
-    const size_t arg0 = infer_output_itemsize((const me_expr*)n->parameters[0]);
+    const size_t arg0 = infer_output_itemsize_u((const me_expr*)n->parameters[0], unit);
 
     if (n->function == (void*)str_concat) {
-        const size_t b = infer_output_itemsize((const me_expr*)n->parameters[1]);
+        const size_t b = infer_output_itemsize_u((const me_expr*)n->parameters[1], unit);
         if (arg0 == 0 || b == 0) return 0;
         return arg0 + b;
     }
@@ -2552,14 +2696,15 @@ size_t infer_output_itemsize(const me_expr* n) {
     /* Case mapping can expand: U+00DF -> "SS" on upper, U+0130 -> 2 cp on lower.
      * ponytail: flat 3x/2x worst-case bound.  A tight bound needs a pass over
      * the data, which the python-blosc2 span driver could do since it already
-     * scans each span; revisit there if the width inflation shows up. */
+     * scans each span; revisit there if the width inflation shows up.
+     * Bytes use NumPy's ASCII-only mapping, which is 1:1, so no growth. */
     if (n->function == (void*)str_upper) {
         if (arg0 == 0) return 0;
-        return arg0 * 3;
+        return (unit == 1) ? arg0 : arg0 * 3;
     }
     if (n->function == (void*)str_lower) {
         if (arg0 == 0) return 0;
-        return arg0 * 2;
+        return (unit == 1) ? arg0 : arg0 * 2;
     }
 
     /* Ops that can only shrink or preserve their first operand. */
@@ -2575,7 +2720,7 @@ size_t infer_output_itemsize(const me_expr* n) {
         const me_expr* len_arg = (const me_expr*)n->parameters[2];
         double len_val;
         if (string_const_number(len_arg, &len_val) && len_val > 0) {
-            const size_t want = (size_t)len_val * sizeof(uint32_t);
+            const size_t want = (size_t)len_val * unit;
             return (arg0 != 0 && want > arg0) ? arg0 : want;
         }
         return arg0;
@@ -2594,13 +2739,17 @@ size_t infer_output_itemsize(const me_expr* n) {
         const size_t new_len = new_arg->str_len;
         if (old_len == 0) return 0;  /* empty needle would match unboundedly */
         if (new_len <= old_len) return arg0;
-        const size_t chars = arg0 / sizeof(uint32_t);
+        const size_t chars = arg0 / unit;
         /* At most floor(chars / old_len) replacements, each growing the result. */
         const size_t grown = chars + (chars / old_len) * (new_len - old_len);
-        return grown * sizeof(uint32_t);
+        return grown * unit;
     }
 
     return 0;
+}
+
+size_t infer_output_itemsize(const me_expr* n) {
+    return infer_output_itemsize_u(n, string_expr_unit(n));
 }
 
 /* `+` between two strings means concatenation, not arithmetic.  Retag the node
@@ -2613,7 +2762,8 @@ bool retag_string_concat(me_expr* node) {
     if (!is_string_producing_node((const me_expr*)node->parameters[1])) return false;
 
     node->function = (void*)str_concat;
-    node->dtype = ME_STRING;
+    node->dtype = infer_output_type(node);
+    if (!is_string_dtype(node->dtype)) return false;
     node->itemsize = infer_output_itemsize(node);
     return node->itemsize != 0;
 }
@@ -2726,8 +2876,14 @@ bool validate_string_usage(const me_expr* n) {
     if (!validate_string_usage_node(n)) {
         return false;
     }
+    if (string_families_mixed(n)) {
+        return false;
+    }
+    if (string_expr_unit(n) == 1 && string_has_non_ascii_literal(n)) {
+        return false;
+    }
     /* String output is fine, but only with a statically computable width. */
-    if (infer_output_type(n) == ME_STRING && infer_output_itemsize(n) == 0) {
+    if (is_string_dtype(infer_output_type(n)) && infer_output_itemsize(n) == 0) {
         return false;
     }
     return true;
@@ -2911,14 +3067,15 @@ static bool compare_to_bool_output(const me_expr* n, me_dtype eval_type,
     return true;
 }
 
-/* Write one string into a fixed-width UCS4 slot, truncating at the slot size and
- * zero-filling the tail so the result is always NUL-terminated and padded. */
-static void string_store(uint32_t* slot, size_t slot_units, const uint32_t* src, size_t len) {
+/* Write one string into a fixed-width slot, truncating at the slot size and
+ * zero-filling the tail, so the result is always NUL-padded (NumPy `<Un`/`Sn`
+ * semantics: a value that fills the slot carries no terminator). */
+static void string_store(void* slot, size_t unit, size_t slot_units, sview src) {
     if (slot_units == 0) return;
-    size_t n = len;
+    size_t n = src.len;
     if (n > slot_units) n = slot_units;
-    if (n > 0) memcpy(slot, src, n * sizeof(uint32_t));
-    memset(slot + n, 0, (slot_units - n) * sizeof(uint32_t));
+    sv_copy(slot, unit, 0, src, n);
+    memset((char*)slot + n * unit, 0, (slot_units - n) * unit);
 }
 
 /* Evaluate a string-valued node into its own output buffer, bottom-up.
@@ -2926,16 +3083,16 @@ static void string_store(uint32_t* slot, size_t slot_units, const uint32_t* src,
  * rest of the tree, mirroring how the numeric evaluator manages intermediates. */
 static bool eval_string_expr(const me_expr* n) {
     if (!n || !n->output) return false;
-    if (n->itemsize == 0 || (n->itemsize % sizeof(uint32_t)) != 0) return false;
+    const size_t unit = dtype_code_unit(n->dtype);
+    if (n->itemsize == 0 || (n->itemsize % unit) != 0) return false;
 
     /* A bare variable or literal as the whole expression: copy it out. */
     if (!IS_FUNCTION(n->type)) {
-        const size_t slot_units = n->itemsize / sizeof(uint32_t);
+        const size_t slot_units = n->itemsize / unit;
         for (int i = 0; i < n->nitems; i++) {
-            const uint32_t* sv = NULL;
-            size_t len = 0;
-            if (!string_view_at(n, i, &sv, &len)) return false;
-            string_store((uint32_t*)n->output + (size_t)i * slot_units, slot_units, sv, len);
+            sview sv;
+            if (!string_view_at(n, i, &sv)) return false;
+            string_store((char*)n->output + (size_t)i * n->itemsize, unit, slot_units, sv);
         }
         return true;
     }
@@ -2949,10 +3106,10 @@ static bool eval_string_expr(const me_expr* n) {
         if (!child || !IS_FUNCTION(child->type)) continue;
         if (!is_string_returning_function(child->function)) continue;
         if (!child->output) {
+            child->dtype = n->dtype;
             child->itemsize = infer_output_itemsize(child);
             if (child->itemsize == 0) return false;
             child->nitems = n->nitems;
-            child->dtype = ME_STRING;
             child->output = malloc((size_t)n->nitems * child->itemsize);
             if (!child->output) return false;
         }
@@ -2962,54 +3119,52 @@ static bool eval_string_expr(const me_expr* n) {
     const me_expr* left = (const me_expr*)n->parameters[0];
     const me_expr* right = (arity > 1) ? (const me_expr*)n->parameters[1] : NULL;
     const me_expr* third = (arity > 2) ? (const me_expr*)n->parameters[2] : NULL;
-    const size_t slot_units = n->itemsize / sizeof(uint32_t);
-    /* NumPy fixed-width semantics: all slot_units codepoints are usable; the
+    const size_t slot_units = n->itemsize / unit;
+    /* NumPy fixed-width semantics: all slot_units code units are usable; the
      * tail is NUL-padded only when the value is shorter. */
     const size_t cap = slot_units;
 
     for (int i = 0; i < n->nitems; i++) {
-        const uint32_t* ldata = NULL;
-        const uint32_t* rdata = NULL;
-        size_t llen = 0, rlen = 0;
-        if (!string_view_at(left, i, &ldata, &llen)) return false;
-        if (right && is_string_producing_node(right) &&
-            !string_view_at(right, i, &rdata, &rlen)) {
+        sview lv = {NULL, 0, unit};
+        sview rv = {NULL, 0, unit};
+        if (!string_view_at(left, i, &lv)) return false;
+        if (right && is_string_producing_node(right) && !string_view_at(right, i, &rv)) {
             return false;
         }
 
-        uint32_t* slot = (uint32_t*)n->output + (size_t)i * slot_units;
+        void* slot = (char*)n->output + (size_t)i * n->itemsize;
         size_t w = 0;
 
         if (n->function == (void*)str_concat) {
-            size_t la = llen > cap ? cap : llen;
-            size_t lb = rlen > cap - la ? cap - la : rlen;
-            if (la) memcpy(slot, ldata, la * sizeof(uint32_t));
-            if (lb) memcpy(slot + la, rdata, lb * sizeof(uint32_t));
+            size_t la = lv.len > cap ? cap : lv.len;
+            size_t lb = rv.len > cap - la ? cap - la : rv.len;
+            sv_copy(slot, unit, 0, lv, la);
+            sv_copy(slot, unit, la, rv, lb);
             w = la + lb;
         }
         else if (n->function == (void*)str_lower || n->function == (void*)str_upper) {
-            w = string_case_map(ldata, llen, slot, cap, n->function == (void*)str_upper);
+            w = string_case_map(lv, slot, unit, cap, n->function == (void*)str_upper);
         }
         else if (n->function == (void*)str_strip || n->function == (void*)str_lstrip ||
                  n->function == (void*)str_rstrip) {
             size_t a, b;
-            string_strip_range(ldata, llen,
+            string_strip_range(lv,
                                n->function != (void*)str_rstrip,
                                n->function != (void*)str_lstrip, &a, &b);
             w = b - a;
             if (w > cap) w = cap;
-            if (w) memcpy(slot, ldata + a, w * sizeof(uint32_t));
+            sv_copy(slot, unit, 0, sv_slice(lv, a, w), w);
         }
         else if (n->function == (void*)str_removeprefix) {
-            size_t off = string_starts_with(ldata, llen, rdata, rlen) ? rlen : 0;
-            w = llen - off;
+            size_t off = string_starts_with(lv, rv) ? rv.len : 0;
+            w = lv.len - off;
             if (w > cap) w = cap;
-            if (w) memcpy(slot, ldata + off, w * sizeof(uint32_t));
+            sv_copy(slot, unit, 0, sv_slice(lv, off, w), w);
         }
         else if (n->function == (void*)str_removesuffix) {
-            w = string_ends_with(ldata, llen, rdata, rlen) ? llen - rlen : llen;
+            w = string_ends_with(lv, rv) ? lv.len - rv.len : lv.len;
             if (w > cap) w = cap;
-            if (w) memcpy(slot, ldata, w * sizeof(uint32_t));
+            sv_copy(slot, unit, 0, lv, w);
         }
         else if (n->function == (void*)str_split_part) {
             /* split_part(s, sep, k): k==0 is the head, k==1 the remainder after
@@ -3019,67 +3174,65 @@ static bool eval_string_expr(const me_expr* n) {
             double kv;
             if (!string_const_number(third, &kv)) return false;
             const long k = (long)kv;
-            const size_t at = string_find(ldata, llen, rdata, rlen);
+            const size_t at = string_find(lv, rv);
             if (k <= 0) {
-                w = (at == (size_t)-1) ? llen : at;
+                w = (at == (size_t)-1) ? lv.len : at;
             }
             else if (at == (size_t)-1) {
                 w = 0;
             }
             else {
-                const size_t off = at + rlen;
-                w = llen - off;
+                const size_t off = at + rv.len;
+                w = lv.len - off;
                 if (w > cap) w = cap;
-                if (w) memcpy(slot, ldata + off, w * sizeof(uint32_t));
-                memset(slot + w, 0, (slot_units - w) * sizeof(uint32_t));
+                sv_copy(slot, unit, 0, sv_slice(lv, off, w), w);
+                memset((char*)slot + w * unit, 0, (slot_units - w) * unit);
                 continue;
             }
             if (w > cap) w = cap;
-            if (w) memcpy(slot, ldata, w * sizeof(uint32_t));
+            sv_copy(slot, unit, 0, lv, w);
         }
         else if (n->function == (void*)str_replace) {
-            const uint32_t* nd = NULL;
-            size_t ndlen = 0;
-            if (!third || !string_view_at(third, i, &nd, &ndlen)) return false;
+            sview nv = {NULL, 0, unit};
+            if (!third || !string_view_at(third, i, &nv)) return false;
             size_t pos = 0;
-            while (pos < llen && w < cap) {
-                if (rlen > 0 && pos + rlen <= llen &&
-                    memcmp(ldata + pos, rdata, rlen * sizeof(uint32_t)) == 0) {
-                    const size_t take = (ndlen > cap - w) ? cap - w : ndlen;
-                    if (take) memcpy(slot + w, nd, take * sizeof(uint32_t));
+            while (pos < lv.len && w < cap) {
+                if (rv.len > 0 && pos + rv.len <= lv.len && sv_equal_range(lv, pos, rv, rv.len)) {
+                    const size_t take = (nv.len > cap - w) ? cap - w : nv.len;
+                    sv_copy(slot, unit, w, nv, take);
                     w += take;
-                    pos += rlen;
+                    pos += rv.len;
                 }
                 else {
-                    slot[w++] = ldata[pos++];
+                    su_put(slot, unit, w++, sv_at(lv, pos++));
                 }
             }
         }
         else if (n->function == (void*)str_substr) {
             /* substr(s, start, len); a negative start counts from the end. */
-            double sv, wv;
-            if (!string_const_number(right, &sv)) return false;
+            double sv_start, wv;
+            if (!string_const_number(right, &sv_start)) return false;
             if (!string_const_number(third, &wv)) return false;
-            long start = (long)sv;
+            long start = (long)sv_start;
             long want = (long)wv;
-            if (start < 0) start += (long)llen;
+            if (start < 0) start += (long)lv.len;
             if (start < 0) start = 0;
             if (want < 0) want = 0;
-            if ((size_t)start >= llen) {
+            if ((size_t)start >= lv.len) {
                 w = 0;
             }
             else {
-                w = llen - (size_t)start;
+                w = lv.len - (size_t)start;
                 if (w > (size_t)want) w = (size_t)want;
                 if (w > cap) w = cap;
-                if (w) memcpy(slot, ldata + start, w * sizeof(uint32_t));
+                sv_copy(slot, unit, 0, sv_slice(lv, (size_t)start, w), w);
             }
         }
         else {
             return false;
         }
 
-        memset(slot + w, 0, (slot_units - w) * sizeof(uint32_t));
+        memset((char*)slot + w * unit, 0, (slot_units - w) * unit);
     }
 
     return true;
@@ -3101,51 +3254,38 @@ static bool eval_string_predicate(const me_expr* n, bool* out, int nitems) {
         return false;
     }
 
-    const uint32_t* lconst = NULL;
-    const uint32_t* rconst = NULL;
-    size_t lconst_len = 0;
-    size_t rconst_len = 0;
+    sview lconst = {NULL, 0, sizeof(uint32_t)};
+    sview rconst = {NULL, 0, sizeof(uint32_t)};
     const bool left_const = (TYPE_MASK(left->type) == ME_STRING_CONSTANT);
     const bool right_const = (TYPE_MASK(right->type) == ME_STRING_CONSTANT);
 
     if (left_const) {
-        lconst = (const uint32_t*)left->bound;
-        lconst_len = left->str_len;
+        lconst.p = left->bound;
+        lconst.len = left->str_len;
     }
     if (right_const) {
-        rconst = (const uint32_t*)right->bound;
-        rconst_len = right->str_len;
+        rconst.p = right->bound;
+        rconst.len = right->str_len;
     }
 
     for (int i = 0; i < nitems; i++) {
-        const uint32_t* ldata = NULL;
-        const uint32_t* rdata = NULL;
-        size_t llen = 0;
-        size_t rlen = 0;
+        sview lv = lconst;
+        sview rv = rconst;
 
-        if (left_const) {
-            ldata = lconst;
-            llen = lconst_len;
-        }
-        else if (!string_view_at(left, i, &ldata, &llen)) {
+        if (!left_const && !string_view_at(left, i, &lv)) {
             return false;
         }
-
-        if (right_const) {
-            rdata = rconst;
-            rlen = rconst_len;
-        }
-        else if (!string_view_at(right, i, &rdata, &rlen)) {
+        if (!right_const && !string_view_at(right, i, &rv)) {
             return false;
         }
 
         bool result = false;
         if (is_cmp) {
             if (n->function == (void*)cmp_eq) {
-                result = string_equals(ldata, llen, rdata, rlen);
+                result = string_equals(lv, rv);
             }
             else if (n->function == (void*)cmp_ne) {
-                result = !string_equals(ldata, llen, rdata, rlen);
+                result = !string_equals(lv, rv);
             }
             else {
                 return false;
@@ -3153,13 +3293,13 @@ static bool eval_string_predicate(const me_expr* n, bool* out, int nitems) {
         }
         else {
             if (n->function == (void*)str_startswith) {
-                result = string_starts_with(ldata, llen, rdata, rlen);
+                result = string_starts_with(lv, rv);
             }
             else if (n->function == (void*)str_endswith) {
-                result = string_ends_with(ldata, llen, rdata, rlen);
+                result = string_ends_with(lv, rv);
             }
             else if (n->function == (void*)str_contains) {
-                result = string_contains(ldata, llen, rdata, rlen);
+                result = string_contains(lv, rv);
             }
             else {
                 return false;
@@ -3186,7 +3326,7 @@ static bool eval_bool_expr(me_expr* n) {
 
     if (n->type == ME_VARIABLE) {
         bool* out = (bool*)n->output;
-        if (n->dtype == ME_STRING) {
+        if (is_string_dtype(n->dtype)) {
             return false;
         }
         if (n->dtype == ME_BOOL) {
@@ -4292,7 +4432,7 @@ static double me_eval_scalar(const me_expr* n) {
     case ME_CONSTANT: return n->value;
     case ME_STRING_CONSTANT: return NAN;
     case ME_VARIABLE:
-        if (n->dtype == ME_STRING) return NAN;
+        if (is_string_dtype(n->dtype)) return NAN;
         return *(const double*)n->bound;
 
     case ME_FUNCTION0:
@@ -4322,6 +4462,7 @@ static double me_eval_scalar(const me_expr* n) {
             case ME_COMPLEX64:
             case ME_COMPLEX128:
             case ME_STRING:
+            case ME_BYTES:
             default:
                 return NAN;
             }
@@ -5074,7 +5215,7 @@ DEFINE_VEC_CONVERT(c64, c128, float _Complex, double _Complex)
 static convert_func_t get_convert_func(me_dtype from, me_dtype to) {
     /* Return conversion function for a specific type pair */
     if (from == to) return NULL; // No conversion needed
-    if (from == ME_STRING || to == ME_STRING) return NULL;
+    if (is_string_dtype(from) || is_string_dtype(to)) return NULL;
 
 #define CONV_CASE(FROM, TO, FROM_S, TO_S) \
         if (from == FROM && to == TO) return (convert_func_t)vec_convert_##FROM_S##_to_##TO_S;
@@ -5370,30 +5511,28 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                 me_expr *right = (me_expr*)n->parameters[1]; \
                 if (is_string_node(left) && is_string_node(right)) { \
                     for (i = 0; i < n->nitems; i++) { \
-                        const uint32_t *ldata = NULL; \
-                        const uint32_t *rdata = NULL; \
-                        size_t llen = 0; \
-                        size_t rlen = 0; \
-                        if (!string_view_at(left, i, &ldata, &llen) || \
-                            !string_view_at(right, i, &rdata, &rlen)) { \
+                        sview lv = {NULL, 0, sizeof(uint32_t)}; \
+                        sview rv = {NULL, 0, sizeof(uint32_t)}; \
+                        if (!string_view_at(left, i, &lv) || \
+                            !string_view_at(right, i, &rv)) { \
                             return; \
                         } \
                         bool result = false; \
                         if (is_comparison_node(n)) { \
                             if (n->function == (void*)cmp_eq) { \
-                                result = string_equals(ldata, llen, rdata, rlen); \
+                                result = string_equals(lv, rv); \
                             } else if (n->function == (void*)cmp_ne) { \
-                                result = !string_equals(ldata, llen, rdata, rlen); \
+                                result = !string_equals(lv, rv); \
                             } else { \
                                 return; \
                             } \
                         } else { \
                             if (n->function == (void*)str_startswith) { \
-                                result = string_starts_with(ldata, llen, rdata, rlen); \
+                                result = string_starts_with(lv, rv); \
                             } else if (n->function == (void*)str_endswith) { \
-                                result = string_ends_with(ldata, llen, rdata, rlen); \
+                                result = string_ends_with(lv, rv); \
                             } else if (n->function == (void*)str_contains) { \
-                                result = string_contains(ldata, llen, rdata, rlen); \
+                                result = string_contains(lv, rv); \
                             } else { \
                                 return; \
                             } \
@@ -7716,7 +7855,7 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
 static void private_eval(const me_expr* n) {
     if (!n) return;
 
-    if (n->dtype == ME_STRING) {
+    if (is_string_dtype(n->dtype)) {
         eval_string_expr(n);
         return;
     }
@@ -8195,7 +8334,7 @@ static void save_variable_metadata(const me_expr* node, const void** var_pointer
             if (var_pointers[i] == node->bound) return; // Already saved
         }
         var_pointers[*var_count] = node->bound;
-        if (node->dtype == ME_STRING && node->itemsize > 0) {
+        if (is_string_dtype(node->dtype) && node->itemsize > 0) {
             var_sizes[*var_count] = node->itemsize;
         }
         else {
@@ -8440,7 +8579,7 @@ int me_eval(const me_expr* expr, const void** vars_block,
             const me_eval_params* params) {
     if (!expr) return ME_EVAL_ERR_NULL_EXPR;
     /* String output is allowed as long as its width is statically bounded. */
-    if (expr->dtype == ME_STRING && expr->itemsize == 0) return ME_EVAL_ERR_INVALID_ARG;
+    if (is_string_dtype(expr->dtype) && expr->itemsize == 0) return ME_EVAL_ERR_INVALID_ARG;
     if (expr->dsl_program) {
         return me_eval_dsl_program(expr, vars_block, n_vars, output_block, block_nitems, params);
     }

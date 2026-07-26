@@ -97,8 +97,10 @@ typedef enum {
     ME_COMPLEX64, /* float complex */
     ME_COMPLEX128, /* double complex */
 
-    /* Fixed-size UCS4 strings (NUL-terminated, no embedded NULs) */
-    ME_STRING
+    /* Fixed-width strings, NumPy `<Un` layout: NUL-padded, never NUL-terminated
+     * when the value fills the slot, and no embedded NULs. */
+    ME_STRING,   /* 4-byte UCS4 code units (numpy 'U') */
+    ME_BYTES     /* 1-byte code units (numpy 'S'); ASCII-only case mapping */
 } me_dtype;
 
 /* Opaque type for compiled expressions */
@@ -118,7 +120,7 @@ enum {
     ME_FLAG_FLOAT_MATH = 64
 };
 
-/* Variable definition with per-element byte size (required for ME_STRING).
+/* Variable definition with per-element byte size (required for ME_STRING/ME_BYTES).
  * For numeric types, itemsize can be 0 to use the default dtype size.
  * For function/closure entries (ME_FUNCTION* / ME_CLOSURE*), dtype is the return type.
  */
@@ -128,7 +130,7 @@ typedef struct me_variable {
     const void *address; // Pointer to data (NULL for me_compile)
     int type; // ME_VARIABLE for user variables (0 = auto-set to ME_VARIABLE)
     void *context; // For closures/functions (NULL for normal variables)
-    size_t itemsize; // Bytes per element (required for ME_STRING; 0 = default dtype size)
+    size_t itemsize; // Bytes per element (required for ME_STRING/ME_BYTES; 0 = default dtype size)
 } me_variable;
 
 /* Note: When initializing variables, only name/dtype/address/itemsize are typically needed.
