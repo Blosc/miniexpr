@@ -326,6 +326,28 @@ me_dtype me_get_dtype(const me_expr *expr);
  * Returns 0 for a NULL expression. */
 size_t me_get_itemsize(const me_expr *expr);
 
+/* --- Arrow-style varlen string output ----------------------------------- */
+
+/* Worst-case bytes me_eval_varlen() can write into `data` for this many items.
+ * Returns 0 unless the expression produces ME_STRING or ME_BYTES. */
+size_t me_varlen_data_bound(const me_expr *expr, int block_nitems);
+
+/* Evaluate a string expression straight into the Arrow varlen layout:
+ * `offsets` (block_nitems + 1 int64 entries, offsets[0] == 0) plus a tight
+ * byte blob in `data`.  ME_STRING yields UTF-8 (Arrow large_string); ME_BYTES
+ * copies its bytes verbatim (Arrow large_binary).  On success *data_used holds
+ * the bytes written, which is what a caller should store or compress -- the
+ * compile-time width bound is spent on scratch only, never on the result.
+ *
+ * Size `data` with me_varlen_data_bound(); a capacity below what the values
+ * need returns ME_EVAL_ERR_INVALID_ARG.  Same variable binding rules as
+ * me_eval(), DSL kernels included.
+ */
+int me_eval_varlen(const me_expr *expr, const void **vars_block, int n_vars,
+                   int block_nitems, int64_t *offsets,
+                   void *data, size_t data_capacity, size_t *data_used,
+                   const me_eval_params *params);
+
 /* Returns true when a DSL expression has a callable JIT runtime kernel bound. */
 bool me_expr_has_jit_kernel(const me_expr *expr);
 

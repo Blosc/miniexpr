@@ -65,6 +65,15 @@ Comparison operator throughput.
 ./build/bench/benchmark_comparisons
 ```
 
+### benchmark_varlen_output.c
+`me_eval_varlen()` (Arrow offsets + byte blob) against fixed-width string
+output, on the pandas-3 blog kernel's shape. Reports the pack overhead and the
+result footprint ratio.
+
+```bash
+./build/bench/benchmark_varlen_output
+```
+
 ### benchmark_logical_bool.c
 Logical operator throughput for boolean arrays.
 

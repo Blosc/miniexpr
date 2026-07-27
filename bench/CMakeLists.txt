@@ -23,6 +23,7 @@ if(WIN32)
   list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_sincos\\.c$")
   list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_sincos_threads\\.c$")
   list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_transcendentals\\.c$")
+  list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_varlen_output\\.c$")
   list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_threadsafe\\.c$")
 endif()
 

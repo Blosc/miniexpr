@@ -103,6 +103,42 @@ time rather than evaluated.
 `me_get_itemsize()` returns `dtype_size()` for non-string expressions, so it is
 the single call to size any output buffer.
 
+## Varlen output (Arrow offsets + byte blob)
+
+The conservative bound above is what a *fixed-width* result costs. It is often
+far wider than the values need: `lower(a)` on a `<U8` operand reserves a 2x
+case-expansion bound at 4 bytes per codepoint, so a 4-character result sits in
+a 64-byte slot.
+
+`me_eval_varlen()` writes the same values in the Arrow varlen layout instead —
+`int64` offsets plus a tight byte blob — so the bound is spent on scratch and
+never on the result:
+
+```c
+size_t bound = me_varlen_data_bound(expr, nitems);   /* worst case, for sizing */
+int64_t *offsets = malloc((nitems + 1) * sizeof(int64_t));
+uint8_t *data = malloc(bound);
+size_t used = 0;
+me_eval_varlen(expr, vars_block, n_vars, nitems, offsets, data, bound, &used, NULL);
+/* store offsets[0..nitems] and the first `used` bytes of data */
+```
+
+- `ME_STRING` yields UTF-8, i.e. Arrow `large_string`. Unpaired surrogates and
+  out-of-range codepoints become U+FFFD.
+- `ME_BYTES` copies its bytes verbatim, i.e. Arrow `large_binary`. Nothing
+  validates them as UTF-8, matching what numpy `S` stores.
+- Value length follows the same first-NUL rule as everywhere else: a
+  slot-filling value carries no terminator.
+- DSL kernels work unchanged — `me_eval()` dispatches the program itself.
+- A capacity below what the values need returns `ME_EVAL_ERR_INVALID_ARG`
+  rather than overrunning. Size with `me_varlen_data_bound()` and it cannot
+  happen.
+
+This packs after evaluation rather than threading varlen buffers through the
+evaluator: intermediates stay fixed-width, since they are per-block scratch
+that never reaches storage. The cost is one extra pass over a block that is
+already in cache.
+
 ## String Literals
 
 Literals are UTF-8 and can be written with double or single quotes, optionally

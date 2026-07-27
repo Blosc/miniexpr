@@ -4,6 +4,15 @@ Release notes for miniexpr
 Changes from 0.2.0 to 0.2.1
 ===========================
 
+* New varlen output for string expressions: `me_eval_varlen()` writes the Arrow
+  layout (int64 offsets + a tight byte blob) instead of fixed-width slots.
+  - `ME_STRING` yields UTF-8 (`large_string`); `ME_BYTES` copies bytes verbatim
+    (`large_binary`). DSL kernels work unchanged.
+  - Size the data buffer with the new `me_varlen_data_bound()`.
+  - The conservative compile-time width bound is then spent on scratch only and
+    never on the result: 9.7x smaller output for a 12% pack overhead on
+    `bench/benchmark_varlen_output.c`. See `doc/strings.md`.
+
 * macOS SIMD math now prefers SLEEF by default when it is available at build time.
   - New CMake option: `MINIEXPR_USE_ACCELERATE=ON|OFF` (enabled by default on macOS, off elsewhere).
   - In runtime `auto` mode, macOS prefers SLEEF first, then falls back to Accelerate when enabled, then to scalar kernels.
