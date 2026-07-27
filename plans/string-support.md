@@ -8,9 +8,11 @@ without building `ME_UTF8`**: its measurement gate came back against it, and the
 shipped instead reaches the same target 5–6× faster than before (see §4).  **Phase 5's output half
 is done in miniexpr** — `me_eval_varlen()` emits Arrow offsets + a byte blob, 9.7× smaller than the
 fixed-width result for a 12 % pack overhead, and its 6–10 week estimate turned out to rest on a
-premise the code does not have (see §5).  **In blosc2 it does not pay**: `compute_varlen()` was
-built and measured, reaches DuckDB's B/row exactly, and still comes out bigger and slower than the
-compressed fixed-width result, because compression had already collected that win.  The finished thing
+premise the code does not have (see §5).  **In blosc2 it does not pay and was reverted**:
+`compute_varlen()` reached DuckDB's B/row exactly and still came out bigger and slower than the
+compressed fixed-width result, because compression had already collected that win.  What *did*
+pay is making `upper`/`lower` width-preserving (miniexpr `5a7de4f`), which then exposed that
+**blosc2 should not SHUFFLE string dtypes** — see §5.  The finished thing
 is benchmarked against numpy/pandas/polars/duckdb on real data — see §"Chicago Taxi string
 benchmark".
 
@@ -37,10 +39,11 @@ benchmark".
 | 5 miniexpr varlen output (`me_eval_varlen`, Arrow offsets + blob) | **done** | miniexpr `src/miniexpr_varlen.c` |
 | 5 varlen intermediates in `eval_string_expr()` | **not built**, gated | — |
 | 5 blosc2: `Utf8Array` results from the utf8 span driver | **done** | blosc2 `9cb490ac` |
-| 5 blosc2: `compute_varlen()` — built, **measured slower and bigger** | **done, negative** | blosc2 `f6b06438` |
+| 5 blosc2: `compute_varlen()` — built, measured, **reverted** | **negative result** | blosc2 `f6b06438`, reverted in `4e364900` |
+| `upper`/`lower` width-preserving (the `ponytail:` bound item) | **done** | miniexpr `5a7de4f` |
 | 5 blosc2: computed columns over utf8 | **todo** — persistence caveat in §5 | — |
 
-**Phases 1, 2 and 3 are complete.** Suites green: miniexpr 36/36; python-blosc2 7774 passed /
+**Phases 1, 2 and 3 are complete.** Suites green: miniexpr 36/36; python-blosc2 7761 passed /
 22 skipped (full `tests/`). Acceptance form 1 passes — the blog kernel as a `@blosc2.dsl_kernel`
 over `<U` NDArrays, byte-identical to the row-by-row Python version, with `strict_miniexpr=True`
 (`tests/ndarray/test_string_output.py::test_blog_kernel_as_dsl_kernel`). Acceptance form 2
