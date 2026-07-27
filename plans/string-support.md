@@ -24,10 +24,10 @@ measurement and is unlikely to ever be worth it.
 | 3b prerequisite: `row["col"]` + control flow | **done** | blosc2 `729a2082` |
 | 3b pandas 3 fixed-width `str` columns | **done** | blosc2 `729a2082` |
 | 3, 3a, 3c: utf8 span driver, `utf8_array`, null policy | **done** | blosc2 `cd6317df`, `332ac400` |
-| prefilter fix: operands wider than 255 bytes | **done** | blosc2 `cbcb15b5` |
+| prefilter fix: operands wider than 255 bytes | **done** | blosc2 `cbcb15b5`, superseded by `9bb345d3`, `7cbd48b7` |
 | 4 utf8 scalar predicates via raw-byte scan (`ME_UTF8` **not** built) | **done** | blosc2 `47b033c2` |
 
-**Phases 1, 2 and 3 are complete.** Suites green: miniexpr 35/35; python-blosc2 7703 passed /
+**Phases 1, 2 and 3 are complete.** Suites green: miniexpr 35/35; python-blosc2 7754 passed /
 22 skipped (full `tests/`). Acceptance form 1 passes — the blog kernel as a `@blosc2.dsl_kernel`
 over `<U` NDArrays, byte-identical to the row-by-row Python version, with `strict_miniexpr=True`
 (`tests/ndarray/test_string_output.py::test_blog_kernel_as_dsl_kernel`). Acceptance form 2
@@ -46,9 +46,43 @@ of 400, non-deterministically, with no error raised anywhere.
 
 `<U64` is 256 bytes — the first fixed-width string that trips it, and exactly what §3's
 power-of-two width bucketing produces. Phases 1 and 2 only ever tested widths up to `<U32`, which
-is why it survived them. The fix converts the request through bytes using the typesize the header
-actually records (`blosc1_cbuffer_metainfo`); identical arithmetic whenever the typesize is not
-capped. Any dtype over 255 bytes was affected, not just strings.
+is why it survived them. Any dtype over 255 bytes was affected, not just strings.
+
+The first fix (blosc2 `cbcb15b5`) was a local `getitem_span()` helper that converted the request
+through bytes using the typesize the chunk header actually records
+(`blosc1_cbuffer_metainfo`) — identical arithmetic whenever the typesize is not capped. The same
+family turned up in `SChunk.get_slice()` and in the index sidecar reader, so `393a2004` swept all
+of them through that one helper.
+
+**Both are gone now: the real fix landed upstream** (blosc2 `9bb345d3`, `7cbd48b7`).
+
+- Blosc/c-blosc2#796 fixed `blosc2_schunk_get_slice_buffer()` and the single-coordinate path of
+  `blosc2_schunk_get_sparse_buffer()` to convert through the typesize chunks actually carry, so the
+  `SChunk.get_slice()` workaround reverted to a plain `super()` call. Upstream also made partial
+  getitem decodes return `BLOSC2_ERROR_DATA` instead of looking like success — that silence is how
+  every downstream instance of this family survived so long. The three regression tests added with
+  the workaround stayed and now exercise the C path: without the fix, 150 of 153 slice shapes at
+  typesize 256 raise and 3 return wrong bytes, so their passing is what verifies the fix is live in
+  the linked c-blosc2.
+- c-blosc2 `bc074b22` added `blosc2_getitem_bytes_ctx()`, which counts in **bytes** at any typesize.
+  All three partial-read sites moved to it (miniexpr prefilter, index sidecar reader, matmul
+  prefilter) and `getitem_span()` was deleted rather than rewritten — once the cap rule moved back
+  inside c-blosc2 it was just a multiply undoing a division its callers had already done. The cap
+  rule now lives only in c-blosc2, which is where it belongs.
+
+The new entry point requires `start` and `nbytes` to be multiples of the stored typesize; every
+offset at these sites is derived from the real typesize, so this is exact below the cap and vacuous
+above it.
+
+Verified after the upstream switch: `arr == "hello"` over 1200 rows (chunks 400, blocks 100) matches
+400/400 at `<U32`, `<U63`, `<U64`, `<U65` and `<U100`, slices are byte-exact across the cap
+boundary, and a 320-byte structured dtype round-trips — i.e. the non-string half of the bug is gone
+too.
+
+**Pre-push follow-up.** `BLOSC2_MIN_VERSION` in `python-blosc2/CMakeLists.txt` is still `3.2.1`,
+which is now too low: `blosc2_getitem_bytes_ctx()` is a build-time dependency, so a system c-blosc2
+in the 3.2.1–3.2.3 range passes the CMake gate and then fails at compile on the missing symbol. Bump
+it to `3.2.4` once that ships.
 
 ### What the "Could not compress the data" blocker actually was
 
@@ -105,6 +139,16 @@ FetchContent_Declare(miniexpr
 FetchContent clones the pinned tag *into* `SOURCE_DIR` and destroys the local checkout — this
 already cost one full rebuild of Phase 1. Before pushing, revert this file and bump `GIT_TAG` to the
 merged miniexpr SHA instead.
+
+The same file also pins the bundled c-blosc2 to the unreleased SHA carrying
+`blosc2_getitem_bytes_ctx()`:
+
+```cmake
+set(BLOSC2_BUNDLED_VERSION bc074b228968d6121b3c8c1a38c0afc0bbf923f6)
+```
+
+Restore it to a release tag (`v3.2.4` or later) before pushing, together with the
+`BLOSC2_MIN_VERSION` bump noted above.
 
 ### Bugs found and fixed along the way
 
@@ -549,6 +593,10 @@ pytest tests/ndarray/test_stringarrays.py tests/ctable/test_utf8.py -q
 # utf8 string expressions (Phase 3) + the 255-byte prefilter regression
 pytest tests/ctable/test_utf8.py -q -k "where_expression or utf8_array"
 pytest tests/ndarray/test_string_output.py -q -k wide_string_operands
+
+# the capped-typesize family; test_schunk_get_slice.py fails loudly unless the
+# linked c-blosc2 carries the Blosc/c-blosc2#796 fix
+pytest tests/test_schunk_get_slice.py tests/ctable/test_ctable_indexing.py -q
 
 # pandas 3 path (Phase 3b) -- requires pandas >= 3, pyarrow, numpy >= 2
 pytest tests/test_pandas_udf_engine.py tests/ndarray/test_jit_dsl_dispatch.py -q
