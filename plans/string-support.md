@@ -2,9 +2,9 @@
 
 ## Status
 
-Branch `dsl-string-support` in both repos.  Phases **1 and 2 are done**, and so is the
-fixed-width half of **3b** — both acceptance forms now pass.  What is left of Phase 3 is the utf8
-span-loop driver (§3, §3a) and the column-wise null policy (§3c).
+Branch `dsl-string-support` in both repos.  Phases **1, 2 and 3 are done** — both acceptance forms
+pass, and utf8 string expressions now run through the span-loop driver.  Phases 4 and 5 remain
+gated on measurement and may never be built.
 
 | step | state | commit |
 |---|---|---|
@@ -21,15 +21,31 @@ span-loop driver (§3, §3a) and the column-wise null policy (§3c).
 | Phase 2 — bytes `S` / `ME_BYTES` | **done** | miniexpr `30267f1`, `665533a`; blosc2 `6f5c9fe9` |
 | 3b prerequisite: `row["col"]` + control flow | **done** | blosc2 `729a2082` |
 | 3b pandas 3 fixed-width `str` columns | **done** | blosc2 `729a2082` |
-| 3, 3a, 3c: utf8 span driver, `utf8_array`, null policy | not started | |
+| 3, 3a, 3c: utf8 span driver, `utf8_array`, null policy | **done** | blosc2 `cd6317df`, `332ac400` |
+| prefilter fix: operands wider than 255 bytes | **done** | blosc2 `cbcb15b5` |
 
-**Phases 1 and 2 are complete**, and the fixed-width half of 3b. Suites green: miniexpr 35/35;
-python-blosc2 7681 passed / 22 skipped (full `tests/`). Acceptance form 1 passes — the blog kernel as a `@blosc2.dsl_kernel` over `<U`
-NDArrays, byte-identical to the row-by-row Python version, with `strict_miniexpr=True`
+**Phases 1, 2 and 3 are complete.** Suites green: miniexpr 35/35; python-blosc2 7703 passed /
+22 skipped (full `tests/`). Acceptance form 1 passes — the blog kernel as a `@blosc2.dsl_kernel`
+over `<U` NDArrays, byte-identical to the row-by-row Python version, with `strict_miniexpr=True`
 (`tests/ndarray/test_string_output.py::test_blog_kernel_as_dsl_kernel`). Acceptance form 2
 (pandas 3) passes too, via §3b below — the blog kernel runs unmodified through
-`df.apply(..., axis=1, engine=blosc2.jit)`. What remains of Phase 3 is variable-width `utf8()`
-columns, which no acceptance criterion covers.
+`df.apply(..., axis=1, engine=blosc2.jit)`.
+
+### The 255-byte prefilter bug (found while building §3)
+
+Independent of strings, and it had been corrupting results silently since long before this branch.
+c-blosc2 caps a typesize above `BLOSC_MAX_TYPESIZE` (255) to **1** in the chunk header so its split
+machinery keeps working (`blosc2.c`, *"treat buffer as an 1-byte stream"*). `aux_miniexpr()` asked
+`blosc2_getitem_ctx()` for each operand block in *element* units, which the chunk then read as a
+**byte** range: block 0 came back with only its first few elements populated and every later block
+was the untouched `malloc`'d buffer. `arr == "hello"` over 1200 rows of `<U64` matched 1 row instead
+of 400, non-deterministically, with no error raised anywhere.
+
+`<U64` is 256 bytes — the first fixed-width string that trips it, and exactly what §3's
+power-of-two width bucketing produces. Phases 1 and 2 only ever tested widths up to `<U32`, which
+is why it survived them. The fix converts the request through bytes using the typesize the header
+actually records (`blosc1_cbuffer_metainfo`); identical arithmetic whenever the typesize is not
+capped. Any dtype over 255 bytes was affected, not just strings.
 
 ### What the "Could not compress the data" blocker actually was
 
@@ -271,43 +287,57 @@ in `lazyexpr.py` test `kind in "US"`; and the DSL validator accepts `bytes` cons
 
 ---
 
-## Phase 3 — variable-width strings by materialisation: utf8 **and pandas 3** (~1.5–2 weeks)
+## Phase 3 — variable-width strings by materialisation: utf8 **and pandas 3** (**done**)
 
-**No miniexpr changes.** Lifts the `NotImplementedError` on utf8 columns and delivers the motivating
-pandas workload. Handles both string- and bool-returning expressions, so it is complete on its own;
-Phase 4 is only a fast path under it.
+**No miniexpr changes**, as planned. Lifts the `NotImplementedError` on utf8 columns and delivers
+the motivating pandas workload.
 
-Source-agnostic driver: **variable-width source → span-local `<Un` → Phase 1 miniexpr → re-encode**.
+Source-agnostic driver: **variable-width source → span-local `<Un` → Phase 1 miniexpr**.
+`CTable._utf8_span_eval()` (`ctable.py`) walks the column in row spans, materializes each span to a
+fixed-width `<Un` array and hands that to miniexpr; `_lazyexpr_over_cols()` routes to it whenever an
+expression touches a utf8 column, and `where()` / `sum(where=)` call that instead of
+`blosc2.lazyexpr` directly.
 
-- **Driver, not prefilter.** `Utf8Array` offsets and data have independent chunk grids
-  (`_OFFSETS_CHUNKS = 2**17` rows, `_DATA_CHUNKS = 2**21` bytes, `utf8_array.py:57-58`), so the
-  prefilter contract does not apply. Drive from `_read_persisted_span` (`:233`), which already
-  produces `(rel_offsets, data_slice)`; hang it off `Column._utf8_chunked_bool` /
-  `_utf8_chunked_bytes` (`ctable.py:2028-2062`), already looping in 65536-row spans. Thread the span
-  loop explicitly — per-block blosc2 parallelism is not available here.
-- **Bucket the width.** `n` is span-local and data-dependent, whereas `infer_output_itemsize` bakes
-  widths in at compile time. Round `n` up to a power of two and cache compiled expressions by
-  bucket, so a column costs a handful of compilations rather than one per span.
+- **Driver, not prefilter**, for the reason planned: `Utf8Array` offsets and data have independent
+  chunk grids (`_OFFSETS_CHUNKS`, `_DATA_CHUNKS`, `utf8_array.py:57-58`).
+- **Bucket the width** to a power of two, so a column costs a handful of compilations rather than
+  one per span.
 - **Container choice** follows the contagion rule. Bool-returning → plain bool NDArray.
-- Lift only the `_is_utf8_column` branch of `ctable.py:12673`.
 
-### 3a. Give `Utf8Array` a public face
+### Deviations from the plan as written
 
-`Utf8Array(blosc2.utf8())` + `.extend()` + `.flush()` is the only construction path today, and it is
-not exported from `__init__.py`. Once a `lazyudf` can *return* one, that asymmetry needs closing:
+- **`_read_persisted_span` does not return `(rel_offsets, data_slice)`** — it returns a decoded
+  `StringDType` array. So the driver's span→`<Un` step is an `astype`, not an offsets walk. The
+  zero-copy Arrow-buffer route stays available for Phase 4/5, which is where it would pay.
+- **Span size is bounded by bytes, not just rows.** The bucketed width comes from the *longest*
+  value in a span, so a single 4 KB row among short ones would materialize
+  65536 × 4096 × 4 = 1 GiB. `_utf8_spans()` splits a nominal 65536-row span whenever the `<Un`
+  buffer would exceed `_UTF8_EXPR_BUDGET` (64 MiB). The lengths come from the offsets
+  (`Utf8Array._span_max_bytes`), so no span is read twice to size it.
+- **Span operands are passed as blosc2 arrays, not NumPy ones.** With NumPy operands
+  `blosc2.lazyexpr` evaluates through `slices_eval`, which never reaches miniexpr — the string
+  kernels would have been bypassed entirely, for correct-looking results. This is the same trap the
+  Phase 1 note describes. `_utf8_span_eval(strict=True)` is the assertion that pins it.
+- **String-returning utf8 expressions have no caller, so nothing wraps the result in a
+  `Utf8Array`.** The driver is dtype-agnostic and concatenates whatever `compute()` returns; the
+  only consumer that would want a string result is a *computed column*, which needs a `LazyExpr`
+  rather than a materialized value and is a separate job. Computed columns over utf8 still raise.
+- **Nested (dotted) utf8 leaves still raise.** `_rewrite_nested_expression` aliases them away before
+  the driver could find them; `_utf8_names_in` is therefore called on the original expression and
+  rejects dotted names explicitly.
 
-```python
-def utf8_array(seq, spec=None, **kwargs) -> Utf8Array:
-    arr = Utf8Array(spec or blosc2.utf8(), **kwargs)
-    arr.extend(seq)
-    arr.flush()
-    return arr
-```
+### 3a. Give `Utf8Array` a public face (**done**)
 
-Export `utf8_array` and `Utf8Array`. **Deliberately not** `blosc2.array(seq, dtype=blosc2.utf8())`:
-`blosc2.array` is annotated `-> NDArray` and `Utf8Array` is not one, so that spelling makes the
-return *class* depend on a kwarg *value*. Reserved future spelling, if the containers ever converge:
+`blosc2.utf8_array(seq, spec=None, **kwargs)` lands as written; `Utf8Array` is exported too.
+**Deliberately not** `blosc2.array(seq, dtype=blosc2.utf8())`: `blosc2.array` is annotated
+`-> NDArray` and `Utf8Array` is not one, so that spelling makes the return *class* depend on a
+kwarg *value*. Reserved future spelling, if the containers ever converge:
 `blosc2.array(seq, dtype=np.dtypes.StringDType())`.
+
+One wrinkle the plan did not anticipate: the public name shadows the internal module
+`blosc2.utf8_array`. `from blosc2.utf8_array import X` still resolves (import machinery finds the
+submodule), but attribute-path lookups do not — two `monkeypatch.setattr("blosc2.utf8_array.…")`
+call sites in the tests now go through `sys.modules`.
 
 ### 3b. pandas 3 `str` columns — **fixed-width part done**
 
@@ -356,7 +386,18 @@ Reuses §3's span loop, bucketing and re-encode. What is new:
 - **Out of scope:** pandas 2 and object-dtype string columns; reject with a message pointing at
   `.astype("str")`.
 
-### 3c. Null propagation
+### 3c. Null propagation — **done for utf8; the DSL half is not needed yet**
+
+For a **utf8 column** nulls are a *sentinel string*, not `NaN`, so the policy collapses to two
+lines in `_utf8_span_eval()`: build the sentinel mask per span, substitute `""` before any kernel
+runs, and `&= ~nulls` the boolean result afterwards. A null then satisfies no predicate — not even
+`name == '<NA>'` against the sentinel's own spelling — which is exactly what the operator form
+(`Column._utf8_compare`) already did, and the tests assert the two forms agree row for row.
+
+The **path-sensitive `null_out` machinery described below was not built**: its consumers are
+string-returning DSL kernels over nullable columns, and neither utf8 (sentinel, so no nullity to
+propagate separately) nor pandas row kernels (§3b rejects nulls, because pandas raises there too)
+needs it. Build it when a string-returning kernel over a genuinely nullable source appears.
 
 Ground truth, pandas 3.0.3 `str` dtype (nulls are `NaN`, a float — *not* `pd.NA`):
 
@@ -444,6 +485,10 @@ cd /Users/faltet/blosc/miniexpr && cmake -B build && cmake --build build -j && c
 cd /Users/faltet/blosc/python-blosc2 && pip install -e . --no-build-isolation
 pytest tests/ndarray/test_string_output.py tests/ndarray/test_lazyexpr.py -q
 pytest tests/ndarray/test_stringarrays.py tests/ctable/test_utf8.py -q
+
+# utf8 string expressions (Phase 3) + the 255-byte prefilter regression
+pytest tests/ctable/test_utf8.py -q -k "where_expression or utf8_array"
+pytest tests/ndarray/test_string_output.py -q -k wide_string_operands
 
 # pandas 3 path (Phase 3b) -- requires pandas >= 3, pyarrow, numpy >= 2
 pytest tests/test_pandas_udf_engine.py tests/ndarray/test_jit_dsl_dispatch.py -q
