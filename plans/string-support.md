@@ -831,6 +831,39 @@ above — it is strictly worse than both (6.6 MB / 75.8 ms on the LZ4 `transform
 `filters_meta` is only consulted for the filter it belongs to, so with SHUFFLE off it is irrelevant
 — verified: no-shuffle gives the same 198× / 2.78 MB at meta 0 and meta 4.
 
+### Which string representation to reach for (measured, 200 k rows)
+
+Compressed size, `<U` (UCS4 + SHUFFLE width 4) against `utf8` (`Utf8Array`, int64 offsets + a
+UTF-8 blob), ZSTD-5 defaults:
+
+| data | `<U` | `utf8` |
+|---|---|---|
+| ASCII, low cardinality | **148 KB** | 279 KB |
+| ASCII, high cardinality | 1396 KB | **1130 KB** |
+| CJK, low cardinality | **190 KB** | 285 KB |
+| CJK, high cardinality | 1264 KB | **1134 KB** |
+
+**Cardinality decides it, not the alphabet.** The intuition that `<U` only wins on ASCII (because
+UCS4's three high bytes are zero) does not survive measurement: `<U` wins on low-cardinality CJK
+too, because repetition compresses away either way and `<U`'s fixed stride is friendlier to the
+codec. `utf8` wins on high cardinality, and by a modest 1.1–1.2×.
+
+So `<U` is the better default whenever the width is bounded and values repeat, which is the common
+column shape. `utf8` earns its place on **unbounded or wildly variable** text — where no static
+width bound exists at all — rather than on raw ratio.
+
+**SHUFFLE should stay on for `utf8`, and the reason is the offsets.** 1 M taxi company values:
+
+| | build | stored (offsets + data) |
+|---|---|---|
+| SHUFFLE (current default) | **72 ms** | **0.13 MB** (0.12 + 0.01) |
+| no filters | 105 ms | 1.11 MB (1.10 + 0.01) |
+
+The data blob is `uint8`, so shuffle there is a literal no-op — 0.01 MB either way, which is the
+intuition that says "don't shuffle UTF-8". But a `Utf8Array` is two arrays, and the `int64` offsets
+are monotonic, so shuffling by 8 collects their near-constant high bytes: 9× on that array and
+8.5× on the pair. Building is *faster* too, because there is less to write.
+
 ### Still unbuilt
 
 - **Document `S` as the choice for ASCII/Latin-1 data** — zero work, still not written down
