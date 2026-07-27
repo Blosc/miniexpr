@@ -8,7 +8,9 @@ without building `ME_UTF8`**: its measurement gate came back against it, and the
 shipped instead reaches the same target 5–6× faster than before (see §4).  **Phase 5's output half
 is done in miniexpr** — `me_eval_varlen()` emits Arrow offsets + a byte blob, 9.7× smaller than the
 fixed-width result for a 12 % pack overhead, and its 6–10 week estimate turned out to rest on a
-premise the code does not have (see §5).  The blosc2 side of it is not started.  The finished thing
+premise the code does not have (see §5).  **In blosc2 it does not pay**: `compute_varlen()` was
+built and measured, reaches DuckDB's B/row exactly, and still comes out bigger and slower than the
+compressed fixed-width result, because compression had already collected that win.  The finished thing
 is benchmarked against numpy/pandas/polars/duckdb on real data — see §"Chicago Taxi string
 benchmark".
 
@@ -35,6 +37,7 @@ benchmark".
 | 5 miniexpr varlen output (`me_eval_varlen`, Arrow offsets + blob) | **done** | miniexpr `src/miniexpr_varlen.c` |
 | 5 varlen intermediates in `eval_string_expr()` | **not built**, gated | — |
 | 5 blosc2: `Utf8Array` results from the utf8 span driver | **done** | blosc2 `9cb490ac` |
+| 5 blosc2: `compute_varlen()` — built, **measured slower and bigger** | **done, negative** | blosc2 `f6b06438` |
 | 5 blosc2: computed columns over utf8 | **todo** — persistence caveat in §5 | — |
 
 **Phases 1, 2 and 3 are complete.** Suites green: miniexpr 36/36; python-blosc2 7754 passed /
@@ -651,12 +654,53 @@ costs its own UTF-8 length. Bool and numeric results are untouched. Nulls keep �
 sentinel goes back into the values and the result spec carries it. This is the contagion rule from
 §Decisions, and it closes the §3 deviation *"nothing wraps the result in a `Utf8Array`"*.
 
-**`me_eval_varlen()` is deliberately not wired into this path, and should not be until there is a
-caller that wants it.** The span driver's only consumers today are `where()` and `sum(where=)`,
-both **boolean** — and a boolean result has no varlen output to speak of. Threading
-`me_eval_varlen()` in means exposing it through `blosc2_ext` and adding a compute route that
-bypasses the prefilter, to save a `<Un` span buffer that `_UTF8_EXPR_BUDGET` already caps at 64 MiB.
-Do it after a string-returning caller exists and shows up on a profile, not before.
+**`me_eval_varlen()` is deliberately not wired into the utf8 span driver.** Its only consumers are
+`where()` and `sum(where=)`, both **boolean** — and a boolean result has no varlen output to speak
+of.
+
+### `blosc2.compute_varlen()` — built, measured, and it does *not* pay
+
+Built (blosc2 `f6b06438`): `blosc2_ext.eval_varlen()` exposes `me_eval_varlen()`,
+`Utf8Array.extend_encoded()` takes offsets+bytes in bulk without decoding to `str`, and
+`blosc2.compute_varlen(expr)` runs a `LazyExpr` or a DSL-backed `LazyUDF` in row spans across a
+thread pool (the Cython binding releases the GIL) into a `Utf8Array`. Values are identical to
+`.compute()`, verified by the benchmark's cross-engine digest.
+
+**The measurement refutes the rationale in §"The gate now has evidence".** 1 M rows, `transform`,
+each engine run in its own process (running second costs ~40 % on this machine — the `filter` row
+is literally the same function in both engines and moved 25 → 33 ms, which is how this was caught):
+
+| | B/row | stored | time |
+|---|---|---|---|
+| fixed-width `<U66` | 264 | **0.81 MB** | **133 ms** |
+| varlen | **34.2** | 1.14 MB | 149 ms |
+
+The varlen blob lands at 34.2 B/row — right on DuckDB's 35.9, exactly the target — **and still
+loses on both axes**:
+
+- **Footprint: blosc2 stores results *compressed*, and that had already solved this.** The
+  404 B/row figure this phase was ranked on is the *uncompressed* result; blosc2 never stored it.
+  Worse, the fixed-width form's NUL padding compresses to almost nothing while a dense UTF-8 blob
+  has nothing left to squeeze, so varlen comes out **bigger**: 1.14 MB vs 0.81. The benchmark table
+  said this all along — blosc2's 0.9 MB against DuckDB's 34.2 — and the §5 comparison read
+  blosc2's uncompressed B/row against everyone else's stored bytes.
+- **Time: break-even is the ceiling.** Serial breakdown at 1 M rows: `eval_varlen` 290 ms,
+  `extend_encoded` 70 ms, operand slicing 20 ms. Even with perfect threading and a free
+  accumulator that is ~110 ms against the fixed path's 133. The prefilter runs in blosc2's own C
+  thread pool *fused with compression*; varlen output has no fixed per-element stride, so it cannot
+  use the prefilter at all and has to be driven from Python.
+
+**Kept, but reframed as a representation feature**, since it is the only route from an expression
+to an Arrow varlen result and is what a `Utf8Array`-typed computed column will need. Its docstring
+says plainly that it is not for speed. In the benchmark it is off by default —
+`--engines "blosc2,blosc2 (varlen)"`, one engine per process — because it is a representation
+comparison, not a cross-engine one.
+
+**What this means for the rest of Phase 5.** The miniexpr-side result stands on its own (9.7×
+smaller output, `bench/benchmark_varlen_output.c`) — it is real for any consumer that stores what
+miniexpr hands it. It just does not transfer to blosc2, whose compressor was already collecting
+that win. Varlen *intermediates* — the 6–10 week item — are now firmly not worth building: their
+payoff was a subset of this one.
 
 ### Still to do: computed columns over utf8
 
@@ -739,6 +783,13 @@ buys 506× the memory (21 MB vs 10 881 MB). Take that ratio from repeated runs, 
 `clevel=0` variant allocates 10.9 GB on a 24 GB machine and is the noisy one. Over five full-table
 runs, compressed 8.2–9.4 s (median 8.5) and raw 5.7–6.0 s (median 5.9) after discarding a 7.7 s
 first-run outlier.
+
+> **Superseded — read §5 first.** The B/row column below is blosc2's *uncompressed* result set
+> against everyone else's *stored* bytes. blosc2 stores results compressed, where the same
+> `kernel` result is 0.9 MB against DuckDB's 34.2. Phase 5 was built on the strength of this
+> comparison and the measurement went the other way: varlen output does reach 34.2 B/row, and it
+> comes out **bigger and slower** than the compressed fixed-width result. The `S` findings and the
+> `lower`/`upper` bound item below are unaffected.
 
 Even on `S`, blosc2 moves 54 B/row against DuckDB's 35.9 (31.7 data + 4 offset + 0.1 validity) —
 it pays the compile-time max on every row where they pay the mean plus an offset. **That residual
