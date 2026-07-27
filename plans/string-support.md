@@ -5,8 +5,12 @@
 Branch `dsl-string-support` in both repos.  Phases **1, 2 and 3 are done** — both acceptance forms
 pass, and utf8 string expressions now run through the span-loop driver.  **Phase 4 is closed
 without building `ME_UTF8`**: its measurement gate came back against it, and the rewrite pass that
-shipped instead reaches the same target 5–6× faster than before (see §4).  Phase 5 remains gated on
-measurement and is unlikely to ever be worth it.
+shipped instead reaches the same target 5–6× faster than before (see §4).  **Phase 5's output half
+is done in miniexpr** — `me_eval_varlen()` emits Arrow offsets + a byte blob, 9.7× smaller than the
+fixed-width result for a 12 % pack overhead, and its 6–10 week estimate turned out to rest on a
+premise the code does not have (see §5).  The blosc2 side of it is not started.  The finished thing
+is benchmarked against numpy/pandas/polars/duckdb on real data — see §"Chicago Taxi string
+benchmark".
 
 | step | state | commit |
 |---|---|---|
@@ -26,8 +30,13 @@ measurement and is unlikely to ever be worth it.
 | 3, 3a, 3c: utf8 span driver, `utf8_array`, null policy | **done** | blosc2 `cd6317df`, `332ac400` |
 | prefilter fix: operands wider than 255 bytes | **done** | blosc2 `cbcb15b5`, superseded by `9bb345d3`, `7cbd48b7` |
 | 4 utf8 scalar predicates via raw-byte scan (`ME_UTF8` **not** built) | **done** | blosc2 `47b033c2` |
+| eval-block stride fix: string output past element 4096 | **done** | miniexpr `a6a694d` |
+| Chicago Taxi string benchmark vs numpy/pandas/polars/duckdb | **done** | blosc2 `bench/chicago-taxi/string-ops.py` |
+| 5 miniexpr varlen output (`me_eval_varlen`, Arrow offsets + blob) | **done** | miniexpr `src/miniexpr_varlen.c` |
+| 5 varlen intermediates in `eval_string_expr()` | **not built**, gated | — |
+| 5 blosc2 driver: `Utf8Array` results + computed columns over utf8 | **todo** | — |
 
-**Phases 1, 2 and 3 are complete.** Suites green: miniexpr 35/35; python-blosc2 7754 passed /
+**Phases 1, 2 and 3 are complete.** Suites green: miniexpr 36/36; python-blosc2 7754 passed /
 22 skipped (full `tests/`). Acceptance form 1 passes — the blog kernel as a `@blosc2.dsl_kernel`
 over `<U` NDArrays, byte-identical to the row-by-row Python version, with `strict_miniexpr=True`
 (`tests/ndarray/test_string_output.py::test_blog_kernel_as_dsl_kernel`). Acceptance form 2
@@ -79,10 +88,38 @@ Verified after the upstream switch: `arr == "hello"` over 1200 rows (chunks 400,
 boundary, and a 320-byte structured dtype round-trips — i.e. the non-string half of the bug is gone
 too.
 
-**Pre-push follow-up.** `BLOSC2_MIN_VERSION` in `python-blosc2/CMakeLists.txt` is still `3.2.1`,
-which is now too low: `blosc2_getitem_bytes_ctx()` is a build-time dependency, so a system c-blosc2
-in the 3.2.1–3.2.3 range passes the CMake gate and then fails at compile on the missing symbol. Bump
-it to `3.2.4` once that ships.
+**Pre-push follow-up — done.** `blosc2_getitem_bytes_ctx()` is a build-time dependency, so a system
+c-blosc2 too old to carry it would pass the CMake gate and then fail at compile on the missing
+symbol. `python-blosc2/CMakeLists.txt` now sets `BLOSC2_MIN_VERSION 3.3.0` and
+`BLOSC2_BUNDLED_VERSION v3.3.0`; the unreleased `bc074b22` SHA is commented out beside it.
+
+### The 4096-element eval-block bug (found while benchmarking)
+
+A **fifth** instance of the `dtype_size()`-returns-0-for-strings family below, missed when the other
+four were swept. `me_eval()` splits a block into `ME_EVAL_BLOCK_NITEMS` (4096) element chunks and
+advances the output pointer per chunk:
+
+```c
+const size_t output_item_size = dtype_size(clone->dtype);   /* 0 for ME_STRING */
+...
+clone->output = (unsigned char*)output_block + (size_t)offset * output_item_size;
+```
+
+With a stride of 0 every chunk after the first wrote back onto element 0, and everything past
+element 4096 of a block was left as `malloc`'d. Fixed to `me_get_itemsize(clone)`
+(miniexpr `a6a694d`), matching what `miniexpr_eval_nd.c:199` and `miniexpr_eval_dsl_nd.c:111`
+already did.
+
+**Why the whole of Phases 1–3 missed it.** It needs a block *wider than 4096 elements*, and nothing
+before the benchmark used one: the tests build small arrays whose auto-chosen blocks are well under
+that, and §3's span driver buckets to `<Un` widths whose blocks land under it too. It is also
+completely silent — elements 0..4095 of each block are correct, so a spot check of the head of the
+array passes. At 1 M rows with 8192-element blocks, `"x=" + arr` returned garbage for 77 % of its
+rows with no error raised anywhere.
+
+Regression test: `tests/ndarray/test_string_output.py::test_block_larger_than_the_eval_block`,
+which pins `blocks=(10000,)` explicitly — the assertion `arr.blocks[0] > 4096` is the part that
+matters, since an auto-chosen geometry would silently stop exercising the path.
 
 ### What the "Could not compress the data" blocker actually was
 
@@ -127,7 +164,11 @@ the reconstructed blog kernel in the tests does.
 
 ### Local build wiring (do not commit)
 
-`python-blosc2/CMakeLists.txt` is modified locally to build against `../miniexpr`:
+**Currently inactive**: `CMakeLists.txt` is pinned to `GIT_TAG a6a694d647f5633bfce639f41ac18c5bc4be64cf`
+(the eval-block fix) with `SOURCE_DIR` commented out, which is the shape it should be pushed in.
+Re-enable the local wiring only while iterating on miniexpr, and re-pin before pushing.
+
+To build against `../miniexpr`:
 
 ```cmake
 FetchContent_Declare(miniexpr
@@ -140,15 +181,9 @@ FetchContent clones the pinned tag *into* `SOURCE_DIR` and destroys the local ch
 already cost one full rebuild of Phase 1. Before pushing, revert this file and bump `GIT_TAG` to the
 merged miniexpr SHA instead.
 
-The same file also pins the bundled c-blosc2 to the unreleased SHA carrying
-`blosc2_getitem_bytes_ctx()`:
-
-```cmake
-set(BLOSC2_BUNDLED_VERSION bc074b228968d6121b3c8c1a38c0afc0bbf923f6)
-```
-
-Restore it to a release tag (`v3.2.4` or later) before pushing, together with the
-`BLOSC2_MIN_VERSION` bump noted above.
+The same file used to pin the bundled c-blosc2 to the unreleased SHA
+`bc074b228968d6121b3c8c1a38c0afc0bbf923f6` carrying `blosc2_getitem_bytes_ctx()`. That is
+**resolved**: it is on the `v3.3.0` release tag now, with the SHA left commented out beside it.
 
 ### Bugs found and fixed along the way
 
@@ -236,10 +271,11 @@ variable-length evaluator. The kernel must run **unmodified** — that is the po
 
 ## Sequencing
 
-Phase numbers are stable identifiers, **not** build order. Built **1 → 2**; Phase 3 is next. (The original order was 1 → 3 → 2; Phase 2 went first because it
-was bounded and self-contained, and Phase 3 grew a prerequisite — see §3b.) Phase 3 is on the
-critical path for the motivating workload; Phases 4 and 5 are gated on measurement and may never
-be built.
+Phase numbers are stable identifiers, **not** build order. Built **1 → 2 → 3 → 4 → 5**. (The
+original order was 1 → 3 → 2; Phase 2 went first because it was bounded and self-contained, and
+Phase 3 grew a prerequisite — see §3b.) Both measurement gates fired as intended and in opposite
+directions: Phase 4's said no and shipped a rewrite pass instead, Phase 5's said yes — and then
+building it showed most of its estimated cost was not real.
 
 ---
 
@@ -558,22 +594,190 @@ self-synchronising, so all five are correct as raw-byte operations.
 
 ---
 
-## Phase 5 — native Arrow varlen output in miniexpr (defer; ~2–3 months)
+## Phase 5 — native Arrow varlen output in miniexpr (**output half done**)
 
-A rewrite of the evaluator's buffer model, not an addition.
+miniexpr `me_eval_varlen()` + `me_varlen_data_bound()` (`src/miniexpr_varlen.c`). String
+expressions now emit the Arrow varlen layout — `int64` offsets plus a tight byte blob,
+`large_string` for `ME_STRING` (UTF-8) and `large_binary` for `ME_BYTES` (verbatim). DSL kernels
+included, since `me_eval()` dispatches the DSL program itself.
 
-1. **Intermediate buffers.** Every internal node is `malloc(nitems * sizeof(TYPE))` inside
-   `DEFINE_ME_EVAL`, sized by the C type of the instantiation. Varlen needs a parallel
-   `(offsets, data, capacity)` type threaded through all 12 instantiations plus the DSL
-   interpreter's masked-copy machinery. This is the bulk of the work.
-2. **Output contract.** `me_eval*` never allocates output. Varlen needs a new entry point.
-3. **Easy part:** a per-block total-byte bound is computable in one pass over the input offsets, so
-   bounded-preallocate works and dynamic growth is never needed.
-4. **blosc2 driver.** The prefilter is unusable regardless, so the span-loop driver is needed either
-   way — the same one Phase 3 builds.
+**The measured result, on the blog kernel's shape at 1 M rows**
+(`bench/benchmark_varlen_output.c`):
 
-~6–10 weeks miniexpr, ~2–3 weeks blosc2, against Phase 3's ~1.5–2. The entire payoff is one avoided
-copy per span, for utf8 and pandas alike. Same measurement gate as Phase 4, stricter.
+| | time | result |
+|---|---|---|
+| fixed-width `me_eval` | 819 ms | **336 B/row** |
+| `me_eval_varlen` | 914 ms | **34.8 B/row** |
+
+9.7× smaller for a 12 % pack overhead — and 34.8 B/row is *below* DuckDB's 35.9 in the benchmark
+table above, from `<U` operands, without touching the operand side. All three inflation factors
+(UCS4, the `lower()` bound, the padding) are gone from the result at once, because the bound is now
+spent on scratch only.
+
+### The cost estimate below was wrong, and that is why this got built
+
+**Strings never go through `DEFINE_ME_EVAL`'s buffer model.** Point 1 — "threaded through all 12
+instantiations", priced as the bulk of ~6–10 weeks — describes code that does not handle strings.
+String *production* lives entirely in `eval_string_expr()` (`functions.c:3084`), a separate
+bottom-up evaluator that allocates its own per-node buffers at `functions.c:3108-3114`. The 12
+numeric instantiations only ever *read* strings, through `string_view_at()`, for bool-returning
+predicates. The estimate predates Phases 1–3 actually being built and was never revisited against
+the code that resulted.
+
+### What shipped, and what it deliberately skips
+
+**Pack after evaluation, do not thread varlen buffers through the evaluator.** The intermediates
+stay fixed-width. They are per-block scratch that never reaches storage, so widening them buys
+nothing the measurement can see; what costs 336 B/row is the *stored* result, and packing on the way
+out deletes that for one extra pass over a block already in cache. `src/miniexpr_varlen.c` is ~120
+lines built only on the public API, with no coupling to `functions.c` at all.
+
+That leaves points 1 and 2 of the original design — varlen *intermediates* and an evaluator that
+never materialises a fixed-width block — unbuilt, and still gated. Their remaining payoff is the
+12 % pack pass plus the scratch allocation, against a rewrite of `eval_string_expr()`. Build it only
+if that pass shows up on a profile of a real workload; the `ponytail:` comment at the head of
+`miniexpr_varlen.c` names the upgrade path.
+
+Point 3 held as written: `me_varlen_data_bound()` is `nitems * itemsize`, exact for both dtypes
+(a UCS4 slot spends 4 bytes per codepoint and UTF-8 never needs more), so bounded-preallocate works
+and dynamic growth is never needed.
+
+### Still to do: the blosc2 side
+
+Point 4 stands — the prefilter is unusable for varlen output, so this needs the span-loop driver
+Phase 3 already built. Concretely, in python-blosc2:
+
+- have `_utf8_span_eval()` call `me_eval_varlen()` for string-returning expressions and concatenate
+  offsets across spans (add the running base to each span's offsets);
+- wrap the result in a `Utf8Array` rather than a `<Un` NDArray, which is what the §3 deviation
+  *"string-returning utf8 expressions have no caller"* was waiting for;
+- that also unblocks **computed columns over utf8**, which still raise today.
+
+Tests must pin the route, not just the values — the same trap as `strict_miniexpr` in Phase 1.
+
+### Two cheaper items from the ranked list, still unbuilt
+
+1. **Tighten the `lower`/`upper` bound on `U`** (`functions.c:2696`, marked `ponytail:`) — ~1.5× on
+   the fixed-width path, days not months. Varlen output makes this *irrelevant to the result* but
+   not to the scratch block, which is still sized at the 2×/3× bound.
+2. **Document `S` as the choice for ASCII/Latin-1 data** — zero work, still not written down
+   anywhere as a performance decision.
+
+### The gate now has evidence, and unlike Phase 4's it argues *for* building
+
+**Source of every number in this section:**
+`python-blosc2/bench/chicago-taxi/string-ops.py` — the `kernel` task, i.e. the blog kernel's shape
+run as a `@blosc2.dsl_kernel`. Its README section (`bench/chicago-taxi/README.md`,
+"String ops") carries the full-table results table and the reproduction commands; the plot is
+`bench/chicago-taxi/string-ops.png`. To regenerate:
+
+```bash
+cd python-blosc2/bench/chicago-taxi
+python string-ops.py                                   # full 24.3 M-row table
+python string-ops.py --nrows 1000000                   # the profiling scale used below
+python string-ops.py --engines "blosc2,blosc2 (raw)"   # compression cost only
+```
+
+At full scale that benchmark puts blosc2 at 3.2× DuckDB on the row-wise kernel. Profiling at 1 M
+rows says **the gap is entirely the `<U` representation, not the evaluator**:
+
+| same kernel, same code path | time | output |
+|---|---|---|
+| blosc2 `<U` operands | 300 ms | 404 B/row |
+| **blosc2 `S` operands** | **114 ms** | **54 B/row** |
+| duckdb | 111 ms | 35.9 B/row |
+| polars | 137 ms | 39.7 B/row |
+
+On `S` blosc2 is at DuckDB parity and ahead of polars, with the result still compressed to 2 MB.
+Values verified identical between the two paths. Three multiplicative factors inflate `<U`:
+
+1. **UCS4 — 4 bytes/codepoint.** The others hold UTF-8, ~1 B/char for this ASCII data.
+2. **The `lower()` width bound — 2×.** On `U` it must reserve for full-case expansion, so
+   `<U36`.lower() → `<U72` and the result is `<U101` where **54 suffices**. On `S`, case mapping is
+   ASCII-only and 1:1, so the bound is exact — this is most of the `S` win, and it is the
+   `ponytail:`-marked item from §"Deviations from the plan as written".
+3. **Fixed-width padding.** Mean result length is 31.7 chars in a 101-char slot.
+
+Everything else is secondary and was measured: operand decompression 23 ms; per-op interpreter cost
+~10 ns/row/op (a `strip()`-chain sweep at constant width gives +9–11 ms per added op per M rows), so
+~50 ms of the 300 for this 5-op kernel; `lazyudf` construction 0 (−6 ms, i.e. noise). Thread scaling
+is 3.9× on 8 cores, consistent with being bandwidth-bound on the wide output. For scale, a numeric
+DSL kernel over the same rows is 7.5 ms — strings are a scalar interpreter loop with no JIT, but at
+10 ns/row/op that is not the cost here.
+
+Compression itself costs **~45 %** of kernel time at full table (8.49 s vs 5.90 s at `clevel=0`) and
+buys 506× the memory (21 MB vs 10 881 MB). Take that ratio from repeated runs, not one pair: the
+`clevel=0` variant allocates 10.9 GB on a 24 GB machine and is the noisy one. Over five full-table
+runs, compressed 8.2–9.4 s (median 8.5) and raw 5.7–6.0 s (median 5.9) after discarding a 7.7 s
+first-run outlier.
+
+Even on `S`, blosc2 moves 54 B/row against DuckDB's 35.9 (31.7 data + 4 offset + 0.1 validity) —
+it pays the compile-time max on every row where they pay the mean plus an offset. **That residual
+1.4× is exactly what Phase 5 deletes**, along with factors 1 and 3 above. Ranked by payoff/effort:
+
+1. **Tighten the `lower`/`upper` bound on `U`** — ~1.5×, days not months. A 1:1 bound plus a slow
+   path for the ~100 expanding codepoints, or a runtime max-length probe per block.
+2. **Document `S` as the choice for ASCII/Latin-1 data** — zero work, already at DuckDB parity, and
+   currently not mentioned as a performance decision anywhere.
+3. **Phase 5** — removes UCS4, the bound and the padding together.
+
+---
+
+## Where the finished thing lands: the Chicago Taxi string benchmark
+
+`python-blosc2/bench/chicago-taxi/string-ops.py` — the string counterpart of the numeric
+`compare-query-methods.py` next to it, with its own section in `bench/chicago-taxi/README.md`.
+The real dataset's two string columns, `company` (`<U44`, 35 distinct values) and `payment.type`
+(`<U11`, 9), whole 24.3 M-row table by default. Every engine must agree or the run aborts —
+verification is a streaming digest (per-row lengths plus every 97th row exactly, in 512 K-row
+windows), because a 24 M-row `<U117` result is ~10 GB and nothing can hold a second copy.
+
+| task | expression |
+|---|---|
+| `filter` | `startswith(company, 'Taxi') & (payment_type != 'Cash')` → bool |
+| `transform` | `'co=' + company + '\|pay=' + lower(payment_type)` → str |
+| `kernel` | the same, branching on whether the company is a cab company |
+
+All three are timed; only `kernel` is plotted. `kernel` is the acceptance workload in miniature: the
+blog kernel's shape (row-wise control flow, string locals, branches of different widths), run as a
+`@blosc2.dsl_kernel`. Everyone else rewrites it as a mask plus two fully-evaluated branches.
+`blosc2 (raw)` is the identical path at `clevel=0`, so compression is the only variable between the
+two blosc2 rows.
+
+Full table, Apple M-series (8 cores, 24 GB), warm, best of 3:
+
+| | filter | transform | kernel | kernel result |
+|---|---|---|---|---|
+| **blosc2** | 648 ms | 3.86 s | 8.49 s | **21 MB** |
+| blosc2 (raw) | 279 ms | 1.92 s | 5.69 s | 10 881 MB |
+| pandas | 189 ms | 2.02 s | 5.19 s | 932 MB |
+| polars | 91 ms | 1.72 s | 3.62 s | 932 MB |
+| duckdb | 338 ms | 1.97 s | 2.95 s | 842 MB |
+
+At 1 M rows, for the profiling scale used in §Phase 5: blosc2 300 ms / 0.9 MB, pandas 208 / 37.9,
+polars 138 / 37.9, duckdb 114 / 34.2, numpy 708 / 417, pandas `.apply()` 21 400 ms.
+
+What it says:
+
+- **The DSL kernel is 69× `df.apply()`.** That is the whole proposition: the row-wise spelling stops
+  being the slow spelling.
+- **blosc2 holds everything compressed for a real but bounded price** — 21 MB against 842–932 MB,
+  at 1.4–2.9× the time of the columnar engines. The `<U` representation, not the evaluator, is what
+  costs the time; see §Phase 5 for the decomposition and for `S` reaching DuckDB parity.
+- **`filter` is blosc2's weakest task** (648 ms vs polars' 91). A bool result is 1 byte per row, so
+  there is no output-side compression win to offset the operand decompression. Consistent with
+  Phase 4's finding that predicate throughput is dominated by getting bytes to the kernel, not by
+  the kernel.
+- **NumPy is off by default** — its `kernel` builds five full-width `<U` temporaries, ~10 GB each at
+  24 M rows. At 1 M rows it loses on both time and memory.
+
+Two measurement traps this benchmark hit, worth not re-learning: `polars.Series.estimated_size()`
+reports the data buffer only and omits the 8 B/row offsets (~20 % low here), and converting each
+engine's result to NumPy before measuring turns Arrow varlen into an object array, which both
+mis-reports the footprint and charges the conversion to the engine's time.
+
+The benchmark is what surfaced the eval-block bug above: it is the first thing in either repo to run
+a string expression over blocks wider than 4096 elements.
 
 ---
 
@@ -583,9 +787,12 @@ copy per span, for utf8 and pandas alike. Same measurement gate as Phase 4, stri
 # miniexpr
 cd /Users/faltet/blosc/miniexpr && cmake -B build && cmake --build build -j && ctest --test-dir build
 ./build/tests/test_string_output && ./build/tests/test_dsl_guards
+./build/tests/test_varlen_output          # Phase 5 output half
+./build/bench/benchmark_varlen_output     # its footprint/overhead numbers
 ./check-whitespace.sh
 
-# python-blosc2 (CMakeLists must point SOURCE_DIR at ../miniexpr, see above)
+# python-blosc2 (CMakeLists is pinned to a pushed miniexpr SHA; point SOURCE_DIR at
+# ../miniexpr only while iterating, see above)
 cd /Users/faltet/blosc/python-blosc2 && pip install -e . --no-build-isolation
 pytest tests/ndarray/test_string_output.py tests/ndarray/test_lazyexpr.py -q
 pytest tests/ndarray/test_stringarrays.py tests/ctable/test_utf8.py -q
@@ -603,6 +810,13 @@ pytest tests/test_pandas_udf_engine.py tests/ndarray/test_jit_dsl_dispatch.py -q
 
 # confirm miniexpr is the engine, not the silent numpy fallback
 BLOSC_ME_JIT_TRACE=1 python bench/ndarray/stringops_bench.py   # expect engine=miniexpr
+
+# blocks wider than one miniexpr eval block (4096 elements)
+pytest tests/ndarray/test_string_output.py -q -k block_larger_than
+
+# the Chicago Taxi string benchmark; cross-checks all five engines byte for byte,
+# so it doubles as an end-to-end correctness run
+cd bench/chicago-taxi && python string-ops.py --nrows 1000000
 ```
 
 End-to-end acceptance, two forms of the same kernel:
