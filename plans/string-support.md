@@ -211,10 +211,10 @@ Four pre-existing defects surfaced; all block or corrupt the target workload.
   unit was always a terminator, costing a character of capacity everywhere and making the concat
   bound one short (`<U24` + `<U4` → `<U27`, where NumPy gives `<U28`). python-blosc2 passes numpy's
   `dtype.itemsize` straight through, so this was the real contract all along.
-- **`upper`/`lower` are not width-preserving.** NumPy uses Python's *full* case mapping, which
-  expands (`ß`→`SS`, `İ`→2 codepoints). Matching it costs a 3×/2× bound; a 1:1 table would have kept
-  the width but silently disagreed with the numpy fallback for the same expression. Marked with a
-  `ponytail:` comment naming the span-driver tightening as the upgrade path.
+- **`upper`/`lower` were given a 3×/2× bound. That was wrong** — see §5: NumPy is
+  width-preserving and truncates, so the reservation was wider than numpy rather than required by
+  it. Closed in miniexpr `5a7de4f`. (The alternative rejected here, a 1:1 *mapping table*, really
+  would disagree with numpy; truncating the full mapping does not.)
 - **`slen` dropped.** It is the only op in the set that takes a string and returns a number, so it
   needs a path through the numeric evaluators that no other op here uses. Add it on demand.
 
@@ -728,13 +728,63 @@ raises. Findings from scoping it:
 Tests must pin the route, not just the values — the same trap as `strict_miniexpr` in Phase 1 — and
 must include a save/reopen round trip, which is where the dtype problem shows up.
 
-### Two cheaper items from the ranked list, still unbuilt
+### `upper`/`lower` are width-preserving now (miniexpr `5a7de4f`)
 
-1. **Tighten the `lower`/`upper` bound on `U`** (`functions.c:2696`, marked `ponytail:`) — ~1.5× on
-   the fixed-width path, days not months. Varlen output makes this *irrelevant to the result* but
-   not to the scratch block, which is still sized at the 2×/3× bound.
-2. **Document `S` as the choice for ASCII/Latin-1 data** — zero work, still not written down
-   anywhere as a performance decision.
+The `ponytail:` item at `functions.c:2696` is closed, and the premise in §"Deviations" was wrong:
+**NumPy does not reserve for case expansion either.** `np.strings.upper` on `<Un` returns `<Un` and
+*truncates* — verified against numpy 2.4.6:
+
+```
+upper("straße") in <U6 -> "STRASS"      upper("ßßß") in <U3 -> "SSS"
+lower("İ")      in <U1 -> "i"
+```
+
+So the old 3×/2× reservation was *wider* than numpy, not a compatibility requirement. The bound is
+now the operand width; full case mapping still applies, only the slot no longer grows, which agrees
+with numpy exactly. `string_case_map()` already bounded every write by the slot, so truncation
+needed no code change. (The rejected alternative in §"Deviations" was a 1:1 *mapping table*,
+i.e. simple case mapping — that really would disagree with numpy. Truncating full mapping does not.)
+
+Chicago Taxi, full 24.3 M-row table, `kernel`: `<U101` → `<U54`.
+
+| | before | after |
+|---|---|---|
+| uncompressed (`blosc2 (raw)`) | 10 881 MB, 6 128 ms | **5 766 MB, 4 458 ms** |
+| compressed (`blosc2`) | 21.5 MB, 9 011 ms | 48.6 MB, 7 922 ms |
+
+Uncompressed halves and gets 27 % faster, which is what the change was for. Against DuckDB the
+`kernel` ratio goes from 3.2× to **2.68×** (7 922 ms vs 2 958 ms), still at 48.6 MB against 842.
+
+### …which exposed a much bigger blosc2 problem: **SHUFFLE on string output**
+
+The compressed column above got *worse* (21.5 → 48.6 MB). Not because narrower compresses worse —
+it does not — but because both results crossed **below the 255-byte typesize cap**. Above 255,
+c-blosc2 records typesize 1 ("treat as a 1-byte stream"), which silently disables SHUFFLE. `<U101`
+is 404 B and `<U54` is 216 B, so tightening the bound turned SHUFFLE *on* — at a typesize that is
+meaningless for text.
+
+Turning it back off recovers everything and more (1 M rows):
+
+| | before the bound change | after, default | after, `filters=[NOFILTER]` |
+|---|---|---|---|
+| `transform` | 134 ms / 0.81 MB | 183 ms / 2.01 MB | **117 ms / 0.78 MB** |
+| `kernel` | 314 ms / 0.90 MB | 291 ms / 2.01 MB | **230 ms / 0.80 MB** |
+
+**blosc2 should not shuffle string dtypes.** It only looked fine before because every string result
+this workload produced happened to exceed 255 bytes and had its typesize capped. This is a
+python-blosc2 default-cparams decision, not a miniexpr one, and it is worth more than anything left
+in Phase 5.
+
+**A second, unexplained anomaly found alongside it.** For the *same bytes* (verified byte-identical),
+same dtype, same chunks/blocks/blocksize/splitmode/typesize and same cparams, the prefilter write
+path compresses 3.2× worse than `blosc2.asarray()`: 2.01 MB vs 0.63 MB at 1 M rows. NOFILTER
+narrows it (0.78 vs 0.63) but does not close it. Worth a look on its own — it applies to every
+prefilter-written result, not just strings.
+
+### Still unbuilt
+
+- **Document `S` as the choice for ASCII/Latin-1 data** — zero work, still not written down
+  anywhere as a performance decision.
 
 ### The gate now has evidence, and unlike Phase 4's it argues *for* building
 
