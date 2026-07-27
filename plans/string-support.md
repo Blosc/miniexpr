@@ -784,22 +784,33 @@ targets ~105 KB blocks when left alone, and expression results do not.
 
 ### Where that leaves the benchmark
 
-Full 24.3 M-row table, after all three fixes:
+Full 24.3 M-row table, after the three fixes **plus switching the benchmark to LZ4 `clevel=5`**
+(ZSTD-5 was spending most of blosc2's time for a ratio nothing here needs — 68 MB against DuckDB's
+842 either way):
 
 | | filter | transform | kernel | kernel result |
 |---|---|---|---|---|
-| **blosc2** | 469 ms | **2.11 s** | **4.03 s** | **18 MB** |
-| duckdb | 334 ms | 1.99 s | 2.96 s | 842 MB |
-| polars | 92 ms | 1.75 s | 3.88 s | 932 MB |
-| pandas | 192 ms | 1.99 s | 5.12 s | 932 MB |
+| **blosc2** | **297 ms** | **1.22 s** | 3.09 s | **68 MB** |
+| blosc2 (raw) | 187 ms | 1.39 s | 3.58 s | 5 766 MB |
+| duckdb | 344 ms | 1.98 s | 2.96 s | 842 MB |
+| polars | 93 ms | 1.75 s | 3.87 s | 932 MB |
+| pandas | 192 ms | 2.07 s | 5.28 s | 932 MB |
 
-`kernel` went 9.01 s → 4.03 s and the DuckDB ratio 3.05× → **1.36×**; `transform` is at parity, and
-blosc2 beats pandas on both while holding the result in 46× less memory. Compression is now ~12 % of
-kernel time, down from ~45 %.
+`kernel` went **9.01 s → 3.09 s** and the DuckDB ratio **3.05× → 1.04×**; `transform` is now the
+fastest of all five engines (1.62× DuckDB); `filter` beats DuckDB too. Only polars' `filter` is
+ahead of blosc2 anywhere.
 
-Not applied, because it changes stock compression settings: ZSTD `clevel=1` gives `transform` 52 ms
-and `kernel` 127 ms at 1 M rows (DuckDB 71 and 112) for 1.0 MB instead of 0.75 — i.e. it would put
-blosc2 ahead on `transform` and within 1.15× on `kernel`.
+**Compression stopped costing anything.** The compressed run beats the `clevel=0` one on both
+`transform` (1.22 s vs 1.39) and `kernel` (3.09 s vs 3.58) — a compressed block is less memory
+traffic than a 5.8 GB uncompressed result — while storing 85× smaller.
+
+**The footgun to fix next.** `filters_meta` must be spelled out whenever a `CParams` is constructed
+for a `<U` array, or the code-unit shuffle width is silently lost: same `transform` at LZ4-5,
+6.55 MB / 77.6 ms with the `CParams` default against 2.72 MB / 48.9 ms with
+`filters_meta=[0,0,0,0,0,4]`. It hits `asarray()` too (operand cratio 171× vs 225×), so the right
+fix is library-wide — pick the code-unit width for `U` wherever a container is built and the caller
+left SHUFFLE's meta at 0. `CParams` alone cannot do it: it knows the typesize but not the kind, and
+`S220` and `<U55` both have typesize 220 while wanting different widths.
 
 ### Still unbuilt
 
