@@ -804,26 +804,32 @@ ahead of blosc2 anywhere.
 tasks — a compressed block is less memory traffic than a 5.8 GB uncompressed result — while storing
 85× smaller.
 
-**What to do about SHUFFLE on strings — the earlier note in this file was half right.** SHUFFLE
-de-interleaves byte positions *within* an item: right for numeric data, where byte 0 of every float
-is a column of similar values, pointless for text, where it scatters each string across its slot.
-Measured three ways on `transform`, 1 M rows, LZ4-5, blosc2 alone in the process:
+**SHUFFLE on strings is a time/ratio tradeoff, not a mistake.** This file said "blosc2 should not
+shuffle string dtypes" at one point and that was too strong. The stock default for `<U` is SHUFFLE
+with `filters_meta` 4 — shuffle by the UCS4 code unit, which separates the ASCII payload byte from
+the three mostly-zero high bytes — and **that is the right default for ratio**. Measured both ways,
+1 M rows, blosc2 alone in the process:
 
-| | time | stored |
-|---|---|---|
-| **no filters** | **44.0 ms** | 2.8 MB |
-| SHUFFLE, width 4 (what a `<U` container picks) | 49.3 ms | 2.7 MB |
-| SHUFFLE, width = itemsize (what `CParams()` gives) | 75.8 ms | 6.6 MB |
+| codec | filters | filter | transform | kernel | result | operand cratio |
+|---|---|---|---|---|---|---|
+| ZSTD-5 | none | 10.0 ms | 80.3 ms | 149.3 ms | 1.08 MB | 860× |
+| ZSTD-5 | **SHUFFLE meta=4** (default) | 15.9 | 80.4 | 155.5 | **0.75 MB** | **1321×** |
+| LZ4-5 | none | 7.2 | 43.9 | 118.1 | 2.76 MB | 198× |
+| LZ4-5 | SHUFFLE meta=4 | 12.4 | 50.5 | 124.8 | 2.70 MB | 225× |
 
-`filter` shows it most: 7.3 ms against 11.9. So **no filters is the right default for string
-dtypes** — not "fix the meta", which only recovers most of what SHUFFLE costs in the first place.
-The width bug above is still real and still worth its fix, because SHUFFLE *is* the stock default
-and anyone who keeps it should at least get the good width; but the better answer for `U`/`S` is to
-drop the filter. `CParams` cannot decide this alone: it knows the typesize but not the kind, and
-`S220` and `<U55` both have typesize 220.
+Shuffle buys 1.4× ratio under ZSTD (and 1.5× on the operands), and ~2 % under LZ4 where the codec
+already handles the zero runs. It costs time in both, most on `filter` — that task writes 1 byte per
+row, so the un-shuffle on the operand side has nothing on the output side to offset it.
+
+So: **keep the default when ratio matters; drop filters for throughput.** The benchmark drops them
+because its memory win is overwhelming either way (2.8 MB against DuckDB's 34).
+
+The width bug fixed in `bbb94f45` is unaffected by any of this and still matters, because SHUFFLE
+*is* the stock default: `[0,…,0]` means "shuffle by the whole item", which is neither of the rows
+above — it is strictly worse than both (6.6 MB / 75.8 ms on the LZ4 `transform`).
 
 `filters_meta` is only consulted for the filter it belongs to, so with SHUFFLE off it is irrelevant
-— verified: no-shuffle gives the same 198×/2.78 MB at meta 0 and meta 4.
+— verified: no-shuffle gives the same 198× / 2.78 MB at meta 0 and meta 4.
 
 ### Still unbuilt
 
