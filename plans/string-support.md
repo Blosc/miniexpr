@@ -761,10 +761,25 @@ Uncompressed halves and gets 27 % faster, which is what the change was for. Agai
 ### …which exposed two much bigger blosc2 problems
 
 The compressed column above got *worse* (21.5 → 48.6 MB). Not because narrower compresses worse —
-it does not — but because both results crossed **below the 255-byte typesize cap**. Above 255,
-c-blosc2 records typesize 1 ("treat as a 1-byte stream"), which silently disables SHUFFLE. `<U101`
-is 404 B and `<U54` is 216 B, so tightening the bound turned SHUFFLE *on* — at a typesize that is
-meaningless for text.
+it does not — but because both results crossed **below the 255-byte typesize cap**, and that cap had
+been masking the `filters_meta` bug. Above 255, c-blosc2 records typesize 1 ("treat as a 1-byte
+stream"), so `filters_meta` 0 — "shuffle by the typesize" — degrades to a harmless shuffle-by-1.
+Below it, the same 0 means shuffle by the real 216 bytes. Same values, same everything else:
+
+| width | `filters_meta` | header typesize | stored |
+|---|---|---|---|
+| `<U66` (264 B, over the cap) | 4 | 1 | 0.78 MB |
+| `<U66` | 0 | 1 | 1.10 MB |
+| `<U54` (216 B, under the cap) | 4 | 216 | **0.75 MB** |
+| `<U54` | 0 | 216 | **2.64 MB** |
+
+So the bug cost 1.4× while results were wide and 3.5× once they were narrow. `<U101` is 404 B and
+`<U54` is 216 B, so tightening the bound is what moved it from latent to severe — and is why it
+survived Phases 1–3 unnoticed.
+
+**This is not what decided `<U` against varlen.** That comparison ran at `<U66`, above the cap,
+where the bug was the mild 1.4× — and `<U` won it 0.81 MB against varlen's 1.14 anyway. With the
+width fixed it wins by more (0.78). The bug and the representation verdict are independent.
 
 **1. Expression results were losing SHUFFLE's code-unit width** (blosc2 `bbb94f45`). The
 3.2×-worse-than-`asarray()` anomaly noted here earlier is solved, and it was not the cap: for
