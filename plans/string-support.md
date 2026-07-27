@@ -34,7 +34,8 @@ benchmark".
 | Chicago Taxi string benchmark vs numpy/pandas/polars/duckdb | **done** | blosc2 `bench/chicago-taxi/string-ops.py` |
 | 5 miniexpr varlen output (`me_eval_varlen`, Arrow offsets + blob) | **done** | miniexpr `src/miniexpr_varlen.c` |
 | 5 varlen intermediates in `eval_string_expr()` | **not built**, gated | — |
-| 5 blosc2 driver: `Utf8Array` results + computed columns over utf8 | **todo** | — |
+| 5 blosc2: `Utf8Array` results from the utf8 span driver | **done** | blosc2 `9cb490ac` |
+| 5 blosc2: computed columns over utf8 | **todo** — persistence caveat in §5 | — |
 
 **Phases 1, 2 and 3 are complete.** Suites green: miniexpr 36/36; python-blosc2 7754 passed /
 22 skipped (full `tests/`). Acceptance form 1 passes — the blog kernel as a `@blosc2.dsl_kernel`
@@ -642,18 +643,46 @@ Point 3 held as written: `me_varlen_data_bound()` is `nitems * itemsize`, exact 
 (a UCS4 slot spends 4 bytes per codepoint and UTF-8 never needs more), so bounded-preallocate works
 and dynamic growth is never needed.
 
-### Still to do: the blosc2 side
+### The blosc2 side: driver done, caller not
 
-Point 4 stands — the prefilter is unusable for varlen output, so this needs the span-loop driver
-Phase 3 already built. Concretely, in python-blosc2:
+**Done** (blosc2 `9cb490ac`): `_utf8_span_eval()` returns a **`Utf8Array`** for string-returning
+expressions, extended span by span, so only one span's `<Un` block is ever live and each stored row
+costs its own UTF-8 length. Bool and numeric results are untouched. Nulls keep §3c's policy — the
+sentinel goes back into the values and the result spec carries it. This is the contagion rule from
+§Decisions, and it closes the §3 deviation *"nothing wraps the result in a `Utf8Array`"*.
 
-- have `_utf8_span_eval()` call `me_eval_varlen()` for string-returning expressions and concatenate
-  offsets across spans (add the running base to each span's offsets);
-- wrap the result in a `Utf8Array` rather than a `<Un` NDArray, which is what the §3 deviation
-  *"string-returning utf8 expressions have no caller"* was waiting for;
-- that also unblocks **computed columns over utf8**, which still raise today.
+**`me_eval_varlen()` is deliberately not wired into this path, and should not be until there is a
+caller that wants it.** The span driver's only consumers today are `where()` and `sum(where=)`,
+both **boolean** — and a boolean result has no varlen output to speak of. Threading
+`me_eval_varlen()` in means exposing it through `blosc2_ext` and adding a compute route that
+bypasses the prefilter, to save a `<Un` span buffer that `_UTF8_EXPR_BUDGET` already caps at 64 MiB.
+Do it after a string-returning caller exists and shows up on a profile, not before.
 
-Tests must pin the route, not just the values — the same trap as `strict_miniexpr` in Phase 1.
+### Still to do: computed columns over utf8
+
+This is the caller. `_normalize_expression_transformer` (`ctable.py:9787`) calls
+`_guard_scalar_expression(expr)` without `allow_utf8`, so `add_computed_column` over a utf8 column
+raises. Findings from scoping it:
+
+- **The "needs a `LazyExpr`, not a materialized value" objection is already answered in the file.**
+  `_build_computed_lazy()` (`ctable.py:9937`) *eagerly materializes* its DSL branch —
+  `lazyudf(...).compute()` on every access — precisely because the miniexpr DSL path cannot do
+  partial-slice getitem. A utf8 entry follows that precedent: run the span driver, return the
+  `Utf8Array`. Consumers slice it (`lazy[int]`, `lazy[a:b]`), which `Utf8Array` supports.
+- **Persistence is the part that will bite.** `_schema_dict_with_computed()` (`ctable.py:9216`)
+  writes `str(cc["dtype"])` and `_load_computed_cols_from_schema()` (`ctable.py:9445`) reads it back
+  with `np.dtype(...)`. For a utf8 result the dtype is `np.dtypes.StringDType()`, and
+  `np.dtype("StringDType()")` raises — so the column would save fine and then make the table
+  **unopenable**. Serialize a sentinel (`"utf8"`) and map it back, and audit the
+  `np.asarray(..., dtype=cc["dtype"])` call sites (`ctable.py:5229`, `9679`, `11287`) for the same
+  assumption.
+- Then: a new `kind: "utf8_expression"` descriptor through
+  `_normalize_transformer` / `add_computed_column` / `_build_computed_lazy` / serialize / reload,
+  `_readable_computed_expr`, `materialize_computed_column` (target spec should be `utf8()`), and
+  `where()` over such a column.
+
+Tests must pin the route, not just the values — the same trap as `strict_miniexpr` in Phase 1 — and
+must include a save/reopen round trip, which is where the dtype problem shows up.
 
 ### Two cheaper items from the ranked list, still unbuilt
 
