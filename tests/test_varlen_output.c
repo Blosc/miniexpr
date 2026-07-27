@@ -122,10 +122,10 @@ static void test_concat_packs_tight(void) {
     me_free(expr);
 }
 
-/* The reason this is worth having: lower() reserves a 2x expansion bound on
- * 'U', so the fixed-width result is 8x the bytes the values actually use. */
+/* Fixed-width pays the operand's full width on every row, however short the
+ * values are; varlen pays each row its own length. */
 static void test_case_bound_is_scratch_only(void) {
-    TEST("lower(a) pays its 2x bound on scratch, not on the result");
+    TEST("lower(a) pays its slot width on scratch, not on the result");
     const size_t au = 8;
     uint32_t a[ITEMS * 8];
     put(a, au, 0, "HOME");
@@ -158,9 +158,9 @@ static void test_case_bound_is_scratch_only(void) {
     expect_value(offsets, data, 2, "loft", "lower");
     expect_value(offsets, data, 3, "suite", "lower");
 
-    /* itemsize is 8 units * 2 (case bound) * 4 (UCS4) = 64 bytes per row. */
-    if (me_get_itemsize(expr) != 64) {
-        fail("%s: expected a 64-byte fixed slot", "lower");
+    /* lower() is width-preserving, like numpy: 8 units * 4 (UCS4) = 32 bytes. */
+    if (me_get_itemsize(expr) != 32) {
+        fail("%s: expected a 32-byte fixed slot", "lower");
     }
     if (used != 17) {
         printf("  FAIL lower: used %zu bytes, expected 17\n", used);

@@ -381,6 +381,74 @@ static void test_case_expansion(void) {
     me_free(expr);
 }
 
+/* NumPy is width-preserving for case mapping and truncates when the expansion
+ * does not fit: np.strings.upper(np.array(["straße"], dtype="<U6")) is <U6
+ * "STRASS", and lower() of "İ" in <U1 is "i".  Verified against numpy 2.4.6. */
+static void test_case_mapping_is_width_preserving(void) {
+    TEST("upper()/lower() keep the operand width and truncate like NumPy");
+    const size_t au = 6;
+    uint32_t a[ITEMS * 6];
+    const uint32_t straesse[] = {'s', 't', 'r', 'a', 0x00DF, 'e'};  /* upper -> 7 cp */
+    for (int i = 0; i < ITEMS; i++) {
+        memcpy(a + (size_t)i * au, straesse, sizeof(straesse));
+    }
+
+    me_variable vars[] = {
+        {"a", ME_STRING, a, ME_VARIABLE, NULL, au * sizeof(uint32_t)},
+    };
+
+    int err;
+    me_expr *expr = NULL;
+    int rc = me_compile("upper(a)", vars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: compilation error %d at %d\n", rc, err);
+        tests_failed++;
+        return;
+    }
+    /* No 3x reservation: the result is as wide as the operand, not <U18. */
+    expect_itemsize(expr, au * sizeof(uint32_t), "upper width");
+
+    uint32_t out[ITEMS * 6];
+    memset(out, 0xFF, sizeof(out));
+    const void *ptrs[] = {a};
+    ME_EVAL_CHECK(expr, ptrs, 1, out, ITEMS);
+    for (int i = 0; i < ITEMS; i++) {
+        expect_slot(out, au, i, "STRASS", "upper truncates");
+    }
+    me_free(expr);
+
+    /* lower(): the whole 2x bound existed for U+0130 alone. */
+    uint32_t b[ITEMS * 1];
+    for (int i = 0; i < ITEMS; i++) {
+        b[i] = 0x0130;  /* lower -> U+0069 U+0307 */
+    }
+    me_variable bvars[] = {
+        {"b", ME_STRING, b, ME_VARIABLE, NULL, sizeof(uint32_t)},
+    };
+    expr = NULL;
+    rc = me_compile("lower(b)", bvars, 1, ME_AUTO, &err, &expr);
+    if (rc != ME_COMPILE_SUCCESS) {
+        printf("  FAIL: compilation error %d at %d\n", rc, err);
+        tests_failed++;
+        return;
+    }
+    expect_itemsize(expr, sizeof(uint32_t), "lower width");
+
+    uint32_t bout[ITEMS * 1];
+    memset(bout, 0xFF, sizeof(bout));
+    const void *bptrs[] = {b};
+    ME_EVAL_CHECK(expr, bptrs, 1, bout, ITEMS);
+    for (int i = 0; i < ITEMS; i++) {
+        if (bout[i] != 0x0069) {
+            printf("  FAIL lower truncates at [%d]: got U+%04X\n", i, bout[i]);
+            tests_failed++;
+            break;
+        }
+    }
+    printf("  PASS case mapping is width-preserving\n");
+    me_free(expr);
+}
+
 static void test_strip_family(void) {
     static const char *in[ITEMS] = {"  pad  ", "left  ", "  right", "none"};
     static const char *both[ITEMS] = {"pad", "left", "right", "none"};
@@ -594,6 +662,7 @@ int main(void) {
     test_numeric_add_unaffected();
     test_case_mapping();
     test_case_expansion();
+    test_case_mapping_is_width_preserving();
     test_strip_family();
     test_prefix_suffix();
     test_split_part();

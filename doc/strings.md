@@ -5,7 +5,7 @@ supported string operations. They differ only in code-unit width:
 
 | dtype | code unit | NumPy | case mapping |
 |---|---|---|---|
-| `ME_STRING` | 4 bytes (UCS4) | `<Un` | full Unicode, can expand |
+| `ME_STRING` | 4 bytes (UCS4) | `<Un` | full Unicode, truncating |
 | `ME_BYTES` | 1 byte | `Sn` | ASCII-only, 1:1 |
 
 Everything below applies to both unless it says otherwise. The two **never mix**
@@ -68,11 +68,14 @@ With the separator absent it yields the whole string for `k == 0` and the empty
 string for `k > 0`, where Python's unpack would raise. Guard with `contains()`
 first if you need Python's behaviour.
 
-For `ME_STRING`, `upper`/`lower` are **not** width-preserving: Python's full
-case mapping expands (`ß` -> `SS`, `İ` -> two codepoints), so the bound is 3x for
-`upper` and 2x for `lower`. This matches NumPy; a 1:1 table would keep the width
-but disagree. For `ME_BYTES` the mapping is ASCII-only, exactly as NumPy does for
-`S`, so the width is preserved and bytes >= 0x80 are left alone.
+`upper`/`lower` are **width-preserving**, as NumPy is. They apply Python's
+full case mapping, which can expand (`ß` -> `SS`, `İ` -> two codepoints), and a
+value whose mapping does not fit its slot is **truncated** — exactly what
+`np.strings.upper` does, e.g. `"straße"` in `<U6` gives `"STRASS"`. Widen the
+operand if you need the expansion to survive.
+
+For `ME_BYTES` the mapping is ASCII-only, again as NumPy does for `S`, so it is
+1:1 and bytes >= 0x80 are left alone.
 
 `strip`/`lstrip`/`rstrip` trim Unicode whitespace for `ME_STRING` and
 `bytes.strip()`'s ASCII set for `ME_BYTES`, again matching NumPy.
@@ -94,8 +97,10 @@ size_t itemsize = me_get_itemsize(expr);   /* bytes per output element */
 
 Callers must allocate the output with exactly that itemsize — `me_eval()` and
 `me_eval_nd()` write `me_get_itemsize(expr)` bytes per element and never
-allocate. The bound may be wider than the exact answer (a `replace` that grows,
-a case mapping that expands); values are identical and nothing ever truncates.
+allocate. The bound may be wider than the exact answer (a `replace` that
+grows); values are identical. The one operation that can lose data is a case
+mapping that expands past its slot, which truncates — see above, and NumPy does
+the same.
 
 An expression whose width cannot be bounded statically is rejected at compile
 time rather than evaluated.
@@ -106,9 +111,9 @@ the single call to size any output buffer.
 ## Varlen output (Arrow offsets + byte blob)
 
 The conservative bound above is what a *fixed-width* result costs. It is often
-far wider than the values need: `lower(a)` on a `<U8` operand reserves a 2x
-case-expansion bound at 4 bytes per codepoint, so a 4-character result sits in
-a 64-byte slot.
+far wider than the values need: a `<U8` operand spends 32 bytes on a row
+whether the value is 8 codepoints or 1, and a concat bound adds its operands'
+widths whatever the values do.
 
 `me_eval_varlen()` writes the same values in the Arrow varlen layout instead —
 `int64` offsets plus a tight byte blob — so the bound is spent on scratch and

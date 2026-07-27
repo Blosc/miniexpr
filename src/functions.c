@@ -2693,18 +2693,18 @@ static size_t infer_output_itemsize_u(const me_expr* n, size_t unit) {
         return arg0 + b;
     }
 
-    /* Case mapping can expand: U+00DF -> "SS" on upper, U+0130 -> 2 cp on lower.
-     * ponytail: flat 3x/2x worst-case bound.  A tight bound needs a pass over
-     * the data, which the python-blosc2 span driver could do since it already
-     * scans each span; revisit there if the width inflation shows up.
-     * Bytes use NumPy's ASCII-only mapping, which is 1:1, so no growth. */
-    if (n->function == (void*)str_upper) {
-        if (arg0 == 0) return 0;
-        return (unit == 1) ? arg0 : arg0 * 3;
-    }
-    if (n->function == (void*)str_lower) {
-        if (arg0 == 0) return 0;
-        return (unit == 1) ? arg0 : arg0 * 2;
+    /* Width-preserving, which is what NumPy does.  Case mapping can expand
+     * (U+00DF -> "SS" on upper, U+0130 -> 2 cp on lower), and np.strings.upper
+     * on <Un returns <Un and truncates when the mapping does not fit: "straße"
+     * in <U6 gives "STRASS".  Full case mapping is still applied here -- only
+     * the slot stays the operand's width -- so this agrees with numpy exactly.
+     *
+     * This used to reserve 3x (upper) / 2x (lower) so no value could ever be
+     * truncated, which was both wider than numpy and paid on every row for a
+     * handful of codepoints: the lower table has exactly one expanding entry.
+     * string_case_map() bounds every write by the slot, expansions included. */
+    if (n->function == (void*)str_upper || n->function == (void*)str_lower) {
+        return arg0;
     }
 
     /* Ops that can only shrink or preserve their first operand. */
