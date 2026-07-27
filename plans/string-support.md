@@ -3,8 +3,10 @@
 ## Status
 
 Branch `dsl-string-support` in both repos.  Phases **1, 2 and 3 are done** — both acceptance forms
-pass, and utf8 string expressions now run through the span-loop driver.  Phases 4 and 5 remain
-gated on measurement and may never be built.
+pass, and utf8 string expressions now run through the span-loop driver.  **Phase 4 is closed
+without building `ME_UTF8`**: its measurement gate came back against it, and the rewrite pass that
+shipped instead reaches the same target 5–6× faster than before (see §4).  Phase 5 remains gated on
+measurement and is unlikely to ever be worth it.
 
 | step | state | commit |
 |---|---|---|
@@ -23,6 +25,7 @@ gated on measurement and may never be built.
 | 3b pandas 3 fixed-width `str` columns | **done** | blosc2 `729a2082` |
 | 3, 3a, 3c: utf8 span driver, `utf8_array`, null policy | **done** | blosc2 `cd6317df`, `332ac400` |
 | prefilter fix: operands wider than 255 bytes | **done** | blosc2 `cbcb15b5` |
+| 4 utf8 scalar predicates via raw-byte scan (`ME_UTF8` **not** built) | **done** | blosc2 `47b033c2` |
 
 **Phases 1, 2 and 3 are complete.** Suites green: miniexpr 35/35; python-blosc2 7703 passed /
 22 skipped (full `tests/`). Acceptance form 1 passes — the blog kernel as a `@blosc2.dsl_kernel`
@@ -436,7 +439,65 @@ predicates over nulls returning `False`, and a `null_count == 0` fast path.
 
 ---
 
-## Phase 4 — native utf8 predicates (optional; gate on measurement; ~1–1.5 weeks)
+## Phase 4 — native utf8 predicates: **measured, not built** (the gate said no)
+
+**`ME_UTF8` was not added to miniexpr.** The plan made this phase conditional on measurement, and
+the measurement came back against it. What shipped instead is a rewrite pass in python-blosc2
+(blosc2 `47b033c2`) that reaches the same target for a fraction of the cost.
+
+### The measurement
+
+1M rows, `<U32`-class values, `t.where("name == 'x'")` on a utf8 column — the cost of Phase 3's
+span driver, broken down:
+
+| step | ms |
+|---|---|
+| decode (StringDType read) | 27.1 |
+| `+ astype(<U32)` | 115.6 |
+| `blosc2.asarray(span)` — feeding miniexpr | 45.7 |
+| **miniexpr eval** | **19.6** |
+| full expression path | 262.9 |
+| operator form `t[t.name == "x"]` (raw bytes, no decode) | **53.0** |
+
+miniexpr is 19.6 ms of 263. A native `ME_UTF8` would delete the decode and the astype and land at
+roughly the operator form's 53 ms — which is exactly what `Column._utf8_scalar_mask` already does
+today, in NumPy, for free. The 1–1.5 weeks of threading a new dtype through all 12 evaluator
+instantiations buys what a regex rewrite pass buys. This is precisely the risk the gate was written
+to catch.
+
+### What shipped instead
+
+`CTable._rewrite_utf8_predicates()` — mirroring the `_rewrite_dictionary_predicates` pass that
+already sat next to it. A `utf8col <cmp> 'literal'` term (both operand orders, all six comparisons)
+is answered by the raw-byte scan and substituted into the expression as a **boolean operand**, so
+the rest of the expression stays one native expression. A utf8 name drops out of the span driver's
+work list only when *every* occurrence was rewritten, so `startswith`/`contains`/`upper` still route
+to §3, and a mixed expression like `startswith(name, 'x') | (name == 'zz')` rewrites the half it can.
+
+| case | before | after | |
+|---|---|---|---|
+| 1M rows, short (~8 B) | 156.5 ms | 28.2 ms | 5.5× |
+| 1M rows, medium (~31 B) | 267.5 ms | 56.3 ms | 4.8× |
+| 200k rows, long (~105 B) | 97.7 ms | 16.0 ms | 6.1× |
+
+The expression form now matches the operator form, which was Phase 4's actual target. Tests assert
+which **route** an expression takes, not just its answer — correctness alone cannot tell the two
+apart, which is the same trap as the `strict_miniexpr` one in Phase 1.
+
+### When to revisit `ME_UTF8`
+
+Three things would change the verdict, none of them true today:
+
+- **`contains`/`startswith`/`endswith` on utf8 become hot.** They have no raw-byte helper, so they
+  still pay the full decode → `<Un` → miniexpr trip. The cheap answer is another NumPy span helper
+  next to `equal_mask_span`, not a miniexpr dtype — try that first.
+- **Predicates need to fuse with heavy numeric work** in one pass over the data. The rewrite pass
+  materializes each mask separately; only a real dtype would fuse them.
+- **The decode itself shows up on a profile of a real workload**, rather than in a microbenchmark.
+
+The original design is kept below for whoever revisits it.
+
+### Original design (unbuilt)
 
 Fast path under Phase 3 for predicate-only expressions: `==`, `!=`, `contains`, `startswith`,
 `endswith` return bool, so no variable-length *output* machinery is needed. UTF-8 is
@@ -450,10 +511,6 @@ self-synchronising, so all five are correct as raw-byte operations.
   existing check fires. No new validation code.
 - **Nulls:** taken only when `null_count == 0`; otherwise fall through to §3.
 - **Driver selection:** any string-returning node in the tree → §3's driver; otherwise this one.
-
-**Why gated:** its competition is not §3's decode but the *existing* numpy code —
-`equal_mask_span` / `order_masks_span` (`utf8_array.py:552-624`) already compare raw bytes with no
-decode. Build Phase 3, profile, and only pay for this if predicate filtering is demonstrably hot.
 
 ---
 
