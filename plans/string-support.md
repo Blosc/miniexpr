@@ -758,7 +758,7 @@ Chicago Taxi, full 24.3 M-row table, `kernel`: `<U101` → `<U54`.
 Uncompressed halves and gets 27 % faster, which is what the change was for. Against DuckDB the
 `kernel` ratio goes from 3.2× to **2.68×** (7 922 ms vs 2 958 ms), still at 48.6 MB against 842.
 
-### …which exposed a much bigger blosc2 problem: **SHUFFLE on string output**
+### …which exposed two much bigger blosc2 problems
 
 The compressed column above got *worse* (21.5 → 48.6 MB). Not because narrower compresses worse —
 it does not — but because both results crossed **below the 255-byte typesize cap**. Above 255,
@@ -766,23 +766,40 @@ c-blosc2 records typesize 1 ("treat as a 1-byte stream"), which silently disable
 is 404 B and `<U54` is 216 B, so tightening the bound turned SHUFFLE *on* — at a typesize that is
 meaningless for text.
 
-Turning it back off recovers everything and more (1 M rows):
+**1. Expression results were losing SHUFFLE's code-unit width** (blosc2 `bbb94f45`). The
+3.2×-worse-than-`asarray()` anomaly noted here earlier is solved, and it was not the cap: for
+byte-identical data with identical geometry and headers, the only difference was `filters_meta` —
+`[0,…,0]` on the expression path against `[0,…,4]` on `asarray`'s. That entry is SHUFFLE's element
+width. Left alone the container picks **4** for `<U`, the UCS4 code unit, so shuffle groups the
+(mostly zero) high bytes of every codepoint; `CParams` defaults it to all zeros, meaning "shuffle by
+the whole item", which scatters characters across the slot. Merely *constructing* a `CParams` to set
+something unrelated erased it, at three sites. Fixed by letting the container choose, plus a
+`_restore_code_unit_shuffle()` helper where an explicit `CParams` is genuinely needed.
 
-| | before the bound change | after, default | after, `filters=[NOFILTER]` |
-|---|---|---|---|
-| `transform` | 134 ms / 0.81 MB | 183 ms / 2.01 MB | **117 ms / 0.78 MB** |
-| `kernel` | 314 ms / 0.90 MB | 291 ms / 2.01 MB | **230 ms / 0.80 MB** |
+**2. Result blocks are sized from the operands' row count, not the result's width.** A string result
+is far wider per row than its operands, so a block shape tuned for `<U36` operands gave 1.7 MB
+blocks for a `<U54` result — out of cache. The benchmark's own pin was the visible instance
+(fixed in blosc2 `f78f6571`), but the inheritance rule is general and still there: `asarray()`
+targets ~105 KB blocks when left alone, and expression results do not.
 
-**blosc2 should not shuffle string dtypes.** It only looked fine before because every string result
-this workload produced happened to exceed 255 bytes and had its typesize capped. This is a
-python-blosc2 default-cparams decision, not a miniexpr one, and it is worth more than anything left
-in Phase 5.
+### Where that leaves the benchmark
 
-**A second, unexplained anomaly found alongside it.** For the *same bytes* (verified byte-identical),
-same dtype, same chunks/blocks/blocksize/splitmode/typesize and same cparams, the prefilter write
-path compresses 3.2× worse than `blosc2.asarray()`: 2.01 MB vs 0.63 MB at 1 M rows. NOFILTER
-narrows it (0.78 vs 0.63) but does not close it. Worth a look on its own — it applies to every
-prefilter-written result, not just strings.
+Full 24.3 M-row table, after all three fixes:
+
+| | filter | transform | kernel | kernel result |
+|---|---|---|---|---|
+| **blosc2** | 469 ms | **2.11 s** | **4.03 s** | **18 MB** |
+| duckdb | 334 ms | 1.99 s | 2.96 s | 842 MB |
+| polars | 92 ms | 1.75 s | 3.88 s | 932 MB |
+| pandas | 192 ms | 1.99 s | 5.12 s | 932 MB |
+
+`kernel` went 9.01 s → 4.03 s and the DuckDB ratio 3.05× → **1.36×**; `transform` is at parity, and
+blosc2 beats pandas on both while holding the result in 46× less memory. Compression is now ~12 % of
+kernel time, down from ~45 %.
+
+Not applied, because it changes stock compression settings: ZSTD `clevel=1` gives `transform` 52 ms
+and `kernel` 127 ms at 1 M rows (DuckDB 71 and 112) for 1.0 MB instead of 0.75 — i.e. it would put
+blosc2 ahead on `transform` and within 1.15× on `kernel`.
 
 ### Still unbuilt
 
