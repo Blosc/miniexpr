@@ -8675,7 +8675,10 @@ int me_eval(const me_expr* expr, const void** vars_block,
         private_eval(clone);
     }
     else {
-        const size_t output_item_size = dtype_size(clone->dtype);
+        /* me_get_itemsize, not dtype_size: strings carry their width in the node.
+           dtype_size() returns 0 for ME_STRING, which collapses every eval block
+           onto element 0. */
+        const size_t output_item_size = me_get_itemsize(clone);
         const int max_var_nodes = count_variable_nodes(clone);
         me_expr** var_nodes = NULL;
         int* var_indices = NULL;
