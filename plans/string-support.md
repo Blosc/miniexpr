@@ -334,10 +334,13 @@ expression touches a utf8 column, and `where()` / `sum(where=)` call that instea
 kwarg *value*. Reserved future spelling, if the containers ever converge:
 `blosc2.array(seq, dtype=np.dtypes.StringDType())`.
 
-One wrinkle the plan did not anticipate: the public name shadows the internal module
-`blosc2.utf8_array`. `from blosc2.utf8_array import X` still resolves (import machinery finds the
-submodule), but attribute-path lookups do not — two `monkeypatch.setattr("blosc2.utf8_array.…")`
-call sites in the tests now go through `sys.modules`.
+One wrinkle the plan did not anticipate: the public name shadowed the internal module
+`blosc2.utf8_array`. `from blosc2.utf8_array import X` still resolved (the import machinery finds
+the submodule), but attribute-path lookups landed on the function, breaking two
+`monkeypatch.setattr("blosc2.utf8_array.…")` call sites in the tests. **The module was renamed to
+`blosc2._utf8_array`** (blosc2 `2638a0dd`) — it was always internal, every reference to it is inside
+blosc2 or its tests, and the underscore frees the plain name for the constructor. No public API
+change.
 
 ### 3b. pandas 3 `str` columns — **fixed-width part done**
 
