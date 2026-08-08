@@ -251,13 +251,37 @@ static bool dsl_jit_ensure_dir(const char *path) {
     if (me_stat(path, &st) == 0) {
         return S_ISDIR(st.st_mode);
     }
-    if (me_mkdir(path, 0700) == 0) {
-        return true;
+    /* mkdir -p semantics: create missing parent components one at a time, so
+       a TMPDIR that does not exist yet (or whose parents are missing) does
+       not silently disable the JIT runtime.  The buffer is transient; each
+       separator is restored before the walk moves past it. */
+    size_t len = strlen(path);
+    char *buf = malloc(len + 1);
+    if (!buf) {
+        return false;
     }
-    if (errno == EEXIST) {
-        return true;
+    strcpy(buf, path);
+    bool ok = false;
+    for (char *p = buf + 1; *p; p++) {
+        if (*p != '/' && *p != '\\') {
+            continue;
+        }
+        /* Skip repeated separators and a Windows drive-letter prefix ("C:"). */
+        if ((p > buf && (p[-1] == '/' || p[-1] == '\\')) ||
+            (p == buf + 2 && buf[1] == ':')) {
+            continue;
+        }
+        char saved = *p;
+        *p = '\0';
+        if (me_mkdir(buf, 0700) != 0 && errno != EEXIST) {
+            free(buf);
+            return false;
+        }
+        *p = saved;
     }
-    return false;
+    ok = me_mkdir(buf, 0700) == 0 || errno == EEXIST;
+    free(buf);
+    return ok;
 }
 
 bool dsl_jit_get_cache_dir(char *out, size_t out_size) {

@@ -3029,6 +3029,91 @@ cleanup:
     }
     return rc;
 }
+
+static int test_nonexistent_tmpdir_creates_cache_dir(void) {
+    printf("\n=== DSL JIT Runtime Cache Test: TMPDIR with missing parents ===\n");
+
+    int rc = 1;
+    char tmp_template[] = "/tmp/me_jit_nested_tmpdir_XXXXXX";
+    char *tmp_root = mkdtemp(tmp_template);
+    char nested_tmpdir[1024];
+    char cache_dir[1024];
+    nested_tmpdir[0] = '\0';
+    cache_dir[0] = '\0';
+    char *saved_tmpdir = dup_env_value("TMPDIR");
+    char *saved_cc = dup_env_value("CC");
+    const char *src =
+        "# me:compiler=cc\n"
+        "def kernel(x):\n"
+        "    y = x + 13\n"
+        "    return y\n";
+
+    if (!tmp_root) {
+        printf("  FAILED: mkdtemp failed\n");
+        goto cleanup;
+    }
+    /* Point TMPDIR at a path whose parents do not exist: the cache dir must
+       be created recursively, not silently disable the JIT runtime. */
+    if (snprintf(nested_tmpdir, sizeof(nested_tmpdir), "%s/one/two/three", tmp_root) >= (int)sizeof(nested_tmpdir)) {
+        printf("  FAILED: nested tmpdir path too long\n");
+        goto cleanup;
+    }
+    if (snprintf(cache_dir, sizeof(cache_dir), "%s/miniexpr-jit", nested_tmpdir) >= (int)sizeof(cache_dir)) {
+        printf("  FAILED: cache path too long\n");
+        goto cleanup;
+    }
+    if (setenv("TMPDIR", nested_tmpdir, 1) != 0) {
+        printf("  FAILED: setenv TMPDIR failed\n");
+        goto cleanup;
+    }
+    if (setenv("CC", "cc", 1) != 0) {
+        printf("  FAILED: setenv CC failed\n");
+        goto cleanup;
+    }
+    (void)unsetenv("CFLAGS");
+
+    if (compile_and_eval_simple_dsl(src, 13.0) != 0) {
+        goto cleanup;
+    }
+
+    /* Eval succeeded, and the cc backend must have written its artifacts into
+       the recursively created cache dir -- proof the JIT engaged instead of
+       silently falling back to the interpreter. */
+    int n = count_kernel_files_with_suffix(cache_dir, ".c", NULL, 0);
+    if (n != 1) {
+        printf("  FAILED: expected one generated source file in %s (got %d)\n", cache_dir, n);
+        goto cleanup;
+    }
+
+    rc = 0;
+    printf("  PASSED\n");
+
+cleanup:
+    restore_env_value("TMPDIR", saved_tmpdir);
+    restore_env_value("CC", saved_cc);
+    free(saved_tmpdir);
+    free(saved_cc);
+    if (cache_dir[0] != '\0') {
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+    }
+    /* Remove the nested TMPDIR parents from the leaf up to tmp_root. */
+    if (nested_tmpdir[0] != '\0' && tmp_root) {
+        char *p = nested_tmpdir;
+        while (strlen(p) > strlen(tmp_root)) {
+            (void)rmdir(p);
+            char *slash = strrchr(p, '/');
+            if (!slash || slash == p) {
+                break;
+            }
+            *slash = '\0';
+        }
+    }
+    if (tmp_root) {
+        (void)rmdir(tmp_root);
+    }
+    return rc;
+}
 #endif
 
 int main(void) {
@@ -3122,6 +3207,7 @@ int main(void) {
     fail |= test_range_start_stop_step_jit_lowering();
     fail |= test_cc_backend_bridge_path();
     fail |= test_cc_backend_bridge_and_vec_math_gates();
+    fail |= test_nonexistent_tmpdir_creates_cache_dir();
 #endif
 #if defined(__EMSCRIPTEN__)
     me_register_wasm_jit_helpers(NULL, NULL);
