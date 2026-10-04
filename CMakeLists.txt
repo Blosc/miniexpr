@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.16.3)
 project(miniexpr LANGUAGES C)
+if(NOT EMSCRIPTEN)
+  find_package(Threads REQUIRED)
+endif()
 include(GNUInstallDirs)
 
 if(WIN32 AND NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
@@ -43,6 +46,9 @@ include(cmake/MiniexprFetchDeps.cmake)
 include(cmake/MiniexprTinyccTargets.cmake)
 
 function(miniexpr_setup_target target_name)
+  if(NOT EMSCRIPTEN)
+    target_link_libraries(${target_name} PRIVATE Threads::Threads)
+  endif()
   target_sources(${target_name} PRIVATE ${MINIEXPR_SOURCES})
   target_include_directories(${target_name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_compile_features(${target_name} PUBLIC c_std_99)

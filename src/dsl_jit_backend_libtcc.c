@@ -24,6 +24,11 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#if ME_USE_LIBTCC_FALLBACK
+static SRWLOCK g_dsl_tcc_lock = SRWLOCK_INIT;
+#define ME_TCC_LOCK() AcquireSRWLockExclusive(&g_dsl_tcc_lock)
+#define ME_TCC_UNLOCK() ReleaseSRWLockExclusive(&g_dsl_tcc_lock)
+#endif
 #ifndef PATH_MAX
 #define PATH_MAX MAX_PATH
 #endif
@@ -31,6 +36,12 @@
 #include <dlfcn.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#if ME_USE_LIBTCC_FALLBACK
+#include <pthread.h>
+static pthread_mutex_t g_dsl_tcc_lock = PTHREAD_MUTEX_INITIALIZER;
+#define ME_TCC_LOCK() pthread_mutex_lock(&g_dsl_tcc_lock)
+#define ME_TCC_UNLOCK() pthread_mutex_unlock(&g_dsl_tcc_lock)
+#endif
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
@@ -51,6 +62,8 @@ typedef int (*me_tcc_add_library_path_fn)(me_tcc_state *s, const char *path);
 typedef int (*me_tcc_add_library_fn)(me_tcc_state *s, const char *libraryname);
 typedef int (*me_tcc_add_symbol_fn)(me_tcc_state *s, const char *name, const void *val);
 typedef void (*me_tcc_set_lib_path_fn)(me_tcc_state *s, const char *path);
+typedef void (*me_tcc_set_error_func_fn)(me_tcc_state *s, void *opaque,
+                                       void (*callback)(void *, const char *));
 
 typedef struct {
     bool attempted;
@@ -67,6 +80,7 @@ typedef struct {
     me_tcc_add_library_fn tcc_add_library_fn;
     me_tcc_add_symbol_fn tcc_add_symbol_fn;
     me_tcc_set_lib_path_fn tcc_set_lib_path_fn;
+    me_tcc_set_error_func_fn tcc_set_error_func_fn;
     char error[160];
 } me_dsl_tcc_api;
 
@@ -364,23 +378,29 @@ static bool dsl_jit_libtcc_load_api(void) {
     const char *candidates[12];
     char self_candidate[PATH_MAX];
     int ncandidates = 0;
-    if (default_path && default_path[0] != '\0') {
-        candidates[ncandidates++] = default_path;
-    }
-    if (dsl_jit_libtcc_path_near_self(self_candidate, sizeof(self_candidate))) {
-        candidates[ncandidates++] = self_candidate;
-    }
+    const char *override_path = getenv("ME_DSL_JIT_LIBTCC_PATH");
+    if (override_path && override_path[0]) {
+        /* An explicit override must not silently load another library instead. */
+        candidates[ncandidates++] = override_path;
+    } else {
+        if (default_path && default_path[0] != '\0') {
+            candidates[ncandidates++] = default_path;
+        }
+        if (dsl_jit_libtcc_path_near_self(self_candidate, sizeof(self_candidate))) {
+            candidates[ncandidates++] = self_candidate;
+        }
 #if defined(_WIN32) || defined(_WIN64)
-    candidates[ncandidates++] = "tcc.dll";
-    candidates[ncandidates++] = "libtcc.dll";
+        candidates[ncandidates++] = "tcc.dll";
+        candidates[ncandidates++] = "libtcc.dll";
 #elif defined(__APPLE__)
-    candidates[ncandidates++] = "libtcc.dylib";
-    candidates[ncandidates++] = "libtcc.so";
-    candidates[ncandidates++] = "libtcc.so.1";
+        candidates[ncandidates++] = "libtcc.dylib";
+        candidates[ncandidates++] = "libtcc.so";
+        candidates[ncandidates++] = "libtcc.so.1";
 #else
-    candidates[ncandidates++] = "libtcc.so";
-    candidates[ncandidates++] = "libtcc.so.1";
+        candidates[ncandidates++] = "libtcc.so";
+        candidates[ncandidates++] = "libtcc.so.1";
 #endif
+    }
     candidates[ncandidates] = NULL;
 
     void *handle = NULL;
@@ -415,6 +435,7 @@ static bool dsl_jit_libtcc_load_api(void) {
     ME_LOAD_TCC_SYM(tcc_compile_string_fn, "tcc_compile_string", me_tcc_compile_string_fn);
     ME_LOAD_TCC_SYM(tcc_relocate_fn, "tcc_relocate", me_tcc_relocate_fn);
     ME_LOAD_TCC_SYM(tcc_get_symbol_fn, "tcc_get_symbol", me_tcc_get_symbol_fn);
+    ME_LOAD_TCC_SYM(tcc_set_error_func_fn, "tcc_set_error_func", me_tcc_set_error_func_fn);
 #undef ME_LOAD_TCC_SYM
 
     g_dsl_tcc_api.tcc_set_options_fn = (me_tcc_set_options_fn)dsl_jit_dynlib_symbol(handle, "tcc_set_options");
@@ -432,13 +453,24 @@ void dsl_jit_libtcc_delete_state(void *state) {
     if (!state) {
         return;
     }
-    if (!dsl_jit_libtcc_load_api() || !g_dsl_tcc_api.tcc_delete_fn) {
-        return;
+    ME_TCC_LOCK();
+    if (dsl_jit_libtcc_load_api() && g_dsl_tcc_api.tcc_delete_fn) {
+        g_dsl_tcc_api.tcc_delete_fn((me_tcc_state *)state);
     }
-    g_dsl_tcc_api.tcc_delete_fn((me_tcc_state *)state);
+    ME_TCC_UNLOCK();
 }
 
-bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
+static void dsl_jit_tcc_diagnostic(void *opaque, const char *message) {
+    me_dsl_compiled_program *program = opaque;
+    if (!program || !message) {
+        return;
+    }
+    /* The program outlives its TCC state, including during state destruction.
+       Never let a libtcc callback print to process-wide stderr. */
+    snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s", message);
+}
+
+static bool dsl_jit_compile_libtcc_impl(me_dsl_compiled_program *program) {
     if (!program || !program->jit_c_source) {
         return false;
     }
@@ -456,6 +488,7 @@ bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
                  "tcc_new failed");
         return false;
     }
+    g_dsl_tcc_api.tcc_set_error_func_fn(state, program, dsl_jit_tcc_diagnostic);
 
     char tcc_lib_dir[PATH_MAX];
     if (g_dsl_tcc_api.tcc_set_lib_path_fn &&
@@ -465,7 +498,11 @@ bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
 
     const char *tcc_opts = getenv("ME_DSL_JIT_TCC_OPTIONS");
     if (g_dsl_tcc_api.tcc_set_options_fn && tcc_opts && tcc_opts[0] != '\0') {
-        (void)g_dsl_tcc_api.tcc_set_options_fn(state, tcc_opts);
+        if (g_dsl_tcc_api.tcc_set_options_fn(state, tcc_opts) < 0) {
+            g_dsl_tcc_api.tcc_delete_fn(state);
+            snprintf(g_dsl_tcc_api.error, sizeof(g_dsl_tcc_api.error), "%s", "tcc_set_options failed");
+            return false;
+        }
     }
     if (g_dsl_tcc_api.tcc_set_output_type_fn(state, 1) < 0) {
         g_dsl_tcc_api.tcc_delete_fn(state);
@@ -505,7 +542,7 @@ bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
     }
 
     if (program->jit_tcc_state) {
-        dsl_jit_libtcc_delete_state(program->jit_tcc_state);
+        g_dsl_tcc_api.tcc_delete_fn((me_tcc_state *)program->jit_tcc_state);
     }
     program->jit_tcc_state = state;
     program->jit_kernel_fn = (me_dsl_jit_kernel_fn)sym;
@@ -515,6 +552,23 @@ bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
     program->jit_runtime_key = 0;
     program->jit_dl_handle_cached = false;
     return true;
+}
+
+bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
+    if (!program) {
+        return false;
+    }
+    /* libtcc API discovery and the compiler itself have process-global state.
+       Serialize compile/delete, but keep diagnostics on the owning program. */
+    ME_TCC_LOCK();
+    program->jit_c_error[0] = '\0';
+    bool ok = dsl_jit_compile_libtcc_impl(program);
+    if (!ok && !program->jit_c_error[0]) {
+        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+                 dsl_jit_libtcc_error_message());
+    }
+    ME_TCC_UNLOCK();
+    return ok;
 }
 
 #else
@@ -528,7 +582,9 @@ void dsl_jit_libtcc_delete_state(void *state) {
 }
 
 bool dsl_jit_compile_libtcc_in_memory(me_dsl_compiled_program *program) {
-    (void)program;
+    if (program) {
+        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s", "tcc backend not built");
+    }
     return false;
 }
 

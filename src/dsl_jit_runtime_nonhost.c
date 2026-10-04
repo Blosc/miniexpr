@@ -66,13 +66,10 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
                    dsl_compiler_name(program->compiler));
         return;
     }
-    snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
-             "jit runtime tcc compilation failed");
-    dsl_tracef("jit runtime skip: fp=%s compiler=%s reason=%s detail=%s",
+    dsl_tracef("jit runtime fallback: interpreter fp=%s compiler=%s reason=%s",
                dsl_fp_mode_name(program->fp_mode),
                dsl_compiler_name(program->compiler),
-               program->jit_c_error,
-               dsl_jit_libtcc_error_message());
+               program->jit_c_error);
 #else
     (void)program;
 #endif

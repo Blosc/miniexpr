@@ -192,6 +192,15 @@ See [doc/dsl-usage.md](doc/dsl-usage.md) for the complete DSL reference and [exa
 
 On Linux/macOS, DSL kernels may use runtime JIT compilation when eligible. The following environment variables control this path:
 
+Native JIT is best effort, including an explicit TCC/CC request: allocation,
+compilation, or library-loading failures use the interpreter without compiler
+messages by default. `ME_DSL_TRACE=1` explains fallback. Bundled TCC compiles in
+memory and never creates a disk cache; on Linux its executable storage uses
+anonymous memfd-backed RW/RX aliases. It needs neither a system compiler nor
+writable temporary storage. A security policy can still deny those mappings.
+The explicitly selected CC backend builds optimized shared libraries and caches
+them persistently; it requires a compiler and a usable executable cache location.
+
 - `ME_DSL_JIT=0`: Disable runtime JIT and always use interpreter fallback.
 - `ME_DSL_JIT_POS_CACHE=0`: Disable process-local positive cache reuse for loaded JIT kernels.
 - `ME_DSL_JIT_INDEX_VARS=0`: Disable runtime JIT for DSL kernels that use reserved index vars (`_i*`, `_n*`, `_ndim`, `_flat_idx`).
@@ -200,7 +209,9 @@ On Linux/macOS, DSL kernels may use runtime JIT compilation when eligible. The f
 - `ME_DSL_JIT_TCC_OPTIONS="..."`: Extra options passed to `tcc_set_options()` for the `libtcc` backend.
 - `CC=...`: Compiler executable used by the `# me:compiler=cc` runtime JIT backend. Defaults to `cc`.
 - `CFLAGS="..."`: Standard C compiler flags honored by the `cc` backend runtime JIT path.
-- `TMPDIR=...`: Root directory for runtime JIT cache artifacts. When unset, miniexpr uses a per-user directory under `/tmp`.
+- `TMPDIR=...`: Root directory for **CC** runtime JIT cache artifacts. When unset, miniexpr uses a per-user directory under `/tmp`. TCC does not use this cache.
+- `ME_DSL_JIT_LIBTCC_PATH=...`: Explicit libtcc library path, without silently substituting another library if loading fails.
+- `ME_DSL_JIT_DEBUG_CC=1`: Show the system compiler's normally suppressed output.
 
 Per-call policy overrides are available via API:
 - `me_eval_params.jit_mode = ME_JIT_ON|ME_JIT_OFF|ME_JIT_DEFAULT`

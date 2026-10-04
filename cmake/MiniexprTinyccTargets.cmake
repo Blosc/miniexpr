@@ -90,6 +90,8 @@ if(MINIEXPR_NEEDS_BUNDLED_TINYCC)
       COMMAND ${MINIEXPR_TINYCC_BUILD_CMD}
       COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MINIEXPR_TINYCC_BUILT_SHARED_PATH}" "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
       DEPENDS "${MINIEXPR_TINYCC_CONFIG_STAMP}"
+              "${tinycc_SOURCE_DIR}/tccrun.c"
+              "${tinycc_SOURCE_DIR}/tcc_memfd.h"
       VERBATIM
     )
   endif()

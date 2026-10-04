@@ -235,7 +235,7 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
     if (!dsl_jit_runtime_enabled()) {
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime disabled by environment");
-        dsl_tracef("jit runtime skip: fp=%s reason=%s",
+        dsl_tracef("jit runtime fallback: interpreter fp=%s reason=%s",
                    dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
         return;
     }
@@ -258,9 +258,24 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
     if (dsl_jit_neg_cache_should_skip(key)) {
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime skipped after recent failure");
-        dsl_tracef("jit runtime skip: fp=%s reason=%s key=%016llx",
+        dsl_tracef("jit runtime fallback: interpreter fp=%s reason=%s key=%016llx",
                    dsl_fp_mode_name(program->fp_mode), program->jit_c_error,
                    (unsigned long long)key);
+        return;
+    }
+
+    /* TCC kernels are owned by their compiled program, never by the disk cache.
+       An unusable TMPDIR must not prevent in-memory JIT execution. */
+    if (program->compiler == ME_DSL_COMPILER_LIBTCC) {
+        if (dsl_jit_compile_libtcc_in_memory(program)) {
+            dsl_tracef("jit runtime built: fp=%s compiler=tcc key=%016llx",
+                       dsl_fp_mode_name(program->fp_mode), (unsigned long long)key);
+            dsl_jit_neg_cache_clear(key);
+            return;
+        }
+        dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
+        dsl_tracef("jit runtime fallback: interpreter fp=%s compiler=tcc reason=%s",
+                   dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
         return;
     }
 
@@ -269,7 +284,7 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_CACHE_DIR);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime cache directory unavailable");
-        dsl_tracef("jit runtime skip: fp=%s reason=%s",
+        dsl_tracef("jit runtime fallback: interpreter fp=%s reason=%s",
                    dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
         return;
     }
@@ -290,7 +305,7 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_PATH);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime cache path too long");
-        dsl_tracef("jit runtime skip: reason=%s", program->jit_c_error);
+        dsl_tracef("jit runtime fallback: interpreter reason=%s", program->jit_c_error);
         return;
     }
 
@@ -323,31 +338,11 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
                    load_detail[0] ? load_detail : "-");
     }
 
-    if (program->compiler == ME_DSL_COMPILER_LIBTCC) {
-        if (dsl_jit_compile_libtcc_in_memory(program)) {
-            dsl_tracef("jit runtime built: fp=%s compiler=%s key=%016llx",
-                       dsl_fp_mode_name(program->fp_mode),
-                       dsl_compiler_name(program->compiler),
-                       (unsigned long long)key);
-            dsl_jit_neg_cache_clear(key);
-            return;
-        }
-        dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
-        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
-                 "jit runtime tcc compilation failed");
-        dsl_tracef("jit runtime skip: fp=%s compiler=%s reason=%s detail=%s",
-                   dsl_fp_mode_name(program->fp_mode),
-                   dsl_compiler_name(program->compiler),
-                   program->jit_c_error,
-                   dsl_jit_libtcc_error_message());
-        return;
-    }
-
     if (!dsl_jit_write_text_file(src_path, program->jit_c_source)) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_WRITE);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime failed to write source");
-        dsl_tracef("jit runtime skip: fp=%s reason=%s",
+        dsl_tracef("jit runtime fallback: interpreter fp=%s reason=%s",
                    dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
         return;
     }
@@ -358,7 +353,7 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
             dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
             snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                      "jit runtime compilation failed");
-            dsl_tracef("jit runtime skip: fp=%s reason=%s",
+            dsl_tracef("jit runtime fallback: interpreter fp=%s reason=%s",
                        dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
             return;
         }
@@ -366,7 +361,7 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
             dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
             snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                      "jit runtime stub copy failed");
-            dsl_tracef("jit runtime skip: fp=%s reason=%s",
+            dsl_tracef("jit runtime fallback: interpreter fp=%s reason=%s",
                        dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
             return;
         }
@@ -374,7 +369,7 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
             dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_METADATA);
             snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                      "jit runtime failed to write cache metadata");
-            dsl_tracef("jit runtime skip: fp=%s reason=%s",
+            dsl_tracef("jit runtime fallback: interpreter fp=%s reason=%s",
                        dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
             return;
         }
@@ -383,7 +378,7 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
             dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_LOAD);
             snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                      "jit runtime shared object load failed");
-            dsl_tracef("jit runtime skip: fp=%s reason=%s detail=%s",
+            dsl_tracef("jit runtime fallback: interpreter fp=%s reason=%s detail=%s",
                        dsl_fp_mode_name(program->fp_mode), program->jit_c_error,
                        load_detail[0] ? load_detail : "-");
             return;
@@ -401,7 +396,7 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime c compiler unavailable");
-        dsl_tracef("jit runtime skip: fp=%s compiler=%s reason=%s",
+        dsl_tracef("jit runtime fallback: interpreter fp=%s compiler=%s reason=%s",
                    dsl_fp_mode_name(program->fp_mode),
                    dsl_compiler_name(program->compiler),
                    program->jit_c_error);
@@ -411,7 +406,7 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime compilation failed");
-        dsl_tracef("jit runtime skip: fp=%s reason=%s",
+        dsl_tracef("jit runtime fallback: interpreter fp=%s reason=%s",
                    dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
         return;
     }
@@ -419,7 +414,7 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_METADATA);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime failed to write cache metadata");
-        dsl_tracef("jit runtime skip: fp=%s reason=%s",
+        dsl_tracef("jit runtime fallback: interpreter fp=%s reason=%s",
                    dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
         return;
     }
@@ -428,7 +423,7 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_LOAD);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime shared object load failed");
-        dsl_tracef("jit runtime skip: fp=%s reason=%s detail=%s",
+        dsl_tracef("jit runtime fallback: interpreter fp=%s reason=%s detail=%s",
                    dsl_fp_mode_name(program->fp_mode), program->jit_c_error,
                    load_detail[0] ? load_detail : "-");
         return;

@@ -1,4 +1,7 @@
 file(GLOB MINIEXPR_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
+if(NOT MINIEXPR_ENABLE_TCC_JIT OR EMSCRIPTEN)
+  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_jit_libtcc\\.c$")
+endif()
 list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "jit_kernel_stub\\.c$")
 if(EMSCRIPTEN)
   add_library(me_jit_test_stub STATIC "${CMAKE_CURRENT_SOURCE_DIR}/jit_kernel_stub.c")
