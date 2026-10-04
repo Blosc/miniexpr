@@ -1241,6 +1241,8 @@ static int test_codegen_runtime_math_bridge_hybrid_stmt_lowering(void) {
     bool has_vec_call = strstr(c_source, "me_jit_vec_sqrt_f64(__me_in_x, __me_vec_tmp_0, __me_nitems);") != NULL ||
                         strstr(c_source, "me_jit_vec_sqrt_f64(__me_in_x, __me_outp, __me_nitems);") != NULL;
     bool marker_ok = has_vec_call &&
+                     strstr(c_source, "extern void *malloc(me_jit_size_t);") != NULL &&
+                     strstr(c_source, "typedef __SIZE_TYPE__ me_jit_size_t;") != NULL &&
                      strstr(c_source, "t = (double)__me_vec_tmp_0[__me_idx];") != NULL &&
                      strstr(c_source, "for (int64_t __me_idx = 0; __me_idx < __me_nitems; __me_idx++) {") != NULL;
     if (!marker_ok ||

@@ -3402,7 +3402,14 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         return false;
     }
     if (use_runtime_math_bridge && enable_hybrid_vector_math) {
-        if (!me_jit_emit_line(&ctx.source, 0, "extern void *malloc(unsigned long long);") ||
+        if (!me_jit_emit_line(&ctx.source, 0, "#if defined(__SIZE_TYPE__)") ||
+            !me_jit_emit_line(&ctx.source, 0, "typedef __SIZE_TYPE__ me_jit_size_t;") ||
+            !me_jit_emit_line(&ctx.source, 0, "#elif defined(_WIN64)") ||
+            !me_jit_emit_line(&ctx.source, 0, "typedef unsigned long long me_jit_size_t;") ||
+            !me_jit_emit_line(&ctx.source, 0, "#else") ||
+            !me_jit_emit_line(&ctx.source, 0, "typedef unsigned int me_jit_size_t;") ||
+            !me_jit_emit_line(&ctx.source, 0, "#endif") ||
+            !me_jit_emit_line(&ctx.source, 0, "extern void *malloc(me_jit_size_t);") ||
             !me_jit_emit_line(&ctx.source, 0, "extern void free(void *);") ||
             !me_jit_emit_line(&ctx.source, 0, "")) {
             me_jit_set_error(error, 0, 0, "out of memory");
