@@ -10,6 +10,7 @@
 
 #include "dsl_parser.h"
 #include <ctype.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -215,9 +216,182 @@ static char *dsl_copy_trimmed(const char *start, const char *end) {
 
 /* Comments inside continued expressions are whitespace. Preserve newlines and
  * quoted '#' characters while removing comment text from miniexpr input. */
-static char *dsl_copy_expression(const char *start, const char *end) {
+static int dsl_digit_value(char c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    return -1;
+}
+
+/* A separator is legal only between digits (except immediately after a base
+ * prefix, handled by the caller). Copy digits without changing their values. */
+static bool dsl_decimal_digits(const char **cursor, char **out, bool required) {
+    const char *p = *cursor;
+    bool digit = false;
+    while (isdigit((unsigned char)*p) || *p == '_') {
+        if (*p == '_') {
+            if (!digit || !isdigit((unsigned char)p[1])) {
+                return false;
+            }
+        } else {
+            *(*out)++ = *p;
+            digit = true;
+        }
+        p++;
+    }
+    *cursor = p;
+    return !required || digit;
+}
+
+static bool dsl_number_literal(const char **cursor, char **out) {
+    const char *p = *cursor;
+    if (p[0] == '0' && p[1] && strchr("xXoObB", p[1])) {
+        int base = (p[1] == 'x' || p[1] == 'X') ? 16 :
+                   (p[1] == 'o' || p[1] == 'O') ? 8 : 2;
+        p += 2;
+        if (*p == '_') {
+            p++;
+        }
+        uint64_t value = 0;
+        bool digit = false;
+        while (dsl_digit_value(*p) >= 0 || *p == '_') {
+            if (*p == '_') {
+                int next = dsl_digit_value(p[1]);
+                if (!digit || next < 0 || next >= base) {
+                    return false;
+                }
+            } else {
+                int next = dsl_digit_value(*p);
+                if (next >= base || value > (UINT64_MAX - next) / base) {
+                    return false;
+                }
+                value = value * base + next;
+                digit = true;
+            }
+            p++;
+        }
+        if (!digit) {
+            return false;
+        }
+        *out += snprintf(*out, 32, "%" PRIu64, value);
+    } else {
+        char *integer_start = *out;
+        if (!dsl_decimal_digits(&p, out, *p != '.')) {
+            return false;
+        }
+        char *integer_end = *out;
+        bool floating = false;
+        if (*p == '.') {
+            floating = true;
+            *(*out)++ = *p++;
+            if (!dsl_decimal_digits(&p, out, false)) {
+                return false;
+            }
+        }
+        if (*p == 'e' || *p == 'E') {
+            floating = true;
+            *(*out)++ = *p++;
+            if (*p == '+' || *p == '-') {
+                *(*out)++ = *p++;
+            }
+            if (!dsl_decimal_digits(&p, out, true)) {
+                return false;
+            }
+        }
+        if (!floating && integer_end - integer_start > 1 && *integer_start == '0') {
+            for (char *q = integer_start; q < integer_end; q++) {
+                if (*q != '0') {
+                    return false;
+                }
+            }
+        }
+    }
+    if (is_ident_char(*p) || *p == '.') {
+        return false;
+    }
+    *cursor = p;
+    return true;
+}
+
+static char *dsl_normalize_numbers(char *text, me_dsl_error *error, int line, int column) {
+    size_t length = strlen(text);
+    if (length > (SIZE_MAX - 32) / 2) {
+        dsl_set_error(error, line, column, "expression is too large");
+        free(text);
+        return NULL;
+    }
+    char *result = malloc(length * 2 + 32);
+    if (!result) {
+        dsl_set_error(error, line, column, "out of memory");
+        free(text);
+        return NULL;
+    }
+    const char *p = text;
+    char *out = result;
+    while (*p) {
+        const char *begin = p;
+        if (*p == '\'' || *p == '"') {
+            char quote = *p;
+            *out++ = *p++;
+            while (*p) {
+                if (*p == '\\' && p[1]) {
+                    *out++ = *p++;
+                    *out++ = *p++;
+                } else {
+                    char c = *p++;
+                    *out++ = c;
+                    if (c == quote) {
+                        break;
+                    }
+                }
+            }
+        } else if (is_ident_start(*p)) {
+            do {
+                *out++ = *p++;
+            } while (is_ident_char(*p));
+        } else if (isdigit((unsigned char)*p) || (*p == '.' && isdigit((unsigned char)p[1]))) {
+            if (!dsl_number_literal(&p, &out)) {
+                dsl_set_error(error, line, column, "invalid or out-of-range numeric literal");
+                free(result);
+                free(text);
+                return NULL;
+            }
+        } else {
+            *out++ = *p++;
+        }
+        for (const char *q = begin; q < p; q++) {
+            if (*q == '\n') {
+                line++;
+                column = 1;
+            } else {
+                column++;
+            }
+        }
+    }
+    *out = '\0';
+    free(text);
+    return result;
+}
+
+static char *dsl_copy_expression(const char *start, const char *end,
+                                 me_dsl_error *error, int line, int column) {
+    while (start < end && isspace((unsigned char)*start)) {
+        if (*start++ == '\n') {
+            line++;
+            column = 1;
+        } else {
+            column++;
+        }
+    }
     char *text = dsl_copy_trimmed(start, end);
     if (!text) {
+        dsl_set_error(error, line, column, "out of memory");
         return NULL;
     }
     char quote = '\0';
@@ -239,7 +413,7 @@ static char *dsl_copy_expression(const char *start, const char *end) {
             }
         }
     }
-    return text;
+    return dsl_normalize_numbers(text, error, line, column);
 }
 
 static char *dsl_build_compound_assign_expr(const char *lhs, size_t lhs_len,
@@ -606,6 +780,7 @@ static bool consume_char(me_dsl_lexer *lex, char c) {
 static char *parse_expression_until_stmt_end(me_dsl_lexer *lex, me_dsl_error *error, int line, int column) {
     lexer_skip_space(lex);
     const char *start = lex->current;
+    int expression_line = lex->line, expression_column = lex->column;
     int depth = 0;
 
     while (*lex->current) {
@@ -665,7 +840,10 @@ static char *parse_expression_until_stmt_end(me_dsl_lexer *lex, me_dsl_error *er
         return NULL;
     }
 
-    char *text = dsl_copy_expression(start, lex->current);
+    char *text = dsl_copy_expression(start, lex->current, error, expression_line, expression_column);
+    if (!text) {
+        return NULL;
+    }
     if (!text || text[0] == '\0') {
         free(text);
         dsl_set_error(error, line, column, "expected expression");
@@ -682,6 +860,7 @@ static char *parse_expression_in_parens(me_dsl_lexer *lex, me_dsl_error *error, 
     }
     lexer_advance(lex);
     const char *start = lex->current;
+    int expression_line = lex->line, expression_column = lex->column;
     int depth = 1;
 
     while (*lex->current) {
@@ -739,7 +918,10 @@ static char *parse_expression_in_parens(me_dsl_lexer *lex, me_dsl_error *error, 
     const char *end = lex->current;
     lexer_advance(lex);
 
-    char *text = dsl_copy_expression(start, end);
+    char *text = dsl_copy_expression(start, end, error, expression_line, expression_column);
+    if (!text) {
+        return NULL;
+    }
     if (!text || text[0] == '\0') {
         free(text);
         dsl_set_error(error, line, column, "expected expression in range()");
@@ -1361,6 +1543,11 @@ static bool parse_statement(me_dsl_lexer *lex, me_dsl_block *block, bool in_loop
         size_t ident_len = 0;
         lexer_read_identifier(lex, &ident_start, &ident_len);
 
+        if (ident_len == 4 && strncmp(ident_start, "pass", ident_len) == 0) {
+            /* No runtime node is needed, including for otherwise empty suites. */
+            return true;
+        }
+
         if (simple_only &&
             ((ident_len == 3 && strncmp(ident_start, "for", ident_len) == 0) ||
              (ident_len == 5 && strncmp(ident_start, "while", ident_len) == 0) ||
@@ -1410,6 +1597,11 @@ static bool parse_statement(me_dsl_lexer *lex, me_dsl_block *block, bool in_loop
         *lex = snapshot;
         if (parse_assignment_or_expr(lex, block, error)) {
             return true;
+        }
+        /* A recognized assignment that failed is not an expression statement.
+         * Preserve its error instead of parsing (or discarding) its tail. */
+        if (lex->current != snapshot.current) {
+            return false;
         }
     }
 

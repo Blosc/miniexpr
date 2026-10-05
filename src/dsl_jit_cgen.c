@@ -2977,17 +2977,24 @@ static bool me_jit_emit_stmt(me_jit_codegen_ctx *ctx, const me_dsl_jit_ir_stmt *
             me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
             return false;
         }
-        size_t for_need = strlen(stmt->as.for_loop.var) * 4 + 160;
+        /* Keep the iterator private: Python leaves the target at the last
+         * visited value, and assignments to it do not change iteration. */
+        size_t for_need = strlen(stmt->as.for_loop.var) + 160;
         char *for_line = malloc(for_need);
         if (!for_line) {
             me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
             return false;
         }
         snprintf(for_line, for_need,
-                 "for (%s = __me_start; ((__me_step > 0) ? (%s < __me_stop) : (%s > __me_stop)); %s += __me_step) {",
-                 stmt->as.for_loop.var, stmt->as.for_loop.var,
-                 stmt->as.for_loop.var, stmt->as.for_loop.var);
+                 "for (int64_t __me_iter = __me_start; ((__me_step > 0) ? "
+                 "(__me_iter < __me_stop) : (__me_iter > __me_stop)); __me_iter += __me_step) {");
         if (!me_jit_emit_line(&ctx->source, indent + 1, for_line)) {
+            free(for_line);
+            me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
+            return false;
+        }
+        snprintf(for_line, for_need, "%s = __me_iter;", stmt->as.for_loop.var);
+        if (!me_jit_emit_line(&ctx->source, indent + 2, for_line)) {
             free(for_line);
             me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
             return false;
