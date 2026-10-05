@@ -58,18 +58,23 @@ static bool dsl_jit_extract_command_name(const char *cmd, char *out, size_t out_
         return false;
     }
     char quote = '\0';
-    if (*p == '"' || *p == '\'') {
-        quote = *p++;
-    }
     size_t n = 0;
     while (*p) {
         if (quote) {
             if (*p == quote) {
-                break;
+                quote = '\0';
+                p++;
+                continue;
             }
-        }
-        else if (isspace((unsigned char)*p)) {
+        } else if (isspace((unsigned char)*p)) {
             break;
+        } else if (*p == '"' || *p == '\'') {
+            quote = *p++;
+            continue;
+        }
+        /* Shell-quoted paths can concatenate quoted and escaped fragments. */
+        if (*p == '\\' && quote != '\'' && p[1]) {
+            p++;
         }
         if (n + 1 >= out_size) {
             return false;
@@ -77,7 +82,7 @@ static bool dsl_jit_extract_command_name(const char *cmd, char *out, size_t out_
         out[n++] = *p++;
     }
     out[n] = '\0';
-    return n > 0;
+    return n > 0 && !quote;
 }
 
 static bool dsl_jit_command_exists(const char *cmd) {
