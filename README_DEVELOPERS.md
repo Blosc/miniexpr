@@ -43,6 +43,15 @@ miniexpr supports these `me_dtype` values:
 - `ME_UINT8`, `ME_UINT16`, `ME_UINT32`, `ME_UINT64`
 - `ME_FLOAT32`, `ME_FLOAT64`
 - `ME_COMPLEX64`, `ME_COMPLEX128`
+- `ME_STRING` (fixed-width 4-byte UCS-4 code units, matching NumPy `<U`)
+- `ME_BYTES` (fixed-width 1-byte strings, matching NumPy `|S`)
+
+### Variable-Length Output (`me_eval_varlen`)
+
+Fixed-width string representations size output slots using a conservative compile-time bound with NUL-padding. For variable-length data, `me_eval_varlen()` formats results into an Arrow-compatible layout:
+- An `offsets` buffer of `(block_nitems + 1)` `int64_t` entries (with `offsets[0] == 0`).
+- A contiguous, tightly packed `data` byte buffer containing UTF-8 text (Arrow `large_string` for `ME_STRING`) or raw bytes (Arrow `large_binary` for `ME_BYTES`).
+- `me_varlen_data_bound()` provides an exact upper bound for sizing the destination data buffer. Scratch evaluation stays within block memory, eliminating the memory overhead of wide fixed-width padding in final output buffers.
 
 ## Reductions
 
@@ -99,11 +108,11 @@ The main [README.md](README.md) keeps the simplest supported build path. This se
 
 Windows (clang-cl):
 
+CMake automatically detects the newest installed Visual Studio version:
+
 ```bash
-mkdir build
-cd build
-cmake .. -G "Visual Studio 17 2022" -T ClangCL
-cmake --build .
+cmake -S . -B build -T ClangCL
+cmake --build build
 ```
 
 Makefile fallback:
@@ -138,6 +147,8 @@ The public/runtime-stable DSL JIT controls remain documented in [README.md](READ
 
 - These knobs are meaningful for development and benchmarking, but they are not treated as regular user-facing interface.
 - Defaults are derived from the current implementation in `src/dsl_config.h`, `src/dsl_jit_backend_cc.c`, and `src/dsl_jit_runtime_host.c`.
+- **In-memory TCC execution**: The bundled TCC backend compiles completely in memory and does not write to a disk cache. On Linux, executable storage uses anonymous `memfd`-backed RW/RX mappings.
+- **Call-local JIT options**: Embedders can pass a `me_jit_options` struct to `me_compile_nd_jit_options()` to configure compiler command, flags, cache directory, and tracing per-call in a thread-local manner without modifying process environment variables.
 
 ### Build-Time Notes
 

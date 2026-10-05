@@ -7,8 +7,9 @@ A small, efficient C library for parsing and evaluating mathematical expressions
 miniexpr is designed to be embedded directly into larger projects, not distributed as a standalone library. It provides fast expression evaluation with support for:
 
 - Standard mathematical operations and functions
-- Multiple numeric data types (integers, floats, complex numbers)
-- Vectorized evaluation for processing arrays efficiently
+- Multiple data types: integers, floats, complex numbers, strings (`ME_STRING`), and bytes (`ME_BYTES`)
+- Vectorized evaluation for processing arrays efficiently (fixed-width and Arrow-compatible variable-length output)
+- Multi-statement DSL computational kernels with optional runtime JIT compilation
 - Thread-safe operations for parallel processing
 
 **Note**: This is a beta project.
@@ -22,9 +23,9 @@ For dtype rules, reduction semantics, and versioning details, see [README_DEVELO
 
 ## API Reference
 
-miniexpr provides a simple, focused API with just two main functions plus cleanup.
+miniexpr provides a focused, thread-safe API for expression compilation, evaluation, and diagnostics.
 
-### `me_compile()`, `me_compile_nd()`, and `me_compile_nd_jit()`
+### `me_compile()`, `me_compile_nd()`, `me_compile_nd_jit()`, and `me_compile_nd_jit_options()`
 
 ```c
 int me_compile(const char *expression, const me_variable *variables,
@@ -40,6 +41,12 @@ int me_compile_nd_jit(const char *expression, const me_variable *variables,
                       const int64_t *shape, const int32_t *chunkshape,
                       const int32_t *blockshape, int jit_mode,
                       int *error, me_expr **out);
+
+int me_compile_nd_jit_options(const char *expression, const me_variable *variables,
+                              int var_count, me_dtype dtype, int ndims,
+                              const int64_t *shape, const int32_t *chunkshape,
+                              const int32_t *blockshape, int jit_mode,
+                              const me_jit_options *options, int *error, me_expr **out);
 ```
 
 Compiles an expression for evaluation. Variable and output pointers are provided during evaluation rather than compilation.
@@ -52,7 +59,9 @@ Variables are matched by position in the arrays. Unspecified fields default to N
 - `jit_mode = 1` (`ME_JIT_ON`): prefer runtime JIT preparation.
 - `jit_mode = 2` (`ME_JIT_OFF`): skip runtime JIT preparation at compile time.
 
-### `me_eval()` and `me_eval_nd()`
+`me_compile_nd_jit_options(...)` accepts fine-grained compile options (compiler binary, custom CFLAGS, cache directory, and diagnostic verbosity) for that call without modifying environment variables.
+
+### `me_eval()`, `me_eval_nd()`, and `me_eval_varlen()`
 
 ```c
 int me_eval(const me_expr *expr, const void **vars_block,
@@ -64,9 +73,18 @@ int me_eval_nd(const me_expr *expr, const void **vars_block,
                int64_t nchunk, int64_t nblock, const me_eval_params *params);
 
 int me_nd_valid_nitems(const me_expr *expr, int64_t nchunk, int64_t nblock, int64_t *valid_nitems);
+
+size_t me_varlen_data_bound(const me_expr *expr, int block_nitems);
+
+int me_eval_varlen(const me_expr *expr, const void **vars_block, int n_vars,
+                   int block_nitems, int64_t *offsets,
+                   void *data, size_t data_capacity, size_t *data_used,
+                   const me_eval_params *params);
 ```
 
 Evaluates the compiled expression with new variable and output pointers. This allows processing arrays in chunks without recompilation and is thread-safe for parallel evaluation.
+
+For string (`ME_STRING`) or bytes (`ME_BYTES`) outputs, `me_eval_varlen()` writes directly into an Arrow-compatible variable-length format (`int64_t` offsets array + compact data blob), avoiding conservative fixed-width padding memory waste. Use `me_varlen_data_bound()` to safely size the data buffer.
 
 Use `ME_EVAL_PARAMS_DEFAULTS` to start from defaults and override only what you need:
 
@@ -83,6 +101,14 @@ me_eval_params params = ME_EVAL_PARAMS_DEFAULTS;
 params.jit_mode = ME_JIT_OFF;
 if (me_eval(expr, var_ptrs, 2, result, 3, &params) != ME_EVAL_SUCCESS) { /* handle error */ }
 ```
+
+### `me_get_last_error_message()`
+
+```c
+const char *me_get_last_error_message(void);
+```
+
+Returns a thread-local, human-readable diagnostic message explaining the most recent compilation or setup failure in this thread, or `NULL` if no diagnostic is available.
 
 ### `me_free()`
 
@@ -155,17 +181,20 @@ For build variants, CMake options, SLEEF notes, platform-specific invocations, a
 - **[doc/type-inference.md](doc/type-inference.md)** - Type inference rules
 - **[doc/parallel-processing.md](doc/parallel-processing.md)** - Parallel processing patterns
 - **[doc/dsl-usage.md](doc/dsl-usage.md)** - DSL kernel programming guide
-- **[doc/strings.md](doc/strings.md)** - UCS4 string support and string operators
+- **[doc/dsl-syntax.md](doc/dsl-syntax.md)** - DSL syntax and grammar reference
+- **[doc/strings.md](doc/strings.md)** - UCS4 string support, byte strings, and string operators
 
 ## DSL Kernels
 
 miniexpr includes a DSL (Domain-Specific Language) for writing multi-statement computational kernels. The DSL extends single-expression evaluation with:
 
 - **Temporary variables**: Intermediate results for complex computations
-- **Conditionals**: `where(cond, then, else)` for element-wise selection
-- **Loops**: `for var in range(limit)` iteration
-- **Control flow**: `break` and `continue` statements
-- **Index access**: Built-in `_i0`–`_i7` (position), `_n0`–`_n7` (shape), and `_flat_idx` variables
+- **Conditionals**: `if` / `elif` / `else` blocks and element-wise `where(cond, then, else)` expressions
+- **Loops & Control flow**: `for var in range(...)` and `while` loops with `break`, `continue`, and `pass`
+- **Chained comparisons**: Python-style comparison chains such as `0 < x <= 10`
+- **Python literals & syntax**: Hex (`0x`), binary (`0b`), octal (`0o`), digit separators (`1_000_000`), byte literals (`b"..."`), docstrings (`"""..."""`), and semicolon-separated statements
+- **String kernels**: String functions (`upper`, `lower`, `strip`, `startswith`, `endswith`, `find`, `replace`, slicing) for `ME_STRING` and `ME_BYTES`
+- **Index access**: Built-in `_i0`–`_i7` (position), `_n0`–`_n7` (shape), `_ndim`, and `_flat_idx` variables
 - **Function-style kernels**: `def name(args): ... return expr`
 
 ### DSL Example
@@ -186,7 +215,7 @@ if (!prog) {
 me_dsl_program_free(prog);
 ```
 
-See [doc/dsl-usage.md](doc/dsl-usage.md) for the complete DSL reference and [examples/11_dsl_kernel.c](examples/11_dsl_kernel.c) for a working example.
+See [doc/dsl-usage.md](doc/dsl-usage.md) and [doc/dsl-syntax.md](doc/dsl-syntax.md) for the complete DSL reference and [examples/11_dsl_kernel.c](examples/11_dsl_kernel.c) for a working example.
 
 ### DSL Runtime JIT Controls
 
@@ -200,7 +229,7 @@ Toolchain settings and explicit cache directories participate in process-cache
 identity; diagnostic toggles do not. Compiler commands/flags are trusted shell
 configuration, while generated source/output paths are shell-quoted.
 
-On Linux/macOS, DSL kernels may use runtime JIT compilation when eligible. The following environment variables control this path:
+On supported platforms (Linux, macOS, and Windows via bundled TCC), DSL kernels may use runtime JIT compilation when eligible. The following environment variables control this path:
 
 Native JIT is best effort, including an explicit TCC/CC request: allocation,
 compilation, or library-loading failures use the interpreter without compiler
