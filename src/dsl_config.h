@@ -39,8 +39,10 @@
 #define ME_DSL_JIT_WASM_POS_CACHE_SLOTS 64
 #endif
 
+const char *me_jit_option_value(const char *name);
+
 static inline bool dsl_env_flag_enabled(const char *name, bool default_value) {
-    const char *env = getenv(name);
+    const char *env = me_jit_option_value(name);
     if (!env || env[0] == '\0') {
         return default_value;
     }

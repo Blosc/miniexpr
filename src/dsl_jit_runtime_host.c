@@ -348,7 +348,7 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
     }
     const char *jit_stub_path = getenv("ME_DSL_JIT_TEST_STUB_SO");
     if (jit_stub_path && jit_stub_path[0] != '\0') {
-        const char *cflags = getenv("CFLAGS");
+        const char *cflags = me_jit_option_value("CFLAGS");
         if (cflags && strstr(cflags, ME_DSL_JIT_TEST_NEG_CACHE_FLAG)) {
             dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
             snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",

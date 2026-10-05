@@ -190,6 +190,16 @@ See [doc/dsl-usage.md](doc/dsl-usage.md) for the complete DSL reference and [exa
 
 ### DSL Runtime JIT Controls
 
+Embedders can call `me_compile_nd_jit_options()` with a `me_jit_options` snapshot
+to select a CC compiler command, extra flags, an exact cache directory, tracing
+and compiler output for that compilation. Strings are borrowed only during the
+call; NULL strings and -1 booleans use environment/built-in settings. Nonempty
+environment overrides take precedence. Settings are thread-local during compilation
+and restored on return, including errors; no process environment is modified.
+Toolchain settings and explicit cache directories participate in process-cache
+identity; diagnostic toggles do not. Compiler commands/flags are trusted shell
+configuration, while generated source/output paths are shell-quoted.
+
 On Linux/macOS, DSL kernels may use runtime JIT compilation when eligible. The following environment variables control this path:
 
 Native JIT is best effort, including an explicit TCC/CC request: allocation,

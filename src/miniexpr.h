@@ -207,6 +207,22 @@ int me_compile_nd(const char *expression, const me_variable *variables,
  *   1 -> prefer JIT
  *   2 -> disable JIT preparation at compile time
  */
+/* Per-compilation settings. Strings are borrowed only for the duration of the
+ * call. NULL strings and -1 booleans use environment/built-in defaults.
+ * Existing nonempty environment overrides take precedence. */
+typedef struct me_jit_options {
+    const char *compiler;
+    const char *cflags;
+    const char *cache_dir;
+    int trace;
+    int compiler_output;
+} me_jit_options;
+
+int me_compile_nd_jit_options(const char *expression, const me_variable *variables,
+    int var_count, me_dtype dtype, int ndims, const int64_t *shape,
+    const int32_t *chunkshape, const int32_t *blockshape, int jit_mode,
+    const me_jit_options *options, int *error, me_expr **out);
+
 int me_compile_nd_jit(const char *expression, const me_variable *variables,
                       int var_count, me_dtype dtype, int ndims,
                       const int64_t *shape, const int32_t *chunkshape,

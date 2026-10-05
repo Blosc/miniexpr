@@ -115,7 +115,7 @@ static bool dsl_jit_command_exists(const char *cmd) {
 }
 
 bool dsl_jit_c_compiler_available(void) {
-    const char *cc = getenv("CC");
+    const char *cc = me_jit_option_value("CC");
     if (!cc || cc[0] == '\0') {
         cc = "cc";
     }
@@ -228,13 +228,37 @@ static void dsl_jit_cc_add_multiarch_library_flags(char *flags, size_t flags_siz
 #endif
 }
 
+static bool dsl_jit_shell_quote(const char *path, char *out, size_t capacity) {
+    size_t used = 0;
+    if (capacity < 3) {
+        return false;
+    }
+    out[used++] = '\'';
+    for (; *path; ++path) {
+        const char *text = *path == '\'' ? "'\\''" : NULL;
+        size_t count = text ? 4 : 1;
+        if (used + count + 2 > capacity) {
+            return false;
+        }
+        if (text) {
+            memcpy(out + used, text, count);
+        } else {
+            out[used] = *path;
+        }
+        used += count;
+    }
+    out[used++] = '\'';
+    out[used] = '\0';
+    return true;
+}
+
 bool dsl_jit_compile_shared(const me_dsl_compiled_program *program,
                             const char *src_path, const char *so_path) {
     if (!program || !src_path || !so_path) {
         return false;
     }
-    const char *cc = getenv("CC");
-    const char *cflags = getenv("CFLAGS");
+    const char *cc = me_jit_option_value("CC");
+    const char *cflags = me_jit_option_value("CFLAGS");
     const char *fp_cflags = dsl_jit_fp_mode_cflags(program->fp_mode);
     if (!cc || cc[0] == '\0') {
         cc = "cc";
@@ -245,7 +269,7 @@ bool dsl_jit_compile_shared(const me_dsl_compiled_program *program,
     if (!fp_cflags) {
         fp_cflags = "";
     }
-    const char *debug_cc = getenv("ME_DSL_JIT_DEBUG_CC");
+    const char *debug_cc = me_jit_option_value("ME_DSL_JIT_DEBUG_CC");
     bool show_cc_output = (debug_cc && debug_cc[0] != '\0' && strcmp(debug_cc, "0") != 0);
     const char *bridge_ldflags = "";
     char multiarch_ldflags[512];
@@ -258,17 +282,22 @@ bool dsl_jit_compile_shared(const me_dsl_compiled_program *program,
 #else
     math_ldflags = " -lm";
 #endif
-    char cmd[2048];
+    char quoted_src[4096], quoted_so[4096];
+    if (!dsl_jit_shell_quote(src_path, quoted_src, sizeof(quoted_src)) ||
+        !dsl_jit_shell_quote(so_path, quoted_so, sizeof(quoted_so))) {
+        return false;
+    }
+    char cmd[12288];
 #if defined(__APPLE__)
     int n = snprintf(cmd, sizeof(cmd),
-                     "%s -std=c99 -O3 -fPIC %s %s -dynamiclib -o \"%s\" \"%s\"%s%s%s%s",
-                     cc, fp_cflags, cflags, so_path, src_path, bridge_ldflags,
+                     "%s -std=c99 -O3 -fPIC %s %s -dynamiclib -o %s %s%s%s%s%s",
+                      cc, fp_cflags, cflags, quoted_so, quoted_src, bridge_ldflags,
                      multiarch_ldflags, math_ldflags,
                      show_cc_output ? "" : " >/dev/null 2>&1");
 #else
     int n = snprintf(cmd, sizeof(cmd),
-                     "%s -std=c99 -O3 -fPIC %s %s -shared -o \"%s\" \"%s\"%s%s%s%s",
-                     cc, fp_cflags, cflags, so_path, src_path, bridge_ldflags,
+                     "%s -std=c99 -O3 -fPIC %s %s -shared -o %s %s%s%s%s%s",
+                      cc, fp_cflags, cflags, quoted_so, quoted_src, bridge_ldflags,
                      multiarch_ldflags, math_ldflags,
                      show_cc_output ? "" : " >/dev/null 2>&1");
 #endif

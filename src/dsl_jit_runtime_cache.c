@@ -75,6 +75,8 @@ static int dsl_jit_backend_tag(const me_dsl_compiled_program *program) {
     return 1;
 }
 
+static uint64_t dsl_jit_toolchain_hash(const me_dsl_compiled_program *program);
+
 uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program) {
     uint64_t h = 1469598103934665603ULL;
     if (!program) {
@@ -121,6 +123,13 @@ uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program) {
     h = dsl_jit_hash_i32(h, program->jit_vec_math_enabled ? 1 : 0);
     h = dsl_jit_hash_i32(h, program->jit_branch_aware_if_lowering_enabled ? 1 : 0);
     h = dsl_jit_hash_i32(h, program->jit_hybrid_expr_vec_math_enabled ? 1 : 0);
+    h = dsl_jit_hash_u64(h, dsl_jit_toolchain_hash(program));
+    if (program->compiler == ME_DSL_COMPILER_CC) {
+        const char *dir = me_jit_option_value("ME_DSL_JIT_CACHE_DIR");
+        if (dir) {
+            h = dsl_jit_hash_bytes(h, dir, strlen(dir));
+        }
+    }
     return h;
 }
 
@@ -140,8 +149,8 @@ static uint64_t dsl_jit_toolchain_hash(const me_dsl_compiled_program *program) {
         uint64_t h = dsl_jit_hash_cstr(1469598103934665603ULL, "tcc");
         return dsl_jit_hash_cstr(h, tcc_opts ? tcc_opts : "");
     }
-    const char *cc = getenv("CC");
-    const char *cflags = getenv("CFLAGS");
+    const char *cc = me_jit_option_value("CC");
+    const char *cflags = me_jit_option_value("CFLAGS");
     const char *fp_cflags = dsl_jit_fp_mode_cflags(program->fp_mode);
     if (!cc || cc[0] == '\0') {
         cc = "cc";
@@ -287,6 +296,13 @@ static bool dsl_jit_ensure_dir(const char *path) {
 bool dsl_jit_get_cache_dir(char *out, size_t out_size) {
     if (!out || out_size == 0) {
         return false;
+    }
+    const char *cache_dir = me_jit_option_value("ME_DSL_JIT_CACHE_DIR");
+    if (cache_dir && cache_dir[0]) {
+        if (snprintf(out, out_size, "%s", cache_dir) >= (int)out_size) {
+            return false;
+        }
+        return dsl_jit_ensure_dir(out);
     }
 #if defined(_WIN32) || defined(_WIN64)
     const char *tmpdir = getenv("TEMP");

@@ -403,6 +403,7 @@ static int test_positive_cache_reuses_loaded_kernel(void) {
     cache_dir[0] = '\0';
     char *saved_tmpdir = dup_env_value("TMPDIR");
     char *saved_cc = dup_env_value("CC");
+    char *saved_path = dup_env_value("PATH");
     char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
     const char *src =
         "# me:compiler=cc\n"
@@ -436,8 +437,11 @@ static int test_positive_cache_reuses_loaded_kernel(void) {
     }
 
     remove_files_in_dir(cache_dir);
-    if (setenv("CC", "me_missing_cc_for_pos_cache_test", 1) != 0) {
-        printf("  FAILED: setenv CC (missing compiler) failed\n");
+    /* Keep the toolchain identity unchanged, but make compiler lookup fail if
+       the process cache does not short-circuit compilation. Changing CC now
+       correctly selects a different cache key. */
+    if (setenv("PATH", "/no/compiler/search/path", 1) != 0) {
+        printf("  FAILED: setenv PATH failed\n");
         goto cleanup;
     }
 
@@ -461,9 +465,11 @@ static int test_positive_cache_reuses_loaded_kernel(void) {
 cleanup:
     restore_env_value("TMPDIR", saved_tmpdir);
     restore_env_value("CC", saved_cc);
+    restore_env_value("PATH", saved_path);
     restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
     free(saved_tmpdir);
     free(saved_cc);
+    free(saved_path);
     free(saved_pos_cache);
     if (cache_dir[0] != '\0') {
         remove_files_in_dir(cache_dir);

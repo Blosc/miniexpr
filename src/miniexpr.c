@@ -124,6 +124,36 @@ For log = base 10 log comment the next line. */
 #endif
 
 static ME_THREAD_LOCAL char g_me_last_error_msg[ME_LAST_ERROR_MSG_CAP];
+static ME_THREAD_LOCAL const me_jit_options *g_me_jit_options;
+
+/* Options live on the compiling thread, never in process-wide environment
+ * variables. Save/restore in the entry point also supports nested compilation. */
+const char *me_jit_option_value(const char *name) {
+    const char *env = getenv(name);
+    if (env && env[0]) {
+        return env;
+    }
+    const me_jit_options *options = g_me_jit_options;
+    if (!options) {
+        return env;
+    }
+    if (strcmp(name, "CC") == 0) {
+        return options->compiler;
+    }
+    if (strcmp(name, "CFLAGS") == 0) {
+        return options->cflags;
+    }
+    if (strcmp(name, "ME_DSL_JIT_CACHE_DIR") == 0) {
+        return options->cache_dir;
+    }
+    if (strcmp(name, "ME_DSL_TRACE") == 0 && options->trace >= 0) {
+        return options->trace ? "1" : "0";
+    }
+    if (strcmp(name, "ME_DSL_JIT_DEBUG_CC") == 0 && options->compiler_output >= 0) {
+        return options->compiler_output ? "1" : "0";
+    }
+    return env;
+}
 
 static void me_clear_last_error_message(void) {
     g_me_last_error_msg[0] = '\0';
@@ -2746,6 +2776,18 @@ int me_compile_nd(const char* expression, const me_variable* variables,
                   const int32_t* blockshape, int* error, me_expr** out) {
     return me_compile_nd_jit(expression, variables, var_count, dtype, ndims,
                              shape, chunkshape, blockshape, ME_JIT_DEFAULT, error, out);
+}
+
+int me_compile_nd_jit_options(const char *expression, const me_variable *variables,
+    int var_count, me_dtype dtype, int ndims, const int64_t *shape,
+    const int32_t *chunkshape, const int32_t *blockshape, int jit_mode,
+    const me_jit_options *options, int *error, me_expr **out) {
+    const me_jit_options *previous = g_me_jit_options;
+    g_me_jit_options = options;
+    int rc = me_compile_nd_jit(expression, variables, var_count, dtype, ndims,
+                              shape, chunkshape, blockshape, jit_mode, error, out);
+    g_me_jit_options = previous;
+    return rc;
 }
 
 static void pn(const me_expr* n, int depth) {
