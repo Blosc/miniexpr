@@ -1738,7 +1738,11 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             }
 
             if (!rhs_compiled) {
-                me_dtype expr_dtype = ctx->output_dtype_auto ? ME_AUTO : ctx->output_dtype;
+                /* A Boolean result does not make intermediate numeric operands
+                 * Boolean. Infer new locals before casting only the return. */
+                me_dtype expr_dtype = (stmt->as.assign.synthetic || ctx->output_dtype_auto ||
+                                      ctx->output_dtype == ME_BOOL)
+                                      ? ME_AUTO : ctx->output_dtype;
                 if (!dsl_compile_expr(ctx, stmt->as.assign.value, expr_dtype, &compiled->as.assign.value)) {
                     dsl_compiled_stmt_free(compiled);
                     return false;
@@ -1749,6 +1753,12 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             bool is_uniform = dsl_expr_is_uniform(compiled->as.assign.value.expr,
                                                   ctx->program->vars.uniform,
                                                   ctx->program->vars.count);
+            /* Guarded chain temporaries are per-lane values, even if an RHS
+             * is constant. Inactive lane zero may never have been assigned. */
+            if (stmt->as.assign.synthetic && !contains_reduction(compiled->as.assign.value.expr)) {
+                is_uniform = false;
+                compiled->as.assign.active_only = true;
+            }
 
             if (var_index < 0) {
                 if (!ctx->allow_new_locals) {
@@ -2073,6 +2083,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             break;
         }
         case ME_DSL_STMT_WHILE: {
+            compiled->as.while_loop.condition_nstmts = stmt->as.while_loop.condition_nstmts;
             if (!dsl_compile_condition_expr(ctx, stmt->as.while_loop.cond, &compiled->as.while_loop.cond)) {
                 dsl_compiled_stmt_free(compiled);
                 return false;

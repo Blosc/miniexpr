@@ -12,6 +12,7 @@
 #define MINIEXPR_DSL_PARSER_H
 
 #include <stddef.h>
+#include <stdbool.h>
 
 typedef enum {
     ME_DSL_STMT_ASSIGN = 0,
@@ -63,6 +64,7 @@ struct me_dsl_stmt {
         struct {
             char *name;
             me_dsl_expr *value;
+            bool synthetic;  /* Internal operand capture: infer type and obey lane masks. */
         } assign;
         struct {
             me_dsl_expr *expr;
@@ -85,6 +87,7 @@ struct me_dsl_stmt {
         struct {
             me_dsl_expr *cond;
             me_dsl_block body;
+            int condition_nstmts;  /* Lowered condition prefix, excluded from the body iteration cap. */
         } while_loop;
         struct {
             char *var;

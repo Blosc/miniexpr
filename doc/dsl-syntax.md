@@ -154,6 +154,23 @@ Commonly supported:
 - Function calls to supported miniexpr functions
 - User-registered C functions/closures passed in `me_variable`
 
+DSL expressions support Python-style chained comparisons such as `0 <= x < 10`
+and `a < b <= c != d`. Operands are evaluated left-to-right, each at most once,
+and later operands are skipped when an earlier comparison fails. This works in
+assignments, nested expressions, conditions, and range arguments. A `while`
+condition is re-evaluated on every iteration, including after `continue`.
+
+The native DSL front end lowers chains to temporaries and guarded statements
+before interpreter compilation or JIT IR construction. C callers can therefore
+pass raw chain syntax to `me_compile()` or `me_compile_nd_jit()` inside a DSL
+kernel (`def ...`), without Python rewriting. Generated temporaries avoid names
+in the source and infer operand types independently of the output dtype.
+Existing DSL `and`/`or` Boolean-result rules apply. The separate classic
+expression API retains its existing comparison semantics.
+
+Chaining does not expand the supported operand types or functions: existing
+string-comparison and per-element reduction restrictions still apply.
+
 Cast intrinsics:
 
 - `int(expr)`
@@ -182,6 +199,8 @@ In this example, `temp` is inferred from `sin(x) ** 2` (typically a floating typ
 Notes:
 
 - You do not need to declare local variable types.
+- Boolean output does not force numeric temporaries to Boolean: operand types
+  are inferred independently, and the return value is converted to Boolean.
 - If you assign a value with an incompatible dtype to the same local later, compilation fails.
 
 ## Loops

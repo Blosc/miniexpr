@@ -9,6 +9,7 @@
 **********************************************************************/
 
 #include "dsl_parser.h"
+#include "dsl_compare.h"
 #include <ctype.h>
 #include <inttypes.h>
 #include <stdbool.h>
@@ -657,7 +658,7 @@ static bool dsl_parse_program_pragmas(const char *source,
     return true;
 }
 
-static me_dsl_expr *dsl_expr_new(char *text, int line, int column) {
+me_dsl_expr *dsl_expr_new(char *text, int line, int column) {
     me_dsl_expr *expr = malloc(sizeof(*expr));
     if (!expr) {
         free(text);
@@ -677,9 +678,9 @@ static void dsl_expr_free(me_dsl_expr *expr) {
     free(expr);
 }
 
-static void dsl_stmt_free(me_dsl_stmt *stmt);
+void dsl_stmt_free(me_dsl_stmt *stmt);
 
-static void dsl_block_free(me_dsl_block *block) {
+void dsl_block_free(me_dsl_block *block) {
     if (!block) {
         return;
     }
@@ -692,7 +693,7 @@ static void dsl_block_free(me_dsl_block *block) {
     block->capacity = 0;
 }
 
-static bool dsl_block_push(me_dsl_block *block, me_dsl_stmt *stmt, me_dsl_error *error) {
+bool dsl_block_push(me_dsl_block *block, me_dsl_stmt *stmt, me_dsl_error *error) {
     if (!block || !stmt) {
         return false;
     }
@@ -710,7 +711,7 @@ static bool dsl_block_push(me_dsl_block *block, me_dsl_stmt *stmt, me_dsl_error 
     return true;
 }
 
-static me_dsl_stmt *dsl_stmt_new(me_dsl_stmt_kind kind, int line, int column) {
+me_dsl_stmt *dsl_stmt_new(me_dsl_stmt_kind kind, int line, int column) {
     me_dsl_stmt *stmt = calloc(1, sizeof(*stmt));
     if (!stmt) {
         return NULL;
@@ -721,7 +722,7 @@ static me_dsl_stmt *dsl_stmt_new(me_dsl_stmt_kind kind, int line, int column) {
     return stmt;
 }
 
-static void dsl_stmt_free(me_dsl_stmt *stmt) {
+void dsl_stmt_free(me_dsl_stmt *stmt) {
     if (!stmt) {
         return;
     }
@@ -1887,7 +1888,7 @@ me_dsl_program *me_dsl_parse(const char *source, me_dsl_error *error) {
 
     me_dsl_lexer lex;
     lexer_init(&lex, source);
-    if (!parse_program(&lex, program, error)) {
+    if (!parse_program(&lex, program, error) || !dsl_lower_comparisons(program, source, error)) {
         me_dsl_program_free(program);
         return NULL;
     }

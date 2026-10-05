@@ -157,8 +157,8 @@ static bool dsl_value_nonzero_at(const void *data, me_dtype dtype, size_t item_s
  * expressions, so a narrower branch must be widened (NUL-padded) on the way in.
  * Pass 0 when the widths are known to agree (numeric output). */
 static int dsl_eval_expr_masked_copy(dsl_eval_ctx *ctx, const me_dsl_compiled_expr *expr,
-                                     void *dst, const uint8_t *mask, int nitems,
-                                     size_t dst_item_size) {
+                                      void *dst, const uint8_t *mask, int nitems,
+                                      size_t dst_item_size, bool active_only) {
     if (!ctx || !expr || !expr->expr || !dst || nitems < 0) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
@@ -189,6 +189,26 @@ static int dsl_eval_expr_masked_copy(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
     }
     if (all_active && dst_item_size == item_size) {
         return dsl_eval_expr_nitems(ctx, expr, dst, nitems);
+    }
+
+    if (active_only) {
+        /* Masking the copy after full-vector evaluation is not short-circuit
+         * evaluation: skipped callbacks and invalid arithmetic still run.
+         * Chain operand captures must evaluate only the active lanes. */
+        for (int i = 0; i < nitems; i++) {
+            if (mask && !mask[i]) {
+                continue;
+            }
+            unsigned char *slot = (unsigned char *)dst + (size_t)i * dst_item_size;
+            int rc = dsl_eval_expr_item(ctx, expr, i, slot);
+            if (rc != ME_EVAL_SUCCESS) {
+                return rc;
+            }
+            if (dst_item_size > item_size) {
+                memset(slot + item_size, 0, dst_item_size - item_size);
+            }
+        }
+        return ME_EVAL_SUCCESS;
     }
 
     void *tmp = malloc((size_t)nitems * item_size);
@@ -449,7 +469,8 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
             int rc = dsl_eval_expr_masked_copy(ctx, &stmt->as.assign.value, out,
                                                run_mask, ctx->nitems,
                                                dsl_var_item_size(ctx->program,
-                                                                 ctx->program->local_var_indices[slot]));
+                                                                  ctx->program->local_var_indices[slot]),
+                                               stmt->as.assign.active_only);
             if (rc != ME_EVAL_SUCCESS) {
                 return rc;
             }
@@ -458,7 +479,7 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
         case ME_DSL_STMT_EXPR: {
             int rc = dsl_eval_expr_masked_copy(ctx, &stmt->as.expr_stmt.expr,
                                                ctx->output_block, run_mask, ctx->nitems,
-                                               ctx->program->output_itemsize);
+                                               ctx->program->output_itemsize, false);
             if (rc != ME_EVAL_SUCCESS) {
                 return rc;
             }
@@ -467,7 +488,7 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
         case ME_DSL_STMT_RETURN: {
             int rc = dsl_eval_expr_masked_copy(ctx, &stmt->as.return_stmt.expr,
                                                ctx->output_block, run_mask, ctx->nitems,
-                                               ctx->program->output_itemsize);
+                                               ctx->program->output_itemsize, false);
             if (rc != ME_EVAL_SUCCESS) {
                 return rc;
             }
@@ -691,6 +712,37 @@ static int dsl_eval_while_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
 
     int rc = ME_EVAL_SUCCESS;
     for (;;) {
+        if (stmt->as.while_loop.condition_nstmts && dsl_mask_any(active_mask, ctx->nitems)) {
+            /* Lowered condition statements belong to condition evaluation,
+             * not to the body iteration count (especially at the cap). */
+            uint8_t *prefix_run = malloc((size_t)ctx->nitems);
+            uint8_t *prefix_break = calloc((size_t)ctx->nitems, 1);
+            uint8_t *prefix_continue = calloc((size_t)ctx->nitems, 1);
+            if (!prefix_run || !prefix_break || !prefix_continue) {
+                free(prefix_run);
+                free(prefix_break);
+                free(prefix_continue);
+                free(active_mask);
+                return ME_EVAL_ERR_OOM;
+            }
+            memcpy(prefix_run, active_mask, (size_t)ctx->nitems);
+            me_dsl_compiled_block prefix = stmt->as.while_loop.body;
+            prefix.nstmts = stmt->as.while_loop.condition_nstmts;
+            rc = dsl_eval_block_element_loop(ctx, &prefix, prefix_run,
+                                             prefix_break, prefix_continue, return_mask);
+            for (int i = 0; i < ctx->nitems; i++) {
+                if (prefix_break[i] || return_mask[i]) {
+                    active_mask[i] = 0;
+                }
+            }
+            free(prefix_run);
+            free(prefix_break);
+            free(prefix_continue);
+            if (rc != ME_EVAL_SUCCESS) {
+                free(active_mask);
+                return rc;
+            }
+        }
         if (!dsl_mask_any(active_mask, ctx->nitems)) {
             break;
         }
@@ -752,7 +804,12 @@ static int dsl_eval_while_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
             }
         }
 
-        rc = dsl_eval_block_element_loop(ctx, &stmt->as.while_loop.body, run_mask,
+        me_dsl_compiled_block body = stmt->as.while_loop.body;
+        if (stmt->as.while_loop.condition_nstmts) {
+            body.stmts += stmt->as.while_loop.condition_nstmts;
+            body.nstmts -= stmt->as.while_loop.condition_nstmts;
+        }
+        rc = dsl_eval_block_element_loop(ctx, &body, run_mask,
                                          break_mask, continue_mask, return_mask);
         free(run_mask);
         free(cond_mask);

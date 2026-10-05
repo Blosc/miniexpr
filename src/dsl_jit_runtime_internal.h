@@ -28,7 +28,7 @@
 #endif
 
 #ifndef ME_DSL_JIT_CGEN_VERSION
-#define ME_DSL_JIT_CGEN_VERSION 10
+#define ME_DSL_JIT_CGEN_VERSION 12
 #endif
 
 #ifndef ME_DSL_JIT_BRIDGE_ABI_VERSION
@@ -72,6 +72,7 @@ struct me_dsl_compiled_stmt {
         struct {
             int local_slot;
             me_dsl_compiled_expr value;
+            bool active_only;
         } assign;
         struct {
             me_dsl_compiled_expr expr;
@@ -103,6 +104,7 @@ struct me_dsl_compiled_stmt {
         struct {
             me_dsl_compiled_expr cond;
             me_dsl_compiled_block body;
+            int condition_nstmts;
         } while_loop;
         struct {
             me_dsl_compiled_expr cond;
