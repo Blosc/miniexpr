@@ -22,6 +22,7 @@ typedef struct {
     int column;
     int indent_stack[32];  /* Stack of indentation levels */
     int indent_depth;      /* Current depth in indent stack */
+    bool allow_docstring;  /* Only the first statement of the function body */
 } me_dsl_lexer;
 
 static void dsl_set_error(me_dsl_error *error, int line, int column, const char *message) {
@@ -40,6 +41,7 @@ static void lexer_init(me_dsl_lexer *lex, const char *source) {
     lex->column = 1;
     lex->indent_stack[0] = 0;  /* Base indentation is 0 */
     lex->indent_depth = 0;
+    lex->allow_docstring = false;
 }
 
 static void lexer_advance(me_dsl_lexer *lex) {
@@ -209,6 +211,35 @@ static char *dsl_copy_trimmed(const char *start, const char *end) {
         end--;
     }
     return dsl_strndup(start, (size_t)(end - start));
+}
+
+/* Comments inside continued expressions are whitespace. Preserve newlines and
+ * quoted '#' characters while removing comment text from miniexpr input. */
+static char *dsl_copy_expression(const char *start, const char *end) {
+    char *text = dsl_copy_trimmed(start, end);
+    if (!text) {
+        return NULL;
+    }
+    char quote = '\0';
+    for (char *p = text; *p; p++) {
+        if (quote) {
+            if (*p == '\\' && p[1]) {
+                p++;
+            } else if (*p == quote) {
+                quote = '\0';
+            }
+        } else if (*p == '\'' || *p == '"') {
+            quote = *p;
+        } else if (*p == '#') {
+            while (*p && *p != '\n') {
+                *p++ = ' ';
+            }
+            if (!*p) {
+                break;
+            }
+        }
+    }
+    return text;
 }
 
 static char *dsl_build_compound_assign_expr(const char *lhs, size_t lhs_len,
@@ -608,6 +639,10 @@ static char *parse_expression_until_stmt_end(me_dsl_lexer *lex, me_dsl_error *er
             }
             continue;
         }
+        if (c == '#' && depth > 0) {
+            lexer_skip_comment(lex);
+            continue;
+        }
         if (c == '(') {
             depth++;
         }
@@ -630,7 +665,7 @@ static char *parse_expression_until_stmt_end(me_dsl_lexer *lex, me_dsl_error *er
         return NULL;
     }
 
-    char *text = dsl_copy_trimmed(start, lex->current);
+    char *text = dsl_copy_expression(start, lex->current);
     if (!text || text[0] == '\0') {
         free(text);
         dsl_set_error(error, line, column, "expected expression");
@@ -680,6 +715,10 @@ static char *parse_expression_in_parens(me_dsl_lexer *lex, me_dsl_error *error, 
             }
             continue;
         }
+        if (c == '#') {
+            lexer_skip_comment(lex);
+            continue;
+        }
         if (c == '(') {
             depth++;
         }
@@ -700,7 +739,7 @@ static char *parse_expression_in_parens(me_dsl_lexer *lex, me_dsl_error *error, 
     const char *end = lex->current;
     lexer_advance(lex);
 
-    char *text = dsl_copy_trimmed(start, end);
+    char *text = dsl_copy_expression(start, end);
     if (!text || text[0] == '\0') {
         free(text);
         dsl_set_error(error, line, column, "expected expression in range()");
@@ -1266,8 +1305,52 @@ static bool parse_print_stmt(me_dsl_lexer *lex, me_dsl_block *block, int line, i
     return true;
 }
 
-static bool parse_statement(me_dsl_lexer *lex, me_dsl_block *block, bool in_loop, me_dsl_error *error) {
-    lexer_skip_separators(lex);
+/* Docstrings are documentation, not runtime string expressions. Keep advancing
+ * the original lexer so diagnostics after multiline strings retain locations. */
+static bool parse_docstring(me_dsl_lexer *lex, me_dsl_error *error) {
+    int line = lex->line, column = lex->column;
+    char quote = *lex->current;
+    bool triple = lex->current[1] == quote && lex->current[2] == quote;
+    int width = triple ? 3 : 1;
+    for (int i = 0; i < width; i++) {
+        lexer_advance(lex);
+    }
+    while (*lex->current) {
+        if (*lex->current == quote &&
+            (!triple || (lex->current[1] == quote && lex->current[2] == quote))) {
+            for (int i = 0; i < width; i++) {
+                lexer_advance(lex);
+            }
+            return true;
+        }
+        if (*lex->current == '\\') {
+            lexer_advance(lex);
+            if (*lex->current) {
+                lexer_advance(lex);
+            }
+        } else {
+            if (!triple && *lex->current == '\n') {
+                break;
+            }
+            lexer_advance(lex);
+        }
+    }
+    dsl_set_error(error, line, column, "unterminated docstring");
+    return false;
+}
+
+static bool parse_statement(me_dsl_lexer *lex, me_dsl_block *block, bool in_loop,
+                             bool simple_only, me_dsl_error *error) {
+    lexer_skip_space(lex);
+    bool allow_docstring = lex->allow_docstring;
+    lex->allow_docstring = false;
+    if (allow_docstring && *lex->current && strchr("rRuU", *lex->current) &&
+        (lex->current[1] == '\'' || lex->current[1] == '"')) {
+        lexer_advance(lex);
+    }
+    if (allow_docstring && (*lex->current == '\'' || *lex->current == '"')) {
+        return parse_docstring(lex, error);
+    }
     if (*lex->current == '\0') {
         return false;
     }
@@ -1277,6 +1360,15 @@ static bool parse_statement(me_dsl_lexer *lex, me_dsl_block *block, bool in_loop
         const char *ident_start = NULL;
         size_t ident_len = 0;
         lexer_read_identifier(lex, &ident_start, &ident_len);
+
+        if (simple_only &&
+            ((ident_len == 3 && strncmp(ident_start, "for", ident_len) == 0) ||
+             (ident_len == 5 && strncmp(ident_start, "while", ident_len) == 0) ||
+             (ident_len == 2 && strncmp(ident_start, "if", ident_len) == 0))) {
+            dsl_set_error(error, snapshot.line, snapshot.column,
+                          "compound statements cannot follow ';'");
+            return false;
+        }
 
         if (ident_len == 3 && strncmp(ident_start, "for", ident_len) == 0) {
             return parse_for(lex, block, snapshot.line, snapshot.column, error);
@@ -1363,6 +1455,13 @@ static bool parse_indented_block(me_dsl_lexer *lex, me_dsl_block *block, int min
     memset(block, 0, sizeof(*block));
 
     /* Skip to the first line of the block */
+    lexer_skip_space(lex);
+    lexer_skip_comment(lex);
+    if (*lex->current && *lex->current != '\n') {
+        dsl_set_error(error, lex->line, lex->column,
+                      "expected newline before indented block");
+        return false;
+    }
     skip_to_line_start(lex);
 
     while (*lex->current) {
@@ -1406,7 +1505,7 @@ static bool parse_indented_block(me_dsl_lexer *lex, me_dsl_block *block, int min
         }
 
         /* Indentation is sufficient, parse the statement */
-        if (!parse_statement(lex, block, in_loop, error)) {
+        if (!parse_statement(lex, block, in_loop, false, error)) {
             return false;
         }
 
@@ -1414,21 +1513,27 @@ static bool parse_indented_block(me_dsl_lexer *lex, me_dsl_block *block, int min
          * But if we're already at a line start (column 1), the statement
          * parser (e.g., for-loop) already positioned us correctly. */
         if (lex->column != 1) {
-            /* Anything left on this line other than blanks or a comment would
-             * be silently discarded here.  That used to swallow ';'-joined
-             * statements whole -- inside an `if` body they simply never ran --
-             * so reject it instead of dropping code on the floor. */
+            /* Parse each simple statement without remeasuring indentation or
+             * crossing a newline. Semicolons in strings stay in expressions. */
             skip_line_whitespace(lex);
-            if (*lex->current == ';') {
-                /* A bare trailing ';' is harmless (and valid Python); only a
-                 * further statement after it is a problem. */
+            while (*lex->current == ';') {
                 lexer_advance(lex);
+                skip_line_whitespace(lex);
+                if (!*lex->current || *lex->current == '\n' || *lex->current == '#') {
+                    break;
+                }
+                if (*lex->current == ';') {
+                    dsl_set_error(error, lex->line, lex->column, "expected statement after ';'");
+                    return false;
+                }
+                if (!parse_statement(lex, block, in_loop, true, error)) {
+                    return false;
+                }
                 skip_line_whitespace(lex);
             }
             if (*lex->current && *lex->current != '\n' && *lex->current != '#') {
                 dsl_set_error(error, lex->line, lex->column,
-                              "only one statement per line is supported; "
-                              "put ';'-joined statements on separate lines");
+                              "expected ';' or newline after statement");
                 return false;
             }
             while (*lex->current && *lex->current != '\n') {
@@ -1538,6 +1643,7 @@ static bool parse_def(me_dsl_lexer *lex, me_dsl_program *program, me_dsl_error *
         return false;
     }
 
+    lex->allow_docstring = true;
     if (!parse_if_body(lex, &program->block, line, column, false, error)) {
         return false;
     }

@@ -22,6 +22,8 @@ Use Python-style indentation and always return a value on the paths you execute.
 - Leading blank lines and header comments are allowed.
 - Any extra trailing content after the function is a parse error.
 - Nested `def` inside the function body is not allowed.
+- The first statement may be a single/double-quoted or triple-quoted docstring,
+  including multiline strings and `r`/`u` prefixes. It is ignored at runtime.
 
 ## Header pragmas
 
@@ -63,12 +65,31 @@ General rules:
 - Empty blocks are invalid.
 - `elif`/`else` must belong to a matching `if`.
 - Deprecated forms like `break if cond` / `continue if cond` are not part of DSL syntax.
-- **One statement per line.** `;`-joined statements are a compile-time error.
-  They used to parse, with everything after the first `;` silently discarded.
+- Simple statements may share a line, separated by `;`, including inside indented
+  blocks. A trailing `;` is allowed; empty statements (`;;`) are not.
+- Compound statements (`if`, `for`, `while`) require their own lines and indented
+  bodies; they cannot follow a semicolon. Inline suites such as `if x: return x`
+  are not supported.
+- Expressions and calls can continue across lines inside parentheses, including
+  comments. This does not add list literals or indexing to the expression grammar.
 - **No reductions inside `if` / `for` / `while` bodies.** A reduction collapses
   the block to a scalar, which is meaningless under a per-element mask. They
   remain valid at top level and as a condition, which is the documented way to
   turn an element-wise predicate into a scalar one.
+
+### Docstrings and semicolon-separated statements
+
+```python
+def kernel(x):
+    """Transform each element.
+
+    Documentation is not evaluated by the interpreter or JIT.
+    """
+    y = x + 1; z = y * y
+    if z > 4:
+        z -= 2; z *= 3
+    return z
+```
 
 ### `if` / `elif` / `else` example
 

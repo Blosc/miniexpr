@@ -3,7 +3,7 @@
  *   - reductions inside per-element control flow give wrong results past
  *     element 0, because the reduction collapses the whole block while the
  *     surrounding mask is per-element
- * Both must now be rejected at compile time rather than mislead. */
+ * Joined statements must execute; invalid reductions must be rejected. */
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -39,15 +39,27 @@ static void expect(const char *label, const char *src, bool want_ok) {
 int main(void) {
     printf("=== DSL guard tests ===\n\n");
 
-    /* Semicolons: a bare trailing one is harmless, a joined statement is not. */
+    /* Semicolons join simple statements without discarding any of them. */
     expect("plain newline-separated body",
            "def k(x):\n    a = x * 2\n    b = a + 1\n    return b\n", true);
     expect("trailing semicolon accepted",
            "def k(x):\n    a = x * 2;\n    return a\n", true);
-    expect("';'-joined statements rejected",
-           "def k(x):\n    a = x * 2; b = a + 1\n    return b\n", false);
-    expect("';'-joined inside if rejected",
-           "def k(x):\n    if x > 2:\n        a = 100; return a\n    return 0\n", false);
+    expect("';'-joined statements accepted",
+           "def k(x):\n    a = x * 2; b = a + 1\n    return b\n", true);
+    expect("';'-joined inside if accepted",
+           "def k(x):\n    if x > 2:\n        a = 100; return a\n    return 0\n", true);
+    expect("compound statement after semicolon rejected",
+           "def k(x):\n    a = 0; if x > 2:\n        a = 1\n    return a\n", false);
+    expect("empty statement rejected",
+           "def k(x):\n    a = 0;; return a\n", false);
+    expect("leading semicolon rejected",
+           "def k(x):\n    ; return x\n", false);
+    expect("single-line docstring accepted",
+           "def k(x):\n    'Docs; # not syntax'\n    return x\n", true);
+    expect("multiline docstring accepted",
+           "def k(x):\n    \"\"\"Docs\nno indent; # text\n    end\"\"\"; return x\n", true);
+    expect("unterminated docstring rejected",
+           "def k(x):\n    \"\"\"Docs\n    return x\n", false);
 
     /* Reductions: fine at top level and as a condition, not inside a body. */
     expect("reduction at top level accepted",
