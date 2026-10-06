@@ -1,6 +1,12 @@
-# Initial portable DSL conformance corpus
+# Frozen portable DSL conformance and full-language regressions
 
-These are raw native source fixtures, not exported artifacts. Each `.txt` file
+These are raw native source fixtures, not exported artifacts. The release boundary
+is [profile 0.1](../../doc/dsl-spec/0.1.md). `frozen-excluded.txt` lists the retained
+full-language cases which **must fail portable validation**. CTest runs those
+as `native_dsl_*` regressions plus `portable_reject_*` negative profile checks;
+only `portable_dsl_*` cases establish frozen membership. The historical coverage
+description below must not be read as admitting excluded cases into 0.1.
+Each `.txt` file
 contains whitespace-delimited:
 
 1. Expected outcome (`ok`, `ok_exact`, `compile_error`, or `eval_error`), input dtype, output
@@ -72,9 +78,12 @@ Build miniexpr with tests enabled, then run:
 build/tests/portable_dsl_runner tests/portable-dsl/affine.dsl tests/portable-dsl/affine.txt off
 ```
 
-The final argument is `off` (require interpreter), `on` (require a prepared JIT
+The policy argument is `off` (require interpreter), `on` (require a prepared JIT
 kernel), or `default` (allow the normal best-effort policy). The runner emits its
-JIT status and computed values. It links only native miniexpr, never libpython.
+JIT status and computed values. An optional final `native` bypasses profile
+membership for full-language regressions; `reject` requires unsupported-feature
+validation without executing source. Neither mode is release conformance.
+It links only native miniexpr, never libpython.
 CTest always runs interpreter cases and adds required-JIT cases when native TCC
 is enabled, including kernels with incomplete return coverage. Missing-return
 fixtures cover all-returning inputs, mixed successful/failing elements, returns

@@ -140,8 +140,8 @@ int main(int argc, char **argv) {
     const void *inputs[MAX_INPUTS] = {0};
     me_jit_mode mode = ME_JIT_DEFAULT;
 
-    if (argc != 4) {
-        fprintf(stderr, "usage: %s source.dsl case.txt off|on|default\n", argv[0]);
+    if (argc != 4 && (argc != 5 || (strcmp(argv[4], "native") && strcmp(argv[4], "reject")))) {
+        fprintf(stderr, "usage: %s source.dsl case.txt off|on|default [native|reject]\n", argv[0]);
         return 2;
     }
     if (!strcmp(argv[3], "off")) {
@@ -223,8 +223,14 @@ int main(int argc, char **argv) {
     me_portable_status profile = me_validate_portable_dsl(source, ME_PORTABLE_DSL_VERSION,
         variables, nvars, output_dtype, &profile_error);
     bool expect_compile_error = !strcmp(outcome, "compile_error");
-    if ((expect_compile_error && profile == ME_PORTABLE_SUCCESS) ||
-        (!expect_compile_error && profile != ME_PORTABLE_SUCCESS)) {
+    if (argc == 5 && !strcmp(argv[4], "reject")) {
+        if (profile != ME_PORTABLE_ERR_UNSUPPORTED) goto cleanup;
+        printf("unsupported_feature\n");
+        result = 0;
+        goto cleanup;
+    }
+    if (argc == 4 && ((expect_compile_error && profile == ME_PORTABLE_SUCCESS) ||
+        (!expect_compile_error && profile != ME_PORTABLE_SUCCESS))) {
         fprintf(stderr, "unexpected portable validation status %d at %d:%d: %s\n",
                 profile, profile_error.line, profile_error.column, profile_error.message);
         goto cleanup;

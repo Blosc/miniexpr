@@ -32,7 +32,7 @@ int main(void) {
     }
     x[0].dtype = ME_FLOAT64;
     check("# me:compiler=cc\ndef k(x):\n    return sin(x) + cos(x)\n", x, 1,
-          ME_FLOAT64, ME_PORTABLE_SUCCESS);
+          ME_FLOAT64, ME_PORTABLE_ERR_UNSUPPORTED);
     check("def k(x):\n    if x > 0:\n        return x\n", x, 1,
           ME_FLOAT64, ME_PORTABLE_SUCCESS);
     check("def k(x):\n    while 1:\n        pass\n    return x\n", x, 1,
@@ -70,6 +70,12 @@ int main(void) {
     check("def k(x, y):\n    return x + y\n", reversed, 2, ME_FLOAT64, ME_PORTABLE_ERR_UNSUPPORTED);
 
     const char *unsupported[] = {
+        "def k(x):\n    return sin(x)\n",
+        "def k(x):\n    return cos(x)\n",
+        "def k(x):\n    return int(x + 0.25)\n",
+        "def k(x):\n    return float(float(x))\n",
+        "def k(x):\n    return bool((x + 1) - x)\n",
+        "def k(x):\n    return (x / 2) > 0\n",
         "def k(x):\n    return sum(x)\n",
         "def k(x):\n    if any(x):\n        return x\n    return x\n",
         "def k(x):\n    while x:\n        print(x)\n    return x\n",
@@ -89,10 +95,14 @@ int main(void) {
     }
     check("def k(x):\n    return missing + x\n", x, 1, ME_FLOAT64, ME_PORTABLE_ERR_SOURCE);
     check("def k(x):\n    return rand\n", x, 1, ME_FLOAT64, ME_PORTABLE_ERR_SOURCE);
-    check("def k(x):\n    return sin()\n", x, 1, ME_FLOAT64, ME_PORTABLE_ERR_SOURCE);
+    check("def k(x):\n    return sin()\n", x, 1, ME_FLOAT64, ME_PORTABLE_ERR_UNSUPPORTED);
     check("def k( :\n", x, 1, ME_FLOAT64, ME_PORTABLE_ERR_SOURCE);
     check(NULL, x, 1, ME_FLOAT64, ME_PORTABLE_ERR_SOURCE);
     x[0].dtype = ME_INT64;
+    check("def k(x):\n    return x + 0.5\n", x, 1, ME_INT64, ME_PORTABLE_ERR_UNSUPPORTED);
+    check("def k(x):\n    return x == 9007199254740993.0\n", x, 1, ME_BOOL, ME_PORTABLE_ERR_UNSUPPORTED);
+    check("def k(x):\n    return x == 1e3\n", x, 1, ME_BOOL, ME_PORTABLE_ERR_UNSUPPORTED);
+    check("def k(x):\n    return float(x)\n", x, 1, ME_FLOAT32, ME_PORTABLE_ERR_UNSUPPORTED);
     check("def k(x):\n    return x / 2\n", x, 1, ME_INT64, ME_PORTABLE_ERR_UNSUPPORTED);
     check("def k(x):\n    return x + 9007199254740994\n", x, 1,
           ME_INT64, ME_PORTABLE_ERR_UNSUPPORTED);
@@ -104,6 +114,10 @@ int main(void) {
           ME_INT64, ME_PORTABLE_ERR_UNSUPPORTED);
     check("def k(x):\n    return x + 0x20000000000001\n", x, 1,
           ME_INT64, ME_PORTABLE_ERR_UNSUPPORTED);
+    x[0].dtype = ME_FLOAT32;
+    check("def k(x):\n    return (x + 1.0) > x\n", x, 1, ME_BOOL, ME_PORTABLE_ERR_UNSUPPORTED);
+    check("def k(x):\n    return (x + 1.0) - x\n", x, 1, ME_FLOAT32, ME_PORTABLE_SUCCESS);
+    x[0].dtype = ME_INT64;
     me_portable_error error;
     assert(me_validate_portable_dsl("def k(x):\n    return x\n", "0.2", x, 1,
                                    ME_INT64, &error) == ME_PORTABLE_ERR_VERSION);

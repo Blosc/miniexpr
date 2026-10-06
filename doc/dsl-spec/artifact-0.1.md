@@ -1,9 +1,9 @@
-# Portable miniexpr artifact 0.1 (experimental)
+# Portable miniexpr artifact 0.1
 
-This is the candidate standalone interchange format for the draft
+This is the frozen conservative standalone interchange format for the
 [portable language profile 0.1](0.1.md), not a package version or a Blosc2 storage
 format. It is implemented by the optional native artifact adapter. The language
-semantics must still pass their remaining audit before either contract is frozen.
+boundary is closed; platform certification remains a separate release gate.
 
 ## JSON representation
 
@@ -39,7 +39,7 @@ constants is at most `ME_MAX_VARS` (128). These are loader limits, not a sandbox
 ## Signature and constant coverage
 
 Dtypes are logical `bool`, `int32`, `int64`, `float32`, and `float64` values. The
-draft portable profile requires all parameters, including constants, to share a
+frozen portable profile requires all parameters, including constants, to share a
 dtype; output can differ. Mixed input/constant types remain excluded for now.
 
 Every source parameter must occur exactly once in either `inputs` or `constants`.
@@ -80,7 +80,7 @@ over compiler defaults. Lack of that backend does not invalidate an artifact;
 normal best-effort interpreter fallback remains available. Host `ME_JIT_OFF`
 can independently disable JIT preparation/execution.
 
-`core-scalar` denotes the draft language profile, not a backend or hardware
+`core-scalar` denotes the frozen language profile, not a backend or hardware
 capability. Input-range, overflow, initialized-local, conversion, loop, divisor,
 and return-path constraints remain those of the language. The loader validates
 source membership and typed compilation; it neither executes the kernel at load

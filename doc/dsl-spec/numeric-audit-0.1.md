@@ -1,9 +1,12 @@
 # Numeric stabilization audit for portable 0.1
 
-**Status: incomplete; blocks publication.** These are checked conversions and
+**Status: audit history; scope closed by the conservative [frozen profile](0.1.md).**
+Unfinished numeric domains below are excluded or explicit runtime preconditions,
+not an open-ended release queue. The earlier broad feature filter is replaced by
+source and compiled-tree membership checks. These are checked conversions and
 open discrepancies, not a frozen specification. The experimental validator
-accepts more combinations than the audited matrix; validation alone does not
-establish interpreter/JIT agreement.
+previously accepted more combinations than the audited matrix; historical
+validation results do not establish frozen release membership.
 
 ## Output conversions
 

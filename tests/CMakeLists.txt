@@ -33,26 +33,37 @@ if(NOT EMSCRIPTEN)
       list(APPEND MINIEXPR_PORTABLE_CASES convert_${input_type}_${output_type})
     endforeach()
   endforeach()
+  file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/frozen-excluded.txt" MINIEXPR_FROZEN_EXCLUDED)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/frozen-excluded.txt")
   foreach(case_name IN LISTS MINIEXPR_PORTABLE_CASES)
     if(case_name MATCHES "^convert_")
       set(source_path "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/identity.dsl")
     else()
       set(source_path "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.dsl")
     endif()
+    set(profile_mode "")
+    set(test_prefix portable_dsl)
+    if(case_name IN_LIST MINIEXPR_FROZEN_EXCLUDED)
+      set(profile_mode native)
+      set(test_prefix native_dsl)
+      add_test(NAME portable_reject_${case_name} COMMAND portable_dsl_runner
+        "${source_path}" "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.txt" off reject)
+    endif()
     foreach(policy off default)
-      add_test(NAME portable_dsl_${case_name}_${policy}
+      add_test(NAME ${test_prefix}_${case_name}_${policy}
         COMMAND portable_dsl_runner
           "${source_path}"
-          "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.txt" "${policy}")
-      set_tests_properties(portable_dsl_${case_name}_${policy} PROPERTIES TIMEOUT 30
+          "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.txt" "${policy}" ${profile_mode})
+      set_tests_properties(${test_prefix}_${case_name}_${policy} PROPERTIES TIMEOUT 30
         ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/portable-jit-cache")
     endforeach()
     if(MINIEXPR_ENABLE_TCC_JIT)
-      add_test(NAME portable_dsl_${case_name}_on
+      add_test(NAME ${test_prefix}_${case_name}_on
         COMMAND portable_dsl_runner
           "${source_path}"
-          "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.txt" on)
-      set_tests_properties(portable_dsl_${case_name}_on PROPERTIES TIMEOUT 30
+          "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.txt" on ${profile_mode})
+      set_tests_properties(${test_prefix}_${case_name}_on PROPERTIES TIMEOUT 30
         ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/portable-jit-cache")
     endif()
     if(MINIEXPR_PORTABLE_CC)
@@ -62,20 +73,17 @@ if(NOT EMSCRIPTEN)
       set(cc_path "${CMAKE_CURRENT_BINARY_DIR}/portable-dsl/${case_name}.cc.dsl")
       file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/portable-dsl")
       file(WRITE "${cc_path}" "# me:compiler=cc\n${cc_source}")
-      add_test(NAME portable_dsl_${case_name}_cc
+      add_test(NAME ${test_prefix}_${case_name}_cc
         COMMAND portable_dsl_runner "${cc_path}"
-          "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.txt" on)
-      set_tests_properties(portable_dsl_${case_name}_cc PROPERTIES TIMEOUT 30
+          "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.txt" on ${profile_mode})
+      set_tests_properties(${test_prefix}_${case_name}_cc PROPERTIES TIMEOUT 30
         ENVIRONMENT "CC=${MINIEXPR_PORTABLE_CC};ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/portable-jit-cache")
     endif()
   endforeach()
-  # These preserve the interpreter baseline for unresolved typed-codegen gaps.
-  # Do not promote them to required-JIT conformance before fixing the gaps.
-  # math_condition also differs between linked interpreter math engines; keep
-  # that source as an audit reproducer rather than a passing baseline case.
+  # Full-language regressions are retained separately from frozen conformance.
   get_property(portable_tests DIRECTORY PROPERTY TESTS)
   foreach(test_name IN LISTS portable_tests)
-    if(test_name MATCHES "^portable_dsl_while_cap_")
+    if(test_name MATCHES "^(portable|native)_dsl_while_cap_")
       set_property(TEST ${test_name} APPEND PROPERTY ENVIRONMENT "ME_DSL_WHILE_MAX_ITERS=3")
     endif()
   endforeach()
@@ -83,7 +91,7 @@ if(NOT EMSCRIPTEN)
   foreach(case_name nested_cast cast_argument_division)
     add_test(NAME portable_audit_${case_name}_off COMMAND portable_dsl_runner
       "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/audit/${case_name}.dsl"
-      "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/audit/${case_name}.txt" off)
+      "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/audit/${case_name}.txt" off native)
     set_tests_properties(portable_audit_${case_name}_off PROPERTIES TIMEOUT 30)
   endforeach()
 endif()

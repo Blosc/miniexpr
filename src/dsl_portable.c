@@ -6,10 +6,12 @@
   License: BSD 3-Clause (see LICENSE.txt)
 **********************************************************************/
 
-/* Draft portable-profile validation; the native parser/compiler remain authoritative. */
+/* Frozen portable-profile validation; the native parser/compiler remain authoritative. */
 #include "miniexpr.h"
 #include "dsl_compile_internal.h"
 #include "dsl_parser.h"
+#include "dsl_eval_internal.h"
+#include "functions.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -74,7 +76,7 @@ static bool portable_name(const char *name) {
 }
 
 static bool portable_call(const char *start, size_t length, bool range_allowed) {
-    const char *functions[] = {"sin", "cos", "int", "float", "bool"};
+    const char *functions[] = {"int", "float", "bool"};
     for (size_t i = 0; i < sizeof(functions) / sizeof(functions[0]); i++) {
         if (portable_ident_equal(start, length, functions[i])) {
             return true;
@@ -86,6 +88,7 @@ static bool portable_call(const char *start, size_t length, bool range_allowed) 
 typedef struct {
     const char *names[ME_MAX_VARS];
     int count;
+    bool integral_inputs;
 } portable_names;
 
 static me_portable_status portable_add_name(portable_names *names, const char *name,
@@ -184,6 +187,31 @@ static me_portable_status portable_expr(const me_dsl_expr *expr, bool range_allo
                 return portable_error(error, ME_PORTABLE_ERR_UNSUPPORTED,
                                       expr->line, expr->column, message);
             }
+            if (*next == '(' && (portable_ident_equal(start, length, "int") ||
+                                 portable_ident_equal(start, length, "float") ||
+                                 (floating_inputs && portable_ident_equal(start, length, "bool")))) {
+                if (!floating_inputs && portable_ident_equal(start, length, "float")) {
+                    return portable_error(error, ME_PORTABLE_ERR_UNSUPPORTED, expr->line, expr->column,
+                                          "integral float() casts are outside frozen portable profile 0.1; use output conversion");
+                }
+                /* Leaf numeric casts only. Do not admit unverified nested
+                 * callback dispatch merely because native compilation succeeds. */
+                const char *arg = next + 1;
+                while (isspace((unsigned char)*arg)) arg++;
+                const char *end = arg;
+                if (portable_ident_start(*arg)) {
+                    while (portable_ident_char(*end)) end++;
+                } else {
+                    char *number_end = NULL;
+                    strtod(arg, &number_end);
+                    end = number_end;
+                }
+                while (isspace((unsigned char)*end)) end++;
+                if (end == arg || *end != ')') {
+                    return portable_error(error, ME_PORTABLE_ERR_UNSUPPORTED, expr->line, expr->column,
+                                          "nested numeric casts are outside frozen portable profile 0.1");
+                }
+            }
             if (*next != '(' && !keyword) {
                 bool bound = false;
                 for (int i = 0; i < names->count; i++) {
@@ -202,6 +230,14 @@ static me_portable_status portable_expr(const me_dsl_expr *expr, bool range_allo
         if ((*p >= '0' && *p <= '9') || (*p == '.' && p[1] >= '0' && p[1] <= '9')) {
             char *end = NULL;
             double value = strtod(p, &end);
+            if (names->integral_inputs) {
+                for (const char *q = p; q < end; q++) {
+                    if (*q == '.' || *q == 'e' || *q == 'E' || *q == 'p' || *q == 'P') {
+                        return portable_error(error, ME_PORTABLE_ERR_UNSUPPORTED, expr->line, expr->column,
+                                              "floating literals in integral signatures are outside frozen portable profile 0.1");
+                    }
+                }
+            }
             bool outside_integer_limit = false;
             if (!floating_inputs) {
                 /* Normalization preserves integer digits (including base-prefixed
@@ -227,7 +263,7 @@ static me_portable_status portable_expr(const me_dsl_expr *expr, bool range_allo
             if (end == p || !isfinite(value) || outside_integer_limit ||
                 (!floating_inputs && value > 9007199254740992.0)) {
                 return portable_error(error, ME_PORTABLE_ERR_UNSUPPORTED, expr->line, expr->column,
-                                      "numeric literal is outside the draft portable range");
+                              "numeric literal is outside the portable range for profile 0.1");
             }
             p = end;
             continue;
@@ -326,6 +362,80 @@ static me_portable_status portable_block(const me_dsl_block *block, bool floatin
     return ME_PORTABLE_SUCCESS;
 }
 
+/* Check actual interpreter computation types, not source spelling or the
+ * requested output width. Data-dependent overflow/cast domains are caller
+ * preconditions; static uncertified expression combinations are rejected. */
+static bool portable_tree(const me_expr *node, bool predicate, int depth) {
+    if (!node || depth > 128) return false;
+    if (!IS_FUNCTION(node->type) && !IS_CLOSURE(node->type)) return true;
+    const char *op = me_arithmetic_operator(node);
+    me_dtype computation = infer_result_type(node);
+    if (op && !strcmp(op, "/") && computation != ME_FLOAT32 && computation != ME_FLOAT64) return false;
+    bool comparison = me_comparison_operator(node) != NULL ||
+        (!op && node->dtype == ME_BOOL && node->function != NULL &&
+         !(node->flags & ME_EXPR_FLAG_DSL_VALUE_CAST));
+    if (op && predicate && (computation == ME_FLOAT32 || !strcmp(op, "/"))) return false;
+    for (int i = 0; i < ARITY(node->type); i++) {
+        const me_expr *child = node->parameters[i];
+        if (op && TYPE_MASK(child->type) == ME_VARIABLE &&
+            (child->dtype == ME_INT32 || child->dtype == ME_INT64) &&
+            (computation == ME_FLOAT32 || computation == ME_FLOAT64)) return false;
+        if (op && IS_FUNCTION(child->type) && ARITY(child->type) == 1 && child->function == NULL &&
+            (child->input_dtype == ME_INT32 || child->input_dtype == ME_INT64) &&
+            (computation == ME_FLOAT32 || computation == ME_FLOAT64)) return false;
+        if (op && me_arithmetic_operator(child) && infer_result_type(child) != computation) return false;
+        if (op && (child->flags & ME_EXPR_FLAG_DSL_VALUE_CAST) &&
+            !(child->flags & ME_EXPR_FLAG_DSL_BOOL_CAST) && infer_result_type(child) != computation) return false;
+        if (!portable_tree(child, predicate || comparison, depth + 1)) return false;
+    }
+    return true;
+}
+
+static me_portable_status portable_compiled_expr(const me_dsl_compiled_expr *expr,
+    const me_dsl_compiled_stmt *stmt, me_portable_error *error) {
+    if (!expr->expr) return ME_PORTABLE_SUCCESS;
+    const me_expr *node = expr->expr;
+    if (!portable_tree(node, false, 0)) {
+        return portable_error(error, ME_PORTABLE_ERR_UNSUPPORTED, stmt->line, stmt->column,
+                              "mixed arithmetic or predicate intermediates are outside frozen portable profile 0.1");
+    }
+    return ME_PORTABLE_SUCCESS;
+}
+
+static me_portable_status portable_compiled_block(const me_dsl_compiled_block *block,
+    int depth, me_portable_error *error) {
+    if (depth > 128) return portable_error(error, ME_PORTABLE_ERR_UNSUPPORTED, 0, 0, "portable nesting limit exceeded");
+    for (int i = 0; i < block->nstmts; i++) {
+        const me_dsl_compiled_stmt *s = block->stmts[i];
+        me_portable_status rc = ME_PORTABLE_SUCCESS;
+#define CHECK_EXPR(e) do { rc = portable_compiled_expr(&(e), s, error); if (rc) return rc; } while (0)
+#define CHECK_BLOCK(b) do { rc = portable_compiled_block(&(b), depth + 1, error); if (rc) return rc; } while (0)
+        switch (s->kind) {
+        case ME_DSL_STMT_ASSIGN: CHECK_EXPR(s->as.assign.value); break;
+        case ME_DSL_STMT_EXPR: CHECK_EXPR(s->as.expr_stmt.expr); break;
+        case ME_DSL_STMT_RETURN: CHECK_EXPR(s->as.return_stmt.expr); break;
+        case ME_DSL_STMT_IF:
+            CHECK_EXPR(s->as.if_stmt.cond);
+            CHECK_BLOCK(s->as.if_stmt.then_block);
+            for (int j = 0; j < s->as.if_stmt.n_elifs; j++) {
+                CHECK_EXPR(s->as.if_stmt.elif_branches[j].cond);
+                CHECK_BLOCK(s->as.if_stmt.elif_branches[j].block);
+            }
+            if (s->as.if_stmt.has_else) CHECK_BLOCK(s->as.if_stmt.else_block);
+            break;
+        case ME_DSL_STMT_FOR:
+            CHECK_EXPR(s->as.for_loop.start); CHECK_EXPR(s->as.for_loop.stop); CHECK_EXPR(s->as.for_loop.step);
+            CHECK_BLOCK(s->as.for_loop.body); break;
+        case ME_DSL_STMT_WHILE: CHECK_EXPR(s->as.while_loop.cond); CHECK_BLOCK(s->as.while_loop.body); break;
+        case ME_DSL_STMT_BREAK: case ME_DSL_STMT_CONTINUE: CHECK_EXPR(s->as.flow.cond); break;
+        case ME_DSL_STMT_PRINT: break; /* Rejected by the parsed feature filter. */
+        }
+#undef CHECK_EXPR
+#undef CHECK_BLOCK
+    }
+    return ME_PORTABLE_SUCCESS;
+}
+
 me_portable_status me_validate_portable_dsl(const char *source, const char *version,
     const me_variable *inputs, int ninputs, me_dtype output_dtype,
     me_portable_error *error) {
@@ -387,10 +497,10 @@ me_portable_status me_validate_portable_dsl(const char *source, const char *vers
     }
     if (rc == ME_PORTABLE_SUCCESS && parsed->fp_mode != ME_DSL_FP_STRICT) {
         rc = portable_error(error, ME_PORTABLE_ERR_UNSUPPORTED, 0, 0,
-                            "non-strict floating-point pragmas are outside draft profile 0.1");
+                            "non-strict floating-point pragmas are outside portable profile 0.1");
     }
     if (rc == ME_PORTABLE_SUCCESS) {
-        portable_names names = {{0}, 0};
+        portable_names names = {{0}, 0, ninputs && (inputs[0].dtype == ME_INT32 || inputs[0].dtype == ME_INT64)};
         for (int i = 0; rc == ME_PORTABLE_SUCCESS && i < parsed->nparams; i++) {
             rc = portable_add_name(&names, parsed->params[i], error);
         }
@@ -428,6 +538,7 @@ me_portable_status me_validate_portable_dsl(const char *source, const char *vers
                               ? ME_PORTABLE_ERR_OOM : ME_PORTABLE_ERR_SOURCE,
                               line, column, reason[0] ? reason : "native DSL compilation failed");
     }
+    rc = portable_compiled_block(&compiled->block, 0, error);
     dsl_compiled_program_free(compiled);
-    return ME_PORTABLE_SUCCESS;
+    return rc;
 }

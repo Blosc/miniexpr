@@ -33,10 +33,10 @@ jobs:
           # runner image can move to a new VS without breaking the build.
           # Visual Studio generators are multi-config; select Release at build time.
           cmake -S . -B build -T ClangCL \
-            -DCMAKE_C_COMPILER=clang-cl
+            -DCMAKE_C_COMPILER=clang-cl -DMINIEXPR_BUILD_ARTIFACT=ON
           grep -Ei '^CMAKE_C_COMPILER:(FILEPATH|STRING|UNINITIALIZED)=.*clang-cl' build/CMakeCache.txt
         else
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DMINIEXPR_BUILD_ARTIFACT=ON
         fi
         if [ "$RUNNER_OS" == "Windows" ]; then
           cmake --build build --config Release
@@ -78,7 +78,7 @@ jobs:
     - name: Configure (JIT enabled)
       shell: bash
       run: |
-        cmake -S . -B build-arm64-jit -DCMAKE_BUILD_TYPE=Release -DMINIEXPR_ENABLE_TCC_JIT=ON
+        cmake -S . -B build-arm64-jit -DCMAKE_BUILD_TYPE=Release -DMINIEXPR_ENABLE_TCC_JIT=ON -DMINIEXPR_BUILD_ARTIFACT=ON
         grep -E '^MINIEXPR_ENABLE_TCC_JIT:BOOL=ON$' build-arm64-jit/CMakeCache.txt
 
     - name: Build
@@ -101,7 +101,7 @@ jobs:
     - name: Configure (interpreter only)
       shell: bash
       run: |
-        cmake -S . -B build-arm64-interpreter -DCMAKE_BUILD_TYPE=Release -DMINIEXPR_ENABLE_TCC_JIT=OFF
+        cmake -S . -B build-arm64-interpreter -DCMAKE_BUILD_TYPE=Release -DMINIEXPR_ENABLE_TCC_JIT=OFF -DMINIEXPR_BUILD_ARTIFACT=ON
         grep -E '^MINIEXPR_ENABLE_TCC_JIT:BOOL=OFF$' build-arm64-interpreter/CMakeCache.txt
 
     - name: Build
@@ -134,7 +134,7 @@ jobs:
         cmake -S . -B build-win-arm64 -A ARM64 -T ClangCL \
           -DCMAKE_C_COMPILER=clang-cl \
           -DMINIEXPR_BUILD_BUNDLED_LIBTCC=OFF \
-          -DMINIEXPR_ENABLE_TCC_JIT=OFF
+          -DMINIEXPR_ENABLE_TCC_JIT=OFF -DMINIEXPR_BUILD_ARTIFACT=ON
         grep -Ei '^CMAKE_C_COMPILER:(FILEPATH|STRING|UNINITIALIZED)=.*clang-cl' build-win-arm64/CMakeCache.txt
         grep -E '^MINIEXPR_BUILD_BUNDLED_LIBTCC:BOOL=OFF$' build-win-arm64/CMakeCache.txt
         grep -E '^MINIEXPR_ENABLE_TCC_JIT:BOOL=OFF$' build-win-arm64/CMakeCache.txt
