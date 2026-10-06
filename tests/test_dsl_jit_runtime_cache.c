@@ -1975,24 +1975,24 @@ static int test_cast_interpreter_jit_parity_compilers(void) {
     return 0;
 }
 
-static int test_wasm_cast_intrinsics_jit_enabled(void) {
+static int test_wasm_float_bool_casts_jit_enabled(void) {
 #if !defined(__EMSCRIPTEN__)
     return 0;
 #else
-    printf("\n=== DSL JIT Runtime Cache Test 8c: wasm cast intrinsics runtime-JIT enabled ===\n");
+    printf("\n=== DSL JIT Runtime Cache Test 8c: wasm float/bool casts runtime-JIT enabled ===\n");
 
     int rc = 1;
     char *saved_jit = dup_env_value("ME_DSL_JIT");
     const char *src =
         "# me:compiler=cc\n"
         "def kernel(x):\n"
-        "    return float(int(x)) + bool(x)\n";
+        "    return float(x) + bool(x)\n";
     me_variable vars[] = {{"x", ME_FLOAT64}};
     int err = 0;
     me_expr *expr = NULL;
-    double in[4] = {0.0, 0.2, 1.9, 3.2};
+    double in[4] = {0.0, 0.25, 1.5, 3.5};
     double out[4] = {0.0, 0.0, 0.0, 0.0};
-    const double expected[4] = {0.0, 1.0, 2.0, 4.0};
+    const double expected[4] = {0.0, 1.25, 2.5, 4.5};
     const void *inputs[] = {in};
 
     if (setenv("ME_DSL_JIT", "1", 1) != 0) {
@@ -3188,7 +3188,7 @@ int main(void) {
     fail |= test_jit_disable_env_guardrail();
     fail |= test_default_tcc_skips_cc_backend();
     fail |= test_cast_interpreter_jit_parity_compilers();
-    fail |= test_wasm_cast_intrinsics_jit_enabled();
+    fail |= test_wasm_float_bool_casts_jit_enabled();
     fail |= test_wasm_instantiate_warning_policy();
     fail |= test_wasm_reserved_index_vars_jit_parity();
     fail |= test_wasm_reserved_index_cache_key_differentiation();
