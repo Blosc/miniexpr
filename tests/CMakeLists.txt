@@ -58,7 +58,9 @@ if(NOT EMSCRIPTEN)
       set_tests_properties(${test_prefix}_${case_name}_${policy} PROPERTIES TIMEOUT 30
         ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/portable-jit-cache")
     endforeach()
-    if(MINIEXPR_ENABLE_TCC_JIT)
+    # Windows release conformance currently certifies the interpreter baseline;
+    # an enabled build option alone does not certify a usable TCC runtime there.
+    if(MINIEXPR_ENABLE_TCC_JIT AND NOT WIN32)
       add_test(NAME ${test_prefix}_${case_name}_on
         COMMAND portable_dsl_runner
           "${source_path}"
@@ -105,7 +107,7 @@ if(MINIEXPR_BUILD_ARTIFACT AND NOT EMSCRIPTEN)
     set_tests_properties(portable_artifact_affine_${policy} PROPERTIES TIMEOUT 30
       ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/artifact-jit-cache")
   endforeach()
-  if(MINIEXPR_ENABLE_TCC_JIT)
+  if(MINIEXPR_ENABLE_TCC_JIT AND NOT WIN32)
     add_test(NAME portable_artifact_affine_on COMMAND portable_artifact_runner
       "${CMAKE_CURRENT_SOURCE_DIR}/portable-artifacts/affine.json" on)
     set_tests_properties(portable_artifact_affine_on PROPERTIES TIMEOUT 30

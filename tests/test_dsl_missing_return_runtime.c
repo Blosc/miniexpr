@@ -8,7 +8,11 @@
 static int kernel_status;
 static int kernel_calls;
 
+#if ME_USE_WASM32_JIT
+static int failing_kernel(const void **inputs, void *output, int nitems) {
+#else
 static int failing_kernel(const void **inputs, void *output, int64_t nitems) {
+#endif
     (void)inputs;
     (void)output;
     (void)nitems;

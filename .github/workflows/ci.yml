@@ -112,8 +112,11 @@ jobs:
     - name: Test
       shell: bash
       run: |
-        ME_DSL_JIT=0 ctest --test-dir build-arm64-interpreter -E "^test_dsl_jit_runtime_cache$" --output-on-failure || \
-          ME_DSL_JIT=0 ctest --test-dir build-arm64-interpreter -E "^test_dsl_jit_runtime_cache$" --rerun-failed --output-on-failure
+        # Individual interpreter tests already select ME_JIT_OFF/ME_DSL_JIT=0.
+        # Do not globally disable the required-CC cases: CC remains independently
+        # available even when the TCC backend is disabled in this build.
+        ctest --test-dir build-arm64-interpreter -E "^test_dsl_jit_runtime_cache$" --output-on-failure || \
+          ctest --test-dir build-arm64-interpreter -E "^test_dsl_jit_runtime_cache$" --rerun-failed --output-on-failure
 
   windows-arm64:
     runs-on: windows-11-arm
