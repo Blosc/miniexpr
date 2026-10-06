@@ -63,11 +63,37 @@ division constants conservatively retain interpreter execution. Such kernels can
 lose JIT acceleration; a compiler preference never licenses an incorrect result.
 The full promotion/operator matrix still needs specification and certification.
 
-Broader probing exposed nested-cast interpreter dispatch discrepancies, including
-incorrect results for `int(x + 0.25)` when nested in division. General nested cast
-semantics remain audit work; interpreter fallback does not certify every accepted
-cast context. The separate `audit/division_nested` sample is covered as a known-good
-fallback case in Python.
+Broader probing exposed nested-cast interpreter dispatch discrepancies. The
+value-cast correction below covers `int(x + 0.25)`, including its use in floating
+division. General nested cast semantics remain audit work; interpreter fallback
+does not certify every accepted cast context. The separate `audit/division_nested`
+sample is covered as a known-good fallback case in Python.
+
+### Integer/Boolean cast arguments: value semantics correction implemented
+
+`int()` and `bool()` now evaluate their argument in its compiled dtype before
+applying truncation/nonzero truth. Previously the enclosing evaluator could
+promote variables or recompute arithmetic in the cast's result dtype, changing
+`int(x + 0.25)` and `bool(x + 0.25)` before the cast consumed the value. Native
+DSL compilation marks these intrinsics; ordinary callbacks and `float()` retain
+their existing policies. Variable-promotion traversal treats these casts as
+boundaries, and nested writers still match their enclosing evaluator's width.
+
+Integer arguments to `int()` retain their exact value without an intermediate
+double conversion. `bool()` tests native nonzero truth, preserving NaN/infinity
+truth and subnormals. Floating `int()` arguments truncate before output
+conversion; unrepresentable/non-finite integer conversion remains outside the
+certified domain. This does not settle contextual division or `float()` rules.
+
+Five exact shared fixtures cover arithmetic cast arguments, nested Boolean/
+integer casts, int64 values beyond `2**53` (including `INT64_MAX`), and non-finite
+truth. They require interpreter/TCC/CC agreement. `audit/cast_argument_division`
+checks the corrected interpreter path; nested-cast division still conservatively
+falls back rather than using typed JIT lowering. Native tests exercise repeated
+evaluation with counts 1/5/257 and both floating input/output widths; Python
+artifact tests additionally exercise all five output dtypes for value casts.
+Validation: 295 regular native tests and 233 AddressSanitizer tests passed;
+484 focused Python tests passed with four existing math expected failures.
 
 ### Nested conversion buffer width: memory-safety correction implemented
 

@@ -78,7 +78,9 @@ enum {
     ME_EXPR_FLAG_EXPLICIT_DTYPE = 1u << 1,
     ME_EXPR_FLAG_HAS_STRING = 1u << 2,
     ME_EXPR_FLAG_HAS_STRING_VALID = 1u << 3,
-    ME_EXPR_FLAG_FLOAT_MATH = 1u << 4
+    ME_EXPR_FLAG_FLOAT_MATH = 1u << 4,
+    ME_EXPR_FLAG_DSL_VALUE_CAST = 1u << 5,
+    ME_EXPR_FLAG_DSL_BOOL_CAST = 1u << 6
 };
 
 /* Check if a pointer is a synthetic address (used internally for chunked evaluation).

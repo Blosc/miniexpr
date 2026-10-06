@@ -189,6 +189,12 @@ Cast rules:
 
 - Use function-call form only.
 - Exactly one argument.
+- `int(expr)` and `bool(expr)` consume the argument's evaluated value in its
+  compiled dtype; they do not recompute its arithmetic in the cast's result
+  dtype. Floating `int()` truncates toward zero; `bool()` tests nonzero truth.
+  Conversion to the requested output dtype happens after this operation.
+  Overflow/non-finite integer conversions and `float()`'s contextual evaluation
+  rules remain part of the experimental portable numeric audit.
 
 ## Temporary variable type inference
 

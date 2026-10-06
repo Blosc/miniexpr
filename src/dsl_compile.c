@@ -868,6 +868,23 @@ fail:
     return false;
 }
 
+static void dsl_mark_value_casts(me_expr *expr) {
+    if (!expr || (!IS_FUNCTION(expr->type) && !IS_CLOSURE(expr->type))) {
+        return;
+    }
+    if (IS_FUNCTION(expr->type) && ARITY(expr->type) == 1 &&
+        (expr->function == (const void *)dsl_cast_int_intrinsic ||
+         expr->function == (const void *)dsl_cast_bool_intrinsic)) {
+        expr->flags |= ME_EXPR_FLAG_DSL_VALUE_CAST;
+        if (expr->function == (const void *)dsl_cast_bool_intrinsic) {
+            expr->flags |= ME_EXPR_FLAG_DSL_BOOL_CAST;
+        }
+    }
+    for (int i = 0; i < ARITY(expr->type); i++) {
+        dsl_mark_value_casts(expr->parameters[i]);
+    }
+}
+
 static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
                              me_dtype expr_dtype, me_dsl_compiled_expr *out_expr) {
     if (!ctx || !expr_node || !out_expr) {
@@ -960,6 +977,7 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
         return false;
     }
     int *indices = NULL;
+    dsl_mark_value_casts(compiled);
     int count = 0;
     if (!dsl_collect_var_indices(compiled, &indices, &count)) {
         me_free(compiled);

@@ -5422,6 +5422,105 @@ static convert_func_t get_convert_func(me_dtype from, me_dtype to) {
 
 typedef double (*me_fun1)(double);
 
+/* int()/bool() consume the value of their argument, not an argument recomputed
+ * in the cast's output dtype. Keep this separate from ordinary user callbacks
+ * and float(), whose existing contextual evaluation policy is unchanged. */
+static void eval_dsl_value_cast(const me_expr *node, me_dtype output_dtype) {
+    me_expr *arg = node->parameters[0];
+    int count = node->nitems;
+    double *values = malloc((size_t)count * sizeof(*values));
+    if (!values) return;
+    if (TYPE_MASK(arg->type) == ME_CONSTANT) {
+        for (int i = 0; i < count; i++) values[i] = arg->value;
+    }
+    else {
+        void *scratch = NULL;
+        void *saved_output = arg->output;
+        int saved_count = arg->nitems;
+        const void *data = arg->bound;
+        me_dtype input_dtype = arg->dtype;
+        if (TYPE_MASK(arg->type) != ME_VARIABLE) {
+            scratch = malloc((size_t)count * dtype_size(input_dtype));
+            if (!scratch) {
+                free(values);
+                return;
+            }
+            arg->output = scratch;
+            arg->nitems = count;
+            private_eval(arg);
+            arg->output = saved_output;
+            arg->nitems = saved_count;
+            data = scratch;
+        }
+        convert_func_t convert = get_convert_func(input_dtype, ME_FLOAT64);
+        /* Integer int() is an identity, and bool() tests native nonzero truth.
+         * Neither may round an int64 argument through double first. */
+        if ((node->flags & ME_EXPR_FLAG_DSL_BOOL_CAST) || is_integer_dtype(input_dtype) ||
+            input_dtype == ME_BOOL) {
+            if (node->flags & ME_EXPR_FLAG_DSL_BOOL_CAST) {
+                bool *truth = malloc((size_t)count * sizeof(*truth));
+                if (truth) {
+                    convert_func_t to_bool = get_convert_func(input_dtype, ME_BOOL);
+                    if (input_dtype == ME_BOOL) {
+                        memcpy(truth, data, (size_t)count * sizeof(*truth));
+                    }
+                    else if (to_bool) {
+                        to_bool(data, truth, count);
+                    }
+                    else {
+                        free(truth);
+                        free(scratch);
+                        free(values);
+                        return;
+                    }
+                    convert_func_t from_bool = get_convert_func(ME_BOOL, output_dtype);
+                    if (output_dtype == ME_BOOL) {
+                        memcpy(node->output, truth, (size_t)count * sizeof(*truth));
+                    }
+                    else if (from_bool) {
+                        from_bool(truth, node->output, count);
+                    }
+                    free(truth);
+                }
+            }
+            else {
+                convert_func_t to_output = get_convert_func(input_dtype, output_dtype);
+                if (input_dtype == output_dtype) {
+                    memcpy(node->output, data, (size_t)count * dtype_size(input_dtype));
+                }
+                else if (to_output) {
+                    to_output(data, node->output, count);
+                }
+            }
+            free(scratch);
+            free(values);
+            return;
+        }
+        if (input_dtype == ME_FLOAT64) {
+            memcpy(values, data, (size_t)count * sizeof(*values));
+        }
+        else if (!convert) {
+            free(scratch);
+            free(values);
+            return;
+        }
+        else {
+            convert(data, values, count);
+        }
+        free(scratch);
+    }
+    me_fun1 cast = (me_fun1)node->function;
+    for (int i = 0; i < count; i++) values[i] = cast(values[i]);
+    convert_func_t convert = get_convert_func(ME_FLOAT64, output_dtype);
+    if (output_dtype == ME_FLOAT64) {
+        memcpy(node->output, values, (size_t)count * sizeof(*values));
+    }
+    else if (convert) {
+        convert(values, node->output, count);
+    }
+    free(values);
+}
+
 typedef float (*me_fun1_f32)(float);
 
 /* Template for type-specific evaluator */
@@ -5514,6 +5613,10 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
         case ME_CLOSURE0: case ME_CLOSURE1: case ME_CLOSURE2: case ME_CLOSURE3: \
         case ME_CLOSURE4: case ME_CLOSURE5: case ME_CLOSURE6: case ME_CLOSURE7: \
             { \
+            if (n->flags & ME_EXPR_FLAG_DSL_VALUE_CAST) { \
+                eval_dsl_value_cast(n, ME_EVAL_DTYPE_##SUFFIX); \
+                break; \
+            } \
             /* Check if this node is a conversion node (arity=1, function=NULL) */ \
             int is_conv_node = (arity == 1 && IS_FUNCTION(n->type) && n->function == NULL); \
             \
@@ -6618,6 +6721,9 @@ static void save_variable_bindings(const me_expr* node,
     case ME_CLOSURE7:
         {
             // Skip conversion nodes - they handle their own type conversion
+            if (node->flags & ME_EXPR_FLAG_DSL_VALUE_CAST) {
+                break;
+            }
             if (IS_FUNCTION(node->type) && ARITY(node->type) == 1 && node->function == NULL) {
                 break;
             }
@@ -6686,7 +6792,8 @@ static void promote_variables_in_tree(me_expr* n, me_dtype target_type,
     case ME_CLOSURE7:
         {
             // Skip conversion nodes - they handle their own type conversion
-            if (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == NULL) {
+            if ((n->flags & ME_EXPR_FLAG_DSL_VALUE_CAST) ||
+                (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == NULL)) {
                 break;
             }
             const int arity = ARITY(n->type);
@@ -6731,7 +6838,8 @@ static void restore_variables_in_tree(me_expr* n, const void** original_bounds,
     case ME_CLOSURE7:
         {
             // Skip conversion nodes - they handle their own type conversion
-            if (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == NULL) {
+            if ((n->flags & ME_EXPR_FLAG_DSL_VALUE_CAST) ||
+                (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == NULL)) {
                 break;
             }
             const int arity = ARITY(n->type);
@@ -6772,7 +6880,8 @@ static bool all_variables_match_type(const me_expr* n, me_dtype target_type) {
     case ME_CLOSURE7:
         {
             // Skip conversion nodes - they handle their own type conversion
-            if (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == NULL) {
+            if ((n->flags & ME_EXPR_FLAG_DSL_VALUE_CAST) ||
+                (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == NULL)) {
                 return true;
             }
             const int arity = ARITY(n->type);
@@ -7895,6 +8004,11 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
 
 static void private_eval(const me_expr* n) {
     if (!n) return;
+
+    if (n->flags & ME_EXPR_FLAG_DSL_VALUE_CAST) {
+        eval_dsl_value_cast(n, n->dtype);
+        return;
+    }
 
     if (is_string_dtype(n->dtype)) {
         eval_string_expr(n);

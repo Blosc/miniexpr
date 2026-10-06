@@ -28,6 +28,10 @@ required-JIT cases for TCC/CC. Unsupported typed contexts use interpreter fallba
 rather than C token-level promotion. The `audit/nested_cast.dsl` source and its
 exact fixture now guard the corrected nested-conversion buffer width in
 interpreter mode; they do not certify general nested-cast/JIT semantics.
+The `cast_argument_*`, `cast_integer_exact`, and `cast_nonfinite_truth` fixtures
+require exact interpreter/TCC/CC agreement for value-cast arguments. The
+`audit/cast_argument_division` fixture checks interpreter semantics while nested
+casts in division remain outside the typed JIT slice.
 
 Fixtures exercise bounded integer arithmetic, precise int64 comparisons, special
 floating-point values, `break`/`continue`, unresolved names, unsupported indexing,

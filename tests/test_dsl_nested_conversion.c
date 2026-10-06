@@ -4,10 +4,11 @@
 #include <stdlib.h>
 #include "../src/miniexpr.h"
 
-static int check_nested_conversion(me_dtype input_dtype, me_dtype output_dtype, int count, int mode) {
-    const char *source = "def k(x):\n    return float(int(x) / 2)\n";
+static int check_nested_conversion(const char *expression, const double *expected,
+                                   me_dtype input_dtype, me_dtype output_dtype, int count, int mode) {
+    char source[256];
+    snprintf(source, sizeof(source), "def k(x):\n    return %s\n", expression);
     const double values[] = {-1.75, -0.25, 0.25, 1.75, 4.75};
-    const double expected[] = {-0.5, 0, 0, 0.5, 2};
     float input32[257];
     double input64[257];
     for (int i = 0; i < count; i++) {
@@ -58,14 +59,25 @@ static int check_nested_conversion(me_dtype input_dtype, me_dtype output_dtype, 
 }
 
 int main(void) {
+    const char *expressions[] = {
+        "float(int(x) / 2)", "int(x + 0.25)", "bool(x + 0.25)",
+        "bool(int(x + 0.25))", "int(x + 0.25) / 2"
+    };
+    const double expected[][5] = {
+        {-0.5, 0, 0, 0.5, 2}, {-1, 0, 0, 2, 5}, {1, 0, 1, 1, 1},
+        {1, 0, 0, 1, 1}, {-0.5, 0, 0, 1, 2.5}
+    };
     const me_dtype types[] = {ME_FLOAT32, ME_FLOAT64};
     const int counts[] = {1, 5, 257};
     for (int input = 0; input < 2; input++) {
         for (int output = 0; output < 2; output++) {
             for (int count = 0; count < 3; count++) {
                 for (int mode = ME_JIT_OFF; mode <= ME_JIT_ON; mode++) {
-                    if (check_nested_conversion(types[input], types[output], counts[count], mode)) {
-                        return 1;
+                    for (int expression = 0; expression < 5; expression++) {
+                        if (check_nested_conversion(expressions[expression], expected[expression],
+                                                     types[input], types[output], counts[count], mode)) {
+                            return 1;
+                        }
                     }
                 }
             }
