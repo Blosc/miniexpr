@@ -121,6 +121,8 @@ void me_free_parameters(me_expr* n);
 
 bool is_reduction_node(const me_expr* n);
 bool is_comparison_node(const me_expr* n);
+/* Internal operator spelling for typed DSL arithmetic lowering, NULL otherwise. */
+const char* me_arithmetic_operator(const me_expr* n);
 bool is_float_math_function(const void* func);
 size_t dtype_size(me_dtype dtype);
 bool has_complex_input_types(const me_expr* n);

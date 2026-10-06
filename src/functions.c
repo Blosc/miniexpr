@@ -823,6 +823,22 @@ static double sub(double a, double b) { return a - b; }
 static double mul(double a, double b) { return a * b; }
 static double divide(double a, double b) { return a / b; }
 static double negate(double a) { return -a; }
+const char* me_arithmetic_operator(const me_expr* n) {
+    if (!n || !IS_FUNCTION(n->type)) {
+        return NULL;
+    }
+    if (ARITY(n->type) == 1 && n->function == (void*)negate) {
+        return "-";
+    }
+    if (ARITY(n->type) != 2) {
+        return NULL;
+    }
+    if (n->function == (void*)add) return "+";
+    if (n->function == (void*)sub) return "-";
+    if (n->function == (void*)mul) return "*";
+    if (n->function == (void*)divide) return "/";
+    return NULL;
+}
 static volatile double sum_salt = 0.0;
 static volatile double mean_salt = 0.0;
 static volatile double prod_salt = 1.0;

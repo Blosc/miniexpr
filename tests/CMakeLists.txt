@@ -8,7 +8,9 @@ if(NOT EMSCRIPTEN)
     find_program(MINIEXPR_PORTABLE_CC NAMES cc clang gcc)
   endif()
   set(MINIEXPR_PORTABLE_CASES affine chains loops int32 int64 float32 bool compare special_floats flow
-                    boolean_results cast_int math
+                     boolean_results cast_int math
+                     division_int division_bool division_literals division_locals division_loop division_float32
+                     division_condition
                     unknown_name invalid_index zero_step missing_return missing_return_ok
                      missing_return_mixed missing_return_loop missing_return_loop_ok
                      missing_return_hybrid missing_return_hybrid_ok)
@@ -57,7 +59,7 @@ if(NOT EMSCRIPTEN)
   # Do not promote them to required-JIT conformance before fixing the gaps.
   # math_condition also differs between linked interpreter math engines; keep
   # that source as an audit reproducer rather than a passing baseline case.
-  foreach(case_name division_int division_bool division_literals math_widen)
+  foreach(case_name math_widen)
     add_test(NAME portable_audit_${case_name}_off COMMAND portable_dsl_runner
       "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/audit/${case_name}.dsl"
       "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/audit/${case_name}.txt" off)

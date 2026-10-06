@@ -40,14 +40,38 @@ base-prefixed spellings. Typed inputs/constants can transport wider integers.
 The fixtures in `tests/portable-dsl/audit/` are reproducers, not passing JIT
 conformance claims. Do not standardize their current backend discrepancies.
 
-### Division promotion
+### Division promotion: first correction implemented
 
 With floating input, `int(x) / 2` at `x = 1.25` yields `0.5` in the interpreter
-but `0` in both TCC and CC. Generated C retains integer operands and performs
+but previously yielded `0` in both TCC and CC. Generated C retained integer operands and performed
 integer division before the output cast. `bool(x) / 2` and literal-only `1 / 2`
-show the same issue. Typed expression generation needs correction, or these
-contexts need explicit profile rejection; changing expected results is not a fix.
-Integer-valued locals and loop indices also need coverage.
+showed the same issue.
+
+Division-containing arithmetic now uses owned C text rendered from the actual
+compiled interpreter tree, not source-token types or the output dtype alone.
+It preserves optimized constants, leaf casts, floating operand conversions, and
+intermediate rounding. Seven exact fixtures are promoted to required-JIT tests:
+integer/Boolean leaf casts, literal folding, locals, loop indices, float32 results,
+and a direct arithmetic branch condition. Both compiler preferences are checked.
+The code-generation cache version is 14; typed text also enters the IR fingerprint.
+Text-only hybrid expression plans must not bypass this typed lowering.
+
+This is intentionally not a general typed-expression implementation. Unsupported
+calls, comparisons containing division, nested cast arguments, integral/Boolean
+arithmetic output, differing arithmetic intermediate dtypes, and inexact float32
+division constants conservatively retain interpreter execution. Such kernels can
+lose JIT acceleration; a compiler preference never licenses an incorrect result.
+The full promotion/operator matrix still needs specification and certification.
+
+Broader probing exposed nested-cast interpreter dispatch discrepancies, including
+incorrect results for `int(x + 0.25)` when nested in division. The raw reproducer
+`audit/nested_cast.dsl` (`float(int(x) / 2)`, float32 input/output) produced anomalous
+values in a multi-element interpreter probe. One broad matrix probe aborted;
+the cause has not yet been isolated. This is a native evaluator investigation,
+not a passing fixture or a claim that interpreter fallback certifies all casts.
+Do not register that reproducer as routine execution conformance before auditing
+buffer sizes, dispatch types, and nested conversion semantics. The separate
+`audit/division_nested` sample is covered as a known-good fallback case in Python.
 
 ### Float32 math intermediates and conditions
 
@@ -62,8 +86,8 @@ audit. Forcing interpreter mode therefore does not certify that case across
 linked math engines. `math_condition` remains a reproducer, not a registered
 passing standalone baseline.
 
-Four interpreter audit cases (three divisions and `math_widen`) are separately
-registered in CTest. Python artifact tests preserve five cases across two JIT
+The remaining `math_widen` interpreter audit case is separately
+registered in CTest. Python artifact tests preserve two math cases across two JIT
 compilers as strict expected failures. The marker is applied only after successful
 load, backend preparation, and execution; unrelated setup failures cannot hide.
 An unexpected pass requires removing the marker and promoting the fixture.

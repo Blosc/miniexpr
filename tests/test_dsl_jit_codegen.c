@@ -1681,8 +1681,35 @@ static int test_codegen_missing_return_cleanup(void) {
     return 0;
 }
 
+static int test_codegen_rejects_untyped_division(void) {
+    printf("\n=== JIT C Codegen: reject untyped division, including hybrid plans ===\n");
+    me_dsl_error error;
+    me_dsl_program *parsed = me_dsl_parse("def k(x):\n    y = 1 / 2\n    return y\n", &error);
+    if (!parsed) return 1;
+    const char *names[] = {"x"};
+    me_dtype types[] = {ME_FLOAT64};
+    dtype_resolve_ctx resolver = {ME_FLOAT64};
+    me_dsl_jit_ir_program *ir = NULL;
+    bool ok = me_dsl_jit_ir_build(parsed, names, types, 1, mock_resolve_dtype, &resolver, &ir, &error);
+    me_dsl_program_free(parsed);
+    if (!ok) return 1;
+    me_dsl_jit_cgen_options options = {0};
+    options.use_runtime_math_bridge = true;
+    options.has_enable_hybrid_vector_math = true;
+    options.enable_hybrid_vector_math = true;
+    options.has_enable_hybrid_expr_vector_math = true;
+    options.enable_hybrid_expr_vector_math = true;
+    char *source = NULL;
+    ok = me_dsl_jit_codegen_c(ir, ME_FLOAT64, &options, &source, &error);
+    bool rejected = !ok && strstr(error.message, "typed arithmetic lowering");
+    free(source);
+    me_dsl_jit_ir_free(ir);
+    return rejected ? 0 : 1;
+}
+
 int main(void) {
     int fail = 0;
+    fail |= test_codegen_rejects_untyped_division();
     fail |= test_codegen_all_noncomplex_dtypes();
     fail |= test_codegen_rejects_unsupported_expression_ops();
     fail |= test_codegen_element_loop_control();

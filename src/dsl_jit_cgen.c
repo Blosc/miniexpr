@@ -1779,6 +1779,11 @@ static int me_jit_collect_stmt_vec_plans(const me_dsl_jit_ir_program *program,
 
         const char *assign_name = stmt->as.assign.name;
         const char *value_text = stmt->as.assign.value.text;
+        /* Text-based hybrid plans do not carry typed division intermediates.
+         * Keep these assignments on the typed scalar lowering path. */
+        if (strchr(value_text, '/')) {
+            continue;
+        }
         bool planned = false;
 
         const char *fn_start = NULL;
@@ -2476,6 +2481,16 @@ static bool me_jit_expr_to_c(const me_dsl_jit_ir_expr *expr, char **out_c,
     if (me_jit_expr_contains_unsupported_tokens(expr->text, expr->dtype)) {
         me_jit_set_error(error, line, column, "expression uses unsupported operator for jit c codegen");
         return false;
+    }
+
+    if (strchr(expr->text, '/')) {
+        if (!expr->division_c) {
+            me_jit_set_error(error, line, column, "division requires supported typed arithmetic lowering");
+            return false;
+        }
+        *out_c = me_jit_strdup(expr->division_c);
+        if (!*out_c) me_jit_set_error(error, line, column, "out of memory");
+        return *out_c != NULL;
     }
 
     size_t len = strlen(expr->text);

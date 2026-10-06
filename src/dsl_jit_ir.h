@@ -29,6 +29,9 @@ typedef enum {
 
 typedef struct {
     char *text;
+    /* Owned C arithmetic lowered from the compiled interpreter tree, when the
+     * source contains division. NULL requires conservative codegen fallback. */
+    char *division_c;
     me_dtype dtype;
 } me_dsl_jit_ir_expr;
 

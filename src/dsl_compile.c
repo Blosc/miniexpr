@@ -17,6 +17,7 @@
 bool contains_reduction(const me_expr *n);
 
 #include <ctype.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1254,6 +1255,178 @@ static bool dsl_jit_ir_resolve_dtype(void *resolve_ctx, const me_dsl_expr *expr,
     return true;
 }
 
+/* Do not infer division semantics from the requested output dtype or C's usual
+ * promotions. The interpreter's compiled tree contains the actual operand and
+ * intermediate types (including constant folding and explicit conversions). */
+static const char *dsl_jit_arithmetic_ctype(me_dtype dtype) {
+    switch (dtype) {
+    case ME_BOOL: return "bool";
+    case ME_INT32: return "int32_t";
+    case ME_INT64: return "int64_t";
+    case ME_FLOAT32: return "float";
+    case ME_FLOAT64: return "double";
+    default: return NULL;
+    }
+}
+
+static char *dsl_jit_typed_arithmetic(const dsl_compile_ctx *ctx, const me_expr *node, int depth) {
+    if (!node || depth > 128) {
+        return NULL;
+    }
+    const char *ctype = dsl_jit_arithmetic_ctype(node->dtype);
+    if (!ctype) {
+        return NULL;
+    }
+    char leaf[128];
+    const char *value = NULL;
+    int kind = TYPE_MASK(node->type);
+    if (kind == ME_CONSTANT) {
+        if (!isfinite(node->value)) {
+            return NULL;
+        }
+        /* C99 hex floats preserve the exact optimized value and signed zero. */
+        snprintf(leaf, sizeof(leaf), "%a", node->value);
+        value = leaf;
+    }
+    else if (kind == ME_VARIABLE && is_synthetic_address(node->bound)) {
+        int index = (int)((const char *)node->bound - synthetic_var_addresses);
+        if (index < 0 || index >= ctx->program->vars.count) {
+            return NULL;
+        }
+        value = ctx->program->vars.names[index];
+    }
+    if (value) {
+        size_t size = strlen(value) + strlen(ctype) + 16;
+        char *out = malloc(size);
+        if (out) snprintf(out, size, "((%s)(%s))", ctype, value);
+        return out;
+    }
+    if (!IS_FUNCTION(node->type)) {
+        return NULL;
+    }
+    int arity = ARITY(node->type);
+    const char *op = me_arithmetic_operator(node);
+    bool conversion = arity == 1 && (node->function == NULL ||
+        node->function == (const void *)dsl_cast_int_intrinsic ||
+        node->function == (const void *)dsl_cast_float_intrinsic ||
+        node->function == (const void *)dsl_cast_bool_intrinsic);
+    const me_expr *child = arity ? node->parameters[0] : NULL;
+    /* Intrinsics with expression arguments have additional evaluator dispatch
+     * rules which are not represented by dtype alone. Only lower leaf casts;
+     * nested casts remain a separate semantic audit, not guessed C semantics. */
+    if (conversion && node->function != NULL && child &&
+        TYPE_MASK(child->type) != ME_CONSTANT && TYPE_MASK(child->type) != ME_VARIABLE) {
+        return NULL;
+    }
+    /* Unsupported calls/conditions retain the interpreter rather than emitting
+     * an untyped division. Boolean arithmetic has a distinct native eval path. */
+    if ((!op && !conversion) || (op && node->dtype != ME_FLOAT32 && node->dtype != ME_FLOAT64)) {
+        return NULL;
+    }
+    if (op) {
+        for (int i = 0; i < arity; i++) {
+            const me_expr *operand = node->parameters[i];
+            if (operand && me_arithmetic_operator(operand) && operand->dtype != node->dtype) {
+                return NULL;
+            }
+            /* The native scalar-constant division path uses a double callback;
+             * do not pre-round an inexact constant to float32 in generated C. */
+            if (!strcmp(op, "/") && node->dtype == ME_FLOAT32 && operand &&
+                TYPE_MASK(operand->type) == ME_CONSTANT && (double)(float)operand->value != operand->value) {
+                return NULL;
+            }
+        }
+    }
+    char *left = dsl_jit_typed_arithmetic(ctx, node->parameters[0], depth + 1);
+    char *right = arity == 2 ? dsl_jit_typed_arithmetic(ctx, node->parameters[1], depth + 1) : NULL;
+    if (!left || (arity == 2 && !right)) {
+        free(left);
+        free(right);
+        return NULL;
+    }
+    size_t size = strlen(left) + (right ? strlen(right) : 0) + strlen(ctype) * 3 + 64;
+    char *out = malloc(size);
+    if (out && arity == 2) {
+        snprintf(out, size, "((%s)(((%s)(%s)) %s ((%s)(%s))))",
+                 ctype, ctype, left, op, ctype, right);
+    }
+    else if (out && node->function == (const void *)dsl_cast_int_intrinsic) {
+        snprintf(out, size, "((%s)((double)((int64_t)((double)(%s)))))", ctype, left);
+    }
+    else if (out && node->function == (const void *)dsl_cast_bool_intrinsic) {
+        snprintf(out, size, "((%s)(((double)(%s)) != 0.0))", ctype, left);
+    }
+    else if (out) {
+        snprintf(out, size, "((%s)(%s(%s)))", ctype, conversion ? "" : op, left);
+    }
+    free(left);
+    free(right);
+    return out;
+}
+
+static void dsl_jit_bind_division_expr(dsl_compile_ctx *ctx, me_dsl_jit_ir_expr *ir,
+                                      const me_dsl_compiled_expr *compiled) {
+    if (ir->text && strchr(ir->text, '/')) {
+        if (compiled->expr && (compiled->expr->dtype == ME_FLOAT32 || compiled->expr->dtype == ME_FLOAT64)) {
+            ir->division_c = dsl_jit_typed_arithmetic(ctx, compiled->expr, 0);
+        }
+    }
+}
+
+static void dsl_jit_bind_divisions(dsl_compile_ctx *ctx, me_dsl_jit_ir_block *ir,
+                                  const me_dsl_compiled_block *compiled) {
+    for (int i = 0; i < ir->nstmts; i++) {
+        me_dsl_jit_ir_stmt *stmt = ir->stmts[i];
+        for (int j = 0; j < compiled->nstmts; j++) {
+            const me_dsl_compiled_stmt *native = compiled->stmts[j];
+            if (stmt->line != native->line || stmt->column != native->column) {
+                continue;
+            }
+            switch (stmt->kind) {
+            case ME_DSL_JIT_IR_STMT_ASSIGN:
+                if (native->kind != ME_DSL_STMT_ASSIGN || strcmp(stmt->as.assign.name,
+                    ctx->program->vars.names[ctx->program->local_var_indices[native->as.assign.local_slot]])) {
+                    continue;
+                }
+                dsl_jit_bind_division_expr(ctx, &stmt->as.assign.value, &native->as.assign.value);
+                break;
+            case ME_DSL_JIT_IR_STMT_RETURN:
+                if (native->kind != ME_DSL_STMT_RETURN) continue;
+                dsl_jit_bind_division_expr(ctx, &stmt->as.return_stmt.expr, &native->as.return_stmt.expr);
+                break;
+            case ME_DSL_JIT_IR_STMT_IF:
+                if (native->kind != ME_DSL_STMT_IF) continue;
+                dsl_jit_bind_division_expr(ctx, &stmt->as.if_stmt.cond, &native->as.if_stmt.cond);
+                dsl_jit_bind_divisions(ctx, &stmt->as.if_stmt.then_block, &native->as.if_stmt.then_block);
+                if (stmt->as.if_stmt.n_elifs != native->as.if_stmt.n_elifs) continue;
+                for (int k = 0; k < stmt->as.if_stmt.n_elifs; k++) {
+                    dsl_jit_bind_division_expr(ctx, &stmt->as.if_stmt.elif_branches[k].cond,
+                                               &native->as.if_stmt.elif_branches[k].cond);
+                    dsl_jit_bind_divisions(ctx, &stmt->as.if_stmt.elif_branches[k].block,
+                                           &native->as.if_stmt.elif_branches[k].block);
+                }
+                dsl_jit_bind_divisions(ctx, &stmt->as.if_stmt.else_block, &native->as.if_stmt.else_block);
+                break;
+            case ME_DSL_JIT_IR_STMT_WHILE:
+                if (native->kind != ME_DSL_STMT_WHILE) continue;
+                dsl_jit_bind_division_expr(ctx, &stmt->as.while_loop.cond, &native->as.while_loop.cond);
+                dsl_jit_bind_divisions(ctx, &stmt->as.while_loop.body, &native->as.while_loop.body);
+                break;
+            case ME_DSL_JIT_IR_STMT_FOR:
+                if (native->kind != ME_DSL_STMT_FOR) continue;
+                dsl_jit_bind_division_expr(ctx, &stmt->as.for_loop.start, &native->as.for_loop.start);
+                dsl_jit_bind_division_expr(ctx, &stmt->as.for_loop.stop, &native->as.for_loop.stop);
+                dsl_jit_bind_division_expr(ctx, &stmt->as.for_loop.step, &native->as.for_loop.step);
+                dsl_jit_bind_divisions(ctx, &stmt->as.for_loop.body, &native->as.for_loop.body);
+                break;
+            default:
+                break;
+            }
+            break;
+        }
+    }
+}
+
 static bool dsl_jit_tcc_reserved_index_mix_auto_disabled(const me_dsl_compiled_program *program) {
     if (!program || program->compiler != ME_DSL_COMPILER_LIBTCC) {
         return false;
@@ -1527,6 +1700,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     }
 
     program->jit_ir = jit_ir;
+    dsl_jit_bind_divisions(ctx, &jit_ir->block, &program->block);
     program->jit_ir_fingerprint = me_dsl_jit_ir_fingerprint(jit_ir);
     program->jit_param_bindings = param_bindings;
     program->jit_nparams = nparams;

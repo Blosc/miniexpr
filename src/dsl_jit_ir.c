@@ -90,6 +90,8 @@ static void dsl_jit_ir_expr_free(me_dsl_jit_ir_expr *expr) {
         return;
     }
     free(expr->text);
+    free(expr->division_c);
+    expr->division_c = NULL;
     expr->text = NULL;
     expr->dtype = ME_AUTO;
 }
@@ -1046,6 +1048,7 @@ static uint64_t dsl_jit_hash_fp_mode(uint64_t h, me_dsl_fp_mode fp_mode) {
 
 static uint64_t dsl_jit_ir_hash_expr(uint64_t h, const me_dsl_jit_ir_expr *expr) {
     h = dsl_jit_hash_string(h, expr ? expr->text : "");
+    h = dsl_jit_hash_string(h, expr && expr->division_c ? expr->division_c : "");
     h = dsl_jit_hash_dtype(h, expr ? expr->dtype : ME_AUTO);
     return h;
 }
