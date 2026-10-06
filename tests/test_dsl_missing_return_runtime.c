@@ -53,6 +53,14 @@ static void check_runtime_status(bool reserved_input) {
     /* The interpreter would successfully overwrite these sentinels. */
     assert(output[0] == -99.0 && output[1] == -99.0 && output[2] == -99.0);
 
+    kernel_status = ME_DSL_JIT_LOOP_CAP;
+    kernel_calls = 0;
+    rc = dsl_eval_program(program, inputs, 1, output, 3, &params,
+                          1, shape, NULL, NULL, NULL);
+    assert(rc == ME_EVAL_ERR_INVALID_ARG);
+    assert(kernel_calls == 1);
+    assert(output[0] == -99.0 && output[1] == -99.0 && output[2] == -99.0);
+
     kernel_status = 1;  /* Existing retryable backend status still falls back. */
     kernel_calls = 0;
     rc = dsl_eval_program(program, inputs, 1, output, 3, &params,

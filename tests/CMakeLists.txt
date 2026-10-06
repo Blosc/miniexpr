@@ -16,6 +16,8 @@ if(NOT EMSCRIPTEN)
                      math_widen math_condition math_local_widen
                      arithmetic_round arithmetic_decimal arithmetic_scalar_sub arithmetic_local_round
                      arithmetic_widen
+                     while_cap_exact while_cap_exceeded while_cap_continue
+                     while_cap_hybrid
                     unknown_name invalid_index zero_step missing_return missing_return_ok
                      missing_return_mixed missing_return_loop missing_return_loop_ok
                      missing_return_hybrid missing_return_hybrid_ok)
@@ -64,6 +66,13 @@ if(NOT EMSCRIPTEN)
   # Do not promote them to required-JIT conformance before fixing the gaps.
   # math_condition also differs between linked interpreter math engines; keep
   # that source as an audit reproducer rather than a passing baseline case.
+  get_property(portable_tests DIRECTORY PROPERTY TESTS)
+  foreach(test_name IN LISTS portable_tests)
+    if(test_name MATCHES "^portable_dsl_while_cap_")
+      set_property(TEST ${test_name} APPEND PROPERTY ENVIRONMENT "ME_DSL_WHILE_MAX_ITERS=3")
+    endif()
+  endforeach()
+
   foreach(case_name nested_cast cast_argument_division)
     add_test(NAME portable_audit_${case_name}_off COMMAND portable_dsl_runner
       "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/audit/${case_name}.dsl"

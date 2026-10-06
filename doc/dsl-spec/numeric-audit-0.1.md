@@ -193,6 +193,46 @@ focused Python tests passed, without expected failures or new build warnings.
 
 ## Remaining publication gates
 
+### While-loop cap: JIT safety correction implemented
+
+The interpreter enforced `ME_DSL_WHILE_MAX_ITERS`, but generated JIT `while`
+loops previously had no counter. JIT now checks a scoped counter after the
+condition and before each body entry. Exactly the cap's number of entries is
+allowed; a false condition, `break`, or `return` at that boundary succeeds.
+`continue` consumes an entry, while each nested/re-entered invocation resets its
+own counter. Chained-condition lowering carries its condition-prefix statement
+count into IR: that prefix executes before the cap check, not as a body entry.
+
+The host cap defaults to 10,000,000, can be disabled with nonpositive values,
+and falls back to its configured default on invalid/out-of-range text. The
+normalized compile-time cap and presence of while loops enter the IR fingerprint;
+code-generation cache version is 17. If the host changes the cap after loading,
+native evaluation bypasses both direct and buffered JIT paths in favor of the
+interpreter under the current policy. This requires no bridge/kernel ABI change.
+JIT cap status propagates as `ME_EVAL_ERR_INVALID_ARG` without interpreter retry,
+using the existing cleanup label to release hybrid temporaries.
+
+Four shared fixtures check exact-limit success, mixed-lane cap failure,
+`continue`, and hybrid failure with a cap of three. Python tests additionally
+cover counts 1/5/257, repeated execution after errors, empty inputs, disabled and
+invalid policies, changes after compilation (including an initially disabled
+cap), cache isolation across caps, boundary `break`/`return`, nested/re-entered
+counters, and inactive branches. Native runtime-stub tests verify both direct
+and buffered semantic cap errors cannot trigger interpreter retry.
+
+The audit exposed a separate interpreter discrepancy, retained in
+`audit/while_cap_chain`: `while 0 <= n < x` with `x = [0, 2, 3]` unexpectedly hits
+the cap instead of returning those values. Homogeneous chained-condition cases
+and JIT mixed-lane execution pass. A strict Python expected failure marks only
+the known interpreter evaluation error after successful preparation; setup,
+other error categories, and incorrect successful values cannot hide behind it.
+This mixed-lane condition issue remains a publication gate.
+Validation: all 344 regular native tests and 270 AddressSanitizer tests passed;
+727 focused Python tests passed with the one strict chained-while expected
+failure. Ruff and whitespace checks passed; native builds emitted no new warnings.
+
+### Outstanding gates
+
 - Resolve expression gaps or explicitly narrow the profile.
 - Audit literal/promotion rules, locals/intermediates, overflow/casts, loop caps,
   non-finite arithmetic, and linked scalar/vector math engines.

@@ -38,6 +38,7 @@ typedef struct {
     me_jit_strbuf source;
     me_jit_locals locals;
     me_dtype output_dtype;
+    int64_t while_max_iters;
     const char *out_var_name;
     me_dsl_error *error;
     bool use_runtime_scalar_math_bridge;
@@ -2896,6 +2897,14 @@ static bool me_jit_emit_stmt(me_jit_codegen_ctx *ctx, const me_dsl_jit_ir_stmt *
         }
         return true;
     case ME_DSL_JIT_IR_STMT_WHILE: {
+        /* A lexical scope gives each nested/re-entered loop a fresh counter.
+         * Count body entries after testing the condition, including continue. */
+        int64_t cap = ctx->while_max_iters;
+        if (cap > 0) {
+            if (!me_jit_emit_line(&ctx->source, indent, "{") ||
+                !me_jit_emit_line(&ctx->source, indent + 1, "int64_t __me_while_iters = 0;")) return false;
+            indent++;
+        }
         char *cond_c = NULL;
         if (!me_jit_expr_to_c(&stmt->as.while_loop.cond, &cond_c, ctx->error, stmt->line, stmt->column,
                               ctx->use_runtime_scalar_math_bridge)) {
@@ -2924,13 +2933,32 @@ static bool me_jit_emit_stmt(me_jit_codegen_ctx *ctx, const me_dsl_jit_ir_stmt *
             me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
             return false;
         }
-        if (!me_jit_emit_block(ctx, &stmt->as.while_loop.body, indent + 1)) {
+        me_dsl_jit_ir_block body = stmt->as.while_loop.body;
+        int prefix_count = stmt->as.while_loop.condition_nstmts;
+        if (prefix_count < 0 || prefix_count > body.nstmts) return false;
+        if (prefix_count) {
+            me_dsl_jit_ir_block prefix = body;
+            prefix.nstmts = prefix_count;
+            if (!me_jit_emit_block(ctx, &prefix, indent + 1)) return false;
+            body.stmts += prefix_count;
+            body.nstmts -= prefix_count;
+        }
+        if (cap > 0) {
+            char guard[192];
+            snprintf(guard, sizeof(guard),
+                     "if (__me_while_iters >= %lldLL) { __me_status = %d; goto __me_cleanup; }",
+                     (long long)cap, ME_DSL_JIT_LOOP_CAP);
+            if (!me_jit_emit_line(&ctx->source, indent + 1, guard) ||
+                !me_jit_emit_line(&ctx->source, indent + 1, "__me_while_iters++;")) return false;
+        }
+        if (!me_jit_emit_block(ctx, &body, indent + 1)) {
             return false;
         }
         if (!me_jit_emit_line(&ctx->source, indent, "}")) {
             me_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
             return false;
         }
+        if (cap > 0 && !me_jit_emit_line(&ctx->source, indent - 1, "}")) return false;
         return true;
     }
     case ME_DSL_JIT_IR_STMT_FOR: {
@@ -3197,6 +3225,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
     me_jit_codegen_ctx ctx;
     memset(&ctx, 0, sizeof(ctx));
     ctx.output_dtype = output_dtype;
+    ctx.while_max_iters = program->while_max_iters;
     ctx.out_var_name = "__me_out";
     ctx.error = error;
     ctx.stmt_vec_out_tmp_slot = -1;

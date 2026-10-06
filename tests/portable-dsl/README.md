@@ -40,6 +40,11 @@ intermediate rounding, locals, and the differing float64 output context. The
 native/Python scalar/vector matrix additionally checks multiplication and
 repeated execution. Mixed computation dtypes, calls, and casts are not certified
 by this pure-arithmetic slice.
+Four `while_cap_*` fixtures use a host cap of three and require interpreter/TCC/CC
+agreement for exact-limit exits, exceeded caps, `continue`, and hybrid cleanup.
+The cap is supplied by the test environment, not embedded in source/artifacts.
+`audit/while_cap_chain` preserves an unresolved interpreter mixed-lane chained
+condition discrepancy; it is not a passing interpreter fixture.
 
 Fixtures exercise bounded integer arithmetic, precise int64 comparisons, special
 floating-point values, `break`/`continue`, unresolved names, unsupported indexing,

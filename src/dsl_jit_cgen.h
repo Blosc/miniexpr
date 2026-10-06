@@ -20,6 +20,7 @@
 /* A semantic execution failure, not a request to retry via the interpreter.
  * Other existing nonzero kernel statuses retain best-effort fallback. */
 #define ME_DSL_JIT_MISSING_RETURN 2
+#define ME_DSL_JIT_LOOP_CAP 3
 
 typedef struct {
     const char *symbol_name;

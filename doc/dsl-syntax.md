@@ -244,6 +244,20 @@ Rules:
 
 - `while` condition is a regular DSL expression.
 - Runtime iteration cap is enforced to prevent runaway `while` loops.
+- The host policy `ME_DSL_WHILE_MAX_ITERS` defaults to 10,000,000 body entries
+  per loop invocation. Positive values cap execution; zero/negative values
+  disable the cap. Invalid/out-of-range values retain the configured default.
+- The condition is tested before enforcing the cap: exactly that many body
+  entries may complete successfully. `continue` counts as a body entry;
+  `break`/`return` on the last allowed entry succeeds. Nested/re-entered loops
+  have independent counters. Lowered condition statements do not count as body
+  entries.
+- Interpreter and JIT cap errors report `ME_EVAL_ERR_INVALID_ARG`. Failed output
+  contents are unspecified, and a JIT cap error is not retried in the interpreter.
+  JIT captures the cap in its cache-keyed IR; changing the host cap after
+  compilation selects interpreter execution under the new policy.
+- The experimental portable audit still has an interpreter discrepancy for
+  chained conditions with mixed active lanes; see `dsl-spec/numeric-audit-0.1.md`.
 
 ## `print(...)`
 

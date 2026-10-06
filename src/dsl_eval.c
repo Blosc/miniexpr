@@ -1162,8 +1162,12 @@ int dsl_eval_program(const me_dsl_compiled_program *program,
     }
 
     bool jit_attempted = false;
+    int64_t current_cap = dsl_while_max_iters();
+    if (current_cap < 0) current_cap = 0;
+    bool jit_cap_matches = !program->jit_ir || !program->jit_ir->has_while ||
+        program->jit_ir->while_max_iters == current_cap;
     /* JIT is best-effort for backend failures, not semantic execution errors. */
-    if (!me_eval_jit_disabled(params) &&
+    if (jit_cap_matches && !me_eval_jit_disabled(params) &&
         program->jit_kernel_fn &&
         program->jit_nparams >= 0 &&
         program->jit_nparams <= ME_MAX_VARS) {
@@ -1253,7 +1257,7 @@ int dsl_eval_program(const me_dsl_compiled_program *program,
                 if (jit_success) {
                     return ME_EVAL_SUCCESS;
                 }
-                if (jit_rc == ME_DSL_JIT_MISSING_RETURN) {
+                if (jit_rc == ME_DSL_JIT_MISSING_RETURN || jit_rc == ME_DSL_JIT_LOOP_CAP) {
                     return ME_EVAL_ERR_INVALID_ARG;
                 }
             }
@@ -1413,7 +1417,7 @@ int dsl_eval_program(const me_dsl_compiled_program *program,
         return reserved_ctx_error ? ME_EVAL_ERR_INVALID_ARG : ME_EVAL_ERR_OOM;
     }
 
-    if (!jit_attempted &&
+    if (jit_cap_matches && !jit_attempted &&
         !me_eval_jit_disabled(params) &&
         program->jit_kernel_fn &&
         program->jit_nparams >= 0 &&
@@ -1519,7 +1523,7 @@ int dsl_eval_program(const me_dsl_compiled_program *program,
                 for (int i = 0; i < jit_temp_count; i++) {
                     free(jit_temp_buffers[i]);
                 }
-                if (jit_success || jit_rc == ME_DSL_JIT_MISSING_RETURN) {
+                if (jit_success || jit_rc == ME_DSL_JIT_MISSING_RETURN || jit_rc == ME_DSL_JIT_LOOP_CAP) {
                     for (int i = 0; i < reserved_count; i++) {
                         free(reserved_buffers[i]);
                     }

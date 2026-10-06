@@ -77,6 +77,7 @@ struct me_dsl_jit_ir_stmt {
         struct {
             me_dsl_jit_ir_expr cond;
             me_dsl_jit_ir_block body;
+            int condition_nstmts;
         } while_loop;
         struct {
             char *var;
@@ -94,6 +95,8 @@ typedef struct {
     me_dtype *param_dtypes;
     int nparams;
     me_dsl_fp_mode fp_mode;
+    bool has_while;
+    int64_t while_max_iters;
     me_dsl_jit_ir_block block;
 } me_dsl_jit_ir_program;
 

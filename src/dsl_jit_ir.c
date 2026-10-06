@@ -9,6 +9,7 @@
 **********************************************************************/
 
 #include "dsl_jit_ir.h"
+#include "dsl_config.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -32,6 +33,7 @@ typedef struct {
     void *resolve_ctx;
     me_dsl_jit_symbol_table symbols;
     me_dsl_error *error;
+    bool has_while;
 } me_dsl_jit_build_ctx;
 
 static void dsl_jit_set_error(me_dsl_error *error, int line, int column, const char *msg) {
@@ -714,6 +716,7 @@ static bool dsl_jit_build_block(me_dsl_jit_build_ctx *ctx, const me_dsl_block *i
             break;
         }
         case ME_DSL_STMT_WHILE: {
+            ctx->has_while = true;
             if (!stmt->as.while_loop.cond) {
                 dsl_jit_set_error(ctx->error, stmt->line, stmt->column, "invalid while condition");
                 dsl_jit_ir_stmt_free(ir_stmt);
@@ -733,6 +736,7 @@ static bool dsl_jit_build_block(me_dsl_jit_build_ctx *ctx, const me_dsl_block *i
                 return false;
             }
             ir_stmt->kind = ME_DSL_JIT_IR_STMT_WHILE;
+            ir_stmt->as.while_loop.condition_nstmts = stmt->as.while_loop.condition_nstmts;
             if (!dsl_jit_ir_expr_init(&ir_stmt->as.while_loop.cond, stmt->as.while_loop.cond, cond_dtype)) {
                 dsl_jit_set_error(ctx->error, stmt->line, stmt->column, "out of memory");
                 dsl_jit_ir_stmt_free(ir_stmt);
@@ -1016,6 +1020,9 @@ bool me_dsl_jit_ir_build(const me_dsl_program *program, const char **param_names
     }
 
     dsl_jit_symbols_free(&ctx.symbols);
+    ir->has_while = ctx.has_while;
+    ir->while_max_iters = ctx.has_while ? dsl_while_max_iters() : 0;
+    if (ir->while_max_iters < 0) ir->while_max_iters = 0;
     *out_ir = ir;
     return true;
 }
@@ -1092,6 +1099,7 @@ static uint64_t dsl_jit_ir_hash_stmt(uint64_t h, const me_dsl_jit_ir_stmt *stmt)
         break;
     case ME_DSL_JIT_IR_STMT_WHILE:
         h = dsl_jit_ir_hash_expr(h, &stmt->as.while_loop.cond);
+        h = dsl_jit_hash_i32(h, stmt->as.while_loop.condition_nstmts);
         h = dsl_jit_ir_hash_block(h, &stmt->as.while_loop.body);
         break;
     case ME_DSL_JIT_IR_STMT_FOR:
@@ -1126,6 +1134,8 @@ uint64_t me_dsl_jit_ir_fingerprint(const me_dsl_jit_ir_program *program) {
     }
     h = dsl_jit_hash_string(h, program->name);
     h = dsl_jit_hash_fp_mode(h, program->fp_mode);
+    h = dsl_jit_hash_bytes(h, &program->has_while, sizeof(program->has_while));
+    h = dsl_jit_hash_bytes(h, &program->while_max_iters, sizeof(program->while_max_iters));
     h = dsl_jit_hash_i32(h, program->nparams);
     for (int i = 0; i < program->nparams; i++) {
         h = dsl_jit_hash_string(h, program->params[i]);
