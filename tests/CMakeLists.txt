@@ -44,7 +44,40 @@ if(NOT EMSCRIPTEN)
   endforeach()
 endif()
 
+if(MINIEXPR_BUILD_ARTIFACT AND NOT EMSCRIPTEN)
+  add_executable(portable_artifact_runner portable-artifacts/runner.c)
+  target_link_libraries(portable_artifact_runner PRIVATE miniexpr_artifact)
+  foreach(policy off default)
+    add_test(NAME portable_artifact_affine_${policy} COMMAND portable_artifact_runner
+      "${CMAKE_CURRENT_SOURCE_DIR}/portable-artifacts/affine.json" "${policy}")
+    set_tests_properties(portable_artifact_affine_${policy} PROPERTIES TIMEOUT 30
+      ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/artifact-jit-cache")
+  endforeach()
+  if(MINIEXPR_ENABLE_TCC_JIT)
+    add_test(NAME portable_artifact_affine_on COMMAND portable_artifact_runner
+      "${CMAKE_CURRENT_SOURCE_DIR}/portable-artifacts/affine.json" on)
+    set_tests_properties(portable_artifact_affine_on PROPERTIES TIMEOUT 30
+      ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/artifact-jit-cache")
+  endif()
+  if(MINIEXPR_PORTABLE_CC)
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/portable-artifacts/affine.json" cc_artifact)
+    string(REPLACE "# me:compiler=tcc" "# me:compiler=cc" cc_artifact "${cc_artifact}")
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/affine.cc.json" "${cc_artifact}")
+    add_test(NAME portable_artifact_affine_cc COMMAND portable_artifact_runner
+      "${CMAKE_CURRENT_BINARY_DIR}/affine.cc.json" on)
+    set_tests_properties(portable_artifact_affine_cc PROPERTIES TIMEOUT 30
+      ENVIRONMENT "CC=${MINIEXPR_PORTABLE_CC};ME_DSL_FP_MODE=fast;ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/artifact-jit-cache")
+  endif()
+  add_test(NAME portable_artifact_affine_fallback COMMAND portable_artifact_runner
+    "${CMAKE_CURRENT_SOURCE_DIR}/portable-artifacts/affine.json" default)
+  set_tests_properties(portable_artifact_affine_fallback PROPERTIES TIMEOUT 30
+    ENVIRONMENT "ME_DSL_JIT=0;ME_DSL_FP_MODE=fast;ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/artifact-jit-cache")
+endif()
+
 file(GLOB MINIEXPR_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
+if(NOT MINIEXPR_BUILD_ARTIFACT)
+  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_artifact\\.c$")
+endif()
 if(NOT MINIEXPR_ENABLE_TCC_JIT OR EMSCRIPTEN)
   list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_jit_libtcc\\.c$")
 endif()
@@ -82,6 +115,11 @@ foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
   target_compile_definitions("${test_name}"
     PRIVATE ME_DSL_JIT_TEST_STUB_SO_PATH="$<TARGET_FILE:me_jit_test_stub>")
   target_link_libraries("${test_name}" PRIVATE ${MINIEXPR_DEFAULT_LIB} ${MINIEXPR_THREADS_LIB})
+  if(test_name STREQUAL "test_dsl_artifact")
+    target_link_libraries("${test_name}" PRIVATE miniexpr_artifact)
+    target_compile_definitions("${test_name}" PRIVATE
+      MINIEXPR_ARTIFACT_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/portable-artifacts/affine.json")
+  endif()
   if(EMSCRIPTEN)
     if(MINIEXPR_USE_WASM32_JIT)
       target_compile_definitions("${test_name}" PRIVATE ME_USE_WASM32_JIT=1)

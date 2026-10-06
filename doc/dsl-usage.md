@@ -62,6 +62,16 @@ before normal compilation/evaluation; runtime data constraints and backend
 compatibility remain separate concerns. See [the draft profile](dsl-spec/0.1.md)
 for supported features and diagnostic categories.
 
+## Portable artifact loading
+
+For a standalone versioned JSON kernel, enable `MINIEXPR_BUILD_ARTIFACT` and link
+the separate `miniexpr_artifact` target. This optional adapter decodes typed scalar
+constants, validates exact name coverage, and provides `me_artifact_load()` /
+`me_artifact_eval()` / `me_artifact_free()` in `miniexpr_artifact.h`. It neither
+requires Python nor adds JSON support to the raw language compiler. See
+[the artifact contract](dsl-spec/artifact-0.1.md) and the
+[standalone example](../tests/portable-artifacts/README.md).
+
 ## Runtime JIT Controls
 
 Use source pragmas or API policy to control JIT behavior.

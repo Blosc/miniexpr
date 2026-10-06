@@ -1,8 +1,18 @@
-if(MINIEXPR_USE_SLEEF OR MINIEXPR_NEEDS_TINYCC)
+if(MINIEXPR_USE_SLEEF OR MINIEXPR_NEEDS_TINYCC OR MINIEXPR_BUILD_ARTIFACT)
   include(FetchContent)
   if(POLICY CMP0169)
     cmake_policy(SET CMP0169 OLD)
   endif()
+endif()
+
+if(MINIEXPR_BUILD_ARTIFACT)
+  FetchContent_Declare(
+    yyjson
+    GIT_REPOSITORY https://github.com/ibireme/yyjson.git
+    GIT_TAG 8b4a38dc994a110abaec8a400615567bd996105f # release 0.12.0
+  )
+  # Compile the reader in the adapter, not in the language/compiler library.
+  FetchContent_Populate(yyjson)
 endif()
 
 if(MINIEXPR_USE_SLEEF)

@@ -2,6 +2,15 @@
 
 This project includes or depends on third-party components with separate licenses.
 
+### yyjson (optional artifact adapter only)
+
+- Component: strict UTF-8 JSON reader for portable DSL artifacts
+- Upstream: https://github.com/ibireme/yyjson
+- Version: 0.12.0 (`8b4a38dc994a110abaec8a400615567bd996105f`)
+- License: MIT
+- The upstream `LICENSE` is installed as `LICENSE-YYJSON` when
+  `MINIEXPR_BUILD_ARTIFACT` is enabled. It is not a dependency of the raw DSL compiler.
+
 ### TinyExpr
 
 - Component: parser/evaluator base design and code portions

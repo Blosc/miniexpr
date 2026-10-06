@@ -1,0 +1,15 @@
+{
+  "schema_version": "0.1",
+  "language": {"name": "miniexpr", "version": "0.1"},
+  "requires": ["core-scalar"],
+  "source": "# me:compiler=tcc\ndef affine(x, scale, bias):\n    return x * scale + bias\n",
+  "entry_point": "affine",
+  "inputs": [{"name": "x", "dtype": "float64"}],
+  "constants": [
+    {"name": "bias", "dtype": "float64", "encoding": "ieee754-hex", "value": "bff0000000000000"},
+    {"name": "scale", "dtype": "float64", "encoding": "ieee754-hex", "value": "4000000000000000"}
+  ],
+  "output": {"dtype": "float64", "contract": "scalar-per-element"},
+  "semantics": {"fp": "strict"},
+  "metadata": {"description": "Hand-authored affine kernel: 2*x - 1"}
+}
