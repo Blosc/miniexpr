@@ -94,6 +94,8 @@ static void dsl_jit_ir_expr_free(me_dsl_jit_ir_expr *expr) {
     expr->division_c = NULL;
     free(expr->math_c);
     expr->math_c = NULL;
+    free(expr->arithmetic_c);
+    expr->arithmetic_c = NULL;
     expr->text = NULL;
     expr->dtype = ME_AUTO;
 }
@@ -1052,6 +1054,7 @@ static uint64_t dsl_jit_ir_hash_expr(uint64_t h, const me_dsl_jit_ir_expr *expr)
     h = dsl_jit_hash_string(h, expr ? expr->text : "");
     h = dsl_jit_hash_string(h, expr && expr->division_c ? expr->division_c : "");
     h = dsl_jit_hash_string(h, expr && expr->math_c ? expr->math_c : "");
+    h = dsl_jit_hash_string(h, expr && expr->arithmetic_c ? expr->arithmetic_c : "");
     h = dsl_jit_hash_dtype(h, expr ? expr->dtype : ME_AUTO);
     return h;
 }

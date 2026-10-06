@@ -1781,7 +1781,7 @@ static int me_jit_collect_stmt_vec_plans(const me_dsl_jit_ir_program *program,
         const char *value_text = stmt->as.assign.value.text;
         /* Text-based hybrid plans do not carry typed division/math intermediates.
          * Keep these assignments on the typed scalar lowering path. */
-        if (strchr(value_text, '/') || stmt->as.assign.value.math_c) {
+        if (strchr(value_text, '/') || stmt->as.assign.value.math_c || stmt->as.assign.value.arithmetic_c) {
             continue;
         }
         bool planned = false;
@@ -2483,8 +2483,8 @@ static bool me_jit_expr_to_c(const me_dsl_jit_ir_expr *expr, char **out_c,
         return false;
     }
 
-    if (expr->math_c) {
-        *out_c = me_jit_strdup(expr->math_c);
+    if (expr->math_c || expr->arithmetic_c) {
+        *out_c = me_jit_strdup(expr->math_c ? expr->math_c : expr->arithmetic_c);
         if (!*out_c) me_jit_set_error(error, line, column, "out of memory");
         return *out_c != NULL;
     }

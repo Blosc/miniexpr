@@ -34,6 +34,8 @@ typedef struct {
     char *division_c;
     /* Owned lowering for audited leaf float32 math and its comparisons. */
     char *math_c;
+    /* Owned lowering for pure floating +, -, and * expression trees. */
+    char *arithmetic_c;
     me_dtype dtype;
 } me_dsl_jit_ir_expr;
 

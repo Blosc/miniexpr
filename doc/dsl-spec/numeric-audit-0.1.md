@@ -155,6 +155,42 @@ and platforms remains a publication gate, not certified by these samples.
 Validation: all 307 regular native tests, 242 AddressSanitizer tests, and 525
 focused Python tests passed, without expected failures or new build warnings.
 
+### Pure float32 arithmetic: literal/intermediate rounding correction implemented
+
+For float32 input/output and `x = 2**24`, `(x + 1.0) - x` previously returned
+`0` in the interpreter but `1` in both JIT compilers. C's double literal widened
+the inner addition, removing the native float32 rounding step. Decimal literals
+expose another boundary: native `x - 0.1` first rounds the constant to float32,
+so an input equal to that rounded value yields zero. A double-literal operation
+followed only by an output cast instead yields a small nonzero result.
+
+The new owned pure-arithmetic lowering preserves operand and intermediate
+rounding for float32 `+`, `-`, `*`, and unary negation. Unlike native division's
+scalar double callback, these operations convert scalar constants to the
+evaluator's dtype before operating. Lowering uses the compiled computation
+dtype rather than just the requested output dtype. Calls, casts, comparisons,
+division, and mixed intermediate computation dtypes are deliberately outside
+this slice; their existing paths are not certified by this correction.
+
+The audit also confirms contextual literal typing: these floating literals use
+the requested floating output context. The same `(x + 1.0) - x` expression with
+float32 input and float64 output yields `1` at `x = 2**24`; it is not specified as
+a float32 computation followed by widening. Explicit parameter/capture constants
+have their declared dtype instead. This is documented observed native behavior,
+not a completed promotion specification for every signature or local context.
+
+Five exact shared fixtures cover exact/decimal literal rounding, scalar
+subtraction, locals, and differing floating output context. Native and Python
+artifact tests check scalar and vector counts 1/5/257, repeated evaluation, both
+floating output widths, and addition/subtraction/multiplication. TCC and CC must
+prepare real kernels for the shared fixtures and Python arithmetic matrix.
+Typed assignments bypass text-only hybrid plans; ordinary float64 arithmetic
+retains its existing hybrid optimizations. Owned text enters the IR fingerprint,
+and code-generation cache version is 16.
+
+Validation: all 328 regular native tests, 258 AddressSanitizer tests, and 632
+focused Python tests passed, without expected failures or new build warnings.
+
 ## Remaining publication gates
 
 - Resolve expression gaps or explicitly narrow the profile.

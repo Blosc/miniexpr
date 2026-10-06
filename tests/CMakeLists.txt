@@ -14,6 +14,8 @@ if(NOT EMSCRIPTEN)
                      cast_argument_int cast_argument_bool cast_argument_nested
                      cast_integer_exact cast_nonfinite_truth
                      math_widen math_condition math_local_widen
+                     arithmetic_round arithmetic_decimal arithmetic_scalar_sub arithmetic_local_round
+                     arithmetic_widen
                     unknown_name invalid_index zero_step missing_return missing_return_ok
                      missing_return_mixed missing_return_loop missing_return_loop_ok
                      missing_return_hybrid missing_return_hybrid_ok)

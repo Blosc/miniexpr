@@ -35,6 +35,11 @@ casts in division remain outside the typed JIT slice.
 The strict `math_widen`, `math_condition`, and `math_local_widen` fixtures now
 require exact interpreter/TCC/CC agreement for leaf float32 sin/cos rounding
 before widening or comparison. Other math contexts remain audit work.
+Five exact `arithmetic_*` fixtures check pure float32 arithmetic literal and
+intermediate rounding, locals, and the differing float64 output context. The
+native/Python scalar/vector matrix additionally checks multiplication and
+repeated execution. Mixed computation dtypes, calls, and casts are not certified
+by this pure-arithmetic slice.
 
 Fixtures exercise bounded integer arithmetic, precise int64 comparisons, special
 floating-point values, `break`/`continue`, unresolved names, unsupported indexing,

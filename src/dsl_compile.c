@@ -1432,6 +1432,50 @@ static char *dsl_jit_typed_leaf_math(const dsl_compile_ctx *ctx, const me_expr *
     return out;
 }
 
+/* The pure floating arithmetic slice deliberately excludes calls, conversions,
+ * comparisons and division. Unlike division's double callback, native +, -,
+ * and * round scalar constants to the evaluator's dtype before operating. */
+static char *dsl_jit_pure_float_arithmetic(const dsl_compile_ctx *ctx, const me_expr *node, int depth) {
+    if (!node || depth > 128) return NULL;
+    if (TYPE_MASK(node->type) == ME_CONSTANT || TYPE_MASK(node->type) == ME_VARIABLE) {
+        if (node->dtype != ME_FLOAT32 && node->dtype != ME_FLOAT64) return NULL;
+        return dsl_jit_typed_arithmetic(ctx, node, depth);
+    }
+    const char *op = me_arithmetic_operator(node);
+    me_dtype dtype = infer_result_type(node);
+    if (!op || !strcmp(op, "/") || (dtype != ME_FLOAT32 && dtype != ME_FLOAT64)) return NULL;
+    int arity = ARITY(node->type);
+    const me_expr *left_node = node->parameters[0];
+    const me_expr *right_node = arity == 2 ? node->parameters[1] : NULL;
+    /* Mixed intermediate dispatch is a separate audit: do not guess its rule. */
+    if (infer_result_type(left_node) != dtype ||
+        (right_node && infer_result_type(right_node) != dtype)) return NULL;
+    char *left = NULL, *right = NULL;
+    const me_expr *operands[] = {left_node, right_node};
+    char **texts[] = {&left, &right};
+    for (int i = 0; i < arity; i++) {
+        *texts[i] = dsl_jit_pure_float_arithmetic(ctx, operands[i], depth + 1);
+    }
+    if (!left || (arity == 2 && !right)) {
+        free(left);
+        free(right);
+        return NULL;
+    }
+    const char *ctype = dsl_jit_arithmetic_ctype(dtype);
+    size_t size = strlen(left) + (right ? strlen(right) : 0) + 128;
+    char *out = malloc(size);
+    if (out && arity == 2) {
+        snprintf(out, size, "((%s)(((%s)(%s)) %s ((%s)(%s))))",
+                 ctype, ctype, left, op, ctype, right);
+    }
+    else if (out) {
+        snprintf(out, size, "((%s)(-(%s)))", ctype, left);
+    }
+    free(left);
+    free(right);
+    return out;
+}
+
 static void dsl_jit_bind_division_expr(dsl_compile_ctx *ctx, me_dsl_jit_ir_expr *ir,
                                       const me_dsl_compiled_expr *compiled) {
     if (ir->text && strchr(ir->text, '/')) {
@@ -1441,6 +1485,11 @@ static void dsl_jit_bind_division_expr(dsl_compile_ctx *ctx, me_dsl_jit_ir_expr 
     }
     else {
         ir->math_c = dsl_jit_typed_leaf_math(ctx, compiled->expr);
+        if (!ir->math_c && compiled->expr && me_arithmetic_operator(compiled->expr) &&
+            infer_result_type(compiled->expr) == ME_FLOAT32 &&
+            (compiled->expr->dtype == ME_FLOAT32 || compiled->expr->dtype == ME_FLOAT64)) {
+            ir->arithmetic_c = dsl_jit_pure_float_arithmetic(ctx, compiled->expr, 0);
+        }
     }
 }
 
