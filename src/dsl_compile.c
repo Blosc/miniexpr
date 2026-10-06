@@ -868,7 +868,7 @@ fail:
     return false;
 }
 
-static void dsl_mark_value_casts(me_expr *expr, me_dsl_fp_mode fp_mode) {
+static void dsl_mark_value_casts(me_expr *expr, me_dsl_fp_mode fp_mode, bool preserve_bool_output) {
     if (!expr || (!IS_FUNCTION(expr->type) && !IS_CLOSURE(expr->type))) {
         return;
     }
@@ -888,7 +888,7 @@ static void dsl_mark_value_casts(me_expr *expr, me_dsl_fp_mode fp_mode) {
         }
     }
     for (int i = 0; i < ARITY(expr->type); i++) {
-        dsl_mark_value_casts(expr->parameters[i], fp_mode);
+        dsl_mark_value_casts(expr->parameters[i], fp_mode, false);
     }
     /* Arithmetic on bool() results in a requested floating context must use
      * numeric 0/1 operands, not compute into one-byte Boolean storage first.
@@ -898,6 +898,25 @@ static void dsl_mark_value_casts(me_expr *expr, me_dsl_fp_mode fp_mode) {
         (expr->dtype == ME_FLOAT32 || expr->dtype == ME_FLOAT64) &&
         infer_result_type(expr) == ME_BOOL) {
         expr->flags |= ME_EXPR_FLAG_EXPLICIT_DTYPE | ME_EXPR_FLAG_DSL_FLOAT_BOOL_ARITH;
+    }
+    /* Boolean operands are numeric 0/1, not one-byte arithmetic storage.
+     * Keep fractional literals and intermediate values until the requested
+     * Boolean output (or an explicit bool() intrinsic) performs nonzero truth.
+     * Integral literals/Boolean-only arithmetic use int64; fractional literals
+     * use float64. Wide integral/mixed arithmetic remains a separate audit. */
+    if (me_arithmetic_operator(expr) && expr->dtype == ME_BOOL) {
+        for (int i = 0; i < ARITY(expr->type); i++) {
+            me_expr *operand = expr->parameters[i];
+            if (TYPE_MASK(operand->type) == ME_CONSTANT && operand->dtype == ME_BOOL) {
+                operand->dtype = trunc(operand->value) == operand->value ? ME_INT64 : ME_FLOAT64;
+            }
+        }
+        me_dtype computation = infer_result_type(expr);
+        if (computation == ME_BOOL) {
+            expr->flags |= ME_EXPR_FLAG_DSL_BOOL_NUMERIC_ARITH;
+            computation = ME_INT64;
+        }
+        if (!preserve_bool_output) expr->dtype = computation;
     }
 }
 
@@ -993,7 +1012,7 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
         return false;
     }
     int *indices = NULL;
-    dsl_mark_value_casts(compiled, ctx->program->fp_mode);
+    dsl_mark_value_casts(compiled, ctx->program->fp_mode, expr_dtype == ME_BOOL);
     int count = 0;
     if (!dsl_collect_var_indices(compiled, &indices, &count)) {
         me_free(compiled);

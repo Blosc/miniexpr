@@ -82,7 +82,8 @@ enum {
     ME_EXPR_FLAG_DSL_VALUE_CAST = 1u << 5,
     ME_EXPR_FLAG_DSL_BOOL_CAST = 1u << 6,
     ME_EXPR_FLAG_DSL_STRICT_F32_MATH = 1u << 7,
-    ME_EXPR_FLAG_DSL_FLOAT_BOOL_ARITH = 1u << 8
+    ME_EXPR_FLAG_DSL_FLOAT_BOOL_ARITH = 1u << 8,
+    ME_EXPR_FLAG_DSL_BOOL_NUMERIC_ARITH = 1u << 9
 };
 
 /* Check if a pointer is a synthetic address (used internally for chunked evaluation).

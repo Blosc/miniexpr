@@ -1072,6 +1072,9 @@ me_dtype infer_result_type(const me_expr* n) {
     case ME_CLOSURE6:
     case ME_CLOSURE7:
         {
+            if (n->flags & ME_EXPR_FLAG_DSL_BOOL_NUMERIC_ARITH) {
+                return ME_INT64;
+            }
             if ((n->flags & ME_EXPR_FLAG_EXPLICIT_DTYPE) != 0) {
                 return n->dtype;
             }

@@ -51,9 +51,11 @@ The cap is supplied by the test environment, not embedded in source/artifacts.
 and `masked_bool_chain` cover constant local assignments under lane masks.
 Five `bool_float_*` fixtures check numeric 0/1 arithmetic on Boolean cast results
 in floating contexts, including signed-zero negation through a local. They do
-not certify Boolean-output arithmetic. `audit/bool_output_fraction` records an
-open interpreter/JIT discrepancy; its rows are observed interpreter behavior,
-not a frozen contract.
+not certify arbitrary Boolean-output arithmetic. Five `bool_output_*` and
+`bool_numeric_*` fixtures cover the selected numeric-then-truth rule: numeric
+zero/one operands, preserved fractional arithmetic and locals, and conversion
+only at an explicit cast or Boolean output. `bool_output_fraction` is promoted
+from the audit corpus with expected values matching that selected contract.
 
 Fixtures exercise bounded integer arithmetic, precise int64 comparisons, special
 floating-point values, `break`/`continue`, unresolved names, unsupported indexing,

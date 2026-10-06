@@ -254,12 +254,40 @@ large integers, subnormals, infinities, NaNs, and exact zero signs.
 Validation passed all 393 regular native tests, 307 AddressSanitizer tests, and
 2014 focused Python tests without expected failures or new native build warnings.
 
-The probe `audit/bool_output_fraction` retains a separate open discrepancy:
+The probe initially retained as `audit/bool_output_fraction` exposed a discrepancy:
 Boolean input/output `x * 0.5` returns false for true input in the interpreter
 but true in JIT. Its expected rows record observed interpreter behavior only,
 not a normative arithmetic rule. `x + 0.5` similarly disagrees for false input.
-Boolean-output arithmetic remains a publication gate and must be specified or
-excluded before freezing the profile.
+The following correction implements the selected numeric-then-truth rule and
+promotes that fixture to the passing corpus.
+
+### Boolean-output numeric arithmetic: selected contract implemented
+
+The selected portable contract treats Boolean arithmetic operands as numeric
+zero/one, preserving numeric intermediates and fractional literals. Nonzero
+truth conversion happens at the requested Boolean output or an explicit
+`bool()` call, not at each arithmetic step. Thus `x * 0.5` preserves Boolean
+`x`, while `x + 0.5` is always true; `bool(x + 0.5)` obeys the same rule.
+
+DSL compilation now restores numeric literal dtypes in Boolean arithmetic
+contexts: integral-valued literals use int64, fractional values float64.
+Boolean-only arithmetic is marked for int64 computation rather than writing
+noncanonical arithmetic bytes to Boolean storage. Arithmetic arguments and
+inferred locals retain their numeric dtype; only the requested root Boolean
+output keeps Boolean storage and converts the completed numeric value.
+Integral/mixed operands retain their separately inferred computation dtype;
+this does not force all Boolean-result arithmetic through double. An exact
+`(x + 2**53) - 2**53` Boolean-input regression guards against premature floating
+promotion. General mixed-type promotion and overflow remain audit work.
+
+Five shared fixtures cover fractional output arithmetic, explicit Boolean
+conversion, a numeric local used in comparison, and truncating an arithmetic
+argument before comparison. Required-JIT Python tests check interpreter/TCC/CC
+agreement at counts 1/2/257, repeated evaluation, locals/intermediates, integral
+arithmetic, comparisons, explicit casts, and canonical zero/one output bytes.
+Code-generation cache version is 20. Validation passed 413 regular native tests,
+322 AddressSanitizer tests, and 2161 focused Python tests without expected
+failures or new native compiler warnings.
 
 ### While-loop cap: JIT safety correction implemented
 
