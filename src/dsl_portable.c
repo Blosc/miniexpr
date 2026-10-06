@@ -202,7 +202,30 @@ static me_portable_status portable_expr(const me_dsl_expr *expr, bool range_allo
         if ((*p >= '0' && *p <= '9') || (*p == '.' && p[1] >= '0' && p[1] <= '9')) {
             char *end = NULL;
             double value = strtod(p, &end);
-            if (end == p || !isfinite(value) || (!floating_inputs && value > 9007199254740992.0)) {
+            bool outside_integer_limit = false;
+            if (!floating_inputs) {
+                /* Normalization preserves integer digits (including base-prefixed
+                 * forms). Check them exactly: strtod rounds 2**53 + 1 down to
+                 * 2**53, which must not bypass this profile restriction. */
+                bool integer = end != p;
+                for (const char *q = p; q < end; q++) {
+                    integer = integer && *q >= '0' && *q <= '9';
+                }
+                if (integer) {
+                    uint64_t magnitude = 0;
+                    const uint64_t limit = UINT64_C(9007199254740992);
+                    for (const char *q = p; q < end; q++) {
+                        uint64_t digit = (uint64_t)(*q - '0');
+                        if (magnitude > (limit - digit) / 10) {
+                            outside_integer_limit = true;
+                            break;
+                        }
+                        magnitude = magnitude * 10 + digit;
+                    }
+                }
+            }
+            if (end == p || !isfinite(value) || outside_integer_limit ||
+                (!floating_inputs && value > 9007199254740992.0)) {
                 return portable_error(error, ME_PORTABLE_ERR_UNSUPPORTED, expr->line, expr->column,
                                       "numeric literal is outside the draft portable range");
             }

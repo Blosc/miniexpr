@@ -7,15 +7,26 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(portable_dsl_runner PRIVATE m)
     find_program(MINIEXPR_PORTABLE_CC NAMES cc clang gcc)
   endif()
-  foreach(case_name affine chains loops int32 int64 float32 bool compare special_floats flow
+  set(MINIEXPR_PORTABLE_CASES affine chains loops int32 int64 float32 bool compare special_floats flow
                     boolean_results cast_int math
                     unknown_name invalid_index zero_step missing_return missing_return_ok
-                    missing_return_mixed missing_return_loop missing_return_loop_ok
-                    missing_return_hybrid missing_return_hybrid_ok)
+                     missing_return_mixed missing_return_loop missing_return_loop_ok
+                     missing_return_hybrid missing_return_hybrid_ok)
+  foreach(input_type bool int32 int64 float32 float64)
+    foreach(output_type bool int32 int64 float32 float64)
+      list(APPEND MINIEXPR_PORTABLE_CASES convert_${input_type}_${output_type})
+    endforeach()
+  endforeach()
+  foreach(case_name IN LISTS MINIEXPR_PORTABLE_CASES)
+    if(case_name MATCHES "^convert_")
+      set(source_path "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/identity.dsl")
+    else()
+      set(source_path "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.dsl")
+    endif()
     foreach(policy off default)
       add_test(NAME portable_dsl_${case_name}_${policy}
         COMMAND portable_dsl_runner
-          "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.dsl"
+          "${source_path}"
           "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.txt" "${policy}")
       set_tests_properties(portable_dsl_${case_name}_${policy} PROPERTIES TIMEOUT 30
         ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/portable-jit-cache")
@@ -23,14 +34,14 @@ if(NOT EMSCRIPTEN)
     if(MINIEXPR_ENABLE_TCC_JIT)
       add_test(NAME portable_dsl_${case_name}_on
         COMMAND portable_dsl_runner
-          "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.dsl"
+          "${source_path}"
           "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.txt" on)
       set_tests_properties(portable_dsl_${case_name}_on PROPERTIES TIMEOUT 30
         ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/portable-jit-cache")
     endif()
     if(MINIEXPR_PORTABLE_CC)
       # Same language fixture, with only the execution preference changed.
-      file(READ "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.dsl" cc_source)
+      file(READ "${source_path}" cc_source)
       string(REPLACE "# me:compiler=tcc\n" "" cc_source "${cc_source}")
       set(cc_path "${CMAKE_CURRENT_BINARY_DIR}/portable-dsl/${case_name}.cc.dsl")
       file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/portable-dsl")
@@ -41,6 +52,16 @@ if(NOT EMSCRIPTEN)
       set_tests_properties(portable_dsl_${case_name}_cc PROPERTIES TIMEOUT 30
         ENVIRONMENT "CC=${MINIEXPR_PORTABLE_CC};ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/portable-jit-cache")
     endif()
+  endforeach()
+  # These preserve the interpreter baseline for unresolved typed-codegen gaps.
+  # Do not promote them to required-JIT conformance before fixing the gaps.
+  # math_condition also differs between linked interpreter math engines; keep
+  # that source as an audit reproducer rather than a passing baseline case.
+  foreach(case_name division_int division_bool division_literals math_widen)
+    add_test(NAME portable_audit_${case_name}_off COMMAND portable_dsl_runner
+      "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/audit/${case_name}.dsl"
+      "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/audit/${case_name}.txt" off)
+    set_tests_properties(portable_audit_${case_name}_off PROPERTIES TIMEOUT 30)
   endforeach()
 endif()
 

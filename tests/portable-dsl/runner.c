@@ -80,10 +80,14 @@ static bool read_value(FILE *file, me_dtype dtype, void *buffer, int index) {
         default:
             return false;
     }
-    return !errno && end != token && !*end;
+    /* strtof/strtod may report ERANGE for valid subnormal values, not only
+     * overflow. Preserve those values in the typed transport corpus. */
+    bool finite = dtype == ME_FLOAT32 ? isfinite(((float *)buffer)[index]) :
+                                       isfinite(((double *)buffer)[index]);
+    return (!errno || (errno == ERANGE && finite)) && end != token && !*end;
 }
 
-static bool compare_value(me_dtype dtype, const void *actual, const void *expected, int index) {
+static bool compare_value(me_dtype dtype, const void *actual, const void *expected, int index, bool exact) {
     if (dtype == ME_BOOL) {
         return ((const bool *)actual)[index] == ((const bool *)expected)[index];
     }
@@ -103,6 +107,9 @@ static bool compare_value(me_dtype dtype, const void *actual, const void *expect
     }
     if (a == 0 && e == 0) {
         return !!signbit(a) == !!signbit(e);
+    }
+    if (exact) {
+        return a == e;
     }
     double tolerance = dtype == ME_FLOAT32 ? 1e-6 : 1e-12;
     return isfinite(a) && fabs(a - e) <= tolerance + tolerance * fabs(e);
@@ -171,7 +178,8 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
     if (fscanf(file, "%15s %15s %15s %d %d", outcome, input_type, output_type, &count, &nvars) != 5 ||
-        (strcmp(outcome, "ok") && strcmp(outcome, "compile_error") && strcmp(outcome, "eval_error")) || count < 1 ||
+        (strcmp(outcome, "ok") && strcmp(outcome, "ok_exact") && strcmp(outcome, "compile_error") &&
+         strcmp(outcome, "eval_error")) || count < 1 ||
         count > MAX_ITEMS || nvars < 1 || nvars > MAX_INPUTS) {
         fprintf(stderr, "invalid fixture header\n");
         goto cleanup;
@@ -261,7 +269,7 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
     for (int i = 0; i < count; i++) {
-        if (!compare_value(output_dtype, output, expected, i)) {
+        if (!compare_value(output_dtype, output, expected, i, !strcmp(outcome, "ok_exact"))) {
             fprintf(stderr, "element %d differs from expected %s value\n", i, output_type);
             goto cleanup;
         }

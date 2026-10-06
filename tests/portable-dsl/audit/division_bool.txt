@@ -1,0 +1,5 @@
+ok_exact float64 float64 3 1
+x
+1 0.5
+-1 0.5
+0 0

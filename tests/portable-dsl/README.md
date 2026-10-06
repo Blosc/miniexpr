@@ -3,7 +3,7 @@
 These are raw native source fixtures, not exported artifacts. Each `.txt` file
 contains whitespace-delimited:
 
-1. Expected outcome (`ok`, `compile_error`, or `eval_error`), input dtype, output
+1. Expected outcome (`ok`, `ok_exact`, `compile_error`, or `eval_error`), input dtype, output
    dtype, element count, and input count.
 2. Input names in compilation/evaluation order (possibly different from source).
 3. One row per element: input values followed by the specified expected output.
@@ -16,6 +16,12 @@ compared exactly, including int64 extrema and values above `2**53`. Floating-poi
 comparison uses `abs(actual - expected) <= tolerance + tolerance * abs(expected)`,
 with `1e-6` for float32 and `1e-12` for float64. Signed zero must match; NaNs compare
 by classification, not payload; infinities must match their sign.
+
+`ok_exact` additionally compares finite floats exactly, preserving subnormal and
+rounding checks. The 25 `convert_INPUT_OUTPUT.txt` fixtures share `identity.dsl`
+and cover the supported 5×5 output-conversion matrix. The `audit/` sources preserve
+unresolved numeric discrepancies; they are not required-JIT conformance claims.
+See [the numeric audit](../../doc/dsl-spec/numeric-audit-0.1.md).
 
 Fixtures exercise bounded integer arithmetic, precise int64 comparisons, special
 floating-point values, `break`/`continue`, unresolved names, unsupported indexing,

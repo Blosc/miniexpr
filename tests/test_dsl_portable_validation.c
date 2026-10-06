@@ -96,6 +96,14 @@ int main(void) {
     check("def k(x):\n    return x / 2\n", x, 1, ME_INT64, ME_PORTABLE_ERR_UNSUPPORTED);
     check("def k(x):\n    return x + 9007199254740994\n", x, 1,
           ME_INT64, ME_PORTABLE_ERR_UNSUPPORTED);
+    check("def k(x):\n    return x + 9007199254740992\n", x, 1,
+          ME_INT64, ME_PORTABLE_SUCCESS);
+    check("def k(x):\n    return x + 9007199254740993\n", x, 1,
+          ME_INT64, ME_PORTABLE_ERR_UNSUPPORTED);
+    check("def k(x):\n    return x - 9_007_199_254_740_993\n", x, 1,
+          ME_INT64, ME_PORTABLE_ERR_UNSUPPORTED);
+    check("def k(x):\n    return x + 0x20000000000001\n", x, 1,
+          ME_INT64, ME_PORTABLE_ERR_UNSUPPORTED);
     me_portable_error error;
     assert(me_validate_portable_dsl("def k(x):\n    return x\n", "0.2", x, 1,
                                    ME_INT64, &error) == ME_PORTABLE_ERR_VERSION);
