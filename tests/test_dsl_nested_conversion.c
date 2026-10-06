@@ -58,7 +58,43 @@ static int check_nested_conversion(const char *expression, const double *expecte
     return 0;
 }
 
+static int check_exact_integer_cast(int mode) {
+    const char *source = "def k(x):\n    return int(x)\n";
+    const int64_t values[] = {-(INT64_C(9007199254740993)), 0, INT64_C(9007199254740993), INT64_MAX};
+    const void *inputs[] = {values};
+    int64_t output[4] = {0};
+    me_variable variables[] = {{"x", ME_INT64}};
+    me_expr *expr = NULL;
+    int error = 0;
+    int64_t shape[] = {4};
+    int32_t chunks[] = {4}, blocks[] = {4};
+    int rc = me_compile_nd_jit(source, variables, 1, ME_INT64, 1,
+                               shape, chunks, blocks, mode, &error, &expr);
+    if (rc != ME_COMPILE_SUCCESS || !expr) return 1;
+#if defined(__EMSCRIPTEN__)
+    /* The wasm adapter only implements 32-bit int() casts. Use the exact
+     * interpreter rather than silently truncating a valid int64 value. */
+    if (me_expr_has_jit_kernel(expr)) {
+        me_free(expr);
+        return 1;
+    }
+#endif
+    rc = me_eval(expr, inputs, 1, output, 4, NULL);
+    me_free(expr);
+    if (rc != ME_EVAL_SUCCESS) return 1;
+    for (int i = 0; i < 4; i++) {
+        if (output[i] != values[i]) {
+            printf("Exact integer cast failed in mode %d at element %d\n", mode, i);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int main(void) {
+    for (int mode = ME_JIT_OFF; mode <= ME_JIT_ON; mode++) {
+        if (check_exact_integer_cast(mode)) return 1;
+    }
     const char *expressions[] = {
         "float(int(x) / 2)", "int(x + 0.25)", "bool(x + 0.25)",
         "bool(int(x + 0.25))", "int(x + 0.25) / 2"

@@ -486,6 +486,21 @@ static bool me_jit_expr_contains_unsupported_tokens(const char *expr, me_dtype d
             quote = c;
             continue;
         }
+#if defined(__EMSCRIPTEN__)
+        /* The wasm32 source adapter narrows int64_t casts and int() helper
+         * results to 32 bits. Never silently truncate valid DSL int() values:
+         * retain interpreter semantics until that backend supports exact i64
+         * casts. Filter before both typed lowering and hybrid-plan selection. */
+        if (isalpha((unsigned char)c) || c == '_') {
+            const char *end = p + 1;
+            while (isalnum((unsigned char)*end) || *end == '_') end++;
+            const char *next = end;
+            while (isspace((unsigned char)*next)) next++;
+            if (end - p == 3 && !strncmp(p, "int", 3) && *next == '(') return true;
+            p = end - 1;
+            continue;
+        }
+#endif
         if (c == '*') {
             if (p[1] == '*') {
                 return true;
