@@ -223,6 +223,44 @@ Validation passed all 373 regular native tests, 292 AddressSanitizer tests, and
 
 ## Remaining publication gates
 
+### Boolean operands in floating arithmetic: corrected bounded slice
+
+With int32/int64 inputs and floating output, `bool(x) + bool(x)` previously
+returned zero for nonzero `x` in the interpreter but two in JIT. The compiled
+arithmetic node requested floating output, yet recursive inference selected
+Boolean computation from its cast operands. Numeric arithmetic then wrote a
+noncanonical Boolean byte (two) before conversion, so this was not a valid
+Boolean storage representation or a reliable numerical result.
+
+DSL arithmetic with Boolean-inferred operands and a requested float32/float64
+computation dtype now marks that dtype explicit. `bool()` still consumes each
+argument in its own dtype before supplying exact numeric zero/one operands.
+The certified matrix covers addition, subtraction, multiplication, and unary
+negation, both directly and through a top-level local assignment. It does not
+settle Boolean-output arithmetic, arbitrary mixed operands, or division domains.
+
+Typed C arithmetic also casts before unary negation, preserving `-0` for false.
+This is needed both for direct `-bool(x)` and for an interpreter floating local
+whose source-derived IR type is Boolean. The additional float64 unary lowering
+is limited to identified top-level bool-assigned locals: general float64 tree
+lowering must not disable established hybrid branch/select optimizations.
+Owned text participates in IR fingerprints; code-generation cache version is 19.
+
+Five exact shared fixtures cover sums with wide int64 inputs, subtraction,
+multiplication with non-finite floating inputs, direct negation, and local
+negation. Required-JIT Python matrices cover both compilers, five input dtypes,
+both floating outputs, counts 1/10/257, direct/local forms, repeated execution,
+large integers, subnormals, infinities, NaNs, and exact zero signs.
+Validation passed all 393 regular native tests, 307 AddressSanitizer tests, and
+2014 focused Python tests without expected failures or new native build warnings.
+
+The probe `audit/bool_output_fraction` retains a separate open discrepancy:
+Boolean input/output `x * 0.5` returns false for true input in the interpreter
+but true in JIT. Its expected rows record observed interpreter behavior only,
+not a normative arithmetic rule. `x + 0.5` similarly disagrees for false input.
+Boolean-output arithmetic remains a publication gate and must be specified or
+excluded before freezing the profile.
+
 ### While-loop cap: JIT safety correction implemented
 
 The interpreter enforced `ME_DSL_WHILE_MAX_ITERS`, but generated JIT `while`

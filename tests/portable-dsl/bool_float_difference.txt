@@ -1,0 +1,6 @@
+ok_exact int32 float64 4 1
+x
+0 0
+1 0
+-1 0
+2 0

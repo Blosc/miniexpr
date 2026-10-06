@@ -17,6 +17,8 @@ if(NOT EMSCRIPTEN)
                      arithmetic_round arithmetic_decimal arithmetic_scalar_sub arithmetic_local_round
                      arithmetic_widen
                      arithmetic_float_cast arithmetic_float_nested arithmetic_float_local arithmetic_float_widen
+                     bool_float_sum bool_float_neg bool_float_product bool_float_difference
+                     bool_float_local_neg
                      while_cap_exact while_cap_exceeded while_cap_continue
                      while_cap_hybrid
                      while_cap_chain

@@ -890,6 +890,15 @@ static void dsl_mark_value_casts(me_expr *expr, me_dsl_fp_mode fp_mode) {
     for (int i = 0; i < ARITY(expr->type); i++) {
         dsl_mark_value_casts(expr->parameters[i], fp_mode);
     }
+    /* Arithmetic on bool() results in a requested floating context must use
+     * numeric 0/1 operands, not compute into one-byte Boolean storage first.
+     * In particular, a sum of two true values is 2, not an invalid bool byte.
+     * Boolean-output arithmetic and mixed operand promotion remain separate. */
+    if (me_arithmetic_operator(expr) &&
+        (expr->dtype == ME_FLOAT32 || expr->dtype == ME_FLOAT64) &&
+        infer_result_type(expr) == ME_BOOL) {
+        expr->flags |= ME_EXPR_FLAG_EXPLICIT_DTYPE | ME_EXPR_FLAG_DSL_FLOAT_BOOL_ARITH;
+    }
 }
 
 static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
@@ -1382,7 +1391,7 @@ static char *dsl_jit_typed_arithmetic(const dsl_compile_ctx *ctx, const me_expr 
         snprintf(out, size, "((%s)(((double)(%s)) != 0.0))", ctype, left);
     }
     else if (out) {
-        snprintf(out, size, "((%s)(%s(%s)))", ctype, conversion ? "" : op, left);
+        snprintf(out, size, "((%s)(%s((%s)(%s))))", ctype, conversion ? "" : op, ctype, left);
     }
     free(left);
     free(right);
@@ -1485,6 +1494,19 @@ static char *dsl_jit_pure_float_arithmetic(const dsl_compile_ctx *ctx, const me_
     return out;
 }
 
+static bool dsl_jit_is_bool_local(const dsl_compile_ctx *ctx, const me_expr *node) {
+    if (!node || TYPE_MASK(node->type) != ME_VARIABLE || !is_synthetic_address(node->bound)) return false;
+    int index = (int)((const char *)node->bound - synthetic_var_addresses);
+    const me_dsl_compiled_block *block = &ctx->program->block;
+    for (int i = 0; i < block->nstmts; i++) {
+        const me_dsl_compiled_stmt *stmt = block->stmts[i];
+        if (stmt->kind == ME_DSL_STMT_ASSIGN &&
+            ctx->program->local_var_indices[stmt->as.assign.local_slot] == index &&
+            (stmt->as.assign.value.expr->flags & ME_EXPR_FLAG_DSL_BOOL_CAST)) return true;
+    }
+    return false;
+}
+
 static void dsl_jit_bind_division_expr(dsl_compile_ctx *ctx, me_dsl_jit_ir_expr *ir,
                                       const me_dsl_compiled_expr *compiled) {
     if (ir->text && strchr(ir->text, '/')) {
@@ -1494,7 +1516,20 @@ static void dsl_jit_bind_division_expr(dsl_compile_ctx *ctx, me_dsl_jit_ir_expr 
     }
     else {
         ir->math_c = dsl_jit_typed_leaf_math(ctx, compiled->expr);
-        if (!ir->math_c && compiled->expr &&
+        if (compiled->expr && (compiled->expr->flags & ME_EXPR_FLAG_DSL_FLOAT_BOOL_ARITH)) {
+            ir->arithmetic_c = dsl_jit_typed_arithmetic(ctx, compiled->expr, 0);
+        }
+        /* A bool() assignment can be a floating local in the interpreter but
+         * a Boolean local in source-derived IR. Cast before unary negation so
+         * false produces floating -0, rather than integer zero widened later.
+         * Do not enable general float64 tree lowering/hybrid exclusion here. */
+        if (!ir->arithmetic_c && compiled->expr &&
+            me_arithmetic_operator(compiled->expr) && ARITY(compiled->expr->type) == 1 &&
+            dsl_jit_is_bool_local(ctx, compiled->expr->parameters[0]) &&
+            infer_result_type(compiled->expr) == ME_FLOAT64) {
+            ir->arithmetic_c = dsl_jit_pure_float_arithmetic(ctx, compiled->expr, 0);
+        }
+        if (!ir->math_c && !ir->arithmetic_c && compiled->expr &&
             (me_arithmetic_operator(compiled->expr) ||
              compiled->expr->function == (const void *)dsl_cast_float_intrinsic) &&
             infer_result_type(compiled->expr) == ME_FLOAT32 &&
