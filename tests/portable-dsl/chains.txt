@@ -1,4 +1,4 @@
-6 1
+ok float64 float64 6 1
 x
 -1 -1
 0 1

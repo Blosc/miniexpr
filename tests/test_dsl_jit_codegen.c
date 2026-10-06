@@ -1630,6 +1630,57 @@ static int test_codegen_alias_vector_lowering(void) {
     return 0;
 }
 
+static int test_codegen_missing_return_cleanup(void) {
+    printf("\n=== JIT C Codegen: missing-return hybrid cleanup ===\n");
+    const char *source =
+        "def kernel(x):\n"
+        "    y = sin(x)\n"
+        "    z = cos(x)\n"
+        "    if x > 0:\n"
+        "        return y + z\n";
+    me_dsl_error error;
+    me_dsl_program *parsed = me_dsl_parse(source, &error);
+    if (!parsed) {
+        return 1;
+    }
+    const char *names[] = {"x"};
+    me_dtype types[] = {ME_FLOAT64};
+    dtype_resolve_ctx resolver = {ME_FLOAT64};
+    me_dsl_jit_ir_program *ir = NULL;
+    bool ok = me_dsl_jit_ir_build(parsed, names, types, 1, mock_resolve_dtype,
+                                  &resolver, &ir, &error);
+    me_dsl_program_free(parsed);
+    if (!ok) {
+        return 1;
+    }
+    me_dsl_jit_cgen_options options = {0};
+    options.use_runtime_math_bridge = true;
+    char *c_source = NULL;
+    ok = me_dsl_jit_codegen_c(ir, ME_FLOAT64, &options, &c_source, &error);
+    me_dsl_jit_ir_free(ir);
+    if (!ok || !c_source) {
+        free(c_source);
+        return 1;
+    }
+    const char *fallthrough = strstr(c_source, "goto __me_missing_return;");
+    const char *return_label = strstr(c_source, "__me_return_idx:");
+    const char *error_label = strstr(c_source, "__me_missing_return:");
+    const char *cleanup_label = strstr(c_source, "__me_cleanup:");
+    const char *free_temp = strstr(c_source, "free(__me_vec_tmp_1);");
+    /* Both success and fallthrough reach the same heap-temporary cleanup. */
+    ok = fallthrough && return_label && error_label && cleanup_label && free_temp &&
+         fallthrough < return_label && return_label < error_label &&
+         error_label < cleanup_label && cleanup_label < free_temp &&
+         strstr(c_source, "return __me_status;");
+    free(c_source);
+    if (!ok) {
+        printf("  FAILED: missing shared fallthrough/temporary cleanup\n");
+        return 1;
+    }
+    printf("  PASSED\n");
+    return 0;
+}
+
 int main(void) {
     int fail = 0;
     fail |= test_codegen_all_noncomplex_dtypes();
@@ -1653,5 +1704,6 @@ int main(void) {
     fail |= test_codegen_runtime_math_bridge_hybrid_gate_disable();
     fail |= test_codegen_branch_aware_if_select_lowering();
     fail |= test_codegen_alias_vector_lowering();
+    fail |= test_codegen_missing_return_cleanup();
     return fail;
 }

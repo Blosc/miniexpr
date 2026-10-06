@@ -28,7 +28,7 @@
 #endif
 
 #ifndef ME_DSL_JIT_CGEN_VERSION
-#define ME_DSL_JIT_CGEN_VERSION 12
+#define ME_DSL_JIT_CGEN_VERSION 13
 #endif
 
 #ifndef ME_DSL_JIT_BRIDGE_ABI_VERSION

@@ -294,6 +294,11 @@ Restrictions:
 - Reassigning incompatible dtypes to the same local is a compile-time error.
 - Return dtype must be consistent across all `return` statements.
 - Non-guaranteed return paths may compile; if execution reaches a missing return path, evaluation fails at runtime.
+- Numeric kernels with non-guaranteed returns can also be JIT-compiled. A missing
+  return on any executed element reports `ME_EVAL_ERR_INVALID_ARG`, without
+  retrying that semantic failure in the interpreter. Output contents after a
+  failed evaluation are unspecified; a kernel may already have written other
+  elements before encountering the missing return.
 
 ## Compound assignment desugaring
 

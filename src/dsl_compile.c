@@ -1353,14 +1353,6 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     program->jit_vector_ops[0] = '\0';
     program->jit_lowering_reason[0] = '\0';
 
-    if (!program->guaranteed_return) {
-        snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
-                 "program may reach function end without return");
-        dsl_tracef("jit ir skip: fp=%s reason=%s",
-                   dsl_fp_mode_name(program->fp_mode), program->jit_ir_error);
-        return;
-    }
-
     if (parsed->nparams < 0) {
         snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
                  "invalid dsl parameter metadata");

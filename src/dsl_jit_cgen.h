@@ -17,6 +17,10 @@
 #include "dsl_parser.h"
 #include "miniexpr.h"
 
+/* A semantic execution failure, not a request to retry via the interpreter.
+ * Other existing nonzero kernel statuses retain best-effort fallback. */
+#define ME_DSL_JIT_MISSING_RETURN 2
+
 typedef struct {
     const char *symbol_name;
     bool use_runtime_math_bridge;

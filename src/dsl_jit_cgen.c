@@ -3672,7 +3672,8 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         me_jit_set_lowering_trace(options, "hybrid", hybrid_ops, "statement-vector-lowered");
     }
 
-    if (!me_jit_emit_stmt_vec_precompute(&ctx, program)) {
+    if (!me_jit_emit_line(&ctx.source, 1, "int __me_status = 0;") ||
+        !me_jit_emit_stmt_vec_precompute(&ctx, program)) {
         me_jit_locals_free(&ctx.locals);
         me_jit_stmt_vec_plans_release(stmt_vec_plans, n_stmt_vec_plans);
         free(ctx.source.data);
@@ -4106,7 +4107,9 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         return false;
     }
 
-    if (!me_jit_emit_line(&ctx.source, 2, "__me_return_idx:") ||
+    /* Explicit returns jump past this fallthrough error, one element at a time. */
+    if (!me_jit_emit_line(&ctx.source, 2, "goto __me_missing_return;") ||
+        !me_jit_emit_line(&ctx.source, 2, "__me_return_idx:") ||
         !me_jit_emit_line(&ctx.source, 2, "__me_outp[__me_idx] = __me_out;")) {
         me_jit_set_error(error, 0, 0, "out of memory");
         me_jit_locals_free(&ctx.locals);
@@ -4193,6 +4196,22 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         return false;
     }
 
+    char missing_return_status[64];
+    snprintf(missing_return_status, sizeof(missing_return_status),
+             "__me_status = %d;", ME_DSL_JIT_MISSING_RETURN);
+    /* Share cleanup with successful execution so hybrid vector temporaries
+     * are released even when a lane reaches the end without returning. */
+    if (!me_jit_emit_line(&ctx.source, 1, "goto __me_cleanup;") ||
+        !me_jit_emit_line(&ctx.source, 1, "__me_missing_return:") ||
+        !me_jit_emit_line(&ctx.source, 1, missing_return_status) ||
+        !me_jit_emit_line(&ctx.source, 1, "__me_cleanup:")) {
+        me_jit_set_error(error, 0, 0, "out of memory");
+        me_jit_locals_free(&ctx.locals);
+        me_jit_stmt_vec_plans_release(stmt_vec_plans, n_stmt_vec_plans);
+        free(ctx.source.data);
+        return false;
+    }
+
     if (n_stmt_vec_plans > 0) {
         for (int i = 0; i < n_stmt_vec_plans; i++) {
             if (stmt_vec_plans[i].tmp_slot == ctx.stmt_vec_out_tmp_slot) {
@@ -4210,7 +4229,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         }
     }
 
-    if (!me_jit_emit_line(&ctx.source, 1, "return 0;") ||
+    if (!me_jit_emit_line(&ctx.source, 1, "return __me_status;") ||
         !me_jit_emit_line(&ctx.source, 0, "}")) {
         me_jit_set_error(error, 0, 0, "out of memory");
         me_jit_locals_free(&ctx.locals);

@@ -5,19 +5,41 @@ if(NOT EMSCRIPTEN)
   target_compile_features(portable_dsl_runner PRIVATE c_std_99)
   if(NOT WIN32)
     target_link_libraries(portable_dsl_runner PRIVATE m)
+    find_program(MINIEXPR_PORTABLE_CC NAMES cc clang gcc)
   endif()
-  foreach(case_name affine chains loops)
+  foreach(case_name affine chains loops int32 int64 float32 bool compare special_floats flow
+                    boolean_results cast_int math
+                    unknown_name invalid_index zero_step missing_return missing_return_ok
+                    missing_return_mixed missing_return_loop missing_return_loop_ok
+                    missing_return_hybrid missing_return_hybrid_ok)
     foreach(policy off default)
       add_test(NAME portable_dsl_${case_name}_${policy}
         COMMAND portable_dsl_runner
           "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.dsl"
           "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.txt" "${policy}")
+      set_tests_properties(portable_dsl_${case_name}_${policy} PROPERTIES TIMEOUT 30
+        ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/portable-jit-cache")
     endforeach()
     if(MINIEXPR_ENABLE_TCC_JIT)
       add_test(NAME portable_dsl_${case_name}_on
         COMMAND portable_dsl_runner
           "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.dsl"
           "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.txt" on)
+      set_tests_properties(portable_dsl_${case_name}_on PROPERTIES TIMEOUT 30
+        ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/portable-jit-cache")
+    endif()
+    if(MINIEXPR_PORTABLE_CC)
+      # Same language fixture, with only the execution preference changed.
+      file(READ "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.dsl" cc_source)
+      string(REPLACE "# me:compiler=tcc\n" "" cc_source "${cc_source}")
+      set(cc_path "${CMAKE_CURRENT_BINARY_DIR}/portable-dsl/${case_name}.cc.dsl")
+      file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/portable-dsl")
+      file(WRITE "${cc_path}" "# me:compiler=cc\n${cc_source}")
+      add_test(NAME portable_dsl_${case_name}_cc
+        COMMAND portable_dsl_runner "${cc_path}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.txt" on)
+      set_tests_properties(portable_dsl_${case_name}_cc PROPERTIES TIMEOUT 30
+        ENVIRONMENT "CC=${MINIEXPR_PORTABLE_CC};ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/portable-jit-cache")
     endif()
   endforeach()
 endif()

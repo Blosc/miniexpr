@@ -1,0 +1,5 @@
+ok float64 float64 3 1
+x
+1 1
+2 2
+3 3

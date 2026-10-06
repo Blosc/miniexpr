@@ -1,0 +1,7 @@
+ok float64 float64 5 1
+x
+0 0
+-0 -0
+inf inf
+-inf -inf
+nan nan

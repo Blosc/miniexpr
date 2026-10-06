@@ -9,6 +9,7 @@
 **********************************************************************/
 
 #include "dsl_eval_internal.h"
+#include "dsl_jit_cgen.h"
 
 #include "functions.h"
 
@@ -1161,7 +1162,7 @@ int dsl_eval_program(const me_dsl_compiled_program *program,
     }
 
     bool jit_attempted = false;
-    /* JIT is best-effort: if kernel call fails, execution falls back to interpreter. */
+    /* JIT is best-effort for backend failures, not semantic execution errors. */
     if (!me_eval_jit_disabled(params) &&
         program->jit_kernel_fn &&
         program->jit_nparams >= 0 &&
@@ -1251,6 +1252,9 @@ int dsl_eval_program(const me_dsl_compiled_program *program,
                 }
                 if (jit_success) {
                     return ME_EVAL_SUCCESS;
+                }
+                if (jit_rc == ME_DSL_JIT_MISSING_RETURN) {
+                    return ME_EVAL_ERR_INVALID_ARG;
                 }
             }
 #if ME_USE_WASM32_JIT
@@ -1515,7 +1519,7 @@ int dsl_eval_program(const me_dsl_compiled_program *program,
                 for (int i = 0; i < jit_temp_count; i++) {
                     free(jit_temp_buffers[i]);
                 }
-                if (jit_success) {
+                if (jit_success || jit_rc == ME_DSL_JIT_MISSING_RETURN) {
                     for (int i = 0; i < reserved_count; i++) {
                         free(reserved_buffers[i]);
                     }
@@ -1526,7 +1530,7 @@ int dsl_eval_program(const me_dsl_compiled_program *program,
                     }
                     free(var_buffers);
                     free(local_buffers);
-                    return ME_EVAL_SUCCESS;
+                    return jit_success ? ME_EVAL_SUCCESS : ME_EVAL_ERR_INVALID_ARG;
                 }
             }
 #if ME_USE_WASM32_JIT
