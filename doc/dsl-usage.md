@@ -43,6 +43,25 @@ Notes:
 - The order of `vars[]` defines input pointer order for `me_eval()`.
 - Full syntax constraints are in `doc/dsl-syntax.md`.
 
+## Portable-profile validation before execution
+
+The experimental versioned profile is smaller than the full DSL:
+
+```c
+me_variable signature[] = {
+    {"x", ME_FLOAT64, NULL, ME_VARIABLE, NULL, 0},
+};
+me_portable_error diagnostic;
+me_portable_status status = me_validate_portable_dsl(
+    src, "0.1", signature, 1, ME_FLOAT64, &diagnostic);
+```
+
+This checks native source and a typed signature without executing it or invoking
+a compiler. It does not require Python or a working JIT backend. Check `status`
+before normal compilation/evaluation; runtime data constraints and backend
+compatibility remain separate concerns. See [the draft profile](dsl-spec/0.1.md)
+for supported features and diagnostic categories.
+
 ## Runtime JIT Controls
 
 Use source pragmas or API policy to control JIT behavior.

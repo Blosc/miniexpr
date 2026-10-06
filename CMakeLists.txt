@@ -30,6 +30,7 @@ set(MINIEXPR_SOURCES
   src/dsl_compile_support.c
   src/dsl_eval.c
   src/dsl_parser.c
+  src/dsl_portable.c
   src/dsl_compare.c
   src/dsl_jit_ir.c
   src/dsl_jit_cgen.c

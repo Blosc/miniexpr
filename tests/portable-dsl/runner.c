@@ -211,6 +211,16 @@ int main(int argc, char **argv) {
     }
     int64_t shape[] = {count};
     int32_t grid[] = {count};
+    me_portable_error profile_error;
+    me_portable_status profile = me_validate_portable_dsl(source, ME_PORTABLE_DSL_VERSION,
+        variables, nvars, output_dtype, &profile_error);
+    bool expect_compile_error = !strcmp(outcome, "compile_error");
+    if ((expect_compile_error && profile == ME_PORTABLE_SUCCESS) ||
+        (!expect_compile_error && profile != ME_PORTABLE_SUCCESS)) {
+        fprintf(stderr, "unexpected portable validation status %d at %d:%d: %s\n",
+                profile, profile_error.line, profile_error.column, profile_error.message);
+        goto cleanup;
+    }
     int rc = me_compile_nd_jit(source, variables, nvars, output_dtype,
                               1, shape, grid, grid, mode, &error, &expr);
     if (!strcmp(outcome, "compile_error")) {

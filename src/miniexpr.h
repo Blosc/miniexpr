@@ -235,6 +235,34 @@ int me_compile_nd_jit(const char *expression, const me_variable *variables,
  */
 const char *me_get_last_error_message(void);
 
+/* Experimental portable kernel profile, independent of package/JIT versions. */
+#define ME_PORTABLE_DSL_VERSION "0.1"
+
+typedef enum {
+    ME_PORTABLE_SUCCESS = 0,
+    ME_PORTABLE_ERR_VERSION = -1,
+    ME_PORTABLE_ERR_SIGNATURE = -2,
+    ME_PORTABLE_ERR_SOURCE = -3,
+    ME_PORTABLE_ERR_UNSUPPORTED = -4,
+    ME_PORTABLE_ERR_OOM = -5
+} me_portable_status;
+
+typedef struct {
+    int line;    /* 1-based source location, or 0 for non-source diagnostics. */
+    int column;
+    char message[256];
+} me_portable_error;
+
+/* Validate raw native DSL and an explicit signature without executing a kernel
+ * or invoking a JIT compiler. Inputs must be plain, explicitly typed variables
+ * with NULL address/context and itemsize 0; order need not match source order.
+ * This checks draft profile membership and native compilation, not runtime
+ * input constraints, backend availability, or a sandbox/trust guarantee.
+ * error may be NULL. See doc/dsl-spec/0.1.md for admitted features. */
+me_portable_status me_validate_portable_dsl(const char *source, const char *version,
+    const me_variable *inputs, int ninputs, me_dtype output_dtype,
+    me_portable_error *error);
+
 /* Status codes for me_compile(). */
 typedef enum {
     ME_COMPILE_SUCCESS = 0,
