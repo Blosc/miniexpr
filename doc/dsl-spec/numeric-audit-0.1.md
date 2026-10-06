@@ -191,6 +191,36 @@ and code-generation cache version is 16.
 Validation: all 328 regular native tests, 258 AddressSanitizer tests, and 632
 focused Python tests passed, without expected failures or new build warnings.
 
+### Same-dtype float32 `float()` arithmetic: corrected
+
+The promotion audit found `(float(x) + 1.0) - float(x)` and
+`float(x + 1.0) - float(x)` returning `1` in JIT instead of the interpreter's
+`0` for float32 input/output at `x = 2**24`. The previous pure-arithmetic renderer
+excluded calls, leaving C's double literals to remove intermediate rounding.
+
+Typed pure-arithmetic lowering now admits `float()` when its result and argument
+computation are both float32, recursively limited to the existing floating
+leaves and `+`, `-`, `*`, and unary negation. Passing a float32 value through the
+native double callback and back is an identity under the tested rounding policy;
+rendering its argument preserves that argument's rounding before further
+operations. This also covers a root `float()` assignment/return and repeated
+same-dtype calls. It does not certify integral/mixed arguments, general calls,
+comparisons, division, or other cast contexts. Ordinary float64 lowering remains
+unchanged. Owned C text enters the fingerprint and bypasses incompatible hybrid
+plans; code-generation cache version is 18.
+
+Four exact shared fixtures cover leaf calls, nested arithmetic arguments, local
+assignment, and float64 output context. The latter still returns `1` at `2**24`,
+consistent with contextual floating literal typing, not float32 computation
+followed by widening. Expanded native arithmetic tests cover repeated scalar
+and vector evaluation. Required-JIT Python matrices check both compiler
+preferences, output widths, counts 1/10/257, decimal constants, repeated calls,
+negation, signed zero, subnormals, extrema, infinities, and NaNs. Exact value and
+zero-sign checks do not promise NaN payload preservation.
+
+Validation passed all 373 regular native tests, 292 AddressSanitizer tests, and
+1019 focused Python tests without expected failures or new native build warnings.
+
 ## Remaining publication gates
 
 ### While-loop cap: JIT safety correction implemented

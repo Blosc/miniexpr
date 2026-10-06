@@ -1432,7 +1432,7 @@ static char *dsl_jit_typed_leaf_math(const dsl_compile_ctx *ctx, const me_expr *
     return out;
 }
 
-/* The pure floating arithmetic slice deliberately excludes calls, conversions,
+/* The pure floating arithmetic slice deliberately excludes general calls/conversions,
  * comparisons and division. Unlike division's double callback, native +, -,
  * and * round scalar constants to the evaluator's dtype before operating. */
 static char *dsl_jit_pure_float_arithmetic(const dsl_compile_ctx *ctx, const me_expr *node, int depth) {
@@ -1440,6 +1440,15 @@ static char *dsl_jit_pure_float_arithmetic(const dsl_compile_ctx *ctx, const me_
     if (TYPE_MASK(node->type) == ME_CONSTANT || TYPE_MASK(node->type) == ME_VARIABLE) {
         if (node->dtype != ME_FLOAT32 && node->dtype != ME_FLOAT64) return NULL;
         return dsl_jit_typed_arithmetic(ctx, node, depth);
+    }
+    /* float() is an identity only within this same-dtype float32 slice. Its
+     * callback passes through double, which exactly represents every float32
+     * value; the result rounds back before any enclosing arithmetic. Do not
+     * infer mixed/integral argument dispatch from the conversion's dtype. */
+    if (IS_FUNCTION(node->type) && ARITY(node->type) == 1 &&
+        node->function == (const void *)dsl_cast_float_intrinsic &&
+        node->dtype == ME_FLOAT32 && infer_result_type(node->parameters[0]) == ME_FLOAT32) {
+        return dsl_jit_pure_float_arithmetic(ctx, node->parameters[0], depth + 1);
     }
     const char *op = me_arithmetic_operator(node);
     me_dtype dtype = infer_result_type(node);
@@ -1485,7 +1494,9 @@ static void dsl_jit_bind_division_expr(dsl_compile_ctx *ctx, me_dsl_jit_ir_expr 
     }
     else {
         ir->math_c = dsl_jit_typed_leaf_math(ctx, compiled->expr);
-        if (!ir->math_c && compiled->expr && me_arithmetic_operator(compiled->expr) &&
+        if (!ir->math_c && compiled->expr &&
+            (me_arithmetic_operator(compiled->expr) ||
+             compiled->expr->function == (const void *)dsl_cast_float_intrinsic) &&
             infer_result_type(compiled->expr) == ME_FLOAT32 &&
             (compiled->expr->dtype == ME_FLOAT32 || compiled->expr->dtype == ME_FLOAT64)) {
             ir->arithmetic_c = dsl_jit_pure_float_arithmetic(ctx, compiled->expr, 0);

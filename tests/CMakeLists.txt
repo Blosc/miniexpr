@@ -16,6 +16,7 @@ if(NOT EMSCRIPTEN)
                      math_widen math_condition math_local_widen
                      arithmetic_round arithmetic_decimal arithmetic_scalar_sub arithmetic_local_round
                      arithmetic_widen
+                     arithmetic_float_cast arithmetic_float_nested arithmetic_float_local arithmetic_float_widen
                      while_cap_exact while_cap_exceeded while_cap_continue
                      while_cap_hybrid
                      while_cap_chain

@@ -40,6 +40,10 @@ intermediate rounding, locals, and the differing float64 output context. The
 native/Python scalar/vector matrix additionally checks multiplication and
 repeated execution. Mixed computation dtypes, calls, and casts are not certified
 by this pure-arithmetic slice.
+Four additional `arithmetic_float_*` fixtures cover same-dtype float32 `float()`
+calls within pure arithmetic, nested/repeated calls, local assignments, and the
+different float64 output context. Mixed/integral cast arguments and general
+calls remain outside this certified slice.
 Five `while_cap_*` fixtures use a host cap of three and require interpreter/TCC/CC
 agreement for exact-limit exits, exceeded caps, `continue`, and hybrid cleanup.
 The cap is supplied by the test environment, not embedded in source/artifacts.

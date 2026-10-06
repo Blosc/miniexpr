@@ -4,7 +4,11 @@
 #include "../src/miniexpr.h"
 
 static int check_arithmetic(int operation, me_dtype dtype, int count, int mode) {
-    const char *expressions[] = {"(x + 0.1) - x", "x - 0.1", "(x * 0.1) - x"};
+    const char *expressions[] = {
+        "(x + 0.1) - x", "x - 0.1", "(x * 0.1) - x",
+        "(float(x) + 0.1) - float(x)", "float(x + 0.1) - float(x)",
+        "float(float(x) + 0.1) - float(float(x))"
+    };
     const float samples[] = {0.1f, -1.0f, 0.0f, 1.0f, 16777216.0f};
     float input[257];
     for (int i = 0; i < count; i++) input[i] = samples[i % 5];
@@ -38,12 +42,14 @@ static int check_arithmetic(int operation, me_dtype dtype, int count, int mode) 
             if (dtype == ME_FLOAT32) {
                 /* Volatile prevents a host compiler fusing the reference's
                  * multiply/add/subtract or retaining a wider intermediate. */
-                volatile float intermediate = operation == 0 ? input[i] + 0.1f : input[i] * 0.1f;
+                volatile float intermediate = operation == 0 || operation >= 3
+                    ? input[i] + 0.1f : input[i] * 0.1f;
                 expected = operation == 1 ? input[i] - 0.1f : intermediate - input[i];
                 actual = ((float *)output)[i];
             }
             else {
-                volatile double intermediate = operation == 0 ? (double)input[i] + 0.1 : (double)input[i] * 0.1;
+                volatile double intermediate = operation == 0 || operation >= 3
+                    ? (double)input[i] + 0.1 : (double)input[i] * 0.1;
                 expected = operation == 1 ? (double)input[i] - 0.1 : intermediate - (double)input[i];
                 actual = ((double *)output)[i];
             }
@@ -64,7 +70,7 @@ static int check_arithmetic(int operation, me_dtype dtype, int count, int mode) 
 int main(void) {
     const me_dtype types[] = {ME_FLOAT32, ME_FLOAT64};
     const int counts[] = {1, 5, 257};
-    for (int operation = 0; operation < 3; operation++) {
+    for (int operation = 0; operation < 6; operation++) {
         for (int type = 0; type < 2; type++) {
             for (int count = 0; count < 3; count++) {
                 for (int mode = ME_JIT_OFF; mode <= ME_JIT_ON; mode++) {
