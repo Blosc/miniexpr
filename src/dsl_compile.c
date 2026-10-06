@@ -868,7 +868,7 @@ fail:
     return false;
 }
 
-static void dsl_mark_value_casts(me_expr *expr) {
+static void dsl_mark_value_casts(me_expr *expr, me_dsl_fp_mode fp_mode) {
     if (!expr || (!IS_FUNCTION(expr->type) && !IS_CLOSURE(expr->type))) {
         return;
     }
@@ -880,8 +880,15 @@ static void dsl_mark_value_casts(me_expr *expr) {
             expr->flags |= ME_EXPR_FLAG_DSL_BOOL_CAST;
         }
     }
+    if (fp_mode == ME_DSL_FP_STRICT && IS_FUNCTION(expr->type) && ARITY(expr->type) == 1 &&
+        (expr->function == (const void *)sin || expr->function == (const void *)cos)) {
+        const me_expr *arg = expr->parameters[0];
+        if (arg && TYPE_MASK(arg->type) == ME_VARIABLE && arg->dtype == ME_FLOAT32) {
+            expr->flags |= ME_EXPR_FLAG_DSL_STRICT_F32_MATH;
+        }
+    }
     for (int i = 0; i < ARITY(expr->type); i++) {
-        dsl_mark_value_casts(expr->parameters[i]);
+        dsl_mark_value_casts(expr->parameters[i], fp_mode);
     }
 }
 
@@ -977,7 +984,7 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
         return false;
     }
     int *indices = NULL;
-    dsl_mark_value_casts(compiled);
+    dsl_mark_value_casts(compiled, ctx->program->fp_mode);
     int count = 0;
     if (!dsl_collect_var_indices(compiled, &indices, &count)) {
         me_free(compiled);
@@ -1382,12 +1389,58 @@ static char *dsl_jit_typed_arithmetic(const dsl_compile_ctx *ctx, const me_expr 
     return out;
 }
 
+/* Only leaf sin/cos and comparisons against exact constants are certified here.
+ * In particular, do not infer contextual arithmetic or nested call dispatch
+ * from node dtype alone. A float32 math result rounds before output widening
+ * or comparison, not after either operation. */
+static char *dsl_jit_leaf_math(const dsl_compile_ctx *ctx, const me_expr *node) {
+    if (!node || !IS_FUNCTION(node->type) || ARITY(node->type) != 1 ||
+        !(node->flags & ME_EXPR_FLAG_FLOAT_MATH)) return NULL;
+    const char *function = node->function == (const void *)sin ? "sinf" :
+                           node->function == (const void *)cos ? "cosf" : NULL;
+    const me_expr *arg = node->parameters[0];
+    if (!function || !arg || TYPE_MASK(arg->type) != ME_VARIABLE ||
+        arg->dtype != ME_FLOAT32 || infer_result_type(node) != ME_FLOAT32) return NULL;
+    char *input = dsl_jit_typed_arithmetic(ctx, arg, 0);
+    if (!input) return NULL;
+    size_t size = strlen(input) + 32;
+    char *out = malloc(size);
+    if (out) snprintf(out, size, "((float)%s(%s))", function, input);
+    free(input);
+    return out;
+}
+
+static char *dsl_jit_typed_leaf_math(const dsl_compile_ctx *ctx, const me_expr *node) {
+    char *out = dsl_jit_leaf_math(ctx, node);
+    if (out || !node) return out;
+    const char *op = me_comparison_operator(node);
+    if (!op) return NULL;
+    const me_expr *left = node->parameters[0], *right = node->parameters[1];
+    const me_expr *constant = TYPE_MASK(right->type) == ME_CONSTANT ? right : left;
+    const me_expr *math = constant == right ? left : right;
+    if (TYPE_MASK(constant->type) != ME_CONSTANT || !isfinite(constant->value) ||
+        (double)(float)constant->value != constant->value) return NULL;
+    char *value = dsl_jit_leaf_math(ctx, math);
+    if (!value) return NULL;
+    char literal[128];
+    snprintf(literal, sizeof(literal), "((float)%a)", constant->value);
+    size_t size = strlen(value) + strlen(literal) + 32;
+    out = malloc(size);
+    if (out) snprintf(out, size, "((%s) %s (%s))",
+                      constant == right ? value : literal, op, constant == right ? literal : value);
+    free(value);
+    return out;
+}
+
 static void dsl_jit_bind_division_expr(dsl_compile_ctx *ctx, me_dsl_jit_ir_expr *ir,
                                       const me_dsl_compiled_expr *compiled) {
     if (ir->text && strchr(ir->text, '/')) {
         if (compiled->expr && (compiled->expr->dtype == ME_FLOAT32 || compiled->expr->dtype == ME_FLOAT64)) {
             ir->division_c = dsl_jit_typed_arithmetic(ctx, compiled->expr, 0);
         }
+    }
+    else {
+        ir->math_c = dsl_jit_typed_leaf_math(ctx, compiled->expr);
     }
 }
 

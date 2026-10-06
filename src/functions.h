@@ -80,7 +80,8 @@ enum {
     ME_EXPR_FLAG_HAS_STRING_VALID = 1u << 3,
     ME_EXPR_FLAG_FLOAT_MATH = 1u << 4,
     ME_EXPR_FLAG_DSL_VALUE_CAST = 1u << 5,
-    ME_EXPR_FLAG_DSL_BOOL_CAST = 1u << 6
+    ME_EXPR_FLAG_DSL_BOOL_CAST = 1u << 6,
+    ME_EXPR_FLAG_DSL_STRICT_F32_MATH = 1u << 7
 };
 
 /* Check if a pointer is a synthetic address (used internally for chunked evaluation).
@@ -123,6 +124,7 @@ void me_free_parameters(me_expr* n);
 
 bool is_reduction_node(const me_expr* n);
 bool is_comparison_node(const me_expr* n);
+const char* me_comparison_operator(const me_expr* n);
 /* Internal operator spelling for typed DSL arithmetic lowering, NULL otherwise. */
 const char* me_arithmetic_operator(const me_expr* n);
 bool is_float_math_function(const void* func);

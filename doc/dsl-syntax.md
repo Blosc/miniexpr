@@ -198,6 +198,12 @@ Cast rules:
 
 ## Temporary variable type inference
 
+In strict mode, leaf `sin(x)`/`cos(x)` calls on float32 variables evaluate with
+scalar float operations at every block size. The float result rounds before
+widening or comparison; approximate SIMD math must not change these strict
+values or branch decisions. This bounded rule does not certify all other math
+functions or nested arithmetic contexts in the experimental portable profile.
+
 Local temporaries get their dtype from the expression assigned to them.
 
 Example:

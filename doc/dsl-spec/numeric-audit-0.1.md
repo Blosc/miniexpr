@@ -121,25 +121,39 @@ float32 output for an auto-inferred int32 + float32 expression, whose native
 promotion is float64. That test now checks the compiled dtype and uses a matching
 float64 buffer. This was a test allocation error, not a changed promotion rule.
 
-### Float32 math intermediates and conditions
+### Float32 leaf sin/cos: rounding correction implemented
 
-For float32 input and float64 output, interpreter `sin(1)` rounds to float32
-before widening (`0.8414709568023681640625`). Scalar JIT math can retain the
-double result, omitting intermediate rounding.
+For float32 input and float64 output, scalar interpreter `sin(1)` rounds to
+float32 before widening (`0.8414709568023681640625`). Scalar JIT math previously
+retained the double result. For float32 `x = 0.0001`, rounded `cos(x)` equals `1`,
+while the double result is below `1`, so this difference can change control flow.
 
-This can change control flow: for float32 `x = 0.0001`, rounded `cos(x)` equals
-`1`, while the double result is below `1`. The standalone native interpreter
-and Python-linked interpreter also differed on the direct condition in this
-audit. Forcing interpreter mode therefore does not certify that case across
-linked math engines. `math_condition` remains a reproducer, not a registered
-passing standalone baseline.
+Wider probes isolated two additional interpreter issues: approximate SIMD
+`sin(1)` produced the adjacent float32 value at count 257, and Boolean-expression
+evaluation could pre-promote variables before evaluating math operands. The
+Boolean path now leaves operand conversion to its existing preparation code,
+rather than changing variable dtypes first. Strict DSL leaf `sin`/`cos` on a
+float32 variable uses scalar `sinf`/`cosf` at every count, rounds before output
+conversion, and forms a variable-promotion boundary. This deliberately trades
+SIMD speed for count-independent strict values only for that bounded call shape;
+non-strict math, classic expressions, and other functions keep their math policy.
 
-The `math_widen` and corrected `nested_cast` interpreter audit cases are separately
-registered in CTest. Python artifact tests preserve two math cases across two JIT
-compilers as strict expected failures. The marker is applied only after successful
-load, backend preparation, and execution; unrelated setup failures cannot hide.
-An unexpected pass requires removing the marker and promoting the fixture.
-Unavailable compilers are separate skips.
+Owned typed JIT text now lowers these leaf calls and their comparisons against
+exactly representable float32 constants. It selects `sinf`/`cosf`, preserves the
+float result before widening/comparison, bypasses text-only hybrid plans, and
+participates in the IR fingerprint. Code-generation cache version is 15. This is
+not a general lowering for nested math, arbitrary arithmetic intermediates,
+other functions, or inexact comparison constants.
+
+`math_widen` and `math_condition` have moved from `audit/` to required-JIT
+interpreter/TCC/CC conformance, alongside `math_local_widen`. Python tests require
+real JIT preparation and exact results with counts 1/2/257 and repeated evaluation;
+the four former strict expected-failure markers are removed. A native regression
+also checks signed zero and a reversed comparison at these counts in all JIT
+policies, including sanitizer execution. General math accuracy across libraries
+and platforms remains a publication gate, not certified by these samples.
+Validation: all 307 regular native tests, 242 AddressSanitizer tests, and 525
+focused Python tests passed, without expected failures or new build warnings.
 
 ## Remaining publication gates
 

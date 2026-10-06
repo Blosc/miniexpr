@@ -32,6 +32,8 @@ typedef struct {
     /* Owned C arithmetic lowered from the compiled interpreter tree, when the
      * source contains division. NULL requires conservative codegen fallback. */
     char *division_c;
+    /* Owned lowering for audited leaf float32 math and its comparisons. */
+    char *math_c;
     me_dtype dtype;
 } me_dsl_jit_ir_expr;
 

@@ -32,6 +32,9 @@ The `cast_argument_*`, `cast_integer_exact`, and `cast_nonfinite_truth` fixtures
 require exact interpreter/TCC/CC agreement for value-cast arguments. The
 `audit/cast_argument_division` fixture checks interpreter semantics while nested
 casts in division remain outside the typed JIT slice.
+The strict `math_widen`, `math_condition`, and `math_local_widen` fixtures now
+require exact interpreter/TCC/CC agreement for leaf float32 sin/cos rounding
+before widening or comparison. Other math contexts remain audit work.
 
 Fixtures exercise bounded integer arithmetic, precise int64 comparisons, special
 floating-point values, `break`/`continue`, unresolved names, unsupported indexing,

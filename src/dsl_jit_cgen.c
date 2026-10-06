@@ -1779,9 +1779,9 @@ static int me_jit_collect_stmt_vec_plans(const me_dsl_jit_ir_program *program,
 
         const char *assign_name = stmt->as.assign.name;
         const char *value_text = stmt->as.assign.value.text;
-        /* Text-based hybrid plans do not carry typed division intermediates.
+        /* Text-based hybrid plans do not carry typed division/math intermediates.
          * Keep these assignments on the typed scalar lowering path. */
-        if (strchr(value_text, '/')) {
+        if (strchr(value_text, '/') || stmt->as.assign.value.math_c) {
             continue;
         }
         bool planned = false;
@@ -2483,6 +2483,11 @@ static bool me_jit_expr_to_c(const me_dsl_jit_ir_expr *expr, char **out_c,
         return false;
     }
 
+    if (expr->math_c) {
+        *out_c = me_jit_strdup(expr->math_c);
+        if (!*out_c) me_jit_set_error(error, line, column, "out of memory");
+        return *out_c != NULL;
+    }
     if (strchr(expr->text, '/')) {
         if (!expr->division_c) {
             me_jit_set_error(error, line, column, "division requires supported typed arithmetic lowering");
@@ -3347,6 +3352,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         !me_jit_emit_line(&ctx.source, 0, "extern double ceil(double);") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double copysign(double, double);") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double cos(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern float cosf(float);") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double cosh(double);") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double erf(double);") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double erfc(double);") ||
@@ -3373,6 +3379,7 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
         !me_jit_emit_line(&ctx.source, 0, "extern double rint(double);") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double round(double);") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double sin(double);") ||
+        !me_jit_emit_line(&ctx.source, 0, "extern float sinf(float);") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double sinh(double);") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double sqrt(double);") ||
         !me_jit_emit_line(&ctx.source, 0, "extern double tan(double);") ||

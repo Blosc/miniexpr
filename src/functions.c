@@ -2263,6 +2263,17 @@ static double cmp_le(double a, double b) { return a <= b ? 1.0 : 0.0; }
 static double cmp_gt(double a, double b) { return a > b ? 1.0 : 0.0; }
 static double cmp_ge(double a, double b) { return a >= b ? 1.0 : 0.0; }
 
+const char* me_comparison_operator(const me_expr* n) {
+    if (!n || !IS_FUNCTION(n->type) || ARITY(n->type) != 2) return NULL;
+    if (n->function == (void*)cmp_eq) return "==";
+    if (n->function == (void*)cmp_ne) return "!=";
+    if (n->function == (void*)cmp_lt) return "<";
+    if (n->function == (void*)cmp_le) return "<=";
+    if (n->function == (void*)cmp_gt) return ">";
+    if (n->function == (void*)cmp_ge) return ">=";
+    return NULL;
+}
+
 /* Keep these stubs distinct to avoid identical code folding (ICF) on some linkers. */
 static double str_startswith(double a, double b) {
     (void)a;
@@ -5523,6 +5534,26 @@ static void eval_dsl_value_cast(const me_expr *node, me_dtype output_dtype) {
 
 typedef float (*me_fun1_f32)(float);
 
+/* Strict DSL leaf math uses the same scalar float operation at every count;
+ * approximate SIMD implementations can differ by an ULP and change branches. */
+static void eval_dsl_strict_f32_math(const me_expr *node, me_dtype output_dtype) {
+    const me_expr *arg = node->parameters[0];
+    const float *input = arg->bound;
+    float *values = malloc((size_t)node->nitems * sizeof(*values));
+    if (!values) return;
+    for (int i = 0; i < node->nitems; i++) {
+        values[i] = node->function == (void*)sin ? sinf(input[i]) : cosf(input[i]);
+    }
+    convert_func_t convert = get_convert_func(ME_FLOAT32, output_dtype);
+    if (output_dtype == ME_FLOAT32) {
+        memcpy(node->output, values, (size_t)node->nitems * sizeof(*values));
+    }
+    else if (convert) {
+        convert(values, node->output, node->nitems);
+    }
+    free(values);
+}
+
 /* Template for type-specific evaluator */
 /* The generic binary fallback narrows both operands through double, which drops
    the imaginary part. Ops with a scalar specialization (+, *, pow) never reach
@@ -5613,6 +5644,10 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
         case ME_CLOSURE0: case ME_CLOSURE1: case ME_CLOSURE2: case ME_CLOSURE3: \
         case ME_CLOSURE4: case ME_CLOSURE5: case ME_CLOSURE6: case ME_CLOSURE7: \
             { \
+            if (n->flags & ME_EXPR_FLAG_DSL_STRICT_F32_MATH) { \
+                eval_dsl_strict_f32_math(n, ME_EVAL_DTYPE_##SUFFIX); \
+                break; \
+            } \
             if (n->flags & ME_EXPR_FLAG_DSL_VALUE_CAST) { \
                 eval_dsl_value_cast(n, ME_EVAL_DTYPE_##SUFFIX); \
                 break; \
@@ -6721,7 +6756,7 @@ static void save_variable_bindings(const me_expr* node,
     case ME_CLOSURE7:
         {
             // Skip conversion nodes - they handle their own type conversion
-            if (node->flags & ME_EXPR_FLAG_DSL_VALUE_CAST) {
+            if (node->flags & (ME_EXPR_FLAG_DSL_VALUE_CAST | ME_EXPR_FLAG_DSL_STRICT_F32_MATH)) {
                 break;
             }
             if (IS_FUNCTION(node->type) && ARITY(node->type) == 1 && node->function == NULL) {
@@ -6792,7 +6827,7 @@ static void promote_variables_in_tree(me_expr* n, me_dtype target_type,
     case ME_CLOSURE7:
         {
             // Skip conversion nodes - they handle their own type conversion
-            if ((n->flags & ME_EXPR_FLAG_DSL_VALUE_CAST) ||
+            if ((n->flags & (ME_EXPR_FLAG_DSL_VALUE_CAST | ME_EXPR_FLAG_DSL_STRICT_F32_MATH)) ||
                 (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == NULL)) {
                 break;
             }
@@ -6838,7 +6873,7 @@ static void restore_variables_in_tree(me_expr* n, const void** original_bounds,
     case ME_CLOSURE7:
         {
             // Skip conversion nodes - they handle their own type conversion
-            if ((n->flags & ME_EXPR_FLAG_DSL_VALUE_CAST) ||
+            if ((n->flags & (ME_EXPR_FLAG_DSL_VALUE_CAST | ME_EXPR_FLAG_DSL_STRICT_F32_MATH)) ||
                 (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == NULL)) {
                 break;
             }
@@ -6880,7 +6915,7 @@ static bool all_variables_match_type(const me_expr* n, me_dtype target_type) {
     case ME_CLOSURE7:
         {
             // Skip conversion nodes - they handle their own type conversion
-            if ((n->flags & ME_EXPR_FLAG_DSL_VALUE_CAST) ||
+            if ((n->flags & (ME_EXPR_FLAG_DSL_VALUE_CAST | ME_EXPR_FLAG_DSL_STRICT_F32_MATH)) ||
                 (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == NULL)) {
                 return true;
             }
@@ -8005,6 +8040,11 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
 static void private_eval(const me_expr* n) {
     if (!n) return;
 
+    if (n->flags & ME_EXPR_FLAG_DSL_STRICT_F32_MATH) {
+        eval_dsl_strict_f32_math(n, n->dtype);
+        return;
+    }
+
     if (n->flags & ME_EXPR_FLAG_DSL_VALUE_CAST) {
         eval_dsl_value_cast(n, n->dtype);
         return;
@@ -8144,38 +8184,8 @@ static void private_eval(const me_expr* n) {
 
     // Fast path for boolean expressions: compute directly into bool output
     if (n->dtype == ME_BOOL && infer_output_type(n) == ME_BOOL) {
-        if (!has_string) {
-            promoted_var_t promotions[ME_MAX_VARS];
-            int promo_count = 0;
-
-            const void* original_bounds[ME_MAX_VARS];
-            me_dtype original_types[ME_MAX_VARS];
-            int save_idx = 0;
-
-            save_variable_bindings(n, original_bounds, original_types, &save_idx);
-            promote_variables_in_tree((me_expr*)n, result_type, promotions, &promo_count, n->nitems);
-
-            if (!eval_bool_expr((me_expr*)n)) {
-                int restore_idx = 0;
-                restore_variables_in_tree((me_expr*)n, original_bounds, original_types, &restore_idx);
-                for (int i = 0; i < promo_count; i++) {
-                    if (promotions[i].needs_free) {
-                        free(promotions[i].promoted_data);
-                    }
-                }
-                goto fallback_eval;
-            }
-
-            int restore_idx = 0;
-            restore_variables_in_tree((me_expr*)n, original_bounds, original_types, &restore_idx);
-            for (int i = 0; i < promo_count; i++) {
-                if (promotions[i].needs_free) {
-                    free(promotions[i].promoted_data);
-                }
-            }
-            return;
-        }
-
+        /* Operand preparation already converts comparison inputs. Promoting
+         * their variables here first would change the value being compared. */
         if (eval_bool_expr((me_expr*)n)) {
             return;
         }
