@@ -54,7 +54,11 @@ static int dsl_eval_expr_item(dsl_eval_ctx *ctx, const me_dsl_compiled_expr *exp
         if (var_size == 0) {
             return ME_EVAL_ERR_INVALID_ARG;
         }
-        if (ctx->program->vars.uniform && ctx->program->vars.uniform[var_index]) {
+        /* Locals always own full per-lane buffers. A compile-time uniform RHS
+         * does not guarantee uniform storage after masked assignments/updates:
+         * lane zero may have exited while other lanes continue changing it. */
+        bool is_local = ctx->program->local_slots && ctx->program->local_slots[var_index] >= 0;
+        if (!is_local && ctx->program->vars.uniform && ctx->program->vars.uniform[var_index]) {
             vars[i] = (const unsigned char *)ctx->var_buffers[var_index];
         }
         else {
@@ -177,6 +181,10 @@ static int dsl_eval_expr_masked_copy(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
     if (dst_item_size < item_size) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
+    /* me_eval writes one result for a root reduction. DSL destinations are
+     * full per-lane buffers, so materialize that scalar at every copied lane.
+     * Otherwise masked chain captures can read uninitialized local slots. */
+    bool scalar_result = is_reduction_node(expr->expr);
 
     bool all_active = (mask == NULL);
     if (!all_active) {
@@ -189,7 +197,13 @@ static int dsl_eval_expr_masked_copy(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
         }
     }
     if (all_active && dst_item_size == item_size) {
-        return dsl_eval_expr_nitems(ctx, expr, dst, nitems);
+        int rc = dsl_eval_expr_nitems(ctx, expr, dst, nitems);
+        if (rc == ME_EVAL_SUCCESS && scalar_result) {
+            for (int i = 1; i < nitems; i++) {
+                memcpy((unsigned char *)dst + (size_t)i * item_size, dst, item_size);
+            }
+        }
+        return rc;
     }
 
     if (active_only) {
@@ -229,7 +243,7 @@ static int dsl_eval_expr_masked_copy(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
             continue;
         }
         unsigned char *slot = dst_bytes + (size_t)i * dst_item_size;
-        memcpy(slot, src_bytes + (size_t)i * item_size, item_size);
+        memcpy(slot, src_bytes + (scalar_result ? 0 : (size_t)i * item_size), item_size);
         if (dst_item_size > item_size) {
             memset(slot + item_size, 0, dst_item_size - item_size);
         }

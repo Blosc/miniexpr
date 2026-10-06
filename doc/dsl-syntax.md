@@ -256,8 +256,6 @@ Rules:
   contents are unspecified, and a JIT cap error is not retried in the interpreter.
   JIT captures the cap in its cache-keyed IR; changing the host cap after
   compilation selects interpreter execution under the new policy.
-- The experimental portable audit still has an interpreter discrepancy for
-  chained conditions with mixed active lanes; see `dsl-spec/numeric-audit-0.1.md`.
 
 ## `print(...)`
 

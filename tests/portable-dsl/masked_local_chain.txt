@@ -1,0 +1,6 @@
+ok_exact int64 bool 4 1
+x
+0 0
+1 1
+2 1
+-1 0

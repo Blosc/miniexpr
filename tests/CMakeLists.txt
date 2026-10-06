@@ -18,6 +18,9 @@ if(NOT EMSCRIPTEN)
                      arithmetic_widen
                      while_cap_exact while_cap_exceeded while_cap_continue
                      while_cap_hybrid
+                     while_cap_chain
+                     masked_local_chain
+                     masked_bool_chain
                     unknown_name invalid_index zero_step missing_return missing_return_ok
                      missing_return_mixed missing_return_loop missing_return_loop_ok
                      missing_return_hybrid missing_return_hybrid_ok)
@@ -198,6 +201,10 @@ foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
   add_test(NAME "${test_name}" COMMAND "${test_name}")
   if(NOT test_name MATCHES "^test_dsl_jit_")
     set_tests_properties("${test_name}" PROPERTIES ENVIRONMENT "ME_DSL_JIT=0")
+  endif()
+  if(test_name STREQUAL "test_dsl_masked_locals")
+    set_property(TEST "${test_name}" APPEND PROPERTY ENVIRONMENT "ME_DSL_WHILE_MAX_ITERS=3")
+    set_tests_properties("${test_name}" PROPERTIES TIMEOUT 30)
   endif()
 endforeach()
 

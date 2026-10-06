@@ -220,16 +220,36 @@ cap), cache isolation across caps, boundary `break`/`return`, nested/re-entered
 counters, and inactive branches. Native runtime-stub tests verify both direct
 and buffered semantic cap errors cannot trigger interpreter retry.
 
-The audit exposed a separate interpreter discrepancy, retained in
-`audit/while_cap_chain`: `while 0 <= n < x` with `x = [0, 2, 3]` unexpectedly hits
-the cap instead of returning those values. Homogeneous chained-condition cases
-and JIT mixed-lane execution pass. A strict Python expected failure marks only
-the known interpreter evaluation error after successful preparation; setup,
-other error categories, and incorrect successful values cannot hide behind it.
-This mixed-lane condition issue remains a publication gate.
+The audit exposed a separate interpreter discrepancy: `while 0 <= n < x` with
+`x = [0, 2, 3]` unexpectedly hit the cap. This was initially retained as
+`audit/while_cap_chain` with a strict expected failure; the following correction
+resolves it and promotes the fixture to the passing corpus.
 Validation: all 344 regular native tests and 270 AddressSanitizer tests passed;
 727 focused Python tests passed with the one strict chained-while expected
 failure. Ruff and whitespace checks passed; native builds emitted no new warnings.
+
+### Masked local chain operands: corrected
+
+Scalar evaluation of guarded chained-comparison operands used lane zero for
+locals marked uniform by compile-time RHS analysis. Masked assignments and loop
+updates can make those buffers nonuniform after lane zero exits. Local buffers
+are full-width, so scalar operand evaluation now reads the active lane for all
+locals; genuine non-local uniform bindings retain broadcast addressing.
+
+Root reductions are an exception at the expression-evaluator boundary: they
+write one scalar. DSL copies now broadcast that scalar across the destination
+lanes, including masked copies, so reduction locals remain valid under per-lane
+reads. A native compatibility regression covers `total = sum(x)` followed by
+`0 < x < total`; reductions remain outside portable 0.1.
+
+The promoted `while_cap_chain` and new `masked_local_chain`/`masked_bool_chain`
+fixtures pass interpreter/TCC/CC execution. Python matrices cover numeric input
+dtypes, counts 1/3/4/257, both lane orders, constant numeric/Boolean locals,
+and repeated evaluation. A native regression additionally rotates all four
+sample lanes and tests masked branch assignments followed by chained loops.
+Validation passed all 357 regular native tests, 280 AddressSanitizer tests, and
+895 focused Python tests without expected failures. Native builds emitted no
+new warnings.
 
 ### Outstanding gates
 
