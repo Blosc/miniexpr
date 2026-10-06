@@ -50,10 +50,10 @@ int main() {
         me_free(expr1);
     }
 
-    // Test 2: int32 + float (should promote to float)
+    // Test 2: int32 + float32 promotes to float64 (as in the native promotion table).
     printf("\nTest 2: int32 + float\n");
     float b_float[VECTOR_SIZE];
-    float result_float[VECTOR_SIZE];
+    double result_float[VECTOR_SIZE];
 
     for (int i = 0; i < VECTOR_SIZE; i++) {
         a_int32[i] = i + 1;
@@ -73,6 +73,10 @@ int main() {
         printf("  This shows runtime type mismatch detection is working!\n");
     } else {
         printf("  ✓ Compilation succeeded\n");
+        if (me_get_dtype(expr2) != ME_FLOAT64) {
+            me_free(expr2);
+            return 1;
+        }
         const void *var_ptrs2[] = {a_int32, b_float};
         ME_EVAL_CHECK(expr2, var_ptrs2, 2, result_float, VECTOR_SIZE);
 

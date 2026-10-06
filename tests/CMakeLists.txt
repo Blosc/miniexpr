@@ -59,7 +59,7 @@ if(NOT EMSCRIPTEN)
   # Do not promote them to required-JIT conformance before fixing the gaps.
   # math_condition also differs between linked interpreter math engines; keep
   # that source as an audit reproducer rather than a passing baseline case.
-  foreach(case_name math_widen)
+  foreach(case_name math_widen nested_cast)
     add_test(NAME portable_audit_${case_name}_off COMMAND portable_dsl_runner
       "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/audit/${case_name}.dsl"
       "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/audit/${case_name}.txt" off)

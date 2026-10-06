@@ -64,14 +64,36 @@ lose JIT acceleration; a compiler preference never licenses an incorrect result.
 The full promotion/operator matrix still needs specification and certification.
 
 Broader probing exposed nested-cast interpreter dispatch discrepancies, including
-incorrect results for `int(x + 0.25)` when nested in division. The raw reproducer
-`audit/nested_cast.dsl` (`float(int(x) / 2)`, float32 input/output) produced anomalous
-values in a multi-element interpreter probe. One broad matrix probe aborted;
-the cause has not yet been isolated. This is a native evaluator investigation,
-not a passing fixture or a claim that interpreter fallback certifies all casts.
-Do not register that reproducer as routine execution conformance before auditing
-buffer sizes, dispatch types, and nested conversion semantics. The separate
-`audit/division_nested` sample is covered as a known-good fallback case in Python.
+incorrect results for `int(x + 0.25)` when nested in division. General nested cast
+semantics remain audit work; interpreter fallback does not certify every accepted
+cast context. The separate `audit/division_nested` sample is covered as a known-good
+fallback case in Python.
+
+### Nested conversion buffer width: memory-safety correction implemented
+
+AddressSanitizer isolated the anomalous results/abort for `audit/nested_cast.dsl`
+(`float(int(x) / 2)`, float32 input/output): a nested conversion's declared target
+was float64, but its enclosing float32 evaluator allocated a float32-sized scratch
+buffer and dispatched that conversion through the float32 evaluator. Conversion
+still selected an int64-to-float64 writer, overflowing that buffer.
+
+The conversion writer now targets the actual typed evaluator's output
+representation, including the Boolean special case, rather than a differing
+declared nested target. Source evaluation still uses its recorded source dtype.
+This is a buffer-width correction, not a general rewrite of cast inference or
+promotion rules; typed JIT lowering still conservatively excludes nested casts.
+
+`audit/nested_cast.txt` now provides exact interpreter regression values. A native
+test checks float32/float64 input/output pairs, counts 1/5/257, all three JIT
+policies, and repeated evaluation. Python artifact tests check the same dtype/count
+matrix with interpreter and requested-JIT/fallback execution. All 217 tests in
+the sanitizer build and all 274 regular native tests passed; 401 focused Python
+tests passed with four remaining math expected failures.
+
+Sanitizer validation also found that the existing mixed-type test allocated a
+float32 output for an auto-inferred int32 + float32 expression, whose native
+promotion is float64. That test now checks the compiled dtype and uses a matching
+float64 buffer. This was a test allocation error, not a changed promotion rule.
 
 ### Float32 math intermediates and conditions
 
@@ -86,7 +108,7 @@ audit. Forcing interpreter mode therefore does not certify that case across
 linked math engines. `math_condition` remains a reproducer, not a registered
 passing standalone baseline.
 
-The remaining `math_widen` interpreter audit case is separately
+The `math_widen` and corrected `nested_cast` interpreter audit cases are separately
 registered in CTest. Python artifact tests preserve two math cases across two JIT
 compilers as strict expected failures. The marker is applied only after successful
 load, backend preparation, and execution; unrelated setup failures cannot hide.

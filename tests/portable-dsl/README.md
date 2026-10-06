@@ -25,8 +25,9 @@ See [the numeric audit](../../doc/dsl-spec/numeric-audit-0.1.md).
 
 Seven exact `division_*` cases cover the first typed arithmetic lowering and are
 required-JIT cases for TCC/CC. Unsupported typed contexts use interpreter fallback
-rather than C token-level promotion. The `audit/nested_cast.dsl` source is an
-unresolved evaluator reproducer, not a routine execution fixture.
+rather than C token-level promotion. The `audit/nested_cast.dsl` source and its
+exact fixture now guard the corrected nested-conversion buffer width in
+interpreter mode; they do not certify general nested-cast/JIT semantics.
 
 Fixtures exercise bounded integer arithmetic, precise int64 comparisons, special
 floating-point values, `break`/`continue`, unresolved names, unsupported indexing,

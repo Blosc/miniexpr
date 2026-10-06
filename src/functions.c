@@ -5442,6 +5442,21 @@ typedef float (*me_fun1_f32)(float);
 #define ME_EVAL_IS_COMPLEX_c64 1
 #define ME_EVAL_IS_COMPLEX_c128 1
 
+/* A nested conversion may be dispatched by its parent's typed evaluator, whose
+ * output buffer width differs from the conversion node's declared dtype. */
+#define ME_EVAL_DTYPE_f32 ME_FLOAT32
+#define ME_EVAL_DTYPE_f64 ME_FLOAT64
+#define ME_EVAL_DTYPE_i8 (n->dtype == ME_BOOL ? ME_BOOL : ME_INT8)
+#define ME_EVAL_DTYPE_i16 ME_INT16
+#define ME_EVAL_DTYPE_i32 ME_INT32
+#define ME_EVAL_DTYPE_i64 ME_INT64
+#define ME_EVAL_DTYPE_u8 ME_UINT8
+#define ME_EVAL_DTYPE_u16 ME_UINT16
+#define ME_EVAL_DTYPE_u32 ME_UINT32
+#define ME_EVAL_DTYPE_u64 ME_UINT64
+#define ME_EVAL_DTYPE_c64 ME_COMPLEX64
+#define ME_EVAL_DTYPE_c128 ME_COMPLEX128
+
 #define DEFINE_ME_EVAL(SUFFIX, TYPE, VEC_ADD, VEC_SUB, VEC_MUL, VEC_DIV, VEC_POW, \
     VEC_ADD_SCALAR, VEC_MUL_SCALAR, VEC_POW_SCALAR, \
     VEC_SQRT, VEC_SIN, VEC_COS, VEC_TAN, \
@@ -5521,7 +5536,9 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                 const void *src_data = (source->type == ME_CONSTANT) ? NULL : \
                     (source->type == ME_VARIABLE) ? source->bound : source->output; \
                 if (src_data) { \
-                    convert_func_t conv = get_convert_func(source_dtype, n->dtype); \
+                    /* Match the actual output allocation/dispatch, not a stale \
+                     * declared target dtype inherited from a nested node. */ \
+                    convert_func_t conv = get_convert_func(source_dtype, ME_EVAL_DTYPE_##SUFFIX); \
                     if (conv) { \
                         conv(src_data, output, n->nitems); \
                     } \
