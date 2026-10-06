@@ -1,3 +1,27 @@
+if(NOT EMSCRIPTEN)
+  # The first portable runner uses host files; wasm corpus adapters are follow-up work.
+  add_executable(portable_dsl_runner portable-dsl/runner.c)
+  target_link_libraries(portable_dsl_runner PRIVATE ${MINIEXPR_DEFAULT_LIB})
+  target_compile_features(portable_dsl_runner PRIVATE c_std_99)
+  if(NOT WIN32)
+    target_link_libraries(portable_dsl_runner PRIVATE m)
+  endif()
+  foreach(case_name affine chains loops)
+    foreach(policy off default)
+      add_test(NAME portable_dsl_${case_name}_${policy}
+        COMMAND portable_dsl_runner
+          "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.dsl"
+          "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.txt" "${policy}")
+    endforeach()
+    if(MINIEXPR_ENABLE_TCC_JIT)
+      add_test(NAME portable_dsl_${case_name}_on
+        COMMAND portable_dsl_runner
+          "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.dsl"
+          "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.txt" on)
+    endif()
+  endforeach()
+endif()
+
 file(GLOB MINIEXPR_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
 if(NOT MINIEXPR_ENABLE_TCC_JIT OR EMSCRIPTEN)
   list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_jit_libtcc\\.c$")

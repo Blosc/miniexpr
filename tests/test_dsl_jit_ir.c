@@ -441,8 +441,8 @@ static int test_parser_pragmas(void) {
 static int test_env_jit_compiler_override(void) {
     printf("\n=== JIT IR Test 6b: env compiler override ===\n");
 
+    /* Environment configuration overrides the default, not a source pragma. */
     const char *src =
-        "# me:compiler=tcc\n"
         "def kernel(x):\n"
         "    return x\n";
     me_dsl_error error;

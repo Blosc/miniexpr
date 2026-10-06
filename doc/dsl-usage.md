@@ -62,6 +62,11 @@ Supported values:
 
 Only these pragmas are supported. See `doc/dsl-syntax.md` for exact pragma parsing rules.
 
+An explicit compiler pragma takes precedence over the `ME_DSL_JIT_COMPILER`
+environment default. Compiler selection is a preference, not a requirement to
+have that compiler available. Explicit `ME_JIT_OFF` still disables JIT, and
+best-effort interpreter fallback remains available.
+
 ### API policy override
 
 ```c

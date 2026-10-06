@@ -4,6 +4,10 @@ This is the practical reference for the DSL accepted by `me_compile()`.
 It focuses on what works today and the most common gotchas.
 For usage walkthroughs and end-to-end examples, see `doc/dsl-usage.md`.
 
+An experimental [portable profile 0.1](dsl-spec/0.1.md) specifies a smaller
+language-independent subset with shared native/Python conformance fixtures.
+This reference continues to describe the full native language.
+
 ## Quick start
 
 A valid DSL program is one function:
@@ -37,6 +41,10 @@ Notes:
 - Pragma keys must be unique.
 - Unknown `me:*` pragmas are errors.
 - Malformed pragma values are errors.
+- An explicit compiler pragma overrides the `ME_DSL_JIT_COMPILER` environment
+  default. With no compiler pragma, that environment setting selects the default.
+  `ME_JIT_OFF` disables JIT independently of compiler selection; unavailable JIT
+  execution retains best-effort interpreter fallback.
 
 ## Function signature and inputs
 

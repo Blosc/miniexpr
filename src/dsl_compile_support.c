@@ -64,7 +64,7 @@ static char *me_strdup(const char *s) {
 #endif
 }
 
-static bool dsl_source_has_fp_pragma(const char *source) {
+static bool dsl_source_has_pragma(const char *source, const char *key) {
     if (!source) {
         return false;
     }
@@ -92,7 +92,8 @@ static bool dsl_source_has_fp_pragma(const char *source) {
         while (p < line_end && isspace((unsigned char)*p)) {
             p++;
         }
-        if ((size_t)(line_end - p) >= 5 && strncmp(p, "me:fp", 5) == 0) {
+        size_t key_len = strlen(key);
+        if ((size_t)(line_end - p) >= key_len && strncmp(p, key, key_len) == 0) {
             return true;
         }
         if (*line_end == '\0') {
@@ -279,11 +280,14 @@ me_dsl_compiled_program *dsl_compiled_program_alloc(const me_dsl_program *parsed
         return NULL;
     }
     program->fp_mode = parsed->fp_mode;
-    if (!dsl_source_has_fp_pragma(source)) {
+    if (!dsl_source_has_pragma(source, "me:fp")) {
         program->fp_mode = dsl_default_fp_mode_from_env();
     }
     program->compiler = parsed->compiler;
-    (void)dsl_env_jit_compiler_override(&program->compiler);
+    /* Source preferences win; environment configuration supplies the default. */
+    if (!dsl_source_has_pragma(source, "me:compiler")) {
+        (void)dsl_env_jit_compiler_override(&program->compiler);
+    }
     program->compile_ndims = compile_ndims;
     dsl_var_table_init(&program->vars);
     program->idx_ndim = -1;
