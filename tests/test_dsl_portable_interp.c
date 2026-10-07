@@ -16,7 +16,7 @@
 #include <fenv.h>
 #include <stdio.h>
 #include <string.h>
-#if defined(__unix__) || defined(__APPLE__)
+#if (defined(__unix__) || defined(__APPLE__)) && !defined(__EMSCRIPTEN__)
 #include <pthread.h>
 #endif
 
@@ -340,21 +340,31 @@ int main(void) {
     dsl_compiled_program_free(p);
     fenv_t caller_environment;
     assert(fegetenv(&caller_environment) == 0);
-    assert(fesetround(FE_UPWARD) == 0);
+    /* wasm has fixed nearest rounding and no hardware exception flags. Keep
+     * arithmetic/literal/restoration checks there; native hosts also exercise
+     * restoration from a deliberately nondefault caller environment. */
+#if defined(__EMSCRIPTEN__)
+    int caller_rounding = FE_TONEAREST;
+#else
+    int caller_rounding = FE_UPWARD;
+#endif
+    assert(fesetround(caller_rounding) == 0);
+#if defined(FE_INVALID)
     assert(feraiseexcept(FE_INVALID) == 0);
+#endif
     int caller_flags = fetestexcept(FE_ALL_EXCEPT);
     x.name = "x";
     x.dtype = ME_FLOAT32;
     float rounding_inputs[] = {16777216.0f, 0.0f};
     inputs[0] = rounding_inputs;
     p = compile("def kernel(x):\n    return (x + 1.0) - x\n", &x, 1, ME_FLOAT64);
-    assert(fegetround() == FE_UPWARD && fetestexcept(FE_ALL_EXCEPT) == caller_flags);
+    assert(fegetround() == caller_rounding && fetestexcept(FE_ALL_EXCEPT) == caller_flags);
     assert(eval(p, inputs, 1, out, 2) == 0 && out[0] == 0.0 && out[1] == 1.0);
-    assert(fegetround() == FE_UPWARD && fetestexcept(FE_ALL_EXCEPT) == caller_flags);
+    assert(fegetround() == caller_rounding && fetestexcept(FE_ALL_EXCEPT) == caller_flags);
     dsl_compiled_program_free(p);
     p = compile("def kernel(x):\n    return x + 0.1\n", &x, 1, ME_FLOAT64);
     assert(eval(p, inputs, 1, out, 2) == 0 && out[1] == (double)0x1.99999ap-4f);
-    assert(fegetround() == FE_UPWARD && fetestexcept(FE_ALL_EXCEPT) == caller_flags);
+    assert(fegetround() == caller_rounding && fetestexcept(FE_ALL_EXCEPT) == caller_flags);
     dsl_compiled_program_free(p);
     assert(fesetenv(&caller_environment) == 0);
     x.dtype = ME_INT64;
@@ -533,7 +543,7 @@ static void masked_iteration_fixture(void) {
     dsl_compiled_program_free(program);
 }
 
-#if defined(__unix__) || defined(__APPLE__)
+#if (defined(__unix__) || defined(__APPLE__)) && !defined(__EMSCRIPTEN__)
 typedef struct {
     me_dsl_compiled_program *program;
     int rounding;
@@ -563,7 +573,7 @@ static void *concurrent_evaluate(void *arg) {
 #endif
 
 static void concurrent_handle_fixture(void) {
-#if defined(__unix__) || defined(__APPLE__)
+#if (defined(__unix__) || defined(__APPLE__)) && !defined(__EMSCRIPTEN__)
     me_variable x = {.name = "x", .dtype = ME_INT64};
     me_dsl_compiled_program *program = compile("def k(x):\n    a = sum(x)\n    return a + 1\n", &x, 1, ME_AUTO);
     concurrent_case cases[] = {{program, FE_DOWNWARD, {1, 2, 3}, 7}, {program, FE_UPWARD, {4, 5, 6}, 16}};

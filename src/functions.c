@@ -2994,12 +2994,25 @@ const char* me_portable_math_name(const me_expr* n) {
     PORTABLE_MATH(fmax); PORTABLE_MATH(fmin); PORTABLE_MATH(hypot); PORTABLE_MATH(nextafter);
     PORTABLE_MATH(remainder); PORTABLE_MATH(fmod); PORTABLE_MATH(fma);
 #undef PORTABLE_MATH
-    const char *wrappers[] = {"square", "sign", "conj", "real", "imag", "exp10", "sinpi", "cospi",
+    /* Some CRT headers expose libm names through inline/import aliases (notably
+     * hypot on Windows). Match the registration address used by tokenization as
+     * well as the direct symbol above; a valid builtin must not depend on which
+     * spelling the compiler uses for an address expression. */
+    const char *builtin_names[] = {"acos", "acosh", "asin", "asinh", "atan", "atanh", "cbrt",
+                             "cos", "cosh", "erf", "erfc", "exp", "exp2", "lgamma",
+                             "ln", "log10", "sin", "sinh", "sqrt", "tan", "tanh", "tgamma",
+                             "ceil", "floor", "rint", "atan2", "copysign", "fdim", "fmax", "fmin",
+                             "hypot", "nextafter", "remainder", "fmod", "fma", "abs",
+                             "square", "sign", "conj", "real", "imag", "exp10", "sinpi", "cospi",
                              "round", "trunc", "expm1", "log1p", "log2", "ldexp", "logaddexp",
                              "fac", "ncr", "npr", "e", "pi"};
-    for (size_t i = 0; i < sizeof(wrappers) / sizeof(wrappers[0]); i++) {
-        const me_variable *builtin = find_builtin(wrappers[i], strlen(wrappers[i]));
-        if (builtin && n->function == builtin->address) return wrappers[i];
+    for (size_t i = 0; i < sizeof(builtin_names) / sizeof(builtin_names[0]); i++) {
+        const me_variable *builtin = find_builtin(builtin_names[i], strlen(builtin_names[i]));
+        if (builtin && n->function == builtin->address) {
+            if (!strcmp(builtin_names[i], "abs")) return "fabs";
+            if (!strcmp(builtin_names[i], "ln")) return "log";
+            return builtin_names[i];
+        }
     }
     return NULL;
 }
