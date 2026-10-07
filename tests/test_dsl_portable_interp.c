@@ -704,6 +704,10 @@ static void independent_anchor_fixture(void) {
             char source[128];
             snprintf(source, sizeof(source), "def k(x):\n    return %s(x)\n", unary[i].name);
             me_dsl_compiled_program *program = compile(source, vars, 1, ME_AUTO);
+            if (program->output_dtype != dtype) {
+                fprintf(stderr, "%s: expected dtype %d, got %d\n", source, (int)dtype,
+                        (int)program->output_dtype);
+            }
             assert(program->output_dtype == dtype);
             double x64 = unary[i].x, out64 = 0;
             float x32 = (float)x64, out32 = 0;

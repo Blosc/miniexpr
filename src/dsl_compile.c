@@ -143,7 +143,12 @@ static double dsl_cast_int_intrinsic(double x) {
     return (double)(int64_t)x;
 }
 
+/* Address identity distinguishes this cast from real/conj identity callbacks.
+ * A unique volatile read prevents Windows Release identical-code folding from
+ * merging them, without arithmetic that would change signed zero or NaNs. */
+static volatile unsigned char dsl_float_cast_identity;
 static double dsl_cast_float_intrinsic(double x) {
+    (void)dsl_float_cast_identity;
     return x;
 }
 
