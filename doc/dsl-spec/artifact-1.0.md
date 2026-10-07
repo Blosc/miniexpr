@@ -1,4 +1,4 @@
-# Portable artifact 1.0 — implementation draft
+# Menudet artifact 1.0 — implementation draft
 
 Status: implemented staged wire schema, **implementation draft, not certified**.
 Final compatibility guarantees await complete release gates.

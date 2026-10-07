@@ -1,6 +1,10 @@
 # DSL Kernel Programming Guide
 
 This guide focuses on practical usage of miniexpr DSL kernels.
+The versioned portable language is **Menudet**, a little language for portable
+computation on arrays and tables. Its [1.0 language draft](dsl-spec/1.0.md) and
+[artifact draft](dsl-spec/artifact-1.0.md) define the portable contract; this guide
+also covers ordinary full-DSL features that need not be portable.
 Canonical syntax, accepted statements, and exact error behavior are documented in `doc/dsl-syntax.md`.
 
 ## Overview
