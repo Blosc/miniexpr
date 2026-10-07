@@ -31,6 +31,7 @@ typedef union {
     double f64;
     float _Complex c64;
     double _Complex c128;
+    const void *string;
 } me_scalar;
 
 extern char synthetic_var_addresses[ME_MAX_VARS];

@@ -10,6 +10,7 @@
 
 #ifndef MINIEXPR_DSL_PARSER_H
 #define MINIEXPR_DSL_PARSER_H
+#include "dsl_semantic_profile.h"
 
 #include <stddef.h>
 #include <stdbool.h>
@@ -117,6 +118,8 @@ typedef struct {
 } me_dsl_error;
 
 me_dsl_program *me_dsl_parse(const char *source, me_dsl_error *error);
+me_dsl_program *me_dsl_parse_profile(const char *source, me_dsl_semantic_profile profile,
+                                     me_dsl_error *error);
 void me_dsl_program_free(me_dsl_program *program);
 
 #endif

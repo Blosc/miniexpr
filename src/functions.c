@@ -822,6 +822,10 @@ static double add(double a, double b) { return a + b; }
 static double sub(double a, double b) { return a - b; }
 static double mul(double a, double b) { return a * b; }
 static double divide(double a, double b) { return a / b; }
+/* Token identity only in the portable parser. Checked interpretation never
+ * calls this floating implementation for integer operands. */
+static double portable_floordiv(double a, double b) { return floor(a / b); }
+static double portable_modulo(double a, double b) { return fmod(a, b); }
 static double negate(double a) { return -a; }
 const char* me_arithmetic_operator(const me_expr* n) {
     if (!n || !IS_FUNCTION(n->type)) {
@@ -2936,6 +2940,7 @@ static void vec_xor_bool(const bool* a, const bool* b, bool* out, int n);
 static void vec_not_bool(const bool* a, bool* out, int n);
 
 static void promote_logical_bool(me_expr* node) {
+    if (node && (node->flags & ME_EXPR_FLAG_PORTABLE_1)) return;
     if (!node || node->dtype != ME_BOOL) return;
 
     if (node->function == bit_and) {
@@ -2950,6 +2955,53 @@ static void promote_logical_bool(me_expr* node) {
     else if (node->function == bit_not) {
         node->function = logical_not;
     }
+}
+
+/* Stable operation identity for the portable typed pass. Do not dispatch
+ * checked integers through these double-valued full-DSL callbacks. */
+const char* me_portable_operator(const me_expr* n) {
+    const char *op = me_arithmetic_operator(n);
+    if (op) return op;
+    if (!n || !IS_FUNCTION(n->type)) return NULL;
+    if (n->function == (void *)bit_and) return "&";
+    if (n->function == (void *)bit_or) return "|";
+    if (n->function == (void *)bit_xor) return "^";
+    if (n->function == (void *)bit_not) return "~";
+    if (n->function == (void *)bit_shl) return "<<";
+    if (n->function == (void *)bit_shr) return ">>";
+    if (n->function == (void *)pow) return "**";
+    if (n->function == (void *)portable_modulo) return "%";
+    if (n->function == (void *)portable_floordiv) return "//";
+    if (n->function == (void *)logical_and) return "and";
+    if (n->function == (void *)logical_or) return "or";
+    if (n->function == (void *)logical_not) return "not";
+    if (n->function == (void *)where_scalar) return "where";
+    return me_comparison_operator(n);
+}
+
+const char* me_portable_math_name(const me_expr* n) {
+    if (!n || !IS_FUNCTION(n->type)) return NULL;
+#define PORTABLE_MATH(fn) if (n->function == (void *)fn) return #fn
+    PORTABLE_MATH(acos); PORTABLE_MATH(acosh); PORTABLE_MATH(asin); PORTABLE_MATH(asinh);
+    PORTABLE_MATH(atan); PORTABLE_MATH(atanh); PORTABLE_MATH(cbrt);
+    PORTABLE_MATH(cos); PORTABLE_MATH(cosh); PORTABLE_MATH(erf); PORTABLE_MATH(erfc);
+    PORTABLE_MATH(exp); PORTABLE_MATH(exp2); PORTABLE_MATH(expm1); PORTABLE_MATH(lgamma);
+    PORTABLE_MATH(log); PORTABLE_MATH(log10); PORTABLE_MATH(log1p); PORTABLE_MATH(log2);
+    PORTABLE_MATH(sin); PORTABLE_MATH(sinh); PORTABLE_MATH(sqrt); PORTABLE_MATH(tan);
+    PORTABLE_MATH(tanh); PORTABLE_MATH(tgamma); PORTABLE_MATH(fabs);
+    PORTABLE_MATH(ceil); PORTABLE_MATH(floor); PORTABLE_MATH(rint); PORTABLE_MATH(round);
+    PORTABLE_MATH(trunc); PORTABLE_MATH(atan2); PORTABLE_MATH(copysign); PORTABLE_MATH(fdim);
+    PORTABLE_MATH(fmax); PORTABLE_MATH(fmin); PORTABLE_MATH(hypot); PORTABLE_MATH(nextafter);
+    PORTABLE_MATH(remainder); PORTABLE_MATH(fmod); PORTABLE_MATH(fma);
+#undef PORTABLE_MATH
+    const char *wrappers[] = {"square", "sign", "conj", "real", "imag", "exp10", "sinpi", "cospi",
+                             "round", "trunc", "expm1", "log1p", "log2", "ldexp", "logaddexp",
+                             "fac", "ncr", "npr", "e", "pi"};
+    for (size_t i = 0; i < sizeof(wrappers) / sizeof(wrappers[0]); i++) {
+        const me_variable *builtin = find_builtin(wrappers[i], strlen(wrappers[i]));
+        if (builtin && n->function == builtin->address) return wrappers[i];
+    }
+    return NULL;
 }
 
 static bool eval_operand_to_type(me_expr* expr, me_dtype eval_type, int nitems,
@@ -3265,6 +3317,68 @@ static bool eval_string_expr(const me_expr* n) {
     return true;
 }
 
+bool me_portable_string_operation(const me_expr *n) {
+    if (!n || !IS_FUNCTION(n->type)) return false;
+    if (is_string_returning_function(n->function) || is_string_function(n->function)) return true;
+    return is_comparison_node(n) && is_string_dtype(((const me_expr *)n->parameters[0])->dtype);
+}
+
+/* Reuse the full-DSL string validator/kernels on per-call materialized operands.
+ * These stack nodes never mutate a compiled handle or invoke the full numeric
+ * evaluator; numeric indices have already been checked by portable typing. */
+static void portable_string_nodes(const me_expr *n, me_expr *root, me_expr *children,
+                                 const void *const *values) {
+    memset(root, 0, sizeof(*root));
+    memcpy(root, n, offsetof(me_expr, parameters));
+    for (int i = 0; i < ARITY(n->type); i++) {
+        const me_expr *arg = n->parameters[i];
+        memset(&children[i], 0, sizeof(children[i]));
+        memcpy(&children[i], arg, offsetof(me_expr, parameters));
+        if (is_string_dtype(arg->dtype) && TYPE_MASK(arg->type) != ME_STRING_CONSTANT) {
+            children[i].type = ME_VARIABLE;
+            children[i].bound = values ? values[i] : NULL;
+        }
+        else if (!is_string_dtype(arg->dtype)) {
+            double value = TYPE_MASK(arg->type) == ME_CONSTANT ? arg->value : 1048576.0;
+            if (values) value = *(const double *)values[i];
+            else if (arg->flags & ME_EXPR_FLAG_INTEGER_LITERAL) value =
+                (arg->flags & ME_EXPR_FLAG_NEGATIVE_LITERAL ? -1.0 : 1.0) * (double)arg->integer_magnitude;
+            /* The subject width is bounded to one MiB; larger integral indices
+             * only select empty/full results. Clamp before legacy long casts. */
+            children[i].type = ME_CONSTANT;
+            children[i].value = value > 1048576.0 ? 1048576.0 : value < -1048576.0 ? -1048576.0 : value;
+        }
+        root->parameters[i] = &children[i];
+    }
+}
+
+bool me_portable_string_validate(me_expr *n) {
+    struct { me_expr node; void *tail[6]; } storage;
+    me_expr children[7];
+    portable_string_nodes(n, &storage.node, children, NULL);
+    for (int i = 0; i < ARITY(n->type); i++) {
+        const me_expr *arg = n->parameters[i];
+        if (!is_string_dtype(arg->dtype) &&
+            !(arg->dtype >= ME_BOOL && arg->dtype <= ME_UINT64)) return false;
+    }
+    if (!validate_string_usage_node(&storage.node) || string_families_mixed(&storage.node) ||
+        (string_expr_unit(&storage.node) == 1 && string_has_non_ascii_literal(&storage.node))) return false;
+    n->dtype = is_string_returning_function(n->function) ? string_family_of(n) : ME_BOOL;
+    if (n->function == (void *)str_replace) {
+        size_t unit = dtype_code_unit(n->dtype), chars = infer_output_itemsize_u(&children[0], unit) / unit;
+        const me_expr *old = n->parameters[1], *replacement = n->parameters[2];
+        size_t old_min = TYPE_MASK(old->type) == ME_STRING_CONSTANT ? old->str_len : 1;
+        size_t new_max = TYPE_MASK(replacement->type) == ME_STRING_CONSTANT ? replacement->str_len : replacement->itemsize / unit;
+        if (!old_min || !chars) return false;
+        size_t growth = new_max > old_min ? new_max - old_min : 0;
+        size_t matches = chars / old_min;
+        if (growth && matches > (1048576 / unit - chars) / growth) return false;
+        n->itemsize = (chars + matches * growth) * unit;
+    }
+    else n->itemsize = is_string_dtype(n->dtype) ? infer_output_itemsize(&storage.node) : sizeof(bool);
+    return n->itemsize > 0 && n->itemsize <= 1024 * 1024;
+}
+
 static bool eval_string_predicate(const me_expr* n, bool* out, int nitems) {
     if (!n || !out) return false;
     if (!IS_FUNCTION(n->type) || ARITY(n->type) != 2) return false;
@@ -3337,6 +3451,20 @@ static bool eval_string_predicate(const me_expr* n, bool* out, int nitems) {
     }
 
     return true;
+}
+
+bool me_portable_string_execute(const me_expr *n, const void *const *values, void *output) {
+    struct { me_expr node; void *tail[6]; } storage;
+    me_expr children[7];
+    portable_string_nodes(n, &storage.node, children, values);
+    if (n->function == (void *)str_replace) {
+        sview needle;
+        if (!string_view_at(&children[1], 0, &needle) || !needle.len) return false;
+    }
+    storage.node.nitems = 1;
+    storage.node.output = output;
+    return is_string_dtype(n->dtype) ? eval_string_expr(&storage.node) :
+        eval_string_predicate(&storage.node, output, 1);
 }
 
 static bool eval_bool_expr(me_expr* n) {
@@ -3493,6 +3621,23 @@ static void read_number_token(state* s) {
             is_float = true;
             break;
         }
+    }
+
+    if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+        s->dtype = is_float ? ME_FLOAT64 : ME_INT64;
+        s->literal_f32 = strtof(start, NULL);
+        s->integer_magnitude = 0;
+        if (!is_float) {
+            for (const char *p = start; p < s->next; p++) {
+                if (*p < '0' || *p > '9' ||
+                    s->integer_magnitude > (UINT64_MAX - (uint64_t)(*p - '0')) / 10) {
+                    s->type = TOK_ERROR;
+                    return;
+                }
+                s->integer_magnitude = s->integer_magnitude * 10 + (uint64_t)(*p - '0');
+            }
+        }
+        return;
     }
 
     if (is_float) {
@@ -3696,12 +3841,24 @@ static void read_identifier_token(state* s) {
     }
 
     const me_variable* var = find_lookup(s, start, s->next - start);
+    bool builtin_binding = var == NULL;
     if (!var) {
         var = find_builtin(start, s->next - start);
     }
 
     if (!var) {
         s->type = TOK_ERROR;
+        return;
+    }
+
+    /* The full language's log spelling is build-configurable. Portable log
+     * explicitly names natural logarithm, independent of ME_NAT_LOG. */
+    if (builtin_binding && s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 &&
+        len == 3 && !strncmp(start, "log", 3)) {
+        s->type = ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH;
+        s->function = (void *)log;
+        s->dtype = ME_AUTO;
+        s->itemsize = 0;
         return;
     }
 
@@ -3732,6 +3889,11 @@ static void read_identifier_token(state* s) {
     case ME_FUNCTION6:
     case ME_FUNCTION7:
         s->type = var->type;
+        /* The legacy token enum aliases pure FUNCTION0 (40) with logical-not.
+         * Portable constants retain function identity without that token flag;
+         * full-DSL parsing is intentionally unchanged. */
+        if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 &&
+            TYPE_MASK(var->type) == ME_FUNCTION0) s->type = ME_FUNCTION0;
         s->function = var->address;
         s->dtype = var->dtype;
         s->itemsize = 0;
@@ -3785,9 +3947,13 @@ static void handle_single_char_operator(state* s, char c) {
         break;
     case '/': s->type = TOK_INFIX;
         s->function = divide;
+        if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 && *s->next == '/') {
+            s->next++;
+            s->function = portable_floordiv;
+        }
         break;
     case '%': s->type = TOK_INFIX;
-        s->function = fmod;
+        s->function = s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 ? portable_modulo : fmod;
         break;
     case '&': s->type = TOK_BITWISE;
         s->function = bit_and;
@@ -3904,6 +4070,12 @@ static me_expr* base(state* s) {
         CHECK_NULL(ret);
 
         ret->value = s->value;
+        if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+            ret->flags |= ME_EXPR_FLAG_PORTABLE_1 | ME_EXPR_FLAG_WEAK_LITERAL;
+            if (s->dtype == ME_INT64) ret->flags |= ME_EXPR_FLAG_INTEGER_LITERAL;
+            ret->integer_magnitude = s->integer_magnitude;
+            ret->literal_f32 = s->literal_f32;
+        }
         // Use inferred type for constants (floating point vs integer)
         if (s->target_dtype == ME_AUTO) {
             ret->dtype = s->dtype;
@@ -3955,6 +4127,9 @@ static me_expr* base(state* s) {
         ret->dtype = s->dtype; // Set the variable's type
         ret->input_dtype = s->dtype;
         ret->itemsize = s->itemsize;
+        if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+            ret->flags |= ME_EXPR_FLAG_PORTABLE_1;
+        }
         next_token(s);
         break;
 
@@ -3976,6 +4151,9 @@ static me_expr* base(state* s) {
     }
 
     if (ret) {
+        if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+            ret->flags |= ME_EXPR_FLAG_PORTABLE_1;
+        }
         return ret;
     }
 
@@ -4086,6 +4264,9 @@ static me_expr* base(state* s) {
             ret->value = NAN;
             break;
         }
+        if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+            ret->flags |= ME_EXPR_FLAG_PORTABLE_1;
+        }
         return ret;
     }
 
@@ -4114,6 +4295,9 @@ static me_expr* power(state* s) {
         CHECK_NULL(ret, me_free(inner));
 
         ret->function = negate;
+        if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+            ret->flags |= ME_EXPR_FLAG_PORTABLE_1;
+        }
         return ret;
     }
 
@@ -4127,6 +4311,9 @@ static me_expr* power(state* s) {
 
         ret->function = bit_not;
         ret->dtype = inner->dtype;
+        if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+            ret->flags |= ME_EXPR_FLAG_PORTABLE_1;
+        }
         promote_logical_bool(ret);
         return ret;
     }
@@ -4186,7 +4373,9 @@ static me_expr* term(state* s) {
     me_expr* ret = factor(s);
     CHECK_NULL(ret);
 
-    while (s->type == TOK_INFIX && (s->function == mul || s->function == divide || s->function == fmod)) {
+    while (s->type == TOK_INFIX && (s->function == mul || s->function == divide ||
+                                  s->function == fmod || s->function == portable_modulo ||
+                                  s->function == portable_floordiv)) {
         me_fun2 t = (me_fun2)s->function;
         next_token(s);
         me_expr* f = factor(s);
@@ -4385,6 +4574,9 @@ static me_expr* logical_not_expr(state* s) {
 
         ret->function = logical_not;
         ret->dtype = ME_BOOL;
+        if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+            ret->flags |= ME_EXPR_FLAG_PORTABLE_1;
+        }
         return ret;
     }
 

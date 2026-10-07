@@ -25,6 +25,7 @@ typedef struct {
     int indent_stack[32];  /* Stack of indentation levels */
     int indent_depth;      /* Current depth in indent stack */
     bool allow_docstring;  /* Only the first statement of the function body */
+    me_dsl_semantic_profile semantic_profile;
 } me_dsl_lexer;
 
 static void dsl_set_error(me_dsl_error *error, int line, int column, const char *message) {
@@ -418,12 +419,13 @@ static char *dsl_copy_expression(const char *start, const char *end,
 }
 
 static char *dsl_build_compound_assign_expr(const char *lhs, size_t lhs_len,
-                                            const char *op, const char *rhs) {
+                                            const char *op, const char *rhs,
+                                            me_dsl_semantic_profile profile) {
     if (!lhs || lhs_len == 0 || !op || !rhs) {
         return NULL;
     }
     size_t rhs_len = strlen(rhs);
-    if (strcmp(op, "//") == 0) {
+    if (strcmp(op, "//") == 0 && profile != ME_DSL_PROFILE_PORTABLE_1_0) {
         size_t total = 6 + lhs_len + 5 + rhs_len + 3 + 1;
         char *out = malloc(total);
         if (!out) {
@@ -1383,7 +1385,8 @@ static bool parse_assignment_or_expr(me_dsl_lexer *lex, me_dsl_block *block, me_
         if (!rhs_text) {
             return false;
         }
-        char *expr_text = dsl_build_compound_assign_expr(ident_start, ident_len, compound_op, rhs_text);
+        char *expr_text = dsl_build_compound_assign_expr(ident_start, ident_len, compound_op, rhs_text,
+                                                         lex->semantic_profile);
         free(rhs_text);
         if (!expr_text) {
             dsl_set_error(error, line, column, "out of memory");
@@ -1875,6 +1878,11 @@ static bool parse_program(me_dsl_lexer *lex, me_dsl_program *program, me_dsl_err
 }
 
 me_dsl_program *me_dsl_parse(const char *source, me_dsl_error *error) {
+    return me_dsl_parse_profile(source, ME_DSL_PROFILE_FULL, error);
+}
+
+me_dsl_program *me_dsl_parse_profile(const char *source, me_dsl_semantic_profile profile,
+                                     me_dsl_error *error) {
     if (error) {
         error->line = 0;
         error->column = 0;
@@ -1888,6 +1896,7 @@ me_dsl_program *me_dsl_parse(const char *source, me_dsl_error *error) {
 
     me_dsl_lexer lex;
     lexer_init(&lex, source);
+    lex.semantic_profile = profile;
     if (!parse_program(&lex, program, error) || !dsl_lower_comparisons(program, source, error)) {
         me_dsl_program_free(program);
         return NULL;

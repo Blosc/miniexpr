@@ -1266,6 +1266,16 @@ static me_expr* create_conversion_node(me_expr* source, me_dtype target_dtype) {
 void apply_type_promotion(me_expr* node) {
     if (!node || ARITY(node->type) < 2) return;
 
+    /* The portable typed pass must see the original operands, not full-DSL
+     * conversion nodes or output-context promotions. */
+    for (int i = 0; i < ARITY(node->type); i++) {
+        const me_expr *child = node->parameters[i];
+        if (child && (child->flags & ME_EXPR_FLAG_PORTABLE_1)) {
+            node->flags |= ME_EXPR_FLAG_PORTABLE_1;
+            return;
+        }
+    }
+
     /* `str + str` is concatenation; it needs no numeric promotion at all. */
     if (retag_string_concat(node)) return;
 
@@ -1461,7 +1471,14 @@ void me_free(me_expr* n) {
 }
 
 int private_compile_ex(const char* expression, const me_variable* variables, int var_count,
-                              void* output, int nitems, me_dtype dtype, int* error, me_expr** out) {
+                               void* output, int nitems, me_dtype dtype, int* error, me_expr** out) {
+    return private_compile_profile_ex(expression, variables, var_count, output, nitems,
+                                      dtype, ME_DSL_PROFILE_FULL, error, out);
+}
+
+int private_compile_profile_ex(const char* expression, const me_variable* variables, int var_count,
+                              void* output, int nitems, me_dtype dtype,
+                              me_dsl_semantic_profile profile, int* error, me_expr** out) {
     if (out) *out = NULL;
     if (!expression || !out || var_count < 0) {
         if (error) *error = -1;
@@ -1568,6 +1585,7 @@ int private_compile_ex(const char* expression, const me_variable* variables, int
     }
 
     state s;
+    s.semantic_profile = profile;
     s.start = s.next = expression;
     s.lookup = vars_copy ? vars_copy : variables;
     s.lookup_len = var_count;
@@ -1596,6 +1614,9 @@ int private_compile_ex(const char* expression, const me_variable* variables, int
         s.target_dtype = ME_AUTO;
     }
 
+    if (profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+        s.target_dtype = ME_AUTO;
+    }
     next_token(&s);
     me_expr* root = list(&s);
 
@@ -1606,6 +1627,22 @@ int private_compile_ex(const char* expression, const me_variable* variables, int
             free((void*)s.str_data);
         }
         return ME_COMPILE_ERR_OOM;
+    }
+
+    /* Internal raw-tree entry point: the profile-aware DSL compiler performs
+     * typed validation before this tree can be executed. No folding, bytecode,
+     * output retyping or callback dispatch is safe before that gate. */
+    if (profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+        if (vars_copy) free(vars_copy);
+        if (s.str_data) free((void *)s.str_data);
+        if (s.type != TOK_END) {
+            me_free(root);
+            if (error) *error = (int)(s.next - s.start);
+            return ME_COMPILE_ERR_PARSE;
+        }
+        *out = root;
+        if (error) *error = 0;
+        return ME_COMPILE_SUCCESS;
     }
 
     if (!validate_string_usage(root)) {

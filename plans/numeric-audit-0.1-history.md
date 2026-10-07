@@ -1,6 +1,8 @@
 # Numeric stabilization audit for portable 0.1
 
-**Status: audit history; scope closed by the conservative [frozen profile](0.1.md).**
+**Historical audit only:** this records earlier ordinary full-DSL investigations,
+not public portable support. Current portable semantics are
+[draft 1.0](../doc/dsl-spec/1.0.md).
 Unfinished numeric domains below are excluded or explicit runtime preconditions,
 not an open-ended release queue. The earlier broad feature filter is replaced by
 source and compiled-tree membership checks. These are checked conversions and

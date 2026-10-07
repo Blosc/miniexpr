@@ -121,7 +121,7 @@ static bool dsl_env_jit_compiler_override(me_dsl_compiler *out_compiler) {
     return false;
 }
 
-static void dsl_compiled_block_free(me_dsl_compiled_block *block);
+void dsl_compiled_block_free(me_dsl_compiled_block *block);
 
 void dsl_compiled_expr_free(me_dsl_compiled_expr *expr) {
     if (!expr) {
@@ -189,7 +189,7 @@ void dsl_compiled_stmt_free(me_dsl_compiled_stmt *stmt) {
     free(stmt);
 }
 
-static void dsl_compiled_block_free(me_dsl_compiled_block *block) {
+void dsl_compiled_block_free(me_dsl_compiled_block *block) {
     if (!block) {
         return;
     }

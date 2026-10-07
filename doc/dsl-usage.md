@@ -53,13 +53,13 @@ me_variable signature[] = {
 };
 me_portable_error diagnostic;
 me_portable_status status = me_validate_portable_dsl(
-    src, "0.1", signature, 1, ME_FLOAT64, &diagnostic);
+    src, "1.0", signature, 1, ME_FLOAT64, &diagnostic);
 ```
 
 This checks native source and a typed signature without executing it or invoking
 a compiler. It does not require Python or a working JIT backend. Check `status`
-before normal compilation/evaluation; runtime data constraints and backend
-compatibility remain separate concerns. See [the draft profile](dsl-spec/0.1.md)
+before portable artifact loading/evaluation; ordinary `me_compile()` retains the
+separate full-DSL semantics. See [the draft profile](dsl-spec/1.0.md)
 for supported features and diagnostic categories.
 
 ## Portable artifact loading
@@ -67,9 +67,9 @@ for supported features and diagnostic categories.
 For a standalone versioned JSON kernel, enable `MINIEXPR_BUILD_ARTIFACT` and link
 the separate `miniexpr_artifact` target. This optional adapter decodes typed scalar
 constants, validates exact name coverage, and provides `me_artifact_load()` /
-`me_artifact_eval()` / `me_artifact_free()` in `miniexpr_artifact.h`. It neither
+`me_artifact_eval_ex()` / `me_artifact_free()` in `miniexpr_artifact.h`. It neither
 requires Python nor adds JSON support to the raw language compiler. See
-[the artifact contract](dsl-spec/artifact-0.1.md) and the
+[the draft artifact contract](dsl-spec/artifact-1.0.md) and the
 [standalone example](../tests/portable-artifacts/README.md).
 
 ## Runtime JIT Controls

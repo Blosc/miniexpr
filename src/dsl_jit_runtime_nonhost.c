@@ -15,6 +15,7 @@
 #if defined(_WIN32) || defined(_WIN64) || defined(__EMSCRIPTEN__)
 
 void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
+    if (program && program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) return;
 #if ME_USE_WASM32_JIT
     if (!program || !program->jit_c_source || program->jit_kernel_fn) {
         return;

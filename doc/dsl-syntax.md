@@ -4,7 +4,7 @@ This is the practical reference for the DSL accepted by `me_compile()`.
 It focuses on what works today and the most common gotchas.
 For usage walkthroughs and end-to-end examples, see `doc/dsl-usage.md`.
 
-An experimental [portable profile 0.1](dsl-spec/0.1.md) specifies a smaller
+An experimental [portable profile 1.0](dsl-spec/1.0.md) specifies a versioned
 language-independent subset with shared native/Python conformance fixtures.
 This reference continues to describe the full native language.
 

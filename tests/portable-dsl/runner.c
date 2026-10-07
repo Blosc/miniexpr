@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "miniexpr.h"
+#include "../../src/dsl_compile_internal.h"
+#include "../../src/dsl_eval_internal.h"
 
 #define MAX_ITEMS 4096
 #define MAX_INPUTS 32
@@ -28,17 +30,6 @@ static me_dtype parse_dtype(const char *name) {
         return ME_FLOAT64;
     }
     return ME_AUTO;
-}
-
-static size_t dtype_size(me_dtype dtype) {
-    switch (dtype) {
-        case ME_BOOL: return sizeof(bool);
-        case ME_INT32: return sizeof(int32_t);
-        case ME_INT64: return sizeof(int64_t);
-        case ME_FLOAT32: return sizeof(float);
-        case ME_FLOAT64: return sizeof(double);
-        default: return 0;
-    }
 }
 
 /* Parse integers exactly, never through double (including values above 2**53). */
@@ -130,6 +121,7 @@ int main(int argc, char **argv) {
     int result = 1, count = 0, nvars = 0, error = 0;
     FILE *file = NULL;
     me_expr *expr = NULL;
+    me_dsl_compiled_program *program = NULL;
     char *source = NULL;
     unsigned char *data = NULL;
     void *output = NULL, *expected = NULL;
@@ -140,8 +132,8 @@ int main(int argc, char **argv) {
     const void *inputs[MAX_INPUTS] = {0};
     me_jit_mode mode = ME_JIT_DEFAULT;
 
-    if (argc != 4 && (argc != 5 || (strcmp(argv[4], "native") && strcmp(argv[4], "reject")))) {
-        fprintf(stderr, "usage: %s source.dsl case.txt off|on|default [native|reject]\n", argv[0]);
+    if (argc != 4 && (argc != 5 || strcmp(argv[4], "native"))) {
+        fprintf(stderr, "usage: %s source.dsl case.txt off|on|default [native]\n", argv[0]);
         return 2;
     }
     if (!strcmp(argv[3], "off")) {
@@ -219,24 +211,27 @@ int main(int argc, char **argv) {
     }
     int64_t shape[] = {count};
     int32_t grid[] = {count};
-    me_portable_error profile_error;
-    me_portable_status profile = me_validate_portable_dsl(source, ME_PORTABLE_DSL_VERSION,
-        variables, nvars, output_dtype, &profile_error);
     bool expect_compile_error = !strcmp(outcome, "compile_error");
-    if (argc == 5 && !strcmp(argv[4], "reject")) {
-        if (profile != ME_PORTABLE_ERR_UNSUPPORTED) goto cleanup;
-        printf("unsupported_feature\n");
-        result = 0;
-        goto cleanup;
-    }
-    if (argc == 4 && ((expect_compile_error && profile == ME_PORTABLE_SUCCESS) ||
-        (!expect_compile_error && profile != ME_PORTABLE_SUCCESS))) {
-        fprintf(stderr, "unexpected portable validation status %d at %d:%d: %s\n",
-                profile, profile_error.line, profile_error.column, profile_error.message);
-        goto cleanup;
-    }
-    int rc = me_compile_nd_jit(source, variables, nvars, output_dtype,
+    int rc;
+    if (argc == 4) {
+        me_portable_error profile_error;
+        me_portable_status profile = me_validate_portable_dsl(source, ME_PORTABLE_DSL_VERSION,
+            variables, nvars, output_dtype, &profile_error);
+        if ((expect_compile_error && profile == ME_PORTABLE_SUCCESS) ||
+            (!expect_compile_error && profile != ME_PORTABLE_SUCCESS)) {
+            fprintf(stderr, "unexpected portable validation status %d at %d:%d: %s\n",
+                    profile, profile_error.line, profile_error.column, profile_error.message);
+            goto cleanup;
+        }
+        bool is_dsl;
+        char reason[256];
+        program = dsl_compile_program_profile(source, variables, nvars, output_dtype,
+            0, mode, ME_DSL_PROFILE_PORTABLE_1_0, &error, &is_dsl, reason, sizeof(reason));
+        rc = program ? ME_COMPILE_SUCCESS : ME_COMPILE_ERR_INVALID_ARG;
+    } else {
+        rc = me_compile_nd_jit(source, variables, nvars, output_dtype,
                               1, shape, grid, grid, mode, &error, &expr);
+    }
     if (!strcmp(outcome, "compile_error")) {
         if (rc == ME_COMPILE_SUCCESS || rc == ME_COMPILE_ERR_OOM) {
             fprintf(stderr, "expected a semantic compilation failure\n");
@@ -252,15 +247,21 @@ int main(int argc, char **argv) {
                 message ? message : "no diagnostic");
         goto cleanup;
     }
-    bool jit = me_expr_has_jit_kernel(expr);
+    bool jit = expr && me_expr_has_jit_kernel(expr);
     printf("jit=%d\n", (int)jit);
-    if ((mode == ME_JIT_OFF && jit) || (mode == ME_JIT_ON && !jit)) {
+    if ((mode == ME_JIT_OFF && jit) || (argc == 5 && mode == ME_JIT_ON && !jit)) {
         fprintf(stderr, "requested execution backend was not prepared\n");
         goto cleanup;
     }
     me_eval_params params = ME_EVAL_PARAMS_DEFAULTS;
     params.jit_mode = mode;
-    rc = me_eval(expr, inputs, nvars, output, count, &params);
+    if (program) {
+        me_dsl_portable_eval_descriptor descriptor = {
+            .nitems = count, .output_capacity = (size_t)count * dtype_size(output_dtype)};
+        rc = dsl_eval_program_portable(program, inputs, nvars, output, &descriptor);
+    } else {
+        rc = me_eval(expr, inputs, nvars, output, count, &params);
+    }
     if (!strcmp(outcome, "eval_error")) {
         if (rc != ME_EVAL_ERR_INVALID_ARG) {
             fprintf(stderr, "expected an invalid-argument evaluation error, got %d\n", rc);
@@ -288,6 +289,7 @@ cleanup:
         fclose(file);
     }
     me_free(expr);
+    dsl_compiled_program_free(program);
     free(source);
     free(data);
     free(output);

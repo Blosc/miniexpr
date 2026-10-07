@@ -39,8 +39,7 @@ int main(int argc, char **argv) {
         strcmp(me_artifact_input_name(artifact, 0), "x") ||
         me_artifact_input_dtype(artifact, 0) != ME_FLOAT64 ||
         me_artifact_output_dtype(artifact) != ME_FLOAT64 ||
-        (mode == ME_JIT_ON && !me_artifact_has_jit(artifact)) ||
-        (mode == ME_JIT_OFF && me_artifact_has_jit(artifact))) {
+        me_artifact_has_jit(artifact)) {
         fprintf(stderr, "expected affine float64 signature and requested backend\n");
         me_artifact_free(artifact);
         return 1;

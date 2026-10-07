@@ -1,102 +1,40 @@
-# Frozen portable DSL conformance and full-language regressions
+# Draft portable DSL 1.0 conformance
 
-These are raw native source fixtures, not exported artifacts. The release boundary
-is [profile 0.1](../../doc/dsl-spec/0.1.md). `frozen-excluded.txt` lists the retained
-full-language cases which **must fail portable validation**. CTest runs those
-as `native_dsl_*` regressions plus `portable_reject_*` negative profile checks;
-only `portable_dsl_*` cases establish frozen membership. The historical coverage
-description below must not be read as admitting excluded cases into 0.1.
-Each `.txt` file
-contains whitespace-delimited:
+These raw native sources exercise [draft 1.0](../../doc/dsl-spec/1.0.md),
+not Python authoring and not exported artifacts. The typed interpreter is the
+admission and execution baseline. Optional compiler/JIT preferences must fall
+back before execution; they are not required-JIT certification.
 
-1. Expected outcome (`ok`, `ok_exact`, `compile_error`, or `eval_error`), input dtype, output
-   dtype, element count, and input count.
-2. Input names in compilation/evaluation order (possibly different from source).
-3. One row per element: input values followed by the specified expected output.
-   Error fixtures use zero as a placeholder for the output.
+Each `.txt` fixture contains whitespace-delimited fields:
 
-The runner limits cases to 4096 elements and 32 inputs. It supports `bool`, `int32`,
-`int64`, `float32`, and `float64`. All inputs of a fixture currently share a dtype;
-the output dtype may differ. Boolean tokens are `0`/`1`. Integers are parsed and
-compared exactly, including int64 extrema and values above `2**53`. Floating-point
-comparison uses `abs(actual - expected) <= tolerance + tolerance * abs(expected)`,
-with `1e-6` for float32 and `1e-12` for float64. Signed zero must match; NaNs compare
-by classification, not payload; infinities must match their sign.
+1. Outcome (`ok`, `ok_exact`, `compile_error`, `eval_error`), input dtype,
+   output dtype, element count and input count.
+2. Input names in evaluation order.
+3. One row per element: input values followed by expected output. Error cases
+   use zero output placeholders.
 
-`ok_exact` additionally compares finite floats exactly, preserving subnormal and
-rounding checks. The 25 `convert_INPUT_OUTPUT.txt` fixtures share `identity.dsl`
-and cover the supported 5×5 output-conversion matrix. The `audit/` sources preserve
-unresolved numeric discrepancies; they are not required-JIT conformance claims.
-See [the numeric audit](../../doc/dsl-spec/numeric-audit-0.1.md).
+The runner supports up to 4096 lanes, 32 inputs, Boolean, int32/int64 and
+float32/float64 transport. Inputs currently share a dtype; the output may differ.
+Boolean tokens are 0/1 and integers are parsed exactly, including values above
+2**53. Integral outputs compare exactly. Floating comparisons use relative plus
+absolute tolerances of 1e-6 (float32) or 1e-12 (float64); `ok_exact` compares
+finite values exactly. Signed zero, infinity sign and NaN classification are
+checked. This transport subset is not the complete language dtype matrix.
 
-Seven exact `division_*` cases cover the first typed arithmetic lowering and are
-required-JIT cases for TCC/CC. Unsupported typed contexts use interpreter fallback
-rather than C token-level promotion. The `audit/nested_cast.dsl` source and its
-exact fixture now guard the corrected nested-conversion buffer width in
-interpreter mode; they do not certify general nested-cast/JIT semantics.
-The `cast_argument_*`, `cast_integer_exact`, and `cast_nonfinite_truth` fixtures
-require exact interpreter/TCC/CC agreement for value-cast arguments. The
-`audit/cast_argument_division` fixture checks interpreter semantics while nested
-casts in division remain outside the typed JIT slice.
-The strict `math_widen`, `math_condition`, and `math_local_widen` fixtures now
-require exact interpreter/TCC/CC agreement for leaf float32 sin/cos rounding
-before widening or comparison. Other math contexts remain audit work.
-Five exact `arithmetic_*` fixtures check pure float32 arithmetic literal and
-intermediate rounding, locals, and the differing float64 output context. The
-native/Python scalar/vector matrix additionally checks multiplication and
-repeated execution. Mixed computation dtypes, calls, and casts are not certified
-by this pure-arithmetic slice.
-Four additional `arithmetic_float_*` fixtures cover same-dtype float32 `float()`
-calls within pure arithmetic, nested/repeated calls, local assignments, and the
-different float64 output context. Mixed/integral cast arguments and general
-calls remain outside this certified slice.
-Five `while_cap_*` fixtures use a host cap of three and require interpreter/TCC/CC
-agreement for exact-limit exits, exceeded caps, `continue`, and hybrid cleanup.
-The cap is supplied by the test environment, not embedded in source/artifacts.
-`while_cap_chain` covers mixed-lane chained conditions. `masked_local_chain`
-and `masked_bool_chain` cover constant local assignments under lane masks.
-Five `bool_float_*` fixtures check numeric 0/1 arithmetic on Boolean cast results
-in floating contexts, including signed-zero negation through a local. They do
-not certify arbitrary Boolean-output arithmetic. Five `bool_output_*` and
-`bool_numeric_*` fixtures cover the selected numeric-then-truth rule: numeric
-zero/one operands, preserved fractional arithmetic and locals, and conversion
-only at an explicit cast or Boolean output. `bool_output_fraction` is promoted
-from the audit corpus with expected values matching that selected contract.
-
-Fixtures exercise bounded integer arithmetic, precise int64 comparisons, special
-floating-point values, `break`/`continue`, unresolved names, unsupported indexing,
-zero range steps, and executed missing-return paths. Additional fixtures check
-Boolean-result semantics on numeric operands, small finite float-to-int casts,
-and `sin` samples. They do not yet define overflow, mixed-input promotions,
-arbitrary float-to-int casts, or global transcendental accuracy.
-The fixture format is experimental test infrastructure, not an artifact
-schema or a new public storage format.
-
-Build miniexpr with tests enabled, then run:
+The identity conversion fixtures cover output conversions; arithmetic/cast,
+predicate, local, masked control-flow, loop cap and missing-return cases exercise
+operand-driven computation followed by checked output conversion. Checked
+overflow/domain, mixed signed/unsigned typing, reductions, fixed strings and ND
+coverage also live in the native portable type/interpreter/artifact unit tests.
+The `audit/` fixtures intentionally exercise different ordinary full-DSL behavior
+and run separately with the final `native` argument; they are not portable gates.
 
 ```sh
 build/tests/portable_dsl_runner tests/portable-dsl/affine.dsl tests/portable-dsl/affine.txt off
 ```
 
-The policy argument is `off` (require interpreter), `on` (require a prepared JIT
-kernel), or `default` (allow the normal best-effort policy). The runner emits its
-JIT status and computed values. An optional final `native` bypasses profile
-membership for full-language regressions; `reject` requires unsupported-feature
-validation without executing source. Neither mode is release conformance.
-It links only native miniexpr, never libpython.
-CTest always runs interpreter cases and adds required-JIT cases when native TCC
-is enabled, including kernels with incomplete return coverage. Missing-return
-fixtures cover all-returning inputs, mixed successful/failing elements, returns
-inside loops, and hybrid vector temporaries. A semantic missing-return error is
-propagated without interpreter retry. Compile-error fixtures must fail at
-compile time; runtime-error fixtures must first compile and then fail at evaluation.
-On non-Windows hosts with a C compiler, CMake generates source variants that
-change only the compiler pragma to `cc` and registers required-JIT CC cases.
-These run even when bundled TCC is disabled. Both compilers must prepare a real
-JIT kernel for the missing-return fixtures, including their successful paths.
-CTest uses a build-local JIT cache and 30-second case timeouts, preventing
-conformance runs from depending on a user's shared cache contents. A fresh-cache
-retry resolved an observed float32 CC stall in the TCC-disabled configuration;
-this isolation is not a claim to have diagnosed or fixed general cache behavior.
-Python-Blosc2 consumes these files from the authoritative checkout
-or the directory selected with `MINIEXPR_PORTABLE_CORPUS`.
+Policies `off`, `on` and `default` are preferences. Draft execution reports
+`jit=0`. The runner links native miniexpr, never libpython. CTest supplies loop
+caps and isolated caches; Python may opt into these fixtures with
+`MINIEXPR_PORTABLE_CORPUS` and `MINIEXPR_PORTABLE_RUNNER`, never sibling inference.
+Local results do not certify other platforms or universal numeric accuracy.

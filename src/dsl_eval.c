@@ -10,6 +10,7 @@
 
 #include "dsl_eval_internal.h"
 #include "dsl_jit_cgen.h"
+#include "dsl_portable_expr.h"
 
 #include "functions.h"
 
@@ -25,12 +26,22 @@ typedef struct {
     int nitems;
     const me_eval_params *params;
     void *output_block;
+    const uint8_t *valid_mask;
+    int group_nitems;
+    bool scalar_output;
+    bool empty_group;
+    uint8_t **initialized;
 } dsl_eval_ctx;
 
 static int dsl_eval_expr_nitems(dsl_eval_ctx *ctx, const me_dsl_compiled_expr *expr,
                                 void *out, int nitems) {
     if (!expr || !expr->expr) {
         return ME_EVAL_ERR_INVALID_ARG;
+    }
+    if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+        return dsl_portable_eval_expr_masked(expr->expr, (const void *const *)ctx->var_buffers,
+                                             ctx->program->vars.count, (const uint8_t *const *)ctx->initialized, nitems, NULL,
+                                             dtype_size(expr->expr->dtype), out);
     }
     const void *vars[ME_MAX_VARS];
     for (int i = 0; i < expr->n_vars; i++) {
@@ -43,6 +54,10 @@ static int dsl_eval_expr_item(dsl_eval_ctx *ctx, const me_dsl_compiled_expr *exp
                               int item, void *out) {
     if (!ctx || !ctx->program || !expr || !expr->expr || !out || item < 0 || item >= ctx->nitems) {
         return ME_EVAL_ERR_INVALID_ARG;
+    }
+    if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+        return dsl_portable_eval_expr(expr->expr, (const void *const *)ctx->var_buffers,
+                                      ctx->program->vars.count, (const uint8_t *const *)ctx->initialized, item, ctx->nitems, NULL, out);
     }
     const void *vars[ME_MAX_VARS];
     for (int i = 0; i < expr->n_vars; i++) {
@@ -181,6 +196,15 @@ static int dsl_eval_expr_masked_copy(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
     if (dst_item_size < item_size) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
+    if (ctx->empty_group) {
+        if (!dsl_compiled_expr_uniform(expr->expr, ctx->program->vars.uniform, ctx->program->vars.count)) return ME_EVAL_SUCCESS;
+        return dsl_portable_eval_expr(expr->expr, (const void *const *)ctx->var_buffers,
+                                      ctx->program->vars.count, (const uint8_t *const *)ctx->initialized, 0, ctx->group_nitems, ctx->valid_mask, dst);
+    }
+    if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+        return dsl_portable_eval_expr_masked(expr->expr, (const void *const *)ctx->var_buffers,
+                                             ctx->program->vars.count, (const uint8_t *const *)ctx->initialized, nitems, mask, dst_item_size, dst);
+    }
     /* me_eval writes one result for a root reduction. DSL destinations are
      * full per-lane buffers, so materialize that scalar at every copied lane.
      * Otherwise masked chain captures can read uninitialized local slots. */
@@ -206,7 +230,7 @@ static int dsl_eval_expr_masked_copy(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
         return rc;
     }
 
-    if (active_only) {
+    if (active_only || ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
         /* Masking the copy after full-vector evaluation is not short-circuit
          * evaluation: skipped callbacks and invalid arithmetic still run.
          * Chain operand captures must evaluate only the active lanes. */
@@ -283,7 +307,16 @@ static int dsl_eval_condition_masked(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
     if (!cond_buf) {
         return ME_EVAL_ERR_OOM;
     }
-    int rc = dsl_eval_expr_nitems(ctx, cond, cond_buf, ctx->nitems);
+    int rc;
+    if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+        memset(cond_buf, 0, (size_t)cond_nitems * cond_size);
+        if (*is_reduction) {
+            rc = dsl_portable_eval_expr(cond->expr, (const void *const *)ctx->var_buffers,
+                                        ctx->program->vars.count, (const uint8_t *const *)ctx->initialized, 0, ctx->nitems, input_mask, cond_buf);
+        }
+        else rc = dsl_eval_expr_masked_copy(ctx, cond, cond_buf, input_mask, ctx->nitems, 0, true);
+    }
+    else rc = dsl_eval_expr_nitems(ctx, cond, cond_buf, ctx->nitems);
     if (rc != ME_EVAL_SUCCESS) {
         free(cond_buf);
         return rc;
@@ -480,6 +513,7 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
         switch (stmt->kind) {
         case ME_DSL_STMT_ASSIGN: {
             int slot = stmt->as.assign.local_slot;
+            if (ctx->empty_group && !dsl_compiled_expr_uniform(stmt->as.assign.value.expr, ctx->program->vars.uniform, ctx->program->vars.count)) break;
             void *out = ctx->local_buffers[slot];
             int rc = dsl_eval_expr_masked_copy(ctx, &stmt->as.assign.value, out,
                                                run_mask, ctx->nitems,
@@ -489,9 +523,22 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
             if (rc != ME_EVAL_SUCCESS) {
                 return rc;
             }
+            if (ctx->initialized) {
+                uint8_t *defined = ctx->initialized[ctx->program->local_var_indices[slot]];
+                for (int j = 0; j < ctx->nitems; j++) if (run_mask[j]) defined[j] = 1;
+            }
             break;
         }
         case ME_DSL_STMT_EXPR: {
+            if (ctx->scalar_output) {
+                size_t size = me_get_itemsize(stmt->as.expr_stmt.expr.expr);
+                void *scratch = malloc((size_t)ctx->nitems * size);
+                if (!scratch) return ME_EVAL_ERR_OOM;
+                int rc = dsl_eval_expr_masked_copy(ctx, &stmt->as.expr_stmt.expr, scratch, run_mask, ctx->nitems, size, true);
+                free(scratch);
+                if (rc) return rc;
+                break;
+            }
             int rc = dsl_eval_expr_masked_copy(ctx, &stmt->as.expr_stmt.expr,
                                                ctx->output_block, run_mask, ctx->nitems,
                                                ctx->program->output_itemsize, false);
@@ -501,7 +548,16 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
             break;
         }
         case ME_DSL_STMT_RETURN: {
-            int rc = dsl_eval_expr_masked_copy(ctx, &stmt->as.return_stmt.expr,
+            int rc;
+            if (ctx->scalar_output) {
+                int lane = 0;
+                while (lane < ctx->nitems && !run_mask[lane]) lane++;
+                rc = dsl_portable_eval_expr(stmt->as.return_stmt.expr.expr,
+                    (const void *const *)ctx->var_buffers, ctx->program->vars.count,
+                    (const uint8_t *const *)ctx->initialized, lane, ctx->group_nitems,
+                    ctx->empty_group ? ctx->valid_mask : run_mask, ctx->output_block);
+            }
+            else rc = dsl_eval_expr_masked_copy(ctx, &stmt->as.return_stmt.expr,
                                                ctx->output_block, run_mask, ctx->nitems,
                                                ctx->program->output_itemsize, false);
             if (rc != ME_EVAL_SUCCESS) {
@@ -580,6 +636,7 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
             break;
         }
         case ME_DSL_STMT_IF: {
+            if (ctx->empty_group) break; /* No lanes participate in control-flow bodies. */
             uint8_t *remaining = malloc((size_t)ctx->nitems);
             if (!remaining) {
                 return ME_EVAL_ERR_OOM;
@@ -631,6 +688,7 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
             break;
         }
         case ME_DSL_STMT_FOR: {
+            if (ctx->empty_group) break;
             int rc = dsl_eval_for_element_loop(ctx, stmt, run_mask, return_mask);
             if (rc != ME_EVAL_SUCCESS) {
                 return rc;
@@ -638,6 +696,7 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
             break;
         }
         case ME_DSL_STMT_WHILE: {
+            if (ctx->empty_group) break;
             int rc = dsl_eval_while_element_loop(ctx, stmt, run_mask, return_mask);
             if (rc != ME_EVAL_SUCCESS) {
                 return rc;
@@ -956,7 +1015,11 @@ static int dsl_eval_for_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_st
 
     while (dsl_mask_any(active_mask, ctx->nitems)) {
         for (int i = 0; i < ctx->nitems; i++) {
+            /* A lane that exhausted its range or broke retains its last local
+             * value. Do not let other lanes' iterations overwrite it. */
+            if (!active_mask[i] && ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) continue;
             loop_buf[i] = active_mask[i] ? iter_vals[i] : 0;
+            if (ctx->initialized && active_mask[i]) ctx->initialized[ctx->program->local_var_indices[slot]][i] = 1;
         }
 
         uint8_t *run_mask = malloc((size_t)ctx->nitems);
@@ -1054,7 +1117,8 @@ static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
         free(return_mask);
         return ME_EVAL_ERR_OOM;
     }
-    memset(run_mask, 1, (size_t)ctx->nitems);
+    if (ctx->valid_mask && !ctx->empty_group) memcpy(run_mask, ctx->valid_mask, (size_t)ctx->nitems);
+    else memset(run_mask, 1, (size_t)ctx->nitems);
 
     int rc = dsl_eval_block_element_loop(ctx, block, run_mask, break_mask, continue_mask, return_mask);
     if (did_break) {
@@ -1066,7 +1130,7 @@ static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
     if (did_return) {
         *did_return = true;
         for (int i = 0; i < ctx->nitems; i++) {
-            if (!return_mask[i]) {
+            if (!return_mask[i] && (!ctx->valid_mask || ctx->empty_group || ctx->valid_mask[i])) {
                 *did_return = false;
                 break;
             }
@@ -1160,20 +1224,25 @@ static void dsl_wasm32_finalize_jit_output(const me_dsl_compiled_program *progra
 }
 #endif
 
-int dsl_eval_program(const me_dsl_compiled_program *program,
+static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
                      const void **vars_block, int n_vars,
                      void *output_block, int nitems,
                      const me_eval_params *params,
                      int ndim, const int64_t *shape,
                      int64_t **idx_buffers,
                      const int64_t *global_linear_idx_buffer,
-                     const int64_t *nd_synth_ctx_buffer) {
+                      const int64_t *nd_synth_ctx_buffer,
+                      const me_dsl_portable_eval_descriptor *descriptor) {
     if (!program || !output_block || nitems < 0) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
     if (n_vars != program->n_inputs) {
         return ME_EVAL_ERR_VAR_MISMATCH;
     }
+    int group_nitems = nitems;
+    bool empty_group = descriptor && program->output_is_scalar &&
+                       (nitems == 0 || (descriptor->valid_mask && !dsl_mask_any(descriptor->valid_mask, nitems)));
+    if (empty_group && nitems == 0) nitems = 1; /* Scalar dependency storage, not a valid input lane. */
 
     bool jit_attempted = false;
     int64_t current_cap = dsl_while_max_iters();
@@ -1181,7 +1250,8 @@ int dsl_eval_program(const me_dsl_compiled_program *program,
     bool jit_cap_matches = !program->jit_ir || !program->jit_ir->has_while ||
         program->jit_ir->while_max_iters == current_cap;
     /* JIT is best-effort for backend failures, not semantic execution errors. */
-    if (jit_cap_matches && !me_eval_jit_disabled(params) &&
+    if (program->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_0 &&
+        jit_cap_matches && !me_eval_jit_disabled(params) &&
         program->jit_kernel_fn &&
         program->jit_nparams >= 0 &&
         program->jit_nparams <= ME_MAX_VARS) {
@@ -1287,8 +1357,8 @@ int dsl_eval_program(const me_dsl_compiled_program *program,
         }
     }
 
-    void **var_buffers = calloc((size_t)program->vars.count, sizeof(*var_buffers));
-    void **local_buffers = calloc((size_t)program->n_locals, sizeof(*local_buffers));
+    void **var_buffers = calloc(program->vars.count ? (size_t)program->vars.count : 1, sizeof(*var_buffers));
+    void **local_buffers = calloc(program->n_locals ? (size_t)program->n_locals : 1, sizeof(*local_buffers));
     if (!var_buffers || !local_buffers) {
         free(var_buffers);
         free(local_buffers);
@@ -1431,7 +1501,8 @@ int dsl_eval_program(const me_dsl_compiled_program *program,
         return reserved_ctx_error ? ME_EVAL_ERR_INVALID_ARG : ME_EVAL_ERR_OOM;
     }
 
-    if (jit_cap_matches && !jit_attempted &&
+    if (program->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_0 &&
+        jit_cap_matches && !jit_attempted &&
         !me_eval_jit_disabled(params) &&
         program->jit_kernel_fn &&
         program->jit_nparams >= 0 &&
@@ -1570,11 +1641,32 @@ int dsl_eval_program(const me_dsl_compiled_program *program,
     ctx.nitems = nitems;
     ctx.params = params;
     ctx.output_block = output_block;
+    ctx.valid_mask = descriptor ? descriptor->valid_mask : NULL;
+    ctx.group_nitems = group_nitems;
+    ctx.scalar_output = descriptor && program->output_is_scalar;
+    ctx.empty_group = empty_group;
+    if (empty_group) ctx.nitems = 1;
+    ctx.initialized = NULL;
+    uint8_t *defined_storage = NULL;
+    int rc = ME_EVAL_SUCCESS;
+    if (program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+        size_t storage_count = program->n_locals ? (size_t)program->n_locals : 1;
+        size_t lane_count = nitems ? (size_t)nitems : 1;
+        ctx.initialized = calloc(program->vars.count ? (size_t)program->vars.count : 1, sizeof(*ctx.initialized));
+        if (storage_count > SIZE_MAX / lane_count) rc = ME_EVAL_ERR_OOM;
+        else defined_storage = calloc(storage_count * lane_count, 1);
+        if (!ctx.initialized || !defined_storage) rc = ME_EVAL_ERR_OOM;
+        if (rc == ME_EVAL_SUCCESS) {
+            for (int i = 0; i < program->n_locals; i++) ctx.initialized[program->local_var_indices[i]] = defined_storage + (size_t)i * lane_count;
+        }
+    }
 
     bool did_break = false;
     bool did_continue = false;
     bool did_return = false;
-    int rc = dsl_eval_block(&ctx, &program->block, &did_break, &did_continue, &did_return);
+    if (rc == ME_EVAL_SUCCESS) rc = dsl_eval_block(&ctx, &program->block, &did_break, &did_continue, &did_return);
+    free(defined_storage);
+    free(ctx.initialized);
 
     for (int i = 0; i < reserved_count; i++) {
         free(reserved_buffers[i]);
@@ -1590,6 +1682,87 @@ int dsl_eval_program(const me_dsl_compiled_program *program,
     if (rc == ME_EVAL_SUCCESS && !did_return) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
+    return rc;
+}
+
+int dsl_eval_program(const me_dsl_compiled_program *program,
+                      const void **vars_block, int n_vars, void *output_block, int nitems,
+                      const me_eval_params *params, int ndim, const int64_t *shape,
+                      int64_t **idx_buffers, const int64_t *global_linear_idx_buffer,
+                      const int64_t *nd_synth_ctx_buffer) {
+    return dsl_eval_program_impl(program, vars_block, n_vars, output_block, nitems, params,
+                                 ndim, shape, idx_buffers, global_linear_idx_buffer, nd_synth_ctx_buffer, NULL);
+}
+
+int dsl_eval_program_portable(const me_dsl_compiled_program *program,
+                               const void **inputs, int ninputs, void *output,
+                               const me_dsl_portable_eval_descriptor *descriptor) {
+    if (!program || program->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_0 || !descriptor ||
+        descriptor->nitems < 0 || ninputs != program->n_inputs || (ninputs && !inputs)) return ME_EVAL_ERR_INVALID_ARG;
+    size_t count = program->output_is_scalar ? 1 : (size_t)descriptor->nitems;
+    size_t itemsize = program->output_itemsize;
+    if (!itemsize || count > SIZE_MAX / itemsize || descriptor->output_capacity < count * itemsize ||
+        (count && !output)) return ME_EVAL_ERR_INVALID_ARG;
+    for (int i = 0; i < descriptor->nitems; i++) {
+        if (descriptor->valid_mask && descriptor->valid_mask[i] > 1) return ME_EVAL_ERR_INVALID_ARG;
+    }
+    int ndim = descriptor->ndim;
+    bool needs_context = program->uses_i_mask || program->uses_n_mask || program->uses_ndim || program->uses_flat_idx;
+    if (ndim < 0 || ndim > ME_DSL_MAX_NDIM || (needs_context && ndim != program->compile_ndims) ||
+        (ndim && (!descriptor->logical_shape || !descriptor->block_origin || !descriptor->block_extent)) ||
+        (!ndim && (needs_context || descriptor->logical_shape || descriptor->block_origin || descriptor->block_extent))) return ME_EVAL_ERR_INVALID_ARG;
+    int64_t *indices[ME_DSL_MAX_NDIM] = {0};
+    int64_t *flat = NULL;
+    int64_t strides[ME_DSL_MAX_NDIM];
+    size_t block_count = 1;
+    int64_t shape_count = 1;
+    for (int d = ndim - 1; d >= 0; d--) {
+        int64_t size = descriptor->logical_shape[d], origin = descriptor->block_origin[d], extent = descriptor->block_extent[d];
+        if (size < 0 || origin < 0 || origin > size || extent < 0 ||
+            (size && shape_count > INT64_MAX / size) ||
+            (extent && block_count > SIZE_MAX / (uint64_t)extent)) return ME_EVAL_ERR_INVALID_ARG;
+        strides[d] = shape_count;
+        shape_count *= size;
+        block_count *= (size_t)extent;
+    }
+    if (ndim && block_count != (size_t)descriptor->nitems) return ME_EVAL_ERR_INVALID_ARG;
+    if (!count) return ME_EVAL_SUCCESS;
+    size_t allocated_lanes = descriptor->nitems ? (size_t)descriptor->nitems : 1;
+    if (allocated_lanes > SIZE_MAX / sizeof(int64_t)) return ME_EVAL_ERR_INVALID_ARG;
+    int rc = ME_EVAL_SUCCESS;
+    for (int d = 0; d < ndim; d++) {
+        if (program->uses_i_mask & (1 << d)) {
+            indices[d] = calloc(allocated_lanes, sizeof(int64_t));
+            if (!indices[d]) rc = ME_EVAL_ERR_OOM;
+        }
+    }
+    if (program->uses_flat_idx) {
+        flat = calloc(allocated_lanes, sizeof(int64_t));
+        if (!flat) rc = ME_EVAL_ERR_OOM;
+    }
+    for (int lane = 0; rc == ME_EVAL_SUCCESS && lane < descriptor->nitems && ndim; lane++) {
+        size_t offset = (size_t)lane;
+        bool valid = !descriptor->valid_mask || descriptor->valid_mask[lane];
+        int64_t linear = 0;
+        for (int d = ndim - 1; d >= 0; d--) {
+            size_t extent = (size_t)descriptor->block_extent[d];
+            size_t relative = offset % extent;
+            offset /= extent;
+            int64_t remaining = descriptor->logical_shape[d] - descriptor->block_origin[d];
+            if (relative >= (uint64_t)remaining) {
+                if (valid) rc = ME_EVAL_ERR_INVALID_ARG;
+                continue;
+            }
+            int64_t coordinate = descriptor->block_origin[d] + (int64_t)relative;
+            if (indices[d]) indices[d][lane] = coordinate;
+            linear += coordinate * strides[d]; /* Validated shape product fits int64. */
+        }
+        if (flat) flat[lane] = linear;
+    }
+    if (rc == ME_EVAL_SUCCESS) rc = dsl_eval_program_impl(program, inputs, ninputs, output, descriptor->nitems, NULL,
+        ndim, descriptor->logical_shape, indices, flat, NULL, descriptor);
+    for (int d = 0; d < ndim; d++) free(indices[d]);
+    free(flat);
     return rc;
 }
 

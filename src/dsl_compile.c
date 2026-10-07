@@ -9,6 +9,9 @@
 **********************************************************************/
 
 #include "dsl_compile_internal.h"
+#include "dsl_portable_expr.h"
+#include "dsl_portable_types.h"
+#include "dsl_portable_fp.h"
 
 #include "dsl_jit_cgen.h"
 #include "functions.h"
@@ -34,8 +37,14 @@ typedef struct {
     bool output_dtype_auto;
     int loop_depth;
     int control_depth;   /* nesting inside if/while/for bodies */
+    int varying_control_depth; /* portable lane-dependent participation */
+    bool varying_loop_flow;
     int in_condition;    /* compiling an if/while condition */
     bool allow_new_locals;
+    bool infer_portable_joins;
+    bool portable_types_changed;
+    bool portable_seen_bindings[ME_MAX_VARS];
+    bool portable_synthetic_expr;
     int *error_pos;
     me_dsl_compiled_expr *output_expr;
     bool has_return;
@@ -47,6 +56,10 @@ typedef struct {
     char *error_reason;
     size_t error_reason_cap;
 } dsl_compile_ctx;
+
+static me_dtype dsl_portable_join(me_dtype a, me_dtype b) {
+    return a == b ? a : dsl_portable_numeric_promote(a, b);
+}
 
 static bool is_function_entry(const me_variable *var) {
     if (!var) {
@@ -404,7 +417,7 @@ static bool dsl_collect_var_indices(const me_expr *expr, int **out_indices, int 
     return true;
 }
 
-static bool dsl_expr_is_uniform(const me_expr *n, const bool *uniform, int nvars) {
+bool dsl_compiled_expr_uniform(const me_expr *n, const bool *uniform, int nvars) {
     if (!n) {
         return true;
     }
@@ -444,7 +457,7 @@ static bool dsl_expr_is_uniform(const me_expr *n, const bool *uniform, int nvars
     case ME_CLOSURE7: {
         int arity = ARITY(n->type);
         for (int i = 0; i < arity; i++) {
-            if (!dsl_expr_is_uniform((const me_expr *)n->parameters[i], uniform, nvars)) {
+            if (!dsl_compiled_expr_uniform((const me_expr *)n->parameters[i], uniform, nvars)) {
                 return false;
             }
         }
@@ -452,6 +465,110 @@ static bool dsl_expr_is_uniform(const me_expr *n, const bool *uniform, int nvars
     }
     default:
         return true;
+    }
+}
+
+static bool dsl_portable_reduced_value(const me_expr *n, const me_dsl_compiled_program *program) {
+    if (is_reduction_node(n)) return true;
+    if (TYPE_MASK(n->type) == ME_VARIABLE && is_synthetic_address(n->bound)) {
+        int index = (int)((const char *)n->bound - synthetic_var_addresses);
+        return index >= 0 && index < program->vars.count && program->portable_reduced_vars[index];
+    }
+    for (int i = 0; i < ARITY(n->type); i++) {
+        if (dsl_portable_reduced_value(n->parameters[i], program)) return true;
+    }
+    return false;
+}
+
+static bool dsl_portable_scalar_value(const me_expr *n, const me_dsl_compiled_program *program) {
+    return dsl_portable_reduced_value(n, program) &&
+           dsl_compiled_expr_uniform(n, program->vars.uniform, program->vars.count);
+}
+
+/* Break/continue in this loop can leave different lanes at different return
+ * sites. Nested loops rejoin locally, so their flow does not split this loop. */
+static bool dsl_portable_split_flow(const me_dsl_compiled_block *block,
+                                  const me_dsl_compiled_program *program, bool varying) {
+    for (int i = 0; i < block->nstmts; i++) {
+        const me_dsl_compiled_stmt *stmt = block->stmts[i];
+        if (stmt->kind == ME_DSL_STMT_BREAK || stmt->kind == ME_DSL_STMT_CONTINUE) {
+            if (varying || (stmt->as.flow.cond.expr &&
+                !dsl_compiled_expr_uniform(stmt->as.flow.cond.expr, program->vars.uniform, program->vars.count))) return true;
+        }
+        else if (stmt->kind == ME_DSL_STMT_IF) {
+            bool split = varying || !dsl_compiled_expr_uniform(stmt->as.if_stmt.cond.expr, program->vars.uniform, program->vars.count);
+            if (dsl_portable_split_flow(&stmt->as.if_stmt.then_block, program, split)) return true;
+            for (int j = 0; j < stmt->as.if_stmt.n_elifs; j++) {
+                const me_dsl_compiled_if_branch *branch = &stmt->as.if_stmt.elif_branches[j];
+                split |= !dsl_compiled_expr_uniform(branch->cond.expr, program->vars.uniform, program->vars.count);
+                if (dsl_portable_split_flow(&branch->block, program, split)) return true;
+            }
+            if (stmt->as.if_stmt.has_else && dsl_portable_split_flow(&stmt->as.if_stmt.else_block, program, split)) return true;
+        }
+    }
+    return false;
+}
+
+/* Validate after static joins converge. A scalar expression is not a scalar
+ * block result if varying control can send lanes to distinct return sites. */
+static bool dsl_portable_coherent_returns(dsl_compile_ctx *ctx,
+                                         const me_dsl_compiled_block *block, bool varying) {
+    const me_dsl_compiled_program *program = ctx->program;
+    for (int i = 0; i < block->nstmts; i++) {
+        const me_dsl_compiled_stmt *stmt = block->stmts[i];
+        if (stmt->kind == ME_DSL_STMT_RETURN && varying) {
+            dsl_set_error_reason(ctx, "ambiguous block-scalar output: return under lane-varying control or loop flow");
+            if (ctx->error_pos) *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+            return false;
+        }
+        if (stmt->kind == ME_DSL_STMT_IF) {
+            bool split = varying || !dsl_compiled_expr_uniform(stmt->as.if_stmt.cond.expr, program->vars.uniform, program->vars.count);
+            if (!dsl_portable_coherent_returns(ctx, &stmt->as.if_stmt.then_block, split)) return false;
+            for (int j = 0; j < stmt->as.if_stmt.n_elifs; j++) {
+                const me_dsl_compiled_if_branch *branch = &stmt->as.if_stmt.elif_branches[j];
+                split |= !dsl_compiled_expr_uniform(branch->cond.expr, program->vars.uniform, program->vars.count);
+                if (!dsl_portable_coherent_returns(ctx, &branch->block, split)) return false;
+            }
+            if (stmt->as.if_stmt.has_else && !dsl_portable_coherent_returns(ctx, &stmt->as.if_stmt.else_block, split)) return false;
+        }
+        else if (stmt->kind == ME_DSL_STMT_WHILE || stmt->kind == ME_DSL_STMT_FOR) {
+            const me_dsl_compiled_block *body;
+            bool split = varying;
+            if (stmt->kind == ME_DSL_STMT_WHILE) {
+                body = &stmt->as.while_loop.body;
+                split |= !dsl_compiled_expr_uniform(stmt->as.while_loop.cond.expr, program->vars.uniform, program->vars.count);
+            }
+            else {
+                body = &stmt->as.for_loop.body;
+                split |= !dsl_compiled_expr_uniform(stmt->as.for_loop.start.expr, program->vars.uniform, program->vars.count) ||
+                         !dsl_compiled_expr_uniform(stmt->as.for_loop.stop.expr, program->vars.uniform, program->vars.count) ||
+                         !dsl_compiled_expr_uniform(stmt->as.for_loop.step.expr, program->vars.uniform, program->vars.count);
+            }
+            split |= dsl_portable_split_flow(body, program, split);
+            if (!dsl_portable_coherent_returns(ctx, body, split)) return false;
+        }
+    }
+    return true;
+}
+
+static void dsl_portable_demote_loop_locals(dsl_compile_ctx *ctx, const me_dsl_compiled_block *block) {
+    for (int i = 0; i < block->nstmts; i++) {
+        const me_dsl_compiled_stmt *stmt = block->stmts[i];
+        if (stmt->kind == ME_DSL_STMT_ASSIGN || stmt->kind == ME_DSL_STMT_FOR) {
+            int slot = stmt->kind == ME_DSL_STMT_ASSIGN ? stmt->as.assign.local_slot : stmt->as.for_loop.loop_var_slot;
+            int index = ctx->program->local_var_indices[slot];
+            if (ctx->program->vars.uniform[index]) {
+                ctx->program->vars.uniform[index] = false;
+                if (ctx->infer_portable_joins) ctx->portable_types_changed = true;
+            }
+        }
+        if (stmt->kind == ME_DSL_STMT_IF) {
+            dsl_portable_demote_loop_locals(ctx, &stmt->as.if_stmt.then_block);
+            for (int j = 0; j < stmt->as.if_stmt.n_elifs; j++) dsl_portable_demote_loop_locals(ctx, &stmt->as.if_stmt.elif_branches[j].block);
+            if (stmt->as.if_stmt.has_else) dsl_portable_demote_loop_locals(ctx, &stmt->as.if_stmt.else_block);
+        }
+        else if (stmt->kind == ME_DSL_STMT_FOR) dsl_portable_demote_loop_locals(ctx, &stmt->as.for_loop.body);
+        else if (stmt->kind == ME_DSL_STMT_WHILE) dsl_portable_demote_loop_locals(ctx, &stmt->as.while_loop.body);
     }
 }
 
@@ -868,6 +985,14 @@ fail:
     return false;
 }
 
+me_dtype dsl_portable_cast_dtype(const me_expr *expr) {
+    if (!expr || !IS_FUNCTION(expr->type) || ARITY(expr->type) != 1) return ME_AUTO;
+    if (expr->function == (const void *)dsl_cast_int_intrinsic) return ME_INT64;
+    if (expr->function == (const void *)dsl_cast_float_intrinsic) return ME_FLOAT64;
+    if (expr->function == (const void *)dsl_cast_bool_intrinsic) return ME_BOOL;
+    return ME_AUTO;
+}
+
 static void dsl_mark_value_casts(me_expr *expr, me_dsl_fp_mode fp_mode, bool preserve_bool_output) {
     if (!expr || (!IS_FUNCTION(expr->type) && !IS_CLOSURE(expr->type))) {
         return;
@@ -992,8 +1117,9 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
     free(all_funcs);
     me_expr *compiled = NULL;
     int local_error = 0;
-    int rc = private_compile_ex(expr_node->text, lookup, lookup_count,
-                                NULL, 0, expr_dtype, &local_error, &compiled);
+    int rc = private_compile_profile_ex(expr_node->text, lookup, lookup_count,
+                                        NULL, 0, expr_dtype, ctx->program->semantic_profile,
+                                        &local_error, &compiled);
     free(lookup);
     if (rc != ME_COMPILE_SUCCESS || !compiled) {
         dsl_set_error_reason(ctx, "failed to compile DSL expression");
@@ -1012,7 +1138,18 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
         return false;
     }
     int *indices = NULL;
-    dsl_mark_value_casts(compiled, ctx->program->fp_mode, expr_dtype == ME_BOOL);
+    if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+        char reason[256];
+        if (!dsl_portable_type_expr(&compiled, expr_dtype, reason, sizeof(reason))) {
+            dsl_set_error_reason(ctx, reason);
+            if (ctx->error_pos) *ctx->error_pos = dsl_offset_from_linecol(ctx->source, expr_node->line, expr_node->column);
+            me_free(compiled);
+            return false;
+        }
+    }
+    else {
+        dsl_mark_value_casts(compiled, ctx->program->fp_mode, expr_dtype == ME_BOOL);
+    }
     int count = 0;
     if (!dsl_collect_var_indices(compiled, &indices, &count)) {
         me_free(compiled);
@@ -1024,7 +1161,8 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
      * surrounding mask is per-element).  Reject it rather than mislead.
      * Conditions are exempt: any()/all() collapsing to a scalar is the
      * documented idiom there. */
-    if (ctx->control_depth > 0 && ctx->in_condition == 0 && contains_reduction(compiled)) {
+    if (ctx->control_depth > 0 && ctx->in_condition == 0 &&
+        !ctx->portable_synthetic_expr && contains_reduction(compiled)) {
         dsl_set_error_reason(ctx,
             "reductions (sum/mean/prod/min/max/any/all) are not supported inside "
             "if/for/while bodies; compute the reduction outside the control flow");
@@ -2032,6 +2170,8 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
 
         switch (stmt->kind) {
         case ME_DSL_STMT_ASSIGN: {
+            ctx->portable_synthetic_expr = ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 &&
+                                           stmt->as.assign.synthetic;
             const char *name = stmt->as.assign.name;
             if (!name) {
                 dsl_compiled_stmt_free(compiled);
@@ -2057,7 +2197,8 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             bool rhs_compiled = false;
 
             if (var_index >= 0 && var_index < ctx->program->vars.count) {
-                me_dtype expr_dtype = ctx->program->vars.dtypes[var_index];
+                me_dtype expr_dtype = ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 ?
+                                      ME_AUTO : ctx->program->vars.dtypes[var_index];
                 if (!dsl_compile_expr(ctx, stmt->as.assign.value, expr_dtype, &compiled->as.assign.value)) {
                     dsl_compiled_stmt_free(compiled);
                     return false;
@@ -2065,7 +2206,8 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 assigned_dtype = me_get_dtype(compiled->as.assign.value.expr);
                 rhs_compiled = true;
             }
-            else if (!ctx->output_dtype_auto && dsl_dtype_is_integer(ctx->output_dtype)) {
+            else if (ctx->program->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_0 &&
+                     !ctx->output_dtype_auto && dsl_dtype_is_integer(ctx->output_dtype)) {
                 me_dsl_compiled_expr probe_expr;
                 memset(&probe_expr, 0, sizeof(probe_expr));
                 int saved_error = 0;
@@ -2091,7 +2233,8 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             if (!rhs_compiled) {
                 /* A Boolean result does not make intermediate numeric operands
                  * Boolean. Infer new locals before casting only the return. */
-                me_dtype expr_dtype = (stmt->as.assign.synthetic || ctx->output_dtype_auto ||
+                me_dtype expr_dtype = (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 ||
+                                      stmt->as.assign.synthetic || ctx->output_dtype_auto ||
                                       ctx->output_dtype == ME_BOOL)
                                       ? ME_AUTO : ctx->output_dtype;
                 if (!dsl_compile_expr(ctx, stmt->as.assign.value, expr_dtype, &compiled->as.assign.value)) {
@@ -2101,9 +2244,11 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 assigned_dtype = me_get_dtype(compiled->as.assign.value.expr);
             }
 
-            bool is_uniform = dsl_expr_is_uniform(compiled->as.assign.value.expr,
-                                                  ctx->program->vars.uniform,
-                                                  ctx->program->vars.count);
+            bool is_uniform = dsl_compiled_expr_uniform(compiled->as.assign.value.expr,
+                                                       ctx->program->vars.uniform,
+                                                       ctx->program->vars.count);
+            if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 &&
+                ctx->varying_control_depth) is_uniform = false;
             /* Guarded chain temporaries are per-lane values, even if an RHS
              * is constant. Inactive lane zero may never have been assigned. */
             if (stmt->as.assign.synthetic && !contains_reduction(compiled->as.assign.value.expr)) {
@@ -2142,33 +2287,72 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
+                if (ctx->infer_portable_joins) ctx->portable_types_changed = true;
             }
             else if (is_string_dtype(assigned_dtype) &&
+                     ctx->program->vars.dtypes[var_index] == assigned_dtype &&
                      ctx->program->vars.itemsizes &&
                      me_get_itemsize(compiled->as.assign.value.expr) >
                          ctx->program->vars.itemsizes[var_index]) {
-                /* Reassigning a string local to a wider value would invalidate
-                 * the width every earlier statement was compiled against.
-                 * Resolving it needs a fixed-point pass over the block; until
-                 * then, say so rather than truncate silently. */
-                dsl_set_error_reason(ctx,
-                    "reassigning a string variable to a wider value is not supported yet; "
-                    "use a separate variable for the longer result");
-                if (ctx->error_pos) {
-                    *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                if (ctx->infer_portable_joins) {
+                    ctx->program->vars.itemsizes[var_index] = me_get_itemsize(compiled->as.assign.value.expr);
+                    ctx->portable_types_changed = true;
                 }
-                dsl_compiled_stmt_free(compiled);
-                return false;
+                else {
+                    /* Full DSL retains its single-pass width restriction;
+                     * portable discovery already joined widths before execution. */
+                    dsl_set_error_reason(ctx,
+                        "reassigning a string variable to a wider value is not supported yet; "
+                        "use a separate variable for the longer result");
+                    if (ctx->error_pos) {
+                        *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                    }
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
             }
             else if (ctx->program->vars.dtypes[var_index] != assigned_dtype) {
-                if (ctx->error_pos) {
-                    *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+                    me_dtype previous = ctx->program->vars.dtypes[var_index];
+                    me_dtype joined = dsl_portable_join(previous, assigned_dtype);
+                    if (joined != ME_AUTO && ctx->infer_portable_joins) {
+                        ctx->program->vars.dtypes[var_index] = joined;
+                        ctx->portable_types_changed |= joined != previous;
+                    }
+                    else if (joined == previous && !ctx->infer_portable_joins &&
+                             dsl_portable_convert_expr(&compiled->as.assign.value.expr, previous)) {
+                        /* Convert storage only after evaluating the RHS in its
+                         * own operand dtype; the stable local has one type. */
+                    }
+                    else {
+                        dsl_set_error_reason(ctx, "no supported static numeric local type join");
+                        if (ctx->error_pos) *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                        dsl_compiled_stmt_free(compiled);
+                        return false;
+                    }
                 }
-                dsl_compiled_stmt_free(compiled);
-                return false;
+                else {
+                    if (ctx->error_pos) {
+                        *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                    }
+                    dsl_compiled_stmt_free(compiled);
+                    return false;
+                }
             }
             else {
-                ctx->program->vars.uniform[var_index] = is_uniform;
+                if (ctx->program->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_0) ctx->program->vars.uniform[var_index] = is_uniform;
+            }
+
+            if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+                if (ctx->program->vars.uniform[var_index] && !is_uniform) {
+                    ctx->program->vars.uniform[var_index] = false;
+                    if (ctx->infer_portable_joins) ctx->portable_types_changed = true;
+                }
+                bool reduced = dsl_portable_reduced_value(compiled->as.assign.value.expr, ctx->program);
+                if (reduced && !ctx->program->portable_reduced_vars[var_index]) {
+                    ctx->program->portable_reduced_vars[var_index] = true;
+                    if (ctx->infer_portable_joins) ctx->portable_types_changed = true;
+                }
             }
 
             if (!dsl_program_add_local(ctx->program, var_index)) {
@@ -2176,6 +2360,8 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 return false;
             }
             compiled->as.assign.local_slot = ctx->program->local_slots[var_index];
+            if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) ctx->portable_seen_bindings[var_index] = true;
+            ctx->portable_synthetic_expr = false;
             break;
         }
         case ME_DSL_STMT_EXPR: {
@@ -2187,7 +2373,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             break;
         }
         case ME_DSL_STMT_RETURN: {
-            me_dtype expr_dtype = ctx->output_dtype_auto ? ME_AUTO : ctx->output_dtype;
+            me_dtype expr_dtype = ctx->infer_portable_joins || ctx->output_dtype_auto ? ME_AUTO : ctx->output_dtype;
             if (!dsl_compile_expr(ctx, stmt->as.return_stmt.expr, expr_dtype, &compiled->as.return_stmt.expr)) {
                 dsl_compiled_stmt_free(compiled);
                 return false;
@@ -2203,15 +2389,37 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 ctx->output_expr = &compiled->as.return_stmt.expr;
             }
             else if (ctx->return_dtype != return_dtype) {
+                if (ctx->infer_portable_joins) {
+                    me_dtype joined = dsl_portable_join(ctx->return_dtype, return_dtype);
+                    if (joined != ME_AUTO) {
+                        ctx->return_dtype = joined;
+                        break;
+                    }
+                    dsl_set_error_reason(ctx, "no supported static numeric return type join");
+                }
                 if (ctx->error_pos) {
                     *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
                 }
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
+            else if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 &&
+                     dsl_portable_scalar_value(ctx->output_expr->expr, ctx->program) !=
+                     dsl_portable_scalar_value(compiled->as.return_stmt.expr.expr, ctx->program)) {
+                dsl_set_error_reason(ctx, "portable return paths have inconsistent result cardinality");
+                if (ctx->error_pos) *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
             break;
         }
         case ME_DSL_STMT_PRINT: {
+            if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+                dsl_set_error_reason(ctx, "print is not allowed in portable 1.0");
+                if (ctx->error_pos) *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
             const char *call = stmt->as.print_stmt.call ? stmt->as.print_stmt.call->text : NULL;
             char **args = NULL;
             int nargs = 0;
@@ -2359,7 +2567,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                     free(args);
                     return false;
                 }
-                if (!dsl_expr_is_uniform(compiled->as.print_stmt.args[i].expr,
+                if (!dsl_compiled_expr_uniform(compiled->as.print_stmt.args[i].expr,
                                          ctx->program->vars.uniform,
                                          ctx->program->vars.count)) {
                     if (ctx->error_pos) {
@@ -2385,6 +2593,10 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 return false;
             }
 
+            bool varying = ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 &&
+                           !dsl_compiled_expr_uniform(compiled->as.if_stmt.cond.expr,
+                                                      ctx->program->vars.uniform, ctx->program->vars.count);
+            ctx->varying_control_depth += varying;
             ctx->control_depth++;
             if (!dsl_compile_block(ctx, &stmt->as.if_stmt.then_block,
                                    &compiled->as.if_stmt.then_block)) {
@@ -2411,6 +2623,11 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
+                if (!varying && ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 &&
+                    !dsl_compiled_expr_uniform(out_branch->cond.expr, ctx->program->vars.uniform, ctx->program->vars.count)) {
+                    varying = true;
+                    ctx->varying_control_depth++;
+                }
                 ctx->control_depth++;
                 if (!dsl_compile_block(ctx, &elif_branch->block, &out_branch->block)) {
                     ctx->control_depth--;
@@ -2431,6 +2648,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 ctx->control_depth--;
                 compiled->as.if_stmt.has_else = true;
             }
+            ctx->varying_control_depth -= varying;
             break;
         }
         case ME_DSL_STMT_WHILE: {
@@ -2439,6 +2657,12 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
+            bool varying = ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 &&
+                           !dsl_compiled_expr_uniform(compiled->as.while_loop.cond.expr,
+                                                      ctx->program->vars.uniform, ctx->program->vars.count);
+            ctx->varying_control_depth += varying;
+            bool enclosing_flow = ctx->varying_loop_flow;
+            ctx->varying_loop_flow = false;
             ctx->loop_depth++;
             ctx->control_depth++;
             if (!dsl_compile_block(ctx, &stmt->as.while_loop.body, &compiled->as.while_loop.body)) {
@@ -2449,6 +2673,9 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             }
             ctx->loop_depth--;
             ctx->control_depth--;
+            ctx->varying_control_depth -= varying;
+            if (ctx->varying_loop_flow) dsl_portable_demote_loop_locals(ctx, &compiled->as.while_loop.body);
+            ctx->varying_loop_flow |= enclosing_flow;
             break;
         }
         case ME_DSL_STMT_FOR: {
@@ -2468,14 +2695,21 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 return false;
             }
             int var_index = dsl_var_table_find(&ctx->program->vars, var);
-            if (var_index >= 0) {
+            bool reusable = ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 &&
+                            var_index >= ctx->program->n_inputs && var_index >= 0 &&
+                            !ctx->portable_seen_bindings[var_index] &&
+                            ctx->program->vars.dtypes[var_index] == ME_INT64;
+            if (var_index >= 0 && !reusable) {
                 if (ctx->error_pos) {
                     *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
                 }
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
-            var_index = dsl_var_table_add_with_uniform(&ctx->program->vars, var, ME_INT64, 0, true);
+            if (var_index < 0) {
+                var_index = dsl_var_table_add_with_uniform(&ctx->program->vars, var, ME_INT64, 0, true);
+                if (ctx->infer_portable_joins) ctx->portable_types_changed = true;
+            }
             if (var_index < 0) {
                 dsl_compiled_stmt_free(compiled);
                 return false;
@@ -2485,11 +2719,31 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 return false;
             }
             compiled->as.for_loop.loop_var_slot = ctx->program->local_slots[var_index];
+            if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) ctx->portable_seen_bindings[var_index] = true;
 
             if (!dsl_compile_for_range_args(ctx, stmt, compiled)) {
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
+            if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 &&
+                (!dsl_portable_convert_expr(&compiled->as.for_loop.start.expr, ME_INT64) ||
+                 !dsl_portable_convert_expr(&compiled->as.for_loop.stop.expr, ME_INT64) ||
+                 !dsl_portable_convert_expr(&compiled->as.for_loop.step.expr, ME_INT64))) {
+                dsl_set_error_reason(ctx, "range arguments require checked int64 conversion");
+                dsl_compiled_stmt_free(compiled);
+                return false;
+            }
+            bool varying = ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 &&
+                           (!dsl_compiled_expr_uniform(compiled->as.for_loop.start.expr, ctx->program->vars.uniform, ctx->program->vars.count) ||
+                            !dsl_compiled_expr_uniform(compiled->as.for_loop.stop.expr, ctx->program->vars.uniform, ctx->program->vars.count) ||
+                            !dsl_compiled_expr_uniform(compiled->as.for_loop.step.expr, ctx->program->vars.uniform, ctx->program->vars.count));
+            if (varying && ctx->program->vars.uniform[var_index]) {
+                ctx->program->vars.uniform[var_index] = false;
+                if (ctx->infer_portable_joins) ctx->portable_types_changed = true;
+            }
+            ctx->varying_control_depth += varying;
+            bool enclosing_flow = ctx->varying_loop_flow;
+            ctx->varying_loop_flow = false;
             ctx->loop_depth++;
             ctx->control_depth++;
             if (!dsl_compile_block(ctx, &stmt->as.for_loop.body, &compiled->as.for_loop.body)) {
@@ -2500,6 +2754,9 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             }
             ctx->loop_depth--;
             ctx->control_depth--;
+            ctx->varying_control_depth -= varying;
+            if (ctx->varying_loop_flow) dsl_portable_demote_loop_locals(ctx, &compiled->as.for_loop.body);
+            ctx->varying_loop_flow |= enclosing_flow;
             break;
         }
         case ME_DSL_STMT_BREAK:
@@ -2520,6 +2777,10 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             else {
                 memset(&compiled->as.flow.cond, 0, sizeof(compiled->as.flow.cond));
             }
+            if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 &&
+                (ctx->varying_control_depth ||
+                 (compiled->as.flow.cond.expr && !dsl_compiled_expr_uniform(compiled->as.flow.cond.expr,
+                     ctx->program->vars.uniform, ctx->program->vars.count)))) ctx->varying_loop_flow = true;
             break;
         }
         }
@@ -2540,8 +2801,19 @@ me_dsl_compiled_program *dsl_compile_program(const char *source,
                                              int jit_mode,
                                              int *error_pos,
                                              bool *is_dsl,
-                                             char *error_reason,
-                                             size_t error_reason_cap) {
+                                              char *error_reason,
+                                              size_t error_reason_cap) {
+    return dsl_compile_program_profile(source, variables, var_count, dtype, compile_ndims,
+                                        jit_mode, ME_DSL_PROFILE_FULL, error_pos, is_dsl,
+                                        error_reason, error_reason_cap);
+}
+
+static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *source,
+                                                     const me_variable *variables, int var_count,
+                                                     me_dtype dtype, int compile_ndims, int jit_mode,
+                                                     me_dsl_semantic_profile profile,
+                                                     int *error_pos, bool *is_dsl,
+                                                     char *error_reason, size_t error_reason_cap) {
     me_dsl_error parse_error;
     if (error_reason && error_reason_cap > 0) {
         error_reason[0] = '\0';
@@ -2549,7 +2821,7 @@ me_dsl_compiled_program *dsl_compile_program(const char *source,
     if (is_dsl) {
         *is_dsl = false;
     }
-    me_dsl_program *parsed = me_dsl_parse(source, &parse_error);
+    me_dsl_program *parsed = me_dsl_parse_profile(source, profile, &parse_error);
     if (!parsed) {
         if (error_reason && error_reason_cap > 0) {
             snprintf(error_reason, error_reason_cap, "dsl parse error: %s",
@@ -2580,6 +2852,21 @@ me_dsl_compiled_program *dsl_compile_program(const char *source,
             *error_pos = -1;
         }
         return NULL;
+    }
+    program->semantic_profile = profile;
+    if (profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+        /* Portable semantics cannot inherit a full-DSL host FP default. Explicit
+         * non-strict source pragmas still reject, rather than being overridden. */
+        program->fp_mode = parsed->fp_mode;
+        if (program->fp_mode != ME_DSL_FP_STRICT) {
+            if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap,
+                                                          "portable 1.0 requires strict floating point");
+            dsl_compiled_program_free(program);
+            me_dsl_program_free(parsed);
+            return NULL;
+        }
+        /* Optional acceleration falls back before building any uncertified IR. */
+        jit_mode = ME_JIT_OFF;
     }
     if (jit_mode == ME_JIT_ON || jit_mode == ME_JIT_OFF) {
         program->jit_request_mode = (me_jit_mode)jit_mode;
@@ -2621,6 +2908,15 @@ me_dsl_compiled_program *dsl_compile_program(const char *source,
             return NULL;
         }
         if (is_function_entry(entry)) {
+            if (profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+                if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap,
+                                                              "external callbacks are not allowed in portable 1.0");
+                if (error_pos) *error_pos = -1;
+                free(funcs);
+                dsl_compiled_program_free(program);
+                me_dsl_program_free(parsed);
+                return NULL;
+            }
             size_t name_len = strlen(name);
             if (dsl_is_reserved_name(name) || me_is_builtin_function_name(name, name_len)) {
                 if (error_reason && error_reason_cap > 0) {
@@ -2762,7 +3058,8 @@ me_dsl_compiled_program *dsl_compile_program(const char *source,
         if (is_string_dtype(entry->dtype)) {
             itemsize = entry->itemsize;
         }
-        int idx = dsl_var_table_add_with_uniform(&program->vars, name, vtype, itemsize, false);
+        int idx = dsl_var_table_add_with_uniform(&program->vars, name, vtype, itemsize,
+            profile == ME_DSL_PROFILE_PORTABLE_1_0 && (entry->type & ME_DSL_UNIFORM_INPUT));
         if (idx < 0) {
             if (error_reason && error_reason_cap > 0) {
                 snprintf(error_reason, error_reason_cap,
@@ -2839,6 +3136,18 @@ me_dsl_compiled_program *dsl_compile_program(const char *source,
     program->uses_n_mask = uses_n_mask;
     program->uses_ndim = uses_ndim;
     program->uses_flat_idx = uses_flat_idx;
+    if (profile == ME_DSL_PROFILE_PORTABLE_1_0 &&
+        (uses_i_mask || uses_n_mask || uses_ndim || uses_flat_idx) &&
+        (compile_ndims <= 0 || compile_ndims > ME_DSL_MAX_NDIM ||
+         ((unsigned)(uses_i_mask | uses_n_mask) >> compile_ndims))) {
+        if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap,
+                                                       "portable ND context descriptors require a covering logical rank");
+        if (error_pos) *error_pos = -1;
+        free(funcs);
+        dsl_compiled_program_free(program);
+        me_dsl_program_free(parsed);
+        return NULL;
+    }
 
     for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
         if (uses_i_mask & (1 << d)) {
@@ -2933,6 +3242,49 @@ me_dsl_compiled_program *dsl_compile_program(const char *source,
     ctx.error_reason = error_reason;
     ctx.error_reason_cap = error_reason_cap;
 
+    if (profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+        /* Discovery trees are never evaluated. Each widening causes a rebuild,
+         * so no earlier variable/conversion node keeps an obsolete local dtype.
+         * The numeric lattice is finite; cap iterations by its size and vars. */
+        bool stable = false;
+        for (int pass = 0; pass < 12 * ME_MAX_VARS; pass++) {
+            ctx.infer_portable_joins = true;
+            ctx.portable_types_changed = false;
+            memset(ctx.portable_seen_bindings, 0, sizeof(ctx.portable_seen_bindings));
+            ctx.has_return = false;
+            ctx.output_expr = NULL;
+            ctx.return_dtype = ME_AUTO;
+            if (!dsl_compile_block(&ctx, &parsed->block, &program->block)) {
+                free(funcs);
+                dsl_compiled_program_free(program);
+                me_dsl_program_free(parsed);
+                return NULL;
+            }
+            stable = !ctx.portable_types_changed;
+            me_dtype inferred_output = ctx.return_dtype;
+            dsl_compiled_block_free(&program->block);
+            ctx.output_expr = NULL;
+            ctx.has_return = false;
+            ctx.return_dtype = ME_AUTO;
+            if (stable) {
+                if (dtype == ME_AUTO && inferred_output != ME_AUTO) {
+                    ctx.output_dtype = inferred_output;
+                    ctx.output_dtype_auto = false;
+                }
+                break;
+            }
+        }
+        if (!stable) {
+            dsl_set_error_reason(&ctx, "portable local type inference did not converge");
+            free(funcs);
+            dsl_compiled_program_free(program);
+            me_dsl_program_free(parsed);
+            return NULL;
+        }
+        ctx.infer_portable_joins = false;
+        memset(ctx.portable_seen_bindings, 0, sizeof(ctx.portable_seen_bindings));
+    }
+
     if (!dsl_compile_block(&ctx, &parsed->block, &program->block)) {
         if (error_reason && error_reason_cap > 0 && error_reason[0] == '\0') {
             snprintf(error_reason, error_reason_cap, "failed to compile DSL statement block");
@@ -2961,6 +3313,7 @@ me_dsl_compiled_program *dsl_compile_program(const char *source,
     /* A string-valued kernel needs its width bound published too, or callers
      * cannot size the output container. */
     program->output_itemsize = 0;
+    if (profile == ME_DSL_PROFILE_PORTABLE_1_0 && !is_string_dtype(program->output_dtype)) program->output_itemsize = dtype_size(program->output_dtype);
     if (is_string_dtype(ctx.return_dtype)) {
         /* The widest branch wins: narrower returns are NUL-padded on the way out. */
         program->output_itemsize = ctx.return_itemsize;
@@ -2968,10 +3321,44 @@ me_dsl_compiled_program *dsl_compile_program(const char *source,
     program->guaranteed_return = dsl_compiled_block_guarantees_return(&program->block);
     program->output_is_scalar = contains_reduction(ctx.output_expr->expr) &&
                                 output_is_scalar(ctx.output_expr->expr);
-    dsl_try_build_jit_ir(&ctx, parsed, program, jit_mode != ME_JIT_OFF);
+    if (profile == ME_DSL_PROFILE_PORTABLE_1_0) program->output_is_scalar = dsl_portable_scalar_value(ctx.output_expr->expr, program);
+    if (profile == ME_DSL_PROFILE_PORTABLE_1_0 && program->output_is_scalar &&
+        !dsl_portable_coherent_returns(&ctx, &program->block, false)) {
+        me_dsl_program_free(parsed);
+        free(funcs);
+        dsl_compiled_program_free(program);
+        return NULL;
+    }
+    if (profile != ME_DSL_PROFILE_PORTABLE_1_0) {
+        dsl_try_build_jit_ir(&ctx, parsed, program, jit_mode != ME_JIT_OFF);
+    }
 
     me_dsl_program_free(parsed);
     free(funcs);
 
+    return program;
+}
+
+me_dsl_compiled_program *dsl_compile_program_profile(const char *source,
+                                                     const me_variable *variables, int var_count,
+                                                     me_dtype dtype, int compile_ndims, int jit_mode,
+                                                     me_dsl_semantic_profile profile,
+                                                     int *error_pos, bool *is_dsl,
+                                                     char *error_reason, size_t error_reason_cap) {
+    fenv_t saved;
+    bool strict = profile == ME_DSL_PROFILE_PORTABLE_1_0;
+    if (strict && !dsl_portable_fp_begin(&saved)) {
+        if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap, "cannot establish portable nearest rounding");
+        if (error_pos) *error_pos = -1;
+        if (is_dsl) *is_dsl = true;
+        return NULL;
+    }
+    me_dsl_compiled_program *program = dsl_compile_program_profile_impl(source, variables, var_count,
+        dtype, compile_ndims, jit_mode, profile, error_pos, is_dsl, error_reason, error_reason_cap);
+    if (strict && !dsl_portable_fp_end(&saved)) {
+        dsl_compiled_program_free(program);
+        if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap, "cannot restore caller floating environment");
+        return NULL;
+    }
     return program;
 }

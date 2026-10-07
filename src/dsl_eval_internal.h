@@ -17,6 +17,21 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+typedef struct {
+    int nitems;
+    const uint8_t *valid_mask; /* NULL: all lanes valid; otherwise 0/1 slots. */
+    size_t output_capacity;   /* Bytes, one item for a block-scalar result. */
+    int ndim;
+    const int64_t *logical_shape;
+    const int64_t *block_origin;
+    const int64_t *block_extent;
+} me_dsl_portable_eval_descriptor;
+
+/* Internal capacity-aware 1.0 evaluation; legacy nitems-output ABI is unchanged. */
+int dsl_eval_program_portable(const me_dsl_compiled_program *program,
+                               const void **inputs, int ninputs, void *output,
+                               const me_dsl_portable_eval_descriptor *descriptor);
+
 #ifndef ME_DSL_JIT_SYNTH_ND_CTX_V2_VERSION
 #define ME_DSL_JIT_SYNTH_ND_CTX_V2_VERSION 2
 #endif

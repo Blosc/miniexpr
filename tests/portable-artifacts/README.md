@@ -1,8 +1,8 @@
 # Portable artifact fixtures
 
-These hand-authored candidate schema 0.1 fixtures are owned by miniexpr and need
+These hand-authored draft schema 1.0 fixtures are owned by miniexpr and need
 no Python source/module, frontend rewriting, or Python interpreter. The normative
-candidate format is [artifact-0.1.md](../../doc/dsl-spec/artifact-0.1.md).
+draft format is [artifact-1.0.md](../../doc/dsl-spec/artifact-1.0.md).
 
 Enable the separately linked JSON adapter:
 
@@ -14,8 +14,8 @@ build-artifacts/tests/portable_artifact_runner tests/portable-artifacts/affine.j
 ```
 
 The demonstration runner supplies float64 input `[0, 1, 2, 3]`, verifies output
-`[-1, 1, 3, 5]`, and reports JIT preparation. `on` requires an actual prepared
-backend in the runner, unlike the adapter's normal best-effort JIT preference.
+`[-1, 1, 3, 5]`, and reports interpreter execution. `on` requests optional JIT,
+but draft 1.0 still uses the typed interpreter.
 Tests generate a CC-preference variant without changing the source computation.
 
 `test_dsl_artifact.c` covers scalar widths/boundaries, non-finite floats, signed

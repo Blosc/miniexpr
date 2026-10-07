@@ -236,7 +236,8 @@ int me_compile_nd_jit(const char *expression, const me_variable *variables,
 const char *me_get_last_error_message(void);
 
 /* Experimental portable kernel profile, independent of package/JIT versions. */
-#define ME_PORTABLE_DSL_VERSION "0.1"
+#define ME_PORTABLE_DSL_VERSION "1.0"
+#define ME_PORTABLE_DSL_VALIDATION_DESCRIPTOR_VERSION 1
 
 typedef enum {
     ME_PORTABLE_SUCCESS = 0,
@@ -254,14 +255,39 @@ typedef struct {
 } me_portable_error;
 
 /* Validate raw native DSL and an explicit signature without executing a kernel
- * or invoking a JIT compiler. Inputs must be plain, explicitly typed variables
- * with NULL address/context and itemsize 0; order need not match source order.
+ * or invoking a JIT compiler. Inputs are plain, explicitly typed variables
+ * with NULL address/context; order need not match source order.
  * This checks draft profile membership and native compilation, not runtime
  * input constraints, backend availability, or a sandbox/trust guarantee.
- * error may be NULL. See doc/dsl-spec/0.1.md for admitted features. */
+ * error may be NULL. Version 1.0 dispatch uses the extended defaults below.
+ * See doc/dsl-spec/1.0.md for admitted features. */
 me_portable_status me_validate_portable_dsl(const char *source, const char *version,
     const me_variable *inputs, int ninputs, me_dtype output_dtype,
     me_portable_error *error);
+
+typedef enum {
+    ME_PORTABLE_CARDINALITY_INFER = 0,
+    ME_PORTABLE_ELEMENTWISE = 1,
+    ME_PORTABLE_BLOCK_SCALAR = 2
+} me_portable_cardinality;
+
+typedef struct {
+    size_t struct_size;
+    unsigned version;
+    size_t output_itemsize; /* Exact positive byte width for strings; numeric 0 or dtype width. */
+    int ndim;              /* Logical rank, required when source uses reserved ND symbols. */
+    me_portable_cardinality cardinality; /* INFER checks membership without asserting a return contract. */
+} me_portable_validation_descriptor;
+
+/* Core-only typed source validation: no artifact/JSON dependency, evaluation or
+ * JIT. Version 1.0 inputs are plain variables; string itemsize is a positive byte
+ * width (Unicode multiples of four), numeric itemsize may be zero or dtype width.
+ * No input buffers/callbacks are accepted. A NULL descriptor means rank zero,
+ * inferred cardinality and numeric output width; string output requires a descriptor.
+ * The original entry point also dispatches numeric, rank-zero 1.0 with this default. */
+me_portable_status me_validate_portable_dsl_ex(const char *source, const char *version,
+    const me_variable *inputs, int ninputs, me_dtype output_dtype,
+    const me_portable_validation_descriptor *descriptor, me_portable_error *error);
 
 /* Status codes for me_compile(). */
 typedef enum {

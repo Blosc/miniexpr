@@ -219,6 +219,7 @@ static bool dsl_jit_pos_cache_store_program(me_dsl_compiled_program *program, ui
 }
 
 void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
+    if (program && program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) return;
     if (!program || !program->jit_ir || !program->jit_c_source) {
         return;
     }

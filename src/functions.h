@@ -12,6 +12,7 @@ Blosc - Blocked Shuffling and Compression Library
 #define MINIEXPR_FUNCTIONS_H
 
 #include "miniexpr.h"
+#include "dsl_semantic_profile.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -39,6 +40,9 @@ typedef struct state {
 
     const me_variable* lookup;
     int lookup_len;
+    me_dsl_semantic_profile semantic_profile;
+    uint64_t integer_magnitude;
+    float literal_f32;
 } state;
 
 /* Internal definition of me_expr (opaque to users). */
@@ -63,6 +67,8 @@ struct me_expr {
     size_t itemsize;
     size_t str_len;
     unsigned int flags;
+    uint64_t integer_magnitude;
+    float literal_f32;
     void* parameters[1];
 };
 
@@ -83,7 +89,11 @@ enum {
     ME_EXPR_FLAG_DSL_BOOL_CAST = 1u << 6,
     ME_EXPR_FLAG_DSL_STRICT_F32_MATH = 1u << 7,
     ME_EXPR_FLAG_DSL_FLOAT_BOOL_ARITH = 1u << 8,
-    ME_EXPR_FLAG_DSL_BOOL_NUMERIC_ARITH = 1u << 9
+    ME_EXPR_FLAG_DSL_BOOL_NUMERIC_ARITH = 1u << 9,
+    ME_EXPR_FLAG_PORTABLE_1 = 1u << 10,
+    ME_EXPR_FLAG_WEAK_LITERAL = 1u << 11,
+    ME_EXPR_FLAG_INTEGER_LITERAL = 1u << 12,
+    ME_EXPR_FLAG_NEGATIVE_LITERAL = 1u << 13
 };
 
 /* Check if a pointer is a synthetic address (used internally for chunked evaluation).
@@ -129,6 +139,8 @@ bool is_comparison_node(const me_expr* n);
 const char* me_comparison_operator(const me_expr* n);
 /* Internal operator spelling for typed DSL arithmetic lowering, NULL otherwise. */
 const char* me_arithmetic_operator(const me_expr* n);
+const char* me_portable_operator(const me_expr* n);
+const char* me_portable_math_name(const me_expr* n);
 bool is_float_math_function(const void* func);
 size_t dtype_size(me_dtype dtype);
 bool has_complex_input_types(const me_expr* n);
@@ -137,6 +149,9 @@ me_dtype reduction_output_dtype(me_dtype dt, const void* func);
 double min_reduce(double x);
 double max_reduce(double x);
 bool validate_string_usage(const me_expr* n);
+bool me_portable_string_operation(const me_expr *n);
+bool me_portable_string_validate(me_expr *n);
+bool me_portable_string_execute(const me_expr *n, const void *const *values, void *output);
 bool me_is_builtin_function_name(const char* name, size_t len);
 
 typedef enum {

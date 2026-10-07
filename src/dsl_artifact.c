@@ -4,6 +4,8 @@
 **********************************************************************/
 #include "miniexpr_artifact.h"
 #include "dsl_parser.h"
+#include "dsl_eval_internal.h"
+#include "functions.h"
 #include "yyjson.h"
 
 #include <ctype.h>
@@ -13,7 +15,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define ARTIFACT_TILE 256
 #define ARTIFACT_MAX_FIELDS 128
 #define ARTIFACT_MAX_DEPTH 32
 
@@ -21,6 +22,12 @@ typedef union {
     bool boolean;
     int32_t i32;
     int64_t i64;
+    int8_t i8;
+    int16_t i16;
+    uint8_t u8;
+    uint16_t u16;
+    uint32_t u32;
+    uint64_t u64;
     float f32;
     double f64;
 } artifact_scalar;
@@ -29,6 +36,7 @@ typedef struct {
     me_variable variable;
     bool constant;
     artifact_scalar value;
+    void *string_value;
 } artifact_binding;
 
 struct me_artifact {
@@ -38,8 +46,11 @@ struct me_artifact {
     int nbindings;
     int ninputs;
     me_dtype output_dtype;
-    me_jit_mode jit_mode;
-    me_expr *expr;
+    size_t output_itemsize;
+    me_dsl_compiled_program *program;
+    unsigned capabilities;
+    int context_ndim;
+    me_artifact_cardinality cardinality;
 };
 
 static me_artifact_status artifact_error(me_artifact_error *error,
@@ -159,12 +170,38 @@ static me_dtype artifact_dtype(yyjson_val *value) {
 static size_t artifact_itemsize(me_dtype dtype) {
     switch (dtype) {
         case ME_BOOL: return sizeof(bool);
+        case ME_INT8: case ME_UINT8: return 1;
+        case ME_INT16: case ME_UINT16: return 2;
+        case ME_UINT32: return 4;
+        case ME_UINT64: return 8;
         case ME_INT32: return sizeof(int32_t);
         case ME_INT64: return sizeof(int64_t);
         case ME_FLOAT32: return sizeof(float);
         case ME_FLOAT64: return sizeof(double);
         default: return 0;
     }
+}
+
+static me_dtype artifact_dtype1(yyjson_val *value) {
+    me_dtype dtype = artifact_dtype(value);
+    const char *name = artifact_string(value);
+    if (!name || dtype != ME_AUTO) return dtype;
+    const char *names[] = {"int8", "int16", "uint8", "uint16", "uint32", "uint64", "bytes", "unicode32"};
+    me_dtype types[] = {ME_INT8, ME_INT16, ME_UINT8, ME_UINT16, ME_UINT32, ME_UINT64, ME_BYTES, ME_STRING};
+    for (int i = 0; i < 8; i++) if (!strcmp(name, names[i])) return types[i];
+    return ME_AUTO;
+}
+
+static bool artifact_width(yyjson_val *object, me_dtype dtype, size_t *width) {
+    if (!is_string_dtype(dtype)) {
+        *width = dtype_size(dtype);
+        return *width > 0;
+    }
+    yyjson_val *size = yyjson_obj_get(object, "itemsize");
+    if (!yyjson_is_uint(size) || !yyjson_get_uint(size) || yyjson_get_uint(size) > ME_ARTIFACT_MAX_BYTES ||
+        yyjson_get_uint(size) % dtype_code_unit(dtype)) return false;
+    *width = (size_t)yyjson_get_uint(size);
+    return true;
 }
 
 static bool artifact_integer(const char *text, me_dtype dtype, artifact_scalar *value) {
@@ -176,8 +213,12 @@ static bool artifact_integer(const char *text, me_dtype dtype, artifact_scalar *
     if (!*digits || (*digits == '0' && (digits[1] || negative))) {
         return false;
     }
-    uint64_t limit = dtype == ME_INT32 ? INT32_MAX : INT64_MAX;
-    limit += negative;
+    bool unsigned_type = dtype >= ME_UINT8 && dtype <= ME_UINT64;
+    size_t width = artifact_itemsize(dtype);
+    if (!width || (negative && unsigned_type)) return false;
+    uint64_t limit = unsigned_type ? (width == 8 ? UINT64_MAX : (UINT64_C(1) << (width * 8)) - 1) :
+        (width == 8 ? INT64_MAX : (UINT64_C(1) << (width * 8 - 1)) - 1);
+    if (!unsigned_type) limit += negative;
     uint64_t magnitude = 0;
     for (const char *p = digits; *p; p++) {
         if (*p < '0' || *p > '9') {
@@ -189,11 +230,22 @@ static bool artifact_integer(const char *text, me_dtype dtype, artifact_scalar *
         }
         magnitude = magnitude * 10 + digit;
     }
-    int64_t integer = negative ? -(int64_t)(magnitude - 1) - 1 : (int64_t)magnitude;
-    if (dtype == ME_INT32) {
-        value->i32 = (int32_t)integer;
-    } else {
-        value->i64 = integer;
+    if (unsigned_type) {
+        switch (dtype) {
+        case ME_UINT8: value->u8 = (uint8_t)magnitude; break;
+        case ME_UINT16: value->u16 = (uint16_t)magnitude; break;
+        case ME_UINT32: value->u32 = (uint32_t)magnitude; break;
+        default: value->u64 = magnitude; break;
+        }
+    }
+    else {
+        int64_t integer = negative ? -(int64_t)(magnitude - 1) - 1 : (int64_t)magnitude;
+        switch (dtype) {
+        case ME_INT8: value->i8 = (int8_t)integer; break;
+        case ME_INT16: value->i16 = (int16_t)integer; break;
+        case ME_INT32: value->i32 = (int32_t)integer; break;
+        default: value->i64 = integer; break;
+        }
     }
     return true;
 }
@@ -228,12 +280,39 @@ static bool artifact_constant(yyjson_val *object, artifact_binding *binding) {
     yyjson_val *encoding = yyjson_obj_get(object, "encoding");
     yyjson_val *value = yyjson_obj_get(object, "value");
     switch (binding->variable.dtype) {
+        case ME_BYTES: case ME_STRING: {
+            const char *text = artifact_string(value);
+            size_t width = binding->variable.itemsize;
+            bool unicode = binding->variable.dtype == ME_STRING;
+            if (!artifact_equal(encoding, unicode ? "unicode32be-hex" : "bytes-hex") || !text || strlen(text) != width * 2) return false;
+            binding->string_value = calloc(1, width);
+            if (!binding->string_value) return false;
+            for (size_t i = 0; i < width; i++) {
+                unsigned byte = 0;
+                for (int h = 0; h < 2; h++) {
+                    char c = text[2 * i + h];
+                    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+                    byte = byte * 16 + (unsigned)(c <= '9' ? c - '0' : c - 'a' + 10);
+                }
+                if (!unicode) ((uint8_t *)binding->string_value)[i] = (uint8_t)byte;
+                else ((uint32_t *)binding->string_value)[i / 4] = (((uint32_t *)binding->string_value)[i / 4] << 8) | byte;
+            }
+            if (unicode) {
+                for (size_t i = 0; i < width / 4; i++) {
+                    uint32_t cp = ((uint32_t *)binding->string_value)[i];
+                    if (cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) return false;
+                }
+            }
+            return true;
+        }
         case ME_BOOL:
             if (!artifact_equal(encoding, "boolean") || !yyjson_is_bool(value)) return false;
             binding->value.boolean = yyjson_get_bool(value);
             return true;
         case ME_INT32:
         case ME_INT64:
+        case ME_INT8: case ME_INT16:
+        case ME_UINT8: case ME_UINT16: case ME_UINT32: case ME_UINT64:
             return artifact_equal(encoding, "decimal") &&
                 artifact_integer(artifact_string(value), binding->variable.dtype, &binding->value);
         case ME_FLOAT32:
@@ -245,24 +324,47 @@ static bool artifact_constant(yyjson_val *object, artifact_binding *binding) {
     }
 }
 
-/* Native parsing has already checked the header's pragmas. Find an explicit FP
- * declaration so we can inject strict mode only when absent, without modifying
- * the stored interchange source or overriding a retained compiler preference. */
-static bool artifact_has_fp_pragma(const char *source) {
-    const char *p = source;
-    while (*p) {
-        while (*p == ' ' || *p == '\t' || *p == '\r') p++;
-        if (*p == '#') {
-            p++;
-            while (*p && *p != '\n' && isspace((unsigned char)*p)) p++;
-            if (!strncmp(p, "me:fp", 5)) return true;
-            while (*p && *p != '\n') p++;
-        } else if (*p && *p != '\n') {
+static unsigned artifact_expr_capabilities(const me_expr *expr) {
+    if (!expr) return 0;
+    unsigned required = is_reduction_node(expr) ? 4 : 0;
+    if (is_string_dtype(expr->dtype) || TYPE_MASK(expr->type) == ME_STRING_CONSTANT) required |= 16;
+    for (int i = 0; i < ARITY(expr->type); i++) required |= artifact_expr_capabilities(expr->parameters[i]);
+    return required;
+}
+
+static unsigned artifact_block_capabilities(const me_dsl_compiled_block *block) {
+    unsigned required = 1;
+    for (int i = 0; i < block->nstmts; i++) {
+        const me_dsl_compiled_stmt *stmt = block->stmts[i];
+        const me_expr *expr = NULL;
+        switch (stmt->kind) {
+        case ME_DSL_STMT_ASSIGN: expr = stmt->as.assign.value.expr; break;
+        case ME_DSL_STMT_RETURN: expr = stmt->as.return_stmt.expr.expr; break;
+        case ME_DSL_STMT_EXPR: expr = stmt->as.expr_stmt.expr.expr; break;
+        case ME_DSL_STMT_BREAK: case ME_DSL_STMT_CONTINUE: expr = stmt->as.flow.cond.expr; required |= 2; break;
+        case ME_DSL_STMT_IF:
+            expr = stmt->as.if_stmt.cond.expr;
+            required |= 2 | artifact_block_capabilities(&stmt->as.if_stmt.then_block);
+            if (stmt->as.if_stmt.has_else) required |= artifact_block_capabilities(&stmt->as.if_stmt.else_block);
+            for (int j = 0; j < stmt->as.if_stmt.n_elifs; j++) {
+                required |= artifact_expr_capabilities(stmt->as.if_stmt.elif_branches[j].cond.expr);
+                required |= artifact_block_capabilities(&stmt->as.if_stmt.elif_branches[j].block);
+            }
             break;
+        case ME_DSL_STMT_WHILE:
+            expr = stmt->as.while_loop.cond.expr;
+            required |= 2 | artifact_block_capabilities(&stmt->as.while_loop.body);
+            break;
+        case ME_DSL_STMT_FOR:
+            expr = stmt->as.for_loop.start.expr;
+            required |= artifact_expr_capabilities(stmt->as.for_loop.stop.expr) | artifact_expr_capabilities(stmt->as.for_loop.step.expr);
+            required |= 2 | artifact_block_capabilities(&stmt->as.for_loop.body);
+            break;
+        default: break;
         }
-        if (*p == '\n') p++;
+        required |= artifact_expr_capabilities(expr);
     }
-    return false;
+    return required;
 }
 
 me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode jit_mode,
@@ -289,16 +391,30 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
     me_artifact_status status = ME_ARTIFACT_ERR_FORMAT;
     me_artifact *artifact = NULL;
     me_dsl_program *parsed = NULL;
-    char *execution_source = NULL;
     yyjson_val *root = yyjson_doc_get_root(doc);
-    const char *const root_fields[] = {"schema_version", "language", "requires", "source",
-        "entry_point", "inputs", "constants", "output", "semantics"};
+    if (!artifact_tree(root, 0) || !yyjson_is_obj(root)) {
+        artifact_error(error, status, "invalid fields, duplicate keys, NUL strings, or nesting limits");
+        goto cleanup;
+    }
+    yyjson_val *schema = yyjson_obj_get(root, "schema_version");
+    yyjson_val *language_version = yyjson_obj_get(yyjson_obj_get(root, "language"), "version");
+    if ((artifact_string(schema) && !artifact_equal(schema, ME_ARTIFACT_SCHEMA_VERSION)) ||
+        (artifact_string(language_version) && !artifact_equal(language_version, ME_PORTABLE_DSL_VERSION))) {
+        status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED,
+                                "unsupported portable artifact version; expected draft 1.0");
+        goto cleanup;
+    }
     const char *const language_fields[] = {"name", "version"};
     const char *const output_fields[] = {"dtype", "contract"};
     const char *const semantics_fields[] = {"fp"};
     const char *const input_fields[] = {"name", "dtype"};
     const char *const constant_fields[] = {"name", "dtype", "encoding", "value"};
-    if (!artifact_tree(root, 0) || !artifact_fields(root, root_fields, 9, true)) {
+    const char *const string_output_fields[] = {"dtype", "contract", "itemsize"};
+    const char *const string_input_fields[] = {"name", "dtype", "itemsize"};
+    const char *const string_constant_fields[] = {"name", "dtype", "encoding", "value", "itemsize"};
+    const char *const root_fields1[] = {"schema_version", "language", "requires", "source",
+        "entry_point", "inputs", "constants", "output", "semantics", "context"};
+    if (!artifact_fields(root, root_fields1, 10, true)) {
         artifact_error(error, status, "invalid fields, duplicate keys, NUL strings, or nesting limits");
         goto cleanup;
     }
@@ -310,8 +426,9 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
     yyjson_val *constants = yyjson_obj_get(root, "constants");
     const char *source = artifact_string(yyjson_obj_get(root, "source"));
     const char *entry = artifact_string(yyjson_obj_get(root, "entry_point"));
+    bool string_output = is_string_dtype(artifact_dtype1(yyjson_obj_get(output, "dtype")));
     if (!artifact_fields(language, language_fields, 2, false) ||
-        !artifact_fields(output, output_fields, 2, false) ||
+        !artifact_fields(output, string_output ? string_output_fields : output_fields, string_output ? 3 : 2, false) ||
         !artifact_fields(semantics, semantics_fields, 1, false) ||
         !yyjson_is_arr(requires) || !yyjson_is_arr(inputs) || !yyjson_is_arr(constants) ||
         !source || !entry || !*entry) {
@@ -330,12 +447,14 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
     if (!artifact_equal(yyjson_obj_get(root, "schema_version"), ME_ARTIFACT_SCHEMA_VERSION) ||
         !artifact_equal(yyjson_obj_get(language, "name"), "miniexpr") ||
         !artifact_equal(yyjson_obj_get(language, "version"), ME_PORTABLE_DSL_VERSION) ||
-        !artifact_equal(yyjson_obj_get(output, "contract"), "scalar-per-element") ||
+        !(artifact_equal(yyjson_obj_get(output, "contract"), "elementwise") ||
+          artifact_equal(yyjson_obj_get(output, "contract"), "block_scalar")) ||
         !artifact_equal(yyjson_obj_get(semantics, "fp"), "strict")) {
         status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported version or semantic requirement");
         goto cleanup;
     }
     bool core = false;
+    unsigned capabilities = 0;
     size_t index, max;
     yyjson_val *value;
     yyjson_arr_foreach(requires, index, max, value) {
@@ -343,15 +462,25 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
             artifact_error(error, status, "capabilities must be strings");
             goto cleanup;
         }
-        if (!artifact_equal(value, "core-scalar")) {
+        if (artifact_equal(value, "jit-required")) {
+            status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "required JIT is unavailable for the draft interpreter profile");
+            goto cleanup;
+        }
+        unsigned capability = artifact_equal(value, "numeric") ? 1 :
+            artifact_equal(value, "control-flow") ? 2 :
+            artifact_equal(value, "block-reductions") ? 4 :
+            artifact_equal(value, "nd-context") ? 8 : 0;
+        if (artifact_equal(value, "fixed-strings")) capability = 16;
+        if (!capability) {
             status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported required capability");
             goto cleanup;
         }
-        if (core) {
+        if (capabilities & capability) {
             artifact_error(error, status, "duplicate required capability");
             goto cleanup;
         }
-        core = true;
+        capabilities |= capability;
+        core |= capability == 1;
     }
     if (!core || yyjson_arr_size(inputs) + yyjson_arr_size(constants) > ME_MAX_VARS) {
         artifact_error(error, status, "missing core capability or too many bindings");
@@ -362,10 +491,27 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
         status = artifact_error(error, ME_ARTIFACT_ERR_OOM, "out of memory");
         goto cleanup;
     }
-    artifact->jit_mode = jit_mode;
+    artifact->capabilities = capabilities;
+    {
+        const char *const context_fields[] = {"ndim"};
+        yyjson_val *context = yyjson_obj_get(root, "context");
+        yyjson_val *rank = yyjson_obj_get(context, "ndim");
+        if (!artifact_fields(context, context_fields, 1, false) || !yyjson_is_int(rank) ||
+            yyjson_get_int(rank) < 0 || yyjson_get_int(rank) > ME_DSL_MAX_NDIM) {
+            status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "invalid logical context rank");
+            goto cleanup;
+        }
+        artifact->context_ndim = (int)yyjson_get_int(rank);
+        if (artifact->context_ndim && !(capabilities & 8)) {
+            status = artifact_error(error, ME_ARTIFACT_ERR_BINDING, "missing nd-context capability");
+            goto cleanup;
+        }
+        artifact->cardinality = artifact_equal(yyjson_obj_get(output, "contract"), "block_scalar") ?
+            ME_ARTIFACT_BLOCK_SCALAR : ME_ARTIFACT_ELEMENTWISE;
+    }
     artifact->source = artifact_copy(source);
     artifact->entry_point = artifact_copy(entry);
-    artifact->output_dtype = artifact_dtype(yyjson_obj_get(output, "dtype"));
+    artifact->output_dtype = artifact_dtype1(yyjson_obj_get(output, "dtype"));
     if (!artifact->source || !artifact->entry_point) {
         status = artifact_error(error, ME_ARTIFACT_ERR_OOM, "out of memory");
         goto cleanup;
@@ -375,9 +521,16 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
         goto cleanup;
     }
     for (int kind = 0; kind < 2; kind++) {
+        if (!artifact_width(output, artifact->output_dtype, &artifact->output_itemsize)) {
+            status = artifact_error(error, ME_ARTIFACT_ERR_BINDING, "invalid output string width");
+            goto cleanup;
+        }
         yyjson_val *array = kind ? constants : inputs;
         yyjson_arr_foreach(array, index, max, value) {
-            if (!artifact_fields(value, kind ? constant_fields : input_fields, kind ? 4 : 2, false)) {
+            me_dtype binding_dtype = artifact_dtype1(yyjson_obj_get(value, "dtype"));
+            bool string_binding = is_string_dtype(binding_dtype);
+            if (!artifact_fields(value, string_binding ? (kind ? string_constant_fields : string_input_fields) :
+                (kind ? constant_fields : input_fields), (kind ? 4 : 2) + string_binding, false)) {
                 artifact_error(error, status, "invalid binding fields");
                 goto cleanup;
             }
@@ -398,7 +551,7 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
             }
             artifact_binding *binding = &artifact->bindings[artifact->nbindings++];
             binding->variable.name = artifact_copy(name);
-            binding->variable.dtype = artifact_dtype(yyjson_obj_get(value, "dtype"));
+            binding->variable.dtype = binding_dtype;
             binding->constant = kind != 0;
             if (!binding->variable.name) {
                 status = artifact_error(error, ME_ARTIFACT_ERR_OOM, "out of memory");
@@ -406,6 +559,10 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
             }
             if (binding->variable.dtype == ME_AUTO) {
                 status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported binding dtype");
+                goto cleanup;
+            }
+            if (!artifact_width(value, binding_dtype, &binding->variable.itemsize) || (string_binding && !(capabilities & 16))) {
+                status = artifact_error(error, ME_ARTIFACT_ERR_BINDING, "invalid string width or missing fixed-strings capability");
                 goto cleanup;
             }
             if (kind && !artifact_constant(value, binding)) {
@@ -416,7 +573,7 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
         }
     }
     me_dsl_error parse_error;
-    parsed = me_dsl_parse(source, &parse_error);
+    parsed = me_dsl_parse_profile(source, ME_DSL_PROFILE_PORTABLE_1_0, &parse_error);
     if (!parsed) {
         if (error) {
             error->line = parse_error.line;
@@ -426,7 +583,7 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
                                 ? ME_ARTIFACT_ERR_OOM : ME_ARTIFACT_ERR_SOURCE, parse_error.message);
         goto cleanup;
     }
-    if (strcmp(parsed->name, entry) || parsed->nparams != artifact->nbindings) {
+    if (!parsed->name || strcmp(parsed->name, entry) || parsed->nparams != artifact->nbindings) {
         status = artifact_error(error, ME_ARTIFACT_ERR_BINDING, "entry point or binding coverage mismatch");
         goto cleanup;
     }
@@ -442,50 +599,47 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
         }
     }
     me_variable variables[ME_MAX_VARS];
-    for (int b = 0; b < artifact->nbindings; b++) variables[b] = artifact->bindings[b].variable;
-    me_portable_error profile_error;
-    me_portable_status profile = me_validate_portable_dsl(source, ME_PORTABLE_DSL_VERSION,
-        variables, artifact->nbindings, artifact->output_dtype, &profile_error);
-    if (profile != ME_PORTABLE_SUCCESS) {
-        if (error) {
-            error->native_status = profile;
-            error->line = profile_error.line;
-            error->column = profile_error.column;
-        }
-        status = artifact_error(error, profile == ME_PORTABLE_ERR_OOM ? ME_ARTIFACT_ERR_OOM :
-            profile == ME_PORTABLE_ERR_UNSUPPORTED ? ME_ARTIFACT_ERR_UNSUPPORTED : ME_ARTIFACT_ERR_SOURCE,
-            profile_error.message);
-        goto cleanup;
+    for (int b = 0; b < artifact->nbindings; b++) {
+        variables[b] = artifact->bindings[b].variable;
+        if (artifact->bindings[b].constant) variables[b].type |= ME_DSL_UNIFORM_INPUT;
     }
-    const char *compiled_source = source;
-    if (!artifact_has_fp_pragma(source)) {
-        const char prefix[] = "# me:fp=strict\n";
-        execution_source = malloc(sizeof(prefix) + strlen(source));
-        if (!execution_source) {
-            status = artifact_error(error, ME_ARTIFACT_ERR_OOM, "out of memory");
+    {
+        char reason[256];
+        int position = 0;
+        bool is_dsl;
+        artifact->program = dsl_compile_program_profile(source, variables, artifact->nbindings,
+            artifact->output_dtype, artifact->context_ndim, ME_JIT_OFF, ME_DSL_PROFILE_PORTABLE_1_0,
+            &position, &is_dsl, reason, sizeof(reason));
+        if (!artifact->program) {
+            status = artifact_error(error, ME_ARTIFACT_ERR_SOURCE, reason);
             goto cleanup;
         }
-        strcpy(execution_source, prefix);
-        strcat(execution_source, source);
-        compiled_source = execution_source;
-    }
-    int position = 0;
-    int64_t shape[] = {ARTIFACT_TILE};
-    int32_t grid[] = {ARTIFACT_TILE};
-    int rc = me_compile_nd_jit(compiled_source, variables, artifact->nbindings,
-        artifact->output_dtype, 1, shape, grid, grid, jit_mode, &position, &artifact->expr);
-    if (rc != ME_COMPILE_SUCCESS) {
-        if (error) error->native_status = rc;
-        const char *reason = me_get_last_error_message();
-        status = artifact_error(error, rc == ME_COMPILE_ERR_OOM ? ME_ARTIFACT_ERR_OOM : ME_ARTIFACT_ERR_SOURCE,
-                                reason ? reason : "native compilation failed");
+        if (artifact->program->uses_i_mask || artifact->program->uses_n_mask ||
+            artifact->program->uses_ndim || artifact->program->uses_flat_idx) {
+            unsigned symbols = (unsigned)(artifact->program->uses_i_mask | artifact->program->uses_n_mask);
+            if (!artifact->context_ndim || (symbols >> artifact->context_ndim) || !(capabilities & 8)) {
+                status = artifact_error(error, ME_ARTIFACT_ERR_BINDING, "reserved symbols exceed declared ND context");
+                goto cleanup;
+            }
+        }
+        if (artifact_block_capabilities(&artifact->program->block) & ~capabilities) {
+            status = artifact_error(error, ME_ARTIFACT_ERR_BINDING, "missing source capability declaration");
+            goto cleanup;
+        }
+        if (artifact->program->output_is_scalar != (artifact->cardinality == ME_ARTIFACT_BLOCK_SCALAR)) {
+            status = artifact_error(error, ME_ARTIFACT_ERR_BINDING, "declared return cardinality disagrees with source");
+            goto cleanup;
+        }
+        if (artifact->program->output_itemsize != artifact->output_itemsize || (string_output && !(capabilities & 16))) {
+            status = artifact_error(error, ME_ARTIFACT_ERR_BINDING, "declared output width disagrees with source");
+            goto cleanup;
+        }
+        *out = artifact;
+        artifact = NULL;
+        status = ME_ARTIFACT_SUCCESS;
         goto cleanup;
     }
-    *out = artifact;
-    artifact = NULL;
-    status = ME_ARTIFACT_SUCCESS;
 cleanup:
-    free(execution_source);
     me_dsl_program_free(parsed);
     me_artifact_free(artifact);
     yyjson_doc_free(doc);
@@ -496,84 +650,169 @@ me_artifact_status me_artifact_eval(const me_artifact *artifact,
     const me_artifact_input *inputs, int ninputs, void *output, size_t nitems,
     me_artifact_error *error) {
     artifact_clear_error(error);
-    if (!artifact || ninputs != artifact->ninputs || (ninputs && !inputs) ||
-        (nitems && !output) || (artifact && nitems > SIZE_MAX / artifact_itemsize(artifact->output_dtype))) {
+    if (!artifact || ninputs != artifact->ninputs || (ninputs && !inputs)) {
         return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "invalid handle, count, or output buffer");
     }
+    /* Compatibility call adapter, not an older artifact format/profile. */
+    if (artifact->context_ndim || artifact->cardinality != ME_ARTIFACT_ELEMENTWISE ||
+        is_string_dtype(artifact->output_dtype)) {
+        return artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "this contract requires descriptor evaluation");
+    }
+    if (nitems > SIZE_MAX / artifact->output_itemsize) {
+        return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "output byte extent overflow");
+    }
+    me_artifact_buffer buffers[ME_MAX_VARS];
+    for (int i = 0; i < ninputs; i++) {
+        size_t width = artifact_itemsize(inputs[i].dtype);
+        if (!width || inputs[i].nitems != nitems || nitems > SIZE_MAX / width) {
+            return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "input dtype or length mismatch");
+        }
+        buffers[i] = (me_artifact_buffer){inputs[i].name, inputs[i].dtype, width,
+                                         inputs[i].data, nitems * width};
+    }
+    me_artifact_eval_descriptor descriptor = {
+        .struct_size = sizeof(descriptor), .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,
+        .nitems = nitems, .output_capacity = nitems * artifact->output_itemsize};
+    return me_artifact_eval_ex(artifact, ninputs ? buffers : NULL, ninputs, output, &descriptor, error);
+}
+
+static bool artifact_range_valid(const void *data, size_t length, size_t alignment) {
+    if (!length) return true;
+    uintptr_t address = (uintptr_t)data;
+    return data && address % alignment == 0 && length <= UINTPTR_MAX - address;
+}
+
+static bool artifact_ranges_overlap(const void *a, size_t a_length, const void *b, size_t b_length) {
+    if (!a_length || !b_length) return false;
+    uintptr_t x = (uintptr_t)a, y = (uintptr_t)b;
+    return x <= y ? y - x < a_length : x - y < b_length;
+}
+
+me_artifact_status me_artifact_eval_ex(const me_artifact *artifact,
+    const me_artifact_buffer *inputs, int ninputs, void *output,
+    const me_artifact_eval_descriptor *descriptor, me_artifact_error *error) {
+    artifact_clear_error(error);
+    if (!artifact || !descriptor || descriptor->struct_size < sizeof(*descriptor) ||
+        ninputs != artifact->ninputs || (ninputs && !inputs)) {
+        return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "invalid extended evaluation descriptor or bindings");
+    }
+    if (descriptor->version != ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION) {
+        return artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unknown evaluation descriptor version");
+    }
+    size_t nitems = descriptor->nitems;
+    if (artifact->program && descriptor->ndim != artifact->context_ndim) return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "logical context rank mismatch");
+    size_t output_width = artifact->output_itemsize;
+    size_t output_count = artifact->cardinality == ME_ARTIFACT_BLOCK_SCALAR ? 1 : nitems;
+    if (!output_width || output_count > SIZE_MAX / output_width ||
+        descriptor->output_capacity < output_count * output_width ||
+        !artifact_range_valid(output, output_count * output_width, is_string_dtype(artifact->output_dtype) ? dtype_code_unit(artifact->output_dtype) : output_width)) {
+        return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "output capacity, alignment, or byte extent is invalid");
+    }
+    for (int i = 0; i < ninputs; i++) {
+        size_t width = is_string_dtype(inputs[i].dtype) ? inputs[i].itemsize : artifact_itemsize(inputs[i].dtype);
+        if (!width || width != inputs[i].itemsize || nitems > SIZE_MAX / width ||
+            inputs[i].capacity < nitems * width ||
+            !artifact_range_valid(inputs[i].data, nitems * width, is_string_dtype(inputs[i].dtype) ? dtype_code_unit(inputs[i].dtype) : width)) {
+            return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "input itemsize, capacity, alignment, or byte extent is invalid");
+        }
+        if (artifact_ranges_overlap(inputs[i].data, nitems * width, output, output_count * output_width)) {
+            return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "output must not overlap an input buffer");
+        }
+    }
+    if (nitems > INT32_MAX || (descriptor->valid_mask && descriptor->valid_mask_capacity < nitems) ||
+        (!descriptor->valid_mask && descriptor->valid_mask_capacity)) return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "invalid lane/mask capacity");
+    if (descriptor->valid_mask && (!artifact_range_valid(descriptor->valid_mask, nitems, 1) ||
+        artifact_ranges_overlap(descriptor->valid_mask, nitems, output, output_count * output_width))) return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "invalid or overlapping lane mask");
+    if (descriptor->ndim) {
+        size_t bytes = (size_t)descriptor->ndim * sizeof(int64_t);
+        const int64_t *context[] = {descriptor->logical_shape, descriptor->block_origin, descriptor->block_extent};
+        for (int i = 0; i < 3; i++) {
+            if (!artifact_range_valid(context[i], bytes, sizeof(int64_t)) ||
+                artifact_ranges_overlap(context[i], bytes, output, output_count * output_width)) return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "invalid or overlapping logical context");
+        }
+    }
+    for (size_t lane = 0; lane < nitems; lane++) {
+        if (descriptor->valid_mask && descriptor->valid_mask[lane] > 1) return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "invalid lane mask value");
+    }
     const void *data[ME_MAX_VARS];
+    void *owned[ME_MAX_VARS] = {0};
     for (int b = 0; b < artifact->ninputs; b++) {
         int found = -1;
         for (int i = 0; i < ninputs; i++) {
-            if (!inputs[i].name) {
-                return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "input name must not be NULL");
-            }
+            if (!inputs[i].name) return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "NULL input name");
             if (!strcmp(inputs[i].name, artifact->bindings[b].variable.name)) {
-                if (found >= 0) {
-                    return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "duplicate runtime input name");
-                }
+                if (found >= 0) return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "duplicate input name");
                 found = i;
             }
         }
-        size_t width = artifact_itemsize(artifact->bindings[b].variable.dtype);
         if (found < 0 || inputs[found].dtype != artifact->bindings[b].variable.dtype ||
-            inputs[found].nitems != nitems || (nitems && !inputs[found].data) || nitems > SIZE_MAX / width) {
-            return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "missing input, dtype, or length mismatch");
-        }
+            inputs[found].itemsize != artifact->bindings[b].variable.itemsize) return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "input signature mismatch");
         data[b] = inputs[found].data;
-    }
-    if (!nitems) return ME_ARTIFACT_SUCCESS;
-    int nconstants = artifact->nbindings - artifact->ninputs;
-    size_t tile = nitems < ARTIFACT_TILE ? nitems : ARTIFACT_TILE;
-    unsigned char *constants = nconstants ? malloc((size_t)nconstants * ARTIFACT_TILE * 8) : NULL;
-    if (nconstants && !constants) {
-        return artifact_error(error, ME_ARTIFACT_ERR_OOM, "out of memory broadcasting constants");
-    }
-    for (int c = 0; c < nconstants; c++) {
-        int b = artifact->ninputs + c;
-        size_t width = artifact_itemsize(artifact->bindings[b].variable.dtype);
-        unsigned char *buffer = constants + (size_t)c * ARTIFACT_TILE * 8;
-        const artifact_scalar *scalar = &artifact->bindings[b].value;
-        const void *value = NULL;
-        switch (artifact->bindings[b].variable.dtype) {
-            case ME_BOOL: value = &scalar->boolean; break;
-            case ME_INT32: value = &scalar->i32; break;
-            case ME_INT64: value = &scalar->i64; break;
-            case ME_FLOAT32: value = &scalar->f32; break;
-            case ME_FLOAT64: value = &scalar->f64; break;
-            default: break;
+        if (inputs[found].dtype == ME_STRING) {
+            size_t width = inputs[found].itemsize / 4;
+            for (size_t lane = 0; lane < nitems; lane++) {
+                if (descriptor->valid_mask && !descriptor->valid_mask[lane]) continue;
+                const uint32_t *slot = (const uint32_t *)data[b] + lane * width;
+                for (size_t unit = 0; unit < width && slot[unit]; unit++) {
+                    if (slot[unit] > 0x10ffff || (slot[unit] >= 0xd800 && slot[unit] <= 0xdfff)) return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "invalid Unicode scalar in active input lane");
+                }
+            }
         }
-        for (size_t i = 0; i < tile; i++) memcpy(buffer + i * width, value, width);
-        data[b] = buffer;
     }
-    me_eval_params params = ME_EVAL_PARAMS_DEFAULTS;
-    params.jit_mode = artifact->jit_mode;
-    size_t output_width = artifact_itemsize(artifact->output_dtype);
-    me_artifact_status status = ME_ARTIFACT_SUCCESS;
-    for (size_t offset = 0; offset < nitems;) {
-        size_t remaining = nitems - offset;
-        int count = (int)(remaining < tile ? remaining : tile);
-        const void *block[ME_MAX_VARS];
-        for (int b = 0; b < artifact->nbindings; b++) {
-            size_t width = artifact_itemsize(artifact->bindings[b].variable.dtype);
-            block[b] = artifact->bindings[b].constant ? data[b] : (const unsigned char *)data[b] + offset * width;
-        }
-        int rc = me_eval(artifact->expr, block, artifact->nbindings,
-            (unsigned char *)output + offset * output_width, count, &params);
-        if (rc != ME_EVAL_SUCCESS) {
-            if (error) error->native_status = rc;
-            status = artifact_error(error, rc == ME_EVAL_ERR_OOM ? ME_ARTIFACT_ERR_OOM : ME_ARTIFACT_ERR_EVAL,
-                                    "native evaluation failed; output contents are unspecified");
+    me_artifact_status result = ME_ARTIFACT_SUCCESS;
+    for (int b = artifact->ninputs; b < artifact->nbindings; b++) {
+        size_t width = artifact->bindings[b].variable.itemsize;
+        size_t count = nitems ? nitems : 1;
+        if (count > SIZE_MAX / width || !(owned[b] = malloc(count * width))) {
+            result = artifact_error(error, ME_ARTIFACT_ERR_OOM, "constant buffer allocation failed");
             break;
         }
-        offset += (size_t)count;
+        const void *constant = artifact->bindings[b].string_value ? artifact->bindings[b].string_value : (const void *)&artifact->bindings[b].value;
+        for (size_t i = 0; i < count; i++) memcpy((char *)owned[b] + i * width, constant, width);
+        data[b] = owned[b];
     }
-    free(constants);
-    return status;
+    if (result == ME_ARTIFACT_SUCCESS) {
+        me_dsl_portable_eval_descriptor native = {(int)nitems, descriptor->valid_mask, descriptor->output_capacity,
+            descriptor->ndim, descriptor->logical_shape, descriptor->block_origin, descriptor->block_extent};
+        int rc = dsl_eval_program_portable(artifact->program, data, artifact->nbindings, output, &native);
+        if (rc) {
+            if (error) error->native_status = rc;
+            result = artifact_error(error, ME_ARTIFACT_ERR_EVAL, "portable interpreter evaluation failed");
+        }
+    }
+    for (int b = 0; b < artifact->nbindings; b++) free(owned[b]);
+    return result;
+}
+
+me_artifact_cardinality me_artifact_result_cardinality(const me_artifact *artifact) {
+    return artifact ? artifact->cardinality : ME_ARTIFACT_CARDINALITY_INVALID;
+}
+
+size_t me_artifact_input_itemsize(const me_artifact *artifact, int index) {
+    return artifact && index >= 0 && index < artifact->ninputs ?
+           artifact->bindings[index].variable.itemsize : 0;
+}
+
+size_t me_artifact_output_itemsize(const me_artifact *artifact) {
+    return artifact ? artifact->output_itemsize : 0;
 }
 
 const char *me_artifact_source(const me_artifact *artifact) {
     return artifact ? artifact->source : NULL;
 }
+
+unsigned int me_artifact_capabilities(const me_artifact *artifact) {
+    return artifact && artifact->program ? artifact->capabilities : 0;
+}
+
+int me_artifact_context_ndim(const me_artifact *artifact) {
+    return artifact ? artifact->context_ndim : -1;
+}
+
+const char *me_artifact_schema_version(const me_artifact *artifact) {
+    return artifact ? ME_ARTIFACT_SCHEMA_VERSION : NULL;
+}
+
 const char *me_artifact_entry_point(const me_artifact *artifact) {
     return artifact ? artifact->entry_point : NULL;
 }
@@ -590,12 +829,16 @@ me_dtype me_artifact_output_dtype(const me_artifact *artifact) {
     return artifact ? artifact->output_dtype : ME_AUTO;
 }
 bool me_artifact_has_jit(const me_artifact *artifact) {
-    return artifact && me_expr_has_jit_kernel(artifact->expr);
+    (void)artifact;
+    return false; /* Draft 1.0 is interpreter-first. */
 }
 void me_artifact_free(me_artifact *artifact) {
     if (!artifact) return;
-    me_free(artifact->expr);
-    for (int b = 0; b < artifact->nbindings; b++) free((void *)artifact->bindings[b].variable.name);
+    dsl_compiled_program_free(artifact->program);
+    for (int b = 0; b < artifact->nbindings; b++) {
+        free((void *)artifact->bindings[b].variable.name);
+        free(artifact->bindings[b].string_value);
+    }
     free(artifact->source);
     free(artifact->entry_point);
     free(artifact);

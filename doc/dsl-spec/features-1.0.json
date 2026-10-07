@@ -1,0 +1,95 @@
+{
+  "language_version": "1.0",
+  "status": "normative-draft-local-implementation-tested-not-release-certified",
+  "types": {
+    "numeric": ["bool", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float32", "float64"],
+    "fixed_width": ["unicode32", "bytes"],
+    "excluded": ["complex", "float16", "object", "datetime", "structured", "dynamic_width"]
+  },
+  "capabilities": ["numeric", "control-flow", "nd-context", "fixed-strings", "block-reductions"],
+  "operators": {
+    "arithmetic": ["+", "-", "*", "/", "//", "%", "**"],
+    "comparison": ["==", "!=", "<", "<=", ">", ">="],
+    "integer": ["&", "|", "^", "~", "<<", ">>"],
+    "truth": ["and", "or", "not"]
+  },
+  "function_groups": [
+    {"names": ["int", "float"], "arity": 1, "signature": "numeric -> int64/float64 respectively", "semantics": "argument evaluated first; int truncates toward zero with finite/range checks"},
+    {"names": ["bool"], "arity": 1, "signature": "numeric/fixed-string -> bool", "semantics": "numeric zero false, NaN true; string logical emptiness before first NUL"},
+    {"names": ["range"], "arity": [1, 2, 3], "signature": "integer loop bounds", "semantics": "loop syntax only; zero step errors"},
+    {"names": ["abs", "square", "sign"], "arity": 1, "signature": "numeric -> operand-derived numeric", "semantics": "checked integer operations"},
+    {"names": ["acos", "acosh", "asin", "asinh", "atan", "atanh", "cbrt", "cos", "cosh", "cospi", "erf", "erfc", "exp", "exp10", "exp2", "expm1", "lgamma", "ln", "log", "log10", "log1p", "log2", "sin", "sinh", "sinpi", "sqrt", "tan", "tanh", "tgamma"], "arity": 1, "signature": "numeric -> float32 for float32 input, float64 otherwise", "semantics": "log/ln natural log independent of build flags; domain/IEEE cases defined in math_domains and 1.0.md; cross-platform accuracy bound pending release certification"},
+    {"names": ["arccos", "arccosh", "arcsin", "arcsinh", "arctan", "arctanh"], "arity": 1, "signature": "aliases of corresponding unary functions", "semantics": "same typed semantics as canonical spelling"},
+    {"names": ["ceil", "floor", "rint", "round", "trunc"], "arity": 1, "signature": "numeric -> same dtype, bool -> int64", "semantics": "ceil toward +infinity; floor toward -infinity; trunc toward zero; rint nearest/ties-even; round nearest/ties-away; integer identities; preserve signed zero/NaN/infinity"},
+    {"names": ["atan2", "arctan2", "copysign", "fdim", "fmax", "fmin", "fmod", "hypot", "logaddexp", "nextafter", "remainder"], "arity": 2, "signature": "numeric pair -> float32 if common numeric type is float32, float64 otherwise; unsupported numeric promotions reject", "semantics": "per-lane, not reductions; math_special_values specifies NaN/zero rules; independent platform accuracy pending"},
+    {"names": ["pow", "power"], "arity": 2, "signature": "numeric pair -> same semantics as **", "semantics": "checked integer power when result is integral"},
+    {"names": ["ldexp"], "arity": 2, "signature": "numeric, integral exponent -> float32 for float32 first operand, float64 otherwise", "semantics": "exponent converts exactly to int64 then must fit C int; floating overflow/underflow yields IEEE values"},
+    {"names": ["fma"], "arity": 3, "signature": "numeric triple -> promoted floating type", "semantics": "explicit single-round fused operation; no implicit contraction elsewhere"},
+    {"names": ["where"], "arity": 3, "signature": "predicate, compatible alternatives -> joined alternative type", "semantics": "only selected participating lanes evaluate each alternative"},
+    {"names": ["e", "pi"], "arity": 0, "signature": "float64 constant", "semantics": "fixed correctly rounded binary64 constants"},
+    {"names": ["conj", "real", "imag"], "arity": 1, "signature": "real numeric only", "semantics": "identity/identity/zero respectively; no complex support"},
+    {"names": ["fac"], "arity": 1, "signature": "integral -> same dtype, bool -> int64", "semantics": "n >= 0; exact n!, 0! = 1; checked multiplication and result conversion; overflow/domain error, never floating approximation"},
+    {"names": ["ncr", "npr"], "arity": 2, "signature": "integral pair -> common integral dtype, bool arithmetic -> int64", "semantics": "0 <= k <= n; exact binomial/falling factorial, k=0 yields 1; ncr uses cancellation before multiplication; all intermediates/result checked; no signed64/unsigned64 implicit arithmetic join"},
+    {"names": ["contains", "endswith", "startswith"], "arity": 2, "signature": "same-kind fixed strings -> bool", "semantics": "first-NUL logical values"},
+    {"names": ["lower", "upper", "lstrip", "rstrip", "strip"], "arity": 1, "signature": "fixed string -> same family and slot width", "semantics": "Unicode 15.0.0 case tables; byte case mapping ASCII only; exact whitespace sets in string_rules; expansion truncates to static width"},
+    {"names": ["removeprefix", "removesuffix"], "arity": 2, "signature": "same-kind fixed strings -> bounded same-kind string", "semantics": "retain native width bounds"},
+    {"names": ["replace"], "arity": 3, "signature": "same-kind fixed strings -> bounded same-kind string", "semantics": "reject unbounded widths"},
+    {"names": ["substr"], "arity": 3, "signature": "fixed string, integral start, integral length -> bounded same-kind string", "semantics": "negative start counts from logical end then clamps at zero; start beyond end/negative length yield empty; length clips at end; large unsigned indices handled without floating loss"},
+    {"names": ["split_part"], "arity": 3, "signature": "same-kind fixed strings, integral part -> bounded same-kind string", "semantics": "first separator only: part <= 0 selects head, part > 0 selects remainder; absent separator gives entire head or empty remainder"},
+    {"names": ["all", "any"], "arity": 1, "signature": "numeric/Boolean lanes -> block bool", "semantics": "active valid lanes; NaN is true; empty all=true, any=false; no direct string reduction"},
+    {"names": ["sum", "prod", "mean", "min", "max"], "arity": 1, "signature": "numeric lanes -> block scalar", "semantics": "ordered checked rules in reduction_rules; NaN propagation; scalar returns require coherent group control flow"}
+  ],
+  "math_domains": {
+    "sin_cos_tan_sinpi_cospi": "finite real inputs; infinities yield NaN; sinpi/cospi exact integral and half-integral anchors",
+    "asin_acos": "[-1,1], outside domain NaN",
+    "acosh": "[1,+infinity], below 1 NaN",
+    "atanh": "(-1,1), endpoints signed infinity, outside [-1,1] NaN",
+    "sqrt": "[0,+infinity], negative finite/infinity NaN, sqrt(-0)=-0",
+    "log_log2_log10": "positive reals, zero -> -infinity, negative -> NaN",
+    "log1p": "x > -1, x=-1 -> -infinity, x<-1 -> NaN",
+    "tgamma": "real excluding nonpositive integer poles; negative integer poles NaN; signed zero poles signed infinity; positive infinity -> infinity, negative infinity -> NaN",
+    "lgamma": "log(abs(Gamma(x))); integer poles -> +infinity; either infinity -> +infinity",
+    "atan_asinh_sinh_cosh_tanh_cbrt_erf_erfc_exp_exp2_exp10_expm1": "all finite reals; C99/IEEE limiting infinity/underflow/overflow values; exp10 is pow(10,x)",
+    "pow_floating": "C99 real pow domain: negative base with nonintegral exponent -> NaN; poles/overflow/underflow yield IEEE values; integral power uses checked integer rules instead"
+  },
+  "math_special_values": {
+    "general": "NaN propagates unless stated otherwise; NaN payloads unspecified; nontrapping nearest/ties-even, caller FP state restored",
+    "atan2_arctan2": "all real pairs; C99 quadrant rules including signed zeros and infinities; any NaN -> NaN",
+    "pow_floating": "C99 exceptions: pow(NaN,0)=1, pow(1,NaN)=1 and pow(-1,+/-infinity)=1; otherwise NaN inputs propagate; signed-zero poles follow exponent sign/parity",
+    "fmin_fmax": "one NaN selects numeric operand; two NaNs yield NaN; zero ties fmin=-0 if either is negative, fmax=-0 only if both are negative",
+    "copysign": "magnitude of first operand, sign bit of second, including signed zero and NaN",
+    "fmod": "truncated-quotient remainder, sign of numerator; zero divisor or infinite numerator -> NaN",
+    "remainder": "nearest-integer quotient, ties-even; zero result sign of numerator; zero divisor or infinite numerator -> NaN",
+    "nextafter": "next representable value toward second operand; equal operands return second (including sign of zero); any NaN -> NaN",
+    "hypot": "nonnegative Euclidean norm; infinity dominates NaN as specified by C99 hypot",
+    "fdim": "positive difference or +0; any NaN -> NaN",
+    "logaddexp": "stable log(exp(x)+exp(y)); any NaN -> NaN; equal signed infinities retain that infinity",
+    "sign": "finite nonzero -> signed one; retain signed zero or NaN; infinities -> signed one",
+    "fma": "single-round x*y+z in promoted floating type; C99 invalid combinations -> NaN"
+  },
+  "reduction_rules": {
+    "group": "valid currently participating lanes in original logical C-order; no padded lanes or reassociation",
+    "sum_prod": "signed/bool -> int64, unsigned -> uint64, floats retain dtype; each accumulation checked/rounded; empty 0/1",
+    "mean": "checked ordered integer sum then float64 conversion/division; floating sum/division retains input dtype; empty NaN",
+    "min_max": "input dtype retained; empty error; NaN propagation; mixed signed-zero ties min=-0, max=+0; same-sign zero ties retain sign",
+    "placement": "top-level values and supported nested conditions; reduction-valued assignments/returns inside control-flow bodies and nested reductions reject",
+    "cardinality": "elementwise or block_scalar; divergent scalar return sites reject as ambiguous, not first/last-lane selection"
+  },
+  "string_rules": {
+    "unicode_case_version": "15.0.0 (bundled src/unicode_case_table.h, never host locale)",
+    "unicode_strip_codepoints": "0009-000D,0020,001C-001F,0085,00A0,1680,2000-200A,2028,2029,202F,205F,3000",
+    "bytes_strip_codepoints": "09-0D,20",
+    "slots": "positive fixed byte widths <= 1048576; Unicode32 widths multiples of four; first NUL terminates value; unterminated full slots valid",
+    "unicode_scalars": "logical characters before first NUL in valid lanes must be scalar codepoints, not surrogates/out-of-range values; ignored padding is not text; no normalization; lexicographic scalar-codepoint order",
+    "bytes": "arbitrary unsigned octets in buffers/captured hex constants; source literals contextualized to bytes must be ASCII; lexicographic unsigned-byte order; ASCII-only case conversion; no Unicode mixing",
+    "widths": "native static width inference authoritative; concat sums widths, where joins maximum width; case expansion truncates to declared slot width",
+    "replace": "left-to-right nonoverlapping replacements with checked static growth bound; empty source needle literal rejected at compile, empty runtime needle errors"
+  },
+  "excluded_effects": ["print", "external_calls", "closures", "input_mutation"],
+  "accuracy_release_gate": {
+    "exact": "integer checked results/comparisons, fixed constants pi/e, stated tie/zero rules, nextafter steps and sinpi/cospi integral/half-integral anchors",
+    "local_fixture_bounds": "analytic anchors and rounded independent hex constants use stated test-specific 8-epsilon relative regression bounds, zero anchors exact; not a universal ULP guarantee",
+    "pending": "independent function-specific accuracy certification on Windows/Linux/macOS/WASM and stock published-pin wheels; no global libm tolerance invented"
+  },
+  "certification_note": "Normative draft rules match the typed interpreter and local fixtures. Local acceptance is not beta/platform certification; pending accuracy/platform/stock-pin gates remain explicit."
+}

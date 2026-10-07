@@ -33,9 +33,6 @@ if(NOT EMSCRIPTEN)
       list(APPEND MINIEXPR_PORTABLE_CASES convert_${input_type}_${output_type})
     endforeach()
   endforeach()
-  file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/frozen-excluded.txt" MINIEXPR_FROZEN_EXCLUDED)
-  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/frozen-excluded.txt")
   foreach(case_name IN LISTS MINIEXPR_PORTABLE_CASES)
     if(case_name MATCHES "^convert_")
       set(source_path "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/identity.dsl")
@@ -44,12 +41,6 @@ if(NOT EMSCRIPTEN)
     endif()
     set(profile_mode "")
     set(test_prefix portable_dsl)
-    if(case_name IN_LIST MINIEXPR_FROZEN_EXCLUDED)
-      set(profile_mode native)
-      set(test_prefix native_dsl)
-      add_test(NAME portable_reject_${case_name} COMMAND portable_dsl_runner
-        "${source_path}" "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.txt" off reject)
-    endif()
     foreach(policy off default)
       add_test(NAME ${test_prefix}_${case_name}_${policy}
         COMMAND portable_dsl_runner
@@ -58,9 +49,8 @@ if(NOT EMSCRIPTEN)
       set_tests_properties(${test_prefix}_${case_name}_${policy} PROPERTIES TIMEOUT 30
         ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/portable-jit-cache")
     endforeach()
-    # Windows release conformance currently certifies the interpreter baseline;
-    # an enabled build option alone does not certify a usable TCC runtime there.
-    if(MINIEXPR_ENABLE_TCC_JIT AND NOT WIN32)
+    # Optional JIT preference must still use the draft typed interpreter.
+    if(MINIEXPR_ENABLE_TCC_JIT)
       add_test(NAME ${test_prefix}_${case_name}_on
         COMMAND portable_dsl_runner
           "${source_path}"
@@ -82,7 +72,7 @@ if(NOT EMSCRIPTEN)
         ENVIRONMENT "CC=${MINIEXPR_PORTABLE_CC};ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/portable-jit-cache")
     endif()
   endforeach()
-  # Full-language regressions are retained separately from frozen conformance.
+  # Full-language audit regressions below intentionally retain different semantics.
   get_property(portable_tests DIRECTORY PROPERTY TESTS)
   foreach(test_name IN LISTS portable_tests)
     if(test_name MATCHES "^(portable|native)_dsl_while_cap_")
@@ -91,10 +81,10 @@ if(NOT EMSCRIPTEN)
   endforeach()
 
   foreach(case_name nested_cast cast_argument_division)
-    add_test(NAME portable_audit_${case_name}_off COMMAND portable_dsl_runner
+    add_test(NAME native_audit_${case_name}_off COMMAND portable_dsl_runner
       "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/audit/${case_name}.dsl"
       "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/audit/${case_name}.txt" off native)
-    set_tests_properties(portable_audit_${case_name}_off PROPERTIES TIMEOUT 30)
+    set_tests_properties(native_audit_${case_name}_off PROPERTIES TIMEOUT 30)
   endforeach()
 endif()
 

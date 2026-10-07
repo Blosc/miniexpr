@@ -122,6 +122,10 @@ static void chain_token(chain_parser *p) {
             strcpy(p->op, "**");
             s++;
             p->precedence = 12;
+        } else if (*p->token == '/' && *s == '/') {
+            strcpy(p->op, "//");
+            s++;
+            p->precedence = 10;
         } else {
             switch (*p->token) {
             case ',': p->precedence = 0; break;
