@@ -356,10 +356,10 @@ static int test_codegen_math_alias_rewrite(void) {
         "    t2 = where(1, t0, t1) * sign(x) + square(x) + ln(x)\n"
         "    t3 = fac(x) + ncr(x, 2.0) + npr(x, 2.0)\n"
         "    t4 = conj(x) + real(x) + imag(x)\n"
-        "    t5 = arcsin(x) + arccos(x) + arctan(x)\n"
-        "    t6 = arcsinh(x) + arccosh(x) + arctanh(x)\n"
+        "    t5 = asin(x) + acos(x) + atan(x)\n"
+        "    t6 = asinh(x) + acosh(x) + atanh(x)\n"
         "    t7 = power(x, 2.0)\n"
-        "    return arctan2(t2 + t3 + t4 + t5 + t6 + t7, 1.0)\n";
+        "    return atan2(t2 + t3 + t4 + t5 + t6 + t7, 1.0)\n";
 
     me_dsl_error parse_error;
     me_dsl_program *program = me_dsl_parse(src, &parse_error);
@@ -1564,8 +1564,8 @@ static int test_codegen_alias_vector_lowering(void) {
     /* Aliases are rewritten to their libc name for the scalar path; the vector
        matcher sees the source spelling, so it has to know them too. */
     const struct { const char *alias; const char *vec_op; } cases[] = {
-        {"ln", "log"}, {"arcsinh", "asinh"}, {"arccosh", "acosh"}, {"arctanh", "atanh"},
-        {"arcsin", "asin"}, {"arccos", "acos"}, {"arctan", "atan"},
+        {"ln", "log"}, {"asinh", "asinh"}, {"acosh", "acosh"}, {"atanh", "atanh"},
+        {"asin", "asin"}, {"acos", "acos"}, {"atan", "atan"},
     };
 
     for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); c++) {

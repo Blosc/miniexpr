@@ -1093,7 +1093,7 @@ static int test_nd_unary_int32_float_math(void) {
     int32_t blockshape[1] = {4};
     me_variable vars[] = {{"x", ME_INT32}};
 
-    int rc = me_compile_nd("arccos(x)", vars, 1, ME_FLOAT64, 1,
+    int rc = me_compile_nd("acos(x)", vars, 1, ME_FLOAT64, 1,
                            shape, chunkshape, blockshape, &err, &expr);
     if (rc != ME_COMPILE_SUCCESS) {
         printf("FAILED me_compile_nd unary int32: %d (err=%d)\n", rc, err);
@@ -1251,7 +1251,7 @@ static int test_nd_unary_int32_to_float64_padding(void) {
     int32_t blockshape[1] = {3};
     me_variable vars[] = {{"x", ME_INT32}};
 
-    int rc = me_compile_nd("arccos(x)", vars, 1, ME_FLOAT64, 1,
+    int rc = me_compile_nd("acos(x)", vars, 1, ME_FLOAT64, 1,
                            shape, chunkshape, blockshape, &err, &expr);
     if (rc != ME_COMPILE_SUCCESS) {
         printf("FAILED me_compile_nd unary int32->float64: %d (err=%d)\n", rc, err);

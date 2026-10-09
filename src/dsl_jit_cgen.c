@@ -576,9 +576,7 @@ static const char *me_jit_function_name_rewrite(const char *start, size_t ident_
     /* Builtin spellings that are plain aliases of a libc name. Without these the
        alias reaches C verbatim and the kernel fails to link. */
     static const struct { const char *alias; const char *libc; } libc_aliases[] = {
-        {"arctan2", "atan2"}, {"arcsin", "asin"},   {"arccos", "acos"},
-        {"arctan", "atan"},   {"arcsinh", "asinh"}, {"arccosh", "acosh"},
-        {"arctanh", "atanh"}, {"ln", "log"},      {"power", "pow"},
+        {"ln", "log"}, {"power", "pow"},
     };
     for (size_t i = 0; i < sizeof(libc_aliases) / sizeof(libc_aliases[0]); i++) {
         if (me_jit_ident_equals(start, ident_len, libc_aliases[i].alias)) {
@@ -1601,28 +1599,22 @@ static me_jit_vec_unary_kind me_jit_vec_unary_kind_from_ident(const char *fn_sta
     if (me_jit_ident_equals(fn_start, fn_len, "tanh")) {
         return ME_JIT_VEC_UNARY_TANH;
     }
-    if (me_jit_ident_equals(fn_start, fn_len, "asinh") ||
-        me_jit_ident_equals(fn_start, fn_len, "arcsinh")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "asinh")) {
         return ME_JIT_VEC_UNARY_ASINH;
     }
-    if (me_jit_ident_equals(fn_start, fn_len, "acosh") ||
-        me_jit_ident_equals(fn_start, fn_len, "arccosh")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "acosh")) {
         return ME_JIT_VEC_UNARY_ACOSH;
     }
-    if (me_jit_ident_equals(fn_start, fn_len, "atanh") ||
-        me_jit_ident_equals(fn_start, fn_len, "arctanh")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "atanh")) {
         return ME_JIT_VEC_UNARY_ATANH;
     }
-    if (me_jit_ident_equals(fn_start, fn_len, "asin") ||
-        me_jit_ident_equals(fn_start, fn_len, "arcsin")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "asin")) {
         return ME_JIT_VEC_UNARY_ASIN;
     }
-    if (me_jit_ident_equals(fn_start, fn_len, "acos") ||
-        me_jit_ident_equals(fn_start, fn_len, "arccos")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "acos")) {
         return ME_JIT_VEC_UNARY_ACOS;
     }
-    if (me_jit_ident_equals(fn_start, fn_len, "atan") ||
-        me_jit_ident_equals(fn_start, fn_len, "arctan")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "atan")) {
         return ME_JIT_VEC_UNARY_ATAN;
     }
     return ME_JIT_VEC_UNARY_NONE;
@@ -1630,8 +1622,7 @@ static me_jit_vec_unary_kind me_jit_vec_unary_kind_from_ident(const char *fn_sta
 
 static me_jit_vec_binary_kind me_jit_vec_binary_kind_from_ident(const char *fn_start,
                                                                  size_t fn_len) {
-    if (me_jit_ident_equals(fn_start, fn_len, "atan2") ||
-        me_jit_ident_equals(fn_start, fn_len, "arctan2")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "atan2")) {
         return ME_JIT_VEC_BINARY_ATAN2;
     }
     if (me_jit_ident_equals(fn_start, fn_len, "hypot")) {

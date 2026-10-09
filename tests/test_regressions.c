@@ -36,7 +36,7 @@ int test_arctan2_with_scalar_constant(const char *description, int size, float s
     }
 
     char expr_str[256];
-    snprintf(expr_str, sizeof(expr_str), "arctan2(x, %.1f)", scalar_value);
+    snprintf(expr_str, sizeof(expr_str), "atan2(x, %.1f)", scalar_value);
     printf("Expression: %s\n", expr_str);
     printf("Array size: %d elements\n", size);
 
@@ -122,7 +122,7 @@ int test_arctan2_with_two_arrays(const char *description, int size, float scalar
     me_variable vars[] = {{"x", ME_FLOAT32}, {"y", ME_FLOAT32}};
     int err;
     me_expr *expr = NULL;
-    int rc_expr = me_compile("arctan2(x, y)", vars, 2, ME_FLOAT32, &err, &expr);
+    int rc_expr = me_compile("atan2(x, y)", vars, 2, ME_FLOAT32, &err, &expr);
 
     if (rc_expr != ME_COMPILE_SUCCESS) {
         printf("✗ COMPILATION FAILED with error code: %d\n", err);
@@ -1650,11 +1650,11 @@ int main() {
 
     total++;
     if (test_arctan2_array_scalar_f64("Test 2.1: arctan2(y, 1.0) where y is an array",
-                                      "arctan2(y, 1.0)", y_data, 1.0, 0)) passed++;
+                                      "atan2(y, 1.0)", y_data, 1.0, 0)) passed++;
 
     total++;
     if (test_arctan2_array_scalar_f64("Test 2.2: arctan2(1.0, x) where x is an array",
-                                      "arctan2(1.0, x)", x_data, 1.0, 1)) passed++;
+                                      "atan2(1.0, x)", x_data, 1.0, 1)) passed++;
 
     double x_data2[CHUNK_SIZE] = {1.0, 2.0, 3.0, -2.0, 0.5};
     total++;
@@ -1678,7 +1678,7 @@ int main() {
 
     total++;
     if (test_arctan2_complex_expr("Test 3.1: arctan2(x+y, 1.0)",
-                                  "arctan2(x+y, 1.0)", x_data4, y_data4,
+                                  "atan2(x+y, 1.0)", x_data4, y_data4,
                                   arctan2_x_plus_y_1)) passed++;
 
     double x_data5[CHUNK_SIZE] = {1.0, 2.0, -1.0, 0.5, -2.0};
@@ -1686,7 +1686,7 @@ int main() {
 
     total++;
     if (test_arctan2_complex_expr("Test 3.2: arctan2(1.0, x+y)",
-                                  "arctan2(1.0, x+y)", x_data5, y_data5,
+                                  "atan2(1.0, x+y)", x_data5, y_data5,
                                   arctan2_1_x_plus_y)) passed++;
 
     // ========================================================================
@@ -1706,7 +1706,7 @@ int main() {
 
     total++;
     if (test_constant_type_f32("Test 4.3: FLOAT32 in arctan2(a, constant), output=ME_AUTO",
-                               "arctan2(a, 3.0)", arctan2_3_f32)) passed++;
+                               "atan2(a, 3.0)", arctan2_3_f32)) passed++;
 
     // ========================================================================
     // SCALAR CONSTANT BUG TESTS
@@ -1722,7 +1722,7 @@ int main() {
     if (test_scalar_constant("Test 5.2: a ** 2", "a ** 2", pow_2_f32)) passed++;
 
     total++;
-    if (test_scalar_constant("Test 5.3: arctan2(a, 3.0)", "arctan2(a, 3.0)", arctan2_3_f32)) passed++;
+    if (test_scalar_constant("Test 5.3: atan2(a, 3.0)", "atan2(a, 3.0)", arctan2_3_f32)) passed++;
 
     total++;
     if (test_scalar_constant("Test 5.4: a * 5", "a * 5", mul_5_f32)) passed++;

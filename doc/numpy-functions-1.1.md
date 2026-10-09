@@ -15,8 +15,8 @@ The corpus covers the advertised real numerical functions:
 - `minimum`, `maximum`, `fmin`, `fmax`, `where`, `pow` / `power`.
 - `isfinite`, `isinf`, `isnan`, `signbit`.
 - `sqrt`, `cbrt`, `exp`, `exp2`, `expm1`, `log` / `ln`, `log2`, `log10`, `log1p`.
-- `sin`, `cos`, `tan`, `sinh`, `cosh`, `tanh`, inverse forms with both C and
-  NumPy `arc*` aliases; `atan2` / `arctan2`, `hypot`, `logaddexp`.
+- `sin`, `cos`, `tan`, `sinh`, `cosh`, `tanh`, inverse forms `asin`, `acos`,
+  `atan`, `asinh`, `acosh`, `atanh`; `atan2`, `hypot`, `logaddexp`.
 - `copysign`, `nextafter`, `fmod`, `remainder`, `ldexp`.
 - Native extensions: `erf`, `erfc`, `lgamma`, `tgamma`, `exp10`, `sinpi`, `cospi`,
   `fdim`, explicit fused `fma`, checked `fac` / `ncr` / `npr`, constants `e` / `pi`.
@@ -56,6 +56,14 @@ Unsupported NumPy spellings and signatures are visible in the corpus, including
 `float_power`, `logaddexp2`, `heaviside`, `spacing`, `frexp`, `modf`, `round` with
 decimals, ufunc methods and tuple-valued functions. Unsupported arities reject
 source validation, not evaluation via Python or an external callback.
+
+Inverse functions use canonical Array API/C names only. The former NumPy aliases
+`arcsin`, `arccos`, `arctan`, `arctan2`, `arcsinh`, `arccosh`, `arctanh` are no
+longer native builtins, in either full expressions or portable profiles. Python
+authoring normalizes these spellings before compilation/export. Existing raw DSL
+sources/artifacts containing these calls must be updated or re-exported; artifact
+import rejects them rather than silently rewriting saved source. See
+`inverse-function-names.md` for migration details.
 
 ## Accuracy
 

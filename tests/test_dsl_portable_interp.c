@@ -676,12 +676,12 @@ static void independent_anchor_fixture(void) {
         {"ceil", -2.5, -2}, {"floor", -2.5, -3}, {"trunc", -2.5, -2},
         {"rint", 2.5, 2}, {"round", 2.5, 3}, {"conj", -2, -2}, {"real", -2, -2}, {"imag", -2, 0},
         {"rint", -0.5, -0.0}, {"round", -0.25, -0.0}, {"sqrt", -0.0, -0.0}, {"sign", -0.0, -0.0},
-        {"arccos", 1, 0}, {"arccosh", 1, 0}, {"arcsin", 0, 0},
-        {"arcsinh", 0, 0}, {"arctan", 0, 0}, {"arctanh", 0, 0}
+        {"acos", 1, 0}, {"acosh", 1, 0}, {"asin", 0, 0},
+        {"asinh", 0, 0}, {"atan", 0, 0}, {"atanh", 0, 0}
     };
     struct { const char *name; double x, y, expected; } binary[] = {
         {"atan2", 0, 1, 0}, {"atan2", 0, -1, 0x1.921fb54442d18p+1},
-        {"arctan2", 0, 1, 0}, {"copysign", 1, -1, -1}, {"fdim", 5, 3, 2},
+        {"atan2", 0, 1, 0}, {"copysign", 1, -1, -1}, {"fdim", 5, 3, 2},
         {"fmin", 5, 3, 3}, {"fmax", 5, 3, 5}, {"hypot", 3, 4, 5},
         {"fmod", 7, 2, 1}, {"remainder", 7, 2, -1}, {"ldexp", 1.5, 2, 6},
         {"logaddexp", 0, 0, 0x1.62e42fefa39efp-1}, {"pow", 2, 3, 8}, {"power", 2, 3, 8}
