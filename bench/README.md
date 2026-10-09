@@ -174,6 +174,35 @@ ME_BENCH_COMPILER=tcc ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
 ME_BENCH_COMPILER=cc ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
 ```
 
+### benchmark_dsl_interpreter_vs_jit.c
+Portable 1.1 interpreter vs JIT lowering, warm per-evaluation. One reduced
+reproducer per family originally outside the portable JIT
+(`src/dsl_portable_jit.c`). Math calls, integer arithmetic, locals and simple
+control flow now compile; floating floor division, block reductions and ND context
+still fall back. A final eligible control kernel checks compiled execution.
+
+Families: `A` math-function call, `B` integer dtype, `C` unsupported float
+operator (`//`), `D` local temporaries, `E` control flow, `F` block reduction and
+`G` ND context.
+
+Backends: `interpreter` (always `ME_JIT_OFF`), internal `tcc`, `gcc-16`
+(`ME_DSL_JIT_COMPILER=cc`, `CC=gcc-16`) and `clang` (`CC=clang`). Cold
+load/compile time is excluded; each cell is the best warm run and a per-sample
+batch is auto-sized to about 2 ms. Requires a CMake build with
+`MINIEXPR_BUILD_ARTIFACT=ON`; the top-level Makefile skips this target.
+
+```bash
+./build/bench/benchmark_dsl_interpreter_vs_jit            # nitems=65536 repeats=7
+./build/bench/benchmark_dsl_interpreter_vs_jit 262144 5
+```
+
+A cell is tagged `I` (interpreter), `JIT` (compiled kernel), `fb` (JIT declined,
+interpreter fallback) or `*` (value differs bitwise from the interpreter
+reference).
+
+Fixed backend order and best-of-warm timings are useful for coverage and large
+interpreter speedups, but not reliable fine-grained compiler rankings.
+
 ### benchmark_black-scholes.c
 Notebook-like Black-Scholes DSL kernel benchmark with branches (`if d1 > 0`, `if d2 > 0`) and multiple transcendental calls.
 

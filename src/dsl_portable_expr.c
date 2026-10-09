@@ -1159,6 +1159,17 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
     return status == 0 ? 0 : ME_EVAL_ERR_INVALID_ARG;
 }
 
+/* Only audited unary floating functions reach this private JIT bridge. Reuse
+ * the evaluator's precision and libm choices rather than the JIT compiler's. */
+double dsl_portable_jit_unary_math(const void *node, double x) {
+    const me_expr *n = node;
+    me_scalar a = {0}, result = {0};
+    if (n->dtype == ME_FLOAT32) a.f32 = (float)x;
+    else a.f64 = x;
+    p_math(n, me_portable_math_name(n), &a, NULL, &result);
+    return n->dtype == ME_FLOAT32 ? (double)result.f32 : result.f64;
+}
+
 static bool p_jit_nan_compare(const void *node, double x, double y);
 
 bool dsl_portable_float_compare(const void *node, double x, double y) {

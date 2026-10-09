@@ -84,25 +84,44 @@ results and mutable-view semantics are deferred, not implied by this ABI.
 ## Opt-in portable host JIT
 
 `ME_JIT_ON` at 1.1 artifact load enables fail-closed typed-tree lowering for a
-single elementwise return without ND context: float32/float64 arithmetic,
-comparisons, Boolean selection and lazy `where`. Check `me_artifact_has_jit()`;
+elementwise program without ND context: float32/float64 arithmetic,
+comparisons, Boolean selection, lazy `where`, straight-line locals and simple
+`if`/`elif`/`else` branches with returns. Same-dtype signed and unsigned integer
+`+`, `-`, `*` and negation use unsigned modular arithmetic and bit-copy results,
+not overflowing signed C operations. Selected unary float functions (`sin`, `cos`,
+`tan`, `exp`, `log`, `sqrt`, `floor`, `ceil`) reuse the authoritative native math
+evaluator through a private bridge. Check `me_artifact_has_jit()`;
 an acceleration request alone is not evidence of compiled execution. Default
 requests and checked 1.0 retain interpreter routing. TCC is the first backend;
 `ME_DSL_JIT_COMPILER=cc` with `CC` selects GCC or another system compiler.
 
 The generated loop uses a private participating-mask and comparison-bridge
-pointer vector. It preserves per-node dtype and final conversion, avoids folding
+and math pointer vector. It preserves per-node dtype and final conversion, avoids folding
 constant operations whose exceptions must be observed, and scopes/restores fenv.
-The comparison bridge preserves host NaN exception behavior; ordinary finite
-comparisons take a fast host path, without evaluating expression trees. Cache
+The comparison bridge preserves host NaN exception behavior; ordinary non-NaN
+comparisons stay inline in generated code. Volatile lane-local stores preserve
+assignment precision and exceptions even for unused values. A bounded recursive
+statement lowering rechecks definite assignment and rejects unsupported statements. Cache
 identity includes semantic profile and lowering/ABI revision; runtime pointers
 are supplied at invocation and are never serialized in generated code.
 
-Unsupported integers/functions/statements/ND context fall back to the portable
+Integer division/shifts, mixed-width integer conversions, signed/unsigned
+comparisons without explicit common promotion, floating floor division, other
+functions, loops, block-scalar returns and ND context fall back to the portable
 interpreter. Arbitrary compiler flags/options reject this route. WASM host-pointer
 lowering is deliberately disabled. No explicit SIMD or cross-platform numerical
 qualification is implied by local host tests. Logical reductions still use the
 unchanged serial M5 accumulator; only their eligible map tiles are accelerated.
+
+For exhaustive host conformance tests, the cc corpus runner bulk-compiles all
+eligible generated kernels in one module, avoiding a compiler/linker process per
+case. Each function has a unique symbol and retains its artifact's runtime
+bindings; all corpus cases and value/status/recovery checks still execute.
+This is test-only, not a production cache/compiler change. Set
+`MENUDET_JIT_SERIAL=1` to exercise the original per-artifact compilation route.
+Dedicated runtime/cache tests also retain that route. Host CTest includes full
+arithmetic and function cc corpora with actual compilation required and a
+60-second timeout.
 
 ## Shape operations
 

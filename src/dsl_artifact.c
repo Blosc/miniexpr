@@ -5,6 +5,7 @@
 #include "miniexpr_artifact.h"
 #include "dsl_parser.h"
 #include "dsl_eval_internal.h"
+#include "dsl_jit_test.h"
 #include "dsl_portable_types.h"
 #include "dsl_portable_fp.h"
 #include "functions.h"
@@ -57,6 +58,12 @@ struct me_artifact {
     me_artifact_cardinality cardinality;
     me_dsl_semantic_profile profile;
 };
+
+/* Test-only bulk compilation borrows the same typed program as normal execution. */
+void *dsl_artifact_program_for_tests(void *opaque) {
+    me_artifact *artifact = opaque;
+    return artifact ? artifact->program : NULL;
+}
 
 static me_artifact_status artifact_error(me_artifact_error *error,
                                         me_artifact_status status, const char *message) {

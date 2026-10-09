@@ -171,6 +171,8 @@ typedef struct {
     char *jit_c_source;
     const me_expr *portable_jit_comparisons[128]; /* Borrowed typed nodes. */
     int portable_jit_ncomparisons;
+    const me_expr *portable_jit_math[128]; /* Borrowed unary typed nodes. */
+    int portable_jit_nmath;
     bool jit_use_runtime_math_bridge;
     bool jit_scalar_math_bridge_enabled;
     bool jit_synth_reserved_non_nd;

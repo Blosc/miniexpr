@@ -51,6 +51,9 @@ endif
 
 # Benchmark sources
 BENCH_SRCS = $(wildcard $(BENCHDIR)/*.c)
+# Needs the artifact loader/JSON library; build it through CMake with
+# MINIEXPR_BUILD_ARTIFACT=ON instead of this Makefile.
+BENCH_SRCS := $(filter-out $(BENCHDIR)/benchmark_dsl_interpreter_vs_jit.c,$(BENCH_SRCS))
 BENCH_BINS = $(patsubst $(BENCHDIR)/%.c,$(BUILDDIR)/%$(EXE),$(BENCH_SRCS))
 
 # Test sources

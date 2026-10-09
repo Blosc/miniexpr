@@ -1249,7 +1249,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
     if (program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_1 &&
         program->jit_kernel_fn && !me_eval_jit_disabled(params)) {
         if (n_vars && !vars_block) return ME_EVAL_ERR_VAR_MISMATCH;
-        const void *inputs[ME_MAX_VARS + 130];
+        const void *inputs[ME_MAX_VARS + 259];
         for (int i = 0; i < n_vars; i++) {
             if (nitems && !vars_block[i]) return ME_EVAL_ERR_VAR_MISMATCH;
             inputs[i] = vars_block[i];
@@ -1258,6 +1258,10 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
         inputs[n_vars+1] = (const void *)dsl_portable_float_compare;
         for (int i = 0; i < program->portable_jit_ncomparisons; i++) {
             inputs[n_vars+2+i] = program->portable_jit_comparisons[i];
+        }
+        inputs[n_vars+130] = (const void *)dsl_portable_jit_unary_math;
+        for (int i = 0; i < program->portable_jit_nmath; i++) {
+            inputs[n_vars+131+i] = program->portable_jit_math[i];
         }
         fenv_t saved;
         if (!dsl_portable_fp_begin(&saved)) return ME_EVAL_ERR_INVALID_ARG;

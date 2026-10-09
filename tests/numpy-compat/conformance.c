@@ -1,5 +1,6 @@
 /* M2 native conformance: the corpus executes without Python/NumPy. */
 #include "vector_io.h"
+#include "batch-jit.h"
 #include <fenv.h>
 #include <math.h>
 #include <stdio.h>
@@ -222,7 +223,13 @@ static int requirements(yyjson_val *test) {
     return supported;
 }
 
-static int run_v2_case(yyjson_val *test, me_jit_mode mode, bool observe) {
+typedef struct {
+    me_artifact *artifact;
+    me_artifact_error error;
+    int status;
+} v2_loaded;
+
+static int run_v2_case(yyjson_val *test, me_jit_mode mode, bool observe, v2_loaded *loaded) {
     const char *id = text(test, "id"), *json = text(test, "artifact");
     yyjson_val *policy = yyjson_obj_get(test, "comparison");
     if (!id || !*id || !json || !text(test, "semantic_revision") ||
@@ -248,7 +255,13 @@ static int run_v2_case(yyjson_val *test, me_jit_mode mode, bool observe) {
     }
     me_artifact *artifact = NULL;
     me_artifact_error error = {0};
-    int rc = me_artifact_load(json, strlen(json), mode, &artifact, &error);
+    int rc;
+    if (loaded) {
+        artifact = loaded->artifact;
+        error = loaded->error;
+        rc = loaded->status;
+    }
+    else rc = me_artifact_load(json, strlen(json), mode, &artifact, &error);
     int failed = 0, reference_match = 0, regression = 0, recovery_ok = 1, environment_ok = 1;
     me_artifact_buffer inputs[16] = {{0}};
     void *buffers[16] = {0}, *output = NULL, *repeat_output = NULL;
@@ -405,7 +418,7 @@ cleanup:
     for (int i = 0; i < 16; i++) free(buffers[i]);
     free(output);
     free(repeat_output);
-    me_artifact_free(artifact);
+    if (!loaded) me_artifact_free(artifact);
     return failed;
 }
 
@@ -414,14 +427,44 @@ int numpy_compat_run_v2(yyjson_val *root, me_jit_mode mode, bool observe) {
     if (!text(root, "generator_revision") || !text(yyjson_obj_get(root, "reference"), "numpy") ||
         !yyjson_is_obj(yyjson_obj_get(root, "provenance")) || !yyjson_is_arr(cases) || !yyjson_arr_size(cases)) return 1;
     int failed = 0;
+    size_t count = yyjson_arr_size(cases);
+    v2_loaded *loaded = NULL;
+    me_artifact **artifacts = NULL;
+    void *batch_handle = NULL;
+    if (numpy_compat_batch_enabled(mode)) {
+        if (count > 16384) return 1;
+        loaded = calloc(count,sizeof(*loaded));
+        artifacts = calloc(count,sizeof(*artifacts));
+        if (!loaded || !artifacts) {
+            free(loaded);
+            free(artifacts);
+            return 1;
+        }
+        for (size_t i = 0; i < count; i++) {
+            const char *json = text(yyjson_arr_get(cases,i),"artifact");
+            loaded[i].status = me_artifact_load(json,json ? strlen(json) : 0,ME_JIT_OFF,
+                                               &loaded[i].artifact,&loaded[i].error);
+            artifacts[i] = loaded[i].artifact;
+        }
+        failed = numpy_compat_batch_compile(artifacts,count,&batch_handle);
+        if (failed) goto cleanup_batch;
+    }
     for (size_t i = 0; i < yyjson_arr_size(cases); i++) {
         yyjson_val *test = yyjson_arr_get(cases, i);
         const char *id = text(test, "id");
         for (size_t j = 0; id && j < i; j++) {
             const char *previous = text(yyjson_arr_get(cases, j), "id");
-            if (previous && !strcmp(id, previous)) return 1;
+            if (previous && !strcmp(id, previous)) {
+                failed = 1;
+                goto cleanup_batch;
+            }
         }
-        failed |= run_v2_case(test, mode, observe);
+        failed |= run_v2_case(test, mode, observe,loaded ? &loaded[i] : NULL);
     }
+cleanup_batch:
+    if (artifacts) for (size_t i = 0; i < count; i++) me_artifact_free(artifacts[i]);
+    numpy_compat_batch_close(batch_handle);
+    free(artifacts);
+    free(loaded);
     return failed;
 }
