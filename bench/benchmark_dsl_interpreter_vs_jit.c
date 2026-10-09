@@ -63,16 +63,44 @@ typedef struct {
  * Keep sources minimal: they are reduced reproducers, not workloads.
  */
 static const bench_case cases[] = {
-    {"A math-call: sin(x)+cos(x)",
+    {"A1 math-call: sin(x)+cos(x)",
      "def k(x):\n    return sin(x) + cos(x)\n",
      "[{\"name\":\"x\",\"dtype\":\"float64\"}]", "[\"numeric\"]",
      "float64", "elementwise", 0, ME_FLOAT64, {"x"}, 1, 0},
-    {"B integer-dtype: int32 x+y",
+    {"A2 binary-math: hypot(x, y)",
+     "def k(x, y):\n    return hypot(x, y)\n",
+     "[{\"name\":\"x\",\"dtype\":\"float64\"},{\"name\":\"y\",\"dtype\":\"float64\"}]", "[\"numeric\"]",
+     "float64", "elementwise", 0, ME_FLOAT64, {"x", "y"}, 2, 0},
+    {"A3 predicate: isfinite(x)",
+     "def k(x):\n    return isfinite(x)\n",
+     "[{\"name\":\"x\",\"dtype\":\"float64\"}]", "[\"numeric\"]",
+     "bool", "elementwise", 0, ME_FLOAT64, {"x"}, 1, 0},
+    {"B1 integer-add: int32 x+y",
      "def k(x, y):\n    return x + y\n",
      "[{\"name\":\"x\",\"dtype\":\"int32\"},{\"name\":\"y\",\"dtype\":\"int32\"}]", "[\"numeric\"]",
      "int32", "elementwise", 0, ME_INT32, {"x", "y"}, 2, 0},
-    {"C float-operator: x // 3.0",
+    {"B2 integer-mod: x % 7",
+     "def k(x):\n    return x % 7\n",
+     "[{\"name\":\"x\",\"dtype\":\"int32\"}]", "[\"numeric\"]",
+     "int32", "elementwise", 0, ME_INT32, {"x"}, 1, 0},
+    {"B3 integer-shift: x << 2",
+     "def k(x):\n    return x << 2\n",
+     "[{\"name\":\"x\",\"dtype\":\"int32\"}]", "[\"numeric\"]",
+     "int32", "elementwise", 0, ME_INT32, {"x"}, 1, 0},
+    {"B4 narrow-cast: int16(x)*2",
+     "def k(x):\n    return int16(x) * 2\n",
+     "[{\"name\":\"x\",\"dtype\":\"int8\"}]", "[\"numeric\"]",
+     "int16", "elementwise", 0, ME_INT8, {"x"}, 1, 0},
+    {"C1 float-floordiv: x // 3.0",
      "def k(x):\n    return x // 3.0\n",
+     "[{\"name\":\"x\",\"dtype\":\"float64\"}]", "[\"numeric\"]",
+     "float64", "elementwise", 0, ME_FLOAT64, {"x"}, 1, 0},
+    {"C2 float-rem: x % 1.5",
+     "def k(x):\n    return x % 1.5\n",
+     "[{\"name\":\"x\",\"dtype\":\"float64\"}]", "[\"numeric\"]",
+     "float64", "elementwise", 0, ME_FLOAT64, {"x"}, 1, 0},
+    {"C3 float-pow: x ** 2.5",
+     "def k(x):\n    return x ** 2.5\n",
      "[{\"name\":\"x\",\"dtype\":\"float64\"}]", "[\"numeric\"]",
      "float64", "elementwise", 0, ME_FLOAT64, {"x"}, 1, 0},
     {"D local-temp: y=x*2; y+1",
@@ -179,10 +207,18 @@ static bool build_json(const bench_case *c, char *out, size_t cap) {
 static void fill_input(me_dtype dtype, void *buffer, size_t nitems) {
     for (size_t i = 0; i < nitems; i++) {
         double value = (i % 5 == 0) ? 0.0 : (double)(i % 1000) * 0.001 + 0.5;
+        int64_t integer = (int64_t)(i % 1000) - 500;
         switch (dtype) {
         case ME_FLOAT32: ((float *)buffer)[i] = (float)value; break;
-        case ME_INT32: ((int32_t *)buffer)[i] = (int32_t)(i % 1000); break;
-        case ME_INT64: ((int64_t *)buffer)[i] = (int64_t)(i % 1000); break;
+        case ME_BOOL: ((uint8_t *)buffer)[i] = (uint8_t)(i % 3 == 0); break;
+        case ME_INT8: ((int8_t *)buffer)[i] = (int8_t)integer; break;
+        case ME_INT16: ((int16_t *)buffer)[i] = (int16_t)integer; break;
+        case ME_INT32: ((int32_t *)buffer)[i] = (int32_t)integer; break;
+        case ME_INT64: ((int64_t *)buffer)[i] = integer; break;
+        case ME_UINT8: ((uint8_t *)buffer)[i] = (uint8_t)integer; break;
+        case ME_UINT16: ((uint16_t *)buffer)[i] = (uint16_t)integer; break;
+        case ME_UINT32: ((uint32_t *)buffer)[i] = (uint32_t)integer; break;
+        case ME_UINT64: ((uint64_t *)buffer)[i] = (uint64_t)integer; break;
         default: ((double *)buffer)[i] = value; break;
         }
     }

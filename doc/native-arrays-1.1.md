@@ -88,18 +88,30 @@ elementwise program without ND context: float32/float64 arithmetic,
 comparisons, Boolean selection, lazy `where`, straight-line locals and simple
 `if`/`elif`/`else` branches with returns. Same-dtype signed and unsigned integer
 `+`, `-`, `*` and negation use unsigned modular arithmetic and bit-copy results,
-not overflowing signed C operations. Selected unary float functions (`sin`, `cos`,
-`tan`, `exp`, `log`, `sqrt`, `floor`, `ceil`) reuse the authoritative native math
-evaluator through a private bridge. Check `me_artifact_has_jit()`;
+not overflowing signed C operations. Integral widening/narrowing conversions
+lower to the same modular bit-copy; float-to-integer conversion stays interpreted
+because it must report out-of-range/nonfinite values as errors.
+
+Unary and binary float functions, the float `//`/`%`/`**` operators, the boolean
+predicates (`isfinite`, `isinf`, `isnan`, `signbit`) and the integer
+`%`/`//`/`<<`/`>>`/`&`/`|`/`^`/`~` operators reuse the authoritative native math
+and checked-integer evaluator through private opaque-node bridges. The bridge
+supplies already-evaluated operands, so promotion, libm choice, NaN rules, signed
+divmod zero/sentinel handling, oversized shifts and IEEE exceptions are identical
+to the interpreter. Check `me_artifact_has_jit()`;
 an acceleration request alone is not evidence of compiled execution. Default
 requests and checked 1.0 retain interpreter routing. TCC is the first backend;
 `ME_DSL_JIT_COMPILER=cc` with `CC` selects GCC or another system compiler.
 
-The generated loop uses a private participating-mask and comparison-bridge
-and math pointer vector. It preserves per-node dtype and final conversion, avoids folding
-constant operations whose exceptions must be observed, and scopes/restores fenv.
+The generated loop uses a private participating-mask and separate
+comparison/math/predicate/integer-operator bridge vectors, each a dispatcher
+pointer followed by borrowed typed nodes. It preserves per-node dtype and final
+conversion, avoids folding constant operations whose exceptions must be observed,
+and scopes/restores fenv.
 The comparison bridge preserves host NaN exception behavior; ordinary non-NaN
-comparisons stay inline in generated code. Volatile lane-local stores preserve
+comparisons stay inline in generated code. The math/operator bridges receive
+already-evaluated operands, so a cheap per-lane call cannot diverge from the
+interpreter's rounding or diagnostics. Volatile lane-local stores preserve
 assignment precision and exceptions even for unused values. A bounded recursive
 statement lowering rechecks definite assignment and rejects unsupported statements. Cache
 identity includes semantic profile and lowering/ABI revision; runtime pointers

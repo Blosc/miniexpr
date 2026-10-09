@@ -82,6 +82,16 @@ int main(void) {
     check_extended("def k(x, y):\\n    return where(x > 0, log(x), y)\\n",ME_FLOAT64,fx,fy,8);
     int32_t ix[] = {INT32_MIN,INT32_MAX,0,1,-1}, iy[] = {1,1,INT32_MAX,INT32_MIN,INT32_MIN};
     check_extended("def k(x, y):\\n    z = x + y\\n    return z * y - x\\n",ME_INT32,ix,iy,4);
-    printf("portable JIT locals/branches/math/modular integers: passed\n");
+    /* Bridge-lowered float operators, binary math, predicates and integer ops. */
+    check_extended("def k(x, y):\\n    return x // y\\n",ME_FLOAT64,fx,fy,8);
+    check_extended("def k(x, y):\\n    return x % y\\n",ME_FLOAT64,fx,fy,8);
+    check_extended("def k(x, y):\\n    return x ** y\\n",ME_FLOAT64,fx,fy,8);
+    check_extended("def k(x, y):\\n    return hypot(x, y)\\n",ME_FLOAT64,fx,fy,8);
+    check_extended("def k(x, y):\\n    return atan2(x, y)\\n",ME_FLOAT64,fx,fy,8);
+    check_extended("def k(x, y):\\n    return x % y\\n",ME_INT32,ix,iy,4);
+    check_extended("def k(x, y):\\n    return x // y\\n",ME_INT32,ix,iy,4);
+    check_extended("def k(x, y):\\n    return x << y\\n",ME_INT32,ix,iy,4);
+    check_extended("def k(x, y):\\n    return x & y\\n",ME_INT32,ix,iy,4);
+    printf("portable JIT locals/branches/math/modular integers/operators: passed\n");
     return 0;
 }

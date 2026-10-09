@@ -40,6 +40,17 @@
 #define ME_DSL_JIT_META_MAGIC 0x4d454a49544d4554ULL
 #define ME_DSL_JIT_META_VERSION 7
 
+/* Portable 1.1 private kernel bridge layout. The kernel receives the mask, then
+ * a dispatcher pointer and up to 128 borrowed typed nodes per family, addressed
+ * as inputs[n_vars + offset]. Slot 0 is the mask; each family spans 129 slots. */
+#define ME_DSL_PORTABLE_JIT_BRIDGE_LIMIT 128
+#define ME_DSL_PORTABLE_JIT_CMP_OFF 1
+#define ME_DSL_PORTABLE_JIT_MATH1_OFF 130
+#define ME_DSL_PORTABLE_JIT_MATH2_OFF 259
+#define ME_DSL_PORTABLE_JIT_PRED_OFF 388
+#define ME_DSL_PORTABLE_JIT_IOP_OFF 517
+#define ME_DSL_PORTABLE_JIT_EXTRA 646
+
 #if ME_USE_WASM32_JIT
 typedef int (*me_dsl_jit_kernel_fn)(const void **inputs, void *output, int nitems);
 #else
@@ -173,6 +184,12 @@ typedef struct {
     int portable_jit_ncomparisons;
     const me_expr *portable_jit_math[128]; /* Borrowed unary typed nodes. */
     int portable_jit_nmath;
+    const me_expr *portable_jit_math2[128]; /* Borrowed binary typed nodes. */
+    int portable_jit_nmath2;
+    const me_expr *portable_jit_preds[128]; /* Borrowed predicate typed nodes. */
+    int portable_jit_npreds;
+    const me_expr *portable_jit_iops[128]; /* Borrowed integer-operator typed nodes. */
+    int portable_jit_niops;
     bool jit_use_runtime_math_bridge;
     bool jit_scalar_math_bridge_enabled;
     bool jit_synth_reserved_non_nd;

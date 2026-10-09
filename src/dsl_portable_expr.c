@@ -1159,8 +1159,8 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
     return status == 0 ? 0 : ME_EVAL_ERR_INVALID_ARG;
 }
 
-/* Only audited unary floating functions reach this private JIT bridge. Reuse
- * the evaluator's precision and libm choices rather than the JIT compiler's. */
+/* Private JIT bridges replay the evaluator's scalar routines so the host
+ * compiler never has to reproduce promotion, libm choice or exception policy. */
 double dsl_portable_jit_unary_math(const void *node, double x) {
     const me_expr *n = node;
     me_scalar a = {0}, result = {0};
@@ -1168,6 +1168,76 @@ double dsl_portable_jit_unary_math(const void *node, double x) {
     else a.f64 = x;
     p_math(n, me_portable_math_name(n), &a, NULL, &result);
     return n->dtype == ME_FLOAT32 ? (double)result.f32 : result.f64;
+}
+
+double dsl_portable_jit_binary_math(const void *node, double x, double y) {
+    const me_expr *n = node;
+    /* Probe the operator first: divmod/power are not math names, and the
+     * math-name lookup is comparatively expensive for these per-lane calls. */
+    const char *op = me_portable_operator(n);
+    bool divmod_pow = op && (!strcmp(op, "//") || !strcmp(op, "%") || !strcmp(op, "**"));
+    me_scalar result = {0};
+    if (divmod_pow) {
+        if (n->dtype == ME_FLOAT32) {
+            float xf = (float)x, yf = (float)y;
+            if (!strcmp(op, "//")) result.f32 = p_numpy(n) ? p_floor_dividef(xf, yf) : floorf(xf / yf);
+            else if (!strcmp(op, "%")) {
+                float rem = fmodf(xf, yf);
+                if (rem != 0.0f && signbit(rem) != signbit(yf)) rem += yf;
+                result.f32 = rem == 0.0f ? copysignf(0.0f, yf) : rem;
+            }
+            else result.f32 = powf(xf, yf);
+        }
+        else {
+            if (!strcmp(op, "//")) result.f64 = p_numpy(n) ? p_floor_divided(x, y) : floor(x / y);
+            else if (!strcmp(op, "%")) {
+                double rem = fmod(x, y);
+                if (rem != 0.0 && signbit(rem) != signbit(y)) rem += y;
+                result.f64 = rem == 0.0 ? copysign(0.0, y) : rem;
+            }
+            else result.f64 = pow(x, y);
+        }
+        return n->dtype == ME_FLOAT32 ? (double)result.f32 : result.f64;
+    }
+    me_scalar a = {0}, b = {0};
+    if (n->dtype == ME_FLOAT32) { a.f32 = (float)x; b.f32 = (float)y; }
+    else { a.f64 = x; b.f64 = y; }
+    p_math(n, me_portable_math_name(n), &a, &b, &result);
+    return n->dtype == ME_FLOAT32 ? (double)result.f32 : result.f64;
+}
+
+bool dsl_portable_jit_predicate(const void *node, double x) {
+    const char *name = me_portable_math_name((const me_expr *)node);
+    return !strcmp(name, "isfinite") ? isfinite(x) :
+           !strcmp(name, "isnan") ? isnan(x) :
+           !strcmp(name, "isinf") ? isinf(x) : signbit(x) != 0;
+}
+
+/* Integer remainder/floor-division/shift/bitwise reuse the exact checked
+ * modular routines; operands arrive as raw bit patterns. */
+uint64_t dsl_portable_jit_int_op(const void *node, uint64_t a, uint64_t b) {
+    const me_expr *n = node;
+    const char *op = me_portable_operator(n);
+    bool complement = op && !strcmp(op, "~");
+    me_portable_integer_op iop;
+    if (op && !strcmp(op, "%")) iop = ME_PORTABLE_MOD;
+    else if (op && !strcmp(op, "//")) iop = ME_PORTABLE_FLOORDIV;
+    else if (op && !strcmp(op, "<<")) iop = ME_PORTABLE_SHL;
+    else if (op && !strcmp(op, ">>")) iop = ME_PORTABLE_SHR;
+    else if (op && !strcmp(op, "&")) iop = ME_PORTABLE_AND;
+    else if (op && !strcmp(op, "|")) iop = ME_PORTABLE_OR;
+    else if (op && !strcmp(op, "^")) iop = ME_PORTABLE_XOR;
+    else if (complement) iop = ME_PORTABLE_XOR;
+    else return 0;
+    me_scalar result = {0};
+    if (p_unsigned(n->dtype)) {
+        uint64_t right = complement ? (UINT64_MAX >> (64 - 8 * (int)dtype_size(n->dtype))) : b;
+        p_unsigned_op(n, iop, a, right, &result.u64);
+        return result.u64;
+    }
+    int64_t right = complement ? -1 : (int64_t)b;
+    p_signed_op(n, iop, (int64_t)a, right, &result.i64);
+    return (uint64_t)result.i64;
 }
 
 static bool p_jit_nan_compare(const void *node, double x, double y);

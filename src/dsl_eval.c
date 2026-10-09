@@ -1249,19 +1249,31 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
     if (program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_1 &&
         program->jit_kernel_fn && !me_eval_jit_disabled(params)) {
         if (n_vars && !vars_block) return ME_EVAL_ERR_VAR_MISMATCH;
-        const void *inputs[ME_MAX_VARS + 259];
+        const void *inputs[ME_MAX_VARS + ME_DSL_PORTABLE_JIT_EXTRA];
         for (int i = 0; i < n_vars; i++) {
             if (nitems && !vars_block[i]) return ME_EVAL_ERR_VAR_MISMATCH;
             inputs[i] = vars_block[i];
         }
         inputs[n_vars] = descriptor ? descriptor->valid_mask : NULL;
-        inputs[n_vars+1] = (const void *)dsl_portable_float_compare;
+        inputs[n_vars+ME_DSL_PORTABLE_JIT_CMP_OFF] = (const void *)dsl_portable_float_compare;
         for (int i = 0; i < program->portable_jit_ncomparisons; i++) {
-            inputs[n_vars+2+i] = program->portable_jit_comparisons[i];
+            inputs[n_vars+ME_DSL_PORTABLE_JIT_CMP_OFF+1+i] = program->portable_jit_comparisons[i];
         }
-        inputs[n_vars+130] = (const void *)dsl_portable_jit_unary_math;
+        inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH1_OFF] = (const void *)dsl_portable_jit_unary_math;
         for (int i = 0; i < program->portable_jit_nmath; i++) {
-            inputs[n_vars+131+i] = program->portable_jit_math[i];
+            inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH1_OFF+1+i] = program->portable_jit_math[i];
+        }
+        inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH2_OFF] = (const void *)dsl_portable_jit_binary_math;
+        for (int i = 0; i < program->portable_jit_nmath2; i++) {
+            inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH2_OFF+1+i] = program->portable_jit_math2[i];
+        }
+        inputs[n_vars+ME_DSL_PORTABLE_JIT_PRED_OFF] = (const void *)dsl_portable_jit_predicate;
+        for (int i = 0; i < program->portable_jit_npreds; i++) {
+            inputs[n_vars+ME_DSL_PORTABLE_JIT_PRED_OFF+1+i] = program->portable_jit_preds[i];
+        }
+        inputs[n_vars+ME_DSL_PORTABLE_JIT_IOP_OFF] = (const void *)dsl_portable_jit_int_op;
+        for (int i = 0; i < program->portable_jit_niops; i++) {
+            inputs[n_vars+ME_DSL_PORTABLE_JIT_IOP_OFF+1+i] = program->portable_jit_iops[i];
         }
         fenv_t saved;
         if (!dsl_portable_fp_begin(&saved)) return ME_EVAL_ERR_INVALID_ARG;
