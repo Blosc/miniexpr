@@ -102,6 +102,13 @@ if(MINIEXPR_BUILD_ARTIFACT)
   add_executable(numpy_compat_portable_jit numpy-compat/portable-jit.c)
   target_link_libraries(numpy_compat_portable_jit PRIVATE miniexpr_artifact)
   add_test(NAME numpy_compat_portable_jit COMMAND numpy_compat_portable_jit)
+  if(MINIEXPR_ENABLE_TCC_JIT AND MINIEXPR_NEEDS_BUNDLED_TINYCC AND NOT WIN32 AND NOT EMSCRIPTEN)
+    # Optional-preference tests may fall back. Supported bundled host TCC must
+    # actually compile portable kernels, including after runtime relocation.
+    add_test(NAME numpy_compat_portable_tcc COMMAND numpy_compat_portable_jit)
+    set_tests_properties(numpy_compat_portable_tcc PROPERTIES TIMEOUT 60
+      ENVIRONMENT "ME_DSL_JIT_COMPILER=tcc;MENUDET_REQUIRE_JIT=1")
+  endif()
   add_executable(numpy_compat_runner numpy-compat/runner.c numpy-compat/conformance.c
     numpy-compat/batch-jit.c)
   target_link_libraries(numpy_compat_runner PRIVATE miniexpr_artifact)

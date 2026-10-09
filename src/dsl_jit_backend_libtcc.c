@@ -59,6 +59,7 @@ typedef int (*me_tcc_relocate_fn)(me_tcc_state *s);
 typedef void *(*me_tcc_get_symbol_fn)(me_tcc_state *s, const char *name);
 typedef int (*me_tcc_set_options_fn)(me_tcc_state *s, const char *str);
 typedef int (*me_tcc_add_library_path_fn)(me_tcc_state *s, const char *path);
+typedef int (*me_tcc_add_sysinclude_path_fn)(me_tcc_state *s, const char *path);
 typedef int (*me_tcc_add_library_fn)(me_tcc_state *s, const char *libraryname);
 typedef int (*me_tcc_add_symbol_fn)(me_tcc_state *s, const char *name, const void *val);
 typedef void (*me_tcc_set_lib_path_fn)(me_tcc_state *s, const char *path);
@@ -77,6 +78,7 @@ typedef struct {
     me_tcc_get_symbol_fn tcc_get_symbol_fn;
     me_tcc_set_options_fn tcc_set_options_fn;
     me_tcc_add_library_path_fn tcc_add_library_path_fn;
+    me_tcc_add_sysinclude_path_fn tcc_add_sysinclude_path_fn;
     me_tcc_add_library_fn tcc_add_library_fn;
     me_tcc_add_symbol_fn tcc_add_symbol_fn;
     me_tcc_set_lib_path_fn tcc_set_lib_path_fn;
@@ -295,6 +297,34 @@ static void dsl_jit_libtcc_add_multiarch_paths(me_tcc_state *state) {
     for (int i = 0; paths[i]; i++) {
         dsl_jit_libtcc_add_library_path_if_exists(state, paths[i]);
     }
+    /* Debian/Ubuntu libc headers use the same multiarch layout as libraries.
+     * A relocated libtcc cannot rely on its build-time compiler include paths. */
+    const char *include_paths[] = {
+#if defined(__x86_64__) || defined(__amd64__)
+        "/usr/include/x86_64-linux-gnu",
+#elif defined(__aarch64__)
+        "/usr/include/aarch64-linux-gnu",
+#elif defined(__arm__)
+        "/usr/include/arm-linux-gnueabihf", "/usr/include/arm-linux-gnueabi",
+#elif defined(__riscv) && (__riscv_xlen == 64)
+        "/usr/include/riscv64-linux-gnu",
+#elif defined(__powerpc64__) && defined(__LITTLE_ENDIAN__)
+        "/usr/include/powerpc64le-linux-gnu",
+#elif defined(__s390x__)
+        "/usr/include/s390x-linux-gnu",
+#elif defined(__i386__)
+        "/usr/include/i386-linux-gnu",
+#endif
+        NULL
+    };
+    if (g_dsl_tcc_api.tcc_add_sysinclude_path_fn) {
+        for (int i = 0; include_paths[i]; i++) {
+            struct stat st;
+            if (stat(include_paths[i], &st) == 0 && S_ISDIR(st.st_mode)) {
+                (void)g_dsl_tcc_api.tcc_add_sysinclude_path_fn(state, include_paths[i]);
+            }
+        }
+    }
 #else
     (void)state;
 #endif
@@ -440,6 +470,7 @@ static bool dsl_jit_libtcc_load_api(void) {
 
     g_dsl_tcc_api.tcc_set_options_fn = (me_tcc_set_options_fn)dsl_jit_dynlib_symbol(handle, "tcc_set_options");
     g_dsl_tcc_api.tcc_add_library_path_fn = (me_tcc_add_library_path_fn)dsl_jit_dynlib_symbol(handle, "tcc_add_library_path");
+    g_dsl_tcc_api.tcc_add_sysinclude_path_fn = (me_tcc_add_sysinclude_path_fn)dsl_jit_dynlib_symbol(handle, "tcc_add_sysinclude_path");
     g_dsl_tcc_api.tcc_add_library_fn = (me_tcc_add_library_fn)dsl_jit_dynlib_symbol(handle, "tcc_add_library");
     g_dsl_tcc_api.tcc_add_symbol_fn = (me_tcc_add_symbol_fn)dsl_jit_dynlib_symbol(handle, "tcc_add_symbol");
     g_dsl_tcc_api.tcc_set_lib_path_fn = (me_tcc_set_lib_path_fn)dsl_jit_dynlib_symbol(handle, "tcc_set_lib_path");
