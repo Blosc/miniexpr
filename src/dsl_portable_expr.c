@@ -527,6 +527,9 @@ static type p_floor_divide##suffix(type x, type y) { \
     if (y == 0) return x / y; \
     type rem = fmod_fn(x, y); \
     type div = (x - rem) / y; \
+    /* Ordered correction comparisons on a quiet NaN can spuriously raise \
+     * invalid on some compiler paths. Preserve arithmetic diagnostics only. */ \
+    if (isnan(div)) return div; \
     if (rem != 0 && ((y < 0) != (rem < 0))) div -= 1; \
     if (div != 0) { \
         type floored = floor_fn(div); \
