@@ -3289,6 +3289,9 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
             ctx.output_expr = NULL;
             ctx.return_dtype = ME_AUTO;
             if (!dsl_compile_block(&ctx, &parsed->block, &program->block)) {
+                if (error_reason && error_reason_cap > 0 && !error_reason[0]) {
+                    snprintf(error_reason, error_reason_cap, "failed to compile portable inference block");
+                }
                 free(funcs);
                 dsl_compiled_program_free(program);
                 me_dsl_program_free(parsed);

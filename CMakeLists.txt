@@ -229,6 +229,13 @@ if(MINIEXPR_BUILD_ARTIFACT)
 endif()
 
 if(MINIEXPR_BUILD_TESTS)
+  if(MINIEXPR_BUILD_ARTIFACT)
+    # A separate test-only copy covers compiler allocations without changing the
+    # public allocator ABI or injecting failures into unrelated test executables.
+    miniexpr_add_library_target(miniexpr_graph_fault STATIC)
+    target_compile_definitions(miniexpr_graph_fault PRIVATE malloc=graph_test_malloc
+      calloc=graph_test_calloc realloc=graph_test_realloc free=graph_test_free)
+  endif()
   enable_testing()
   add_subdirectory(tests)
 endif()

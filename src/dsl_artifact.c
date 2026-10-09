@@ -665,7 +665,7 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
                 ME_AUTO, artifact->context_ndim, ME_JIT_OFF, artifact->profile,
                 &position, &is_dsl, reason, sizeof(reason));
             if (!inferred) {
-                status = artifact_error(error, ME_ARTIFACT_ERR_SOURCE, reason);
+                status = artifact_error(error, strstr(reason, "out of memory") ? ME_ARTIFACT_ERR_OOM : ME_ARTIFACT_ERR_SOURCE, reason);
                 goto cleanup;
             }
             bool allowed = is_string_dtype(inferred->output_dtype) ? inferred->output_dtype == artifact->output_dtype :
@@ -681,7 +681,7 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
             artifact->output_dtype, artifact->context_ndim, jit_mode, artifact->profile,
             &position, &is_dsl, reason, sizeof(reason));
         if (!artifact->program) {
-            status = artifact_error(error, ME_ARTIFACT_ERR_SOURCE, reason);
+            status = artifact_error(error, strstr(reason, "out of memory") ? ME_ARTIFACT_ERR_OOM : ME_ARTIFACT_ERR_SOURCE, reason);
             goto cleanup;
         }
         if (infer_output) {

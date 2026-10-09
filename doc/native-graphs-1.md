@@ -175,7 +175,7 @@ participation, lifetime and resource contracts; it does not broaden the first sl
 Current platform CI already runs graph hosts/corpus tests wherever artifact tests
 run, including interpreter-only and Node/WASM configurations. Actual publication
 qualification still requires fresh exact-revision Linux/macOS/Windows/WASM jobs
-and broader compiler allocator qualification. Local distribution/install and
+and exact-revision compiler allocator qualification. Local distribution/install and
 graph/JSON/materialization allocation checks pass; local green tests do not
 certify those platforms or promise a universal speedup/NumPy reduction bit parity.
 
@@ -189,8 +189,13 @@ cases outside the single-return/constant-free inference adapter are explicitly
 skipped, not counted as graph conformance. Existing artifact corpora still cover
 their own wider contracts. Graph/yyjson allocation failure tests now exercise
 37 map, 278 automatic-stage, 38 final-conversion and 70 reduction-initial allocation
-checkpoints, including schedule/execution and successful recovery. Compiler allocation
-injection remains unqualified; these checks do not claim coverage of every allocator.
+checkpoints, including schedule/execution and successful recovery. The additional
+`graph_compiler_allocation` executable instruments every miniexpr compiler, graph,
+artifact, iterator and yyjson translation unit. It sweeps every allocation in the
+baseline map/intermediate-reduction preparation paths, including requested optional
+JIT, checks diagnostic/ownership safety, evaluates any successful fallback, and
+reprepares after every failure. It does not instrument system-library or dynamically
+loaded compiler internals, nor claim every possible allocation branch is covered.
 Standalone Node/WASM32 interpreter hosts pass the five fixtures, lifecycle and
 inference tests; native ASan graph/array/artifact tests also pass.
 

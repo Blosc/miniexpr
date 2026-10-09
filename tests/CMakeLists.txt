@@ -93,13 +93,27 @@ if(MINIEXPR_BUILD_ARTIFACT)
   target_link_libraries(graph_preparation PRIVATE miniexpr_artifact)
   add_test(NAME graph_preparation COMMAND graph_preparation)
   add_executable(graph_allocation graph/allocation.c "${PROJECT_SOURCE_DIR}/src/dsl_graph.c"
+    "${PROJECT_SOURCE_DIR}/src/dsl_graph_text.c" "${PROJECT_SOURCE_DIR}/src/dsl_artifact.c"
+    "${PROJECT_SOURCE_DIR}/src/dsl_array.c"
     "${yyjson_SOURCE_DIR}/src/yyjson.c")
-  target_link_libraries(graph_allocation PRIVATE miniexpr_artifact)
+  # Do not link a second archive containing the same graph/yyjson symbols:
+  # COFF archive extraction (Windows) does not mirror ELF/Mach-O here.
+  target_link_libraries(graph_allocation PRIVATE ${MINIEXPR_DEFAULT_LIB})
   target_include_directories(graph_allocation PRIVATE "${yyjson_SOURCE_DIR}/src")
   target_compile_definitions(graph_allocation PRIVATE malloc=graph_test_malloc calloc=graph_test_calloc
     realloc=graph_test_realloc free=graph_test_free
     YYJSON_DISABLE_UTILS=1 YYJSON_DISABLE_FILE=1 YYJSON_DISABLE_NON_STANDARD=1)
   add_test(NAME graph_allocation COMMAND graph_allocation)
+  add_executable(graph_compiler_allocation graph/compiler-allocation.c
+    "${PROJECT_SOURCE_DIR}/src/dsl_artifact.c" "${PROJECT_SOURCE_DIR}/src/dsl_array.c"
+    "${PROJECT_SOURCE_DIR}/src/dsl_graph.c" "${PROJECT_SOURCE_DIR}/src/dsl_graph_text.c"
+    "${yyjson_SOURCE_DIR}/src/yyjson.c")
+  target_link_libraries(graph_compiler_allocation PRIVATE miniexpr_graph_fault)
+  target_include_directories(graph_compiler_allocation PRIVATE "${yyjson_SOURCE_DIR}/src")
+  target_compile_definitions(graph_compiler_allocation PRIVATE malloc=graph_test_malloc
+    calloc=graph_test_calloc realloc=graph_test_realloc free=graph_test_free
+    YYJSON_DISABLE_UTILS=1 YYJSON_DISABLE_FILE=1 YYJSON_DISABLE_NON_STANDARD=1)
+  add_test(NAME graph_compiler_allocation COMMAND graph_compiler_allocation)
   add_executable(graph_host graph/host.c)
   target_link_libraries(graph_host PRIVATE miniexpr_artifact)
   if(EMSCRIPTEN)
@@ -122,6 +136,7 @@ if(MINIEXPR_BUILD_ARTIFACT)
       "-sSTACK_SIZE=1048576" "-sEXIT_RUNTIME=1")
     target_link_options(graph_preparation PRIVATE "-sALLOW_MEMORY_GROWTH=1" "-sSTACK_SIZE=1048576")
     target_link_options(graph_allocation PRIVATE "-sALLOW_MEMORY_GROWTH=1" "-sSTACK_SIZE=1048576")
+    target_link_options(graph_compiler_allocation PRIVATE "-sALLOW_MEMORY_GROWTH=1" "-sSTACK_SIZE=1048576")
   endif()
   foreach(corpus arithmetic functions)
     add_test(NAME graph_inference_${corpus} COMMAND graph_corpus
