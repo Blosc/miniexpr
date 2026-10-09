@@ -99,6 +99,9 @@ function(miniexpr_setup_target target_name)
     target_link_libraries(${target_name} PRIVATE miniexpr_wasm_libtcc)
   endif()
   if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang")
+    # Builtin dispatch uses function addresses as operation identities. Release
+    # ICF must not merge distinct callbacks (e.g. real/conj for Boolean inputs).
+    target_link_options(${target_name} PUBLIC "/OPT:NOICF")
     set(_miniexpr_builtins_names)
     if(CMAKE_VS_PLATFORM_NAME STREQUAL "ARM64"
        OR CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|AARCH64|arm64|aarch64)$")
@@ -204,6 +207,10 @@ if(MINIEXPR_BUILD_ARTIFACT)
     YYJSON_DISABLE_WRITER=1 YYJSON_DISABLE_UTILS=1 YYJSON_DISABLE_FILE=1
     YYJSON_DISABLE_NON_STANDARD=1)
   target_link_libraries(miniexpr_artifact PUBLIC ${MINIEXPR_DEFAULT_LIB})
+  if(NOT WIN32)
+    # The adapter and its consumers use fenv/libm directly, not just through miniexpr.
+    target_link_libraries(miniexpr_artifact PUBLIC m)
+  endif()
   install(FILES "${yyjson_SOURCE_DIR}/LICENSE"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/miniexpr/licenses" RENAME LICENSE-YYJSON)
 endif()

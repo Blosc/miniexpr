@@ -213,6 +213,11 @@ foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
     target_link_libraries("${test_name}" PRIVATE miniexpr_artifact)
     target_compile_definitions("${test_name}" PRIVATE
       MINIEXPR_ARTIFACT_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/portable-artifacts/affine.json")
+    if(EMSCRIPTEN)
+      # fopen uses the virtual filesystem; preserve the compiled-in fixture path.
+      target_link_options("${test_name}" PRIVATE
+        "SHELL:--embed-file ${CMAKE_CURRENT_SOURCE_DIR}/portable-artifacts/affine.json@${CMAKE_CURRENT_SOURCE_DIR}/portable-artifacts/affine.json")
+    endif()
   endif()
   if(EMSCRIPTEN)
     if(MINIEXPR_USE_WASM32_JIT)
