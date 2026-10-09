@@ -294,6 +294,19 @@ static void dsl_jit_libtcc_add_multiarch_paths(me_tcc_state *state) {
     };
     for (int i = 0; paths[i]; i++) {
         dsl_jit_libtcc_add_library_path_if_exists(state, paths[i]);
+        /* Bundled TinyCC may be configured by a conda compiler whose target
+         * tuple differs from the host glibc layout. Discover matching system
+         * headers as well as libraries (e.g. bits/libc-header-start.h). */
+        if (g_dsl_tcc_api.tcc_set_options_fn && strncmp(paths[i], "/usr/lib/", 9) == 0) {
+            char include_path[PATH_MAX], option[PATH_MAX + 4];
+            int n = snprintf(include_path, sizeof(include_path), "/usr/include/%s", paths[i] + 9);
+            struct stat st;
+            if (n > 0 && (size_t)n < sizeof(include_path) &&
+                stat(include_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+                snprintf(option, sizeof(option), "-I%s", include_path);
+                (void)g_dsl_tcc_api.tcc_set_options_fn(state, option);
+            }
+        }
     }
 #else
     (void)state;
