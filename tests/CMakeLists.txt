@@ -100,8 +100,8 @@ if(MINIEXPR_BUILD_ARTIFACT)
   # COFF archive extraction (Windows) does not mirror ELF/Mach-O here.
   target_link_libraries(graph_allocation PRIVATE ${MINIEXPR_DEFAULT_LIB})
   target_include_directories(graph_allocation PRIVATE "${yyjson_SOURCE_DIR}/src")
-  target_compile_definitions(graph_allocation PRIVATE malloc=graph_test_malloc calloc=graph_test_calloc
-    realloc=graph_test_realloc free=graph_test_free
+  miniexpr_graph_fault_allocators(graph_allocation)
+  target_compile_definitions(graph_allocation PRIVATE
     YYJSON_DISABLE_UTILS=1 YYJSON_DISABLE_FILE=1 YYJSON_DISABLE_NON_STANDARD=1)
   add_test(NAME graph_allocation COMMAND graph_allocation)
   add_executable(graph_compiler_allocation graph/compiler-allocation.c
@@ -110,8 +110,8 @@ if(MINIEXPR_BUILD_ARTIFACT)
     "${yyjson_SOURCE_DIR}/src/yyjson.c")
   target_link_libraries(graph_compiler_allocation PRIVATE miniexpr_graph_fault)
   target_include_directories(graph_compiler_allocation PRIVATE "${yyjson_SOURCE_DIR}/src")
-  target_compile_definitions(graph_compiler_allocation PRIVATE malloc=graph_test_malloc
-    calloc=graph_test_calloc realloc=graph_test_realloc free=graph_test_free
+  miniexpr_graph_fault_allocators(graph_compiler_allocation)
+  target_compile_definitions(graph_compiler_allocation PRIVATE
     YYJSON_DISABLE_UTILS=1 YYJSON_DISABLE_FILE=1 YYJSON_DISABLE_NON_STANDARD=1)
   add_test(NAME graph_compiler_allocation COMMAND graph_compiler_allocation)
   add_executable(graph_host graph/host.c)

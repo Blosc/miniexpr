@@ -228,13 +228,20 @@ if(MINIEXPR_BUILD_ARTIFACT)
   endif()
 endif()
 
+function(miniexpr_graph_fault_allocators target_name)
+  if(WIN32)
+    target_compile_options(${target_name} PRIVATE "/FI${PROJECT_SOURCE_DIR}/tests/graph/allocator.h")
+  else()
+    target_compile_options(${target_name} PRIVATE -include "${PROJECT_SOURCE_DIR}/tests/graph/allocator.h")
+  endif()
+endfunction()
+
 if(MINIEXPR_BUILD_TESTS)
   if(MINIEXPR_BUILD_ARTIFACT)
     # A separate test-only copy covers compiler allocations without changing the
     # public allocator ABI or injecting failures into unrelated test executables.
     miniexpr_add_library_target(miniexpr_graph_fault STATIC)
-    target_compile_definitions(miniexpr_graph_fault PRIVATE malloc=graph_test_malloc
-      calloc=graph_test_calloc realloc=graph_test_realloc free=graph_test_free)
+    miniexpr_graph_fault_allocators(miniexpr_graph_fault)
   endif()
   enable_testing()
   add_subdirectory(tests)
