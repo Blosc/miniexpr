@@ -521,9 +521,18 @@ static double p_round_even(double x) {
 
 /* NumPy divmod correction: fmod determines the quotient before rounding.
  * floor(x/y) alone is wrong for e.g. float64 1 // 0.1 and infinite inputs.
- * Each float32 step is performed in float32, never narrowed from a double loop. */
+ * Each float32 step is performed in float32, never narrowed from a double loop.
+ * Keep one compiled scalar routine for interpreter and JIT bridge calls: GCC
+ * can otherwise specialize the two inlined copies with different FP flags. */
+#if defined(_MSC_VER)
+#define P_DIVMOD_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define P_DIVMOD_NOINLINE __attribute__((noinline))
+#else
+#define P_DIVMOD_NOINLINE
+#endif
 #define P_DIVMOD_IMPL(suffix, type, fmod_fn, floor_fn, copysign_fn) \
-static type p_floor_divide##suffix(type x, type y) { \
+static P_DIVMOD_NOINLINE type p_floor_divide##suffix(type x, type y) { \
     if (y == 0) return x / y; \
     type rem = fmod_fn(x, y); \
     type div = (x - rem) / y; \
@@ -538,6 +547,7 @@ static type p_floor_divide##suffix(type x, type y) { \
 P_DIVMOD_IMPL(f, float, fmodf, floorf, copysignf)
 P_DIVMOD_IMPL(d, double, fmod, floor, copysign)
 #undef P_DIVMOD_IMPL
+#undef P_DIVMOD_NOINLINE
 
 static uint64_t p_gcd(uint64_t a, uint64_t b) {
     while (b) {

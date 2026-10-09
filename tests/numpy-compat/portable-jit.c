@@ -35,6 +35,10 @@ static void check_extended(const char *source, me_dtype dtype, const void *x, co
         me_artifact_fp_status a,b;
         assert(me_artifact_eval_status(reference,inputs,2,expected,&descriptor,0,&a,&error)==0);
         assert(me_artifact_eval_status(accelerated,inputs,2,actual,&descriptor,0,&b,&error)==0);
+        if (a.flags != b.flags || a.supported != b.supported) {
+            fprintf(stderr, "JIT FP mismatch: source=%s masked=%d reference=%u/%d compiled=%u/%d\n",
+                    source, masked, a.flags, a.supported, b.flags, b.supported);
+        }
         assert(a.flags==b.flags && a.supported==b.supported);
         for (int i = 0; i < 5; i++) {
             if (masked && !mask[i]) continue;
