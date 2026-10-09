@@ -290,3 +290,10 @@ Copyright (c) 2025-2026, The Blosc Development Team
 ## Acknowledgments
 
 Based on [tinyexpr](https://github.com/codeplea/tinyexpr) by Lewis Van Winkle. See [LICENSE-TINYEXPR](LICENSE-TINYEXPR) for the original license.
+## Native graph preparation
+
+The opt-in numerical graph API prepares declarative JSON or restricted expression
+text without Python, specializes pointer-free shapes and executes checked native
+array buffers. See [the API/format contract](doc/native-graphs-1.md) and
+`tests/graph/host.c` for standalone C/Node deployment. Artifact 1.0/1.1 compatibility
+and ordinary backend defaults are unchanged.

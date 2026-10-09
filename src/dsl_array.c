@@ -1,6 +1,7 @@
 /* Native logical traversal. Storage/decompression is a host concern, grouping is
  * not: each reduction visits C logical coordinates in a fixed serial order. */
 #include "miniexpr_artifact.h"
+#include "dsl_graph_internal.h"
 #include "dsl_portable_fp.h"
 #include <limits.h>
 #include <math.h>
@@ -137,6 +138,26 @@ static uint64_t a_integer(me_dtype dtype, const void *p) {
         default: { uint64_t x; memcpy(&x,p,8); return x; }
     }
 }
+static bool a_extrema_valid(const me_array_options *o, size_t red_count, size_t out_count, bool mask) {
+    return !((o->reduction == ME_ARRAY_MIN || o->reduction == ME_ARRAY_MAX) &&
+        !o->initial && (!red_count || mask) && out_count);
+}
+me_artifact_status dsl_array_validate_domain(const me_artifact *a, int rank,
+    const int64_t *shape, const me_array_options *o, bool participating, me_artifact_error *error) {
+    int out_rank; int64_t out_shape[ME_ARRAY_MAX_RANK]; me_dtype dtype;
+    int rc = me_array_result_shape(a, rank, shape, o, &out_rank, out_shape, &dtype, error);
+    if (rc) return rc;
+    bool axes[ME_ARRAY_MAX_RANK]; a_axes(rank, o, axes);
+    size_t out_count, red_count = 1;
+    if (!a_product(out_rank, out_shape, &out_count)) return a_error(error, ME_ARTIFACT_ERR_BINDING, "output extent overflow");
+    for (int i = 0; i < rank; i++) if (axes[i]) {
+        if (shape[i] && red_count > SIZE_MAX / (uint64_t)shape[i]) return a_error(error, ME_ARTIFACT_ERR_BINDING, "reduction extent overflow");
+        red_count *= (size_t)shape[i];
+    }
+    if (!a_extrema_valid(o, red_count, out_count, participating))
+        return a_error(error, ME_ARTIFACT_ERR_BINDING, "empty/masked extrema require initial");
+    return ME_ARTIFACT_SUCCESS;
+}
 static double a_real(me_dtype d, const void *p) {
     if (d == ME_FLOAT32) { float x; memcpy(&x,p,4); return x; }
     if (d == ME_FLOAT64) { double x; memcpy(&x,p,8); return x; }
@@ -182,9 +203,9 @@ static void a_combine(me_dtype dtype, int op, void *acc, const void *value) {
         a_cast(ME_UINT64,&z,dtype,acc);
     }
 }
-me_artifact_status me_artifact_eval_array(const me_artifact *a, const me_array_view *inputs, int ninputs,
+static me_artifact_status a_run(const me_artifact *a, const me_array_view *inputs, int ninputs,
     int rank, const int64_t *shape, const me_array_options *o, void *output, size_t capacity,
-    me_array_report *report, me_artifact_error *error) {
+    me_array_report *report, me_artifact_error *error, bool execute) {
     int out_rank; int64_t out_shape[ME_ARRAY_MAX_RANK]; me_dtype dtype;
     me_array_report local = {0}; if (!report) report = &local; memset(report,0,sizeof(*report));
     int rc = me_array_result_shape(a,rank,shape,o,&out_rank,out_shape,&dtype,error);
@@ -218,12 +239,13 @@ me_artifact_status me_artifact_eval_array(const me_artifact *a, const me_array_v
     }
     if (o->where && (o->where->dtype != ME_BOOL || !a_broadcast(o->where,rank,shape) || a_overlap(o->where->base,o->where->capacity,output,capacity))) return a_error(error,ME_ARTIFACT_ERR_BINDING,"invalid participating mask");
     if (o->initial && a_overlap(o->initial,width,output,capacity)) return a_error(error,ME_ARTIFACT_ERR_BINDING,"initial overlaps output");
-    if ((o->reduction == ME_ARRAY_MIN || o->reduction == ME_ARRAY_MAX) && !o->initial && (!red_count || o->where) && out_count) return a_error(error,ME_ARTIFACT_ERR_BINDING,"empty/masked extrema require initial");
+    if (!a_extrema_valid(o, red_count, out_count, o->where != NULL)) return a_error(error,ME_ARTIFACT_ERR_BINDING,"empty/masked extrema require initial");
     size_t tile = o->tile_items ? o->tile_items : 1024;
     if (tile > INT32_MAX || tile > SIZE_MAX / source_width) return a_error(error,ME_ARTIFACT_ERR_BINDING,"invalid tile size");
     if (tile > red_count && o->reduction != ME_ARRAY_NONE) tile = red_count;
     if (tile > total && o->reduction == ME_ARRAY_NONE) tile = total;
     if (!tile) tile = 1;
+    if (!execute) return ME_ARTIFACT_SUCCESS;
     void *owned[128] = {0}; me_artifact_buffer buffers[128];
     uint8_t *mask = o->where ? malloc(tile) : NULL;
     void *scratch = o->reduction != ME_ARRAY_NONE ? malloc(tile * source_width) : NULL;
@@ -297,6 +319,16 @@ cleanup:
     free(mask); free(scratch);
     if (rc && (!error || !error->message[0])) return a_error(error,rc,"native array traversal failed");
     return rc;
+}
+me_artifact_status me_artifact_eval_array(const me_artifact *a, const me_array_view *inputs, int ninputs,
+    int rank, const int64_t *shape, const me_array_options *o, void *output, size_t capacity,
+    me_array_report *report, me_artifact_error *error) {
+    return a_run(a, inputs, ninputs, rank, shape, o, output, capacity, report, error, true);
+}
+me_artifact_status dsl_array_preflight(const me_artifact *a, const me_array_view *inputs, int ninputs,
+    int rank, const int64_t *shape, const me_array_options *o, void *output, size_t capacity,
+    me_artifact_error *error) {
+    return a_run(a, inputs, ninputs, rank, shape, o, output, capacity, NULL, error, false);
 }
 me_artifact_status me_array_reshape(const me_array_view *v, int rank, const int64_t *shape,
     me_array_view *out, me_artifact_error *e) {

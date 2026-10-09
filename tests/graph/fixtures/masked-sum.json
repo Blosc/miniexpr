@@ -1,0 +1,15 @@
+{
+  "format": "menudet-graph-1",
+  "semantics": "menudet-numpy-1.1",
+  "requires": ["numeric"],
+  "nodes": [
+    {"id": 0, "op": "input", "name": "x", "dtype": "float32"},
+    {"id": 1, "op": "input", "name": "y", "dtype": "float32"},
+    {"id": 2, "op": "add", "args": [0, 1]},
+    {"id": 3, "op": "input", "name": "mask", "dtype": "bool"},
+    {"id": 4, "op": "sum", "args": [2], "axes": [-1], "keepdims": true, "dtype": "float32",
+     "initial": {"dtype": "int64", "category": "weak", "encoding": "decimal", "value": "2"}, "where": 3}
+  ],
+  "root": 4,
+  "output": {"dtype": "auto", "casting": "unsafe"}
+}

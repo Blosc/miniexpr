@@ -198,13 +198,14 @@ if(MINIEXPR_BUILD_ARTIFACT)
   if(NOT MINIEXPR_DEFAULT_LIB)
     message(FATAL_ERROR "Artifact support requires a shared or static miniexpr library")
   endif()
-  add_library(miniexpr_artifact STATIC src/dsl_artifact.c src/dsl_array.c "${yyjson_SOURCE_DIR}/src/yyjson.c")
+  add_library(miniexpr_artifact STATIC src/dsl_artifact.c src/dsl_array.c src/dsl_graph.c
+    src/dsl_graph_text.c "${yyjson_SOURCE_DIR}/src/yyjson.c")
   set_target_properties(miniexpr_artifact PROPERTIES POSITION_INDEPENDENT_CODE ON)
-  target_compile_features(miniexpr_artifact PUBLIC c_std_99)
+  target_compile_features(miniexpr_artifact PUBLIC c_std_11)
   target_include_directories(miniexpr_artifact PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
   target_include_directories(miniexpr_artifact PRIVATE "${yyjson_SOURCE_DIR}/src")
   target_compile_definitions(miniexpr_artifact PRIVATE
-    YYJSON_DISABLE_WRITER=1 YYJSON_DISABLE_UTILS=1 YYJSON_DISABLE_FILE=1
+    YYJSON_DISABLE_UTILS=1 YYJSON_DISABLE_FILE=1
     YYJSON_DISABLE_NON_STANDARD=1)
   target_link_libraries(miniexpr_artifact PUBLIC ${MINIEXPR_DEFAULT_LIB})
   if(NOT WIN32)

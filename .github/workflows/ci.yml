@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main, numpy-compat ]
+    branches: [ main, numpy-compat, graph-preparation ]
   pull_request:
     branches: [ main ]
 

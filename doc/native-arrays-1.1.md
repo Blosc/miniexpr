@@ -159,21 +159,23 @@ verifies modular combination. It has no Python, NumPy, NumExpr or compressed
 storage dependency. CTest runs it in native and standalone Node/WASM builds.
 
 Python's `PortableKernel.evaluate_array` wraps this scheduler.
+Graph-enabled builds also provide [native metadata-only preparation](native-graphs-1.md)
+through `miniexpr_graph.h`, independently of the artifact ABI described here.
 `LazyExpr.compute(_require_native=True)` lowers an eligible safe numerical graph
-to a fused portable 1.1 elementwise plan plus optional root logical reduction.
-The frontend validates metadata and performs compressed storage reads; native code
-owns numerical values, casts, masks, traversal and reduction. Supported direct
+to a declarative native graph with a fused portable 1.1 map and optional root logical reduction.
+The frontend adapts syntax/owners and performs compressed storage reads; native code
+owns numerical validation, type/shape preparation, values, casts, masks, traversal and reduction. Supported direct
 operands are NumPy/Blosc2 arrays and plain/typed numeric scalars. Unsupported
 graph capabilities reject before destination writes; no NumExpr or Python
 numerical fallback is allowed. A bounded 128-entry immutable plan cache keys
-normalized source, semantic profile, signatures and scalar captures, not input
+canonical declarative graph, semantic profile, signatures and scalar captures, not input
  array identities or evaluated values. Mutation of inputs never reuses results.
 
 `LazyExpr.compute(_require_native=True, jit=True)` explicitly requests this JIT
 subset without changing default backend selection. Its execution report names
 `portable-jit` only when the plan has a compiled kernel; unsupported plans retain
-native interpretation. A separate bounded compiled-plan cache includes artifact
-identity and backend/compiler configuration, never numerical input values.
+native interpretation. The same bounded graph-plan cache includes backend/compiler
+configuration for JIT requests, never numerical input values.
 
 Basic elementwise partial reads select operand views/storage before native
 execution. Nested lazy/proxy/remote/table operands, table row/partition filtering,

@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Menudet numerical graph 1 (experimental)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "semantics", "requires", "nodes", "root", "output"],
+  "properties": {
+    "format": {"const": "menudet-graph-1"},
+    "semantics": {"const": "menudet-numpy-1.1"},
+    "requires": {"const": ["numeric"]},
+    "nodes": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"$ref": "#/$defs/node"}},
+    "root": {"$ref": "#/$defs/id"},
+    "output": {
+      "type": "object", "additionalProperties": false, "required": ["dtype", "casting"],
+      "properties": {
+        "dtype": {"anyOf": [{"$ref": "#/$defs/dtype"}, {"const": "auto"}]},
+        "casting": {"enum": ["safe", "same_kind", "unsafe"]}
+      }
+    }
+  },
+  "$defs": {
+    "id": {"type": "integer", "minimum": 0, "maximum": 255},
+    "dtype": {"enum": ["bool", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float32", "float64"]},
+    "name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z_0-9]*$", "maxLength": 63},
+    "args": {"type": "array", "maxItems": 3, "items": {"$ref": "#/$defs/id"}},
+    "scalar": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dtype", "category", "encoding", "value"],
+      "properties": {
+        "dtype": {"$ref": "#/$defs/dtype"},
+        "category": {"enum": ["weak", "typed_scalar"]},
+        "encoding": {"enum": ["boolean", "decimal", "ieee754-hex"]},
+        "value": {"type": ["string", "boolean"]}
+      }
+    },
+    "node": {
+      "type": "object", "required": ["id", "op"],
+      "oneOf": [
+        {
+          "additionalProperties": false, "required": ["name", "dtype"],
+          "properties": {"id": {"$ref": "#/$defs/id"}, "op": {"const": "input"}, "name": {"$ref": "#/$defs/name"}, "dtype": {"$ref": "#/$defs/dtype"}}
+        },
+        {
+          "additionalProperties": false, "required": ["dtype", "category", "encoding", "value"],
+          "properties": {"id": {"$ref": "#/$defs/id"}, "op": {"const": "constant"}, "dtype": {"$ref": "#/$defs/dtype"}, "category": {"enum": ["weak", "typed_scalar"]}, "encoding": {"enum": ["boolean", "decimal", "ieee754-hex"]}, "value": {"type": ["string", "boolean"]}}
+        },
+        {
+          "additionalProperties": false, "required": ["args"],
+          "properties": {"id": {"$ref": "#/$defs/id"}, "op": {"enum": ["neg", "pos", "not", "invert"]}, "args": {"allOf": [{"$ref": "#/$defs/args"}, {"minItems": 1, "maxItems": 1}]}}
+        },
+        {
+          "additionalProperties": false, "required": ["args"],
+          "properties": {"id": {"$ref": "#/$defs/id"}, "op": {"enum": ["add", "sub", "mul", "div", "floordiv", "mod", "pow", "eq", "ne", "lt", "le", "gt", "ge", "bitand", "bitor", "bitxor", "lshift", "rshift", "and", "or"]}, "args": {"allOf": [{"$ref": "#/$defs/args"}, {"minItems": 2, "maxItems": 2}]}}
+        },
+        {
+          "additionalProperties": false, "required": ["args", "dtype"],
+          "properties": {"id": {"$ref": "#/$defs/id"}, "op": {"const": "cast"}, "args": {"allOf": [{"$ref": "#/$defs/args"}, {"minItems": 1, "maxItems": 1}]}, "dtype": {"$ref": "#/$defs/dtype"}}
+        },
+        {
+          "additionalProperties": false, "required": ["args", "name"],
+          "properties": {"id": {"$ref": "#/$defs/id"}, "op": {"const": "function"}, "args": {"$ref": "#/$defs/args"}, "name": {"$ref": "#/$defs/name"}}
+        },
+        {
+          "additionalProperties": false, "required": ["args"],
+          "properties": {"id": {"$ref": "#/$defs/id"}, "op": {"const": "select"}, "args": {"allOf": [{"$ref": "#/$defs/args"}, {"minItems": 3, "maxItems": 3}]}}
+        },
+        {
+          "additionalProperties": false, "required": ["args", "axes", "keepdims", "dtype", "initial", "where"],
+          "properties": {
+            "id": {"$ref": "#/$defs/id"}, "op": {"enum": ["sum", "prod", "min", "max", "any", "all"]},
+            "args": {"allOf": [{"$ref": "#/$defs/args"}, {"minItems": 1, "maxItems": 1}]},
+            "axes": {"anyOf": [{"type": "null"}, {"type": "array", "maxItems": 16, "items": {"type": "integer", "minimum": -16, "maximum": 15}}]},
+            "keepdims": {"type": "boolean"}, "dtype": {"anyOf": [{"$ref": "#/$defs/dtype"}, {"const": "auto"}]},
+            "initial": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/scalar"}]},
+            "where": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/id"}]}
+          }
+        }
+      ]
+    }
+  },
+  "$comment": "Native validation additionally enforces ordered IDs/edges, reachability, scalar ranges/encodings, categories, type/function rules, root-only reductions, participation, sharing and resource limits. JSON schema alone is not numerical validation."
+}

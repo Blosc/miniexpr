@@ -3,6 +3,7 @@
   License: BSD 3-Clause (see LICENSE)
 **********************************************************************/
 #include "miniexpr_artifact.h"
+#include "dsl_graph_internal.h"
 #include "dsl_parser.h"
 #include "dsl_eval_internal.h"
 #include "dsl_jit_test.h"
@@ -344,6 +345,21 @@ static unsigned artifact_expr_capabilities(const me_expr *expr) {
     return required;
 }
 
+bool dsl_graph_scalar(const char *json, size_t length, me_dtype *dtype, void *value) {
+    yyjson_doc *doc = yyjson_read(json, length, 0);
+    if (!doc) return false;
+    artifact_binding binding = {0};
+    binding.variable.dtype = artifact_dtype1(yyjson_obj_get(yyjson_doc_get_root(doc), "dtype"));
+    bool ok = artifact_itemsize(binding.variable.dtype) &&
+        artifact_constant(yyjson_doc_get_root(doc), &binding);
+    if (ok) {
+        *dtype = binding.variable.dtype;
+        memcpy(value, &binding.value, artifact_itemsize(*dtype));
+    }
+    yyjson_doc_free(doc);
+    return ok;
+}
+
 static unsigned artifact_block_capabilities(const me_dsl_compiled_block *block) {
     unsigned required = 1;
     for (int i = 0; i < block->nstmts; i++) {
@@ -379,8 +395,8 @@ static unsigned artifact_block_capabilities(const me_dsl_compiled_block *block) 
     return required;
 }
 
-me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode jit_mode,
-                                  me_artifact **out, me_artifact_error *error) {
+static me_artifact_status artifact_load(const char *json, size_t length, me_jit_mode jit_mode,
+                                   me_artifact **out, me_artifact_error *error, bool graph_infer) {
     artifact_clear_error(error);
     if (out) *out = NULL;
     if (!out || !json || !length || length > ME_ARTIFACT_MAX_BYTES || memchr(json, 0, length)) {
@@ -539,12 +555,13 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
         status = artifact_error(error, ME_ARTIFACT_ERR_OOM, "out of memory");
         goto cleanup;
     }
-    if (artifact->output_dtype == ME_AUTO) {
+    bool infer_output = graph_infer && numpy_profile && artifact_equal(yyjson_obj_get(output, "dtype"), "auto");
+    if (artifact->output_dtype == ME_AUTO && !infer_output) {
         status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported output dtype");
         goto cleanup;
     }
     for (int kind = 0; kind < 2; kind++) {
-        if (!artifact_width(output, artifact->output_dtype, &artifact->output_itemsize)) {
+        if (!infer_output && !artifact_width(output, artifact->output_dtype, &artifact->output_itemsize)) {
             status = artifact_error(error, ME_ARTIFACT_ERR_BINDING, "invalid output string width");
             goto cleanup;
         }
@@ -641,7 +658,7 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
         char reason[256];
         int position = 0;
         bool is_dsl;
-        if (numpy_profile) {
+        if (numpy_profile && !infer_output) {
             /* Metadata-only inference: output policy cannot drive intermediates. */
             me_dsl_compiled_program *inferred = dsl_compile_program_profile(source, variables, artifact->nbindings,
                 ME_AUTO, artifact->context_ndim, ME_JIT_OFF, artifact->profile,
@@ -665,6 +682,11 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
         if (!artifact->program) {
             status = artifact_error(error, ME_ARTIFACT_ERR_SOURCE, reason);
             goto cleanup;
+        }
+        if (infer_output) {
+            artifact->output_dtype = artifact->program->output_dtype;
+            artifact->inferred_dtype = artifact->output_dtype;
+            artifact->output_itemsize = artifact->program->output_itemsize;
         }
         if (artifact->program->uses_i_mask || artifact->program->uses_n_mask ||
             artifact->program->uses_ndim || artifact->program->uses_flat_idx) {
@@ -696,6 +718,16 @@ cleanup:
     me_artifact_free(artifact);
     yyjson_doc_free(doc);
     return status;
+}
+
+me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode jit_mode,
+    me_artifact **out, me_artifact_error *error) {
+    return artifact_load(json, length, jit_mode, out, error, false);
+}
+
+me_artifact_status dsl_graph_load_map(const char *json, size_t length, me_jit_mode jit_mode,
+    me_artifact **out, me_artifact_error *error) {
+    return artifact_load(json, length, jit_mode, out, error, true);
 }
 
 me_artifact_status me_artifact_eval(const me_artifact *artifact,
