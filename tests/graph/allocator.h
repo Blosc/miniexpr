@@ -3,6 +3,11 @@
  * linkage. The test callbacks are ordinary functions defined by the executable. */
 #ifndef GRAPH_TEST_ALLOCATOR_H
 #define GRAPH_TEST_ALLOCATOR_H
+/* The cc backend needs Dl_info. Feature macros must precede this forced
+ * system-header include, not just the backend's ordinary includes. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <stdlib.h>
 void *graph_test_malloc(size_t n);
 void *graph_test_calloc(size_t n, size_t width);
