@@ -107,7 +107,7 @@ if(MINIEXPR_BUILD_ARTIFACT)
     # actually compile portable kernels, including after runtime relocation.
     add_test(NAME numpy_compat_portable_tcc COMMAND numpy_compat_portable_jit)
     set_tests_properties(numpy_compat_portable_tcc PROPERTIES TIMEOUT 60
-      ENVIRONMENT "ME_DSL_JIT_COMPILER=tcc;MENUDET_REQUIRE_JIT=1")
+      ENVIRONMENT "ME_DSL_JIT_COMPILER=tcc;MENUDET_REQUIRE_JIT=1;ME_DSL_TRACE=1")
   endif()
   add_executable(numpy_compat_runner numpy-compat/runner.c numpy-compat/conformance.c
     numpy-compat/batch-jit.c)
