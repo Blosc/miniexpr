@@ -97,9 +97,14 @@ if(MINIEXPR_NEEDS_BUNDLED_TINYCC)
   endif()
 
   add_custom_target(miniexpr_tinycc ALL
+    # libtcc resolves compiler-provided headers (stddef.h, stdarg.h, etc.)
+    # relative to its relocated runtime library, not the source checkout.
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory
+            "${tinycc_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include"
     DEPENDS "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}")
 
   install(FILES "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}" DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+  install(DIRECTORY "${tinycc_SOURCE_DIR}/include/" DESTINATION "${CMAKE_INSTALL_LIBDIR}/include")
   install(FILES "${tinycc_SOURCE_DIR}/libtcc.h" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
   install(FILES "${tinycc_SOURCE_DIR}/COPYING"
           DESTINATION "${CMAKE_INSTALL_DATADIR}/miniexpr/third_party/tinycc")
