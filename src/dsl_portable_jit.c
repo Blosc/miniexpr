@@ -1,4 +1,4 @@
-/* Portable 1.1 scalar C lowering, revision 6. Never translate source
+/* Portable 1.1 scalar C lowering, revision 7. Never translate source
  * text: the typed tree includes promotion and final output conversions. The
  * private kernel ABI appends a participating mask and host comparison bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
@@ -76,8 +76,11 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, int depth) {
             else {
                 int id = p->portable_jit_ncomparisons++;
                 p->portable_jit_comparisons[id] = n;
-                snprintf(out,capacity,"((pj_cmp)inputs[%d])(inputs[%d],(double)(%s),(double)(%s))",
-                    p->n_inputs+1,p->n_inputs+2+id,args[0],args[1]);
+                const char *name = !strcmp(op, "==") ? "eq" : !strcmp(op, "!=") ? "ne" :
+                    !strcmp(op, "<") ? "lt" : !strcmp(op, "<=") ? "le" :
+                    !strcmp(op, ">") ? "gt" : "ge";
+                snprintf(out,capacity,"pj_%s((pj_cmp)inputs[%d],inputs[%d],(double)(%s),(double)(%s))",
+                    name,p->n_inputs+1,p->n_inputs+2+id,args[0],args[1]);
             }
         }
         else if (arity == 1) snprintf(out,capacity,"((%s)(%s(%s)))",type,logical ? "!" : "-",args[0]);
@@ -113,7 +116,7 @@ void dsl_portable_prepare_jit(me_dsl_compiled_program *p) {
     if ((flags && *flags) || (tcc && *tcc)) return;
     char *expression = pj_expr(p,p->block.stmts[0]->as.return_stmt.expr.expr,0);
     if (!expression) { dsl_tracef("portable jit ineligible: unsupported typed expression"); return; }
-    size_t capacity = strlen(expression) + 1024;
+    size_t capacity = strlen(expression) + 2048;
     char *source = malloc(capacity);
     me_dsl_jit_ir_program *ir = calloc(1,sizeof(*ir));
     if (!source || !ir) { free(expression); free(source); free(ir); return; }
@@ -125,9 +128,22 @@ void dsl_portable_prepare_jit(me_dsl_compiled_program *p) {
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
     snprintf(source,capacity,
-        "/* portable-1.1 lowering-r6 mask-compare-abi-r3 */\n"
+        "/* portable-1.1 lowering-r7 mask-compare-abi-r3 */\n"
         "#include <stdint.h>\n"
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"
+        /* Inspect representation without executing any floating comparison on
+         * a NaN (especially sNaN). Arguments are evaluated once, preserving lazy
+         * branch participation and the tree's float32->float64 widening. GCC and
+         * Clang inline/specialize these helpers; TCC may emit local calls. */
+        "#define PJ_COMPARE(name, op) \\\n"
+        "static inline _Bool pj_##name(pj_cmp slow, const void *node, double x, double y) { \\\n"
+        "union { double f; uint64_t u; } a, b; a.f=x; b.f=y; \\\n"
+        "if ((a.u & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000) || \\\n"
+        "    (b.u & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000)) \\\n"
+        "    return slow(node,x,y); \\\n"
+        "return x op y; }\n"
+        "PJ_COMPARE(eq, ==)\nPJ_COMPARE(ne, !=)\nPJ_COMPARE(lt, <)\n"
+        "PJ_COMPARE(le, <=)\nPJ_COMPARE(gt, >)\nPJ_COMPARE(ge, >=)\n"
         "int %s(const void *const *inputs, void *output, int64_t count) {\n"
         "const unsigned char *mask = inputs[%d];\n"
         "for (int64_t i=0; i<count; i++) { if (mask && !mask[i]) continue;\n"
