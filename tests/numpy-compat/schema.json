@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:menudet:numpy-vectors:1",
+  "title": "Menudet NumPy checkpoint vectors (not a runtime artifact schema)",
+  "type": "object",
+  "required": ["schema_version", "generator_revision", "reference", "cases"],
+  "properties": {
+    "schema_version": {"const": "menudet-numpy-vectors-1"},
+    "generator_revision": {"type": "string"},
+    "reference": {
+      "type": "object",
+      "required": ["numpy", "intp_bits", "byteorder", "platform", "machine", "floating_errors", "python"],
+      "properties": {
+        "numpy": {"type": "string"},
+        "intp_bits": {"enum": [32, 64]},
+        "byteorder": {"enum": ["little", "big"]},
+        "floating_errors": {"enum": ["ignore"]}
+      }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/case"}
+    }
+  },
+  "$defs": {
+    "buffer": {
+      "type": "object",
+      "required": ["dtype", "shape", "encoding", "hex"],
+      "properties": {
+        "dtype": {"enum": ["bool", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float32", "float64"]},
+        "shape": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "encoding": {"const": "raw-be-hex"},
+        "hex": {"type": "string", "pattern": "^([0-9a-f]{2})*$"},
+        "name": {"type": "string"},
+        "category": {"enum": ["array", "zero_dimensional_array", "typed_scalar"]},
+        "layout": {"const": "C"}
+      }
+    },
+    "case": {
+      "type": "object",
+      "required": ["id", "operation", "semantic_revision", "requires", "artifact", "inputs", "literal", "expected", "comparison"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9-]+$"},
+        "operation": {"type": "string"},
+        "semantic_revision": {"const": "menudet-draft-1.0-checked"},
+        "requires": {"type": "array", "items": {"type": "string"}},
+        "artifact": {"type": "string", "description": "Normalized kernel encoded as a complete, independently validated artifact JSON string."},
+        "inputs": {"type": "array", "items": {"$ref": "#/$defs/buffer"}},
+        "scalar_operands": {"type": "array", "items": {"$ref": "#/$defs/buffer"}},
+        "literal": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "object", "required": ["category", "type", "decimal"], "properties": {
+              "category": {"const": "weak"}, "type": {"enum": ["int", "float"]}, "decimal": {"type": "string"}
+            }}
+          ]
+        },
+        "expected": {"$ref": "#/$defs/buffer"},
+        "comparison": {
+          "type": "object", "required": ["kind", "nan", "signed_zero"],
+          "properties": {"kind": {"const": "bitwise"}, "nan": {"const": "bits"}, "signed_zero": {"const": "exact"}}
+        },
+        "baseline": {
+          "type": "object", "required": ["status", "hex", "backend"],
+          "properties": {"status": {"type": "integer"}, "hex": {"type": "string"}, "backend": {"const": "interpreter"}}
+        },
+        "classification": {"enum": ["matching", "divergent", "unsupported", "unverified"]}
+      }
+    }
+  }
+}
