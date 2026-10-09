@@ -677,10 +677,21 @@ static double npr(double n, double r) { return ncr(n, r) * fac(r); }
 #pragma function (floor)
 #endif
 
+/* Distinct identities for portable 1.1 operations; typed evaluation never
+ * dispatches through these double callbacks. */
+static double numpy_minimum(double x, double y) { return isnan(x) || x <= y ? x : y; }
+static double numpy_maximum(double x, double y) { return isnan(x) || x >= y ? x : y; }
+static double numpy_isfinite(double x) { return isfinite(x); }
+static double numpy_isinf(double x) { return isinf(x); }
+static double numpy_isnan(double x) { return isnan(x); }
+static double numpy_signbit(double x) { return signbit(x) != 0; }
+static double numpy_fabs(double x) { return fabs(x); }
+
 static const me_variable functions[] = {
     /* must be in alphabetical order */
     /* Format: {name, dtype, address, type, context} */
     {"abs", 0, fabs, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"absolute", 0, fabs, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"acos", 0, acos, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"acosh", 0, acosh, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"all", 0, all_reduce, ME_FUNCTION1, 0},
@@ -713,6 +724,7 @@ static const me_variable functions[] = {
     {"exp10", 0, exp10_wrapper, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"exp2", 0, exp2, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"expm1", 0, expm1_wrapper, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
+    {"fabs", 0, numpy_fabs, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"fac", 0, fac, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"fdim", 0, fdim, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"floor", 0, floor, ME_FUNCTION1 | ME_FLAG_PURE, 0},
@@ -722,6 +734,9 @@ static const me_variable functions[] = {
     {"fmod", 0, fmod, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"hypot", 0, hypot, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"imag", 0, imag_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"isfinite", 0, numpy_isfinite, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"isinf", 0, numpy_isinf, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"isnan", 0, numpy_isnan, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"ldexp", 0, ldexp_wrapper, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"lgamma", 0, lgamma, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"ln", 0, log, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
@@ -737,8 +752,10 @@ static const me_variable functions[] = {
     {"lower", 0, str_lower, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"lstrip", 0, str_lstrip, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"max", 0, max_reduce, ME_FUNCTION1, 0},
+    {"maximum", 0, numpy_maximum, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"mean", 0, mean_reduce, ME_FUNCTION1, 0},
     {"min", 0, min_reduce, ME_FUNCTION1, 0},
+    {"minimum", 0, numpy_minimum, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"ncr", 0, ncr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"nextafter", 0, nextafter, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"npr", 0, npr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
@@ -755,6 +772,7 @@ static const me_variable functions[] = {
     {"round", 0, round_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"rstrip", 0, str_rstrip, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"sign", 0, sign, ME_FUNCTION1 | ME_FLAG_PURE, 0},
+    {"signbit", 0, numpy_signbit, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"sin", 0, sin, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"sinh", 0, sinh, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"sinpi", 0, sinpi_wrapper, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
@@ -2960,6 +2978,8 @@ static void promote_logical_bool(me_expr* node) {
 /* Stable operation identity for the portable typed pass. Do not dispatch
  * checked integers through these double-valued full-DSL callbacks. */
 const char* me_portable_operator(const me_expr* n) {
+    if (n && (n->flags & ME_EXPR_FLAG_NUMPY_1_1) && n->function == (void *)remainder) return "%";
+    if (n && IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == (void *)add) return "+";
     const char *op = me_arithmetic_operator(n);
     if (op) return op;
     if (!n || !IS_FUNCTION(n->type)) return NULL;
@@ -2980,6 +3000,13 @@ const char* me_portable_operator(const me_expr* n) {
 }
 
 const char* me_portable_math_name(const me_expr* n) {
+    if (n && n->function == (void *)numpy_fabs) return "floating_abs";
+    if (n && n->function == (void *)numpy_minimum) return "minimum";
+    if (n && n->function == (void *)numpy_maximum) return "maximum";
+    if (n && n->function == (void *)numpy_isfinite) return "isfinite";
+    if (n && n->function == (void *)numpy_isinf) return "isinf";
+    if (n && n->function == (void *)numpy_isnan) return "isnan";
+    if (n && n->function == (void *)numpy_signbit) return "signbit";
     if (!n || !IS_FUNCTION(n->type)) return NULL;
 #define PORTABLE_MATH(fn) if (n->function == (void *)fn) return #fn
     PORTABLE_MATH(acos); PORTABLE_MATH(acosh); PORTABLE_MATH(asin); PORTABLE_MATH(asinh);
@@ -3636,7 +3663,7 @@ static void read_number_token(state* s) {
         }
     }
 
-    if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+    if (dsl_portable_typed_profile(s->semantic_profile)) {
         s->dtype = is_float ? ME_FLOAT64 : ME_INT64;
         s->literal_f32 = strtof(start, NULL);
         s->integer_magnitude = 0;
@@ -3858,6 +3885,17 @@ static void read_identifier_token(state* s) {
     if (!var) {
         var = find_builtin(start, s->next - start);
     }
+    /* New numerical spellings belong only to opt-in 1.1. Exposing them to
+     * the full evaluator would change host routing/fallback and its legacy
+     * double-callback/SIMD typing (notably nullable-table predicates). */
+    if (builtin_binding && var && s->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_1 &&
+        (var->address == (void *)numpy_minimum || var->address == (void *)numpy_maximum ||
+         var->address == (void *)numpy_isfinite || var->address == (void *)numpy_isinf ||
+         var->address == (void *)numpy_isnan || var->address == (void *)numpy_signbit ||
+         var->address == (void *)numpy_fabs || (len == 8 && !strncmp(start, "absolute", 8)))) {
+        s->type = TOK_ERROR;
+        return;
+    }
 
     if (!var) {
         s->type = TOK_ERROR;
@@ -3866,7 +3904,7 @@ static void read_identifier_token(state* s) {
 
     /* The full language's log spelling is build-configurable. Portable log
      * explicitly names natural logarithm, independent of ME_NAT_LOG. */
-    if (builtin_binding && s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 &&
+    if (builtin_binding && dsl_portable_typed_profile(s->semantic_profile) &&
         len == 3 && !strncmp(start, "log", 3)) {
         s->type = ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH;
         s->function = (void *)log;
@@ -3905,7 +3943,7 @@ static void read_identifier_token(state* s) {
         /* The legacy token enum aliases pure FUNCTION0 (40) with logical-not.
          * Portable constants retain function identity without that token flag;
          * full-DSL parsing is intentionally unchanged. */
-        if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 &&
+        if (dsl_portable_typed_profile(s->semantic_profile) &&
             TYPE_MASK(var->type) == ME_FUNCTION0) s->type = ME_FUNCTION0;
         s->function = var->address;
         s->dtype = var->dtype;
@@ -3960,13 +3998,13 @@ static void handle_single_char_operator(state* s, char c) {
         break;
     case '/': s->type = TOK_INFIX;
         s->function = divide;
-        if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 && *s->next == '/') {
+        if (dsl_portable_typed_profile(s->semantic_profile) && *s->next == '/') {
             s->next++;
             s->function = portable_floordiv;
         }
         break;
     case '%': s->type = TOK_INFIX;
-        s->function = s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0 ? portable_modulo : fmod;
+        s->function = dsl_portable_typed_profile(s->semantic_profile) ? portable_modulo : fmod;
         break;
     case '&': s->type = TOK_BITWISE;
         s->function = bit_and;
@@ -4083,7 +4121,7 @@ static me_expr* base(state* s) {
         CHECK_NULL(ret);
 
         ret->value = s->value;
-        if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+        if (dsl_portable_typed_profile(s->semantic_profile)) {
             ret->flags |= ME_EXPR_FLAG_PORTABLE_1 | ME_EXPR_FLAG_WEAK_LITERAL;
             if (s->dtype == ME_INT64) ret->flags |= ME_EXPR_FLAG_INTEGER_LITERAL;
             ret->integer_magnitude = s->integer_magnitude;
@@ -4140,7 +4178,7 @@ static me_expr* base(state* s) {
         ret->dtype = s->dtype; // Set the variable's type
         ret->input_dtype = s->dtype;
         ret->itemsize = s->itemsize;
-        if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+        if (dsl_portable_typed_profile(s->semantic_profile)) {
             ret->flags |= ME_EXPR_FLAG_PORTABLE_1;
         }
         next_token(s);
@@ -4164,7 +4202,7 @@ static me_expr* base(state* s) {
     }
 
     if (ret) {
-        if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+        if (dsl_portable_typed_profile(s->semantic_profile)) {
             ret->flags |= ME_EXPR_FLAG_PORTABLE_1;
         }
         return ret;
@@ -4277,7 +4315,7 @@ static me_expr* base(state* s) {
             ret->value = NAN;
             break;
         }
-        if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+        if (dsl_portable_typed_profile(s->semantic_profile)) {
             ret->flags |= ME_EXPR_FLAG_PORTABLE_1;
         }
         return ret;
@@ -4301,6 +4339,13 @@ static me_expr* power(state* s) {
         CHECK_NULL(inner);
 
         if (t == add) {
+            if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_1) {
+                me_expr *positive = NEW_EXPR(ME_FUNCTION1 | ME_FLAG_PURE, inner);
+                CHECK_NULL(positive, me_free(inner));
+                positive->function = (void *)add;
+                positive->flags |= ME_EXPR_FLAG_PORTABLE_1;
+                return positive;
+            }
             return inner;
         }
 
@@ -4308,7 +4353,7 @@ static me_expr* power(state* s) {
         CHECK_NULL(ret, me_free(inner));
 
         ret->function = negate;
-        if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+        if (dsl_portable_typed_profile(s->semantic_profile)) {
             ret->flags |= ME_EXPR_FLAG_PORTABLE_1;
         }
         return ret;
@@ -4324,7 +4369,7 @@ static me_expr* power(state* s) {
 
         ret->function = bit_not;
         ret->dtype = inner->dtype;
-        if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+        if (dsl_portable_typed_profile(s->semantic_profile)) {
             ret->flags |= ME_EXPR_FLAG_PORTABLE_1;
         }
         promote_logical_bool(ret);
@@ -4424,7 +4469,9 @@ static me_expr* expr(state* s) {
         ret->function = (void*)t;
         apply_type_promotion(ret); // Apply type promotion
 
-        if (t == add) {
+        /* Rewriting x + (-literal) as x - literal loses weak-scalar range
+         * validation. Preserve source operations in the NumPy profile. */
+        if (t == add && s->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_1) {
             me_expr *left = (me_expr*)ret->parameters[0];
             me_expr *right = (me_expr*)ret->parameters[1];
 
@@ -4587,7 +4634,7 @@ static me_expr* logical_not_expr(state* s) {
 
         ret->function = logical_not;
         ret->dtype = ME_BOOL;
-        if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+        if (dsl_portable_typed_profile(s->semantic_profile)) {
             ret->flags |= ME_EXPR_FLAG_PORTABLE_1;
         }
         return ret;

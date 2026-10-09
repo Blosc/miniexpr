@@ -1614,7 +1614,7 @@ int private_compile_profile_ex(const char* expression, const me_variable* variab
         s.target_dtype = ME_AUTO;
     }
 
-    if (profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+    if (dsl_portable_typed_profile(profile)) {
         s.target_dtype = ME_AUTO;
     }
     next_token(&s);
@@ -1632,7 +1632,7 @@ int private_compile_profile_ex(const char* expression, const me_variable* variab
     /* Internal raw-tree entry point: the profile-aware DSL compiler performs
      * typed validation before this tree can be executed. No folding, bytecode,
      * output retyping or callback dispatch is safe before that gate. */
-    if (profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+    if (dsl_portable_typed_profile(profile)) {
         if (vars_copy) free(vars_copy);
         if (s.str_data) free((void *)s.str_data);
         if (s.type != TOK_END) {

@@ -1,0 +1,128 @@
+# Logical arrays and native graph deployment (M5/M6)
+
+The opt-in logical-array ABI (`ME_ARTIFACT_ARRAY_VERSION=1`) executes numeric,
+elementwise, rank-zero portable 1.1 artifacts over a logical domain. It does not
+reinterpret explicit block-scalar artifacts or ND-context partitions as logical
+array reductions. Existing artifact language/schema semantics are unchanged.
+
+## Descriptors, bounds and ownership
+
+`me_array_view` records dtype, allocation base/capacity, byte offset, rank (0–16),
+signed byte strides, shape, and native/little/big byte order. The allocation is
+caller-owned and remains alive throughout execution. Bounds validation checks
+the complete reachable byte interval with overflow-safe signed-stride arithmetic;
+unaligned operands use bounded memcpy loads. Runtime bindings are by name and
+must match immutable artifact dtype signatures. Arrays may broadcast by aligning
+trailing axes: matching extents or singleton inputs are accepted, including 0-D
+scalars, zero-sized domains and singleton-to-zero broadcasting. The host supplies
+the logical domain; native validation rejects incompatible views before execution.
+
+Output is caller-owned, aligned, native-endian C-order storage. Query its shape
+and dtype with `me_array_result_shape()` before allocation. Capacity is checked.
+Input allocations must be disjoint from output; in-place execution and overlapping
+views are rejected even where particular element addresses do not coincide. As
+with the descriptor API, caller metadata/status/error structures must not alias
+array storage. Errors during execution leave output unspecified; bounds, options
+and signature errors reject before numerical writes. Initial/mask value contents
+are host-owned data; a malformed mask value can fail during traversal.
+
+The native iterator is zero-copy for aligned, native-endian, matching C-contiguous
+inputs when traversal is contiguous (elementwise and suffix-axis reduction groups).
+Other supported layouts use **bounded per-tile gathers**, not normalized full-array
+copies. This includes F-order, transposed, stepped, negative-stride, unaligned,
+byte-swapped and broadcast views. `tile_items` defaults to 1024 and may not exceed
+the native signed-32-bit lane limit. Allocation failure never switches backends.
+
+`me_array_report` records peak iterator scratch (excluding output and interpreter
+internals), cumulative gathered bytes, input zero-copy tile count, evaluated tile
+count and aggregated floating status. These are measurements of this iterator,
+not a comprehensive interpreter allocation bound. Host copying/decompression must
+be measured separately; the Python adapter reports its owner-normalization bytes.
+Views into a known owning NumPy allocation preserve their layout. Unsupported
+external buffer owners use a copying adapter and report the copy, rather than
+claiming zero-copy. Fictitious `as_strided` views outside their allocation reject.
+
+## Reduction contract
+
+Options select `sum`, `prod`, `min`, `max`, `any`, `all`, or elementwise execution.
+Axis lists normalize negative indices and reject duplicates/out-of-range indices;
+`naxes=-1` means all axes and zero means no axes. `keepdims` retains selected axes
+as singleton dimensions. A broadcast Boolean `where` mask controls participation
+before expression evaluation; masked lanes do not raise numerical flags.
+
+Sum/prod widen Boolean/signed integer inputs to int64 and unsigned integer inputs
+to uint64. Floating dtypes remain float32/float64. Any/all return bool; min/max
+preserve expression output dtype. Explicit numeric accumulator dtypes are accepted
+except floating-to-integer accumulation (currently unsupported); truth reductions
+do not accept dtype/initial overrides. Initial is one native-endian scalar of the
+selected accumulator dtype and participates once per group, not once per tile.
+Empty sum/prod/any/all identities are 0/1/false/true. Empty/masked min/max require
+initial. Integer accumulation and combination use fixed-width modular arithmetic,
+including explicitly narrow accumulators, never signed-C overflow.
+
+Each group visits its selected-axis coordinates in serial logical C order.
+**Tile size and compressed storage chunking do not change grouping or order.**
+Float32 rounds each accumulator step to float32; no unconstrained fast-math or
+reassociation is allowed. This is not NumPy's layout/platform-dependent pairwise
+sum, so universal bitwise floating-reduction parity is not promised. For finite
+sum without overflow/underflow, use the standard forward-error criterion
+`gamma_n * sum(abs(x))`, with `gamma_n = n*u/(1-n*u)` and unit roundoff `u`, plus
+the initial term. Seeded finite tests check this against an independent `math.fsum`
+reference and also require tile-invariant bytes. Nonfinite classifications and
+extrema follow the existing M4 contract, including deterministic signed-zero ties.
+Products may overflow/underflow in serial order even where another grouping would
+not; no global relative-error promise is made near zero or overflow.
+
+The logical scheduler is serial. Floating flags aggregate through scoped native
+guards and caller fenv restoration; reporting is capability-qualified on WASM.
+Independent calls/buffers on a shared immutable artifact may run concurrently;
+same-output or same-storage mutation is not made safe automatically.
+
+Mean/variance/std, arg/cumulative reductions, arbitrary gathers/scatters, tuple
+results and mutable-view semantics are deferred, not implied by this ABI.
+
+## Shape operations
+
+Native `me_array_reshape`, `me_array_transpose`, and `me_array_slice` create borrowed
+metadata views with checked bounds. Reshape requires equal element count and C
+contiguity; transpose validates a full axis permutation; slice takes a normalized
+start, count and nonzero step. Negative-axis and negative-step views are supported.
+These APIs do not allocate or transfer ownership. The evaluation result always
+owns independent storage at the host level: NumPy returned-view alias guarantees
+are not promised. Python can use normal array reshape/transpose/basic slices as
+metadata before passing the resulting view into native evaluation.
+
+## Deployment / graph boundary
+
+`tests/numpy-compat/arrays.c` is a standalone C host that loads an artifact,
+broadcasts, reduces axes, transforms views, varies tile sizes, checks bounds and
+verifies modular combination. It has no Python, NumPy, NumExpr or compressed
+storage dependency. CTest runs it in native and standalone Node/WASM builds.
+
+Python's `PortableKernel.evaluate_array` wraps this scheduler.
+`LazyExpr.compute(_require_native=True)` lowers an eligible safe numerical graph
+to a fused portable 1.1 elementwise plan plus optional root logical reduction.
+The frontend validates metadata and performs compressed storage reads; native code
+owns numerical values, casts, masks, traversal and reduction. Supported direct
+operands are NumPy/Blosc2 arrays and plain/typed numeric scalars. Unsupported
+graph capabilities reject before destination writes; no NumExpr or Python
+numerical fallback is allowed. A bounded 128-entry immutable plan cache keys
+normalized source, semantic profile, signatures and scalar captures, not input
+array identities or evaluated values. Mutation of inputs never reuses results.
+
+Basic elementwise partial reads select operand views/storage before native
+execution. Nested lazy/proxy/remote/table operands, table row/partition filtering,
+ordering, output aliases, reduction partial reads, custom acceleration/accuracy
+overrides and unsupported functions are not eligible. Existing table-specific
+partition semantics and safe/full persistence policies remain untouched.
+
+`LazyExpr.native_kernel()` exports eligible **elementwise** artifacts. Their
+existing portable lazy recipes retain native provenance validation and reject
+unsupported kernels before creating carriers. Logical reduction options are a
+host scheduler descriptor, not silently added to persisted block-scalar recipes;
+deploy them explicitly with the logical-array C API.
+
+NumExpr-unavailable subprocess tests cover imports, safe construction/metadata,
+native-required execution/reduction, artifact import/export and persisted portable
+recipe reload. NumExpr's packaging requirement remains unchanged: relaxing it for
+all construction/persistence routes requires a wider clean-install audit.

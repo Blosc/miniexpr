@@ -425,7 +425,7 @@ static char *dsl_build_compound_assign_expr(const char *lhs, size_t lhs_len,
         return NULL;
     }
     size_t rhs_len = strlen(rhs);
-    if (strcmp(op, "//") == 0 && profile != ME_DSL_PROFILE_PORTABLE_1_0) {
+    if (strcmp(op, "//") == 0 && !dsl_portable_typed_profile(profile)) {
         size_t total = 6 + lhs_len + 5 + rhs_len + 3 + 1;
         char *out = malloc(total);
         if (!out) {

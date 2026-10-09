@@ -2,57 +2,13 @@
  * Fixed limits intentionally cover only checkpoint-1 contiguous numeric vectors. */
 #include "miniexpr_artifact.h"
 #include "yyjson.h"
+#include "vector_io.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-static const char *text(yyjson_val *object, const char *key) {
-    return yyjson_get_str(yyjson_obj_get(object, key));
-}
-
-static me_dtype dtype(const char *name) {
-    static const char *names[] = {"bool", "int8", "int16", "int32", "int64",
-                                  "uint8", "uint16", "uint32", "uint64", "float32", "float64"};
-    static const me_dtype types[] = {ME_BOOL, ME_INT8, ME_INT16, ME_INT32, ME_INT64,
-                                    ME_UINT8, ME_UINT16, ME_UINT32, ME_UINT64, ME_FLOAT32, ME_FLOAT64};
-    for (size_t i = 0; name && i < sizeof(types) / sizeof(types[0]); i++) {
-        if (!strcmp(name, names[i])) return types[i];
-    }
-    return ME_AUTO;
-}
-
-static int nibble(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    return -1;
-}
-
-static int little_endian(void) {
-    const uint16_t one = 1;
-    return *(const unsigned char *)&one;
-}
-
-static int decode(const char *hex, unsigned char *out, size_t width, size_t count) {
-    if (!hex || strlen(hex) != width * count * 2) return 0;
-    for (size_t i = 0; i < width * count; i++) {
-        int high = nibble(hex[2 * i]), low = nibble(hex[2 * i + 1]);
-        if (high < 0 || low < 0) return 0;
-        size_t offset = little_endian() ? (i / width) * width + width - 1 - i % width : i;
-        out[offset] = (unsigned char)(high * 16 + low);
-    }
-    return 1;
-}
-
-static void encode(const unsigned char *data, size_t width, size_t count, char *out) {
-    static const char digits[] = "0123456789abcdef";
-    for (size_t i = 0; i < width * count; i++) {
-        size_t offset = little_endian() ? (i / width) * width + width - 1 - i % width : i;
-        out[2 * i] = digits[data[offset] >> 4];
-        out[2 * i + 1] = digits[data[offset] & 15];
-    }
-    out[2 * width * count] = 0;
-}
+int numpy_compat_run_v2(yyjson_val *root, me_jit_mode mode, bool observe);
 
 static int run_case(yyjson_val *test, me_jit_mode mode) {
     const char *id = text(test, "id"), *json = text(test, "artifact");
@@ -152,24 +108,26 @@ cleanup:
 }
 
 int main(int argc, char **argv) {
-    if (argc < 2 || argc > 3) {
-        fprintf(stderr, "usage: %s vectors.json [off|on]\n", argv[0]);
+    if (argc < 2 || argc > 4 || (argc == 4 && strcmp(argv[3], "observe"))) {
+        fprintf(stderr, "usage: %s vectors.json [off|on] [observe]\n", argv[0]);
         return 2;
     }
     me_jit_mode mode = ME_JIT_OFF;
-    if (argc == 3) {
+    if (argc >= 3) {
         if (!strcmp(argv[2], "on")) mode = ME_JIT_ON;
         else if (strcmp(argv[2], "off")) return 2;
     }
     FILE *file = fopen(argv[1], "rb");
     if (!file) return 2;
-    char *data = malloc(1024 * 1024 + 1);
+    /* A matrix contains many individually bounded artifacts. */
+    const size_t corpus_limit = 16 * 1024 * 1024;
+    char *data = malloc(corpus_limit + 1);
     if (!data) {
         fclose(file);
         return 2;
     }
-    size_t size = fread(data, 1, 1024 * 1024 + 1, file);
-    int failed = ferror(file) || size > 1024 * 1024;
+    size_t size = fread(data, 1, corpus_limit + 1, file);
+    int failed = ferror(file) || size > corpus_limit;
     fclose(file);
     yyjson_doc *doc = failed ? NULL : yyjson_read(data, size, 0);
     free(data);
@@ -177,7 +135,10 @@ int main(int argc, char **argv) {
     yyjson_val *root = yyjson_doc_get_root(doc);
     const char *version = text(root, "schema_version");
     yyjson_val *cases = yyjson_obj_get(root, "cases");
-    if (!version || strcmp(version, "menudet-numpy-vectors-1") ||
+    if (version && !strcmp(version, "menudet-numpy-vectors-2")) {
+        failed = numpy_compat_run_v2(root, mode, argc == 4);
+    }
+    else if (!version || strcmp(version, "menudet-numpy-vectors-1") ||
         !yyjson_is_arr(cases) || !yyjson_arr_size(cases)) failed = 1;
     else {
         for (size_t i = 0; i < yyjson_arr_size(cases); i++) {

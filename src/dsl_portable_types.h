@@ -12,6 +12,9 @@
  * ME_AUTO reports an unsupported pair; never means output-context typing. */
 me_dtype dsl_portable_numeric_promote(me_dtype left, me_dtype right);
 me_dtype dsl_portable_division_dtype(me_dtype left, me_dtype right);
+/* NumPy 2.x strong dtype promotion; independent of operand values/output. */
+me_dtype dsl_numpy_numeric_promote(me_dtype left, me_dtype right);
+bool dsl_numpy_can_cast(me_dtype from, me_dtype to, const char *policy);
 
 typedef enum {
     ME_PORTABLE_NUMERIC_OK = 0,
@@ -40,7 +43,13 @@ typedef enum {
 me_portable_numeric_status dsl_portable_signed_op(me_dtype dtype, me_portable_integer_op op,
                                                  int64_t left, int64_t right, int64_t *out);
 me_portable_numeric_status dsl_portable_unsigned_op(me_dtype dtype, me_portable_integer_op op,
-                                                   uint64_t left, uint64_t right, uint64_t *out);
+                                                    uint64_t left, uint64_t right, uint64_t *out);
+me_portable_numeric_status dsl_numpy_signed_op(me_dtype dtype, me_portable_integer_op op,
+                                              int64_t left, int64_t right, int64_t *out);
+me_portable_numeric_status dsl_numpy_unsigned_op(me_dtype dtype, me_portable_integer_op op,
+                                                uint64_t left, uint64_t right, uint64_t *out);
+int64_t dsl_numpy_signed_bits(me_dtype dtype, uint64_t raw);
+uint64_t dsl_numpy_unsigned_bits(me_dtype dtype, uint64_t raw);
 me_portable_numeric_status dsl_portable_float_to_signed(me_dtype dtype, double value, int64_t *out);
 me_portable_numeric_status dsl_portable_float_to_unsigned(me_dtype dtype, double value, uint64_t *out);
 me_portable_numeric_status dsl_portable_signed_to_signed(me_dtype dtype, int64_t value, int64_t *out);

@@ -13,6 +13,31 @@
 #include <string.h>
 #include <stdlib.h>
 
+#ifdef _MSC_VER
+static __declspec(thread) unsigned *p_status_collector;
+#else
+static _Thread_local unsigned *p_status_collector;
+#endif
+
+unsigned *dsl_portable_status_begin(unsigned *flags) {
+    unsigned *previous = p_status_collector;
+    p_status_collector = flags;
+    return previous;
+}
+
+void dsl_portable_status_end(unsigned *previous) {
+    p_status_collector = previous;
+}
+
+void dsl_portable_status_capture(void) {
+#ifndef __EMSCRIPTEN__
+    if (!p_status_collector) return;
+    int raised = fetestexcept(FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW | FE_UNDERFLOW);
+    *p_status_collector |= (raised & FE_INVALID ? 1u : 0u) | (raised & FE_DIVBYZERO ? 2u : 0u) |
+                          (raised & FE_OVERFLOW ? 4u : 0u) | (raised & FE_UNDERFLOW ? 8u : 0u);
+#endif
+}
+
 static bool p_unsigned(me_dtype d) {
     return d == ME_UINT8 || d == ME_UINT16 || d == ME_UINT32 || d == ME_UINT64;
 }
@@ -23,6 +48,41 @@ static bool p_float(me_dtype d) {
 
 static bool p_numeric(me_dtype d) {
     return dsl_portable_numeric_promote(d, d) != ME_AUTO;
+}
+
+static bool p_numpy(const me_expr *expr) {
+    return (expr->flags & ME_EXPR_FLAG_NUMPY_1_1) != 0;
+}
+
+static bool p_weak(const me_expr *expr) {
+    return (expr->flags & (ME_EXPR_FLAG_WEAK_LITERAL | ME_EXPR_FLAG_WEAK_SCALAR)) != 0;
+}
+
+static bool p_predicate(const char *name) {
+    return name && (!strcmp(name, "isfinite") || !strcmp(name, "isinf") ||
+                    !strcmp(name, "isnan") || !strcmp(name, "signbit"));
+}
+
+static me_dtype p_numpy_math_dtype(me_dtype dtype) {
+    if (dtype == ME_BOOL || dtype == ME_INT8 || dtype == ME_UINT8) return ME_AUTO; /* float16 loop */
+    if (dtype == ME_INT16 || dtype == ME_UINT16 || dtype == ME_FLOAT32) return ME_FLOAT32;
+    return ME_FLOAT64;
+}
+
+static me_dtype p_promote(bool numpy, me_dtype left, me_dtype right) {
+    return numpy ? dsl_numpy_numeric_promote(left, right) : dsl_portable_numeric_promote(left, right);
+}
+
+static me_portable_numeric_status p_signed_op(const me_expr *n, me_portable_integer_op op,
+                                              int64_t left, int64_t right, int64_t *out) {
+    return p_numpy(n) && !(n->flags & ME_EXPR_FLAG_WEAK_SCALAR) ? dsl_numpy_signed_op(n->dtype, op, left, right, out) :
+                        dsl_portable_signed_op(n->dtype, op, left, right, out);
+}
+
+static me_portable_numeric_status p_unsigned_op(const me_expr *n, me_portable_integer_op op,
+                                                uint64_t left, uint64_t right, uint64_t *out) {
+    return p_numpy(n) ? dsl_numpy_unsigned_op(n->dtype, op, left, right, out) :
+                        dsl_portable_unsigned_op(n->dtype, op, left, right, out);
 }
 
 static bool p_truth(me_dtype d, const me_scalar *v) {
@@ -70,6 +130,19 @@ static me_portable_numeric_status p_convert(me_dtype from, const me_scalar *v,
     return dsl_portable_signed_to_signed(to, from == ME_BOOL ? (int64_t)v->b : v->i64, &out->i64);
 }
 
+/* Explicit/output conversion is different from literal construction. Integer
+ * narrowing is modular, but unstable nonfinite/out-of-range float casts reject. */
+static me_portable_numeric_status p_numpy_convert(me_dtype from, const me_scalar *v,
+                                                  me_dtype to, me_scalar *out) {
+    if (!p_float(from) && to != ME_BOOL && !p_float(to)) {
+        uint64_t raw = from == ME_BOOL ? (uint64_t)v->b : p_unsigned(from) ? v->u64 : (uint64_t)v->i64;
+        if (p_unsigned(to)) out->u64 = dsl_numpy_unsigned_bits(to, raw);
+        else out->i64 = dsl_numpy_signed_bits(to, raw);
+        return ME_PORTABLE_NUMERIC_OK;
+    }
+    return p_convert(from, v, to, out);
+}
+
 static bool p_fail(char *reason, size_t cap, const char *message) {
     if (reason && cap) snprintf(reason, cap, "%s", message);
     return false;
@@ -98,7 +171,7 @@ static bool p_literal_value(const me_expr *n, me_scalar *out) {
     }
     if (n->dtype == ME_FLOAT32) {
         out->f32 = n->literal_f32;
-        return isfinite(out->f32);
+        return p_numpy(n) ? isfinite(n->value) : isfinite(out->f32);
     }
     if (n->dtype == ME_FLOAT64) {
         out->f64 = n->value;
@@ -111,6 +184,14 @@ static bool p_literal_value(const me_expr *n, me_scalar *out) {
 
 static bool p_context_literal(me_expr *literal, me_dtype context) {
     if (!(literal->flags & ME_EXPR_FLAG_WEAK_LITERAL)) return true;
+    if (p_numpy(literal) && !(literal->flags & ME_EXPR_FLAG_INTEGER_LITERAL) && !p_float(context)) {
+        literal->dtype = ME_FLOAT64;
+        return true;
+    }
+    if (p_numpy(literal) && context == ME_BOOL) {
+        /* Python int/float is higher-kind than bool, regardless of its value. */
+        context = literal->flags & ME_EXPR_FLAG_INTEGER_LITERAL ? ME_INT64 : ME_FLOAT64;
+    }
     if (!(literal->flags & ME_EXPR_FLAG_INTEGER_LITERAL) &&
         !p_float(context) && trunc(literal->value) != literal->value) return true;
     literal->dtype = context;
@@ -137,6 +218,7 @@ static bool p_wrap(me_expr **expr, me_dtype to) {
     conv->input_dtype = (*expr)->dtype;
     conv->dtype = to;
     conv->flags |= ME_EXPR_FLAG_PORTABLE_1;
+    conv->flags |= (*expr)->flags & ME_EXPR_FLAG_NUMPY_1_1;
     *expr = conv;
     return true;
 }
@@ -145,10 +227,11 @@ bool dsl_portable_convert_expr(me_expr **expr, me_dtype dtype) {
     return expr && *expr && p_numeric(dtype) && p_wrap(expr, dtype);
 }
 
-static bool p_type(me_expr **slot, char *reason, size_t cap, int depth) {
+static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool numpy) {
     me_expr *n = *slot;
     if (!n || depth > 128) return p_fail(reason, cap, "portable expression nesting limit exceeded");
     n->flags |= ME_EXPR_FLAG_PORTABLE_1;
+    if (numpy) n->flags |= ME_EXPR_FLAG_NUMPY_1_1;
     int kind = TYPE_MASK(n->type);
     if (kind == ME_VARIABLE || kind == ME_CONSTANT || kind == ME_STRING_CONSTANT) {
         if (is_string_dtype(n->dtype) || kind == ME_STRING_CONSTANT) {
@@ -166,6 +249,11 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth) {
     }
     const char *op = me_portable_operator(n);
     const char *math_name = me_portable_math_name(n);
+    if (numpy && op && !strcmp(op, "%")) math_name = NULL;
+    if (!numpy && math_name && (p_predicate(math_name) || !strcmp(math_name, "minimum") ||
+        !strcmp(math_name, "maximum") || !strcmp(math_name, "floating_abs"))) {
+        return p_fail(reason, cap, "function requires portable profile 1.1");
+    }
     me_reduce_kind reduce = reduction_kind(n->function);
     me_dtype cast = dsl_portable_cast_dtype(n);
     if (!op && !math_name && !reduce && cast == ME_AUTO && !me_portable_string_operation(n)) {
@@ -173,7 +261,7 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth) {
     }
     int arity = ARITY(n->type);
     for (int i = 0; i < arity; i++) {
-        if (!p_type((me_expr **)&n->parameters[i], reason, cap, depth + 1)) return false;
+        if (!p_type((me_expr **)&n->parameters[i], reason, cap, depth + 1, numpy)) return false;
     }
     if (op && !strcmp(op, "+") && is_string_dtype(((me_expr *)n->parameters[0])->dtype)) retag_string_concat(n);
     if (me_portable_string_operation(n)) {
@@ -193,6 +281,17 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth) {
         return true;
     }
     me_expr *a = n->parameters[0];
+    if (numpy && p_predicate(math_name)) {
+        n->dtype = ME_BOOL;
+        return true;
+    }
+    if (numpy && op && arity == 1 && !strcmp(op, "+")) {
+        if (a->dtype == ME_BOOL) return p_fail(reason, cap, "Boolean unary plus is unsupported");
+        n->parameters[0] = NULL;
+        me_free(n);
+        *slot = a;
+        return true;
+    }
     if (reduce) {
         if (is_string_dtype(a->dtype)) return p_fail(reason, cap, "reduce numeric or Boolean lanes, not strings");
         if (contains_reduction(a)) return p_fail(reason, cap, "nested reductions are not supported");
@@ -225,7 +324,7 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth) {
         for (int i = 0; i < 3; i++) {
             const me_expr *arg = n->parameters[i];
             if (arg->flags & ME_EXPR_FLAG_WEAK_LITERAL) continue;
-            common = common == ME_AUTO ? arg->dtype : dsl_portable_numeric_promote(common, arg->dtype);
+            common = common == ME_AUTO ? arg->dtype : p_promote(numpy, common, arg->dtype);
             if (common == ME_AUTO) return p_fail(reason, cap, "unsupported fma operand promotion");
         }
         if (common == ME_AUTO) common = ME_FLOAT64;
@@ -241,7 +340,9 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth) {
     if (math_name && !strcmp(math_name, "ldexp")) {
         const me_expr *exponent = n->parameters[1];
         if (p_float(exponent->dtype)) return p_fail(reason, cap, "ldexp exponent must be integral");
-        n->dtype = a->dtype == ME_FLOAT32 ? ME_FLOAT32 : ME_FLOAT64;
+        if (numpy && exponent->dtype == ME_UINT64) return p_fail(reason, cap, "ldexp uint64 exponent is unsupported");
+        n->dtype = numpy ? p_numpy_math_dtype(a->dtype) : a->dtype == ME_FLOAT32 ? ME_FLOAT32 : ME_FLOAT64;
+        if (n->dtype == ME_AUTO) return p_fail(reason, cap, "NumPy ldexp loop requires unsupported float16");
         return p_wrap((me_expr **)&n->parameters[0], n->dtype) &&
                p_wrap((me_expr **)&n->parameters[1], ME_INT64);
     }
@@ -256,8 +357,21 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth) {
                           !strcmp(math_name, "round") || !strcmp(math_name, "trunc") ||
                           !strcmp(math_name, "square") || !strcmp(math_name, "sign") ||
                           !strcmp(math_name, "conj") || !strcmp(math_name, "real") ||
-                          !strcmp(math_name, "imag");
-        n->dtype = preserving ? (a->dtype == ME_BOOL ? ME_INT64 : a->dtype) :
+                            !strcmp(math_name, "imag");
+        if (numpy) {
+            if (!strcmp(math_name, "sign") && a->dtype == ME_BOOL) return p_fail(reason, cap, "Boolean sign is unsupported");
+            if ((!strcmp(math_name, "square") || !strcmp(math_name, "conj")) && a->dtype == ME_BOOL) {
+                n->dtype = ME_INT8;
+                return p_wrap((me_expr **)&n->parameters[0], ME_INT8);
+            }
+            if (!strcmp(math_name, "rint") || !strcmp(math_name, "floating_abs")) preserving = false;
+            if (!strcmp(math_name, "round") && a->dtype == ME_BOOL) preserving = false;
+            n->dtype = preserving ? a->dtype : p_numpy_math_dtype(a->dtype);
+            if (n->dtype == ME_AUTO) return p_fail(reason, cap, "NumPy function loop requires unsupported float16");
+            return p_wrap((me_expr **)&n->parameters[0], n->dtype);
+        }
+        if (numpy && preserving && p_weak(a)) n->flags |= ME_EXPR_FLAG_WEAK_SCALAR;
+        n->dtype = preserving ? (a->dtype == ME_BOOL && !numpy ? ME_INT64 : a->dtype) :
                    a->dtype == ME_FLOAT32 ? ME_FLOAT32 : ME_FLOAT64;
         return p_wrap((me_expr **)&n->parameters[0], n->dtype);
     }
@@ -267,6 +381,8 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth) {
         return true;
     }
     if (arity == 1) {
+        if (numpy && p_weak(a)) n->flags |= ME_EXPR_FLAG_WEAK_SCALAR;
+        if (numpy && a->dtype == ME_BOOL && !strcmp(op, "-")) return p_fail(reason, cap, "Boolean negation is unsupported; use logical not");
         n->dtype = a->dtype == ME_BOOL && strcmp(op, "~") ? ME_INT64 : a->dtype;
         if (!strcmp(op, "~") && p_float(n->dtype)) return p_fail(reason, cap, "bitwise operand must be integral");
         return p_wrap((me_expr **)&n->parameters[0], n->dtype);
@@ -287,34 +403,68 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth) {
         n->itemsize = a->itemsize > b->itemsize ? a->itemsize : b->itemsize;
         return true;
     }
-    bool weak_a = (a->flags & ME_EXPR_FLAG_WEAK_LITERAL) != 0;
-    bool weak_b = (b->flags & ME_EXPR_FLAG_WEAK_LITERAL) != 0;
+    bool weak_a = p_weak(a);
+    bool weak_b = p_weak(b);
     bool numeric_bool = math_name || (strcmp(op, "where") && !is_comparison_node(n) &&
                         strcmp(op, "&") && strcmp(op, "|") && strcmp(op, "^"));
-    me_dtype context_a = numeric_bool && b->dtype == ME_BOOL ? ME_INT64 : b->dtype;
-    me_dtype context_b = numeric_bool && a->dtype == ME_BOOL ? ME_INT64 : a->dtype;
-    if ((weak_a && !weak_b && !p_context_literal(a, context_a)) ||
-        (weak_b && !weak_a && !p_context_literal(b, context_b))) {
+    me_dtype context_a = !numpy && numeric_bool && b->dtype == ME_BOOL ? ME_INT64 : b->dtype;
+    me_dtype context_b = !numpy && numeric_bool && a->dtype == ME_BOOL ? ME_INT64 : a->dtype;
+    me_dtype original_a = a->dtype, original_b = b->dtype;
+    bool literal_ok = true;
+    if (weak_a && !weak_b && !p_context_literal(a, context_a)) {
+        if (numpy && is_comparison_node(n)) a->dtype = original_a;
+        else literal_ok = false;
+    }
+    if (weak_b && !weak_a && !p_context_literal(b, context_b)) {
+        if (numpy && is_comparison_node(n)) b->dtype = original_b;
+        else literal_ok = false;
+    }
+    if (!literal_ok) {
         return p_fail(reason, cap, "source literal is out of range for its operand context");
     }
     if (is_comparison_node(n) && !p_float(a->dtype) && !p_float(b->dtype)) {
         n->dtype = ME_BOOL; /* Mixed int64/uint64 comparison stays exact. */
         return true;
     }
-    if (!strcmp(op, "<<") || !strcmp(op, ">>")) {
+    if (!numpy && (!strcmp(op, "<<") || !strcmp(op, ">>"))) {
         if (p_float(a->dtype) || p_float(b->dtype)) return p_fail(reason, cap, "shift operands must be integral");
         n->dtype = a->dtype == ME_BOOL ? ME_INT64 : a->dtype;
         return p_wrap((me_expr **)&n->parameters[0], n->dtype);
     }
-    me_dtype common = dsl_portable_numeric_promote(a->dtype, b->dtype);
+    me_dtype common = p_promote(numpy, a->dtype, b->dtype);
+    if (numpy && weak_a != weak_b) {
+        const me_expr *weak = weak_a ? a : b, *strong = weak_a ? b : a;
+        if (weak->flags & ME_EXPR_FLAG_WEAK_SCALAR) {
+            common = p_float(weak->dtype) && !p_float(strong->dtype) ? ME_FLOAT64 :
+                     strong->dtype == ME_BOOL && weak->dtype != ME_BOOL ? weak->dtype : strong->dtype;
+        }
+    }
+    if (numpy && weak_a && weak_b) n->flags |= ME_EXPR_FLAG_WEAK_SCALAR;
+    if (numpy && math_name && (strcmp(math_name, "minimum") && strcmp(math_name, "maximum") &&
+        strcmp(math_name, "fmin") && strcmp(math_name, "fmax") && strcmp(math_name, "fmod") && strcmp(math_name, "ncr") && strcmp(math_name, "npr"))) {
+        common = p_numpy_math_dtype(common);
+        if (common == ME_AUTO) return p_fail(reason, cap, "NumPy function loop requires unsupported float16");
+    }
     bool combinatoric = math_name && (!strcmp(math_name, "ncr") || !strcmp(math_name, "npr"));
     if (combinatoric && p_float(common)) return p_fail(reason, cap, "combinatoric operands must be integral");
-    if (math_name && !combinatoric && common != ME_AUTO) common = common == ME_FLOAT32 ? ME_FLOAT32 : ME_FLOAT64;
+    if (numpy && combinatoric && common == ME_BOOL) common = ME_INT64;
+    bool ordered = math_name && (!strcmp(math_name, "minimum") || !strcmp(math_name, "maximum") ||
+                                  !strcmp(math_name, "fmin") || !strcmp(math_name, "fmax") || !strcmp(math_name, "fmod"));
+    if (numpy && math_name && !strcmp(math_name, "fmod") && common == ME_BOOL) common = ME_INT8;
+    if (math_name && !combinatoric && common != ME_AUTO && !(numpy && ordered)) common = common == ME_FLOAT32 ? ME_FLOAT32 : ME_FLOAT64;
     if (!strcmp(op, "&") || !strcmp(op, "|") || !strcmp(op, "^")) {
         if (a->dtype == ME_BOOL && b->dtype == ME_BOOL) common = ME_BOOL;
         if (p_float(common)) return p_fail(reason, cap, "bitwise operands must be integral");
     }
-    if (!strcmp(op, "/")) common = dsl_portable_division_dtype(a->dtype, b->dtype);
+    if (numpy && (!strcmp(op, "<<") || !strcmp(op, ">>")) && (p_float(common) || common == ME_BOOL)) {
+        if (common == ME_BOOL) common = ME_INT8;
+        else return p_fail(reason, cap, "shift operands require an integral common dtype");
+    }
+    if (numpy && common == ME_BOOL) {
+        if (!strcmp(op, "-")) return p_fail(reason, cap, "Boolean subtraction is unsupported");
+        if (!strcmp(op, "//") || !strcmp(op, "%") || !strcmp(op, "**")) common = ME_INT8;
+    }
+    if (!strcmp(op, "/")) common = numpy ? (p_float(common) ? common : ME_FLOAT64) : dsl_portable_division_dtype(a->dtype, b->dtype);
     if (common == ME_AUTO) return p_fail(reason, cap, "unsupported implicit numeric promotion; use an explicit cast");
     n->input_dtype = common;
     n->dtype = is_comparison_node(n) ? ME_BOOL : common;
@@ -334,8 +484,13 @@ static bool p_validate_literals(const me_expr *n) {
 }
 
 bool dsl_portable_type_expr(me_expr **expr, me_dtype output_dtype, char *reason, size_t cap) {
+    return dsl_portable_type_expr_profile(expr, output_dtype, ME_DSL_PROFILE_PORTABLE_1_0, reason, cap);
+}
+
+bool dsl_portable_type_expr_profile(me_expr **expr, me_dtype output_dtype, me_dsl_semantic_profile profile,
+                                    char *reason, size_t cap) {
     if (!expr || !*expr) return p_fail(reason, cap, "missing portable expression");
-    if (!p_type(expr, reason, cap, 0)) return false;
+    if (!p_type(expr, reason, cap, 0, profile == ME_DSL_PROFILE_PORTABLE_1_1)) return false;
     if (!p_validate_literals(*expr)) return p_fail(reason, cap, "source literal is outside its computation dtype");
     if (output_dtype != ME_AUTO) {
         if (is_string_dtype(output_dtype)) return p_context_string_literal(*expr, output_dtype) || p_fail(reason, cap, "incompatible string output family");
@@ -352,6 +507,26 @@ static double p_round_even(double x) {
     if (fraction > 0.5 || (fraction == 0.5 && fmod(base, 2.0) != 0.0)) base += 1.0;
     return copysign(base, x);
 }
+
+/* NumPy divmod correction: fmod determines the quotient before rounding.
+ * floor(x/y) alone is wrong for e.g. float64 1 // 0.1 and infinite inputs.
+ * Each float32 step is performed in float32, never narrowed from a double loop. */
+#define P_DIVMOD_IMPL(suffix, type, fmod_fn, floor_fn, copysign_fn) \
+static type p_floor_divide##suffix(type x, type y) { \
+    if (y == 0) return x / y; \
+    type rem = fmod_fn(x, y); \
+    type div = (x - rem) / y; \
+    if (rem != 0 && ((y < 0) != (rem < 0))) div -= 1; \
+    if (div != 0) { \
+        type floored = floor_fn(div); \
+        if (div - floored > (type)0.5) floored += 1; \
+        return floored; \
+    } \
+    return copysign_fn((type)0, x / y); \
+}
+P_DIVMOD_IMPL(f, float, fmodf, floorf, copysignf)
+P_DIVMOD_IMPL(d, double, fmod, floor, copysign)
+#undef P_DIVMOD_IMPL
 
 static uint64_t p_gcd(uint64_t a, uint64_t b) {
     while (b) {
@@ -391,7 +566,27 @@ static int p_combinatoric(const me_expr *node, const char *name, const me_scalar
 }
 
 static int p_math(const me_expr *n, const char *name, const me_scalar *a,
-                   const me_scalar *b, me_scalar *out) {
+                    const me_scalar *b, me_scalar *out) {
+    if (!strcmp(name, "minimum") || !strcmp(name, "maximum") ||
+        (p_numpy(n) && (!strcmp(name, "fmin") || !strcmp(name, "fmax")))) {
+        bool minimum = !strcmp(name, "minimum") || !strcmp(name, "fmin");
+        if (p_float(n->dtype)) {
+            double x = p_double(n->dtype, a), y = p_double(n->dtype, b);
+            bool propagate = !strcmp(name, "minimum") || !strcmp(name, "maximum");
+            if (isnan(x)) *out = propagate ? *a : *b;
+            else if (isnan(y)) *out = propagate ? *b : *a;
+            else if (x == 0 && y == 0) {
+                bool negative = minimum ? signbit(x) || signbit(y) : signbit(x) && signbit(y);
+                if (n->dtype == ME_FLOAT32) out->f32 = negative ? -0.0f : 0.0f;
+                else out->f64 = negative ? -0.0 : 0.0;
+            }
+            else *out = (minimum ? x < y : x > y) ? *a : *b; /* ties: second operand */
+        }
+        else if (n->dtype == ME_BOOL) out->b = minimum ? a->b && b->b : a->b || b->b;
+        else if (p_unsigned(n->dtype)) out->u64 = (minimum ? a->u64 < b->u64 : a->u64 > b->u64) ? a->u64 : b->u64;
+        else out->i64 = (minimum ? a->i64 < b->i64 : a->i64 > b->i64) ? a->i64 : b->i64;
+        return 0;
+    }
     if (!strcmp(name, "fac") || !strcmp(name, "ncr") || !strcmp(name, "npr")) return p_combinatoric(n, name, a, b, out);
     if (!strcmp(name, "ldexp")) {
         if (b->i64 < INT_MIN || b->i64 > INT_MAX) return ME_EVAL_ERR_INVALID_ARG;
@@ -401,10 +596,23 @@ static int p_math(const me_expr *n, const char *name, const me_scalar *a,
     }
     if (!p_float(n->dtype)) {
         *out = *a; /* Integer ceil/floor/trunc/round/rint are identities. */
+        if (p_numpy(n) && !strcmp(name, "fmod")) {
+            if (p_unsigned(n->dtype)) out->u64 = b->u64 ? a->u64 % b->u64 : 0;
+            else {
+                int bits = (int)(dtype_size(n->dtype) * 8);
+                int64_t minimum = bits == 64 ? INT64_MIN : -(INT64_C(1) << (bits - 1));
+                out->i64 = !b->i64 || (a->i64 == minimum && b->i64 == -1) ? 0 : a->i64 % b->i64;
+            }
+            return 0;
+        }
+        if (n->dtype == ME_BOOL) {
+            if (!strcmp(name, "imag")) out->b = false;
+            return 0;
+        }
         if (!strcmp(name, "square")) {
             me_portable_numeric_status status = p_unsigned(n->dtype) ?
-                dsl_portable_unsigned_op(n->dtype, ME_PORTABLE_MUL, a->u64, a->u64, &out->u64) :
-                dsl_portable_signed_op(n->dtype, ME_PORTABLE_MUL, a->i64, a->i64, &out->i64);
+                p_unsigned_op(n, ME_PORTABLE_MUL, a->u64, a->u64, &out->u64) :
+                p_signed_op(n, ME_PORTABLE_MUL, a->i64, a->i64, &out->i64);
             return status == 0 ? 0 : ME_EVAL_ERR_INVALID_ARG;
         }
         if (!strcmp(name, "imag")) {
@@ -416,7 +624,7 @@ static int p_math(const me_expr *n, const char *name, const me_scalar *a,
             else out->i64 = (a->i64 > 0) - (a->i64 < 0);
         }
         if (!strcmp(name, "fabs") && !p_unsigned(n->dtype) && a->i64 < 0) {
-            return dsl_portable_signed_op(n->dtype, ME_PORTABLE_SUB, 0, a->i64, &out->i64) == 0 ?
+            return p_signed_op(n, ME_PORTABLE_SUB, 0, a->i64, &out->i64) == 0 ?
                    0 : ME_EVAL_ERR_INVALID_ARG;
         }
         return 0;
@@ -445,10 +653,12 @@ static int p_math(const me_expr *n, const char *name, const me_scalar *a,
         !strcmp(name, "real") || !strcmp(name, "imag")) {
         if (n->dtype == ME_FLOAT32) {
             out->f32 = !strcmp(name, "square") ? a->f32 * a->f32 : !strcmp(name, "imag") ? 0.0f :
-                       !strcmp(name, "sign") && a->f32 != 0.0f && !isnan(a->f32) ? copysignf(1.0f, a->f32) : a->f32;
+                        !strcmp(name, "sign") && a->f32 != 0.0f && !isnan(a->f32) ? copysignf(1.0f, a->f32) :
+                        p_numpy(n) && !strcmp(name, "sign") && a->f32 == 0 ? 0.0f : a->f32;
         }
         else out->f64 = !strcmp(name, "square") ? x * x : !strcmp(name, "imag") ? 0.0 :
-                       !strcmp(name, "sign") && x != 0.0 && !isnan(x) ? copysign(1.0, x) : x;
+                        !strcmp(name, "sign") && x != 0.0 && !isnan(x) ? copysign(1.0, x) :
+                        p_numpy(n) && !strcmp(name, "sign") && x == 0 ? 0.0 : x;
         return 0;
     }
     if (!strcmp(name, "sinpi") || !strcmp(name, "cospi")) {
@@ -501,9 +711,14 @@ static int p_math(const me_expr *n, const char *name, const me_scalar *a,
         }
         return 0;
     }
-    if (!strcmp(name, "rint")) {
+    if (!strcmp(name, "rint") || (p_numpy(n) && !strcmp(name, "round"))) {
         if (n->dtype == ME_FLOAT32) out->f32 = (float)p_round_even(x);
         else out->f64 = p_round_even(x);
+        return 0;
+    }
+    if (!strcmp(name, "floating_abs")) {
+        if (n->dtype == ME_FLOAT32) out->f32 = fabsf(a->f32);
+        else out->f64 = fabs(a->f64);
         return 0;
     }
     if (!strcmp(name, "fmin") || !strcmp(name, "fmax")) {
@@ -769,10 +984,19 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
     int rc = p_eval(a_node, ctx, item, &a);
     if (rc) return rc;
     if (!n->function) {
-        return p_convert(a_node->dtype, &a, n->dtype, out) == 0 ? 0 : ME_EVAL_ERR_INVALID_ARG;
+        return (p_numpy(n) && !p_weak(a_node) ? p_numpy_convert(a_node->dtype, &a, n->dtype, out) :
+                             p_convert(a_node->dtype, &a, n->dtype, out)) == 0 ? 0 : ME_EVAL_ERR_INVALID_ARG;
     }
     const char *op = me_portable_operator(n);
     const char *math_name = me_portable_math_name(n);
+    if (p_numpy(n) && op && !strcmp(op, "%")) math_name = NULL;
+    if (p_predicate(math_name)) {
+        double x = p_float(a_node->dtype) ? p_double(a_node->dtype, &a) : 0;
+        out->b = !strcmp(math_name, "isfinite") ? !p_float(a_node->dtype) || isfinite(x) :
+                 !strcmp(math_name, "isnan") ? isnan(x) : !strcmp(math_name, "isinf") ? isinf(x) :
+                 p_float(a_node->dtype) ? signbit(x) != 0 : a_node->dtype != ME_BOOL && !p_unsigned(a_node->dtype) && a.i64 < 0;
+        return 0;
+    }
     if (math_name && ARITY(n->type) == 1) return p_math(n, math_name, &a, NULL, out);
     if (math_name && !strcmp(math_name, "fma")) {
         me_scalar c;
@@ -821,11 +1045,11 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
         }
         me_portable_numeric_status status;
         if (p_unsigned(n->dtype)) {
-            status = dsl_portable_unsigned_op(n->dtype, !strcmp(op, "~") ? ME_PORTABLE_XOR : ME_PORTABLE_SUB,
+            status = p_unsigned_op(n, !strcmp(op, "~") ? ME_PORTABLE_XOR : ME_PORTABLE_SUB,
                                               !strcmp(op, "~") ? UINT64_MAX >> (64 - 8 * dtype_size(n->dtype)) : 0,
                                               a.u64, &out->u64);
         }
-        else status = dsl_portable_signed_op(n->dtype, !strcmp(op, "~") ? ME_PORTABLE_XOR : ME_PORTABLE_SUB,
+        else status = p_signed_op(n, !strcmp(op, "~") ? ME_PORTABLE_XOR : ME_PORTABLE_SUB,
                                              !strcmp(op, "~") ? -1 : 0, a.i64, &out->i64);
         return status == 0 ? 0 : ME_EVAL_ERR_INVALID_ARG;
     }
@@ -870,7 +1094,7 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
             else if (!strcmp(op, "-")) out->f32 = x - y;
             else if (!strcmp(op, "*")) out->f32 = x * y;
             else if (!strcmp(op, "/")) out->f32 = x / y;
-            else if (!strcmp(op, "//")) out->f32 = floorf(x / y);
+            else if (!strcmp(op, "//")) out->f32 = p_numpy(n) ? p_floor_dividef(x, y) : floorf(x / y);
             else if (!strcmp(op, "%")) {
                 float rem = fmodf(x, y);
                 if (rem != 0.0f && signbit(rem) != signbit(y)) rem += y;
@@ -884,7 +1108,7 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
             else if (!strcmp(op, "-")) out->f64 = x - y;
             else if (!strcmp(op, "*")) out->f64 = x * y;
             else if (!strcmp(op, "/")) out->f64 = x / y;
-            else if (!strcmp(op, "//")) out->f64 = floor(x / y);
+            else if (!strcmp(op, "//")) out->f64 = p_numpy(n) ? p_floor_divided(x, y) : floor(x / y);
             else if (!strcmp(op, "%")) {
                 double rem = fmod(x, y);
                 if (rem != 0.0 && signbit(rem) != signbit(y)) rem += y;
@@ -895,7 +1119,8 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
         return 0;
     }
     if (n->dtype == ME_BOOL) {
-        out->b = !strcmp(op, "&") ? a.b && b.b : !strcmp(op, "|") ? a.b || b.b : a.b != b.b;
+        out->b = !strcmp(op, "&") || !strcmp(op, "*") ? a.b && b.b :
+                 !strcmp(op, "|") || !strcmp(op, "+") ? a.b || b.b : a.b != b.b;
         return 0;
     }
     me_portable_integer_op integer_op;
@@ -910,7 +1135,7 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
     else if (!strcmp(op, "&")) integer_op = ME_PORTABLE_AND;
     else if (!strcmp(op, "|")) integer_op = ME_PORTABLE_OR;
     else integer_op = ME_PORTABLE_XOR;
-    if (integer_op == ME_PORTABLE_SHL || integer_op == ME_PORTABLE_SHR) {
+    if (!p_numpy(n) && (integer_op == ME_PORTABLE_SHL || integer_op == ME_PORTABLE_SHR)) {
         me_scalar count;
         if (p_convert(b_node->dtype, &b, ME_INT64, &count) != 0 || count.i64 < 0 ||
             count.i64 >= (int64_t)(8 * dtype_size(n->dtype))) return ME_EVAL_ERR_INVALID_ARG;
@@ -918,8 +1143,8 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
         else b.i64 = count.i64;
     }
     me_portable_numeric_status status = p_unsigned(n->dtype) ?
-        dsl_portable_unsigned_op(n->dtype, integer_op, a.u64, b.u64, &out->u64) :
-        dsl_portable_signed_op(n->dtype, integer_op, a.i64, b.i64, &out->i64);
+        p_unsigned_op(n, integer_op, a.u64, b.u64, &out->u64) :
+        p_signed_op(n, integer_op, a.i64, b.i64, &out->i64);
     return status == 0 ? 0 : ME_EVAL_ERR_INVALID_ARG;
 }
 

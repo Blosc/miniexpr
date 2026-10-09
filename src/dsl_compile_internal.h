@@ -15,6 +15,7 @@
 
 /* Internal signature marker: immutable scalar binding broadcast by the host. */
 #define ME_DSL_UNIFORM_INPUT (1 << 16)
+#define ME_DSL_WEAK_INPUT (1 << 17)
 #include "dsl_parser.h"
 
 #include <stdbool.h>

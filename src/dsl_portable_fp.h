@@ -9,6 +9,12 @@
 #include <stdbool.h>
 #include <float.h>
 
+/* Scoped per-thread collector. Flags use the public stable 1/2/4/8 encoding,
+ * never platform FE_* values. Nesting restores the previous collector. */
+unsigned *dsl_portable_status_begin(unsigned *flags);
+void dsl_portable_status_end(unsigned *previous);
+void dsl_portable_status_capture(void);
+
 /* Portable strict operations run with nearest/ties-even and nontrapping IEEE
  * exceptions. Save/restore the calling thread's environment (including flags).
  * No compiled handle or process-global policy is mutated. */
@@ -31,6 +37,7 @@ static inline bool dsl_portable_fp_begin(fenv_t *saved) {
 }
 
 static inline bool dsl_portable_fp_end(const fenv_t *saved) {
+    dsl_portable_status_capture();
     return fesetenv(saved) == 0;
 }
 

@@ -5,6 +5,8 @@
 #include "miniexpr_artifact.h"
 #include "dsl_parser.h"
 #include "dsl_eval_internal.h"
+#include "dsl_portable_types.h"
+#include "dsl_portable_fp.h"
 #include "functions.h"
 #include "yyjson.h"
 
@@ -35,6 +37,7 @@ typedef union {
 typedef struct {
     me_variable variable;
     bool constant;
+    bool weak;
     artifact_scalar value;
     void *string_value;
 } artifact_binding;
@@ -46,11 +49,13 @@ struct me_artifact {
     int nbindings;
     int ninputs;
     me_dtype output_dtype;
+    me_dtype inferred_dtype;
     size_t output_itemsize;
     me_dsl_compiled_program *program;
     unsigned capabilities;
     int context_ndim;
     me_artifact_cardinality cardinality;
+    me_dsl_semantic_profile profile;
 };
 
 static me_artifact_status artifact_error(me_artifact_error *error,
@@ -398,17 +403,20 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
     }
     yyjson_val *schema = yyjson_obj_get(root, "schema_version");
     yyjson_val *language_version = yyjson_obj_get(yyjson_obj_get(root, "language"), "version");
-    if ((artifact_string(schema) && !artifact_equal(schema, ME_ARTIFACT_SCHEMA_VERSION)) ||
-        (artifact_string(language_version) && !artifact_equal(language_version, ME_PORTABLE_DSL_VERSION))) {
+    bool numpy_profile = artifact_equal(schema, "1.1") && artifact_equal(language_version, "1.1");
+    if (!numpy_profile && ((artifact_string(schema) && !artifact_equal(schema, ME_ARTIFACT_SCHEMA_VERSION)) ||
+        (artifact_string(language_version) && !artifact_equal(language_version, ME_PORTABLE_DSL_VERSION)))) {
         status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED,
-                                "unsupported portable artifact version; expected draft 1.0");
+                                "unsupported portable artifact version pair; expected 1.0/1.0 or 1.1/1.1");
         goto cleanup;
     }
     const char *const language_fields[] = {"name", "version"};
     const char *const output_fields[] = {"dtype", "contract"};
     const char *const semantics_fields[] = {"fp"};
+    const char *const numpy_semantics_fields[] = {"fp", "numeric", "casting"};
     const char *const input_fields[] = {"name", "dtype"};
     const char *const constant_fields[] = {"name", "dtype", "encoding", "value"};
+    const char *const numpy_constant_fields[] = {"name", "dtype", "encoding", "value", "category"};
     const char *const string_output_fields[] = {"dtype", "contract", "itemsize"};
     const char *const string_input_fields[] = {"name", "dtype", "itemsize"};
     const char *const string_constant_fields[] = {"name", "dtype", "encoding", "value", "itemsize"};
@@ -429,7 +437,7 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
     bool string_output = is_string_dtype(artifact_dtype1(yyjson_obj_get(output, "dtype")));
     if (!artifact_fields(language, language_fields, 2, false) ||
         !artifact_fields(output, string_output ? string_output_fields : output_fields, string_output ? 3 : 2, false) ||
-        !artifact_fields(semantics, semantics_fields, 1, false) ||
+        !artifact_fields(semantics, numpy_profile ? numpy_semantics_fields : semantics_fields, numpy_profile ? 3 : 1, false) ||
         !yyjson_is_arr(requires) || !yyjson_is_arr(inputs) || !yyjson_is_arr(constants) ||
         !source || !entry || !*entry) {
         artifact_error(error, status, "invalid manifest structure");
@@ -444,13 +452,20 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
         artifact_error(error, status, "versions, semantic requirements, and dtypes must be strings");
         goto cleanup;
     }
-    if (!artifact_equal(yyjson_obj_get(root, "schema_version"), ME_ARTIFACT_SCHEMA_VERSION) ||
+    if ((!numpy_profile && !artifact_equal(yyjson_obj_get(root, "schema_version"), ME_ARTIFACT_SCHEMA_VERSION)) ||
         !artifact_equal(yyjson_obj_get(language, "name"), "miniexpr") ||
-        !artifact_equal(yyjson_obj_get(language, "version"), ME_PORTABLE_DSL_VERSION) ||
+        (!numpy_profile && !artifact_equal(yyjson_obj_get(language, "version"), ME_PORTABLE_DSL_VERSION)) ||
         !(artifact_equal(yyjson_obj_get(output, "contract"), "elementwise") ||
           artifact_equal(yyjson_obj_get(output, "contract"), "block_scalar")) ||
         !artifact_equal(yyjson_obj_get(semantics, "fp"), "strict")) {
         status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported version or semantic requirement");
+        goto cleanup;
+    }
+    if (numpy_profile && (!artifact_equal(yyjson_obj_get(semantics, "numeric"), "numpy-2.5") ||
+        !(artifact_equal(yyjson_obj_get(semantics, "casting"), "unsafe") ||
+          artifact_equal(yyjson_obj_get(semantics, "casting"), "same_kind") ||
+          artifact_equal(yyjson_obj_get(semantics, "casting"), "safe")))) {
+        status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported 1.1 numerical or casting policy");
         goto cleanup;
     }
     bool core = false;
@@ -492,6 +507,7 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
         goto cleanup;
     }
     artifact->capabilities = capabilities;
+    artifact->profile = numpy_profile ? ME_DSL_PROFILE_PORTABLE_1_1 : ME_DSL_PROFILE_PORTABLE_1_0;
     {
         const char *const context_fields[] = {"ndim"};
         yyjson_val *context = yyjson_obj_get(root, "context");
@@ -530,7 +546,8 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
             me_dtype binding_dtype = artifact_dtype1(yyjson_obj_get(value, "dtype"));
             bool string_binding = is_string_dtype(binding_dtype);
             if (!artifact_fields(value, string_binding ? (kind ? string_constant_fields : string_input_fields) :
-                (kind ? constant_fields : input_fields), (kind ? 4 : 2) + string_binding, false)) {
+                (kind ? (numpy_profile ? numpy_constant_fields : constant_fields) : input_fields),
+                (kind ? (numpy_profile && !string_binding ? 5 : 4) : 2) + string_binding, false)) {
                 artifact_error(error, status, "invalid binding fields");
                 goto cleanup;
             }
@@ -553,6 +570,15 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
             binding->variable.name = artifact_copy(name);
             binding->variable.dtype = binding_dtype;
             binding->constant = kind != 0;
+            if (kind && numpy_profile && !string_binding) {
+                yyjson_val *category = yyjson_obj_get(value, "category");
+                binding->weak = artifact_equal(category, "weak");
+                if (!(binding->weak || artifact_equal(category, "typed_scalar")) ||
+                    (binding->weak && binding_dtype != ME_INT64 && binding_dtype != ME_FLOAT64 && binding_dtype != ME_BOOL)) {
+                    status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "invalid scalar category or weak scalar dtype");
+                    goto cleanup;
+                }
+            }
             if (!binding->variable.name) {
                 status = artifact_error(error, ME_ARTIFACT_ERR_OOM, "out of memory");
                 goto cleanup;
@@ -573,7 +599,7 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
         }
     }
     me_dsl_error parse_error;
-    parsed = me_dsl_parse_profile(source, ME_DSL_PROFILE_PORTABLE_1_0, &parse_error);
+    parsed = me_dsl_parse_profile(source, artifact->profile, &parse_error);
     if (!parsed) {
         if (error) {
             error->line = parse_error.line;
@@ -602,13 +628,32 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
     for (int b = 0; b < artifact->nbindings; b++) {
         variables[b] = artifact->bindings[b].variable;
         if (artifact->bindings[b].constant) variables[b].type |= ME_DSL_UNIFORM_INPUT;
+        if (artifact->bindings[b].weak) variables[b].type |= ME_DSL_WEAK_INPUT;
     }
     {
         char reason[256];
         int position = 0;
         bool is_dsl;
+        if (numpy_profile) {
+            /* Metadata-only inference: output policy cannot drive intermediates. */
+            me_dsl_compiled_program *inferred = dsl_compile_program_profile(source, variables, artifact->nbindings,
+                ME_AUTO, artifact->context_ndim, ME_JIT_OFF, artifact->profile,
+                &position, &is_dsl, reason, sizeof(reason));
+            if (!inferred) {
+                status = artifact_error(error, ME_ARTIFACT_ERR_SOURCE, reason);
+                goto cleanup;
+            }
+            bool allowed = is_string_dtype(inferred->output_dtype) ? inferred->output_dtype == artifact->output_dtype :
+                dsl_numpy_can_cast(inferred->output_dtype, artifact->output_dtype, artifact_string(yyjson_obj_get(semantics, "casting")));
+            artifact->inferred_dtype = inferred->output_dtype;
+            dsl_compiled_program_free(inferred);
+            if (!allowed) {
+                status = artifact_error(error, ME_ARTIFACT_ERR_BINDING, "inferred result cannot be converted under the declared cast policy");
+                goto cleanup;
+            }
+        }
         artifact->program = dsl_compile_program_profile(source, variables, artifact->nbindings,
-            artifact->output_dtype, artifact->context_ndim, ME_JIT_OFF, ME_DSL_PROFILE_PORTABLE_1_0,
+            artifact->output_dtype, artifact->context_ndim, ME_JIT_OFF, artifact->profile,
             &position, &is_dsl, reason, sizeof(reason));
         if (!artifact->program) {
             status = artifact_error(error, ME_ARTIFACT_ERR_SOURCE, reason);
@@ -686,6 +731,29 @@ static bool artifact_ranges_overlap(const void *a, size_t a_length, const void *
     if (!a_length || !b_length) return false;
     uintptr_t x = (uintptr_t)a, y = (uintptr_t)b;
     return x <= y ? y - x < a_length : x - y < b_length;
+}
+
+me_artifact_status me_artifact_eval_status(const me_artifact *artifact,
+    const me_artifact_buffer *inputs, int ninputs, void *output,
+    const me_artifact_eval_descriptor *descriptor, unsigned raise_mask,
+    me_artifact_fp_status *status, me_artifact_error *error) {
+    artifact_clear_error(error);
+    if (!status) return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "floating status output is required");
+    status->flags = 0;
+#ifdef __EMSCRIPTEN__
+    status->supported = 0;
+#else
+    status->supported = 1;
+#endif
+    if (!artifact || artifact->profile != ME_DSL_PROFILE_PORTABLE_1_1 || (raise_mask & ~15u) ||
+        (raise_mask && !status->supported)) return artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported floating-status profile or policy");
+    unsigned *previous = dsl_portable_status_begin(&status->flags);
+    me_artifact_status result = me_artifact_eval_ex(artifact, inputs, ninputs, output, descriptor, error);
+    dsl_portable_status_end(previous);
+    if (result == ME_ARTIFACT_SUCCESS && (status->flags & raise_mask)) {
+        return artifact_error(error, ME_ARTIFACT_ERR_EVAL, "floating exception selected by raise policy");
+    }
+    return result;
 }
 
 me_artifact_status me_artifact_eval_ex(const me_artifact *artifact,
@@ -810,7 +878,11 @@ int me_artifact_context_ndim(const me_artifact *artifact) {
 }
 
 const char *me_artifact_schema_version(const me_artifact *artifact) {
-    return artifact ? ME_ARTIFACT_SCHEMA_VERSION : NULL;
+    return artifact ? (artifact->profile == ME_DSL_PROFILE_PORTABLE_1_1 ? "1.1" : ME_ARTIFACT_SCHEMA_VERSION) : NULL;
+}
+
+me_dtype me_artifact_inferred_dtype(const me_artifact *artifact) {
+    return artifact && artifact->profile == ME_DSL_PROFILE_PORTABLE_1_1 ? artifact->inferred_dtype : ME_AUTO;
 }
 
 const char *me_artifact_entry_point(const me_artifact *artifact) {

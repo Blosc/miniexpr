@@ -60,9 +60,9 @@ me_portable_status me_validate_portable_dsl_ex(const char *source, const char *v
     const me_variable *inputs, int ninputs, me_dtype output_dtype,
     const me_portable_validation_descriptor *descriptor, me_portable_error *error) {
     if (error) memset(error, 0, sizeof(*error));
-    if (!version || strcmp(version, ME_PORTABLE_DSL_VERSION)) {
+    if (!version || (strcmp(version, ME_PORTABLE_DSL_VERSION) && strcmp(version, "1.1"))) {
         return portable_error(error, ME_PORTABLE_ERR_VERSION, 0, 0,
-                              "unsupported portable DSL version; expected draft 1.0");
+                              "unsupported portable DSL version; expected 1.0 or 1.1");
     }
     me_portable_validation_descriptor defaults = {
         .struct_size = sizeof(defaults), .version = ME_PORTABLE_DSL_VALIDATION_DESCRIPTOR_VERSION};
@@ -99,7 +99,8 @@ me_portable_status me_validate_portable_dsl_ex(const char *source, const char *v
         }
     }
     me_dsl_error parse_error;
-    me_dsl_program *parsed = me_dsl_parse_profile(source, ME_DSL_PROFILE_PORTABLE_1_0, &parse_error);
+    me_dsl_semantic_profile profile = !strcmp(version, "1.1") ? ME_DSL_PROFILE_PORTABLE_1_1 : ME_DSL_PROFILE_PORTABLE_1_0;
+    me_dsl_program *parsed = me_dsl_parse_profile(source, profile, &parse_error);
     if (!parsed) {
         return portable_error(error, strstr(parse_error.message, "out of memory")
                               ? ME_PORTABLE_ERR_OOM : ME_PORTABLE_ERR_SOURCE,
@@ -117,7 +118,7 @@ me_portable_status me_validate_portable_dsl_ex(const char *source, const char *v
     bool is_dsl = false;
     char reason[256] = {0};
     me_dsl_compiled_program *program = dsl_compile_program_profile(source, inputs, ninputs,
-        output_dtype, descriptor->ndim, ME_JIT_OFF, ME_DSL_PROFILE_PORTABLE_1_0,
+        output_dtype, descriptor->ndim, ME_JIT_OFF, profile,
         &position, &is_dsl, reason, sizeof(reason));
     if (!program) {
         int line = 0, column = 0;

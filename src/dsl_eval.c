@@ -38,7 +38,7 @@ static int dsl_eval_expr_nitems(dsl_eval_ctx *ctx, const me_dsl_compiled_expr *e
     if (!expr || !expr->expr) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
-    if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+    if (dsl_portable_typed_profile(ctx->program->semantic_profile)) {
         return dsl_portable_eval_expr_masked(expr->expr, (const void *const *)ctx->var_buffers,
                                              ctx->program->vars.count, (const uint8_t *const *)ctx->initialized, nitems, NULL,
                                              dtype_size(expr->expr->dtype), out);
@@ -55,7 +55,7 @@ static int dsl_eval_expr_item(dsl_eval_ctx *ctx, const me_dsl_compiled_expr *exp
     if (!ctx || !ctx->program || !expr || !expr->expr || !out || item < 0 || item >= ctx->nitems) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
-    if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+    if (dsl_portable_typed_profile(ctx->program->semantic_profile)) {
         return dsl_portable_eval_expr(expr->expr, (const void *const *)ctx->var_buffers,
                                       ctx->program->vars.count, (const uint8_t *const *)ctx->initialized, item, ctx->nitems, NULL, out);
     }
@@ -201,7 +201,7 @@ static int dsl_eval_expr_masked_copy(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
         return dsl_portable_eval_expr(expr->expr, (const void *const *)ctx->var_buffers,
                                       ctx->program->vars.count, (const uint8_t *const *)ctx->initialized, 0, ctx->group_nitems, ctx->valid_mask, dst);
     }
-    if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+    if (dsl_portable_typed_profile(ctx->program->semantic_profile)) {
         return dsl_portable_eval_expr_masked(expr->expr, (const void *const *)ctx->var_buffers,
                                              ctx->program->vars.count, (const uint8_t *const *)ctx->initialized, nitems, mask, dst_item_size, dst);
     }
@@ -230,7 +230,7 @@ static int dsl_eval_expr_masked_copy(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
         return rc;
     }
 
-    if (active_only || ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+    if (active_only || dsl_portable_typed_profile(ctx->program->semantic_profile)) {
         /* Masking the copy after full-vector evaluation is not short-circuit
          * evaluation: skipped callbacks and invalid arithmetic still run.
          * Chain operand captures must evaluate only the active lanes. */
@@ -308,7 +308,7 @@ static int dsl_eval_condition_masked(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
         return ME_EVAL_ERR_OOM;
     }
     int rc;
-    if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+    if (dsl_portable_typed_profile(ctx->program->semantic_profile)) {
         memset(cond_buf, 0, (size_t)cond_nitems * cond_size);
         if (*is_reduction) {
             rc = dsl_portable_eval_expr(cond->expr, (const void *const *)ctx->var_buffers,
@@ -1017,7 +1017,7 @@ static int dsl_eval_for_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_st
         for (int i = 0; i < ctx->nitems; i++) {
             /* A lane that exhausted its range or broke retains its last local
              * value. Do not let other lanes' iterations overwrite it. */
-            if (!active_mask[i] && ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) continue;
+            if (!active_mask[i] && dsl_portable_typed_profile(ctx->program->semantic_profile)) continue;
             loop_buf[i] = active_mask[i] ? iter_vals[i] : 0;
             if (ctx->initialized && active_mask[i]) ctx->initialized[ctx->program->local_var_indices[slot]][i] = 1;
         }
@@ -1250,7 +1250,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
     bool jit_cap_matches = !program->jit_ir || !program->jit_ir->has_while ||
         program->jit_ir->while_max_iters == current_cap;
     /* JIT is best-effort for backend failures, not semantic execution errors. */
-    if (program->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_0 &&
+    if (!dsl_portable_typed_profile(program->semantic_profile) &&
         jit_cap_matches && !me_eval_jit_disabled(params) &&
         program->jit_kernel_fn &&
         program->jit_nparams >= 0 &&
@@ -1501,7 +1501,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
         return reserved_ctx_error ? ME_EVAL_ERR_INVALID_ARG : ME_EVAL_ERR_OOM;
     }
 
-    if (program->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_0 &&
+    if (!dsl_portable_typed_profile(program->semantic_profile) &&
         jit_cap_matches && !jit_attempted &&
         !me_eval_jit_disabled(params) &&
         program->jit_kernel_fn &&
@@ -1649,7 +1649,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
     ctx.initialized = NULL;
     uint8_t *defined_storage = NULL;
     int rc = ME_EVAL_SUCCESS;
-    if (program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+    if (dsl_portable_typed_profile(program->semantic_profile)) {
         size_t storage_count = program->n_locals ? (size_t)program->n_locals : 1;
         size_t lane_count = nitems ? (size_t)nitems : 1;
         ctx.initialized = calloc(program->vars.count ? (size_t)program->vars.count : 1, sizeof(*ctx.initialized));
@@ -1697,7 +1697,7 @@ int dsl_eval_program(const me_dsl_compiled_program *program,
 int dsl_eval_program_portable(const me_dsl_compiled_program *program,
                                const void **inputs, int ninputs, void *output,
                                const me_dsl_portable_eval_descriptor *descriptor) {
-    if (!program || program->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_0 || !descriptor ||
+    if (!program || !dsl_portable_typed_profile(program->semantic_profile) || !descriptor ||
         descriptor->nitems < 0 || ninputs != program->n_inputs || (ninputs && !inputs)) return ME_EVAL_ERR_INVALID_ARG;
     size_t count = program->output_is_scalar ? 1 : (size_t)descriptor->nitems;
     size_t itemsize = program->output_itemsize;

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, numpy-compat ]
   pull_request:
     branches: [ main ]
 
@@ -177,6 +177,7 @@ jobs:
           -DCMAKE_CROSSCOMPILING_EMULATOR=node \
           -DMINIEXPR_BUILD_SHARED=OFF \
           -DMINIEXPR_BUILD_STATIC=ON \
+          -DMINIEXPR_BUILD_ARTIFACT=ON \
           -DMINIEXPR_BUILD_BENCH=OFF \
           -DMINIEXPR_BUILD_EXAMPLES=OFF \
           -DMINIEXPR_USE_SLEEF=OFF \

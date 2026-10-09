@@ -10,7 +10,9 @@
 /* Internal typed 1.0 path shared by source validation and artifact import.
  * Reuses the native parser's me_expr tree; no source execution or callbacks. */
 bool dsl_portable_type_expr(me_expr **expr, me_dtype output_dtype,
-                            char *reason, size_t reason_cap);
+                             char *reason, size_t reason_cap);
+bool dsl_portable_type_expr_profile(me_expr **expr, me_dtype output_dtype,
+                                    me_dsl_semantic_profile profile, char *reason, size_t reason_cap);
 bool dsl_portable_convert_expr(me_expr **expr, me_dtype dtype);
 me_dtype dsl_portable_cast_dtype(const me_expr *expr);
 int dsl_portable_eval_expr(const me_expr *expr, const void *const *vars, int nvars,

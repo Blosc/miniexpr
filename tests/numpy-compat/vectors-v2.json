@@ -1,0 +1,4339 @@
+{
+  "schema_version": "menudet-numpy-vectors-2",
+  "generator_revision": "m2-1",
+  "reference": {
+    "numpy": "2.5.3",
+    "intp_bits": 64,
+    "byteorder": "little",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "machine": "arm64",
+    "floating_errors": "ignore",
+    "python": "3.14.4"
+  },
+  "provenance": {
+    "checkpoint_schema": "menudet-numpy-vectors-1",
+    "rng": "NumPy PCG64",
+    "seeds": [
+      1729
+    ]
+  },
+  "cases": [
+    {
+      "id": "int8-add-boundary",
+      "operation": "add",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int8",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "7e7f",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": {
+        "category": "weak",
+        "type": "int",
+        "decimal": "1"
+      },
+      "expected": {
+        "dtype": "int8",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "7f80"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": -5,
+        "category": "evaluation_error"
+      },
+      "classification": "divergent",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": [],
+      "divergence": {
+        "id": "checkpoint-int8-add-boundary",
+        "reason": "Reviewed current draft divergence; see native checkpoint divergence register"
+      }
+    },
+    {
+      "id": "int16-add-boundary",
+      "operation": "add",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int16\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int16\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int16",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "7ffe7fff",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": {
+        "category": "weak",
+        "type": "int",
+        "decimal": "1"
+      },
+      "expected": {
+        "dtype": "int16",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "7fff8000"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": -5,
+        "category": "evaluation_error"
+      },
+      "classification": "divergent",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": [],
+      "divergence": {
+        "id": "checkpoint-int16-add-boundary",
+        "reason": "Reviewed current draft divergence; see native checkpoint divergence register"
+      }
+    },
+    {
+      "id": "int32-add-boundary",
+      "operation": "add",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int32",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "7ffffffe7fffffff",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": {
+        "category": "weak",
+        "type": "int",
+        "decimal": "1"
+      },
+      "expected": {
+        "dtype": "int32",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "7fffffff80000000"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": -5,
+        "category": "evaluation_error"
+      },
+      "classification": "divergent",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": [],
+      "divergence": {
+        "id": "checkpoint-int32-add-boundary",
+        "reason": "Reviewed current draft divergence; see native checkpoint divergence register"
+      }
+    },
+    {
+      "id": "int64-add-boundary",
+      "operation": "add",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "7ffffffffffffffe7fffffffffffffff",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": {
+        "category": "weak",
+        "type": "int",
+        "decimal": "1"
+      },
+      "expected": {
+        "dtype": "int64",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "7fffffffffffffff8000000000000000"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": -5,
+        "category": "evaluation_error"
+      },
+      "classification": "divergent",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": [],
+      "divergence": {
+        "id": "checkpoint-int64-add-boundary",
+        "reason": "Reviewed current draft divergence; see native checkpoint divergence register"
+      }
+    },
+    {
+      "id": "uint8-add-boundary",
+      "operation": "add",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"uint8\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"uint8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
+      "inputs": [
+        {
+          "dtype": "uint8",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "feff",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": {
+        "category": "weak",
+        "type": "int",
+        "decimal": "1"
+      },
+      "expected": {
+        "dtype": "uint8",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "ff00"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": -5,
+        "category": "evaluation_error"
+      },
+      "classification": "divergent",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": [],
+      "divergence": {
+        "id": "checkpoint-uint8-add-boundary",
+        "reason": "Reviewed current draft divergence; see native checkpoint divergence register"
+      }
+    },
+    {
+      "id": "uint16-add-boundary",
+      "operation": "add",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"uint16\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"uint16\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
+      "inputs": [
+        {
+          "dtype": "uint16",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "fffeffff",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": {
+        "category": "weak",
+        "type": "int",
+        "decimal": "1"
+      },
+      "expected": {
+        "dtype": "uint16",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "ffff0000"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": -5,
+        "category": "evaluation_error"
+      },
+      "classification": "divergent",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": [],
+      "divergence": {
+        "id": "checkpoint-uint16-add-boundary",
+        "reason": "Reviewed current draft divergence; see native checkpoint divergence register"
+      }
+    },
+    {
+      "id": "uint32-add-boundary",
+      "operation": "add",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"uint32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"uint32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
+      "inputs": [
+        {
+          "dtype": "uint32",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "fffffffeffffffff",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": {
+        "category": "weak",
+        "type": "int",
+        "decimal": "1"
+      },
+      "expected": {
+        "dtype": "uint32",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "ffffffff00000000"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": -5,
+        "category": "evaluation_error"
+      },
+      "classification": "divergent",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": [],
+      "divergence": {
+        "id": "checkpoint-uint32-add-boundary",
+        "reason": "Reviewed current draft divergence; see native checkpoint divergence register"
+      }
+    },
+    {
+      "id": "uint64-add-boundary",
+      "operation": "add",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"uint64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"uint64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
+      "inputs": [
+        {
+          "dtype": "uint64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "fffffffffffffffeffffffffffffffff",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": {
+        "category": "weak",
+        "type": "int",
+        "decimal": "1"
+      },
+      "expected": {
+        "dtype": "uint64",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "ffffffffffffffff0000000000000000"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": -5,
+        "category": "evaluation_error"
+      },
+      "classification": "divergent",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": [],
+      "divergence": {
+        "id": "checkpoint-uint64-add-boundary",
+        "reason": "Reviewed current draft divergence; see native checkpoint divergence register"
+      }
+    },
+    {
+      "id": "int64-exact-subtract",
+      "operation": "subtract",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x - 9007199254740993\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "00200000000000010020000000000002",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": {
+        "category": "weak",
+        "type": "int",
+        "decimal": "9007199254740993"
+      },
+      "expected": {
+        "dtype": "int64",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "00000000000000000000000000000001"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "int64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "00000000000000000000000000000001"
+        }
+      },
+      "classification": "matching",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": []
+    },
+    {
+      "id": "int8-multiply-boundary",
+      "operation": "multiply",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x * 2\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int8",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3f40",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": {
+        "category": "weak",
+        "type": "int",
+        "decimal": "2"
+      },
+      "expected": {
+        "dtype": "int8",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "7e80"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": -5,
+        "category": "evaluation_error"
+      },
+      "classification": "divergent",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": [],
+      "divergence": {
+        "id": "checkpoint-int8-multiply-boundary",
+        "reason": "Reviewed current draft divergence; see native checkpoint divergence register"
+      }
+    },
+    {
+      "id": "int8-negate-min",
+      "operation": "negative",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return -x\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int8",
+          "shape": [
+            3
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "80ff00",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": null,
+      "expected": {
+        "dtype": "int8",
+        "shape": [
+          3
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "800100"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": -5,
+        "category": "evaluation_error"
+      },
+      "classification": "divergent",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": [],
+      "divergence": {
+        "id": "checkpoint-int8-negate-min",
+        "reason": "Reviewed current draft divergence; see native checkpoint divergence register"
+      }
+    },
+    {
+      "id": "int64-absolute-min",
+      "operation": "absolute",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return abs(x)\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "8000000000000000ffffffffffffffff",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": null,
+      "expected": {
+        "dtype": "int64",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "80000000000000000000000000000001"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": -5,
+        "category": "evaluation_error"
+      },
+      "classification": "divergent",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": [],
+      "divergence": {
+        "id": "checkpoint-int64-absolute-min",
+        "reason": "Reviewed current draft divergence; see native checkpoint divergence register"
+      }
+    },
+    {
+      "id": "float32-weak-literal",
+      "operation": "cancel",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return (x + 1.0) - x\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float32",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "4b80000040000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite",
+            "finite"
+          ]
+        }
+      ],
+      "literal": {
+        "category": "weak",
+        "type": "float",
+        "decimal": "1.0"
+      },
+      "expected": {
+        "dtype": "float32",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "000000003f800000",
+        "classes": [
+          "positive_zero",
+          "finite"
+        ]
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float32",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "000000003f800000"
+        }
+      },
+      "classification": "matching",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": []
+    },
+    {
+      "id": "float32-typed-float64-capture",
+      "operation": "add",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [{\"dtype\": \"float64\", \"encoding\": \"ieee754-hex\", \"name\": \"y\", \"value\": \"3ff0000000000000\"}], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float32",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "4b80000040000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite",
+            "finite"
+          ]
+        }
+      ],
+      "literal": null,
+      "expected": {
+        "dtype": "float64",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "41700000100000004008000000000000",
+        "classes": [
+          "finite",
+          "finite"
+        ]
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "scalar_operands": [
+        {
+          "name": "y",
+          "category": "typed_scalar",
+          "dtype": "float64",
+          "shape": [],
+          "encoding": "raw-be-hex",
+          "hex": "3ff0000000000000"
+        }
+      ],
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "41700000100000004008000000000000"
+        }
+      },
+      "classification": "matching",
+      "reference_kind": "numpy",
+      "seed": null
+    },
+    {
+      "id": "int8-typed-int64-capture",
+      "operation": "add",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [{\"dtype\": \"int64\", \"encoding\": \"decimal\", \"name\": \"y\", \"value\": \"1\"}], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int8",
+          "shape": [
+            1
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "7f",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": null,
+      "expected": {
+        "dtype": "int64",
+        "shape": [
+          1
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "0000000000000080"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "scalar_operands": [
+        {
+          "name": "y",
+          "category": "typed_scalar",
+          "dtype": "int64",
+          "shape": [],
+          "encoding": "raw-be-hex",
+          "hex": "0000000000000001"
+        }
+      ],
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "int64",
+          "shape": [
+            1
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "0000000000000080"
+        }
+      },
+      "classification": "matching",
+      "reference_kind": "numpy",
+      "seed": null
+    },
+    {
+      "id": "float32-zero-dimensional",
+      "operation": "add",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x + 1.0\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float32",
+          "shape": [],
+          "encoding": "raw-be-hex",
+          "hex": "4b800000",
+          "name": "x",
+          "category": "zero_dimensional_array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite"
+          ]
+        }
+      ],
+      "literal": {
+        "category": "weak",
+        "type": "float",
+        "decimal": "1.0"
+      },
+      "expected": {
+        "dtype": "float32",
+        "shape": [],
+        "encoding": "raw-be-hex",
+        "hex": "4b800000",
+        "classes": [
+          "finite"
+        ]
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float32",
+          "shape": [],
+          "encoding": "raw-be-hex",
+          "hex": "4b800000"
+        }
+      },
+      "classification": "matching",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": []
+    },
+    {
+      "id": "int8-float-literal",
+      "operation": "add",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x + 1.0\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int8",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "7f01",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": {
+        "category": "weak",
+        "type": "float",
+        "decimal": "1.0"
+      },
+      "expected": {
+        "dtype": "float64",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "40600000000000004000000000000000",
+        "classes": [
+          "finite",
+          "finite"
+        ]
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": -5,
+        "category": "evaluation_error"
+      },
+      "classification": "divergent",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": [],
+      "divergence": {
+        "id": "checkpoint-int8-float-literal",
+        "reason": "Reviewed current draft divergence; see native checkpoint divergence register"
+      }
+    },
+    {
+      "id": "int8-uint8-promote",
+      "operation": "add",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}, {\"dtype\": \"uint8\", \"name\": \"y\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int16\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int8",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "ff7f",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        },
+        {
+          "dtype": "uint8",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "ff01",
+          "name": "y",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": null,
+      "expected": {
+        "dtype": "int16",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "00fe0080"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "int16",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "00fe0080"
+        }
+      },
+      "classification": "matching",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": []
+    },
+    {
+      "id": "int64-uint64-promote",
+      "operation": "add",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}, {\"dtype\": \"uint64\", \"name\": \"y\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "ffffffffffffffff7fffffffffffffff",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        },
+        {
+          "dtype": "uint64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "0000000000000000ffffffffffffffff",
+          "name": "y",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": null,
+      "expected": {
+        "dtype": "float64",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "bff000000000000043f8000000000000",
+        "classes": [
+          "finite",
+          "finite"
+        ]
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": -3,
+        "category": "invalid_source"
+      },
+      "classification": "divergent",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": [],
+      "divergence": {
+        "id": "checkpoint-int64-uint64-promote",
+        "reason": "Reviewed current draft divergence; see native checkpoint divergence register"
+      }
+    },
+    {
+      "id": "int64-uint64-compare",
+      "operation": "less",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}, {\"dtype\": \"uint64\", \"name\": \"y\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"bool\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x, y):\\n    return x < y\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "ffffffffffffffff7fffffffffffffff",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        },
+        {
+          "dtype": "uint64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "0000000000000000ffffffffffffffff",
+          "name": "y",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": null,
+      "expected": {
+        "dtype": "bool",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "0101"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "bool",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "0101"
+        }
+      },
+      "classification": "matching",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": []
+    },
+    {
+      "id": "int64-uint64-compare-rounding",
+      "operation": "less",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}, {\"dtype\": \"uint64\", \"name\": \"y\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"bool\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x, y):\\n    return x < y\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int64",
+          "shape": [
+            1
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "0020000000000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        },
+        {
+          "dtype": "uint64",
+          "shape": [
+            1
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "0020000000000001",
+          "name": "y",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": null,
+      "expected": {
+        "dtype": "bool",
+        "shape": [
+          1
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "01"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "bool",
+          "shape": [
+            1
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "01"
+        }
+      },
+      "classification": "matching",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": []
+    },
+    {
+      "id": "bool-add",
+      "operation": "add",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"bool\", \"name\": \"x\"}, {\"dtype\": \"bool\", \"name\": \"y\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
+      "inputs": [
+        {
+          "dtype": "bool",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "0100",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        },
+        {
+          "dtype": "bool",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "0101",
+          "name": "y",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": null,
+      "expected": {
+        "dtype": "bool",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "0101"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "int64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "00000000000000020000000000000001"
+        }
+      },
+      "classification": "divergent",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": [],
+      "divergence": {
+        "id": "checkpoint-bool-add",
+        "reason": "Reviewed current draft divergence; see native checkpoint divergence register"
+      }
+    },
+    {
+      "id": "int64-true-divide",
+      "operation": "divide",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x / 3\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "fffffffffffffff90000000000000007",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": {
+        "category": "weak",
+        "type": "int",
+        "decimal": "3"
+      },
+      "expected": {
+        "dtype": "float64",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "c002aaaaaaaaaaab4002aaaaaaaaaaab",
+        "classes": [
+          "finite",
+          "finite"
+        ]
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "c002aaaaaaaaaaab4002aaaaaaaaaaab"
+        }
+      },
+      "classification": "matching",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": []
+    },
+    {
+      "id": "int64-floor-divide",
+      "operation": "floor_divide",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x // -3\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "fffffffffffffff90000000000000007",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": {
+        "category": "weak",
+        "type": "int",
+        "decimal": "-3"
+      },
+      "expected": {
+        "dtype": "int64",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "0000000000000002fffffffffffffffd"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "int64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "0000000000000002fffffffffffffffd"
+        }
+      },
+      "classification": "matching",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": []
+    },
+    {
+      "id": "int64-remainder",
+      "operation": "remainder",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x % -3\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "fffffffffffffff90000000000000007",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": {
+        "category": "weak",
+        "type": "int",
+        "decimal": "-3"
+      },
+      "expected": {
+        "dtype": "int64",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "fffffffffffffffffffffffffffffffe"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "int64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "fffffffffffffffffffffffffffffffe"
+        }
+      },
+      "classification": "matching",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": []
+    },
+    {
+      "id": "int64-zero-divide",
+      "operation": "floor_divide",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x // 0\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int64",
+          "shape": [
+            3
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "fffffffffffffff900000000000000000000000000000007",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": {
+        "category": "weak",
+        "type": "int",
+        "decimal": "0"
+      },
+      "expected": {
+        "dtype": "int64",
+        "shape": [
+          3
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "000000000000000000000000000000000000000000000000"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": -5,
+        "category": "evaluation_error"
+      },
+      "classification": "divergent",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": [],
+      "divergence": {
+        "id": "checkpoint-int64-zero-divide",
+        "reason": "Reviewed current draft divergence; see native checkpoint divergence register"
+      }
+    },
+    {
+      "id": "int64-min-divide",
+      "operation": "floor_divide",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x // -1\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int64",
+          "shape": [
+            1
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "8000000000000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": {
+        "category": "weak",
+        "type": "int",
+        "decimal": "-1"
+      },
+      "expected": {
+        "dtype": "int64",
+        "shape": [
+          1
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "8000000000000000"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": -5,
+        "category": "evaluation_error"
+      },
+      "classification": "divergent",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": [],
+      "divergence": {
+        "id": "checkpoint-int64-min-divide",
+        "reason": "Reviewed current draft divergence; see native checkpoint divergence register"
+      }
+    },
+    {
+      "id": "int8-large-shift",
+      "operation": "left_shift",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x << 8\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int8",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "01ff",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": {
+        "category": "weak",
+        "type": "int",
+        "decimal": "8"
+      },
+      "expected": {
+        "dtype": "int8",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "0000"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": -5,
+        "category": "evaluation_error"
+      },
+      "classification": "divergent",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": [],
+      "divergence": {
+        "id": "checkpoint-int8-large-shift",
+        "reason": "Reviewed current draft divergence; see native checkpoint divergence register"
+      }
+    },
+    {
+      "id": "float64-cast-int",
+      "operation": "cast_int64",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return int(x)\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float64",
+          "shape": [
+            3
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3ffe666666666666bffe6666666666668000000000000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite",
+            "finite",
+            "negative_zero"
+          ]
+        }
+      ],
+      "literal": null,
+      "expected": {
+        "dtype": "int64",
+        "shape": [
+          3
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "0000000000000001ffffffffffffffff0000000000000000"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "int64",
+          "shape": [
+            3
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "0000000000000001ffffffffffffffff0000000000000000"
+        }
+      },
+      "classification": "matching",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": []
+    },
+    {
+      "id": "float64-cast-infinity",
+      "operation": "cast_int64",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return int(x)\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float64",
+          "shape": [
+            1
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "7ff0000000000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "positive_inf"
+          ]
+        }
+      ],
+      "literal": null,
+      "expected": {
+        "dtype": "int64",
+        "shape": [
+          1
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "7fffffffffffffff"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "platform_qualification": "NumPy nonfinite-to-integer sentinel is host-specific; not a universal contract.",
+      "baseline": {
+        "status": -5,
+        "category": "evaluation_error"
+      },
+      "classification": "divergent",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": [],
+      "divergence": {
+        "id": "checkpoint-float64-cast-infinity",
+        "reason": "Reviewed current draft divergence; see native checkpoint divergence register"
+      }
+    },
+    {
+      "id": "int64-narrow-output",
+      "operation": "cast_int8",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int64",
+          "shape": [
+            3
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "000000000000007f0000000000000080ffffffffffffff7f",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "literal": null,
+      "expected": {
+        "dtype": "int8",
+        "shape": [
+          3
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "7f807f"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": -5,
+        "category": "evaluation_error"
+      },
+      "classification": "divergent",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": [],
+      "divergence": {
+        "id": "checkpoint-int64-narrow-output",
+        "reason": "Reviewed current draft divergence; see native checkpoint divergence register"
+      }
+    },
+    {
+      "id": "float32-cast-float",
+      "operation": "cast_float64",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return float(x)\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float32",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3fa0000080000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite",
+            "negative_zero"
+          ]
+        }
+      ],
+      "literal": null,
+      "expected": {
+        "dtype": "float64",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "3ff40000000000008000000000000000",
+        "classes": [
+          "finite",
+          "negative_zero"
+        ]
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3ff40000000000008000000000000000"
+        }
+      },
+      "classification": "matching",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": []
+    },
+    {
+      "id": "float32-sin",
+      "operation": "sin",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return sin(x)\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float32",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "0000000080000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "positive_zero",
+            "negative_zero"
+          ]
+        }
+      ],
+      "literal": null,
+      "expected": {
+        "dtype": "float32",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "0000000080000000",
+        "classes": [
+          "positive_zero",
+          "negative_zero"
+        ]
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float32",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "0000000080000000"
+        }
+      },
+      "classification": "matching",
+      "reference_kind": "numpy",
+      "seed": null,
+      "scalar_operands": []
+    },
+    {
+      "id": "float32-sin-finite-ulp",
+      "operation": "sin",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return sin(x)\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float32",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3e0000003f0000003f8000004000000041000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite",
+            "finite",
+            "finite",
+            "finite",
+            "finite"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "ulp",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 2,
+        "nan": "equal",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float32",
+        "shape": [
+          5
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "3dff55773ef577443f576aa53f68c7b73f7d4695",
+        "classes": [
+          "finite",
+          "finite",
+          "finite",
+          "finite",
+          "finite"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float32",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3dff55773ef577443f576aa43f68c7b73f7d4695"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "float32-cos-finite-ulp",
+      "operation": "cos",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return cos(x)\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float32",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3e0000003f0000003f8000004000000041000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite",
+            "finite",
+            "finite",
+            "finite",
+            "finite"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "ulp",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 2,
+        "nan": "equal",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float32",
+        "shape": [
+          5
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "3f7e00ab3f60a9403f0a5140bed51132be14fdf6",
+        "classes": [
+          "finite",
+          "finite",
+          "finite",
+          "finite",
+          "finite"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float32",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3f7e00ab3f60a9403f0a5140bed51133be14fdf6"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "float32-log-finite-ulp",
+      "operation": "log",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return log(x)\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float32",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3e0000003f0000003f8000004000000041000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite",
+            "finite",
+            "finite",
+            "finite",
+            "finite"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "ulp",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 2,
+        "nan": "equal",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float32",
+        "shape": [
+          5
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "c0051592bf317218000000003f31721840051592",
+        "classes": [
+          "finite",
+          "finite",
+          "positive_zero",
+          "finite",
+          "finite"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float32",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "c0051592bf317218000000003f31721840051592"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "float32-sqrt-finite-ulp",
+      "operation": "sqrt",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return sqrt(x)\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float32",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3e0000003f0000003f8000004000000041000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite",
+            "finite",
+            "finite",
+            "finite",
+            "finite"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "ulp",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 2,
+        "nan": "equal",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float32",
+        "shape": [
+          5
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "3eb504f33f3504f33f8000003fb504f3403504f3",
+        "classes": [
+          "finite",
+          "finite",
+          "finite",
+          "finite",
+          "finite"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float32",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3eb504f33f3504f33f8000003fb504f3403504f3"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "float32-exp-finite-ulp",
+      "operation": "exp",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return exp(x)\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float32",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3e0000003f0000003f8000004000000041000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite",
+            "finite",
+            "finite",
+            "finite",
+            "finite"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "ulp",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 2,
+        "nan": "equal",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float32",
+        "shape": [
+          5
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "3f910b023fd3094c402df85440ec7326453a4f54",
+        "classes": [
+          "finite",
+          "finite",
+          "finite",
+          "finite",
+          "finite"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float32",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3f910b023fd3094c402df85440ec7326453a4f54"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "float32-identity-special",
+      "operation": "identity",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float32",
+          "shape": [
+            6
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "00000000800000007f800000ff8000007fc0000000000001",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "positive_zero",
+            "negative_zero",
+            "positive_inf",
+            "negative_inf",
+            "nan",
+            "subnormal"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float32",
+        "shape": [
+          6
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "00000000800000007f800000ff8000007fc0000000000001",
+        "classes": [
+          "positive_zero",
+          "negative_zero",
+          "positive_inf",
+          "negative_inf",
+          "nan",
+          "subnormal"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float32",
+          "shape": [
+            6
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "00000000800000007f800000ff8000007fc0000000000001"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "float32-sqrt-domain",
+      "operation": "sqrt",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return sqrt(x)\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float32",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "bf80000080000000408000007f8000007fc00000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite",
+            "negative_zero",
+            "finite",
+            "positive_inf",
+            "nan"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "exact",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "equal",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float32",
+        "shape": [
+          5
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "7fc0000080000000400000007f8000007fc00000",
+        "classes": [
+          "nan",
+          "negative_zero",
+          "finite",
+          "positive_inf",
+          "nan"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float32",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "7fc0000080000000400000007f8000007fc00000"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "float32-nan-payload-identity",
+      "operation": "identity",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float32",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "7fc01234ffc05678",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "nan",
+            "nan"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float32",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "7fc01234ffc05678",
+        "classes": [
+          "nan",
+          "nan"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float32",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "7fc01234ffc05678"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "float64-sin-finite-ulp",
+      "operation": "sin",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return sin(x)\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float64",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3fc00000000000003fe00000000000003ff000000000000040000000000000004020000000000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite",
+            "finite",
+            "finite",
+            "finite",
+            "finite"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "ulp",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 2,
+        "nan": "equal",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float64",
+        "shape": [
+          5
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "3fbfeaaeee86ee363fdeaee8744b05f03feaed548f090cee3fed18f6ead1b4463fefa8d2a028cf7b",
+        "classes": [
+          "finite",
+          "finite",
+          "finite",
+          "finite",
+          "finite"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float64",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3fbfeaaeee86ee363fdeaee8744b05f03feaed548f090cee3fed18f6ead1b4463fefa8d2a028cf7b"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "float64-cos-finite-ulp",
+      "operation": "cos",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return cos(x)\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float64",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3fc00000000000003fe00000000000003ff000000000000040000000000000004020000000000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite",
+            "finite",
+            "finite",
+            "finite",
+            "finite"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "ulp",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 2,
+        "nan": "equal",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float64",
+        "shape": [
+          5
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "3fefc015527d5bd33fec1528065b7d503fe14a280fb5068cbfdaa22657537205bfc29fbebf632f94",
+        "classes": [
+          "finite",
+          "finite",
+          "finite",
+          "finite",
+          "finite"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float64",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3fefc015527d5bd33fec1528065b7d503fe14a280fb5068cbfdaa22657537205bfc29fbebf632f94"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "float64-log-finite-ulp",
+      "operation": "log",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return log(x)\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float64",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3fc00000000000003fe00000000000003ff000000000000040000000000000004020000000000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite",
+            "finite",
+            "finite",
+            "finite",
+            "finite"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "ulp",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 2,
+        "nan": "equal",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float64",
+        "shape": [
+          5
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "c000a2b23f3bab73bfe62e42fefa39ef00000000000000003fe62e42fefa39ef4000a2b23f3bab73",
+        "classes": [
+          "finite",
+          "finite",
+          "positive_zero",
+          "finite",
+          "finite"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float64",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "c000a2b23f3bab73bfe62e42fefa39ef00000000000000003fe62e42fefa39ef4000a2b23f3bab73"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "float64-sqrt-finite-ulp",
+      "operation": "sqrt",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return sqrt(x)\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float64",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3fc00000000000003fe00000000000003ff000000000000040000000000000004020000000000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite",
+            "finite",
+            "finite",
+            "finite",
+            "finite"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "ulp",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 2,
+        "nan": "equal",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float64",
+        "shape": [
+          5
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "3fd6a09e667f3bcd3fe6a09e667f3bcd3ff00000000000003ff6a09e667f3bcd4006a09e667f3bcd",
+        "classes": [
+          "finite",
+          "finite",
+          "finite",
+          "finite",
+          "finite"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float64",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3fd6a09e667f3bcd3fe6a09e667f3bcd3ff00000000000003ff6a09e667f3bcd4006a09e667f3bcd"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "float64-exp-finite-ulp",
+      "operation": "exp",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return exp(x)\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float64",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3fc00000000000003fe00000000000003ff000000000000040000000000000004020000000000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite",
+            "finite",
+            "finite",
+            "finite",
+            "finite"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "ulp",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 2,
+        "nan": "equal",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float64",
+        "shape": [
+          5
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "3ff2216045b6f5cd3ffa61298e1e069c4005bf0a8b145769401d8e64b8d4ddae40a749ea7d470c6e",
+        "classes": [
+          "finite",
+          "finite",
+          "finite",
+          "finite",
+          "finite"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float64",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3ff2216045b6f5cd3ffa61298e1e069c4005bf0a8b145769401d8e64b8d4ddae40a749ea7d470c6e"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "float64-identity-special",
+      "operation": "identity",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float64",
+          "shape": [
+            6
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "000000000000000080000000000000007ff0000000000000fff00000000000007ff80000000000000000000000000001",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "positive_zero",
+            "negative_zero",
+            "positive_inf",
+            "negative_inf",
+            "nan",
+            "subnormal"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float64",
+        "shape": [
+          6
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "000000000000000080000000000000007ff0000000000000fff00000000000007ff80000000000000000000000000001",
+        "classes": [
+          "positive_zero",
+          "negative_zero",
+          "positive_inf",
+          "negative_inf",
+          "nan",
+          "subnormal"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float64",
+          "shape": [
+            6
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "000000000000000080000000000000007ff0000000000000fff00000000000007ff80000000000000000000000000001"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "float64-sqrt-domain",
+      "operation": "sqrt",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return sqrt(x)\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float64",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "bff0000000000000800000000000000040100000000000007ff00000000000007ff8000000000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite",
+            "negative_zero",
+            "finite",
+            "positive_inf",
+            "nan"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "exact",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "equal",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float64",
+        "shape": [
+          5
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "7ff8000000000000800000000000000040000000000000007ff00000000000007ff8000000000000",
+        "classes": [
+          "nan",
+          "negative_zero",
+          "finite",
+          "positive_inf",
+          "nan"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float64",
+          "shape": [
+            5
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "7ff8000000000000800000000000000040000000000000007ff00000000000007ff8000000000000"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "float64-nan-payload-identity",
+      "operation": "identity",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "7ff8000000001234fff8000000005678",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "nan",
+            "nan"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float64",
+        "shape": [
+          2
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "7ff8000000001234fff8000000005678",
+        "classes": [
+          "nan",
+          "nan"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float64",
+          "shape": [
+            2
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "7ff8000000001234fff8000000005678"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "float64-exp-tolerance",
+      "operation": "exp",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return exp(x)\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float64",
+          "shape": [
+            3
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "bff000000000000000000000000000003ff0000000000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite",
+            "positive_zero",
+            "finite"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "tolerance",
+        "atol": 1e-15,
+        "rtol": 1e-15,
+        "max_ulp": 0,
+        "nan": "equal",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float64",
+        "shape": [
+          3
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "3fd78b56362cef383ff00000000000004005bf0a8b145769",
+        "classes": [
+          "finite",
+          "finite",
+          "finite"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float64",
+          "shape": [
+            3
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3fd78b56362cef383ff00000000000004005bf0a8b145769"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "layout-fortran",
+      "operation": "identity",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float32",
+          "shape": [
+            2,
+            3
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "000000003f80000040000000404000004080000040a00000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "F",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "positive_zero",
+            "finite",
+            "finite",
+            "finite",
+            "finite",
+            "finite"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float32",
+        "shape": [
+          2,
+          3
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "000000003f80000040000000404000004080000040a00000",
+        "classes": [
+          "positive_zero",
+          "finite",
+          "finite",
+          "finite",
+          "finite",
+          "finite"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float32",
+          "shape": [
+            2,
+            3
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "000000003f80000040000000404000004080000040a00000"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "layout-negative-stride",
+      "operation": "identity",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float32",
+          "shape": [
+            2,
+            3
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "000000003f80000040000000404000004080000040a00000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": 0
+          },
+          "classes": [
+            "positive_zero",
+            "finite",
+            "finite",
+            "finite",
+            "finite",
+            "finite"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float32",
+        "shape": [
+          2,
+          3
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "000000003f80000040000000404000004080000040a00000",
+        "classes": [
+          "positive_zero",
+          "finite",
+          "finite",
+          "finite",
+          "finite",
+          "finite"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float32",
+          "shape": [
+            2,
+            3
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "000000003f80000040000000404000004080000040a00000"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "layout-stepped-big-endian",
+      "operation": "identity",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float32",
+          "shape": [
+            2,
+            3
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "000000003f80000040000000404000004080000040a00000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "F",
+            "byteorder": "big",
+            "step": 2,
+            "reverse_axis": 1
+          },
+          "classes": [
+            "positive_zero",
+            "finite",
+            "finite",
+            "finite",
+            "finite",
+            "finite"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float32",
+        "shape": [
+          2,
+          3
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "000000003f80000040000000404000004080000040a00000",
+        "classes": [
+          "positive_zero",
+          "finite",
+          "finite",
+          "finite",
+          "finite",
+          "finite"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float32",
+          "shape": [
+            2,
+            3
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "000000003f80000040000000404000004080000040a00000"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "layout-little-endian",
+      "operation": "identity",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float32",
+          "shape": [
+            2,
+            3
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "000000003f80000040000000404000004080000040a00000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "little",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "positive_zero",
+            "finite",
+            "finite",
+            "finite",
+            "finite",
+            "finite"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float32",
+        "shape": [
+          2,
+          3
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "000000003f80000040000000404000004080000040a00000",
+        "classes": [
+          "positive_zero",
+          "finite",
+          "finite",
+          "finite",
+          "finite",
+          "finite"
+        ]
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "float32",
+          "shape": [
+            2,
+            3
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "000000003f80000040000000404000004080000040a00000"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "empty-elementwise",
+      "operation": "identity",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int64",
+          "shape": [
+            2,
+            0
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "int64",
+        "shape": [
+          2,
+          0
+        ],
+        "encoding": "raw-be-hex",
+        "hex": ""
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "int64",
+          "shape": [
+            2,
+            0
+          ],
+          "encoding": "raw-be-hex",
+          "hex": ""
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "weak-scalar-out-of-range",
+      "operation": "add",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x + 128\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int8",
+          "shape": [
+            1
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "01",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "scalar_operands": [],
+      "literal": {
+        "category": "weak",
+        "type": "int",
+        "decimal": "128"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "diagnostic": {
+          "category": "invalid_source",
+          "numpy_category": "OverflowError"
+        }
+      },
+      "baseline": {
+        "status": -3,
+        "category": "invalid_source"
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "diagnostic-future-artifact",
+      "operation": "identity",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.1\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int64",
+          "shape": [
+            1
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "0000000000000001",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "native-contract",
+      "seed": null,
+      "expected": {
+        "diagnostic": {
+          "category": "unsupported_requirement"
+        }
+      },
+      "baseline": {
+        "status": -2,
+        "category": "unsupported_requirement"
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "diagnostic-invalid-source",
+      "operation": "identity",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return missing_name\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int64",
+          "shape": [
+            1
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "0000000000000001",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "native-contract",
+      "seed": null,
+      "expected": {
+        "diagnostic": {
+          "category": "invalid_source"
+        }
+      },
+      "baseline": {
+        "status": -3,
+        "category": "invalid_source"
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "diagnostic-wrong-binding",
+      "operation": "identity",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int64",
+          "shape": [
+            1
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "0000000000000001",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "native-contract",
+      "seed": null,
+      "expected": {
+        "diagnostic": {
+          "category": "binding_error"
+        }
+      },
+      "baseline": {
+        "status": -4,
+        "category": "binding_error"
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "failure-then-success-same-handle",
+      "operation": "add",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int8",
+          "shape": [
+            1
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "7f",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "scalar_operands": [],
+      "literal": {
+        "category": "weak",
+        "type": "int",
+        "decimal": "1"
+      },
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "int8",
+        "shape": [
+          1
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "80"
+      },
+      "divergence": {
+        "id": "D01",
+        "reason": "Checked integer overflow instead of NumPy wrapping"
+      },
+      "recovery": {
+        "inputs": [
+          {
+            "dtype": "int8",
+            "shape": [
+              1
+            ],
+            "encoding": "raw-be-hex",
+            "hex": "01",
+            "name": "x",
+            "category": "array",
+            "layout": {
+              "order": "C",
+              "byteorder": "native",
+              "step": 1,
+              "reverse_axis": null
+            }
+          }
+        ],
+        "expected": {
+          "dtype": "int8",
+          "shape": [
+            1
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "02"
+        }
+      },
+      "baseline": {
+        "status": -5,
+        "category": "evaluation_error"
+      },
+      "classification": "divergent"
+    },
+    {
+      "id": "block-sum-explicit-int64",
+      "operation": "sum",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric",
+        "block-reductions"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"block_scalar\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\", \"block-reductions\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return sum(x)\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int64",
+          "shape": [
+            2,
+            3
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "000000000000000000000000000000010000000000000002000000000000000300000000000000040000000000000005",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "int64",
+        "shape": [],
+        "encoding": "raw-be-hex",
+        "hex": "000000000000000f"
+      },
+      "baseline": {
+        "status": 0,
+        "category": "success",
+        "output": {
+          "dtype": "int64",
+          "shape": [],
+          "encoding": "raw-be-hex",
+          "hex": "000000000000000f"
+        }
+      },
+      "classification": "matching"
+    },
+    {
+      "id": "capability-complex-skipped",
+      "operation": "identity",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numpy-complex"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"complex64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"complex64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "inputs": [
+        {
+          "dtype": "complex64",
+          "shape": [
+            1
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3f80000040000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "complex64",
+        "shape": [
+          1
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "3f80000040000000"
+      },
+      "skip_reason": "Complex numerical semantics are explicitly outside the current native capability set"
+    },
+    {
+      "id": "capability-broadcast-skipped",
+      "operation": "add",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric",
+        "array-broadcasting"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}, {\"dtype\": \"float32\", \"name\": \"y\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
+      "inputs": [
+        {
+          "dtype": "float32",
+          "shape": [
+            2,
+            1
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "3f80000040000000",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite",
+            "finite"
+          ]
+        },
+        {
+          "dtype": "float32",
+          "shape": [
+            1,
+            3
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "400000004040000040800000",
+          "name": "y",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          },
+          "classes": [
+            "finite",
+            "finite",
+            "finite"
+          ]
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": null,
+      "expected": {
+        "dtype": "float32",
+        "shape": [
+          2,
+          3
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "404000004080000040a000004080000040a0000040c00000",
+        "classes": [
+          "finite",
+          "finite",
+          "finite",
+          "finite",
+          "finite",
+          "finite"
+        ]
+      },
+      "skip_reason": "Native array broadcasting is milestone 5, not an implemented kernel capability"
+    },
+    {
+      "id": "seed-1729-minimized-int8-overflow",
+      "operation": "add",
+      "semantic_revision": "menudet-draft-1.0-checked",
+      "requires": [
+        "numeric"
+      ],
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}, {\"dtype\": \"int8\", \"name\": \"y\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
+      "inputs": [
+        {
+          "dtype": "int8",
+          "shape": [
+            1
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "7f",
+          "name": "x",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        },
+        {
+          "dtype": "int8",
+          "shape": [
+            1
+          ],
+          "encoding": "raw-be-hex",
+          "hex": "01",
+          "name": "y",
+          "category": "array",
+          "layout": {
+            "order": "C",
+            "byteorder": "native",
+            "step": 1,
+            "reverse_axis": null
+          }
+        }
+      ],
+      "scalar_operands": [],
+      "literal": null,
+      "comparison": {
+        "kind": "bitwise",
+        "atol": 0.0,
+        "rtol": 0.0,
+        "max_ulp": 0,
+        "nan": "bits",
+        "signed_zero": "exact"
+      },
+      "reference_kind": "numpy",
+      "seed": 1729,
+      "expected": {
+        "dtype": "int8",
+        "shape": [
+          1
+        ],
+        "encoding": "raw-be-hex",
+        "hex": "80"
+      },
+      "minimized_from": "seeded boundary property",
+      "divergence": {
+        "id": "D01",
+        "reason": "Checked integer overflow instead of NumPy wrapping"
+      },
+      "baseline": {
+        "status": -5,
+        "category": "evaluation_error"
+      },
+      "classification": "divergent"
+    }
+  ]
+}

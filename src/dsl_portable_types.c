@@ -5,6 +5,9 @@
 #include "dsl_portable_types.h"
 #include <limits.h>
 #include <math.h>
+#include <string.h>
+
+static bool portable_signed_bounds(me_dtype dtype, int64_t *minimum, int64_t *maximum);
 
 static int portable_integer_bits(me_dtype dtype) {
     switch (dtype) {
@@ -67,6 +70,97 @@ me_dtype dsl_portable_division_dtype(me_dtype left, me_dtype right) {
         return promoted;
     }
     return ME_FLOAT64;
+}
+
+me_dtype dsl_numpy_numeric_promote(me_dtype left, me_dtype right) {
+    if (left == ME_BOOL && right == ME_BOOL) return ME_BOOL;
+    if (left == ME_BOOL) return dsl_portable_numeric_promote(right, right);
+    if (right == ME_BOOL) return dsl_portable_numeric_promote(left, left);
+    me_dtype common = dsl_portable_numeric_promote(left, right);
+    /* int64/uint64 has no lossless integer common type in NumPy. */
+    if (common == ME_AUTO && portable_integer_bits(left) && portable_integer_bits(right)) return ME_FLOAT64;
+    return common;
+}
+
+bool dsl_numpy_can_cast(me_dtype from, me_dtype to, const char *policy) {
+    if (!policy || !strcmp(policy, "unsafe")) return dsl_numpy_numeric_promote(from, to) != ME_AUTO;
+    if (!strcmp(policy, "safe")) return dsl_numpy_numeric_promote(from, to) == to;
+    if (strcmp(policy, "same_kind")) return false;
+    int a = from == ME_BOOL ? 0 : portable_unsigned(from) ? 1 : portable_integer_bits(from) ? 2 : 3;
+    int b = to == ME_BOOL ? 0 : portable_unsigned(to) ? 1 : portable_integer_bits(to) ? 2 : 3;
+    return dsl_numpy_numeric_promote(from, to) != ME_AUTO && a <= b;
+}
+
+uint64_t dsl_numpy_unsigned_bits(me_dtype dtype, uint64_t raw) {
+    int bits = portable_integer_bits(dtype);
+    return bits == 64 ? raw : raw & ((UINT64_C(1) << bits) - 1);
+}
+
+int64_t dsl_numpy_signed_bits(me_dtype dtype, uint64_t raw) {
+    int bits = portable_integer_bits(dtype);
+    uint64_t mask = bits == 64 ? UINT64_MAX : (UINT64_C(1) << bits) - 1;
+    raw &= mask;
+    return raw & (UINT64_C(1) << (bits - 1)) ? -1 - (int64_t)(mask - raw) : (int64_t)raw;
+}
+
+me_portable_numeric_status dsl_numpy_unsigned_op(me_dtype dtype, me_portable_integer_op op,
+                                                uint64_t left, uint64_t right, uint64_t *out) {
+    int bits = portable_integer_bits(dtype);
+    if (!out || !bits || !portable_unsigned(dtype)) return ME_PORTABLE_NUMERIC_TYPE;
+    uint64_t raw;
+    switch (op) {
+    case ME_PORTABLE_ADD: raw = left + right; break;
+    case ME_PORTABLE_SUB: raw = left - right; break;
+    case ME_PORTABLE_MUL: raw = left * right; break;
+    case ME_PORTABLE_FLOORDIV: raw = right ? left / right : 0; break;
+    case ME_PORTABLE_MOD: raw = right ? left % right : 0; break;
+    case ME_PORTABLE_SHL: raw = right >= (uint64_t)bits ? 0 : left << right; break;
+    case ME_PORTABLE_SHR: raw = right >= (uint64_t)bits ? 0 : left >> right; break;
+    case ME_PORTABLE_AND: raw = left & right; break;
+    case ME_PORTABLE_OR: raw = left | right; break;
+    case ME_PORTABLE_XOR: raw = left ^ right; break;
+    case ME_PORTABLE_POW:
+        raw = 1;
+        while (right) {
+            if (right & 1) raw *= left;
+            right >>= 1;
+            if (right) left *= left;
+        }
+        break;
+    default: return ME_PORTABLE_NUMERIC_TYPE;
+    }
+    *out = dsl_numpy_unsigned_bits(dtype, raw);
+    return ME_PORTABLE_NUMERIC_OK;
+}
+
+me_portable_numeric_status dsl_numpy_signed_op(me_dtype dtype, me_portable_integer_op op,
+                                              int64_t left, int64_t right, int64_t *out) {
+    int64_t minimum, maximum;
+    if (!out || !portable_signed_bounds(dtype, &minimum, &maximum)) return ME_PORTABLE_NUMERIC_TYPE;
+    int bits = portable_integer_bits(dtype);
+    if (op == ME_PORTABLE_FLOORDIV || op == ME_PORTABLE_MOD) {
+        if (!right) *out = 0;
+        else if (left == minimum && right == -1) *out = op == ME_PORTABLE_MOD ? 0 : minimum;
+        else {
+            int64_t q = left / right, r = left % right;
+            if (r && ((left < 0) != (right < 0))) { q--; r += right; }
+            *out = op == ME_PORTABLE_MOD ? r : q;
+        }
+        return ME_PORTABLE_NUMERIC_OK;
+    }
+    if (op == ME_PORTABLE_SHL || op == ME_PORTABLE_SHR) {
+        if (right < 0 || right >= bits) *out = op == ME_PORTABLE_SHR && left < 0 ? -1 : 0;
+        else if (op == ME_PORTABLE_SHL) *out = dsl_numpy_signed_bits(dtype, (uint64_t)left << right);
+        else *out = left < 0 ? -1 - (int64_t)((uint64_t)(-(left + 1)) >> right) :
+                              (int64_t)((uint64_t)left >> right);
+        return ME_PORTABLE_NUMERIC_OK;
+    }
+    if (op == ME_PORTABLE_POW && right < 0) return ME_PORTABLE_NUMERIC_RANGE;
+    uint64_t raw;
+    me_dtype unsigned_dtype = portable_integer_type(bits, true);
+    me_portable_numeric_status status = dsl_numpy_unsigned_op(unsigned_dtype, op, (uint64_t)left, (uint64_t)right, &raw);
+    if (status == ME_PORTABLE_NUMERIC_OK) *out = dsl_numpy_signed_bits(dtype, raw);
+    return status;
 }
 
 static bool portable_signed_bounds(me_dtype dtype, int64_t *minimum, int64_t *maximum) {

@@ -155,6 +155,7 @@ typedef struct {
     int compile_ndims;
     me_dsl_fp_mode fp_mode;
     me_dsl_semantic_profile semantic_profile;
+    bool numpy_weak_vars[ME_MAX_VARS];
     bool portable_reduced_vars[ME_MAX_VARS];
     me_dsl_compiler compiler;
     me_jit_mode jit_request_mode;
