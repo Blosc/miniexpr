@@ -99,6 +99,13 @@ if(MINIEXPR_NEEDS_BUNDLED_TINYCC)
   add_custom_target(miniexpr_tinycc ALL
     DEPENDS "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}")
 
+  # Runtime compilation needs TinyCC's compiler headers after the source/build
+  # tree is gone. Keep them namespaced alongside the relocatable shared library.
+  file(COPY "${tinycc_SOURCE_DIR}/include/"
+       DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/miniexpr-tcc/include")
+  install(DIRECTORY "${tinycc_SOURCE_DIR}/include/"
+          DESTINATION "${CMAKE_INSTALL_LIBDIR}/miniexpr-tcc/include")
+
   install(FILES "${MINIEXPR_TINYCC_STAGED_SHARED_PATH}" DESTINATION "${CMAKE_INSTALL_LIBDIR}")
   install(FILES "${tinycc_SOURCE_DIR}/libtcc.h" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
   install(FILES "${tinycc_SOURCE_DIR}/COPYING"
