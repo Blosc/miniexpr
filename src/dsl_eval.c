@@ -1275,6 +1275,25 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
         for (int i = 0; i < program->portable_jit_niops; i++) {
             inputs[n_vars+ME_DSL_PORTABLE_JIT_IOP_OFF+1+i] = program->portable_jit_iops[i];
         }
+        /* ND logical context for reserved index variables. The kernel recomputes
+         * each lane's coordinates and validates them, so the interpreter's index
+         * buffers are not built on this path. */
+        int64_t nd_ctx[1 + 3 * ME_DSL_MAX_NDIM];
+        const int64_t *nd_shape = shape;
+        const int64_t *nd_origin = descriptor ? descriptor->block_origin : NULL;
+        const int64_t *nd_extent = descriptor ? descriptor->block_extent : NULL;
+        if (ndim > 0) {
+            nd_ctx[0] = ndim;
+            for (int d = 0; d < ndim; d++) {
+                nd_ctx[1 + d] = nd_shape ? nd_shape[d] : 0;
+                nd_ctx[1 + ndim + d] = nd_origin ? nd_origin[d] : 0;
+                nd_ctx[1 + 2 * ndim + d] = nd_extent ? nd_extent[d] : 0;
+            }
+            inputs[n_vars+ME_DSL_PORTABLE_JIT_ND_OFF] = nd_ctx;
+        }
+        else {
+            inputs[n_vars+ME_DSL_PORTABLE_JIT_ND_OFF] = NULL;
+        }
         fenv_t saved;
         if (!dsl_portable_fp_begin(&saved)) return ME_EVAL_ERR_INVALID_ARG;
         int rc = program->jit_kernel_fn(inputs,output_block,(int64_t)nitems);
@@ -1766,39 +1785,47 @@ int dsl_eval_program_portable(const me_dsl_compiled_program *program,
     size_t allocated_lanes = descriptor->nitems ? (size_t)descriptor->nitems : 1;
     if (allocated_lanes > SIZE_MAX / sizeof(int64_t)) return ME_EVAL_ERR_INVALID_ARG;
     int rc = ME_EVAL_SUCCESS;
-    for (int d = 0; d < ndim; d++) {
-        if (program->uses_i_mask & (1 << d)) {
-            indices[d] = calloc(allocated_lanes, sizeof(int64_t));
-            if (!indices[d]) rc = ME_EVAL_ERR_OOM;
-        }
-    }
-    if (program->uses_flat_idx) {
-        flat = calloc(allocated_lanes, sizeof(int64_t));
-        if (!flat) rc = ME_EVAL_ERR_OOM;
-    }
-    for (int lane = 0; rc == ME_EVAL_SUCCESS && lane < descriptor->nitems && ndim; lane++) {
-        size_t offset = (size_t)lane;
-        bool valid = !descriptor->valid_mask || descriptor->valid_mask[lane];
-        int64_t linear = 0;
-        for (int d = ndim - 1; d >= 0; d--) {
-            size_t extent = (size_t)descriptor->block_extent[d];
-            size_t relative = offset % extent;
-            offset /= extent;
-            int64_t remaining = descriptor->logical_shape[d] - descriptor->block_origin[d];
-            if (relative >= (uint64_t)remaining) {
-                if (valid) rc = ME_EVAL_ERR_INVALID_ARG;
-                continue;
+    /* When the JIT kernel will run, it recomputes and validates the logical
+     * coordinates in-kernel; building interpreter index buffers here would be
+     * pure overhead (and duplicate the same range validation). */
+    bool jit_direct = program->jit_kernel_fn != NULL;
+    if (!jit_direct) {
+        for (int d = 0; d < ndim; d++) {
+            if (program->uses_i_mask & (1 << d)) {
+                indices[d] = calloc(allocated_lanes, sizeof(int64_t));
+                if (!indices[d]) rc = ME_EVAL_ERR_OOM;
             }
-            int64_t coordinate = descriptor->block_origin[d] + (int64_t)relative;
-            if (indices[d]) indices[d][lane] = coordinate;
-            linear += coordinate * strides[d]; /* Validated shape product fits int64. */
         }
-        if (flat) flat[lane] = linear;
+        if (program->uses_flat_idx) {
+            flat = calloc(allocated_lanes, sizeof(int64_t));
+            if (!flat) rc = ME_EVAL_ERR_OOM;
+        }
+        for (int lane = 0; rc == ME_EVAL_SUCCESS && lane < descriptor->nitems && ndim; lane++) {
+            size_t offset = (size_t)lane;
+            bool valid = !descriptor->valid_mask || descriptor->valid_mask[lane];
+            int64_t linear = 0;
+            for (int d = ndim - 1; d >= 0; d--) {
+                size_t extent = (size_t)descriptor->block_extent[d];
+                size_t relative = offset % extent;
+                offset /= extent;
+                int64_t remaining = descriptor->logical_shape[d] - descriptor->block_origin[d];
+                if (relative >= (uint64_t)remaining) {
+                    if (valid) rc = ME_EVAL_ERR_INVALID_ARG;
+                    continue;
+                }
+                int64_t coordinate = descriptor->block_origin[d] + (int64_t)relative;
+                if (indices[d]) indices[d][lane] = coordinate;
+                linear += coordinate * strides[d]; /* Validated shape product fits int64. */
+            }
+            if (flat) flat[lane] = linear;
+        }
     }
     if (rc == ME_EVAL_SUCCESS) rc = dsl_eval_program_impl(program, inputs, ninputs, output, descriptor->nitems, NULL,
         ndim, descriptor->logical_shape, indices, flat, NULL, descriptor);
-    for (int d = 0; d < ndim; d++) free(indices[d]);
-    free(flat);
+    if (!jit_direct) {
+        for (int d = 0; d < ndim; d++) free(indices[d]);
+        free(flat);
+    }
     return rc;
 }
 

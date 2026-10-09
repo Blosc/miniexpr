@@ -2,6 +2,7 @@
 #undef NDEBUG
 #include <assert.h>
 #include <math.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +44,66 @@ static void check_extended(const char *source, me_dtype dtype, const void *x, co
     }
     me_artifact_free(reference);
     me_artifact_free(accelerated);
+}
+
+/* ND logical context: reserved index symbols are recomputed per lane in the
+ * kernel and must match the interpreter's traversal, including range checks. */
+static void check_nd_case(const char *source, int ndim, const int64_t *shape,
+                          const int64_t *origin, const int64_t *extent, size_t nitems,
+                          const uint8_t *mask, bool expect_error) {
+    char json[4096];
+    snprintf(json,sizeof(json),
+        "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
+        "\"requires\":[\"numeric\",\"nd-context\"],\"source\":\"%s\",\"entry_point\":\"k\","
+        "\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"},{\"name\":\"y\",\"dtype\":\"float64\"}],\"constants\":[],"
+        "\"output\":{\"dtype\":\"float64\",\"contract\":\"elementwise\"},\"context\":{\"ndim\":%d},"
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"metadata\":{}}",
+        source,ndim);
+    me_artifact *reference = NULL, *accelerated = NULL;
+    me_artifact_error error = {0};
+    assert(me_artifact_load(json,strlen(json),ME_JIT_OFF,&reference,&error)==0);
+    assert(me_artifact_load(json,strlen(json),ME_JIT_ON,&accelerated,&error)==0);
+    if (getenv("MENUDET_REQUIRE_JIT")) assert(me_artifact_has_jit(accelerated));
+    double x[16], y[16], expected[16] = {0}, actual[16] = {0};
+    for (int i = 0; i < 16; i++) { x[i] = i * 0.5; y[i] = 1.0 - i * 0.25; }
+    me_artifact_buffer inputs[] = {
+        {"x",ME_FLOAT64,8,x,sizeof(x)}, {"y",ME_FLOAT64,8,y,sizeof(y)}};
+    me_artifact_eval_descriptor descriptor = {.struct_size=sizeof(descriptor),.version=1,
+        .nitems=nitems,.output_capacity=nitems*8,.ndim=ndim,
+        .valid_mask=mask,.valid_mask_capacity=mask?nitems:0,
+        .logical_shape=shape,.block_origin=origin,.block_extent=extent};
+    me_artifact_status rr = me_artifact_eval_ex(reference,inputs,2,expected,&descriptor,&error);
+    me_artifact_status ar = me_artifact_eval_ex(accelerated,inputs,2,actual,&descriptor,&error);
+    if (expect_error) {
+        assert(rr == ME_ARTIFACT_ERR_EVAL && ar == ME_ARTIFACT_ERR_EVAL);
+    }
+    else {
+        assert(rr == ME_ARTIFACT_SUCCESS && ar == ME_ARTIFACT_SUCCESS);
+        for (size_t i = 0; i < nitems; i++) {
+            if (mask && !mask[i]) continue;
+            assert(memcmp(&expected[i],&actual[i],8) == 0);
+        }
+    }
+    me_artifact_free(reference);
+    me_artifact_free(accelerated);
+}
+
+static void check_nd(void) {
+    int64_t shape1[] = {16}, origin0[] = {0}, extent1[] = {16};
+    check_nd_case("def k(x, y):\\n    return x + _i0\\n",1,shape1,origin0,extent1,16,NULL,false);
+    check_nd_case("def k(x, y):\\n    return _n0 - x\\n",1,shape1,origin0,extent1,16,NULL,false);
+    check_nd_case("def k(x, y):\\n    return _ndim + _i0 + x\\n",1,shape1,origin0,extent1,16,NULL,false);
+    check_nd_case("def k(x, y):\\n    return _flat_idx + x\\n",1,shape1,origin0,extent1,16,NULL,false);
+    int64_t shape2[] = {5,4}, origin2[] = {1,0}, extent2[] = {4,4};
+    check_nd_case("def k(x, y):\\n    return _i0 * 10 + _i1 + x\\n",2,shape2,origin2,extent2,16,NULL,false);
+    int64_t origin_bad[] = {8}, extent_bad[] = {16};
+    check_nd_case("def k(x, y):\\n    return x + _i0\\n",1,shape1,origin_bad,extent_bad,16,NULL,true);
+    int64_t shape_bad2[] = {4,4}, origin_bad2[] = {1,0}, extent_bad2[] = {4,4};
+    check_nd_case("def k(x, y):\\n    return _i0 * 10 + _i1 + x\\n",2,shape_bad2,origin_bad2,extent_bad2,16,NULL,true);
+    /* Masked lanes skip the preamble, so an otherwise out-of-range block is fine. */
+    uint8_t half[16];
+    for (int i = 0; i < 16; i++) half[i] = (uint8_t)(i < 8);
+    check_nd_case("def k(x, y):\\n    return x + _i0\\n",1,shape1,origin_bad,extent_bad,16,half,false);
 }
 
 int main(void) {
@@ -92,6 +153,7 @@ int main(void) {
     check_extended("def k(x, y):\\n    return x // y\\n",ME_INT32,ix,iy,4);
     check_extended("def k(x, y):\\n    return x << y\\n",ME_INT32,ix,iy,4);
     check_extended("def k(x, y):\\n    return x & y\\n",ME_INT32,ix,iy,4);
-    printf("portable JIT locals/branches/math/modular integers/operators: passed\n");
+    check_nd();
+    printf("portable JIT locals/branches/math/modular integers/operators/ND: passed\n");
     return 0;
 }

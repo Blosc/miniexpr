@@ -49,7 +49,9 @@
 #define ME_DSL_PORTABLE_JIT_MATH2_OFF 259
 #define ME_DSL_PORTABLE_JIT_PRED_OFF 388
 #define ME_DSL_PORTABLE_JIT_IOP_OFF 517
-#define ME_DSL_PORTABLE_JIT_EXTRA 646
+/* ND context: one pointer to [ndim, shape[ndim], origin[ndim], extent[ndim]]. */
+#define ME_DSL_PORTABLE_JIT_ND_OFF 646
+#define ME_DSL_PORTABLE_JIT_EXTRA 647
 
 #if ME_USE_WASM32_JIT
 typedef int (*me_dsl_jit_kernel_fn)(const void **inputs, void *output, int nitems);

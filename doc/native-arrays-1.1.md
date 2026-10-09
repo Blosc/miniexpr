@@ -84,13 +84,14 @@ results and mutable-view semantics are deferred, not implied by this ABI.
 ## Opt-in portable host JIT
 
 `ME_JIT_ON` at 1.1 artifact load enables fail-closed typed-tree lowering for a
-elementwise program without ND context: float32/float64 arithmetic,
+elementwise program, with or without ND context: float32/float64 arithmetic,
 comparisons, Boolean selection, lazy `where`, straight-line locals and simple
 `if`/`elif`/`else` branches with returns. Same-dtype signed and unsigned integer
 `+`, `-`, `*` and negation use unsigned modular arithmetic and bit-copy results,
 not overflowing signed C operations. Integral widening/narrowing conversions
 lower to the same modular bit-copy; float-to-integer conversion stays interpreted
-because it must report out-of-range/nonfinite values as errors.
+because it must report out-of-range/nonfinite values as errors. Block reductions
+(`sum`, `min`, ...) remain on the interpreter.
 
 Unary and binary float functions, the float `//`/`%`/`**` operators, the boolean
 predicates (`isfinite`, `isinf`, `isnan`, `signbit`) and the integer
@@ -109,7 +110,11 @@ pointer followed by borrowed typed nodes. It preserves per-node dtype and final
 conversion, avoids folding constant operations whose exceptions must be observed,
 and scopes/restores fenv.
 The comparison bridge preserves host NaN exception behavior; ordinary non-NaN
-comparisons stay inline in generated code. The math/operator bridges receive
+comparisons stay inline in generated code. For ND context the kernel recomputes
+each lane's `_iN`/`_nN`/`_ndim`/`_flat_idx` from the logical shape/origin/extent
+and applies the interpreter's range validation in-kernel; masked lanes skip the
+preamble, and the interpreter's index buffers are not built on this path. The
+math/operator bridges receive
 already-evaluated operands, so a cheap per-lane call cannot diverge from the
 interpreter's rounding or diagnostics. Volatile lane-local stores preserve
 assignment precision and exceptions even for unused values. A bounded recursive

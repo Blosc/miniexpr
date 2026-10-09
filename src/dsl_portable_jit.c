@@ -76,6 +76,19 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
         if (!is_synthetic_address(n->bound)) return NULL;
         int index = (int)((const char *)n->bound - synthetic_var_addresses);
         if (index < 0 || index >= p->vars.count) return NULL;
+        /* ND reserved symbols are recomputed per lane in the kernel preamble. */
+        if (p->idx_ndim >= 0 && index == p->idx_ndim) return strdup("nd[0]");
+        if (p->idx_flat_idx >= 0 && index == p->idx_flat_idx) return strdup("flat");
+        for (int d = 0; d < p->compile_ndims && d < ME_DSL_MAX_NDIM; d++) {
+            if (p->idx_i[d] >= 0 && index == p->idx_i[d]) {
+                snprintf(leaf,sizeof(leaf),"coord_%d",d);
+                return strdup(leaf);
+            }
+            if (p->idx_n[d] >= 0 && index == p->idx_n[d]) {
+                snprintf(leaf,sizeof(leaf),"nd[%d]",1+d);
+                return strdup(leaf);
+            }
+        }
         if (index < p->n_inputs) snprintf(leaf,sizeof(leaf),"((const %s *)inputs[%d])[i]",type,index);
         else if (p->local_slots && p->local_slots[index] >= 0 && defined[index]) {
             snprintf(leaf,sizeof(leaf),"local_%d",index);
@@ -306,9 +319,11 @@ void dsl_portable_prepare_jit_source(me_dsl_compiled_program *p) {
     (void)p;
     return;
 #endif
-    /* Bounded elementwise statements only; no loops, reductions or ND context. */
+    /* Bounded elementwise statements only; no loops or reductions. ND logical
+     * context is supported through lane-local reserved index recomputation. */
     if (!p || p->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_1 ||
-        p->jit_request_mode != ME_JIT_ON || p->output_is_scalar || p->compile_ndims ||
+        p->jit_request_mode != ME_JIT_ON || p->output_is_scalar ||
+        p->compile_ndims < 0 || p->compile_ndims > ME_DSL_MAX_NDIM ||
         !p->guaranteed_return || p->vars.count > ME_MAX_VARS ||
         !pj_type(p->output_dtype)) {
         if (p) dsl_tracef("portable jit ineligible: request=%d statements=%d rank=%d",p->jit_request_mode,p->block.nstmts,p->compile_ndims);
@@ -338,10 +353,49 @@ void dsl_portable_prepare_jit_source(me_dsl_compiled_program *p) {
         dsl_tracef("portable jit ineligible: unsupported typed statements");
         return;
     }
-    size_t capacity = body.used + 4096;
+    /* Lane-local ND index recomputation, range-checked like the interpreter's
+     * logical traversal. Masked lanes are skipped before this preamble. */
+    pj_text preamble = {0};
+    char nd_decl[96] = "";
+    bool uses_nd = (p->uses_i_mask || p->uses_n_mask || p->uses_ndim || p->uses_flat_idx);
+    if (uses_nd) {
+        snprintf(nd_decl,sizeof(nd_decl),
+            "const int64_t *nd = (const int64_t *)inputs[%d];\n",
+            p->n_inputs + ME_DSL_PORTABLE_JIT_ND_OFF);
+        bool ok = pj_append(&preamble, "int64_t jit_bad = 0;\n");
+        for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
+            if (p->uses_i_mask & (1 << d)) ok = ok && pj_append(&preamble, "int64_t coord_%d = 0;\n", d);
+        }
+        if (p->uses_flat_idx) ok = ok && pj_append(&preamble, "int64_t flat = 0;\n");
+        ok = ok && pj_append(&preamble,
+            "if (nd) { int64_t jit_off = i, jit_stride = 1; int jit_nd = (int)nd[0];\n"
+            "for (int jit_d = jit_nd - 1; jit_d >= 0; jit_d--) {\n"
+            "int64_t jit_ext = nd[1+2*jit_nd+jit_d];\n"
+            "int64_t jit_rem = nd[1+jit_d]-nd[1+jit_nd+jit_d];\n"
+            "int64_t jit_rel = jit_ext > 0 ? jit_off %% jit_ext : 0;\n"
+            "jit_off = jit_ext > 0 ? jit_off / jit_ext : 0;\n"
+            "int64_t jit_coord = nd[1+jit_nd+jit_d] + jit_rel;\n"
+            "if (jit_rel >= jit_rem) jit_bad = 1;\n");
+        for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
+            if (p->uses_i_mask & (1 << d)) {
+                ok = ok && pj_append(&preamble, "if (jit_d == %d) coord_%d = jit_coord;\n", d, d);
+            }
+        }
+        if (p->uses_flat_idx) {
+            ok = ok && pj_append(&preamble, "flat += jit_coord * jit_stride; jit_stride *= nd[1+jit_d];\n");
+        }
+        ok = ok && pj_append(&preamble, "}\n}\nif (jit_bad) return -2;\n");
+        if (!ok) {
+            free(preamble.text);
+            free(body.text);
+            return;
+        }
+    }
+    size_t capacity = body.used + preamble.used + 4096;
     char *source = malloc(capacity);
     me_dsl_jit_ir_program *ir = calloc(1,sizeof(*ir));
     if (!source || !ir) {
+        free(preamble.text);
         free(body.text);
         free(source);
         free(ir);
@@ -351,6 +405,7 @@ void dsl_portable_prepare_jit_source(me_dsl_compiled_program *p) {
     ir->param_dtypes = calloc(p->n_inputs ? p->n_inputs : 1,sizeof(me_dtype));
     ir->params = calloc(p->n_inputs ? p->n_inputs : 1,sizeof(char *));
     if (!ir->param_dtypes || !ir->params) {
+        free(preamble.text);
         free(body.text);
         free(source);
         me_dsl_jit_ir_free(ir);
@@ -358,7 +413,7 @@ void dsl_portable_prepare_jit_source(me_dsl_compiled_program *p) {
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
     snprintf(source,capacity,
-        "/* portable-1.1 lowering-r9 mask-compare-math-abi-r5 */\n"
+        "/* portable-1.1 lowering-r10 mask-compare-math-nd-abi-r6 */\n"
         "#include <stdint.h>\n"
         "#include <string.h>\n"
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"
@@ -386,9 +441,12 @@ void dsl_portable_prepare_jit_source(me_dsl_compiled_program *p) {
         "PJ_COMPARE(le, <=)\nPJ_COMPARE(gt, >)\nPJ_COMPARE(ge, >=)\n"
         "int %s(const void *const *inputs, void *output, int64_t count) {\n"
         "const unsigned char *mask = inputs[%d];\n"
+        "%s"
         "for (int64_t i=0; i<count; i++) { if (mask && !mask[i]) continue;\n"
+        "%s"
         "%s } return 0; }\n",
-        ME_DSL_JIT_SYMBOL_NAME,p->n_inputs,body.text);
+        ME_DSL_JIT_SYMBOL_NAME,p->n_inputs,nd_decl,preamble.text ? preamble.text : "",body.text);
+    free(preamble.text);
     free(body.text);
     p->jit_ir = ir;
     p->jit_c_source = source;
