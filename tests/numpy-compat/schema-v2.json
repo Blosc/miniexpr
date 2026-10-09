@@ -59,6 +59,7 @@
         "scalar_operands": {"type": "array", "items": {"$ref": "#/$defs/buffer"}},
         "literal": {"oneOf": [{"type": "null"}, {"type": "object", "required": ["category", "type", "decimal"], "properties": {"category": {"const": "weak"}, "type": {"enum": ["int", "float"]}, "decimal": {"type": "string"}}}]},
         "expected": {"oneOf": [{"$ref": "#/$defs/buffer"}, {"$ref": "#/$defs/diagnostic"}]},
+        "reference_expected_by_machine": {"type": "object", "description": "Reviewed exact host-specific NumPy observations; native expected/baseline remain unchanged", "additionalProperties": {"$ref": "#/$defs/buffer"}},
         "comparison": {"$ref": "#/$defs/comparison"},
         "reference_kind": {"enum": ["numpy", "native-contract"]}, "seed": {"type": ["integer", "null"]},
         "baseline": {"type": "object", "required": ["status", "category"], "properties": {"status": {"type": "integer"}, "category": {"type": "string"}, "output": {"$ref": "#/$defs/buffer"}}},

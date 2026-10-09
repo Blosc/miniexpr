@@ -124,7 +124,9 @@ if(MINIEXPR_BUILD_ARTIFACT)
       "${CMAKE_CURRENT_SOURCE_DIR}/numpy-compat/arithmetic-v1.1.json" "${policy}")
     # The cc conformance route bulk-compiles all eligible kernels in one module;
     # keep serial runtime compilation tests separate from exhaustive value tests.
-    set_tests_properties(numpy_compat_arithmetic_${policy} PROPERTIES TIMEOUT 60)
+    # Thousands of cases include optional per-kernel JIT compilation. Conda's
+    # compiler wrapper on macOS can exceed 60 s without a numerical failure.
+    set_tests_properties(numpy_compat_arithmetic_${policy} PROPERTIES TIMEOUT 180)
     add_test(NAME numpy_compat_functions_${policy} COMMAND numpy_compat_runner
       "${CMAKE_CURRENT_SOURCE_DIR}/numpy-compat/functions-v1.1.json" "${policy}")
     set_tests_properties(numpy_compat_functions_${policy} PROPERTIES TIMEOUT 60)
@@ -135,6 +137,9 @@ if(MINIEXPR_BUILD_ARTIFACT)
         "${CMAKE_CURRENT_SOURCE_DIR}/numpy-compat/${corpus}-v1.1.json" on)
       set_tests_properties(numpy_compat_${corpus}_cc PROPERTIES TIMEOUT 60
         ENVIRONMENT "ME_DSL_JIT_COMPILER=cc;CC=${MINIEXPR_PORTABLE_CC};ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/conformance-batch-cache;MENUDET_REQUIRE_JIT=1")
+      if(corpus STREQUAL "arithmetic")
+        set_tests_properties(numpy_compat_${corpus}_cc PROPERTIES TIMEOUT 180)
+      endif()
     endforeach()
   endif()
 endif()

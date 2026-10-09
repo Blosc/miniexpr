@@ -1952,6 +1952,20 @@
         "signed_zero": "exact"
       },
       "platform_qualification": "NumPy nonfinite-to-integer sentinel is host-specific; not a universal contract.",
+      "reference_expected_by_machine": {
+        "x86_64": {
+          "dtype": "int64",
+          "shape": [1],
+          "encoding": "raw-be-hex",
+          "hex": "8000000000000000"
+        },
+        "arm64": {
+          "dtype": "int64",
+          "shape": [1],
+          "encoding": "raw-be-hex",
+          "hex": "7fffffffffffffff"
+        }
+      },
       "baseline": {
         "status": -5,
         "category": "evaluation_error"
