@@ -12,6 +12,7 @@ typedef struct {
     size_t length, pos;
     char token[80], nodes[ME_GRAPH_MAX_NODES][2048], names[ME_MAX_VARS][64];
     int kind, ninputs, count, depth;
+    bool reductions[ME_GRAPH_MAX_NODES];
     const char *error;
 } text_parser;
 static const char *t_dtype(me_dtype d) {
@@ -71,6 +72,7 @@ static void t_expect(text_parser *p, const char *s) {
 static int t_node(text_parser *p, const char *body) {
     if (p->count == ME_GRAPH_MAX_NODES) { p->error = "expression node limit exceeded"; return -1; }
     int id = p->count++;
+    p->reductions[id] = false;
     int n = snprintf(p->nodes[id], sizeof(p->nodes[id]), "{\"id\":%d,%s}", id, body);
     if (n < 0 || (size_t)n >= sizeof(p->nodes[id])) p->error = "node encoding limit exceeded";
     return id;
@@ -193,7 +195,9 @@ static int t_call(text_parser *p, const char *name) {
         for (int i = 0; i < n; i++) used += (size_t)snprintf(body + used, sizeof(body) - used, "%s%d", i ? "," : "", args[i]);
         snprintf(body + used, sizeof(body) - used, "]");
     }
-    return p->error ? -1 : t_node(p, body);
+    int id = p->error ? -1 : t_node(p, body);
+    if (id >= 0) p->reductions[id] = t_reduction(name);
+    return id;
 }
 static int t_primary(text_parser *p) {
     if (t_take(p, "(")) { int id = t_expr(p, 0); t_expect(p, ")"); return id; }
@@ -278,7 +282,9 @@ me_graph_status me_graph_prepare_expression(const char *expression, size_t lengt
             if (error) snprintf(error->native.message, sizeof(error->native.message), "expression graph allocation failed");
         }
         else {
-            size_t used = (size_t)snprintf(json, capacity, "{\"format\":\"%s\",\"semantics\":\"%s\",\"requires\":[\"numeric\"],\"nodes\":[", ME_GRAPH_FORMAT, ME_GRAPH_SEMANTICS);
+            bool staged = false;
+            for (int i = 0; i < p->count; i++) if (i != root && p->reductions[i]) staged = true;
+            size_t used = (size_t)snprintf(json, capacity, "{\"format\":\"%s\",\"semantics\":\"%s\",\"requires\":[\"numeric\"%s],\"nodes\":[", ME_GRAPH_FORMAT, ME_GRAPH_SEMANTICS, staged ? ",\"staged\"" : "");
             for (int i = 0; i < p->count; i++) used += (size_t)snprintf(json + used, capacity - used, "%s%s", i ? "," : "", p->nodes[i]);
             used += (size_t)snprintf(json + used, capacity - used, "],\"root\":%d,\"output\":{\"dtype\":\"auto\",\"casting\":\"unsafe\"}}", root);
             rc = me_graph_prepare_json(json, used, options, out, error); free(json);

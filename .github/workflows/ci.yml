@@ -69,6 +69,19 @@ jobs:
         fi
         grep -E "jit ir built:|jit runtime (built|skip|hit|stubbed):" build/dsl-jit-trace.log || true
 
+    - name: Install native graph distribution
+      shell: bash
+      run: |
+        cmake --install build --config Release --prefix "$PWD/graph-dist"
+        test -f graph-dist/include/miniexpr_graph.h
+        test -f graph-dist/share/miniexpr/graphs/native-staged-graph-1.schema.json
+        git rev-parse HEAD > graph-dist/native-revision.txt
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: native-graph-${{ matrix.os }}
+        path: graph-dist
+
   linux-arm64-jit:
     runs-on: ubuntu-24.04-arm
 

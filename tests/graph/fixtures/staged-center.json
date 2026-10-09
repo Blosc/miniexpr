@@ -1,0 +1,1 @@
+{"format":"menudet-graph-1","semantics":"menudet-numpy-1.1","requires":["numeric","staged"],"nodes":[{"id":0,"op":"input","name":"x","dtype":"float32"},{"id":1,"op":"sum","args":[0],"axes":[0],"keepdims":false,"dtype":"auto","initial":null,"where":null},{"id":2,"op":"sub","args":[0,1]}],"root":2,"output":{"dtype":"auto","casting":"unsafe"}}

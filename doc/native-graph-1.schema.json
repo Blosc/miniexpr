@@ -7,7 +7,7 @@
   "properties": {
     "format": {"const": "menudet-graph-1"},
     "semantics": {"const": "menudet-numpy-1.1"},
-    "requires": {"const": ["numeric"]},
+    "requires": {"enum": [["numeric"], ["numeric", "staged"]]},
     "nodes": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"$ref": "#/$defs/node"}},
     "root": {"$ref": "#/$defs/id"},
     "output": {
@@ -38,7 +38,8 @@
       "oneOf": [
         {
           "additionalProperties": false, "required": ["name", "dtype"],
-          "properties": {"id": {"$ref": "#/$defs/id"}, "op": {"const": "input"}, "name": {"$ref": "#/$defs/name"}, "dtype": {"$ref": "#/$defs/dtype"}}
+          "properties": {"id": {"$ref": "#/$defs/id"}, "op": {"const": "input"}, "name": {"$ref": "#/$defs/name"}, "dtype": {"anyOf": [{"$ref": "#/$defs/dtype"}, {"const": "auto"}]}},
+          "$comment": "auto input dtype is admitted only inside a declared stage; native inference fills it from that dependency, never from input values."
         },
         {
           "additionalProperties": false, "required": ["dtype", "category", "encoding", "value"],

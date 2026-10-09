@@ -345,9 +345,10 @@ static unsigned artifact_expr_capabilities(const me_expr *expr) {
     return required;
 }
 
-bool dsl_graph_scalar(const char *json, size_t length, me_dtype *dtype, void *value) {
-    yyjson_doc *doc = yyjson_read(json, length, 0);
-    if (!doc) return false;
+me_artifact_status dsl_graph_scalar(const char *json, size_t length, me_dtype *dtype, void *value) {
+    yyjson_read_err error;
+    yyjson_doc *doc = yyjson_read_opts((char *)json, length, 0, NULL, &error);
+    if (!doc) return error.code == YYJSON_READ_ERROR_MEMORY_ALLOCATION ? ME_ARTIFACT_ERR_OOM : ME_ARTIFACT_ERR_FORMAT;
     artifact_binding binding = {0};
     binding.variable.dtype = artifact_dtype1(yyjson_obj_get(yyjson_doc_get_root(doc), "dtype"));
     bool ok = artifact_itemsize(binding.variable.dtype) &&
@@ -357,7 +358,7 @@ bool dsl_graph_scalar(const char *json, size_t length, me_dtype *dtype, void *va
         memcpy(value, &binding.value, artifact_itemsize(*dtype));
     }
     yyjson_doc_free(doc);
-    return ok;
+    return ok ? ME_ARTIFACT_SUCCESS : ME_ARTIFACT_ERR_FORMAT;
 }
 
 static unsigned artifact_block_capabilities(const me_dsl_compiled_block *block) {

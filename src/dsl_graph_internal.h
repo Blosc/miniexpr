@@ -5,7 +5,7 @@
  * public artifact schemas and validation remain unchanged. */
 me_artifact_status dsl_graph_load_map(const char *json, size_t length,
     me_jit_mode jit, me_artifact **out, me_artifact_error *error);
-bool dsl_graph_scalar(const char *json, size_t length, me_dtype *dtype, void *value);
+me_artifact_status dsl_graph_scalar(const char *json, size_t length, me_dtype *dtype, void *value);
 me_artifact_status dsl_array_preflight(const me_artifact *artifact,
     const me_array_view *inputs, int ninputs, int rank, const int64_t *shape,
     const me_array_options *options, void *output, size_t capacity, me_artifact_error *error);

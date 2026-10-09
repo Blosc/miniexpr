@@ -214,6 +214,18 @@ if(MINIEXPR_BUILD_ARTIFACT)
   endif()
   install(FILES "${yyjson_SOURCE_DIR}/LICENSE"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/miniexpr/licenses" RENAME LICENSE-YYJSON)
+  # Standalone distribution only: embedding hosts own their install layout.
+  if(PROJECT_IS_TOP_LEVEL)
+    install(TARGETS miniexpr_artifact ${MINIEXPR_DEFAULT_LIB}
+      ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+      LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+      RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    install(FILES src/miniexpr.h src/miniexpr_artifact.h src/miniexpr_graph.h
+      DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+    install(FILES doc/native-graph-1.schema.json doc/native-staged-graph-1.schema.json
+      doc/native-graphs-1.md doc/native-stages-1.md
+      DESTINATION "${CMAKE_INSTALL_DATADIR}/miniexpr/graphs")
+  endif()
 endif()
 
 if(MINIEXPR_BUILD_TESTS)

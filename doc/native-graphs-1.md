@@ -108,8 +108,9 @@ portable kernel. `select` and Boolean short-circuiting remain lazy. Reduction ma
 gate the map before evaluation. All computed nodes are conservatively treated as
 potentially effectful. Inputs and capture bindings may be shared; **shared computed
 nodes reject**, rather than silently duplicate/hoist work across active domains.
-Intermediate reductions, reductions inside conditional domains and arbitrary
-artifact/callback nodes reject. These are explicit later milestones.
+Intermediate reductions and shared array computations require the separately
+declared [staged subset](native-stages-1.md). Reductions inside conditional domains
+and arbitrary full-DSL/callback nodes still reject.
 
 Limits: 1 MiB JSON/expression/generated-buffer size; 256 nodes; 64 graph/parser
 expression nesting; 16 JSON structural nesting; 32 object fields; `ME_MAX_VARS`
@@ -142,7 +143,7 @@ sum(sqrt(x), axis=[-1], keepdims=True, initial=2, where=mask)
 
 `tests/graph/host.c` loads a fixture, prepares it, specializes only metadata,
 queries/allocates the result and executes native buffers. It links no Python or
-NumPy. CTest runs all four fixtures, lifecycle/layout/mask tests and corpus-derived
+NumPy. CTest runs all five fixtures, lifecycle/layout/mask/stage tests and corpus-derived
 single-return, constant-free inference cases with original corpus IDs. Node/WASM
 uses the same C hosts with raw host-file access; WASM FP reporting is unavailable
 and requested raise policies reject before execution. Interpretation is the native
@@ -167,13 +168,15 @@ pin has not been changed to an unpublished native revision.
 ## Qualification boundaries and remaining work
 
 The first slice is map plus an optional root logical reduction, with a distinct
-optional final conversion. G5 staged DAGs/intermediate reductions/shared stage
-values and trusted portable kernel nodes remain deferred: their participation,
-lifetime and budget contracts must not be claimed by this first slice.
+optional final conversion. G5 now has a separate opt-in materialized subset for
+intermediate reductions, shared strong stage values, broadcast consumers and
+trusted validated portable 1.1 regions. See `native-stages-1.md` for its explicit
+participation, lifetime and resource contracts; it does not broaden the first slice.
 Current platform CI already runs graph hosts/corpus tests wherever artifact tests
 run, including interpreter-only and Node/WASM configurations. Actual publication
-qualification still requires fresh exact-revision Linux/macOS/Windows/WASM jobs,
-distribution builds and allocation-failure injection. Local green tests do not
+qualification still requires fresh exact-revision Linux/macOS/Windows/WASM jobs
+and broader compiler allocator qualification. Local distribution/install and
+graph/JSON/materialization allocation checks pass; local green tests do not
 certify those platforms or promise a universal speedup/NumPy reduction bit parity.
 
 ### Local checkpoint (2026-10-09)
@@ -184,10 +187,23 @@ Reference NumPy 2.5.3 / Python 3.14.4, macOS arm64, interpreter and host JIT.
 Graph inference checks 2,778 arithmetic and 854 function corpus cases; 415/209
 cases outside the single-return/constant-free inference adapter are explicitly
 skipped, not counted as graph conformance. Existing artifact corpora still cover
-their own wider contracts. Graph metadata allocation failure tests exercise
-eight allocation checkpoints and successful recovery, not all compiler allocators.
-Standalone Node/WASM32 interpreter hosts pass the four fixtures, lifecycle and
+their own wider contracts. Graph/yyjson allocation failure tests now exercise
+37 map, 278 automatic-stage, 38 final-conversion and 70 reduction-initial allocation
+checkpoints, including schedule/execution and successful recovery. Compiler allocation
+injection remains unqualified; these checks do not claim coverage of every allocator.
+Standalone Node/WASM32 interpreter hosts pass the five fixtures, lifecycle and
 inference tests; native ASan graph/array/artifact tests also pass.
+
+Latest local G5 qualification: 439 native CTests passed; the paired Python graph,
+array, JIT, portable artifact/DSL, persistence and nullable-table regression selection
+passed 919 tests with 17 skips in 149 seconds. Graph runtime was required, so none
+of those skips hide missing graph support. The Node/WASM graph selection passed
+9 tests and the ASan graph/array/artifact selection passed 11. A standalone native
+install linked and executed the staged host using installed headers/libraries; a
+non-editable Python wheel built and its independently installed staged smoke test
+passed. Paired CI now requires graph support and tests the non-editable wheel,
+records both revisions and uploads distribution/configuration evidence. Remote
+Linux/Windows/exact-pair publication qualification has **not** run locally.
 
 `bench/benchmark_graph_preparation.c` reports C-only CPU-time phases and graph-owned
 metadata/schedule bytes, iterator bounds/actual peak and output size separately.
@@ -201,3 +217,28 @@ specialization 5.8 microseconds. Execution was approximately 22.7 milliseconds
 on all native runs: this is a preparation architecture gain, not a claimed execution
 speedup. Repeated subprocess/cold-compiler and broader workload/RSS studies remain
 publication requirements, not extrapolations from this one sample.
+
+### Materialized stage cost samples
+
+`bench/ndarray/native-graph-stages.py` separates preparation (including requested
+compilation), specialization, first/warm execution, rebinding, graph-owned metadata,
+iterator bounds/actual scratch, output, reserved intermediates, last consumers and
+whole-process peak RSS. Compiler-only memory is not inferred from RSS. It records
+both revision IDs and dirty tracked-tree indicators; measurements below are working
+tree G5 additions on native `5fd1a2b` / Python `225c3596`, not released-pair signoff.
+
+Fresh subprocess samples of `x - sum(x, axis=0)`, warm imports and five execution
+repetitions, on the same macOS arm64/Python 3.14.4/NumPy 2.5.3 environment:
+
+| Input / route | Prepare (us) | Specialize (us) | First (us) | Warm median (us) | Intermediate / output bytes | Process peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| float32 (1000,16), interpreter | 444 | 10.6 | 26674 | 17653 | 64 / 64000 | 79.2 MB |
+| float64 (1000,16), 2 actual JIT regions | 9241 | 13.0 | 294 | 259 | 128 / 128000 | 78.5 MB |
+| int64 (10,16), interpreter | 152 | 10.8 | 226 | 190 | 128 / 1280 | 76.3 MB |
+
+These are workload/route cost examples, **not controlled cross-dtype speedup
+comparisons**. Preparation includes compilation when requested; import cost is
+excluded. Reduction grouping is unchanged. Metadata is roughly 59 KB per two-stage
+plan and 57 KB per specialization because this experimental API currently uses
+fixed bounded stage/input arrays. This overhead is visible and may matter more than
+materialization for tiny graphs; no memory-efficiency superiority is claimed.

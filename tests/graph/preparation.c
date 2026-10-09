@@ -93,7 +93,7 @@ static void reductions(bool jit) {
 }
 static void validation(void) {
     me_graph_input_metadata input = {"x", ME_FLOAT64, 1, {0}};
-    const char *bad[] = {"x.thing", "sum(x) + x", "sum(x, bogus=1)", "where(x, x)", "x < 1 < 2", "x + missing", "x + 9223372036854775808"};
+    const char *bad[] = {"x.thing", "where(x > 0, sum(x), x)", "sum(x, bogus=1)", "where(x, x)", "x < 1 < 2", "x + missing", "x + 9223372036854775808"};
     for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); i++) {
         me_graph_plan *p = (void *)1;
         CHECK(me_graph_prepare_expression(bad[i], strlen(bad[i]), &input, 1, NULL, &p, &error) != 0);
@@ -141,8 +141,73 @@ static void limits(void) {
     CHECK(me_graph_specialize(p, &input, 1, &options, &s, &error) == ME_GRAPH_ERR_FORMAT && s == NULL);
     me_graph_plan_free(p);
 }
+static void staged(bool jit) {
+    me_graph_input_metadata input = {"x", ME_FLOAT64, 2, {2, 3}};
+    me_graph_plan *p = prepare("x - sum(x, axis=0)", &input, 1, jit), *copy = NULL;
+    CHECK(me_graph_stage_count(p) == 2);
+    CHECK(me_graph_capabilities(p) & ME_GRAPH_CAP_STAGED);
+    CHECK(me_graph_stage_last_consumer(p, 0) == 1);
+    size_t length;
+    const char *json = me_graph_export_json(p, &length);
+    CHECK(!me_graph_prepare_json(json, length, NULL, &copy, &error));
+    me_graph_plan_free(copy);
+    me_graph_schedule *s = NULL;
+    me_graph_specialize_options options = {sizeof(options), ME_GRAPH_VERSION, 1, 23};
+    CHECK(me_graph_specialize(p, &input, 1, &options, &s, &error) == ME_GRAPH_ERR_SHAPE);
+    CHECK(s == NULL);
+    options.intermediate_budget = 24;
+    CHECK(!me_graph_specialize(p, &input, 1, &options, &s, &error));
+    CHECK(me_graph_intermediate_bytes(s) == 24);
+    CHECK(me_graph_stage_output_rank(s, 0) == 1 && me_graph_stage_output_shape(s, 0)[0] == 3);
+    double x[] = {1, 2, 3, 4, 5, 6}, output[6], expected[] = {-4, -5, -6, -1, -2, -3};
+    me_array_view v = view("x", ME_FLOAT64, x, sizeof(x), 2, 2, 3);
+    me_graph_report report;
+    CHECK(!me_graph_execute(s, &v, 1, output, sizeof(output), NULL, &report, &error));
+    CHECK(!memcmp(output, expected, sizeof(output)) && report.stages == 2);
+    output[0] = 99; v.capacity = 1;
+    CHECK(me_graph_execute(s, &v, 1, output, sizeof(output), NULL, &report, &error) == ME_GRAPH_ERR_BINDING);
+    CHECK(output[0] == 99 && error.stage == 0);
+    v.capacity = sizeof(x);
+    x[0] = 10;
+    CHECK(!me_graph_execute(s, &v, 1, output, sizeof(output), NULL, &report, &error));
+    CHECK(output[0] == -4 && output[3] == -10);
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+}
+static void trusted(bool jit) {
+    me_graph_input_metadata input = {"x", ME_FLOAT32, 1, {3}};
+    me_graph_plan *map = prepare("x * 2", &input, 1, jit), *p = NULL;
+    const char *artifact = me_graph_export_map_json(map);
+    CHECK(artifact != NULL);
+    size_t capacity = strlen(artifact) + 2048;
+    char *json = malloc(capacity);
+    CHECK(json != NULL);
+    int size = snprintf(json, capacity,
+        "{\"format\":\"menudet-staged-graph-1\",\"semantics\":\"menudet-numpy-1.1\",\"requires\":[\"numeric\",\"staged\"],"
+        "\"inputs\":[{\"name\":\"x\",\"dtype\":\"float32\"}],\"root\":1,\"stages\":["
+        "{\"id\":0,\"kind\":\"portable\",\"inputs\":{\"x\":{\"input\":\"x\"}},\"artifact\":%s,"
+        "\"contract\":{\"cardinality\":\"elementwise\",\"context\":\"none\",\"effects\":\"ordered-lazy\",\"mask\":\"none\"}},"
+        "{\"id\":1,\"kind\":\"graph\",\"inputs\":{\"y\":{\"stage\":0}},\"graph\":{"
+        "\"format\":\"menudet-graph-1\",\"semantics\":\"menudet-numpy-1.1\",\"requires\":[\"numeric\"],"
+        "\"nodes\":[{\"id\":0,\"op\":\"input\",\"name\":\"y\",\"dtype\":\"auto\"},"
+        "{\"id\":1,\"op\":\"sum\",\"args\":[0],\"axes\":null,\"keepdims\":false,\"dtype\":\"auto\",\"initial\":null,\"where\":null}],"
+        "\"root\":1,\"output\":{\"dtype\":\"auto\",\"casting\":\"unsafe\"}}}]}", artifact);
+    CHECK(size > 0 && (size_t)size < capacity);
+    me_graph_prepare_options options = {sizeof(options), ME_GRAPH_VERSION, jit ? ME_JIT_ON : ME_JIT_OFF, false, true};
+    CHECK(!me_graph_prepare_json(json, (size_t)size, &options, &p, &error));
+    free(json); me_graph_plan_free(map);
+    CHECK(!strcmp(me_graph_stage_kind(p, 0), "portable"));
+    me_graph_schedule *s = NULL;
+    CHECK(!me_graph_specialize(p, &input, 1, NULL, &s, &error));
+    float x[] = {1, 2, 3}, output = 0;
+    me_array_view v = view("x", ME_FLOAT32, x, sizeof(x), 1, 3, 0);
+    CHECK(!me_graph_execute(s, &v, 1, &output, sizeof(output), NULL, NULL, &error));
+    CHECK(output == 12);
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+}
 int main(void) {
     maps(false); lazy(false); reductions(false); validation(); limits();
     maps(true); lazy(true); reductions(true);
+    staged(false); staged(true);
+    trusted(false); trusted(true);
     puts("native graph preparation/execution passed"); return 0;
 }

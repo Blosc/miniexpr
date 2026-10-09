@@ -38,6 +38,12 @@ struct me_graph_plan {
     me_array_options reduction;
     uint64_t initial;
     me_dtype initial_dtype, inferred;
+    int nstages;
+    me_graph_plan *stages[ME_GRAPH_MAX_STAGES];
+    int sources[ME_GRAPH_MAX_STAGES][ME_MAX_VARS]; /* >=0 stage; -1-input index. */
+    int last_consumer[ME_GRAPH_MAX_STAGES];
+    bool portable_stage;
+    bool declared_staged;
 };
 struct me_graph_schedule {
     me_graph_plan *plan;
@@ -47,7 +53,17 @@ struct me_graph_schedule {
     me_dtype dtype;
     size_t bytes, scratch, intermediate;
     me_array_options reduction;
+    me_graph_schedule *stages[ME_GRAPH_MAX_STAGES];
 };
+static me_graph_status g_prepare_staged(yyjson_val *root, const me_graph_prepare_options *options,
+    me_graph_plan **out, me_graph_error *error);
+static me_graph_status g_split_graph(yyjson_val *root, graph_node *nodes, int count, int result,
+    const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error);
+static me_graph_status g_specialize_staged(me_graph_schedule *schedule,
+    const me_graph_specialize_options *options, me_graph_error *error);
+static me_graph_status g_execute_staged(const me_graph_schedule *schedule,
+    const me_array_view *inputs, int ninputs, void *output, size_t capacity,
+    const me_graph_execute_options *options, me_graph_report *report, me_graph_error *error);
 static me_graph_status g_error(me_graph_error *error, int node, me_graph_status rc, const char *text) {
     if (error) {
         memset(error, 0, sizeof(*error));
@@ -236,6 +252,17 @@ static bool g_signed_size(size_t bytes) {
     return true;
 #endif
 }
+static bool g_strides(int rank, const int64_t *shape, size_t width, int64_t *strides) {
+    size_t stride = width;
+    for (int a = rank - 1; a >= 0; a--) {
+        if (!g_signed_size(stride)) return false;
+        if (strides) strides[a] = (int64_t)stride;
+        size_t extent = (size_t)shape[a];
+        if (extent && stride > SIZE_MAX / extent) return false;
+        stride *= extent;
+    }
+    return true;
+}
 static int g_reduce(const char *op) {
     const char *names[] = {"", "sum", "prod", "min", "max", "any", "all"};
     for (int i = 1; i < 7; i++) if (!strcmp(op, names[i])) return i;
@@ -286,8 +313,11 @@ static me_graph_status g_prepare_json(const char *json, size_t length,
     if (options && (options->struct_size != sizeof(*options) || options->version != ME_GRAPH_VERSION ||
         (options->jit != ME_JIT_OFF && options->jit != ME_JIT_ON && options->jit != ME_JIT_DEFAULT)))
         return g_error(error, -1, ME_GRAPH_ERR_FORMAT, "invalid preparation options");
-    yyjson_doc *doc = yyjson_read(json, length, 0);
-    if (!doc) return g_error(error, -1, ME_GRAPH_ERR_FORMAT, "invalid graph JSON");
+    yyjson_read_err decode_error;
+    yyjson_doc *doc = yyjson_read_opts((char *)json, length, 0, NULL, &decode_error);
+    if (!doc) return g_error(error, -1,
+        decode_error.code == YYJSON_READ_ERROR_MEMORY_ALLOCATION ? ME_GRAPH_ERR_OOM : ME_GRAPH_ERR_FORMAT,
+        "graph JSON decode failed");
     me_graph_status rc = ME_GRAPH_ERR_FORMAT;
     me_graph_plan *p = NULL;
     graph_buffer source = {0}, manifest = {0}, canonical = {0};
@@ -296,14 +326,21 @@ static me_graph_status g_prepare_json(const char *json, size_t length,
     int current = -1, mask_node = -1;
     const char *message = "invalid graph schema, fields, keys or nesting";
     yyjson_val *root = yyjson_doc_get_root(doc);
+    if (g_tree(root, 0) && g_equal(yyjson_obj_get(root, "format"), ME_GRAPH_STAGED_FORMAT)) {
+        rc = g_prepare_staged(root, options, out, error);
+        yyjson_doc_free(doc);
+        return rc;
+    }
     const char *const root_fields[] = {"format", "semantics", "requires", "nodes", "root", "output"};
     if (!g_tree(root, 0) || !g_fields(root, root_fields, 6, 6)) goto done;
     if (!g_equal(yyjson_obj_get(root, "format"), ME_GRAPH_FORMAT) || !g_equal(yyjson_obj_get(root, "semantics"), ME_GRAPH_SEMANTICS)) {
         rc = ME_GRAPH_ERR_UNSUPPORTED; message = "unsupported graph format or numerical semantics"; goto done;
     }
     yyjson_val *requires = yyjson_obj_get(root, "requires");
-    if (!yyjson_is_arr(requires) || yyjson_arr_size(requires) != 1 || !g_equal(yyjson_arr_get(requires, 0), "numeric")) {
-        rc = ME_GRAPH_ERR_CAPABILITY; message = "only the numeric graph capability is supported"; goto done;
+    bool staged_capability = yyjson_is_arr(requires) && yyjson_arr_size(requires) == 2 &&
+        g_equal(yyjson_arr_get(requires, 1), "staged");
+    if (!yyjson_is_arr(requires) || (yyjson_arr_size(requires) != 1 && !staged_capability) || !g_equal(yyjson_arr_get(requires, 0), "numeric")) {
+        rc = ME_GRAPH_ERR_CAPABILITY; message = "unsupported graph capability list; expected numeric or numeric/staged"; goto done;
     }
     const char *const output_fields[] = {"dtype", "casting"};
     yyjson_val *output = yyjson_obj_get(root, "output");
@@ -319,6 +356,7 @@ static me_graph_status g_prepare_json(const char *json, size_t length,
     if (!yyjson_is_arr(array) || !yyjson_arr_size(array) || yyjson_arr_size(array) > ME_GRAPH_MAX_NODES ||
         !yyjson_is_uint(root_id) || yyjson_get_uint(root_id) >= yyjson_arr_size(array)) goto done;
     int count = (int)yyjson_arr_size(array), result = (int)yyjson_get_uint(root_id);
+    bool needs_stages = false;
     for (int i = 0; i < count; i++) {
         current = i;
         graph_node *n = &nodes[i]; n->value = yyjson_arr_get(array, (size_t)i);
@@ -355,7 +393,7 @@ static me_graph_status g_prepare_json(const char *json, size_t length,
             }
         } else {
             if (reduction) {
-                if (i != result) { rc = ME_GRAPH_ERR_UNSUPPORTED; message = "intermediate reductions are not supported"; goto done; }
+                if (i != result) needs_stages = true;
                 if (!g_fields(n->value, reduction_fields, 8, 8)) goto done;
                 arity = 1;
                 yyjson_val *where = yyjson_obj_get(n->value, "where");
@@ -395,18 +433,32 @@ static me_graph_status g_prepare_json(const char *json, size_t length,
     }
     nodes[result].reachable = true;
     if (mask_node >= 0) nodes[mask_node].reachable = true;
-    for (int i = count - 1; i >= 0; i--) if (nodes[i].reachable)
+    for (int i = count - 1; i >= 0; i--) if (nodes[i].reachable) {
         for (int j = 0; j < nodes[i].nargs; j++) nodes[nodes[i].args[j]].reachable = true;
+        if (g_reduce(nodes[i].op)) {
+            yyjson_val *where = yyjson_obj_get(nodes[i].value, "where");
+            if (!yyjson_is_null(where)) nodes[(int)yyjson_get_uint(where)].reachable = true;
+        }
+    }
     for (int i = 0; i < count; i++) {
         current = i;
         if (!nodes[i].reachable) { message = "unreachable graph node"; goto done; }
         if (nodes[i].uses > 1 && strcmp(nodes[i].op, "input") && strcmp(nodes[i].op, "constant")) {
-            rc = ME_GRAPH_ERR_UNSUPPORTED; message = "shared computed nodes require a participation-aware scheduler"; goto done;
+            needs_stages = true;
         }
+    }
+    if (needs_stages) {
+        if (!staged_capability) {
+            rc = ME_GRAPH_ERR_CAPABILITY; message = "intermediate reductions/shared computed nodes require the staged capability"; goto done;
+        }
+        rc = g_split_graph(root, nodes, count, result, options, out, error);
+        message = NULL;
+        goto done;
     }
     p = calloc(1, sizeof(*p));
     if (!p) { rc = ME_GRAPH_ERR_OOM; message = "plan allocation failed"; goto done; }
     atomic_init(&p->references, 1);
+    p->declared_staged = staged_capability;
     p->mask = -1; p->ninputs = ni;
     p->reduction.version = ME_ARTIFACT_ARRAY_VERSION;
     int reduction = g_reduce(nodes[result].op), map_root = reduction ? nodes[result].args[0] : result;
@@ -437,9 +489,12 @@ static me_graph_status g_prepare_json(const char *json, size_t length,
                 !(g_equal(yyjson_obj_get(initial, "category"), "typed_scalar") ||
                   g_equal(yyjson_obj_get(initial, "category"), "weak"))) goto done;
             char *s = yyjson_val_write(initial, 0, NULL);
-            bool ok = s && dsl_graph_scalar(s, strlen(s), &p->initial_dtype, &p->initial);
+            me_artifact_status scalar_status = s ? dsl_graph_scalar(s, strlen(s), &p->initial_dtype, &p->initial) : ME_ARTIFACT_ERR_OOM;
             free(s);
-            if (!ok) { message = "invalid initial scalar"; goto done; }
+            if (scalar_status) {
+                rc = scalar_status == ME_ARTIFACT_ERR_OOM ? ME_GRAPH_ERR_OOM : ME_GRAPH_ERR_FORMAT;
+                message = "initial scalar decode failed"; goto done;
+            }
             if (g_equal(yyjson_obj_get(initial, "category"), "weak") && p->initial_dtype != ME_BOOL &&
                 p->initial_dtype != ME_INT64 && p->initial_dtype != ME_FLOAT64) {
                 message = "invalid weak initial transport dtype"; goto done;
@@ -596,6 +651,18 @@ me_graph_status me_graph_specialize(const me_graph_plan *p,
         s->inputs[j] = inputs[i]; s->inputs[j].name = p->names[j];
         if (p->map_indices[j] >= 0 && inputs[i].rank > s->rank) s->rank = inputs[i].rank;
     }
+    if (p->nstages) {
+        s->plan = (me_graph_plan *)p;
+        rc = g_specialize_staged(s, options, error);
+        if (rc) {
+            for (int i = 0; i < p->nstages; i++) me_graph_schedule_free(s->stages[i]);
+            free(s);
+            return rc;
+        }
+        atomic_fetch_add_explicit((atomic_uint *)&p->references, 1, memory_order_relaxed);
+        *out = s;
+        return ME_GRAPH_SUCCESS;
+    }
     for (int a = 0; a < s->rank; a++) s->shape[a] = 1;
     for (int j = 0; j < ninputs; j++) if (p->map_indices[j] >= 0) for (int a = 0; a < s->inputs[j].rank; a++) {
         int axis = s->rank - s->inputs[j].rank + a;
@@ -623,7 +690,9 @@ me_graph_status me_graph_specialize(const me_graph_plan *p,
     if (!g_product(s->output_rank, s->output_shape, g_width(s->dtype), &s->bytes)) goto fail;
     if (p->conversion) {
         s->intermediate = s->bytes;
-        if (!g_signed_size(s->intermediate)) { message = "conversion geometry exceeds signed stride range"; goto fail; }
+        if (!g_signed_size(s->intermediate) || !g_strides(s->output_rank, s->output_shape, g_width(s->dtype), NULL)) {
+            message = "conversion geometry exceeds signed stride range"; goto fail;
+        }
         size_t budget = options && options->intermediate_budget ? options->intermediate_budget : 64 * 1024 * 1024;
         if (s->intermediate > budget) { message = "final conversion intermediate budget exceeded"; goto fail; }
         s->dtype = me_artifact_output_dtype(p->conversion);
@@ -652,6 +721,7 @@ me_graph_status me_graph_execute(const me_graph_schedule *s,
         return g_error(error, -1, ME_GRAPH_ERR_CAPABILITY, "floating status unavailable on this target");
 #endif
     const me_graph_plan *p = s->plan;
+    if (p->nstages) return g_execute_staged(s, inputs, ninputs, output, capacity, options, report, error);
     if (capacity < s->bytes || (capacity && (!output || (uintptr_t)output > UINTPTR_MAX - capacity)) ||
         (s->bytes && (uintptr_t)output % g_width(s->dtype)))
         return g_error(error, -1, ME_GRAPH_ERR_BINDING, "invalid final output capacity or alignment");
@@ -692,11 +762,10 @@ me_graph_status me_graph_execute(const me_graph_schedule *s,
     conversion.version = ME_ARTIFACT_ARRAY_VERSION; conversion.tile_items = reduction.tile_items;
     if (p->conversion) {
         value.name = "value"; value.dtype = p->inferred; value.base = temporary; value.capacity = s->intermediate;
-        value.rank = s->output_rank; size_t stride = g_width(value.dtype);
-        for (int a = value.rank - 1; a >= 0; a--) {
-            if (!g_signed_size(stride)) { free(temporary); return g_error(error, -1, ME_GRAPH_ERR_BINDING, "conversion stride overflow"); }
-            value.shape[a] = s->output_shape[a]; value.strides[a] = (int64_t)stride;
-            stride *= (size_t)value.shape[a];
+        value.rank = s->output_rank;
+        memcpy(value.shape, s->output_shape, sizeof(value.shape));
+        if (!g_strides(value.rank, value.shape, g_width(value.dtype), value.strides)) {
+            free(temporary); return g_error(error, -1, ME_GRAPH_ERR_BINDING, "conversion stride overflow");
         }
         status = dsl_array_preflight(p->conversion, &value, 1, value.rank, value.shape, &conversion,
             output, capacity, &native);
@@ -737,7 +806,13 @@ me_graph_status me_graph_execute(const me_graph_schedule *s,
     }
     free(temporary);
     array.fp_flags |= initial_status.flags;
-    if (report) { report->array = array; report->has_jit = me_artifact_has_jit(p->map); report->stages = p->conversion ? 2 : 1; }
+    if (report) {
+        report->array = array;
+        report->has_jit = me_artifact_has_jit(p->map);
+        report->stages = p->conversion ? 2 : 1;
+        report->jit_stages = report->has_jit ? 1 : 0;
+        report->interpreter_stages = (size_t)active_stage + 1 - report->jit_stages;
+    }
     if (status) {
         me_graph_status rc = status == ME_ARTIFACT_ERR_OOM ? ME_GRAPH_ERR_OOM :
             status == ME_ARTIFACT_ERR_UNSUPPORTED ? ME_GRAPH_ERR_CAPABILITY :
@@ -763,10 +838,14 @@ me_dtype me_graph_inferred_dtype(const me_graph_plan *p) {
     return p ? p->inferred : ME_AUTO;
 }
 bool me_graph_has_jit(const me_graph_plan *p) {
+    if (p && p->nstages) {
+        for (int i = 0; i < p->nstages; i++) if (!me_graph_has_jit(p->stages[i])) return false;
+        return true;
+    }
     return p && me_artifact_has_jit(p->map);
 }
 unsigned me_graph_capabilities(const me_graph_plan *p) {
-    return p ? ME_ARTIFACT_CAP_NUMERIC : 0;
+    return p ? ME_ARTIFACT_CAP_NUMERIC | (p->nstages || p->declared_staged ? ME_GRAPH_CAP_STAGED : 0) : 0;
 }
 const char *me_graph_export_json(const me_graph_plan *p, size_t *n) {
     if (n) *n = p ? p->json_size : 0;
@@ -801,25 +880,491 @@ size_t me_graph_intermediate_bytes(const me_graph_schedule *s) {
     return s ? s->intermediate : 0;
 }
 size_t me_graph_stage_count(const me_graph_plan *p) {
+    if (p && p->nstages) return (size_t)p->nstages;
     return p ? p->conversion ? 2 : 1 : 0;
 }
 size_t me_graph_plan_bytes(const me_graph_plan *p) {
     if (!p) return 0;
     size_t bytes = sizeof(*p) + p->json_size + 1 + (p->map_json ? strlen(p->map_json) + 1 : 0);
     for (int i = 0; i < p->ninputs; i++) bytes += strlen(p->names[i]) + 1;
+    for (int i = 0; i < p->nstages; i++) bytes += me_graph_plan_bytes(p->stages[i]);
     return bytes;
 }
 size_t me_graph_schedule_bytes(const me_graph_schedule *s) {
-    return s ? sizeof(*s) : 0;
+    if (!s) return 0;
+    size_t bytes = sizeof(*s);
+    for (int i = 0; i < s->plan->nstages; i++) bytes += me_graph_schedule_bytes(s->stages[i]);
+    return bytes;
 }
 void me_graph_plan_free(me_graph_plan *p) {
     if (!p || atomic_fetch_sub_explicit(&p->references, 1, memory_order_acq_rel) != 1) return;
     me_artifact_free(p->map); me_artifact_free(p->conversion); me_artifact_free(p->initial_conversion);
     free(p->json); free(p->map_json);
     for (int i = 0; i < p->ninputs; i++) free(p->names[i]);
+    for (int i = 0; i < p->nstages; i++) me_graph_plan_free(p->stages[i]);
     free(p);
 }
 void me_graph_schedule_free(me_graph_schedule *s) {
     if (!s) return;
+    for (int i = 0; i < s->plan->nstages; i++) me_graph_schedule_free(s->stages[i]);
     me_graph_plan_free(s->plan); free(s);
+}
+
+static me_dtype g_result_dtype(const me_graph_plan *p) {
+    return p->conversion ? me_artifact_output_dtype(p->conversion) : p->inferred;
+}
+static me_graph_status g_split_graph(yyjson_val *root, graph_node *nodes, int count, int result,
+    const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error) {
+    bool boundary[ME_GRAPH_MAX_NODES] = {0};
+    bool strong_dependency[ME_GRAPH_MAX_NODES] = {0};
+    int stage_ids[ME_GRAPH_MAX_NODES], roots[ME_GRAPH_MAX_STAGES], nstages = 0;
+    for (int i = 0; i < count; i++) {
+        stage_ids[i] = -1;
+        strong_dependency[i] = !strcmp(nodes[i].op, "input") || g_reduce(nodes[i].op);
+        for (int j = 0; j < nodes[i].nargs; j++) strong_dependency[i] |= strong_dependency[nodes[i].args[j]];
+        if (!strcmp(nodes[i].op, "select") || !strcmp(nodes[i].op, "and") || !strcmp(nodes[i].op, "or") ||
+            (g_reduce(nodes[i].op) && !yyjson_is_null(yyjson_obj_get(nodes[i].value, "where"))))
+            return g_error(error, i, ME_GRAPH_ERR_UNSUPPORTED, "automatic stages reject conditional or masked participation domains; declare independent stages explicitly");
+        boundary[i] = i == result || g_reduce(nodes[i].op) ||
+            (nodes[i].uses > 1 && strcmp(nodes[i].op, "input") && strcmp(nodes[i].op, "constant"));
+        if (boundary[i]) {
+            if (i != result && !g_reduce(nodes[i].op) && !strong_dependency[i])
+                return g_error(error, i, ME_GRAPH_ERR_UNSUPPORTED, "shared scalar-only computations cannot be materialized as strong stage inputs");
+            if (nstages == ME_GRAPH_MAX_STAGES)
+                return g_error(error, i, ME_GRAPH_ERR_FORMAT, "automatic stage limit exceeded");
+            stage_ids[i] = nstages;
+            roots[nstages++] = i;
+        }
+    }
+    if (!g_equal(yyjson_obj_get(yyjson_obj_get(root, "output"), "dtype"), "auto"))
+        return g_error(error, result, ME_GRAPH_ERR_UNSUPPORTED, "staged results require auto output; use explicit cast nodes");
+    graph_buffer json = {0};
+    g_add(&json, "{\"format\":\"" ME_GRAPH_STAGED_FORMAT "\",\"semantics\":\"" ME_GRAPH_SEMANTICS
+        "\",\"requires\":[\"numeric\",\"staged\"],\"inputs\":[");
+    bool first = true;
+    for (int i = 0; i < count; i++) if (!strcmp(nodes[i].op, "input")) {
+        if (!first) g_add(&json, ",");
+        first = false;
+        g_add(&json, "{\"name\":"); g_json(&json, yyjson_obj_get(nodes[i].value, "name"));
+        g_add(&json, ",\"dtype\":"); g_json(&json, yyjson_obj_get(nodes[i].value, "dtype")); g_add(&json, "}");
+    }
+    g_add(&json, "],\"stages\":[");
+    for (int stage = 0; stage < nstages; stage++) {
+        int stage_root = roots[stage], mapped[ME_GRAPH_MAX_NODES];
+        bool needed[ME_GRAPH_MAX_NODES] = {0};
+        needed[stage_root] = true;
+        for (int i = stage_root; i >= 0; i--) if (needed[i] && (i == stage_root || !boundary[i])) {
+            for (int j = 0; j < nodes[i].nargs; j++) needed[nodes[i].args[j]] = true;
+        }
+        char text[96];
+        snprintf(text, sizeof(text), "%s{\"id\":%d,\"kind\":\"graph\",\"inputs\":{", stage ? "," : "", stage);
+        g_add(&json, text);
+        first = true;
+        for (int i = 0; i <= stage_root; i++) if (needed[i]) {
+            bool intermediate = boundary[i] && i != stage_root;
+            if (!intermediate && strcmp(nodes[i].op, "input")) continue;
+            if (!first) g_add(&json, ",");
+            first = false;
+            if (intermediate) {
+                snprintf(text, sizeof(text), "\"_me_stage_%d\":{\"stage\":%d}", i, stage_ids[i]);
+                g_add(&json, text);
+            } else {
+                yyjson_val *name = yyjson_obj_get(nodes[i].value, "name");
+                const char *s = g_str(name);
+                if (!strncmp(s, "_me_stage_", strlen("_me_stage_"))) {
+                    free(json.data);
+                    return g_error(error, i, ME_GRAPH_ERR_BINDING, "input name collides with automatic stage namespace");
+                }
+                g_json(&json, name); g_add(&json, ":{\"input\":"); g_json(&json, name); g_add(&json, "}");
+            }
+        }
+        g_add(&json, "},\"graph\":{\"format\":\"" ME_GRAPH_FORMAT "\",\"semantics\":\"" ME_GRAPH_SEMANTICS
+            "\",\"requires\":[\"numeric\"],\"nodes\":[");
+        int n = 0;
+        for (int i = 0; i <= stage_root; i++) if (needed[i]) {
+            mapped[i] = n++;
+            if (mapped[i]) g_add(&json, ",");
+            if (boundary[i] && i != stage_root) {
+                snprintf(text, sizeof(text), "{\"id\":%d,\"op\":\"input\",\"name\":\"_me_stage_%d\",\"dtype\":\"auto\"}", mapped[i], i);
+                g_add(&json, text);
+            } else {
+                yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+                yyjson_mut_val *node = doc ? yyjson_val_mut_copy(doc, nodes[i].value) : NULL;
+                bool ok = node && yyjson_mut_obj_put(node, yyjson_mut_str(doc, "id"), yyjson_mut_uint(doc, (uint64_t)mapped[i]));
+                if (ok && nodes[i].nargs) {
+                    yyjson_mut_val *args = yyjson_mut_arr(doc);
+                    for (int j = 0; ok && j < nodes[i].nargs; j++)
+                        ok = yyjson_mut_arr_add_int(doc, args, mapped[nodes[i].args[j]]);
+                    ok = ok && yyjson_mut_obj_put(node, yyjson_mut_str(doc, "args"), args);
+                }
+                char *encoded = ok ? yyjson_mut_val_write(node, 0, NULL) : NULL;
+                if (!encoded) json.failed = json.oom = true;
+                else g_add(&json, encoded);
+                free(encoded); yyjson_mut_doc_free(doc);
+            }
+        }
+        snprintf(text, sizeof(text), "],\"root\":%d,\"output\":", mapped[stage_root]);
+        g_add(&json, text);
+        g_json(&json, yyjson_obj_get(root, "output")); g_add(&json, "}}");
+    }
+    char end[32]; snprintf(end, sizeof(end), "],\"root\":%d}", nstages - 1); g_add(&json, end);
+    me_graph_status rc = json.failed ? g_error(error, -1, json.oom ? ME_GRAPH_ERR_OOM : ME_GRAPH_ERR_FORMAT,
+        "automatic stage allocation or byte limit exceeded") :
+        me_graph_prepare_json(json.data, json.size, options, out, error);
+    free(json.data);
+    return rc;
+}
+static int g_source(const me_graph_plan *p, yyjson_val *binding, int stage) {
+    const char *const input_field[] = {"input"}, *const stage_field[] = {"stage"};
+    if (g_fields(binding, input_field, 1, 1)) {
+        int index = g_find(p, g_str(yyjson_obj_get(binding, "input")));
+        return index < 0 ? INT_MIN : -1 - index;
+    }
+    yyjson_val *id = yyjson_obj_get(binding, "stage");
+    if (g_fields(binding, stage_field, 1, 1) && yyjson_is_uint(id) && yyjson_get_uint(id) < (uint64_t)stage)
+        return (int)yyjson_get_uint(id);
+    return INT_MIN;
+}
+static me_dtype g_source_dtype(const me_graph_plan *p, int source) {
+    return source < 0 ? p->types[-1 - source] : g_result_dtype(p->stages[source]);
+}
+static me_graph_status g_prepare_portable(yyjson_val *stage, const me_graph_prepare_options *options,
+    me_graph_plan **out, me_graph_error *error) {
+    const char *const fields[] = {"cardinality", "context", "effects", "mask"};
+    yyjson_val *contract = yyjson_obj_get(stage, "contract"), *artifact = yyjson_obj_get(stage, "artifact");
+    if (!g_fields(contract, fields, 4, 4) ||
+        !g_equal(yyjson_obj_get(contract, "cardinality"), "elementwise") ||
+        !g_equal(yyjson_obj_get(contract, "context"), "none") ||
+        !g_equal(yyjson_obj_get(contract, "effects"), "ordered-lazy") ||
+        !g_equal(yyjson_obj_get(contract, "mask"), "none") ||
+        !g_equal(yyjson_obj_get(artifact, "schema_version"), "1.1") ||
+        !g_equal(yyjson_obj_get(yyjson_obj_get(artifact, "language"), "version"), "1.1"))
+        return g_error(error, -1, ME_GRAPH_ERR_UNSUPPORTED, "trusted stages require portable 1.1 elementwise/context-free/ordered-lazy/unmasked contracts");
+    me_graph_plan *p = calloc(1, sizeof(*p));
+    if (!p) return g_error(error, -1, ME_GRAPH_ERR_OOM, "portable stage allocation failed");
+    atomic_init(&p->references, 1);
+    p->mask = -1;
+    p->portable_stage = true;
+    p->reduction.version = ME_ARTIFACT_ARRAY_VERSION;
+    graph_buffer json = {0};
+    g_json(&json, artifact);
+    me_artifact_error native = {0};
+    int status = json.failed ? ME_ARTIFACT_ERR_OOM :
+        me_artifact_load(json.data, json.size, options ? options->jit : ME_JIT_OFF, &p->map, &native);
+    free(json.data);
+    me_graph_status rc = ME_GRAPH_SUCCESS;
+    if (status) rc = g_native(error, -1, status, &native);
+    else if (me_artifact_result_cardinality(p->map) != ME_ARTIFACT_ELEMENTWISE ||
+        me_artifact_context_ndim(p->map) || me_artifact_capabilities(p->map) != ME_ARTIFACT_CAP_NUMERIC)
+        rc = g_error(error, -1, ME_GRAPH_ERR_UNSUPPORTED, "trusted stage must be numeric elementwise without control-flow, reductions or ND context");
+    else if (options && options->require_jit && !me_artifact_has_jit(p->map))
+        rc = g_error(error, -1, ME_GRAPH_ERR_CAPABILITY, "required trusted-stage JIT unavailable");
+    if (!rc) {
+        p->ninputs = me_artifact_ninputs(p->map);
+        p->inferred = me_artifact_output_dtype(p->map);
+        for (int i = 0; i < p->ninputs; i++) {
+            p->names[i] = g_copy(me_artifact_input_name(p->map, i));
+            p->types[i] = me_artifact_input_dtype(p->map, i);
+            p->map_indices[i] = i;
+            if (!p->names[i]) rc = g_error(error, -1, ME_GRAPH_ERR_OOM, "trusted signature allocation failed");
+        }
+    }
+    if (rc) me_graph_plan_free(p);
+    else *out = p;
+    return rc;
+}
+static me_graph_status g_prepare_staged(yyjson_val *root, const me_graph_prepare_options *options,
+    me_graph_plan **out, me_graph_error *error) {
+    const char *const fields[] = {"format", "semantics", "requires", "inputs", "stages", "root"};
+    yyjson_val *requires = yyjson_obj_get(root, "requires"), *inputs = yyjson_obj_get(root, "inputs");
+    yyjson_val *stages = yyjson_obj_get(root, "stages"), *result = yyjson_obj_get(root, "root");
+    if (!g_fields(root, fields, 6, 6) || !yyjson_is_arr(inputs) || yyjson_arr_size(inputs) > ME_MAX_VARS ||
+        !yyjson_is_arr(stages) || !yyjson_arr_size(stages) || yyjson_arr_size(stages) > ME_GRAPH_MAX_STAGES ||
+        !yyjson_is_uint(result) || yyjson_get_uint(result) != yyjson_arr_size(stages) - 1)
+        return g_error(error, -1, ME_GRAPH_ERR_FORMAT, "invalid staged schema or stage/root limit");
+    if (!g_equal(yyjson_obj_get(root, "semantics"), ME_GRAPH_SEMANTICS) ||
+        !yyjson_is_arr(requires) || yyjson_arr_size(requires) != 2 ||
+        !g_equal(yyjson_arr_get(requires, 0), "numeric") || !g_equal(yyjson_arr_get(requires, 1), "staged"))
+        return g_error(error, -1, ME_GRAPH_ERR_CAPABILITY, "staged graphs require explicit numeric/staged capabilities and supported semantics");
+    me_graph_plan *p = calloc(1, sizeof(*p));
+    if (!p) return g_error(error, -1, ME_GRAPH_ERR_OOM, "staged plan allocation failed");
+    atomic_init(&p->references, 1);
+    p->mask = -1;
+    p->ninputs = (int)yyjson_arr_size(inputs);
+    p->nstages = (int)yyjson_arr_size(stages);
+    me_graph_status rc = ME_GRAPH_ERR_FORMAT;
+    bool used[ME_MAX_VARS] = {0}, reachable[ME_GRAPH_MAX_STAGES] = {0};
+    int current = -1;
+    for (int i = 0; i < p->ninputs; i++) {
+        const char *const input_fields[] = {"name", "dtype"};
+        yyjson_val *v = yyjson_arr_get(inputs, (size_t)i);
+        const char *name = g_str(yyjson_obj_get(v, "name"));
+        me_dtype dtype = g_dtype(g_str(yyjson_obj_get(v, "dtype")));
+        if (!g_fields(v, input_fields, 2, 2) || !g_name(name) || dtype == ME_AUTO) goto failure;
+        for (int j = 0; j < i; j++) if (!strcmp(p->names[j], name)) goto failure;
+        p->names[i] = g_copy(name);
+        if (!p->names[i]) { rc = ME_GRAPH_ERR_OOM; goto failure; }
+        p->types[i] = dtype;
+    }
+    for (int i = 0; i < p->nstages; i++) {
+        current = i;
+        p->last_consumer[i] = i;
+        yyjson_val *stage = yyjson_arr_get(stages, (size_t)i), *id = yyjson_obj_get(stage, "id");
+        yyjson_val *bindings = yyjson_obj_get(stage, "inputs");
+        const char *const graph_fields[] = {"id", "kind", "inputs", "graph"};
+        const char *const portable_fields[] = {"id", "kind", "inputs", "artifact", "contract"};
+        bool portable = g_equal(yyjson_obj_get(stage, "kind"), "portable");
+        if (!(portable || g_equal(yyjson_obj_get(stage, "kind"), "graph")) ||
+            !g_fields(stage, portable ? portable_fields : graph_fields, portable ? 5 : 4, portable ? 5 : 4) ||
+            !yyjson_is_uint(id) || yyjson_get_uint(id) != (uint64_t)i || !yyjson_is_obj(bindings) ||
+            yyjson_obj_size(bindings) > ME_MAX_VARS) goto failure;
+        size_t j, count; yyjson_val *key, *binding;
+        yyjson_obj_foreach(bindings, j, count, key, binding) {
+            if (!g_name(g_str(key)) || g_source(p, binding, i) == INT_MIN) goto failure;
+        }
+        if (portable) {
+            rc = g_prepare_portable(stage, options, &p->stages[i], error);
+        } else {
+            yyjson_val *graph = yyjson_obj_get(stage, "graph");
+            if (!g_equal(yyjson_obj_get(graph, "format"), ME_GRAPH_FORMAT)) goto failure;
+            /* Native inferred signatures replace auto only for stage-bound inputs.
+             * Explicit declarations are independently checked after preparation. */
+            yyjson_mut_doc *copy = yyjson_mut_doc_new(NULL);
+            yyjson_mut_val *value = copy ? yyjson_val_mut_copy(copy, graph) : NULL;
+            if (!value) { yyjson_mut_doc_free(copy); rc = ME_GRAPH_ERR_OOM; goto failure; }
+            yyjson_mut_doc_set_root(copy, value);
+            yyjson_mut_val *nodes = yyjson_mut_obj_get(value, "nodes"), *node;
+            yyjson_mut_arr_foreach(nodes, j, count, node) {
+                const char *op = yyjson_mut_get_str(yyjson_mut_obj_get(node, "op"));
+                if (!op || strcmp(op, "input")) continue;
+                const char *name = yyjson_mut_get_str(yyjson_mut_obj_get(node, "name"));
+                int source = g_source(p, name ? yyjson_obj_get(bindings, name) : NULL, i);
+                if (source == INT_MIN) { yyjson_mut_doc_free(copy); goto failure; }
+                const char *dtype = yyjson_mut_get_str(yyjson_mut_obj_get(node, "dtype"));
+                if (dtype && !strcmp(dtype, "auto")) {
+                    yyjson_mut_val *k = yyjson_mut_str(copy, "dtype");
+                    yyjson_mut_val *v = yyjson_mut_str(copy, g_dtype_name(g_source_dtype(p, source)));
+                    if (!k || !v || !yyjson_mut_obj_put(node, k, v)) {
+                        yyjson_mut_doc_free(copy); rc = ME_GRAPH_ERR_OOM; goto failure;
+                    }
+                }
+            }
+            size_t length = 0;
+            char *json = yyjson_mut_write(copy, 0, &length);
+            yyjson_mut_doc_free(copy);
+            if (!json) { rc = ME_GRAPH_ERR_OOM; goto failure; }
+            rc = me_graph_prepare_json(json, length, options, &p->stages[i], error);
+            free(json);
+        }
+        if (rc) goto nested_failure;
+        me_graph_plan *child = p->stages[i];
+        if (child->conversion || child->nstages) {
+            rc = ME_GRAPH_ERR_UNSUPPORTED;
+            g_error(error, -1, rc, "staged regions must be nonnested with auto result dtype; express conversion as a cast node");
+            goto nested_failure;
+        }
+        if (yyjson_obj_size(bindings) != (size_t)child->ninputs) { rc = ME_GRAPH_ERR_BINDING; goto failure; }
+        for (int j = 0; j < child->ninputs; j++) {
+            int source = g_source(p, yyjson_obj_get(bindings, child->names[j]), i);
+            if (source == INT_MIN) { rc = ME_GRAPH_ERR_BINDING; goto failure; }
+            if (child->types[j] != g_source_dtype(p, source)) { rc = ME_GRAPH_ERR_SIGNATURE; goto failure; }
+            p->sources[i][j] = source;
+            if (source >= 0) p->last_consumer[source] = i;
+            else used[-1 - source] = true;
+        }
+    }
+    reachable[p->nstages - 1] = true;
+    for (int i = p->nstages - 1; i >= 0; i--) if (reachable[i]) {
+        for (int j = 0; j < p->stages[i]->ninputs; j++) if (p->sources[i][j] >= 0)
+            reachable[p->sources[i][j]] = true;
+    }
+    for (int i = 0; i < p->nstages; i++) if (!reachable[i]) goto failure;
+    for (int i = 0; i < p->ninputs; i++) if (!used[i]) goto failure;
+    graph_buffer canonical = {0};
+    g_json(&canonical, root);
+    if (canonical.failed) { free(canonical.data); rc = ME_GRAPH_ERR_OOM; goto failure; }
+    p->json = canonical.data;
+    p->json_size = canonical.size;
+    p->inferred = g_result_dtype(p->stages[p->nstages - 1]);
+    *out = p;
+    return ME_GRAPH_SUCCESS;
+failure:
+    g_error(error, -1, rc == ME_GRAPH_SUCCESS ? ME_GRAPH_ERR_FORMAT : rc,
+        "invalid staged graph, source reference, signature, reachability or allocation");
+    if (!rc) rc = ME_GRAPH_ERR_FORMAT;
+nested_failure:
+    if (error) error->stage = current;
+    me_graph_plan_free(p);
+    return rc;
+}
+static me_graph_status g_specialize_staged(me_graph_schedule *s,
+    const me_graph_specialize_options *options, me_graph_error *error) {
+    const me_graph_plan *p = s->plan;
+    size_t budget = options && options->intermediate_budget ? options->intermediate_budget : 64 * 1024 * 1024;
+    for (int i = 0; i < p->nstages; i++) {
+        me_graph_input_metadata inputs[ME_MAX_VARS] = {0};
+        me_graph_plan *child = p->stages[i];
+        for (int j = 0; j < child->ninputs; j++) {
+            int source = p->sources[i][j];
+            if (source < 0) inputs[j] = s->inputs[-1 - source];
+            else {
+                me_graph_schedule *producer = s->stages[source];
+                inputs[j].dtype = producer->dtype;
+                inputs[j].rank = producer->output_rank;
+                memcpy(inputs[j].shape, producer->output_shape, sizeof(inputs[j].shape));
+            }
+            inputs[j].name = child->names[j];
+        }
+        me_graph_status rc = me_graph_specialize(child, inputs, child->ninputs, options, &s->stages[i], error);
+        if (rc) {
+            if (error) error->stage = i;
+            return rc;
+        }
+        me_graph_schedule *region = s->stages[i];
+        if (region->scratch > s->scratch) s->scratch = region->scratch;
+        if (i < p->nstages - 1) {
+            if (!g_signed_size(region->bytes) ||
+                !g_strides(region->output_rank, region->output_shape, g_width(region->dtype), NULL) ||
+                region->bytes > budget - s->intermediate)
+                return g_error(error, -1, ME_GRAPH_ERR_SHAPE, "staged intermediate budget or stride range exceeded");
+            s->intermediate += region->bytes;
+        } else {
+            s->dtype = region->dtype;
+            s->bytes = region->bytes;
+            s->rank = region->rank;
+            s->output_rank = region->output_rank;
+            memcpy(s->shape, region->shape, sizeof(s->shape));
+            memcpy(s->output_shape, region->output_shape, sizeof(s->output_shape));
+        }
+    }
+    return ME_GRAPH_SUCCESS;
+}
+static void g_stage_views(const me_graph_schedule *s, int stage, const me_array_view *external,
+    const me_array_view *results, me_array_view *inputs, me_array_view *maps, me_array_options *reduction) {
+    const me_graph_plan *p = s->plan, *child = p->stages[stage];
+    *reduction = s->stages[stage]->reduction;
+    for (int j = 0; j < child->ninputs; j++) {
+        int source = p->sources[stage][j];
+        inputs[j] = source < 0 ? external[-1 - source] : results[source];
+        inputs[j].name = child->names[j];
+        if (j == child->mask) reduction->where = &inputs[j];
+        if (child->map_indices[j] >= 0) maps[child->map_indices[j]] = inputs[j];
+    }
+}
+static me_graph_status g_execute_staged(const me_graph_schedule *s, const me_array_view *inputs,
+    int ninputs, void *output, size_t capacity, const me_graph_execute_options *options,
+    me_graph_report *report, me_graph_error *error) {
+    const me_graph_plan *p = s->plan;
+    me_array_view external[ME_MAX_VARS], results[ME_GRAPH_MAX_STAGES] = {0};
+    bool seen[ME_MAX_VARS] = {0};
+    if (capacity < s->bytes || (capacity && (!output || (uintptr_t)output > UINTPTR_MAX - capacity)) ||
+        (s->bytes && (uintptr_t)output % g_width(s->dtype)))
+        return g_error(error, -1, ME_GRAPH_ERR_BINDING, "invalid staged output capacity or alignment");
+    for (int i = 0; i < ninputs; i++) {
+        int j = g_find(p, inputs[i].name);
+        if (j < 0 || seen[j] || inputs[i].dtype != p->types[j] || inputs[i].rank != s->inputs[j].rank)
+            return g_error(error, -1, ME_GRAPH_ERR_BINDING, "invalid staged invocation binding");
+        seen[j] = true;
+        for (int a = 0; a < inputs[i].rank; a++) if (inputs[i].shape[a] != s->inputs[j].shape[a])
+            return g_error(error, -1, ME_GRAPH_ERR_BINDING, "staged shape changed; specialize again");
+        if (inputs[i].capacity && (!inputs[i].base || (uintptr_t)inputs[i].base > UINTPTR_MAX - inputs[i].capacity))
+            return g_error(error, -1, ME_GRAPH_ERR_BINDING, "invalid staged input allocation");
+        if (capacity && inputs[i].capacity && (uintptr_t)output < (uintptr_t)inputs[i].base + inputs[i].capacity &&
+            (uintptr_t)inputs[i].base < (uintptr_t)output + capacity)
+            return g_error(error, -1, ME_GRAPH_ERR_BINDING, "staged output overlaps input");
+        external[j] = inputs[i];
+    }
+    /* Allocate every materialized dependency before executing anything. The
+     * budget reports this honest reservation, not a hypothetical live peak. */
+    me_graph_status rc = ME_GRAPH_SUCCESS;
+    int current = -1;
+    for (int i = 0; i < p->nstages; i++) {
+        current = i;
+        const me_graph_schedule *region = s->stages[i];
+        results[i].dtype = region->dtype;
+        results[i].rank = region->output_rank;
+        memcpy(results[i].shape, region->output_shape, sizeof(results[i].shape));
+        results[i].capacity = i == p->nstages - 1 ? capacity : region->bytes;
+        results[i].base = i == p->nstages - 1 ? output : region->bytes ? malloc(region->bytes) : NULL;
+        if (region->bytes && !results[i].base) { rc = ME_GRAPH_ERR_OOM; goto failure; }
+        if (!g_strides(region->output_rank, results[i].shape, g_width(region->dtype), results[i].strides)) {
+            rc = ME_GRAPH_ERR_BINDING; goto failure;
+        }
+    }
+    for (int i = 0; i < p->nstages; i++) {
+        current = i;
+        me_array_view bindings[ME_MAX_VARS], maps[ME_MAX_VARS];
+        me_array_options reduction;
+        g_stage_views(s, i, external, results, bindings, maps, &reduction);
+        const me_graph_schedule *region = s->stages[i];
+        me_artifact_error native;
+        int status = dsl_array_preflight(region->plan->map, maps, me_artifact_ninputs(region->plan->map),
+            region->rank, region->shape, &reduction, (void *)results[i].base, results[i].capacity, &native);
+        if (status) {
+            rc = g_error(error, -1, ME_GRAPH_ERR_BINDING, native.message);
+            goto cleanup;
+        }
+    }
+    for (int i = 0; i < p->nstages; i++) {
+        current = i;
+        me_array_view bindings[ME_MAX_VARS], maps[ME_MAX_VARS];
+        me_array_options reduction;
+        g_stage_views(s, i, external, results, bindings, maps, &reduction);
+        me_graph_report region = {0};
+        rc = me_graph_execute(s->stages[i], bindings, p->stages[i]->ninputs, (void *)results[i].base,
+            results[i].capacity, options, &region, error);
+        if (report) {
+            report->array.fp_flags |= region.array.fp_flags;
+            report->array.fp_supported = region.array.fp_supported;
+            report->array.gathered_bytes += region.array.gathered_bytes;
+            report->array.evaluated_tiles += region.array.evaluated_tiles;
+            report->array.zero_copy_tiles += region.array.zero_copy_tiles;
+            if (region.array.temporary_bytes > report->array.temporary_bytes)
+                report->array.temporary_bytes = region.array.temporary_bytes;
+            report->jit_stages += region.jit_stages;
+            report->interpreter_stages += region.interpreter_stages;
+            report->stages = (size_t)p->nstages;
+            report->has_jit = me_graph_has_jit(p);
+        }
+        if (rc) goto cleanup;
+        for (int j = 0; j < i; j++) if (p->last_consumer[j] == i) {
+            free((void *)results[j].base);
+            results[j].base = NULL;
+        }
+    }
+    goto cleanup;
+failure:
+    g_error(error, -1, rc, "staged intermediate allocation or geometry failed");
+cleanup:
+    if (rc && error) error->stage = current;
+    for (int i = 0; i < p->nstages - 1; i++) free((void *)results[i].base);
+    return rc;
+}
+const char *me_graph_stage_kind(const me_graph_plan *p, int stage) {
+    if (!p || stage < 0 || (size_t)stage >= me_graph_stage_count(p)) return NULL;
+    if (p->nstages) return p->stages[stage]->portable_stage ? "portable" : "graph";
+    return stage ? "conversion" : p->portable_stage ? "portable" : "graph";
+}
+int me_graph_stage_last_consumer(const me_graph_plan *p, int stage) {
+    if (!p || stage < 0 || (size_t)stage >= me_graph_stage_count(p)) return -1;
+    return p->nstages ? p->last_consumer[stage] : (int)me_graph_stage_count(p) - 1;
+}
+int me_graph_stage_output_rank(const me_graph_schedule *s, int stage) {
+    if (!s || stage < 0 || (size_t)stage >= me_graph_stage_count(s->plan)) return -1;
+    return s->plan->nstages ? s->stages[stage]->output_rank : s->output_rank;
+}
+const int64_t *me_graph_stage_output_shape(const me_graph_schedule *s, int stage) {
+    if (me_graph_stage_output_rank(s, stage) < 0) return NULL;
+    return s->plan->nstages ? s->stages[stage]->output_shape : s->output_shape;
+}
+me_dtype me_graph_stage_output_dtype(const me_graph_schedule *s, int stage) {
+    if (me_graph_stage_output_rank(s, stage) < 0) return ME_AUTO;
+    return s->plan->nstages ? s->stages[stage]->dtype : stage ? s->dtype : s->plan->inferred;
+}
+size_t me_graph_stage_output_bytes(const me_graph_schedule *s, int stage) {
+    if (me_graph_stage_output_rank(s, stage) < 0) return 0;
+    return s->plan->nstages ? s->stages[stage]->bytes : stage ? s->bytes : s->intermediate ? s->intermediate : s->bytes;
+}
+int me_graph_schedule_stage_last_consumer(const me_graph_schedule *s, int stage) {
+    return s ? me_graph_stage_last_consumer(s->plan, stage) : -1;
 }

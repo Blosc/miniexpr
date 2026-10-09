@@ -8,6 +8,9 @@ extern "C" {
 #define ME_GRAPH_VERSION 1
 #define ME_GRAPH_FORMAT "menudet-graph-1"
 #define ME_GRAPH_SEMANTICS "menudet-numpy-1.1"
+#define ME_GRAPH_STAGED_FORMAT "menudet-staged-graph-1"
+#define ME_GRAPH_MAX_STAGES 32
+#define ME_GRAPH_CAP_STAGED 64u
 #define ME_GRAPH_MAX_BYTES (1024 * 1024)
 #define ME_GRAPH_MAX_NODES 256
 #define ME_GRAPH_MAX_DEPTH 64
@@ -54,6 +57,8 @@ typedef struct {
     me_array_report array;
     bool has_jit; /* Actual map route, not requested preference. */
     size_t stages;
+    size_t jit_stages;
+    size_t interpreter_stages;
 } me_graph_report;
 /* NULL options select interpretation/default geometry. Errors may be NULL.
  * Preparation copies graph/captures, reads no arrays and evaluates no constants.
@@ -92,6 +97,16 @@ size_t me_graph_intermediate_bytes(const me_graph_schedule *schedule);
 size_t me_graph_stage_count(const me_graph_plan *plan);
 size_t me_graph_plan_bytes(const me_graph_plan *plan); /* Owned graph metadata, excluding compiler/artifact resources. */
 size_t me_graph_schedule_bytes(const me_graph_schedule *schedule);
+/* Materialized stage descriptions. Indices follow dependency order. The final
+ * stage writes caller output; other stages are released after last_consumer.
+ * Ordinary graph plans expose one numerical region (plus final conversion). */
+const char *me_graph_stage_kind(const me_graph_plan *plan, int stage);
+int me_graph_stage_last_consumer(const me_graph_plan *plan, int stage);
+int me_graph_stage_output_rank(const me_graph_schedule *schedule, int stage);
+const int64_t *me_graph_stage_output_shape(const me_graph_schedule *schedule, int stage);
+me_dtype me_graph_stage_output_dtype(const me_graph_schedule *schedule, int stage);
+size_t me_graph_stage_output_bytes(const me_graph_schedule *schedule, int stage);
+int me_graph_schedule_stage_last_consumer(const me_graph_schedule *schedule, int stage);
 /* Schedules retain plans. Immutable shared handles support independent calls;
  * freeing a handle concurrently with its use is unsupported. */
 void me_graph_plan_free(me_graph_plan *plan);
