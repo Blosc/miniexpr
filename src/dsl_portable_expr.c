@@ -95,9 +95,20 @@ static bool p_truth(me_dtype d, const me_scalar *v) {
     return v->i64 != 0;
 }
 
+#ifdef _MSC_VER
+__declspec(noinline)
+#else
+__attribute__((noinline))
+#endif
+static double p_widen_float(float value) {
+    return value;
+}
+
 static double p_double(me_dtype d, const me_scalar *v) {
     if (d == ME_BOOL) return v->b ? 1.0 : 0.0;
-    if (d == ME_FLOAT32) return v->f32;
+    /* Do not speculate float32 widening from an inactive union member: arbitrary
+     * float64 low bits can encode a signaling float32 NaN and pollute status. */
+    if (d == ME_FLOAT32) return p_widen_float(v->f32);
     if (d == ME_FLOAT64) return v->f64;
     if (p_unsigned(d)) return (double)v->u64;
     return (double)v->i64;
@@ -1146,6 +1157,60 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
         p_unsigned_op(n, integer_op, a.u64, b.u64, &out->u64) :
         p_signed_op(n, integer_op, a.i64, b.i64, &out->i64);
     return status == 0 ? 0 : ME_EVAL_ERR_INVALID_ARG;
+}
+
+static bool p_jit_nan_compare(const void *node, double x, double y);
+
+bool dsl_portable_float_compare(const void *node, double x, double y) {
+    /* Execute the exact host comparison path: NaN exception instructions differ
+     * between host/JIT compilers even when Boolean values are identical. Only
+     * the already-computed operands enter this bridge, not their expression trees. */
+    const me_expr *original = node;
+    uint64_t xb, yb;
+    memcpy(&xb,&x,sizeof(xb)); memcpy(&yb,&y,sizeof(yb));
+    if ((xb & UINT64_C(0x7fffffffffffffff)) <= UINT64_C(0x7ff0000000000000) &&
+        (yb & UINT64_C(0x7fffffffffffffff)) <= UINT64_C(0x7ff0000000000000)) {
+        /* Finite/infinite comparisons cannot raise. Keep the rare NaN path on
+         * the exact evaluator instruction sequence; avoid recursive dispatch
+         * for ordinary lanes without changing classification/exception policy. */
+        int cmp = (x > y) - (x < y);
+        me_cmp_kind kind = comparison_kind(original->function);
+        return kind == ME_CMP_NE ? cmp != 0 : kind == ME_CMP_EQ ? cmp == 0 :
+            kind == ME_CMP_LT ? cmp < 0 : kind == ME_CMP_LE ? cmp <= 0 :
+            kind == ME_CMP_GT ? cmp > 0 : cmp >= 0;
+    }
+    return p_jit_nan_compare(node,x,y);
+}
+
+#ifdef _MSC_VER
+__declspec(noinline)
+#else
+__attribute__((noinline))
+#endif
+static bool p_jit_nan_compare(const void *node, double x, double y) {
+    const me_expr *original = node;
+    /* Leaves are allocated only through the header, not sizeof(me_expr), whose
+     * trailing parameters[1] slot need not exist on a variable/constant. */
+    me_expr left = {0}, right = {0};
+    memcpy(&left, original->parameters[0], offsetof(me_expr, parameters));
+    memcpy(&right, original->parameters[1], offsetof(me_expr, parameters));
+    /* p_literal_value intentionally rejects NaNs; use typed variables instead. */
+    me_scalar values[2] = {{0},{0}};
+    if (left.dtype == ME_FLOAT32) values[0].f32 = (float)x;
+    else if (left.dtype == ME_BOOL) values[0].b = x != 0;
+    else values[0].f64 = x;
+    if (right.dtype == ME_FLOAT32) values[1].f32 = (float)y;
+    else if (right.dtype == ME_BOOL) values[1].b = y != 0;
+    else values[1].f64 = y;
+    const void *vars[2] = {&values[0],&values[1]};
+    left.type = right.type = ME_VARIABLE;
+    left.bound = synthetic_var_addresses; right.bound = synthetic_var_addresses + 1;
+    /* me_expr has trailing operand storage; allocate sufficient stack space. */
+    union { me_expr expr; unsigned char bytes[sizeof(me_expr)+2*sizeof(void *)]; } storage;
+    memcpy(&storage.expr,original,offsetof(me_expr, parameters));
+    storage.expr.parameters[0] = &left; storage.expr.parameters[1] = &right;
+    p_eval_context ctx = {.vars=vars,.nvars=2,.nitems=1}; me_scalar result;
+    return p_eval(&storage.expr,&ctx,0,&result) == 0 && result.b;
 }
 
 int dsl_portable_eval_expr(const me_expr *expr, const void *const *vars, int nvars,

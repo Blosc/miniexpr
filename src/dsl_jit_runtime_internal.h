@@ -169,6 +169,8 @@ typedef struct {
     int jit_ir_error_column;
     char jit_ir_error[128];
     char *jit_c_source;
+    const me_expr *portable_jit_comparisons[128]; /* Borrowed typed nodes. */
+    int portable_jit_ncomparisons;
     bool jit_use_runtime_math_bridge;
     bool jit_scalar_math_bridge_enabled;
     bool jit_synth_reserved_non_nd;

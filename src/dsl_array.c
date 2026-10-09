@@ -245,6 +245,8 @@ me_artifact_status me_artifact_eval_array(const me_artifact *a, const me_array_v
 #endif
     size_t groups = o->reduction == ME_ARRAY_NONE ? 1 : out_count;
     size_t lanes = o->reduction == ME_ARRAY_NONE ? total : red_count;
+    bool gather = mask != NULL;
+    for (int b = 0; b < ninputs; b++) gather |= !direct[b];
     for (size_t g = 0; g < groups && !rc; g++) {
         uint64_t acc = 0; bool initialized = false;
         if (o->initial) { memcpy(&acc,o->initial,width); initialized = true; }
@@ -254,7 +256,7 @@ me_artifact_status me_artifact_eval_array(const me_artifact *a, const me_array_v
         }
         for (size_t begin = 0; begin < lanes && !rc;) {
             size_t count = lanes - begin < tile ? lanes - begin : tile;
-            for (size_t lane = 0; lane < count; lane++) {
+            for (size_t lane = 0; gather && lane < count; lane++) {
                 size_t outer = g, inner = begin + lane; int64_t coordinates[ME_ARRAY_MAX_RANK];
                 for (int i = rank - 1; i >= 0; i--) {
                     size_t *index = o->reduction != ME_ARRAY_NONE && !axes[i] ? &outer : &inner;

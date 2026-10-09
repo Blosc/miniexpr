@@ -14,6 +14,9 @@
 unsigned *dsl_portable_status_begin(unsigned *flags);
 void dsl_portable_status_end(unsigned *previous);
 void dsl_portable_status_capture(void);
+/* Shared floating comparison bridge; operands are widened exactly as in the
+ * portable evaluator. Passed at invocation, never baked into disk-cache code. */
+bool dsl_portable_float_compare(const void *node, double x, double y);
 
 /* Portable strict operations run with nearest/ties-even and nontrapping IEEE
  * exceptions. Save/restore the calling thread's environment (including flags).

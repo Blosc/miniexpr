@@ -99,6 +99,9 @@ if(MINIEXPR_BUILD_ARTIFACT)
   add_executable(numpy_compat_arrays numpy-compat/arrays.c)
   target_link_libraries(numpy_compat_arrays PRIVATE miniexpr_artifact)
   add_test(NAME numpy_compat_native_arrays COMMAND numpy_compat_arrays)
+  add_executable(numpy_compat_portable_jit numpy-compat/portable-jit.c)
+  target_link_libraries(numpy_compat_portable_jit PRIVATE miniexpr_artifact)
+  add_test(NAME numpy_compat_portable_jit COMMAND numpy_compat_portable_jit)
   add_executable(numpy_compat_runner numpy-compat/runner.c numpy-compat/conformance.c)
   target_link_libraries(numpy_compat_runner PRIVATE miniexpr_artifact)
   target_include_directories(numpy_compat_runner PRIVATE "${yyjson_SOURCE_DIR}/src")
@@ -116,7 +119,9 @@ if(MINIEXPR_BUILD_ARTIFACT)
     set_tests_properties(numpy_compat_conformance_${policy} PROPERTIES TIMEOUT 30)
     add_test(NAME numpy_compat_arithmetic_${policy} COMMAND numpy_compat_runner
       "${CMAKE_CURRENT_SOURCE_DIR}/numpy-compat/arithmetic-v1.1.json" "${policy}")
-    set_tests_properties(numpy_compat_arithmetic_${policy} PROPERTIES TIMEOUT 60)
+    # The on route now compiles eligible artifacts; external GCC cold compilation
+    # of hundreds of distinct signatures exceeds the old interpreter-only budget.
+    set_tests_properties(numpy_compat_arithmetic_${policy} PROPERTIES TIMEOUT 300)
     add_test(NAME numpy_compat_functions_${policy} COMMAND numpy_compat_runner
       "${CMAKE_CURRENT_SOURCE_DIR}/numpy-compat/functions-v1.1.json" "${policy}")
     set_tests_properties(numpy_compat_functions_${policy} PROPERTIES TIMEOUT 60)

@@ -262,8 +262,7 @@ static int run_v2_case(yyjson_val *test, me_jit_mode mode, bool observe) {
     if (!rc) {
         yyjson_val *items = yyjson_obj_get(test, "inputs");
         size_t ninputs = yyjson_arr_size(items);
-        if (!yyjson_is_arr(items) || !ninputs || ninputs > 16 || (int)ninputs != me_artifact_ninputs(artifact) ||
-            me_artifact_has_jit(artifact)) { failed = 1; goto cleanup; }
+        if (!yyjson_is_arr(items) || !ninputs || ninputs > 16 || (int)ninputs != me_artifact_ninputs(artifact)) { failed = 1; goto cleanup; }
         for (size_t i = 0; i < ninputs; i++) {
             yyjson_val *item = yyjson_arr_get(items, i);
             int64_t other_dims[8] = {0};
@@ -379,11 +378,13 @@ static int run_v2_case(yyjson_val *test, me_jit_mode mode, bool observe) {
     const char *outcome = regression ? "regression" : reference_match ? "matching" :
         baseline && reviewed ? "known_divergence" : "mismatch";
     printf("{\"id\":\"%s\",\"status\":%d,\"category\":\"%s\",\"native_status\":%d,"
-           "\"backend\":\"%s\",\"requested_backend\":\"%s\",\"jit_eligible\":false,"
-           "\"jit_skip_reason\":\"portable draft has no eligible JIT route\",\"reference_match\":%s,"
+           "\"backend\":\"%s\",\"requested_backend\":\"%s\",\"jit_eligible\":%s,"
+           "\"jit_skip_reason\":\"%s\",\"reference_match\":%s,"
            "\"baseline_regression\":%s,\"outcome\":\"%s\",\"normalization_bytes\":%zu,"
            "\"environment_restored\":%s,\"recovery_ok\":%s,\"mismatches\":[%s]",
-           id, rc, category(rc), error.native_status, artifact ? "interpreter" : "none", mode == ME_JIT_ON ? "jit" : "interpreter",
+           id, rc, category(rc), error.native_status, me_artifact_has_jit(artifact) ? "jit" : artifact ? "interpreter" : "none", mode == ME_JIT_ON ? "jit" : "interpreter",
+           me_artifact_has_jit(artifact) ? "true" : "false",
+           me_artifact_has_jit(artifact) ? "" : "no compiled route for this artifact/request",
            reference_match ? "true" : "false", regression ? "true" : "false", outcome, normalized,
            environment_ok ? "true" : "false", recovery_ok ? "true" : "false",
            reference_match ? "" : rc || diagnostic ? "\"diagnostic\"" : "\"dtype-shape-or-values\"");

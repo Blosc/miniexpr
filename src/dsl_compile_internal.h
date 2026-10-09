@@ -29,6 +29,7 @@ int dsl_var_table_add_with_uniform(me_dsl_var_table *table, const char *name, me
 int dsl_var_table_add(me_dsl_var_table *table, const char *name, me_dtype dtype);
 
 extern char synthetic_var_addresses[ME_MAX_VARS];
+void dsl_portable_prepare_jit(me_dsl_compiled_program *program);
 
 int private_compile_ex(const char *expression, const me_variable *variables, int var_count,
                        void *output, int nitems, me_dtype dtype, int *error, me_expr **out);

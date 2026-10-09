@@ -653,7 +653,7 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
             }
         }
         artifact->program = dsl_compile_program_profile(source, variables, artifact->nbindings,
-            artifact->output_dtype, artifact->context_ndim, ME_JIT_OFF, artifact->profile,
+            artifact->output_dtype, artifact->context_ndim, jit_mode, artifact->profile,
             &position, &is_dsl, reason, sizeof(reason));
         if (!artifact->program) {
             status = artifact_error(error, ME_ARTIFACT_ERR_SOURCE, reason);
@@ -901,8 +901,7 @@ me_dtype me_artifact_output_dtype(const me_artifact *artifact) {
     return artifact ? artifact->output_dtype : ME_AUTO;
 }
 bool me_artifact_has_jit(const me_artifact *artifact) {
-    (void)artifact;
-    return false; /* Draft 1.0 is interpreter-first. */
+    return artifact && artifact->program && artifact->program->jit_kernel_fn != NULL;
 }
 void me_artifact_free(me_artifact *artifact) {
     if (!artifact) return;

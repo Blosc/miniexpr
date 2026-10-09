@@ -2899,7 +2899,7 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
             return NULL;
         }
         /* Optional acceleration falls back before building any uncertified IR. */
-        jit_mode = ME_JIT_OFF;
+        if (profile != ME_DSL_PROFILE_PORTABLE_1_1) jit_mode = ME_JIT_OFF;
     }
     if (jit_mode == ME_JIT_ON || jit_mode == ME_JIT_OFF) {
         program->jit_request_mode = (me_jit_mode)jit_mode;
@@ -3365,6 +3365,9 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
     }
     if (!dsl_portable_typed_profile(profile)) {
         dsl_try_build_jit_ir(&ctx, parsed, program, jit_mode != ME_JIT_OFF);
+    }
+    else {
+        dsl_portable_prepare_jit(program);
     }
 
     me_dsl_program_free(parsed);

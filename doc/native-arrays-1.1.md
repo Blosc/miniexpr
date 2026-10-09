@@ -81,6 +81,29 @@ same-output or same-storage mutation is not made safe automatically.
 Mean/variance/std, arg/cumulative reductions, arbitrary gathers/scatters, tuple
 results and mutable-view semantics are deferred, not implied by this ABI.
 
+## Opt-in portable host JIT
+
+`ME_JIT_ON` at 1.1 artifact load enables fail-closed typed-tree lowering for a
+single elementwise return without ND context: float32/float64 arithmetic,
+comparisons, Boolean selection and lazy `where`. Check `me_artifact_has_jit()`;
+an acceleration request alone is not evidence of compiled execution. Default
+requests and checked 1.0 retain interpreter routing. TCC is the first backend;
+`ME_DSL_JIT_COMPILER=cc` with `CC` selects GCC or another system compiler.
+
+The generated loop uses a private participating-mask and comparison-bridge
+pointer vector. It preserves per-node dtype and final conversion, avoids folding
+constant operations whose exceptions must be observed, and scopes/restores fenv.
+The comparison bridge preserves host NaN exception behavior; ordinary finite
+comparisons take a fast host path, without evaluating expression trees. Cache
+identity includes semantic profile and lowering/ABI revision; runtime pointers
+are supplied at invocation and are never serialized in generated code.
+
+Unsupported integers/functions/statements/ND context fall back to the portable
+interpreter. Arbitrary compiler flags/options reject this route. WASM host-pointer
+lowering is deliberately disabled. No explicit SIMD or cross-platform numerical
+qualification is implied by local host tests. Logical reductions still use the
+unchanged serial M5 accumulator; only their eligible map tiles are accelerated.
+
 ## Shape operations
 
 Native `me_array_reshape`, `me_array_transpose`, and `me_array_slice` create borrowed
@@ -108,11 +131,17 @@ operands are NumPy/Blosc2 arrays and plain/typed numeric scalars. Unsupported
 graph capabilities reject before destination writes; no NumExpr or Python
 numerical fallback is allowed. A bounded 128-entry immutable plan cache keys
 normalized source, semantic profile, signatures and scalar captures, not input
-array identities or evaluated values. Mutation of inputs never reuses results.
+ array identities or evaluated values. Mutation of inputs never reuses results.
+
+`LazyExpr.compute(_require_native=True, jit=True)` explicitly requests this JIT
+subset without changing default backend selection. Its execution report names
+`portable-jit` only when the plan has a compiled kernel; unsupported plans retain
+native interpretation. A separate bounded compiled-plan cache includes artifact
+identity and backend/compiler configuration, never numerical input values.
 
 Basic elementwise partial reads select operand views/storage before native
 execution. Nested lazy/proxy/remote/table operands, table row/partition filtering,
-ordering, output aliases, reduction partial reads, custom acceleration/accuracy
+ ordering, output aliases, reduction partial reads, custom backend/accuracy
 overrides and unsupported functions are not eligible. Existing table-specific
 partition semantics and safe/full persistence policies remain untouched.
 

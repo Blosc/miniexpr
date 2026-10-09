@@ -83,6 +83,7 @@ uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program) {
         return h;
     }
     h = dsl_jit_hash_u64(h, program->jit_ir_fingerprint);
+    h = dsl_jit_hash_i32(h, (int)program->semantic_profile);
     h = dsl_jit_hash_i32(h, (int)program->output_dtype);
     h = dsl_jit_hash_i32(h, (int)program->fp_mode);
     h = dsl_jit_hash_i32(h, program->jit_nparams);
