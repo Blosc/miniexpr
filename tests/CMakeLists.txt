@@ -109,6 +109,11 @@ if(MINIEXPR_BUILD_ARTIFACT)
     "${PROJECT_SOURCE_DIR}/src/dsl_graph.c" "${PROJECT_SOURCE_DIR}/src/dsl_graph_text.c"
     "${yyjson_SOURCE_DIR}/src/yyjson.c")
   target_link_libraries(graph_compiler_allocation PRIVATE miniexpr_graph_fault)
+  # This executable compiles graph/artifact sources directly, so it needs
+  # libm even when the native shared library keeps that dependency private.
+  if(NOT WIN32)
+    target_link_libraries(graph_allocation PRIVATE m)
+  endif()
   target_include_directories(graph_compiler_allocation PRIVATE "${yyjson_SOURCE_DIR}/src")
   miniexpr_graph_fault_allocators(graph_compiler_allocation)
   target_compile_definitions(graph_compiler_allocation PRIVATE
