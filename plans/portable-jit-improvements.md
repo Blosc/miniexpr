@@ -338,3 +338,22 @@ so downstream benchmarks cannot silently claim JIT performance while interpretin
 5. P4 general weak operands and specialization/cache qualification.
 6. Complete intended host backend/release gates; pursue P5 WASM separately.
 7. Evaluate P6 reductions only after parity work and performance evidence.
+
+## Implementation record
+
+- P0: added a production-artifact eligibility/value/FP-status matrix in
+  `tests/test_portable_jit_parity.c`, with backend availability established by an
+  eligible oracle rather than assuming a compiler is installed.
+- P1 safety milestone: integral comparisons now use exact integer transport,
+  including mixed signed/unsigned inputs. Checked weak integer function nodes
+  fail closed until a checked scalar bridge is qualified. Production-artifact
+  regressions cover the demonstrated overflow, hidden branches, masks, recovery,
+  all six comparisons, and values beyond double precision. The full native suite
+  passed (442 tests) after these changes.
+- Checked execution design: retain the existing three-argument private entrypoint
+  and its integer return status. Additional scalar helpers must use an
+  invocation-local status object passed in the private bridge inputs; they must
+  not modify the immutable program, serialize addresses, or trigger interpreter
+  replay after a semantic error. Output after failure remains unspecified under
+  the public artifact contract. The checked bridge and broader weak eligibility
+  remain P3/P4 work; safe exclusion is not advertised as full weak JIT coverage.

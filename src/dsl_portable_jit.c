@@ -1,4 +1,4 @@
-/* Portable 1.1 scalar C lowering, revision 11. Never translate source
+/* Portable 1.1 scalar C lowering, revision 12. Never translate source
  * text: the typed tree includes promotion and final output conversions. The
  * private kernel ABI appends a participating mask and host comparison/math bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
@@ -128,6 +128,9 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
         return strdup(leaf);
     }
     if (!IS_FUNCTION(n->type) || is_reduction_node(n)) return NULL;
+    /* Checked weak intermediates are not modular typed arithmetic. Until the
+     * checked invocation bridge is installed, retain interpreter diagnostics. */
+    if (pj_integer(n->dtype) && (n->flags & ME_EXPR_FLAG_WEAK_SCALAR)) return NULL;
     int arity = ARITY(n->type);
     const char *op = me_portable_operator(n);
     const me_expr *arg0 = arity > 0 ? (const me_expr *)n->parameters[0] : NULL;
@@ -148,13 +151,8 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
     if (conversion && pj_integer(n->dtype) && arg0->dtype != n->dtype && !int_cast) return NULL;
     bool where = op && !strcmp(op,"where") && arity == 3;
     bool comparison = op && is_comparison_node(n) && arity == 2;
-    if (comparison) {
-        /* Weak negative literals can intentionally remain signed beside uint64.
-         * C's usual conversions would turn -1 into UINT64_MAX: fail closed. */
-        if (pj_integer(arg0->dtype) && pj_integer(arg1->dtype) &&
-            pj_unsigned(arg0->dtype) != pj_unsigned(arg1->dtype)) return NULL;
-    }
-    bool comparison_bridge = comparison && (arg0->dtype != ME_BOOL || arg1->dtype != ME_BOOL);
+    bool integer_comparison = comparison && pj_integral(arg0->dtype) && pj_integral(arg1->dtype);
+    bool comparison_bridge = comparison && !integer_comparison;
     bool arithmetic = op && float_result &&
         (!strcmp(op,"+") || !strcmp(op,"-") || !strcmp(op,"*") || !strcmp(op,"/")) &&
         (arity == 2 || (arity == 1 && !strcmp(op,"-")));
@@ -177,7 +175,7 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
          (arity == 1 && !strcmp(op,"~")));
     bool logical = op && ((!strcmp(op,"not") && arity == 1) ||
         ((!strcmp(op,"and") || !strcmp(op,"or")) && arity == 2));
-    if (!conversion && !where && !comparison_bridge && !arithmetic && !integer_arithmetic &&
+    if (!conversion && !where && !comparison && !arithmetic && !integer_arithmetic &&
         !logical && !predicate && !unary_math && !binary_math && !float_operator &&
         !integer_operator) return NULL;
     char *args[3] = {0};
@@ -195,6 +193,10 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
         if (where) snprintf(out,capacity,"((%s)((%s) ? (%s) : (%s)))",type,args[0],args[1],args[2]);
         else if (int_cast) snprintf(out,capacity,"pj_%s((uint64_t)(%s))",type,args[0]);
         else if (conversion) snprintf(out,capacity,"((%s)(%s))",type,args[0]);
+        else if (integer_comparison) {
+            snprintf(out,capacity,"(pj_icmp((uint64_t)(%s),(uint64_t)(%s),%d,%d) %s 0)",
+                args[0],args[1],pj_unsigned(arg0->dtype),pj_unsigned(arg1->dtype),op);
+        }
         else if (predicate) {
             if (p->portable_jit_npreds == ME_DSL_PORTABLE_JIT_BRIDGE_LIMIT) { free(out); out = NULL; }
             else {
@@ -448,7 +450,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
     snprintf(source,capacity,
-        "/* portable-1.1 lowering-r11 immutable-weak-conversions abi-r6 */\n"
+        "/* portable-1.1 lowering-r12 exact-integral-comparisons abi-r6 */\n"
         "#include <stdint.h>\n"
         "#include <string.h>\n"
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"
@@ -461,6 +463,12 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "#define PJ_INT(S,U) static inline S pj_##S(uint64_t x) { U u=(U)x; S s; memcpy(&s,&u,sizeof(s)); return s; }\n"
         "PJ_INT(int8_t,uint8_t)\nPJ_INT(int16_t,uint16_t)\nPJ_INT(int32_t,uint32_t)\nPJ_INT(int64_t,uint64_t)\n"
         "PJ_INT(uint8_t,uint8_t)\nPJ_INT(uint16_t,uint16_t)\nPJ_INT(uint32_t,uint32_t)\nPJ_INT(uint64_t,uint64_t)\n"
+        /* Signed values are sign-extended before transport. Only compare their
+         * unsigned representations once both operands are known nonnegative. */
+        "static inline int pj_icmp(uint64_t a,uint64_t b,int au,int bu) {\n"
+        "int an=!au && pj_int64_t(a)<0, bn=!bu && pj_int64_t(b)<0;\n"
+        "if (an!=bn) return an ? -1 : 1;\n"
+        "return (a>b)-(a<b); }\n"
         /* Inspect representation without executing any floating comparison on
          * a NaN (especially sNaN). Arguments are evaluated once, preserving lazy
          * branch participation and the tree's float32->float64 widening. GCC and
