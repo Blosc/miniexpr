@@ -357,3 +357,14 @@ so downstream benchmarks cannot silently claim JIT performance while interpretin
   replay after a semantic error. Output after failure remains unspecified under
   the public artifact contract. The checked bridge and broader weak eligibility
   remain P3/P4 work; safe exclusion is not advertised as full weak JIT coverage.
+- P2: added lane-local range/while loops, nested break/continue targets, explicit
+  lane-return exits, and an invocation-local while cap. Signed range advancement
+  terminates safely on overflow. Bounds requiring checked float/u64 conversion
+  and reads of locals only initialized inside potentially empty loops still fall
+  back. Checked weak integer operators now use an invocation-local status bridge;
+  the demonstrated weak-overflow case can JIT without losing its error. Added
+  scalar-operation bridge infrastructure for subsequent checked-cast/math work.
+  Native production-artifact tests include nested exits, masks, cap changes,
+  range edges, and Mandelbrot; compiler allocation sweeps include loop lowering.
+  Python tests execute the actual benchmark algorithm through portable artifacts,
+  compare with NumPy/interpretation, and cover round trips and concurrency.

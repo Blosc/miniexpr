@@ -1295,6 +1295,10 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
         for (int i = 0; i < program->portable_jit_niops; i++) {
             inputs[n_vars+ME_DSL_PORTABLE_JIT_IOP_OFF+1+i] = program->portable_jit_iops[i];
         }
+        inputs[n_vars+ME_DSL_PORTABLE_JIT_CHECKED_OFF] = (const void *)dsl_portable_jit_checked;
+        for (int i = 0; i < program->portable_jit_nchecked; i++) {
+            inputs[n_vars+ME_DSL_PORTABLE_JIT_CHECKED_OFF+1+i] = program->portable_jit_checked[i];
+        }
         /* ND logical context for reserved index variables. The kernel recomputes
          * each lane's coordinates and validates them, so the interpreter's index
          * buffers are not built on this path. */
@@ -1314,11 +1318,14 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
         else {
             inputs[n_vars+ME_DSL_PORTABLE_JIT_ND_OFF] = NULL;
         }
+        int64_t while_cap = dsl_while_max_iters();
+        if (while_cap < 0) while_cap = 0;
+        inputs[n_vars+ME_DSL_PORTABLE_JIT_CAP_OFF] = &while_cap;
         fenv_t saved;
         if (!dsl_portable_fp_begin(&saved)) return ME_EVAL_ERR_INVALID_ARG;
         int rc = program->jit_kernel_fn(inputs,output_block,(int64_t)nitems);
         if (!dsl_portable_fp_end(&saved)) return ME_EVAL_ERR_INVALID_ARG;
-        return rc == 0 ? ME_EVAL_SUCCESS : ME_EVAL_ERR_INVALID_ARG;
+        return rc == ME_EVAL_SUCCESS || rc == ME_EVAL_ERR_OOM ? rc : ME_EVAL_ERR_INVALID_ARG;
     }
     int64_t current_cap = dsl_while_max_iters();
     if (current_cap < 0) current_cap = 0;

@@ -1,3 +1,6 @@
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "miniexpr_artifact.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,12 +23,19 @@ typedef struct {
 static const parity_case cases[] = {
     {"arithmetic", "return x * 2 + y", "float64", "float64", true},
     {"conditional return", "if x > 0:\\n        return x\\n    return -x", "float64", "float64", true},
-    {"range", "s = 0.0\\n    for i in range(10):\\n        s = s + x\\n    return s", "float64", "float64", false},
-    {"while", "s = 0.0\\n    i = 0\\n    while i < 10:\\n        s = s + x\\n        i = i + 1\\n    return s", "float64", "float64", false},
-    {"break", "s = 0.0\\n    for i in range(10):\\n        if s > y:\\n            break\\n        s = s + x\\n    return s", "float64", "float64", false},
-    {"continue", "s = 0.0\\n    for i in range(10):\\n        if i < 3:\\n            continue\\n        s = s + x\\n    return s", "float64", "float64", false},
-    {"loop return", "for i in range(10):\\n        if x > 0:\\n            return x\\n    return y", "float64", "float64", false},
-    {"nested loops", "s = 0.0\\n    for i in range(3):\\n        for j in range(4):\\n            s = s + x\\n    return s", "float64", "float64", false},
+    {"range", "s = 0.0\\n    for i in range(10):\\n        s = s + x\\n    return s", "float64", "float64", true},
+    {"while", "s = 0.0\\n    i = 0\\n    while i < 10:\\n        s = s + x\\n        i = i + 1\\n    return s", "float64", "float64", true},
+    {"break", "s = 0.0\\n    for i in range(10):\\n        if s > y:\\n            break\\n        s = s + x\\n    return s", "float64", "float64", true},
+    {"continue", "s = 0.0\\n    for i in range(10):\\n        if i < 3:\\n            continue\\n        s = s + x\\n    return s", "float64", "float64", true},
+    {"loop return", "for i in range(10):\\n        if x > 0:\\n            return x\\n    return y", "float64", "float64", true},
+    {"nested loops", "s = 0.0\\n    for i in range(3):\\n        for j in range(4):\\n            s = s + x\\n    return s", "float64", "float64", true},
+    {"negative range", "s = 0.0\\n    for i in range(5, -2, -2):\\n        s = s + i + x\\n    return s", "float64", "float64", true},
+    {"empty range", "s = x\\n    for i in range(0):\\n        s = y\\n    return s", "float64", "float64", true},
+    {"nested exit targets", "s = 0.0\\n    for i in range(3):\\n        for j in range(4):\\n            if j == 1:\\n                continue\\n            if j == 3:\\n                break\\n            s = s + x\\n    return s", "float64", "float64", true},
+    {"while continue", "s = 0.0\\n    i = 0\\n    while i < 5:\\n        i = i + 1\\n        if i < 3:\\n            continue\\n        s = s + x\\n    return s", "float64", "float64", true},
+    {"while break", "s = 0.0\\n    i = 0\\n    while i < 5:\\n        if i == 3:\\n            break\\n        s = s + x\\n        i = i + 1\\n    return s", "float64", "float64", true},
+    {"range advancement edge", "s = x\\n    for i in range(9223372036854775806, 9223372036854775807, 2):\\n        s = s + y\\n    return s", "float64", "float64", true},
+    {"mandelbrot", "zr = 0.0\\n    zi = 0.0\\n    escape_iter = 64.0\\n    for i in range(64):\\n        if zr * zr + zi * zi > 4.0:\\n            escape_iter = i + 0.0\\n            break\\n        zr_new = zr * zr - zi * zi + x\\n        zi = 2.0 * zr * zi + y\\n        zr = zr_new\\n    return escape_iter", "float64", "float64", true},
     {"checked cast", "return int(x)", "float64", "int64", false},
     {"integer abs", "return abs(x)", "int32", "int32", false},
     {"integer sign", "return sign(x)", "int32", "int32", false},
@@ -145,7 +155,10 @@ static void weak_overflow(void) {
         "int64", "int64", false};
     me_artifact *jit = load_extra(&test, ME_JIT_ON, NULL, constant);
     me_artifact *reference = load_extra(&test, ME_JIT_OFF, NULL, constant);
-    CHECK(!me_artifact_has_jit(jit));
+    /* This computed weak arithmetic now uses the checked invocation bridge. */
+    me_artifact *oracle = load(&cases[0], ME_JIT_ON);
+    CHECK(me_artifact_has_jit(jit) == me_artifact_has_jit(oracle));
+    me_artifact_free(oracle);
     int64_t x[] = {0, 0}, output[2];
     uint8_t mask[] = {1, 0};
     me_artifact_buffer buffer = {"x", ME_INT64, 8, x, sizeof(x)};
@@ -169,9 +182,70 @@ static void weak_overflow(void) {
     me_artifact_free(reference);
 }
 
+static void environment(const char *name, const char *value) {
+#ifdef _WIN32
+    CHECK(!_putenv_s(name, value ? value : ""));
+#else
+    if (value) CHECK(!setenv(name, value, 1));
+    else CHECK(!unsetenv(name));
+#endif
+}
+
+static void loop_errors(void) {
+    const char *old_cap = getenv("ME_DSL_WHILE_MAX_ITERS");
+    char *saved_cap = old_cap ? strdup(old_cap) : NULL;
+    environment("ME_DSL_WHILE_MAX_ITERS", "3");
+    parity_case tests[] = {
+        {"while cap", "i = 0\\n    while i < x:\\n        i = i + 1\\n    return i", "int64", "int64", true},
+        {"zero range step", "s = 0\\n    for i in range(0, x, y):\\n        s = s + i\\n    return s", "int64", "int64", true}
+    };
+    for (int t = 0; t < 2; t++) {
+        me_artifact *jit = load(&tests[t], ME_JIT_ON);
+        me_artifact *reference = load(&tests[t], ME_JIT_OFF);
+        me_artifact *oracle = load(&cases[0], ME_JIT_ON);
+        CHECK(me_artifact_has_jit(jit) == me_artifact_has_jit(oracle));
+        int64_t x[] = {0, 3}, y[] = {1, 1}, output[2], expected[2];
+        me_artifact_buffer buffers[] = {{"x", ME_INT64, 8, x, sizeof(x)},
+            {"y", ME_INT64, 8, y, sizeof(y)}};
+        uint8_t mask[] = {1, 0};
+        me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
+            .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = 2,
+            .output_capacity = sizeof(output)};
+        me_artifact_error error, reference_error;
+        CHECK(!me_artifact_eval_ex(jit, buffers, 2, output, &descriptor, &error));
+        CHECK(!me_artifact_eval_ex(reference, buffers, 2, expected, &descriptor, &reference_error));
+        CHECK(!memcmp(output, expected, sizeof(output)));
+        if (t == 0) x[1] = 4;
+        else y[1] = 0;
+        int rc = me_artifact_eval_ex(jit, buffers, 2, output, &descriptor, &error);
+        int reference_rc = me_artifact_eval_ex(reference, buffers, 2, expected, &descriptor, &reference_error);
+        CHECK(rc && rc == reference_rc && error.native_status == reference_error.native_status);
+        descriptor.valid_mask = mask;
+        descriptor.valid_mask_capacity = sizeof(mask);
+        CHECK(!me_artifact_eval_ex(jit, buffers, 2, output, &descriptor, &error));
+        x[1] = 2;
+        y[1] = 1;
+        descriptor.valid_mask = NULL;
+        descriptor.valid_mask_capacity = 0;
+        CHECK(!me_artifact_eval_ex(jit, buffers, 2, output, &descriptor, &error));
+        /* The runtime cap is read per invocation, not baked into cached code. */
+        if (t == 0) {
+            environment("ME_DSL_WHILE_MAX_ITERS", "1");
+            CHECK(me_artifact_eval_ex(jit, buffers, 2, output, &descriptor, &error));
+            environment("ME_DSL_WHILE_MAX_ITERS", "3");
+        }
+        me_artifact_free(jit);
+        me_artifact_free(reference);
+        me_artifact_free(oracle);
+    }
+    environment("ME_DSL_WHILE_MAX_ITERS", saved_cap);
+    free(saved_cap);
+}
+
 int main(void) {
     matrix();
     exact_comparisons();
     weak_overflow();
+    loop_errors();
     return 0;
 }

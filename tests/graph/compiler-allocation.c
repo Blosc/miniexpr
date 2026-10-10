@@ -174,9 +174,54 @@ static int weak_conversion_allocations(void) {
     printf("weak conversion compiler checkpoints=%ld\n", checkpoints);
     return !checkpoints;
 }
+static int loop_result(me_artifact *artifact) {
+    double x[] = {1, 2, 3}, output[3];
+    me_artifact_buffer buffer = {"x", ME_FLOAT64, sizeof(double), x, sizeof(x)};
+    me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
+        .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = 3,
+        .output_capacity = sizeof(output)};
+    me_artifact_error native;
+    int rc = me_artifact_eval_ex(artifact, &buffer, 1, output, &descriptor, &native);
+    return rc || output[0] != 6 || output[1] != 12 || output[2] != 18;
+}
+
+static int loop_allocations(void) {
+    const char *json =
+        "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
+        "\"requires\":[\"numeric\",\"control-flow\"],\"source\":\"def k(x):\\n    s = 0.0\\n"
+        "    for i in range(3):\\n        for j in range(4):\\n            if j == 1:\\n"
+        "                continue\\n            if j == 3:\\n                break\\n"
+        "            s = s + x\\n    n = 0\\n    while n < 2:\\n        n = n + 1\\n    return s\\n\","
+        "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"}],\"constants\":[],"
+        "\"output\":{\"dtype\":\"float64\",\"contract\":\"elementwise\"},\"context\":{\"ndim\":0},"
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}";
+    me_artifact *artifact = NULL;
+    me_artifact_error native;
+    calls = 0;
+    int rc = me_artifact_load(json, strlen(json), ME_JIT_ON, &artifact, &native);
+    long checkpoints = calls;
+    if (rc || !artifact || loop_result(artifact)) return 1;
+    me_artifact_free(artifact);
+    for (long i = 0; i < checkpoints; i++) {
+        artifact = (void *)1;
+        calls = 0;
+        fail_at = i;
+        rc = me_artifact_load(json, strlen(json), ME_JIT_ON, &artifact, &native);
+        fail_at = -1;
+        if (rc ? artifact != NULL : !artifact || loop_result(artifact)) return 1;
+        me_artifact_free(artifact);
+        artifact = NULL;
+        rc = me_artifact_load(json, strlen(json), ME_JIT_ON, &artifact, &native);
+        if (rc || !artifact || loop_result(artifact)) return 1;
+        me_artifact_free(artifact);
+    }
+    printf("loop compiler checkpoints=%ld\n", checkpoints);
+    return !checkpoints;
+}
+
 int main(void) {
     const float affine[] = {3, 10, 21}, staged[] = {7, 8, 9};
-    return scalar_dispatches() || weak_conversion_allocations() || check("x * 2 + y", affine, ME_JIT_OFF) ||
+    return scalar_dispatches() || weak_conversion_allocations() || loop_allocations() || check("x * 2 + y", affine, ME_JIT_OFF) ||
         check("sqrt(x) + sum(y)", staged, ME_JIT_OFF) ||
         check("x * 2 + y", affine, ME_JIT_ON);
 }

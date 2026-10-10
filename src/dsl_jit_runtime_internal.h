@@ -51,7 +51,10 @@
 #define ME_DSL_PORTABLE_JIT_IOP_OFF 517
 /* ND context: one pointer to [ndim, shape[ndim], origin[ndim], extent[ndim]]. */
 #define ME_DSL_PORTABLE_JIT_ND_OFF 646
-#define ME_DSL_PORTABLE_JIT_EXTRA 647
+/* Invocation-local while limit; zero disables the cap, matching interpretation. */
+#define ME_DSL_PORTABLE_JIT_CAP_OFF 647
+#define ME_DSL_PORTABLE_JIT_CHECKED_OFF 648
+#define ME_DSL_PORTABLE_JIT_EXTRA 777
 
 #if ME_USE_WASM32_JIT
 typedef int (*me_dsl_jit_kernel_fn)(const void **inputs, void *output, int nitems);
@@ -192,6 +195,8 @@ typedef struct {
     int portable_jit_npreds;
     const me_expr *portable_jit_iops[128]; /* Borrowed integer-operator typed nodes. */
     int portable_jit_niops;
+    const me_expr *portable_jit_checked[128]; /* Borrowed checked scalar nodes. */
+    int portable_jit_nchecked;
     bool jit_use_runtime_math_bridge;
     bool jit_scalar_math_bridge_enabled;
     bool jit_synth_reserved_non_nd;

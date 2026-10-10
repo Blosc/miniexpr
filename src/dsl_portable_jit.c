@@ -1,4 +1,4 @@
-/* Portable 1.1 scalar C lowering, revision 12. Never translate source
+/* Portable 1.1 scalar C lowering, revision 13. Never translate source
  * text: the typed tree includes promotion and final output conversions. The
  * private kernel ABI appends a participating mask and host comparison/math bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
@@ -128,9 +128,9 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
         return strdup(leaf);
     }
     if (!IS_FUNCTION(n->type) || is_reduction_node(n)) return NULL;
-    /* Checked weak intermediates are not modular typed arithmetic. Until the
-     * checked invocation bridge is installed, retain interpreter diagnostics. */
-    if (pj_integer(n->dtype) && (n->flags & ME_EXPR_FLAG_WEAK_SCALAR)) return NULL;
+    /* Checked weak intermediates are not modular typed arithmetic. Only audited
+     * operators may use the invocation-local checked integer bridge. */
+    bool checked_weak = pj_integer(n->dtype) && (n->flags & ME_EXPR_FLAG_WEAK_SCALAR);
     int arity = ARITY(n->type);
     const char *op = me_portable_operator(n);
     const me_expr *arg0 = arity > 0 ? (const me_expr *)n->parameters[0] : NULL;
@@ -172,7 +172,12 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
     bool integer_operator = op && pj_integer(n->dtype) &&
         ((arity == 2 && (!strcmp(op,"%") || !strcmp(op,"//") || !strcmp(op,"<<") ||
                          !strcmp(op,">>") || !strcmp(op,"&") || !strcmp(op,"|") || !strcmp(op,"^"))) ||
-         (arity == 1 && !strcmp(op,"~")));
+          (arity == 1 && !strcmp(op,"~")));
+    if (checked_weak) {
+        if (!integer_arithmetic && !integer_operator) return NULL;
+        integer_operator = true;
+        integer_arithmetic = false;
+    }
     bool logical = op && ((!strcmp(op,"not") && arity == 1) ||
         ((!strcmp(op,"and") || !strcmp(op,"or")) && arity == 2));
     if (!conversion && !where && !comparison && !arithmetic && !integer_arithmetic &&
@@ -232,7 +237,7 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
             else {
                 int id = p->portable_jit_niops++;
                 p->portable_jit_iops[id] = n;
-                snprintf(out,capacity,"pj_%s((uint64_t)(((pj_iop)inputs[%d])(inputs[%d],(uint64_t)(%s),(uint64_t)(%s))))",
+                snprintf(out,capacity,"pj_%s((uint64_t)(((pj_iop)inputs[%d])(inputs[%d],(uint64_t)(%s),(uint64_t)(%s),&pj_status)))",
                     type,p->n_inputs+ME_DSL_PORTABLE_JIT_IOP_OFF,
                     p->n_inputs+ME_DSL_PORTABLE_JIT_IOP_OFF+1+id,args[0],arity > 1 ? args[1] : "0ULL");
             }
@@ -296,8 +301,14 @@ static bool pj_append(pj_text *s, const char *format, ...) {
 
 /* Lane-local statements preserve assignment rounding and observable exceptions.
  * Definite assignment is checked again here; unsupported flow remains interpreted. */
+typedef struct {
+    int *next_label;
+    int loop_label;
+} pj_flow;
+
 static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *block,
-                     bool *defined, pj_text *s, int depth, const pj_constants *constants) {
+                     bool *defined, pj_text *s, int depth, const pj_constants *constants,
+                     pj_flow flow) {
     if (depth > 64) return false;
     for (int i = 0; i < block->nstmts; i++) {
         const me_dsl_compiled_stmt *stmt = block->stmts[i];
@@ -310,10 +321,10 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
             if (assignment) {
                 int index = p->local_var_indices[stmt->as.assign.local_slot];
                 ok = node->dtype == p->vars.dtypes[index] &&
-                    pj_append(s,"local_%d = %s;\n",index,value);
+                    pj_append(s,"local_%d = %s; if (pj_status) return pj_status;\n",index,value);
                 defined[index] = true;
             }
-            else ok = pj_append(s,"((%s *)output)[i] = %s; continue;\n",pj_type(p->output_dtype),value);
+            else ok = pj_append(s,"((%s *)output)[i] = %s; if (pj_status) return pj_status; goto pj_lane_done;\n",pj_type(p->output_dtype),value);
             free(value);
             if (!ok) return false;
         }
@@ -328,21 +339,100 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
                         stmt->as.if_stmt.elif_branches[j-1].cond.expr;
                     char *value = pj_expr(p,cond,defined,0,constants);
                     if (!value) return false;
-                    bool ok = pj_append(s,"%sif (%s) {\n",j ? "else " : "",value);
+                    /* Test status after evaluating the condition, before either
+                     * branch participates. Keep else-if chains syntactically intact. */
+                    bool ok = pj_append(s,"%sif (%s) { if (pj_status) return pj_status;\n",j ? "else " : "",value);
                     free(value);
                     if (!ok) return false;
                     body = j == 0 ? &stmt->as.if_stmt.then_block : &stmt->as.if_stmt.elif_branches[j-1].block;
                 }
                 else {
-                    if (!pj_append(s,"else {\n")) return false;
+                    if (!pj_append(s,"else { if (pj_status) return pj_status;\n")) return false;
                     body = &stmt->as.if_stmt.else_block;
                 }
                 memcpy(branch,defined,sizeof(branch));
-                if (!pj_block(p,body,branch,s,depth+1,constants) || !pj_append(s,"}\n")) return false;
+                if (!pj_block(p,body,branch,s,depth+1,constants,flow) || !pj_append(s,"}\n")) return false;
                 if (j == 0) memcpy(merged,branch,sizeof(merged));
                 else for (int k = 0; k < p->vars.count; k++) merged[k] &= branch[k];
             }
             memcpy(defined,merged,sizeof(merged));
+        }
+        else if (stmt->kind == ME_DSL_STMT_FOR) {
+            const me_expr *nodes[] = {stmt->as.for_loop.start.expr,
+                stmt->as.for_loop.stop.expr, stmt->as.for_loop.step.expr};
+            char *values[3] = {0};
+            bool ok = true;
+            for (int j = 0; j < 3; j++) {
+                /* Range's checked float/u64 conversions require a checked bridge.
+                 * Signed integral bounds are exactly representable in int64. */
+                if (!nodes[j] || !pj_integral(nodes[j]->dtype) || pj_unsigned(nodes[j]->dtype)) {
+                    ok = false;
+                    break;
+                }
+                values[j] = pj_expr(p,nodes[j],defined,0,constants);
+                if (!values[j]) { ok = false; break; }
+            }
+            int label = (*flow.next_label)++;
+            int index = p->local_var_indices[stmt->as.for_loop.loop_var_slot];
+            ok = ok && p->vars.dtypes[index] == ME_INT64 && pj_append(s,
+                "{ int64_t pj_iter_%d = %s; int64_t pj_stop_%d = %s; int64_t pj_step_%d = %s;\n"
+                "if (pj_status) return pj_status; if (!pj_step_%d) return -5;\n"
+                "while (pj_step_%d > 0 ? pj_iter_%d < pj_stop_%d : pj_iter_%d > pj_stop_%d) {\n"
+                "local_%d = pj_iter_%d;\n",
+                label,values[0],label,values[1],label,values[2],label,
+                label,label,label,label,label,index,label);
+            for (int j = 0; j < 3; j++) free(values[j]);
+            if (!ok) return false;
+            bool body_defined[ME_MAX_VARS];
+            memcpy(body_defined,defined,sizeof(body_defined));
+            body_defined[index] = true;
+            pj_flow loop_flow = {flow.next_label,label};
+            if (!pj_block(p,&stmt->as.for_loop.body,body_defined,s,depth+1,constants,loop_flow)) return false;
+            /* Continue performs advancement; overflow exhausts the range just as
+             * in the interpreter, without executing overflowing signed addition. */
+            if (!pj_append(s,
+                "pj_continue_%d: ;\n"
+                "if (pj_step_%d > 0 ? pj_iter_%d > INT64_MAX-pj_step_%d : pj_iter_%d < INT64_MIN-pj_step_%d) break;\n"
+                "pj_iter_%d += pj_step_%d;\n} pj_break_%d: ; }\n",
+                label,label,label,label,label,label,label,label,label)) return false;
+            /* A range can be empty. Newly initialized locals cannot be assumed
+             * defined afterwards; retain safe fallback for such later reads. */
+        }
+        else if (stmt->kind == ME_DSL_STMT_WHILE) {
+            int label = (*flow.next_label)++;
+            pj_flow loop_flow = {flow.next_label,label};
+            bool body_defined[ME_MAX_VARS];
+            memcpy(body_defined,defined,sizeof(body_defined));
+            if (!pj_append(s,"{ uint64_t pj_count_%d = 0; for (;;) {\npj_continue_%d: ;\n",label,label)) return false;
+            me_dsl_compiled_block prefix = stmt->as.while_loop.body;
+            prefix.nstmts = stmt->as.while_loop.condition_nstmts;
+            if (!pj_block(p,&prefix,body_defined,s,depth+1,constants,loop_flow)) return false;
+            char *condition = pj_expr(p,stmt->as.while_loop.cond.expr,body_defined,0,constants);
+            if (!condition) return false;
+            bool ok = pj_append(s,
+                "int pj_cond_%d = (%s); if (pj_status) return pj_status; if (!pj_cond_%d) break;\n"
+                "if (pj_cap > 0 && pj_count_%d >= (uint64_t)pj_cap) return -5;\n"
+                "pj_count_%d++;\n",label,condition,label,label,label);
+            free(condition);
+            if (!ok) return false;
+            me_dsl_compiled_block body = stmt->as.while_loop.body;
+            body.stmts += prefix.nstmts;
+            body.nstmts -= prefix.nstmts;
+            if (!pj_block(p,&body,body_defined,s,depth+1,constants,loop_flow) ||
+                !pj_append(s,"} pj_break_%d: ; }\n",label)) return false;
+        }
+        else if (stmt->kind == ME_DSL_STMT_BREAK || stmt->kind == ME_DSL_STMT_CONTINUE) {
+            if (flow.loop_label < 0) return false;
+            const char *target = stmt->kind == ME_DSL_STMT_BREAK ? "break" : "continue";
+            if (stmt->as.flow.cond.expr) {
+                char *condition = pj_expr(p,stmt->as.flow.cond.expr,defined,0,constants);
+                if (!condition) return false;
+                bool ok = pj_append(s,"if (%s) { if (pj_status) return pj_status; goto pj_%s_%d; }\n"
+                    "if (pj_status) return pj_status;\n",condition,target,flow.loop_label);
+                free(condition);
+                if (!ok) return false;
+            }
+            else if (!pj_append(s,"goto pj_%s_%d;\n",target,flow.loop_label)) return false;
         }
         else return false;
     }
@@ -356,7 +446,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     (void)constants;
     return;
 #endif
-    /* Bounded elementwise statements only; no loops or reductions. ND logical
+    /* Elementwise statements and lane-local loops; no reductions. ND logical
      * context is supported through lane-local reserved index recomputation. */
     if (!p || p->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_1 ||
         p->jit_request_mode != ME_JIT_ON || p->output_is_scalar ||
@@ -385,7 +475,9 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
             return;
         }
     }
-    if (!pj_block(p,&p->block,defined,&body,0,constants)) {
+    int next_label = 0;
+    pj_flow flow = {&next_label,-1};
+    if (!pj_block(p,&p->block,defined,&body,0,constants,flow)) {
         free(body.text);
         dsl_tracef("portable jit ineligible: unsupported typed statements");
         return;
@@ -428,7 +520,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
             return;
         }
     }
-    size_t capacity = body.used + preamble.used + 4096;
+    size_t capacity = body.used + preamble.used + 8192;
     char *source = malloc(capacity);
     me_dsl_jit_ir_program *ir = calloc(1,sizeof(*ir));
     if (!source || !ir) {
@@ -450,14 +542,14 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
     snprintf(source,capacity,
-        "/* portable-1.1 lowering-r12 exact-integral-comparisons abi-r6 */\n"
+        "/* portable-1.1 lowering-r13 lane-local-loops abi-r7 */\n"
         "#include <stdint.h>\n"
         "#include <string.h>\n"
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"
         "typedef double (*pj_math)(const void *,double);\n"
         "typedef double (*pj_math2)(const void *,double,double);\n"
         "typedef _Bool (*pj_pred)(const void *,double);\n"
-        "typedef uint64_t (*pj_iop)(const void *,uint64_t,uint64_t);\n"
+        "typedef uint64_t (*pj_iop)(const void *,uint64_t,uint64_t,int *);\n"
         /* Unsigned arithmetic followed by a bit copy implements modular signed
          * arithmetic without signed overflow or out-of-range signed casts. */
         "#define PJ_INT(S,U) static inline S pj_##S(uint64_t x) { U u=(U)x; S s; memcpy(&s,&u,sizeof(s)); return s; }\n"
@@ -484,11 +576,14 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "PJ_COMPARE(le, <=)\nPJ_COMPARE(gt, >)\nPJ_COMPARE(ge, >=)\n"
         "int %s(const void *const *inputs, void *output, int64_t count) {\n"
         "const unsigned char *mask = inputs[%d];\n"
+        "const int64_t pj_cap = *(const int64_t *)inputs[%d];\n"
+        "int pj_status = 0;\n"
         "%s"
         "for (int64_t i=0; i<count; i++) { if (mask && !mask[i]) continue;\n"
         "%s"
-        "%s } return 0; }\n",
-        ME_DSL_JIT_SYMBOL_NAME,p->n_inputs,nd_decl,preamble.text ? preamble.text : "",body.text);
+        "%s pj_lane_done: ; } return 0; }\n",
+        ME_DSL_JIT_SYMBOL_NAME,p->n_inputs,p->n_inputs+ME_DSL_PORTABLE_JIT_CAP_OFF,
+        nd_decl,preamble.text ? preamble.text : "",body.text);
     free(preamble.text);
     free(body.text);
     p->jit_ir = ir;

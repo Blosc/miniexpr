@@ -1278,12 +1278,16 @@ bool dsl_portable_jit_predicate(const void *node, double x) {
 
 /* Integer remainder/floor-division/shift/bitwise reuse the exact checked
  * modular routines; operands arrive as raw bit patterns. */
-uint64_t dsl_portable_jit_int_op(const void *node, uint64_t a, uint64_t b) {
+uint64_t dsl_portable_jit_int_op(const void *node, uint64_t a, uint64_t b, int *status) {
+    if (*status) return 0;
     const me_expr *n = node;
     const char *op = me_portable_operator(n);
     bool complement = op && !strcmp(op, "~");
     me_portable_integer_op iop;
-    if (op && !strcmp(op, "%")) iop = ME_PORTABLE_MOD;
+    if (op && !strcmp(op, "+")) iop = ME_PORTABLE_ADD;
+    else if (op && !strcmp(op, "-")) iop = ME_PORTABLE_SUB;
+    else if (op && !strcmp(op, "*")) iop = ME_PORTABLE_MUL;
+    else if (op && !strcmp(op, "%")) iop = ME_PORTABLE_MOD;
     else if (op && !strcmp(op, "//")) iop = ME_PORTABLE_FLOORDIV;
     else if (op && !strcmp(op, "<<")) iop = ME_PORTABLE_SHL;
     else if (op && !strcmp(op, ">>")) iop = ME_PORTABLE_SHR;
@@ -1293,14 +1297,72 @@ uint64_t dsl_portable_jit_int_op(const void *node, uint64_t a, uint64_t b) {
     else if (complement) iop = ME_PORTABLE_XOR;
     else return 0;
     me_scalar result = {0};
+    me_portable_numeric_status rc;
     if (p_unsigned(n->dtype)) {
         uint64_t right = complement ? (UINT64_MAX >> (64 - 8 * (int)dtype_size(n->dtype))) : b;
-        p_unsigned_op(n, iop, a, right, &result.u64);
+        rc = p_unsigned_op(n, iop, a, right, &result.u64);
+        if (rc) *status = ME_EVAL_ERR_INVALID_ARG;
         return result.u64;
     }
-    int64_t right = complement ? -1 : (int64_t)b;
-    p_signed_op(n, iop, (int64_t)a, right, &result.i64);
+    int64_t left, right;
+    memcpy(&left, &a, sizeof(left));
+    memcpy(&right, &b, sizeof(right));
+    if (complement) right = -1;
+    if (ARITY(n->type) == 1 && op && !strcmp(op, "-")) { right = left; left = 0; }
+    rc = p_signed_op(n, iop, left, right, &result.i64);
+    if (rc) *status = ME_EVAL_ERR_INVALID_ARG;
     return (uint64_t)result.i64;
+}
+
+/* Replay only one audited scalar operation, not its expression subtree. Typed
+ * operands arrive as exact bits; replacement variable leaves retain categories
+ * so checked weak conversions and modular strong operations stay distinct. */
+uint64_t dsl_portable_jit_checked(const void *node, uint64_t a, uint64_t b, uint64_t c, int *status) {
+    if (*status) return 0;
+    const me_expr *original = node;
+    int arity = ARITY(original->type);
+    if (arity < 1 || arity > 3 || is_reduction_node(original)) {
+        *status = ME_EVAL_ERR_INVALID_ARG;
+        return 0;
+    }
+    union { me_expr alignment; unsigned char bytes[sizeof(me_expr) + 2 * sizeof(void *)]; } storage;
+    me_expr *operation = (me_expr *)storage.bytes;
+    memcpy(operation, original, sizeof(me_expr));
+    me_expr leaves[3] = {{0}};
+    me_scalar values[3] = {{0}}, typed[3] = {{0}};
+    uint64_t bits[] = {a, b, c};
+    const void *vars[3];
+    for (int j = 0; j < arity; j++) {
+        const me_expr *arg = original->parameters[j];
+        memcpy(&leaves[j], arg, offsetof(me_expr, parameters));
+        leaves[j].type = ME_VARIABLE;
+        leaves[j].bound = synthetic_var_addresses + j;
+        operation->parameters[j] = &leaves[j];
+        if (arg->dtype == ME_FLOAT32) {
+            uint32_t raw = (uint32_t)bits[j];
+            memcpy(&values[j].f32, &raw, sizeof(raw));
+        } else if (arg->dtype == ME_FLOAT64) memcpy(&values[j].f64, &bits[j], sizeof(bits[j]));
+        else if (arg->dtype == ME_BOOL) values[j].b = bits[j] != 0;
+        else if (p_unsigned(arg->dtype)) values[j].u64 = bits[j];
+        else memcpy(&values[j].i64, &bits[j], sizeof(bits[j]));
+        write_scalar(&typed[j], arg->dtype, arg->dtype, &values[j]);
+        vars[j] = &typed[j];
+    }
+    p_eval_context context = {.vars = vars, .nvars = arity, .nitems = 1};
+    me_scalar result = {0};
+    int rc = p_eval(operation, &context, 0, &result);
+    p_context_free(&context);
+    if (rc) { *status = rc; return 0; }
+    uint64_t output = 0;
+    if (operation->dtype == ME_FLOAT32) {
+        uint32_t raw;
+        memcpy(&raw, &result.f32, sizeof(raw));
+        output = raw;
+    } else if (operation->dtype == ME_FLOAT64) memcpy(&output, &result.f64, sizeof(output));
+    else if (operation->dtype == ME_BOOL) output = result.b;
+    else if (p_unsigned(operation->dtype)) output = result.u64;
+    else memcpy(&output, &result.i64, sizeof(output));
+    return output;
 }
 
 static bool p_jit_nan_compare(const void *node, double x, double y);
