@@ -44,6 +44,7 @@ struct me_graph_plan {
     int last_consumer[ME_GRAPH_MAX_STAGES];
     bool portable_stage;
     bool declared_staged;
+    bool direct_reduction;
 };
 struct me_graph_schedule {
     me_graph_plan *plan;
@@ -462,6 +463,7 @@ static me_graph_status g_prepare_json(const char *json, size_t length,
     p->mask = -1; p->ninputs = ni;
     p->reduction.version = ME_ARTIFACT_ARRAY_VERSION;
     int reduction = g_reduce(nodes[result].op), map_root = reduction ? nodes[result].args[0] : result;
+    p->direct_reduction = reduction && !strcmp(nodes[map_root].op, "input");
     p->reduction.reduction = (me_array_reduction)reduction;
     p->reduction.naxes = reduction ? -1 : 0;
     if (reduction) {
@@ -792,8 +794,10 @@ me_graph_status me_graph_execute(const me_graph_schedule *s,
         }
         reduction.initial = &initial;
     }
-    status = me_artifact_eval_array(p->map, views, me_artifact_ninputs(p->map), s->rank, s->shape,
+    status = (p->direct_reduction ? dsl_array_eval_direct_input : me_artifact_eval_array)(
+        p->map, views, me_artifact_ninputs(p->map), s->rank, s->shape,
         &reduction, p->conversion ? temporary : output, p->conversion ? s->intermediate : capacity, &array, &native);
+    bool map_jit = me_artifact_has_jit(p->map) && array.evaluated_tiles != 0;
     if (!status && p->conversion) {
         active_stage = 1;
         me_array_report converted;
@@ -808,7 +812,7 @@ me_graph_status me_graph_execute(const me_graph_schedule *s,
     array.fp_flags |= initial_status.flags;
     if (report) {
         report->array = array;
-        report->has_jit = me_artifact_has_jit(p->map);
+        report->has_jit = map_jit;
         report->stages = p->conversion ? 2 : 1;
         report->jit_stages = report->has_jit ? 1 : 0;
         report->interpreter_stages = (size_t)active_stage + 1 - report->jit_stages;

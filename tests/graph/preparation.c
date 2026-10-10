@@ -1,5 +1,6 @@
 #include "miniexpr_graph.h"
 #include <fenv.h>
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -175,6 +176,139 @@ static void staged(bool jit) {
     CHECK(output[0] == -4 && output[3] == -10);
     me_graph_schedule_free(s); me_graph_plan_free(p);
 }
+/* Compare the optimized graph route against the unchanged artifact-array
+ * reducer, including exact serial rounding and floating status. */
+static void direct_reductions(void) {
+    const char *names[] = {"sum", "prod", "min", "max", "any", "all"};
+    me_dtype types[] = {ME_FLOAT32, ME_FLOAT64, ME_INT32, ME_BOOL, ME_INT8, ME_INT16,
+        ME_INT64, ME_UINT8, ME_UINT16, ME_UINT32, ME_UINT64};
+    float f[] = {1, -2, 3, 0, 5, -6};
+    double d[] = {1, -2, 3, 0, 5, -6};
+    int32_t integers[] = {1, -2, 3, 0, 5, -6};
+    bool booleans[] = {true, false, true, false, true, true};
+    int8_t i8[] = {1, -2, 3, 0, 5, -6}; int16_t i16[] = {1, -2, 3, 0, 5, -6};
+    int64_t i64[] = {INT64_MAX, 1, INT64_MIN, -1, 0, 3};
+    uint8_t u8[] = {1, 2, 3, 0, 5, 6}; uint16_t u16[] = {1, 2, 3, 0, 5, 6};
+    uint32_t u32[] = {1, 2, 3, 0, 5, 6}; uint64_t u64[] = {UINT64_MAX, 1, 0, 1, 2, 3};
+    void *data[] = {f, d, integers, booleans, i8, i16, i64, u8, u16, u32, u64};
+    size_t widths[] = {4, 8, 4, 1, 1, 2, 8, 1, 2, 4, 8};
+    for (int type = 0; type < 11; type++) for (int op = 0; op < 6; op++) {
+        char source[32]; snprintf(source, sizeof(source), "%s(x)", names[op]);
+        me_graph_input_metadata input = {"x", types[type], 1, {6}};
+        me_graph_plan *p = prepare(source, &input, 1, false);
+        size_t width = widths[type];
+        me_array_view v = {0}; v.name = "x"; v.dtype = types[type];
+        v.rank = 1; v.shape[0] = 6; v.strides[0] = (int64_t)width;
+        v.base = data[type]; v.capacity = 6 * width;
+        for (size_t tile = 1; tile <= 9; tile += 4) {
+            me_graph_specialize_options options = {sizeof(options), ME_GRAPH_VERSION, tile, 0};
+            me_graph_schedule *s = NULL;
+            CHECK(!me_graph_specialize(p, &input, 1, &options, &s, &error));
+            me_array_options reduction = {0}; reduction.version = ME_ARTIFACT_ARRAY_VERSION;
+            reduction.reduction = (me_array_reduction)(op + 1); reduction.naxes = -1;
+            reduction.tile_items = tile;
+            uint64_t actual = 0, expected = 0;
+            me_array_report reference; me_graph_report report; me_artifact_error native;
+            CHECK(!me_artifact_eval_array(me_graph_map_artifact(p), &v, 1, 1, input.shape,
+                &reduction, &expected, sizeof(expected), &reference, &native));
+            CHECK(!me_graph_execute(s, &v, 1, &actual, sizeof(actual), NULL, &report, &error));
+            CHECK(!memcmp(&actual, &expected, me_graph_output_bytes(s)));
+            CHECK(report.array.fp_flags == reference.fp_flags);
+            CHECK(report.array.evaluated_tiles == 0 && report.array.temporary_bytes == 0);
+            CHECK(!report.has_jit && report.jit_stages == 0);
+            me_graph_schedule_free(s);
+        }
+        me_graph_plan_free(p);
+    }
+    /* Cancellation-sensitive order, overflow, NaNs and signed zero. */
+    double special[][6] = {{1e16, 1, -1e16, 1, -0.0, 0},
+        {DBL_MAX, DBL_MAX, -DBL_MAX, 1, 2, 3}, {INFINITY, -INFINITY, 1, 2, 3, 4},
+        {NAN, 1, 2, 3, 4, 5}, {-0.0, -0.0, -0.0, -0.0, -0.0, -0.0}};
+    for (size_t i = 0; i < sizeof(special) / sizeof(*special); i++) {
+        me_graph_input_metadata input = {"x", ME_FLOAT64, 1, {6}};
+        me_graph_plan *p = prepare("sum(x)", &input, 1, false);
+        me_graph_schedule *s = NULL;
+        CHECK(!me_graph_specialize(p, &input, 1, NULL, &s, &error));
+        me_array_view v = view("x", ME_FLOAT64, special[i], sizeof(special[i]), 1, 6, 0);
+        me_array_options o = {0}; o.version = ME_ARTIFACT_ARRAY_VERSION;
+        o.reduction = ME_ARRAY_SUM; o.naxes = -1; o.tile_items = 1;
+        double expected, actual; me_array_report reference; me_graph_report report; me_artifact_error native;
+        CHECK(!me_artifact_eval_array(me_graph_map_artifact(p), &v, 1, 1, input.shape,
+            &o, &expected, sizeof(expected), &reference, &native));
+        CHECK(!me_graph_execute(s, &v, 1, &actual, sizeof(actual), NULL, &report, &error));
+        CHECK(!memcmp(&actual, &expected, sizeof(actual)) && report.array.fp_flags == reference.fp_flags);
+        me_graph_schedule_free(s); me_graph_plan_free(p);
+    }
+}
+static void dsl_direct_sum(void) {
+    const char *json =
+        "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
+        "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x):\\n    return sum(x)\\n\","
+        "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"}],\"constants\":[],"
+        "\"output\":{\"dtype\":\"float64\",\"contract\":\"block_scalar\"},\"context\":{\"ndim\":0},"
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}";
+    me_artifact *a = NULL; me_artifact_error native;
+    CHECK(!me_artifact_load(json, strlen(json), ME_JIT_OFF, &a, &native));
+    double x[] = {1e16, 1, -1e16, 3}, result;
+    me_artifact_buffer buffer = {"x", ME_FLOAT64, sizeof(double), x, sizeof(x)};
+    me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
+        .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = 4, .output_capacity = sizeof(result)};
+    me_artifact_fp_status status;
+    CHECK(!me_artifact_eval_status(a, &buffer, 1, &result, &descriptor, 0, &status, &native));
+    CHECK(result == 3 && status.flags == 0);
+    uint8_t mask[] = {0, 0, 1, 1};
+    x[0] = INFINITY; x[1] = -INFINITY; x[2] = 2;
+    descriptor.valid_mask = mask; descriptor.valid_mask_capacity = sizeof(mask);
+    CHECK(!me_artifact_eval_status(a, &buffer, 1, &result, &descriptor, 0, &status, &native));
+    CHECK(result == 5 && status.flags == 0);
+    descriptor.valid_mask = NULL; descriptor.valid_mask_capacity = 0;
+    CHECK(!me_artifact_eval_status(a, &buffer, 1, &result, &descriptor, 0, &status, &native));
+    CHECK(isnan(result));
+#ifndef __EMSCRIPTEN__
+    CHECK(status.flags & 1);
+#endif
+    me_artifact_free(a);
+}
+static void dsl_direct_reductions(void) {
+    const char *names[] = {"float32", "float64", "int64", "uint64", "bool"};
+    me_dtype types[] = {ME_FLOAT32, ME_FLOAT64, ME_INT64, ME_UINT64, ME_BOOL};
+    size_t widths[] = {4, 8, 8, 8, sizeof(bool)};
+    const char *ops[] = {"prod", "min", "max", "any", "all"};
+    for (int type = 0; type < 5; type++) for (int op = 0; op < 5; op++) {
+        char json[2048];
+        const char *output = op >= 3 ? "bool" : op == 0 && type == 4 ? "int64" : names[type];
+        snprintf(json, sizeof(json),
+            "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
+            "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x):\\n    return %s(x)\\n\","
+            "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"%s\"}],\"constants\":[],"
+            "\"output\":{\"dtype\":\"%s\",\"contract\":\"block_scalar\"},\"context\":{\"ndim\":0},"
+            "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}",
+            ops[op], names[type], output);
+        me_artifact *a = NULL; me_artifact_error native;
+        CHECK(!me_artifact_load(json, strlen(json), ME_JIT_OFF, &a, &native));
+        for (int edge = 0; edge < 3; edge++) {
+            float f[] = {1, -0.0f, 2, 3, 0};
+            double d[] = {1, -0.0, 2, 3, 0};
+            int64_t s[] = {-1, 2, 3, 4, 0};
+            uint64_t u[] = {1, 2, 3, 4, 0};
+            bool b[] = {true, true, false, true, false};
+            if (edge == 1) { f[1] = NAN; d[1] = NAN; s[0] = INT64_MIN; s[1] = -1; u[0] = UINT64_MAX; }
+            if (edge == 2) { f[0] = INFINITY; d[0] = INFINITY; }
+            void *data[] = {f, d, s, u, b};
+            me_artifact_buffer buffer = {"x", types[type], widths[type], data[type], widths[type] * 5};
+            me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
+                .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = 4, .output_capacity = 8};
+            uint64_t direct = 0, generic = 0; me_artifact_fp_status status, reference;
+            int rc = me_artifact_eval_status(a, &buffer, 1, &direct, &descriptor, 0, &status, &native);
+            uint8_t mask[] = {1, 1, 1, 1, 0};
+            descriptor.nitems = 5; descriptor.valid_mask = mask; descriptor.valid_mask_capacity = sizeof(mask);
+            int expected_rc = me_artifact_eval_status(a, &buffer, 1, &generic, &descriptor, 0, &reference, &native);
+            CHECK(rc == expected_rc);
+            if (!rc) { CHECK(direct == generic); CHECK(status.flags == reference.flags); }
+        }
+        me_artifact_free(a);
+    }
+}
 static void trusted(bool jit) {
     me_graph_input_metadata input = {"x", ME_FLOAT32, 1, {3}};
     me_graph_plan *map = prepare("x * 2", &input, 1, jit), *p = NULL;
@@ -212,6 +346,9 @@ int main(void) {
     RUN_CASE(validation()); RUN_CASE(limits());
     RUN_CASE(maps(true)); RUN_CASE(lazy(true)); RUN_CASE(reductions(true));
     RUN_CASE(staged(false)); RUN_CASE(staged(true));
+    RUN_CASE(direct_reductions());
+    RUN_CASE(dsl_direct_sum());
+    RUN_CASE(dsl_direct_reductions());
     RUN_CASE(trusted(false)); RUN_CASE(trusted(true));
 #undef RUN_CASE
     puts("native graph preparation/execution passed"); return 0;

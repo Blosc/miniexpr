@@ -2,6 +2,7 @@ file(GLOB MINIEXPR_BENCH_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
 # This one needs the artifact library and a dedicated link line; handled below.
 list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_dsl_interpreter_vs_jit\\.c$")
 list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_graph_preparation\\.c$")
+list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_sum_paths\\.c$")
 if(WIN32)
   # These benchmarks rely on pthreads/time APIs not available on Windows CI.
   list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_blocksize\\.c$")
@@ -48,6 +49,8 @@ endforeach()
 
 # Needs the artifact loader/JSON library, so it gets its own link line.
 if(MINIEXPR_BUILD_ARTIFACT)
+  add_executable(benchmark_sum_paths benchmark_sum_paths.c)
+  target_link_libraries(benchmark_sum_paths PRIVATE miniexpr_artifact)
   add_executable(benchmark_graph_preparation benchmark_graph_preparation.c)
   target_link_libraries(benchmark_graph_preparation PRIVATE miniexpr_artifact)
   add_executable(benchmark_dsl_interpreter_vs_jit benchmark_dsl_interpreter_vs_jit.c)

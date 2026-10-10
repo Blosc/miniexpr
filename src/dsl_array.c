@@ -3,6 +3,7 @@
 #include "miniexpr_artifact.h"
 #include "dsl_graph_internal.h"
 #include "dsl_portable_fp.h"
+#include "dsl_portable_reduce.h"
 #include <limits.h>
 #include <math.h>
 #include <stdint.h>
@@ -205,7 +206,7 @@ static void a_combine(me_dtype dtype, int op, void *acc, const void *value) {
 }
 static me_artifact_status a_run(const me_artifact *a, const me_array_view *inputs, int ninputs,
     int rank, const int64_t *shape, const me_array_options *o, void *output, size_t capacity,
-    me_array_report *report, me_artifact_error *error, bool execute) {
+    me_array_report *report, me_artifact_error *error, bool execute, bool identity_map) {
     int out_rank; int64_t out_shape[ME_ARRAY_MAX_RANK]; me_dtype dtype;
     me_array_report local = {0}; if (!report) report = &local; memset(report,0,sizeof(*report));
     int rc = me_array_result_shape(a,rank,shape,o,&out_rank,out_shape,&dtype,error);
@@ -246,10 +247,16 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
     if (tile > total && o->reduction == ME_ARRAY_NONE) tile = total;
     if (!tile) tile = 1;
     if (!execute) return ME_ARTIFACT_SUCCESS;
+    /* Keep the complete shared preflight above. Only native contiguous tiles
+     * without masks bypass map evaluation; other layouts use the original path. */
+    bool direct_reduction = identity_map && o->reduction != ME_ARRAY_NONE &&
+        ninputs == 1 && direct[0] && !o->where &&
+        inputs[binding[0]].dtype == me_artifact_output_dtype(a);
     void *owned[128] = {0}; me_artifact_buffer buffers[128];
     uint8_t *mask = o->where ? malloc(tile) : NULL;
-    void *scratch = o->reduction != ME_ARRAY_NONE ? malloc(tile * source_width) : NULL;
-    if ((o->where && !mask) || (o->reduction != ME_ARRAY_NONE && !scratch)) { rc = ME_ARTIFACT_ERR_OOM; goto cleanup; }
+    bool need_scratch = o->reduction != ME_ARRAY_NONE && !direct_reduction;
+    void *scratch = need_scratch ? malloc(tile * source_width) : NULL;
+    if ((o->where && !mask) || (need_scratch && !scratch)) { rc = ME_ARTIFACT_ERR_OOM; goto cleanup; }
     report->temporary_bytes = (mask ? tile : 0) + (scratch ? tile * source_width : 0);
     for (int b = 0; b < ninputs; b++) {
         const me_array_view *v = &inputs[binding[b]]; size_t w = a_width(v->dtype);
@@ -298,13 +305,63 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
                 buffers[b].capacity = count*buffers[b].itemsize;
                 if (direct[b]) report->zero_copy_tiles++;
             }
-            void *destination = scratch ? scratch : (uint8_t *)output + begin*source_width;
-            me_artifact_eval_descriptor descriptor = {sizeof(descriptor),ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,count,count*source_width,mask,mask ? count : 0,0,NULL,NULL,NULL};
-            rc = me_artifact_eval_ex(a,buffers,ninputs,destination,&descriptor,error);
-            report->evaluated_tiles++;
-            if (!rc && scratch) for (size_t lane = 0; lane < count; lane++) {
+            if (!direct_reduction) {
+                void *destination = scratch ? scratch : (uint8_t *)output + begin*source_width;
+                me_artifact_eval_descriptor descriptor = {sizeof(descriptor),ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,count,count*source_width,mask,mask ? count : 0,0,NULL,NULL,NULL};
+                rc = me_artifact_eval_ex(a,buffers,ninputs,destination,&descriptor,error);
+                report->evaluated_tiles++;
+            }
+            const void *values = direct_reduction ? buffers[0].data : scratch;
+            bool handled = false;
+            if (!rc && direct_reduction &&
+                (o->reduction == ME_ARRAY_MIN || o->reduction == ME_ARRAY_MAX) &&
+                dtype == me_artifact_output_dtype(a)) {
+                uint64_t normalized = acc, result;
+                if (!a_float(dtype)) normalized = a_integer(dtype, &acc);
+                handled = dsl_portable_extrema(dtype, values, count, normalized,
+                    initialized, o->reduction == ME_ARRAY_MIN, &result);
+                if (handled) {
+                    if (a_float(dtype)) acc = result;
+                    else a_cast(ME_UINT64, &result, dtype, &acc);
+                    initialized = true;
+                }
+            } else if (!rc && direct_reduction && dtype == ME_BOOL &&
+                (o->reduction == ME_ARRAY_ANY || o->reduction == ME_ARRAY_ALL)) {
+                bool truth;
+                handled = dsl_portable_truth_reduce(me_artifact_output_dtype(a), values,
+                    count, a_integer(dtype, &acc) != 0, o->reduction == ME_ARRAY_ALL, &truth);
+                if (handled) { uint64_t result = truth; a_cast(ME_UINT64, &result, dtype, &acc); }
+            }
+            if (!rc && !handled && direct_reduction &&
+                (o->reduction == ME_ARRAY_SUM || o->reduction == ME_ARRAY_PROD) &&
+                dtype == me_artifact_output_dtype(a) && a_float(dtype)) {
+                /* Fixed serial order, with one float32 rounding per operation.
+                 * No reassociation, vector reduction or tile partial sums. */
+                if (dtype == ME_FLOAT64) {
+                    double sum; memcpy(&sum, &acc, sizeof(sum));
+                    sum = o->reduction == ME_ARRAY_PROD ? dsl_portable_prod_f64(sum, values, count) :
+                        dsl_portable_sum_f64(sum, values, count);
+                    memcpy(&acc, &sum, sizeof(sum));
+                } else {
+                    float sum; memcpy(&sum, &acc, sizeof(sum));
+                    sum = o->reduction == ME_ARRAY_PROD ? dsl_portable_prod_f32(sum, values, count) :
+                        dsl_portable_sum_f32(sum, values, count);
+                    memcpy(&acc, &sum, sizeof(sum));
+                }
+            } else if (!rc && !handled && direct_reduction &&
+                (o->reduction == ME_ARRAY_SUM || o->reduction == ME_ARRAY_PROD) &&
+                !a_float(me_artifact_output_dtype(a)) &&
+                ((dtype == ME_UINT64 && a_unsigned(me_artifact_output_dtype(a)) &&
+                  me_artifact_output_dtype(a) != ME_BOOL) ||
+                 (dtype == ME_INT64 && (!a_unsigned(me_artifact_output_dtype(a)) ||
+                  me_artifact_output_dtype(a) == ME_BOOL)))) {
+                bool ok = o->reduction == ME_ARRAY_PROD ?
+                    dsl_portable_prod_integer(me_artifact_output_dtype(a), values, count, acc, false, &acc) :
+                    dsl_portable_sum_integer(me_artifact_output_dtype(a), values, count, acc, false, &acc);
+                if (!ok) rc = ME_ARTIFACT_ERR_EVAL;
+            } else if (!rc && !handled && values) for (size_t lane = 0; lane < count; lane++) {
                 if (mask && !mask[lane]) continue;
-                uint64_t value = 0; a_cast(me_artifact_output_dtype(a),(uint8_t *)scratch + lane*source_width,dtype,&value);
+                uint64_t value = 0; a_cast(me_artifact_output_dtype(a),(const uint8_t *)values + lane*source_width,dtype,&value);
                 if (!initialized) { memcpy(&acc,&value,width); initialized = true; }
                 else a_combine(dtype,o->reduction,&acc,&value);
             }
@@ -323,12 +380,17 @@ cleanup:
 me_artifact_status me_artifact_eval_array(const me_artifact *a, const me_array_view *inputs, int ninputs,
     int rank, const int64_t *shape, const me_array_options *o, void *output, size_t capacity,
     me_array_report *report, me_artifact_error *error) {
-    return a_run(a, inputs, ninputs, rank, shape, o, output, capacity, report, error, true);
+    return a_run(a, inputs, ninputs, rank, shape, o, output, capacity, report, error, true, false);
+}
+me_artifact_status dsl_array_eval_direct_input(const me_artifact *a, const me_array_view *inputs,
+    int ninputs, int rank, const int64_t *shape, const me_array_options *o, void *output,
+    size_t capacity, me_array_report *report, me_artifact_error *error) {
+    return a_run(a, inputs, ninputs, rank, shape, o, output, capacity, report, error, true, true);
 }
 me_artifact_status dsl_array_preflight(const me_artifact *a, const me_array_view *inputs, int ninputs,
     int rank, const int64_t *shape, const me_array_options *o, void *output, size_t capacity,
     me_artifact_error *error) {
-    return a_run(a, inputs, ninputs, rank, shape, o, output, capacity, NULL, error, false);
+    return a_run(a, inputs, ninputs, rank, shape, o, output, capacity, NULL, error, false, false);
 }
 me_artifact_status me_array_reshape(const me_array_view *v, int rank, const int64_t *shape,
     me_array_view *out, me_artifact_error *e) {

@@ -5,6 +5,7 @@
 #include "dsl_portable_expr.h"
 #include "dsl_portable_types.h"
 #include "dsl_portable_fp.h"
+#include "dsl_portable_reduce.h"
 #include "miniexpr_internal.h"
 
 #include <math.h>
@@ -866,10 +867,69 @@ static int p_eval_branch(const me_expr *node, int alternative, bool selected_tru
     return rc;
 }
 
+static bool p_all_lanes(const uint8_t *lanes, int count) {
+    if (!lanes) return true;
+    for (int i = 0; i < count; i++) if (!lanes[i]) return false;
+    return true;
+}
+
 static int p_reduce(const me_expr *n, p_eval_context *ctx, me_scalar *out) {
     me_reduce_kind kind = reduction_kind(n->function);
     const me_expr *arg = n->parameters[0];
     me_dtype acc_dtype = n->dtype;
+    /* Plain, fully initialized fully participating inputs need neither expression
+     * dispatch nor scalar conversion for every lane. The DSL may supply all-one
+     * masks/initialization arrays even for inputs: validate those once. Partial
+     * participation, uninitialized locals and computed operands retain p_eval. */
+    bool direct_float = arg->dtype == acc_dtype && p_float(acc_dtype);
+    bool direct_integer = !p_float(arg->dtype) && p_numeric(arg->dtype) &&
+        acc_dtype == (p_unsigned(arg->dtype) ? ME_UINT64 : ME_INT64);
+    bool arithmetic = kind == ME_REDUCE_SUM || kind == ME_REDUCE_PROD;
+    bool extrema = kind == ME_REDUCE_MIN || kind == ME_REDUCE_MAX;
+    bool logical = kind == ME_REDUCE_ANY || kind == ME_REDUCE_ALL;
+    if (((arithmetic && (direct_float || direct_integer)) ||
+         (extrema && arg->dtype == acc_dtype && p_numeric(arg->dtype)) ||
+         (logical && p_numeric(arg->dtype))) &&
+        TYPE_MASK(arg->type) == ME_VARIABLE && is_synthetic_address(arg->bound) &&
+        ctx->nitems > 0 && ctx->vars) {
+        int index = (int)((const char *)arg->bound - synthetic_var_addresses);
+        if (index >= 0 && index < ctx->nvars && ctx->vars[index] &&
+            p_all_lanes(ctx->mask, ctx->nitems) &&
+            (!ctx->initialized || ctx->initialized[index] == ctx->mask ||
+             p_all_lanes(ctx->initialized[index], ctx->nitems))) {
+            *out = (me_scalar){0};
+            const void *values = ctx->vars[index];
+            size_t count = (size_t)ctx->nitems;
+            if (logical) {
+                if (dsl_portable_truth_reduce(arg->dtype, values, count,
+                    kind == ME_REDUCE_ALL, kind == ME_REDUCE_ALL, &out->b)) return ME_EVAL_SUCCESS;
+            } else if (extrema) {
+                uint64_t result;
+                if (dsl_portable_extrema(arg->dtype, values, count, 0, false,
+                    kind == ME_REDUCE_MIN, &result)) {
+                    if (acc_dtype == ME_BOOL) out->b = result != 0;
+                    else memcpy(out, &result, sizeof(result));
+                    return ME_EVAL_SUCCESS;
+                }
+            } else if (acc_dtype == ME_FLOAT32) {
+                out->f32 = kind == ME_REDUCE_PROD ? dsl_portable_prod_f32(1.0f, values, count) :
+                    dsl_portable_sum_f32(0.0f, values, count);
+                return ME_EVAL_SUCCESS;
+            } else if (acc_dtype == ME_FLOAT64) {
+                out->f64 = kind == ME_REDUCE_PROD ? dsl_portable_prod_f64(1.0, values, count) :
+                    dsl_portable_sum_f64(0.0, values, count);
+                return ME_EVAL_SUCCESS;
+            } else {
+                uint64_t sum;
+                bool ok = kind == ME_REDUCE_PROD ?
+                    dsl_portable_prod_integer(arg->dtype, values, count, 1, true, &sum) :
+                    dsl_portable_sum_integer(arg->dtype, values, count, 0, true, &sum);
+                if (!ok) return ME_EVAL_ERR_INVALID_ARG;
+                memcpy(out, &sum, sizeof(sum));
+                return ME_EVAL_SUCCESS;
+            }
+        }
+    }
     if (kind == ME_REDUCE_MEAN) {
         acc_dtype = p_float(arg->dtype) ? arg->dtype : p_unsigned(arg->dtype) ? ME_UINT64 : ME_INT64;
     }

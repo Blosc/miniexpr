@@ -28,8 +28,54 @@ Options have `struct_size=sizeof(options)` and `version=ME_GRAPH_VERSION` (1).
 NULL options choose the interpreter, a 1024-item tile and ignore FP flags.
 JIT preference and `require_jit` are explicit; required unavailable acceleration
 rejects. Reports name the actual **map kernel** route; reductions still use the
-serial logical accumulator. No optimization/reassociation/CSE is enabled, whether
+serial logical accumulator. No expression reassociation/CSE is enabled, whether
 `disable_optimization` is true or false.
+
+A reduction whose map is a plain input can bypass identity-map evaluation for
+native-endian, aligned, contiguous inputs and suffix axes without a mask. This
+also applies to reduction regions inside staged graphs such as `x - sum(x)`.
+Float32/float64 sum and product use typed serial loops with the same initial value
+and per-operation rounding. Boolean and integer sums/products with their default promoted
+64-bit accumulators use dtype-specialized loops with modular accumulation;
+nondefault accumulator conversions retain generic logic. Min/max use typed
+comparisons when the accumulator dtype matches the input, preserving signed-zero
+selection. Any/all use typed truth tests and introduce no early exit. Float
+extrema/truth tiles containing NaNs (or NaN extrema initials) retain generic logic
+to preserve payload selection and signaling-NaN diagnostics.
+Gathered layouts, masks and computed maps keep the original map/reducer route.
+No tile partial sums or reassociation are introduced. Scratch queries remain
+conservative bounds; actual reported temporary memory can be zero. Bypassed maps
+do not contribute to `evaluated_tiles` or `jit_stages`, even if the prepared map
+is JIT-capable. The legacy `interpreter_stages` count includes non-JIT native
+reduction stages and does not imply that an identity map was interpreted.
+
+The portable DSL interpreter shares the sum/product helpers for plain variables with
+unchanged float accumulator dtype or the default promoted integer accumulator,
+full participation and fully initialized lanes. Its integer sums/products preserve the
+existing checked-overflow behavior (unlike graph modular accumulation), including
+failure on intermediate prefix overflow. Boolean sums count true lanes in int64.
+Min/max and any/all share the typed comparisons/truth tests with the same NaN
+fallback. Mean still uses the existing generic reducer.
+All-one interpreter masks/initialization arrays are checked
+once; partial masks, potentially uninitialized variables and computed operands
+retain generic expression reduction. This is a block-reduction optimization, not
+conversion of DSL programs into graphs, and it does not imply JIT execution.
+
+`benchmark_sum_paths [items] [samples] [tile_items] [dtype] [direct|computed]
+[sum|prod|min|max|any|all]` times both warm native APIs on identical inputs, with
+preparation, Python and compression excluded. Each call verifies its result.
+The optional computed DSL operand adds work and is not a historical baseline.
+An A/B measurement disabling only the new product/extrema/truth loops (Apple M4
+Pro, 1,048,576 float64 lanes, 9 samples, 1024-item tiles, JIT off) gave these median
+milliseconds; these are local measurements, not portable speedup guarantees:
+
+| Reduction | DSL before / after | Graph before / after |
+| --- | ---: | ---: |
+| prod | 7.587 / 2.878 | 3.172 / 1.756 |
+| min | 7.664 / 2.458 | 3.962 / 0.731 |
+| max | 7.704 / 2.627 | 3.687 / 0.920 |
+| any | 6.372 / 2.558 | 7.112 / 0.573 |
+| all | 6.491 / 2.390 | 6.588 / 0.583 |
 
 `me_graph_export_json` returns canonical declarative JSON, with sorted object
 keys and preserved node/operand order. Import is preparation and revalidation,
