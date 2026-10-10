@@ -324,7 +324,14 @@ static void computed_weak_conversion(void) {
     me_artifact_free(oracle);
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    if (argc > 1) {
+        me_artifact *oracle = load(&cases[0], ME_JIT_ON);
+        if (!strcmp(argv[1],"--require-jit")) CHECK(me_artifact_has_jit(oracle));
+        else if (!strcmp(argv[1],"--require-interpreter")) CHECK(!me_artifact_has_jit(oracle));
+        else CHECK(false);
+        me_artifact_free(oracle);
+    }
     matrix();
     exact_comparisons();
     weak_overflow();

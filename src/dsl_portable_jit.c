@@ -1,4 +1,4 @@
-/* Portable 1.1 scalar C lowering, revision 15. Never translate source
+/* Portable 1.1 scalar C lowering, revision 16. Never translate source
  * text: the typed tree includes promotion and final output conversions. The
  * private kernel ABI appends a participating mask and host comparison/math bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
@@ -182,6 +182,7 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
     bool integer_arithmetic = op && pj_integer(n->dtype) &&
         (!strcmp(op,"+") || !strcmp(op,"-") || !strcmp(op,"*")) &&
         (arity == 2 || (arity == 1 && !strcmp(op,"-")));
+    bool checked_arithmetic = checked_weak && n->dtype == ME_INT64 && integer_arithmetic;
     /* Unary/binary math, predicates and the divmod/power operators are lowered
      * through host bridges that replay the exact interpreter scalar path. */
     const char *math = me_portable_math_name(n);
@@ -280,6 +281,11 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
         else if (integer_comparison) {
             snprintf(out,capacity,"(pj_icmp((uint64_t)(%s),(uint64_t)(%s),%d,%d) %s 0)",
                 args[0],args[1],pj_unsigned(arg0->dtype),pj_unsigned(arg1->dtype),op);
+        }
+        else if (checked_arithmetic) {
+            const char *name = !strcmp(op,"+") ? "add" : !strcmp(op,"-") ? "sub" : "mul";
+            snprintf(out,capacity,"pj_int64_t(pj_weak_%s((uint64_t)(%s),(uint64_t)(%s),&pj_status))",
+                name,arity == 1 ? "0ULL" : args[0],arity == 1 ? args[0] : args[1]);
         }
         else if (predicate) {
             if (p->portable_jit_npreds == ME_DSL_PORTABLE_JIT_BRIDGE_LIMIT) { free(out); out = NULL; }
@@ -527,6 +533,7 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
 static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *constants) {
 #ifdef __EMSCRIPTEN__
     /* Host function-pointer comparison/mask ABI is not the WASM adapter ABI. */
+    dsl_tracef("portable jit ineligible: wasm adapter lacks exact i64 and typed bridge ABI");
     (void)p;
     (void)constants;
     return;
@@ -628,7 +635,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
     snprintf(source,capacity,
-        "/* portable-1.1 lowering-r15 sequenced-weak-checks abi-r8 */\n"
+        "/* portable-1.1 lowering-r16 inline-checked-weak-arithmetic abi-r8 */\n"
         "#include <stdint.h>\n"
         "#include <string.h>\n"
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"
@@ -646,6 +653,18 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "#define PJ_INT(S,U) static inline S pj_##S(uint64_t x) { U u=(U)x; S s; memcpy(&s,&u,sizeof(s)); return s; }\n"
         "PJ_INT(int8_t,uint8_t)\nPJ_INT(int16_t,uint16_t)\nPJ_INT(int32_t,uint32_t)\nPJ_INT(int64_t,uint64_t)\n"
         "PJ_INT(uint8_t,uint8_t)\nPJ_INT(uint16_t,uint16_t)\nPJ_INT(uint32_t,uint32_t)\nPJ_INT(uint64_t,uint64_t)\n"
+        /* Overflow is detected in unsigned representations, never by executing
+         * overflowing signed C arithmetic. Multiplication checks bounds before
+         * producing the modular bit pattern. Weak int64 stays checked. */
+        "static inline uint64_t pj_weak_add(uint64_t a,uint64_t b,int *status) {\n"
+        "uint64_t r=a+b; if ((~(a^b)&(a^r))>>63) *status=-5; return r; }\n"
+        "static inline uint64_t pj_weak_sub(uint64_t a,uint64_t b,int *status) {\n"
+        "uint64_t r=a-b; if (((a^b)&(a^r))>>63) *status=-5; return r; }\n"
+        "static inline uint64_t pj_weak_mul(uint64_t a,uint64_t b,int *status) {\n"
+        "int64_t x=pj_int64_t(a), y=pj_int64_t(b);\n"
+        "if (x>0 ? (y>0 ? x>INT64_MAX/y : y<INT64_MIN/x) :\n"
+        "    (x<0 && (y>0 ? x<INT64_MIN/y : y<INT64_MAX/x))) *status=-5;\n"
+        "return a*b; }\n"
         /* Signed values are sign-extended before transport. Only compare their
          * unsigned representations once both operands are known nonnegative. */
         "static inline int pj_icmp(uint64_t a,uint64_t b,int au,int bu) {\n"

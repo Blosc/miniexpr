@@ -385,3 +385,28 @@ so downstream benchmarks cannot silently claim JIT performance while interpretin
   fallback remain intact. Added computed narrowing, floating capture, lazy cast,
   and cache-reuse regressions. All 442 native tests and 98 focused independent-
   wheel Python tests pass; broader Python qualification is run separately.
+- P5 host qualification: added required-TCC and required-system-CC artifact
+  parity tests, plus an explicit interpreter-only test for unsafe user compiler
+  flags. The new branch runs native CI and exact-pair Python CI includes the
+  parity suite in editable and independent-wheel checks. Full local native
+  qualification passes 445 tests; the independent wheel passes 1,567 broader
+  Python tests (23 skips), with 134 focused parity cases after additional weak
+  arithmetic boundary tests. ASan/UBSan pass 18 focused tests; WASM passes 16
+  fallback/graph/artifact tests. Strict changed-lowerer C checks pass. The
+  sanitizer build also emitted pre-existing deprecated-sprintf warnings from
+  `examples/test_chunk_sizes.c`, not from changed sources.
+- P5 performance qualification: inline checked int64 weak add/subtract/multiply
+  avoids a host callback on each Mandelbrot counter increment. Overflow checks
+  operate on unsigned representations or safe division bounds, preserving
+  checked semantics without signed C overflow. On this Apple M4 Pro, a 128x128
+  grid with 64 iterations, best of three warm runs, produced Clang portable JIT
+  1.272 ms, legacy JIT 2.239 ms, NumPy 3.457 ms, and portable interpretation
+  3,039.516 ms; all outputs match. These are local samples, not universal speed
+  rankings or cold-compilation parity claims.
+- P5 WASM JIT remains incomplete: the legacy adapter's
+  `dsl_wasm32_patch_source` explicitly narrows int64/uint64 types to 32 bits.
+  Enabling host portable source generation against it would silently corrupt
+  exact values and bridge signatures. Added an actionable trace reason and a
+  required-interpreter test instead of enabling an unsafe route. A new exact-i64
+  typed-bridge adapter is still required; passing WASM fallback tests does not
+  qualify portable WASM JIT.
