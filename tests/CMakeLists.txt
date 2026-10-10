@@ -332,6 +332,21 @@ foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
 endforeach()
 
 set(MINIEXPR_JS_GLUE_SMOKE_TEST "${CMAKE_CURRENT_SOURCE_DIR}/test_me_jit_glue_smoke.js")
+if(WIN32 AND MINIEXPR_BUILD_SHARED)
+  # Windows searches beside the executable, not its build-tree parent. Missing
+  # DLLs can display a loader dialog before main(), appearing as a CTest hang.
+  get_property(test_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+  foreach(test_target IN LISTS test_targets)
+    get_target_property(test_target_type ${test_target} TYPE)
+    if(test_target_type STREQUAL "EXECUTABLE")
+      add_dependencies(${test_target} miniexpr)
+      add_custom_command(TARGET ${test_target} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+          "$<TARGET_FILE:miniexpr>" "$<TARGET_FILE_DIR:${test_target}>"
+        VERBATIM)
+    endif()
+  endforeach()
+endif()
 find_program(MINIEXPR_NODE_EXE node)
 if(MINIEXPR_NODE_EXE AND EXISTS "${MINIEXPR_JS_GLUE_SMOKE_TEST}")
   add_test(NAME test_me_jit_glue_smoke

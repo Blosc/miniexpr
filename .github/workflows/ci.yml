@@ -48,8 +48,8 @@ jobs:
       shell: bash
       run: |
         if [ "$RUNNER_OS" == "Windows" ]; then
-          ctest --test-dir build -C Release --output-on-failure || \
-            ctest --test-dir build -C Release --rerun-failed --output-on-failure
+          ctest --test-dir build -C Release --timeout 120 --output-on-failure || \
+            ctest --test-dir build -C Release --timeout 120 --rerun-failed --output-on-failure
         else
           ctest --test-dir build --output-on-failure || \
             ctest --test-dir build --rerun-failed --output-on-failure
@@ -163,8 +163,8 @@ jobs:
     - name: Test
       shell: bash
       run: |
-        ME_DSL_JIT=0 ctest --test-dir build-win-arm64 -C Release -E "^test_dsl_jit_runtime_cache$" --output-on-failure || \
-          ME_DSL_JIT=0 ctest --test-dir build-win-arm64 -C Release -E "^test_dsl_jit_runtime_cache$" --rerun-failed --output-on-failure
+        ME_DSL_JIT=0 ctest --test-dir build-win-arm64 -C Release --timeout 120 -E "^test_dsl_jit_runtime_cache$" --output-on-failure || \
+          ME_DSL_JIT=0 ctest --test-dir build-win-arm64 -C Release --timeout 120 -E "^test_dsl_jit_runtime_cache$" --rerun-failed --output-on-failure
 
   miniexpr-wasm32:
     runs-on: ubuntu-latest

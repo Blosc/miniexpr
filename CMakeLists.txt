@@ -173,6 +173,10 @@ endif()
 if(MINIEXPR_BUILD_STATIC)
   miniexpr_add_library_target(miniexpr_static STATIC)
   set_target_properties(miniexpr_static PROPERTIES OUTPUT_NAME miniexpr)
+  if(WIN32 AND MINIEXPR_BUILD_SHARED)
+    # A DLL import library and static archive must not overwrite miniexpr.lib.
+    set_target_properties(miniexpr_static PROPERTIES OUTPUT_NAME miniexpr_static)
+  endif()
 endif()
 
 install(FILES
