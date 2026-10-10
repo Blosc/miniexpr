@@ -13,7 +13,7 @@ int numpy_compat_run_v2(yyjson_val *root, me_jit_mode mode, bool observe);
 static int run_case(yyjson_val *test, me_jit_mode mode) {
     const char *id = text(test, "id"), *json = text(test, "artifact");
     if (!id || !json || !text(test, "semantic_revision") ||
-        strcmp(text(test, "semantic_revision"), "menudet-draft-1.0-checked")) return 1;
+        strcmp(text(test, "semantic_revision"), "menudet-numpy-1.0")) return 1;
     for (const char *p = id; *p; p++) {
         if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '-')) return 1;
     }
@@ -32,7 +32,7 @@ static int run_case(yyjson_val *test, me_jit_mode mode) {
         yyjson_val *items = yyjson_obj_get(test, "inputs");
         size_t ninputs = yyjson_arr_size(items), count = 0;
         if (ninputs == 0 || ninputs > 16 || (int)ninputs != me_artifact_ninputs(artifact) ||
-            me_artifact_has_jit(artifact)) {
+            (mode == ME_JIT_OFF && me_artifact_has_jit(artifact))) {
             failed = 1;
             goto cleanup;
         }

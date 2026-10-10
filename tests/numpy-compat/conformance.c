@@ -234,7 +234,7 @@ static int run_v2_case(yyjson_val *test, me_jit_mode mode, bool observe, v2_load
     yyjson_val *policy = yyjson_obj_get(test, "comparison");
     if (!id || !*id || !json || !text(test, "semantic_revision") ||
         (strcmp(text(test, "semantic_revision"), "menudet-draft-1.0-checked") &&
-         strcmp(text(test, "semantic_revision"), "menudet-numpy-1.1")) || !valid_policy(policy)) return 1;
+         strcmp(text(test, "semantic_revision"), "menudet-numpy-1.0")) || !valid_policy(policy)) return 1;
     for (const char *p = id; *p; p++) if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '-')) return 1;
     int required = requirements(test);
     if (required < 0) return 1;

@@ -1,3 +1,6 @@
+> Historical qualification checkpoint. Current public Menudet 1.0 uses
+> NumPy numerical semantics and optional JIT; see [the specification](dsl-spec/1.0.md).
+
 # NumPy conformance harness (M2)
 
 The authoritative corpus is `tests/numpy-compat/vectors-v2.json`, with
@@ -8,7 +11,7 @@ executable cases retain checked draft **1.0** semantics.
 64 cases: **41 matching, 21 known divergences, 2 capability skips** on macOS
 arm64 with NumPy 2.5.3. These counts are bounded evidence, not universal parity.
 Complex arithmetic and array broadcasting skip with named missing capabilities.
-An on request still selects the portable interpreter: no eligible portable JIT
+An on request still selects the Menudet interpreter: no eligible portable JIT
 exists. Full-DSL accelerated performance controls do not certify this profile.
 
 ## Transport and comparison contract

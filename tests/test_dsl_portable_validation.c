@@ -70,7 +70,7 @@ static void descriptor_validation_fixture(void) {
     assert(me_validate_portable_dsl("def k(x, y):\n    return x < y\n", "1.0", pair, 2,
                                    ME_BOOL, &error) == ME_PORTABLE_SUCCESS);
     assert(me_validate_portable_dsl("def k(x, y):\n    return x + y\n", "1.0", pair, 2,
-                                   ME_FLOAT64, &error) == ME_PORTABLE_ERR_SOURCE);
+                                   ME_FLOAT64, &error) == ME_PORTABLE_SUCCESS);
     x.dtype = ME_STRING;
     x.itemsize = 16;
     descriptor.output_itemsize = 16;

@@ -118,8 +118,8 @@ me_artifact_status me_array_result_shape(const me_artifact *a, int rank, const i
     if (error) memset(error,0,sizeof(*error));
     bool axes[ME_ARRAY_MAX_RANK]; size_t n;
     if (!a || !out_rank || !out_shape || !dtype || !a_product(rank, shape, &n) || !a_axes(rank, o, axes)) return a_error(error, ME_ARTIFACT_ERR_BINDING, "invalid logical shape, axes or options");
-    if (strcmp(me_artifact_schema_version(a), "1.1") || me_artifact_context_ndim(a) ||
-        me_artifact_result_cardinality(a) != ME_ARTIFACT_ELEMENTWISE || !a_width(me_artifact_output_dtype(a))) return a_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "logical arrays require numeric elementwise rank-zero profile 1.1");
+    if (strcmp(me_artifact_schema_version(a), "1.0") || me_artifact_context_ndim(a) ||
+        me_artifact_result_cardinality(a) != ME_ARTIFACT_ELEMENTWISE || !a_width(me_artifact_output_dtype(a))) return a_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "logical arrays require numeric elementwise rank-zero Menudet 1.0");
     *dtype = a_dtype(me_artifact_output_dtype(a), o);
     if (*dtype == ME_AUTO) return a_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported accumulator signature");
     *out_rank = 0;

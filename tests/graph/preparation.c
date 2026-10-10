@@ -129,7 +129,7 @@ static void validation(void) {
 static void limits(void) {
     char json[20000];
     for (int depth = ME_GRAPH_MAX_DEPTH; depth <= ME_GRAPH_MAX_DEPTH + 1; depth++) {
-        size_t n = (size_t)snprintf(json, sizeof(json), "{\"format\":\"menudet-graph-1\",\"semantics\":\"menudet-numpy-1.1\",\"requires\":[\"numeric\"],\"nodes\":[{\"id\":0,\"op\":\"input\",\"name\":\"x\",\"dtype\":\"float64\"}");
+        size_t n = (size_t)snprintf(json, sizeof(json), "{\"format\":\"menudet-graph-1\",\"semantics\":\"menudet-numpy-1.0\",\"requires\":[\"numeric\"],\"nodes\":[{\"id\":0,\"op\":\"input\",\"name\":\"x\",\"dtype\":\"float64\"}");
         for (int i = 1; i <= depth; i++) n += (size_t)snprintf(json + n, sizeof(json) - n, ",{\"id\":%d,\"op\":\"neg\",\"args\":[%d]}", i, i - 1);
         n += (size_t)snprintf(json + n, sizeof(json) - n, "],\"root\":%d,\"output\":{\"dtype\":\"auto\",\"casting\":\"unsafe\"}}", depth);
         me_graph_plan *p = NULL;
@@ -288,7 +288,7 @@ static void weak_capture_conversions(void) {
 }
 static void dsl_direct_sum(void) {
     const char *json =
-        "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
+        "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
         "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x):\\n    return block_sum(x)\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"}],\"constants\":[],"
         "\"output\":{\"dtype\":\"float64\",\"contract\":\"block_scalar\"},\"context\":{\"ndim\":0},"
@@ -324,7 +324,7 @@ static void dsl_direct_reductions(void) {
         char json[2048];
         const char *output = op >= 3 ? "bool" : op == 0 && type == 4 ? "int64" : names[type];
         snprintf(json, sizeof(json),
-            "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
+            "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
             "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x):\\n    return block_%s(x)\\n\","
             "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"%s\"}],\"constants\":[],"
             "\"output\":{\"dtype\":\"%s\",\"contract\":\"block_scalar\"},\"context\":{\"ndim\":0},"
@@ -364,12 +364,12 @@ static void trusted(bool jit) {
     char *json = malloc(capacity);
     CHECK(json != NULL);
     int size = snprintf(json, capacity,
-        "{\"format\":\"menudet-staged-graph-1\",\"semantics\":\"menudet-numpy-1.1\",\"requires\":[\"numeric\",\"staged\"],"
+        "{\"format\":\"menudet-staged-graph-1\",\"semantics\":\"menudet-numpy-1.0\",\"requires\":[\"numeric\",\"staged\"],"
         "\"inputs\":[{\"name\":\"x\",\"dtype\":\"float32\"}],\"root\":1,\"stages\":["
         "{\"id\":0,\"kind\":\"portable\",\"inputs\":{\"x\":{\"input\":\"x\"}},\"artifact\":%s,"
         "\"contract\":{\"cardinality\":\"elementwise\",\"context\":\"none\",\"effects\":\"ordered-lazy\",\"mask\":\"none\"}},"
         "{\"id\":1,\"kind\":\"graph\",\"inputs\":{\"y\":{\"stage\":0}},\"graph\":{"
-        "\"format\":\"menudet-graph-1\",\"semantics\":\"menudet-numpy-1.1\",\"requires\":[\"numeric\"],"
+        "\"format\":\"menudet-graph-1\",\"semantics\":\"menudet-numpy-1.0\",\"requires\":[\"numeric\"],"
         "\"nodes\":[{\"id\":0,\"op\":\"input\",\"name\":\"y\",\"dtype\":\"auto\"},"
         "{\"id\":1,\"op\":\"sum\",\"args\":[0],\"axes\":null,\"keepdims\":false,\"dtype\":\"auto\",\"initial\":null,\"where\":null}],"
         "\"root\":1,\"output\":{\"dtype\":\"auto\",\"casting\":\"unsafe\"}}}]}", artifact);

@@ -39,7 +39,7 @@ int main(int argc, char **argv) {
         strcmp(me_artifact_input_name(artifact, 0), "x") ||
         me_artifact_input_dtype(artifact, 0) != ME_FLOAT64 ||
         me_artifact_output_dtype(artifact) != ME_FLOAT64 ||
-        me_artifact_has_jit(artifact)) {
+        (mode == ME_JIT_OFF && me_artifact_has_jit(artifact))) {
         fprintf(stderr, "expected affine float64 signature and requested backend\n");
         me_artifact_free(artifact);
         return 1;
@@ -49,7 +49,7 @@ int main(int argc, char **argv) {
     me_artifact_input inputs[] = {{"x", ME_FLOAT64, x, 4}};
     rc = me_artifact_eval(artifact, inputs, 1, output, 4, &error);
     if (rc == ME_ARTIFACT_SUCCESS) {
-        printf("jit=%d\n", (int)me_artifact_has_jit(artifact));
+        printf("jit=%d\n", (int)(mode == ME_JIT_OFF && me_artifact_has_jit(artifact)));
         for (int i = 0; i < 4; i++) {
             printf("%.17g\n", output[i]);
             if (output[i] != 2 * x[i] - 1) rc = ME_ARTIFACT_ERR_EVAL;

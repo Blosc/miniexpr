@@ -202,7 +202,7 @@ static bool build_json(const bench_case *c, char *out, size_t cap) {
     char source[1024];
     json_escape(c->source, source, sizeof(source));
     int n = snprintf(out, cap,
-        "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
+        "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
         "\"requires\":%s,\"source\":\"%s\",\"entry_point\":\"k\",\"inputs\":%s,"
         "\"constants\":[],\"output\":{\"dtype\":\"%s\",\"contract\":\"%s\"},"
         "\"context\":{\"ndim\":%d},"

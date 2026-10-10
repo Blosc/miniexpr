@@ -7,7 +7,7 @@ extern "C" {
 #endif
 #define ME_GRAPH_VERSION 1
 #define ME_GRAPH_FORMAT "menudet-graph-1"
-#define ME_GRAPH_SEMANTICS "menudet-numpy-1.1"
+#define ME_GRAPH_SEMANTICS "menudet-numpy-1.0"
 #define ME_GRAPH_STAGED_FORMAT "menudet-staged-graph-1"
 #define ME_GRAPH_MAX_STAGES 32
 #define ME_GRAPH_CAP_STAGED 64u

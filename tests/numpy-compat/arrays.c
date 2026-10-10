@@ -7,7 +7,7 @@
 
 /* A standalone C host: broadcast and axis reduction, no Python or storage ABI. */
 int main(void) {
-    const char *json = "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
+    const char *json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
         "\"requires\":[\"numeric\"],\"source\":\"def k(x, y):\\n    return x + y\\n\",\"entry_point\":\"k\","
         "\"inputs\":[{\"name\":\"x\",\"dtype\":\"int64\"},{\"name\":\"y\",\"dtype\":\"int64\"}],\"constants\":[],"
         "\"output\":{\"dtype\":\"int64\",\"contract\":\"elementwise\"},\"context\":{\"ndim\":0},"

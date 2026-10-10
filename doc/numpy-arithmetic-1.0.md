@@ -1,9 +1,11 @@
-# NumPy arithmetic profile 1.1
+# NumPy arithmetic Menudet 1.0
 
-The **opt-in** artifact/schema and language pair `1.1` / `1.1` selects
-`ME_DSL_PROFILE_PORTABLE_1_1`. Checked `1.0` / `1.0` remains the default and its
-existing corpus is unchanged. Mixed version pairs, unknown numeric policies and
-unsupported required capabilities reject; there is no automatic artifact upgrade.
+Menudet 1.0 uses the NumPy-style numerical implementation for both interpretation
+and optional JIT. It is the sole public language/schema pair `1.0` / `1.0`.
+The earlier checked-arithmetic profile remains only as private regression code;
+the historical internal enum `ME_DSL_PROFILE_PORTABLE_1_1` names this implementation
+but does not expose a public 1.1 version. Unknown/mixed versions and numerical
+policies reject. Old development artifacts must be re-exported.
 
 The semantic reference is NumPy **2.5.3**. The advertised M3 matrix covers bool,
 int8/16/32/64, uint8/16/32/64 and float32/64. Half, complex, extended floats,
@@ -13,8 +15,8 @@ This is an arithmetic profile, not a claim of full NumPy function or array parit
 ## Artifact policy and scalar categories
 
 ```json
-"schema_version": "1.1",
-"language": {"name": "miniexpr", "version": "1.1"},
+"schema_version": "1.0",
+"language": {"name": "miniexpr", "version": "1.0"},
 "semantics": {"fp": "strict", "numeric": "numpy-2.5", "casting": "unsafe"}
 ```
 
@@ -41,7 +43,7 @@ their transport width rather than silently becoming arbitrary-precision arithmet
 
 ## Operators and dtype resolution
 
-`arithmetic-v1.1.json` contains the enumerated strong promotion/casting tables and
+`arithmetic-v1.0.json` contains the enumerated strong promotion/casting tables and
 executable cases. Promotion is metadata-only: it reads no input buffers and runs
 no kernel. `me_artifact_inferred_dtype()` reports the result before final output
 conversion; no requested output dtype controls arithmetic intermediates.
@@ -93,20 +95,19 @@ calls. Neither a permitted policy nor unsafe conversion bypasses resource checks
 **Defined divergence:** floating-to-integer conversion truncates toward zero but
 rejects nonfinite or truncated out-of-range results, including negative unsigned
 results. NumPy's unstable host/compiler-dependent sentinels are not a universal
-portable contract. This divergence is recorded and diagnostic-tested, not hidden
+Menudet contract. This divergence is recorded and diagnostic-tested, not hidden
 behind a widened tolerance or a machine-specific golden integer.
 
 ## Backend and validation
 
-The profile currently has **no eligible portable JIT/SIMD route**. On/default
-requests select the interpreter, and `jit-required` rejects. Full-DSL TCC/GCC
-controls remain a different semantic profile. CI registers the same corpus for
-Linux, macOS, Windows and standalone Node/WASM builds; explicit on/off tests never
-count fallback as accelerated conformance.
+Menudet 1.0 has optional typed-tree JIT with shared native compiler/cache backends.
+Eligibility depends on the program and target; unsupported kernels fall back
+before execution. Full-DSL JIT remains a separate semantic profile. Explicit
+on/off tests must report the actual backend and never count fallback as acceleration.
+See [native arrays and JIT](native-arrays-1.0.md) for current capabilities.
 
-Python authoring uses `DSLKernel.export(..., version="1.1", casting="safe")`;
-ordinary Python scalar captures are weak, NumPy scalars or `capture_dtypes`
-are strong. `PortableKernel.inferred_dtype` is native metadata. Saved lazy recipes
-preserve their original artifact/profile. An older native dependency rejects
-1.1; use an explicit updated native checkout for development builds rather than
-silently loading a sibling library or changing 1.0 semantics.
+Python authoring uses `DSLKernel.export(..., version="1.0", casting="safe")`;
+version 1.0 is also the default. Ordinary Python scalar captures are weak;
+NumPy scalars and explicit `capture_dtypes` are strong. `PortableKernel` is the
+existing public API name for a Menudet kernel, and its inferred dtype is native
+metadata. API spelling does not define a separate Portable language.

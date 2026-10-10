@@ -4,7 +4,7 @@ This is the practical reference for the DSL accepted by `me_compile()`.
 It focuses on what works today and the most common gotchas.
 For usage walkthroughs and end-to-end examples, see `doc/dsl-usage.md`.
 
-An experimental [portable profile 1.0](dsl-spec/1.0.md) specifies a versioned
+An experimental [Menudet profile 1.0](dsl-spec/1.0.md) specifies a versioned
 language-independent subset with shared native/Python conformance fixtures.
 This reference continues to describe the full native language.
 
@@ -194,7 +194,7 @@ Cast rules:
   dtype. Floating `int()` truncates toward zero; `bool()` tests nonzero truth.
   Conversion to the requested output dtype happens after this operation.
   Overflow/non-finite integer conversions and `float()`'s contextual evaluation
-  rules remain part of the experimental portable numeric audit.
+  rules remain part of the experimental Menudet numeric audit.
 
 ## Temporary variable type inference
 
@@ -202,7 +202,7 @@ In strict mode, leaf `sin(x)`/`cos(x)` calls on float32 variables evaluate with
 scalar float operations at every block size. The float result rounds before
 widening or comparison; approximate SIMD math must not change these strict
 values or branch decisions. This bounded rule does not certify all other math
-functions or nested arithmetic contexts in the experimental portable profile.
+functions or nested arithmetic contexts in the experimental Menudet profile.
 
 Local temporaries get their dtype from the expression assigned to them.
 

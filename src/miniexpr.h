@@ -235,9 +235,9 @@ int me_compile_nd_jit(const char *expression, const me_variable *variables,
  */
 const char *me_get_last_error_message(void);
 
-/* Experimental portable kernel profile, independent of package/JIT versions. */
+/* Experimental Menudet 1.0 kernel profile, independent of package/JIT versions. */
 #define ME_PORTABLE_DSL_VERSION "1.0"
-#define ME_NUMPY_PORTABLE_DSL_VERSION "1.1"
+#define ME_NUMPY_PORTABLE_DSL_VERSION ME_PORTABLE_DSL_VERSION
 #define ME_PORTABLE_DSL_VALIDATION_DESCRIPTOR_VERSION 1
 
 typedef enum {

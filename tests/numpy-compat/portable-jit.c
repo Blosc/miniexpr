@@ -12,7 +12,7 @@ static void check_extended(const char *source, me_dtype dtype, const void *x, co
     char json[4096];
     const char *name = dtype == ME_INT32 ? "int32" : "float64";
     snprintf(json,sizeof(json),
-        "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
+        "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
         "\"requires\":[\"numeric\",\"control-flow\"],\"source\":\"%s\",\"entry_point\":\"k\","
         "\"inputs\":[{\"name\":\"x\",\"dtype\":\"%s\"},{\"name\":\"y\",\"dtype\":\"%s\"}],\"constants\":[],"
         "\"output\":{\"dtype\":\"%s\",\"contract\":\"elementwise\"},\"context\":{\"ndim\":0},"
@@ -59,7 +59,7 @@ static void check_nd_case(const char *source, int ndim, const int64_t *shape,
                           const uint8_t *mask, bool expect_error) {
     char json[4096];
     snprintf(json,sizeof(json),
-        "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
+        "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
         "\"requires\":[\"numeric\",\"nd-context\"],\"source\":\"%s\",\"entry_point\":\"k\","
         "\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"},{\"name\":\"y\",\"dtype\":\"float64\"}],\"constants\":[],"
         "\"output\":{\"dtype\":\"float64\",\"contract\":\"elementwise\"},\"context\":{\"ndim\":%d},"
@@ -113,7 +113,7 @@ static void check_nd(void) {
 }
 
 int main(void) {
-    const char *json = "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
+    const char *json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
         "\"requires\":[\"numeric\"],\"source\":\"def k(x, y):\\n    return where(x != 0, y / x, y)\\n\",\"entry_point\":\"k\","
         "\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"},{\"name\":\"y\",\"dtype\":\"float64\"}],\"constants\":[],"
         "\"output\":{\"dtype\":\"float64\",\"contract\":\"elementwise\"},\"context\":{\"ndim\":0},"

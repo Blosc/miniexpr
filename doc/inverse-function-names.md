@@ -14,8 +14,8 @@ function names. NumPy names remain Python frontend syntax, not native aliases.
 | `arctanh` | `atanh` |
 
 This is a deliberate source compatibility change. Full-expression and DSL
-compilation rejects the removed builtin calls. Portable artifact loading also
-rejects them for both checked 1.0 and numerical 1.1 profiles. Artifact import does
+compilation rejects the removed builtin calls. Menudet artifact loading also
+rejects them for the legacy/full DSL and Menudet 1.0. Artifact import does
 not rewrite source, change the saved artifact, or switch profiles. Syntax removal
 does not change the values/promotion/diagnostics of the retained functions.
 

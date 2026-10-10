@@ -65,8 +65,8 @@ static char *scalar_manifest(const char *dtype, const char *encoding, const char
     const char *format = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\","
         "\"version\":\"1.0\"},\"requires\":[\"numeric\"],\"source\":\"def k(c):\\n    return c\\n\","
         "\"entry_point\":\"k\",\"inputs\":[],\"constants\":[{\"name\":\"c\",\"dtype\":\"%s\","
-        "\"encoding\":\"%s\",\"value\":%s}],\"output\":{\"dtype\":\"%s\","
-        "\"contract\":\"elementwise\"},\"semantics\":{\"fp\":\"strict\"},\"context\":{\"ndim\":0}}";
+        "\"encoding\":\"%s\",\"value\":%s,\"category\":\"typed_scalar\"}],\"output\":{\"dtype\":\"%s\","
+        "\"contract\":\"elementwise\"},\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":0}}";
     char *json = malloc(2048);
     assert(json);
     assert(snprintf(json, 2048, format, dtype, encoding, value, dtype) < 2048);
@@ -152,7 +152,7 @@ static void runtime_order(void) {
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"},"
         "{\"name\":\"y\",\"dtype\":\"float64\"}],\"constants\":[],"
         "\"output\":{\"dtype\":\"float64\",\"contract\":\"elementwise\"},"
-        "\"semantics\":{\"fp\":\"strict\"},\"context\":{\"ndim\":0}}";
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":0}}";
     me_artifact *artifact = load(json);
     double x = 3, y = 1, output = 0;
     me_artifact_input inputs[] = {{"y", ME_FLOAT64, &y, 1}, {"x", ME_FLOAT64, &x, 1}};
@@ -353,8 +353,8 @@ static void schema1_fixture(void) {
     const char *json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
         "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x,c):\\n    a = block_sum(x)\\n    return a + c\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"int64\"}],"
-        "\"constants\":[{\"name\":\"c\",\"dtype\":\"int64\",\"encoding\":\"decimal\",\"value\":\"1\"}],"
-        "\"output\":{\"dtype\":\"int64\",\"contract\":\"block_scalar\"},\"semantics\":{\"fp\":\"strict\"},"
+        "\"constants\":[{\"name\":\"c\",\"dtype\":\"int64\",\"category\":\"typed_scalar\",\"encoding\":\"decimal\",\"value\":\"1\"}],"
+        "\"output\":{\"dtype\":\"int64\",\"contract\":\"block_scalar\"},\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},"
         "\"context\":{\"ndim\":0},\"metadata\":{\"status\":\"implementation-draft\"}}";
     me_artifact *artifact = load(json);
     assert(!me_artifact_has_jit(artifact) && me_artifact_result_cardinality(artifact) == ME_ARTIFACT_BLOCK_SCALAR);
@@ -409,7 +409,7 @@ static void schema1_strings_nd_fixture(void) {
         "\"requires\":[\"numeric\",\"fixed-strings\"],\"source\":\"def k(x):\\n    return %s\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"bytes\",\"itemsize\":4}],\"constants\":[],"
         "\"output\":{\"dtype\":\"bytes\",\"itemsize\":%zu,\"contract\":\"elementwise\"},"
-        "\"semantics\":{\"fp\":\"strict\"},\"context\":{\"ndim\":0}}";
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":0}}";
     struct { const char *expr; size_t width; const char *expected; } cases[] = {
         {"upper(x)", 4, " AB "}, {"lower(x)", 4, " ab "}, {"strip(x)", 4, "Ab"},
         {"lstrip(x)", 4, "Ab "}, {"rstrip(x)", 4, " Ab"},
@@ -440,7 +440,7 @@ static void schema1_strings_nd_fixture(void) {
     const char *nd_json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
         "\"requires\":[\"numeric\",\"nd-context\"],\"source\":\"def k():\\n    return _flat_idx + _i0 + _i1 + _n0 + _n1 + _ndim\\n\","
         "\"entry_point\":\"k\",\"inputs\":[],\"constants\":[],\"output\":{\"dtype\":\"int64\",\"contract\":\"elementwise\"},"
-        "\"semantics\":{\"fp\":\"strict\"},\"context\":{\"ndim\":2}}";
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":2}}";
     me_artifact *artifact = load(nd_json);
     int64_t shape[] = {4, 5}, origin[] = {2, 3}, extent[] = {2, 3}, output[6] = {-1,-1,-1,-1,-1,-1};
     uint8_t mask[] = {1, 1, 0, 1, 1, 0};
@@ -461,7 +461,7 @@ static void schema1_strings_nd_fixture(void) {
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"unicode32\",\"itemsize\":16}],"
         "\"constants\":[{\"name\":\"c\",\"dtype\":\"unicode32\",\"itemsize\":8,\"encoding\":\"unicode32be-hex\",\"value\":\"0000002100000000\"}],"
         "\"output\":{\"dtype\":\"unicode32\",\"itemsize\":24,\"contract\":\"elementwise\"},"
-        "\"semantics\":{\"fp\":\"strict\"},\"context\":{\"ndim\":0}}";
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":0}}";
     artifact = load(unicode_json);
     uint32_t unicode_input[] = {0xdf, ' ', 'a', 0}, unicode_output[6];
     input = (me_artifact_buffer){"x", ME_STRING, sizeof(unicode_input), unicode_input, sizeof(unicode_input)};
@@ -487,7 +487,7 @@ static void schema1_strings_nd_fixture(void) {
         "\"constants\":[{\"name\":\"old\",\"dtype\":\"bytes\",\"itemsize\":1,\"encoding\":\"bytes-hex\",\"value\":\"41\"},"
         "{\"name\":\"new\",\"dtype\":\"bytes\",\"itemsize\":2,\"encoding\":\"bytes-hex\",\"value\":\"5858\"}],"
         "\"output\":{\"dtype\":\"bytes\",\"itemsize\":8,\"contract\":\"elementwise\"},"
-        "\"semantics\":{\"fp\":\"strict\"},\"context\":{\"ndim\":0}}";
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":0}}";
     artifact = load(indexed_json);
     char subjects[] = {'A','b','c','d','A','x','y','z'}, indexed_output[16];
     int64_t starts[] = {-2, 0};

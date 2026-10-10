@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 #define ME_ARTIFACT_SCHEMA_VERSION "1.0"
-#define ME_ARTIFACT_NUMPY_SCHEMA_VERSION "1.1"
+#define ME_ARTIFACT_NUMPY_SCHEMA_VERSION ME_ARTIFACT_SCHEMA_VERSION
 #define ME_ARTIFACT_MAX_BYTES (1024 * 1024)
 #define ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION 1
 #define ME_ARTIFACT_DRAFT_SCHEMA_VERSION "1.0"
@@ -83,7 +83,7 @@ typedef struct {
 /* Decode, validate, and compile without executing. The handle owns a copy of
  * source, names, and constants; JSON storage can be released on return. jit_mode
  * is a host preference, not an artifact requirement. No sandbox is provided.
- * Schema/language pairs 1.0/1.0 and opt-in 1.1/1.1 are accepted.
+ * Only Menudet schema/language pair 1.0/1.0 is accepted, with NumPy numerical semantics.
  * On any failure *out is NULL. error may be NULL. */
 me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode jit_mode,
                                   me_artifact **out, me_artifact_error *error);
@@ -188,7 +188,7 @@ int me_artifact_ninputs(const me_artifact *artifact);
 const char *me_artifact_input_name(const me_artifact *artifact, int index);
 me_dtype me_artifact_input_dtype(const me_artifact *artifact, int index);
 me_dtype me_artifact_output_dtype(const me_artifact *artifact);
-/* Metadata-only result dtype before final output conversion (1.1 artifacts).
+/* Metadata-only result dtype before final output conversion (Menudet 1.0 artifacts).
  * Returns ME_AUTO for legacy artifacts and NULL handles. */
 me_dtype me_artifact_inferred_dtype(const me_artifact *artifact);
 bool me_artifact_has_jit(const me_artifact *artifact);

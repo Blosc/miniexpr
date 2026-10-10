@@ -6,7 +6,7 @@
   "required": ["format", "semantics", "requires", "inputs", "stages", "root"],
   "properties": {
     "format": {"const": "menudet-staged-graph-1"},
-    "semantics": {"const": "menudet-numpy-1.1"},
+    "semantics": {"const": "menudet-numpy-1.0"},
     "requires": {"const": ["numeric", "staged"]},
     "inputs": {
       "type": "array", "maxItems": 128,
@@ -49,5 +49,5 @@
       ]
     }
   },
-  "$comment": "Native validation enforces exact signatures, portable 1.1 profile/capabilities, ordered dependency references, last-stage root, reachability, nonnested stage graphs and shape/materialization budgets. No executable cached inference or arbitrary callback nodes."
+  "$comment": "Native validation enforces exact signatures, Menudet 1.0 profile/capabilities, ordered dependency references, last-stage root, reachability, nonnested stage graphs and shape/materialization budgets. No executable cached inference or arbitrary callback nodes."
 }

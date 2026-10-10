@@ -203,7 +203,7 @@ static int g_conversion(me_dtype source, me_dtype target, const char *casting,
     me_artifact **out, me_artifact_error *error) {
     char json[1024];
     int n = snprintf(json, sizeof(json),
-        "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
+        "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
         "\"requires\":[\"numeric\"],\"source\":\"def convert(value):\\n    return value\\n\","
         "\"entry_point\":\"convert\",\"inputs\":[{\"name\":\"value\",\"dtype\":\"%s\"}],\"constants\":[],"
         "\"output\":{\"dtype\":\"%s\",\"contract\":\"elementwise\"},\"context\":{\"ndim\":0},"
@@ -214,7 +214,7 @@ static int g_conversion(me_dtype source, me_dtype target, const char *casting,
 static int g_initial_conversion(yyjson_val *initial, me_dtype target,
     me_artifact **out, me_artifact_error *error) {
     graph_buffer json = {0};
-    g_add(&json, "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
+    g_add(&json, "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
         "\"requires\":[\"numeric\"],\"source\":\"def convert(initial):\\n    return initial\\n\","
         "\"entry_point\":\"convert\",\"inputs\":[],\"constants\":[{\"name\":\"initial\"");
     const char *fields[] = {"dtype", "category", "encoding", "value"};
@@ -514,7 +514,7 @@ static me_graph_status g_prepare_json(const char *json, size_t length,
         else { char name[32]; snprintf(name, sizeof(name), "_me_capture_%d", id); g_add(&source, name); }
     }
     g_add(&source, "):\n    return "); g_expr(&source, nodes, map_root); g_add(&source, "\n");
-    g_add(&manifest, "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},\"requires\":[\"numeric\"],\"entry_point\":\"graph_map\",\"source\":");
+    g_add(&manifest, "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},\"requires\":[\"numeric\"],\"entry_point\":\"graph_map\",\"source\":");
     /* Source contains only generated ASCII names/operators; JSON-escape it. */
     g_add(&manifest, "\"");
     if (!source.failed) for (size_t i = 0; i < source.size; i++) {
@@ -1041,9 +1041,9 @@ static me_graph_status g_prepare_portable(yyjson_val *stage, const me_graph_prep
         !g_equal(yyjson_obj_get(contract, "context"), "none") ||
         !g_equal(yyjson_obj_get(contract, "effects"), "ordered-lazy") ||
         !g_equal(yyjson_obj_get(contract, "mask"), "none") ||
-        !g_equal(yyjson_obj_get(artifact, "schema_version"), "1.1") ||
-        !g_equal(yyjson_obj_get(yyjson_obj_get(artifact, "language"), "version"), "1.1"))
-        return g_error(error, -1, ME_GRAPH_ERR_UNSUPPORTED, "trusted stages require portable 1.1 elementwise/context-free/ordered-lazy/unmasked contracts");
+        !g_equal(yyjson_obj_get(artifact, "schema_version"), "1.0") ||
+        !g_equal(yyjson_obj_get(yyjson_obj_get(artifact, "language"), "version"), "1.0"))
+        return g_error(error, -1, ME_GRAPH_ERR_UNSUPPORTED, "trusted stages require Menudet 1.0 elementwise/context-free/ordered-lazy/unmasked contracts");
     me_graph_plan *p = calloc(1, sizeof(*p));
     if (!p) return g_error(error, -1, ME_GRAPH_ERR_OOM, "portable stage allocation failed");
     atomic_init(&p->references, 1);
