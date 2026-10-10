@@ -1323,6 +1323,34 @@ uint64_t dsl_portable_jit_int_op(const void *node, uint64_t a, uint64_t b, int *
     return (uint64_t)result.i64;
 }
 
+/* Cast-only checked bridge: reuse the authoritative conversion routines without
+ * reconstructing an expression/context for each lane. Strong integer casts stay
+ * modular; weak operands and floating inputs retain their checked conversions. */
+static uint64_t p_jit_checked_cast(const me_expr *operation, uint64_t bits, int *status) {
+    const me_expr *arg = operation->parameters[0];
+    me_scalar value = {0}, result = {0};
+    if (arg->dtype == ME_FLOAT32) {
+        uint32_t raw = (uint32_t)bits;
+        memcpy(&value.f32, &raw, sizeof(raw));
+    } else if (arg->dtype == ME_FLOAT64) {
+        memcpy(&value.f64, &bits, sizeof(bits));
+    } else if (arg->dtype == ME_BOOL) {
+        value.b = bits != 0;
+    } else if (p_unsigned(arg->dtype)) {
+        value.u64 = bits;
+    } else {
+        memcpy(&value.i64, &bits, sizeof(bits));
+    }
+    me_portable_numeric_status rc = p_numpy(operation) && !p_weak(arg) ?
+        p_numpy_convert(arg->dtype, &value, operation->dtype, &result) :
+        p_convert(arg->dtype, &value, operation->dtype, &result);
+    if (rc) {
+        *status = ME_EVAL_ERR_INVALID_ARG;
+        return 0;
+    }
+    return p_unsigned(operation->dtype) ? result.u64 : (uint64_t)result.i64;
+}
+
 /* Replay only one audited scalar operation, not its expression subtree. Typed
  * operands arrive as exact bits; replacement variable leaves retain categories
  * so checked weak conversions and modular strong operations stay distinct. */
@@ -1333,6 +1361,10 @@ uint64_t dsl_portable_jit_checked(const void *node, uint64_t a, uint64_t b, uint
     if (arity < 1 || arity > 3 || is_reduction_node(original)) {
         *status = ME_EVAL_ERR_INVALID_ARG;
         return 0;
+    }
+    if (arity == 1 && !original->function && original->dtype != ME_BOOL &&
+        p_numeric(original->dtype) && !p_float(original->dtype)) {
+        return p_jit_checked_cast(original, a, status);
     }
     union { me_expr alignment; unsigned char bytes[sizeof(me_expr) + 2 * sizeof(void *)]; } storage;
     me_expr *operation = (me_expr *)storage.bytes;

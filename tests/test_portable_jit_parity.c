@@ -270,18 +270,32 @@ static void loop_errors(void) {
     free(saved_cap);
 }
 
-static void checked_cast_errors(void) {
-    parity_case test = {"checked cast boundaries", "if y > 0:\\n        return int(x)\\n    return 0",
-        "float64", "int64", true};
+static void checked_cast_target(int input64, size_t target) {
+    const char *outputs[] = {"int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64"};
+    const int widths[] = {8, 8, 16, 16, 32, 32, 64, 64};
+    char body[128];
+    snprintf(body, sizeof(body), "if y > 0:\\n        return %s(x)\\n    return 0", outputs[target]);
+    parity_case test = {"checked cast boundaries", body,
+        input64 ? "float64" : "float32", outputs[target], true};
     me_artifact *jit = load(&test, ME_JIT_ON);
     me_artifact *reference = load(&test, ME_JIT_OFF);
-    double edges[] = {INFINITY, -INFINITY, NAN, 0x1p63, -0x1p63, -1.75, 0x1p53};
+    me_artifact *oracle = load(&cases[0], ME_JIT_ON);
+    CHECK(me_artifact_has_jit(jit) == me_artifact_has_jit(oracle));
+    me_artifact_free(oracle);
+    double bound = ldexp(1.0, widths[target] - (target % 2 == 0));
+    double edges[] = {INFINITY, -INFINITY, NAN, bound, -bound, -1.75, -0.75,
+        0.0, -0.0, 0x1p53, nextafter(bound, 0), nextafter(-bound, -INFINITY)};
+    size_t output_size = (size_t)widths[target] / 8;
     for (size_t edge = 0; edge < sizeof(edges)/sizeof(edges[0]); edge++) {
         double x[] = {2.75, edges[edge]}, y[] = {1, 1};
-        int64_t output[2], expected[2];
+        float xf[] = {2.75f, (float)edges[edge]}, yf[] = {1, 1};
+        uint64_t output[2] = {0}, expected[2] = {0};
         uint8_t mask[] = {1, 0};
-        me_artifact_buffer buffers[] = {{"x", ME_FLOAT64, 8, x, sizeof(x)},
-            {"y", ME_FLOAT64, 8, y, sizeof(y)}};
+        me_artifact_buffer buffers[] = {
+            {"x", input64 ? ME_FLOAT64 : ME_FLOAT32, input64 ? 8 : 4,
+                input64 ? (void *)x : (void *)xf, input64 ? sizeof(x) : sizeof(xf)},
+            {"y", input64 ? ME_FLOAT64 : ME_FLOAT32, input64 ? 8 : 4,
+                input64 ? (void *)y : (void *)yf, input64 ? sizeof(y) : sizeof(yf)}};
         me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
             .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = 2,
             .output_capacity = sizeof(output)};
@@ -289,20 +303,31 @@ static void checked_cast_errors(void) {
         int rc = me_artifact_eval_ex(jit, buffers, 2, output, &descriptor, &error);
         int reference_rc = me_artifact_eval_ex(reference, buffers, 2, expected, &descriptor, &reference_error);
         CHECK(rc == reference_rc);
-        if (!rc) CHECK(!memcmp(output,expected,sizeof(output)));
+        if (!rc) CHECK(!memcmp(output,expected,2 * output_size));
         else CHECK(error.native_status == reference_error.native_status);
         descriptor.valid_mask = mask;
         descriptor.valid_mask_capacity = sizeof(mask);
         CHECK(!me_artifact_eval_ex(jit, buffers, 2, output, &descriptor, &error));
-        CHECK(output[0] == 2);
+        CHECK(!me_artifact_eval_ex(reference, buffers, 2, expected, &descriptor, &reference_error));
+        CHECK(!memcmp(output,expected,output_size));
         descriptor.valid_mask = NULL;
         descriptor.valid_mask_capacity = 0;
         y[1] = 0;
+        yf[1] = 0;
         CHECK(!me_artifact_eval_ex(jit, buffers, 2, output, &descriptor, &error));
-        CHECK(output[1] == 0);
+        CHECK(!me_artifact_eval_ex(reference, buffers, 2, expected, &descriptor, &reference_error));
+        CHECK(!memcmp(output,expected,2 * output_size));
     }
     me_artifact_free(jit);
     me_artifact_free(reference);
+}
+
+static void checked_cast_errors(void) {
+    for (int input64 = 0; input64 < 2; input64++) {
+        for (size_t target = 0; target < 8; target++) {
+            checked_cast_target(input64, target);
+        }
+    }
 }
 
 static void computed_weak_conversion(void) {

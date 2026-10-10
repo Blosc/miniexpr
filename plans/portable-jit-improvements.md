@@ -424,3 +424,16 @@ so downstream benchmarks cannot silently claim JIT performance while interpretin
   reducers were already efficient native loops (1,048,576-float64 direct sum:
   DSL 0.5168 ms, graph 0.5197 ms); the measured benefit is mapped reduction fusion,
   not a universal promise that compiling a direct reducer is faster.
+- Checked-cast follow-up: the existing exact-bit bridge now dispatches integer
+  conversions directly to the authoritative conversion routines, without building
+  replacement expression leaves or a per-lane evaluation context. Weak conversions
+  remain checked; strong integer conversions remain modular. The bridge ABI and
+  generated-source cache keys are unchanged because the optimization is in the host
+  callback. Boundary parity tests cover both floating input widths and all eight
+  integer output widths, errors, recovery, masks, and inactive branches. All 445
+  native tests, 224 focused Python tests (one skip), and three sanitizer parity
+  tests pass. In sequential before/after local ARM64 runs of `jit-coverage.py`
+  (65,536 items, median of 31 warm samples), float64-to-int64 takes Clang from
+  3.190 ms to 0.603 ms, GCC from 3.190 ms to 0.648 ms, and TCC from 3.459 ms to
+  0.931 ms. Interpretation remains around 0.99 ms. All seven cast/masked-cast
+  cases validate outputs and FP status; these timings exclude compilation.
