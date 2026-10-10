@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 #include "miniexpr_artifact.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,17 +37,23 @@ static const parity_case cases[] = {
     {"while break", "s = 0.0\\n    i = 0\\n    while i < 5:\\n        if i == 3:\\n            break\\n        s = s + x\\n        i = i + 1\\n    return s", "float64", "float64", true},
     {"range advancement edge", "s = x\\n    for i in range(9223372036854775806, 9223372036854775807, 2):\\n        s = s + y\\n    return s", "float64", "float64", true},
     {"mandelbrot", "zr = 0.0\\n    zi = 0.0\\n    escape_iter = 64.0\\n    for i in range(64):\\n        if zr * zr + zi * zi > 4.0:\\n            escape_iter = i + 0.0\\n            break\\n        zr_new = zr * zr - zi * zi + x\\n        zi = 2.0 * zr * zi + y\\n        zr = zr_new\\n    return escape_iter", "float64", "float64", true},
-    {"checked cast", "return int(x)", "float64", "int64", false},
-    {"integer abs", "return abs(x)", "int32", "int32", false},
-    {"integer sign", "return sign(x)", "int32", "int32", false},
-    {"integer square", "return square(x)", "int32", "int32", false},
-    {"integer floor", "return floor(x)", "int32", "int32", false},
-    {"integer round", "return round(x)", "int32", "int32", false},
-    {"integer real", "return real(x)", "int32", "int32", false},
-    {"integer imag", "return imag(x)", "int32", "int32", false},
-    {"integer conj", "return conj(x)", "int32", "int32", false},
-    {"ldexp", "return ldexp(x, 2)", "float64", "float64", false},
-    {"fma", "return fma(x, y, 1.0)", "float64", "float64", false},
+    {"checked cast", "return int(x)", "float64", "int64", true},
+    {"integer abs", "return abs(x)", "int32", "int32", true},
+    {"integer sign", "return sign(x)", "int32", "int32", true},
+    {"integer square", "return square(x)", "int32", "int32", true},
+    {"integer floor", "return floor(x)", "int32", "int32", true},
+    {"integer round", "return round(x)", "int32", "int32", true},
+    {"integer ceil", "return ceil(x)", "int32", "int32", true},
+    {"integer trunc", "return trunc(x)", "int32", "int32", true},
+    {"integer real", "return real(x)", "int32", "int32", true},
+    {"integer imag", "return imag(x)", "int32", "int32", true},
+    {"integer conj", "return conj(x)", "int32", "int32", true},
+    {"factorial", "return fac(x)", "int32", "int32", true},
+    {"ncr", "return ncr(x, y)", "int32", "int32", true},
+    {"npr", "return npr(x, y)", "int32", "int32", true},
+    {"named power", "return pow(x, y)", "int32", "int32", true},
+    {"ldexp", "return ldexp(x, 2)", "float64", "float64", true},
+    {"fma", "return fma(x, y, 1.0)", "float64", "float64", true},
     {"floating math", "return sin(x) + cos(y)", "float64", "float64", true},
 };
 
@@ -90,6 +97,10 @@ static void matrix(void) {
         CHECK(!me_artifact_has_jit(reference));
         double x[] = {-2, 0, 3}, y[] = {4, 2, 1};
         int32_t ix[] = {-2, 0, 3}, iy[] = {4, 2, 1};
+        if (!strcmp(test->name,"factorial") || !strcmp(test->name,"ncr") || !strcmp(test->name,"npr")) {
+            ix[0] = 0; ix[1] = 3; ix[2] = 5;
+            iy[0] = 0; iy[1] = 1; iy[2] = 2;
+        }
         bool integer = !strcmp(test->input, "int32");
         me_artifact_buffer buffers[] = {
             {"x", integer ? ME_INT32 : ME_FLOAT64, integer ? 4 : 8,
@@ -103,11 +114,15 @@ static void matrix(void) {
             .output_capacity = sizeof(result)};
         me_artifact_fp_status status, reference_status;
         me_artifact_error error;
-        CHECK(!me_artifact_eval_status(jit, buffers, 2, result, &descriptor, 0, &status, &error));
-        CHECK(!me_artifact_eval_status(reference, buffers, 2, expected, &descriptor, 0,
-            &reference_status, &error));
-        CHECK(!memcmp(result, expected, sizeof(result)));
-        CHECK(status.flags == reference_status.flags);
+        me_artifact_error reference_error;
+        int rc = me_artifact_eval_status(jit, buffers, 2, result, &descriptor, 0, &status, &error);
+        int reference_rc = me_artifact_eval_status(reference, buffers, 2, expected, &descriptor, 0,
+            &reference_status, &reference_error);
+        CHECK(rc == reference_rc);
+        if (!rc) {
+            CHECK(!memcmp(result, expected, sizeof(result)));
+            CHECK(status.flags == reference_status.flags);
+        } else CHECK(error.native_status == reference_error.native_status);
         fprintf(stderr, "%-20s route=%s\n", test->name,
             me_artifact_has_jit(jit) ? "jit" : "interpreter");
         me_artifact_free(jit);
@@ -242,10 +257,46 @@ static void loop_errors(void) {
     free(saved_cap);
 }
 
+static void checked_cast_errors(void) {
+    parity_case test = {"checked cast boundaries", "if y > 0:\\n        return int(x)\\n    return 0",
+        "float64", "int64", true};
+    me_artifact *jit = load(&test, ME_JIT_ON);
+    me_artifact *reference = load(&test, ME_JIT_OFF);
+    double edges[] = {INFINITY, -INFINITY, NAN, 0x1p63, -0x1p63, -1.75, 0x1p53};
+    for (size_t edge = 0; edge < sizeof(edges)/sizeof(edges[0]); edge++) {
+        double x[] = {2.75, edges[edge]}, y[] = {1, 1};
+        int64_t output[2], expected[2];
+        uint8_t mask[] = {1, 0};
+        me_artifact_buffer buffers[] = {{"x", ME_FLOAT64, 8, x, sizeof(x)},
+            {"y", ME_FLOAT64, 8, y, sizeof(y)}};
+        me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
+            .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = 2,
+            .output_capacity = sizeof(output)};
+        me_artifact_error error, reference_error;
+        int rc = me_artifact_eval_ex(jit, buffers, 2, output, &descriptor, &error);
+        int reference_rc = me_artifact_eval_ex(reference, buffers, 2, expected, &descriptor, &reference_error);
+        CHECK(rc == reference_rc);
+        if (!rc) CHECK(!memcmp(output,expected,sizeof(output)));
+        else CHECK(error.native_status == reference_error.native_status);
+        descriptor.valid_mask = mask;
+        descriptor.valid_mask_capacity = sizeof(mask);
+        CHECK(!me_artifact_eval_ex(jit, buffers, 2, output, &descriptor, &error));
+        CHECK(output[0] == 2);
+        descriptor.valid_mask = NULL;
+        descriptor.valid_mask_capacity = 0;
+        y[1] = 0;
+        CHECK(!me_artifact_eval_ex(jit, buffers, 2, output, &descriptor, &error));
+        CHECK(output[1] == 0);
+    }
+    me_artifact_free(jit);
+    me_artifact_free(reference);
+}
+
 int main(void) {
     matrix();
     exact_comparisons();
     weak_overflow();
     loop_errors();
+    checked_cast_errors();
     return 0;
 }

@@ -368,3 +368,12 @@ so downstream benchmarks cannot silently claim JIT performance while interpretin
   range edges, and Mandelbrot; compiler allocation sweeps include loop lowering.
   Python tests execute the actual benchmark algorithm through portable artifacts,
   compare with NumPy/interpretation, and cover round trips and concurrency.
+- P3: checked float/integer conversions, integer preserving/combinatorial math,
+  named and operator integer power, ldexp, and fma now lower through exact-bit
+  scalar-operation bridges where direct lowering is unavailable. A bridge
+  executes one typed operation on already computed operands, not an expression
+  subtree. Strong modular and weak checked semantics remain distinguished.
+  Qualification uses isolated worktrees at the P2 revision because concurrent
+  public-schema migration in the original directories invalidated shared builds.
+  The isolated native suite passes all 442 tests; the independent wheel passes
+  all 81 new Python parity cases, including cast boundaries and FP status.

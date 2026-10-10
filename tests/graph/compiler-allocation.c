@@ -191,7 +191,8 @@ static int loop_allocations(void) {
         "\"requires\":[\"numeric\",\"control-flow\"],\"source\":\"def k(x):\\n    s = 0.0\\n"
         "    for i in range(3):\\n        for j in range(4):\\n            if j == 1:\\n"
         "                continue\\n            if j == 3:\\n                break\\n"
-        "            s = s + x\\n    n = 0\\n    while n < 2:\\n        n = n + 1\\n    return s\\n\","
+        "            s = s + x\\n    n = 0\\n    while n < 2:\\n        n = n + 1\\n"
+        "    s = fma(s, 1.0, 0.0)\\n    return float(int(s))\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"}],\"constants\":[],"
         "\"output\":{\"dtype\":\"float64\",\"contract\":\"elementwise\"},\"context\":{\"ndim\":0},"
         "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}";

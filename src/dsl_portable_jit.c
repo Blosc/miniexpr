@@ -1,4 +1,4 @@
-/* Portable 1.1 scalar C lowering, revision 13. Never translate source
+/* Portable 1.1 scalar C lowering, revision 14. Never translate source
  * text: the typed tree includes promotion and final output conversions. The
  * private kernel ABI appends a participating mask and host comparison/math bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
@@ -137,18 +137,20 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
     const me_expr *arg1 = arity > 1 ? (const me_expr *)n->parameters[1] : NULL;
     bool float_result = pj_float(n->dtype);
     /* Float/Boolean conversions and integer identities are safe C casts.
-     * Integral narrowing/widening is modular in 1.1, so it lowers through the
-     * same bit-copy helpers. Float-to-integer checks still reject out-of-range
-     * values and must stay on the interpreter where they can report an error. */
+     * Integral narrowing/widening is modular in 1.1. Float-to-integer conversion
+     * uses the checked scalar bridge rather than an unchecked C cast. */
     bool conversion = !n->function && arity == 1;
     bool weak_operand = arg0 &&
         (arg0->flags & (ME_EXPR_FLAG_WEAK_LITERAL | ME_EXPR_FLAG_WEAK_SCALAR)) != 0;
     bool int_cast = conversion && pj_integer(n->dtype) && pj_integral(arg0->dtype) &&
         arg0->dtype != n->dtype && !weak_operand;
     if (conversion && pj_integer(n->dtype) && arg0->dtype != n->dtype && weak_operand) {
-        return pj_weak_conversion(n, constants);
+        char *specialized = pj_weak_conversion(n, constants);
+        if (specialized) return specialized;
+        if (TYPE_MASK(arg0->type) != ME_CONSTANT) return NULL;
     }
-    if (conversion && pj_integer(n->dtype) && arg0->dtype != n->dtype && !int_cast) return NULL;
+    bool checked_conversion = conversion && pj_integer(n->dtype) &&
+        arg0->dtype != n->dtype && !int_cast;
     bool where = op && !strcmp(op,"where") && arity == 3;
     bool comparison = op && is_comparison_node(n) && arity == 2;
     bool integer_comparison = comparison && pj_integral(arg0->dtype) && pj_integral(arg1->dtype);
@@ -166,6 +168,9 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
     bool unary_math = math && arity == 1 && !predicate && float_result && arg0 && pj_float(arg0->dtype);
     bool binary_math = math && arity == 2 && float_result && arg0 && arg1 &&
         pj_float(arg0->dtype) && pj_float(arg1->dtype);
+    bool checked_math = (math && arity >= 1 && arity <= 3 &&
+        !predicate && !unary_math && !binary_math) ||
+        (op && !strcmp(op,"**") && arity == 2 && pj_integer(n->dtype));
     bool float_operator = op && arity == 2 && float_result && arg0 && arg1 &&
         (!strcmp(op,"//") || !strcmp(op,"%") || !strcmp(op,"**")) &&
         pj_float(arg0->dtype) && pj_float(arg1->dtype);
@@ -174,15 +179,14 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
                          !strcmp(op,">>") || !strcmp(op,"&") || !strcmp(op,"|") || !strcmp(op,"^"))) ||
           (arity == 1 && !strcmp(op,"~")));
     if (checked_weak) {
-        if (!integer_arithmetic && !integer_operator) return NULL;
-        integer_operator = true;
-        integer_arithmetic = false;
+        if (!integer_arithmetic && !integer_operator && !checked_math && !checked_conversion) return NULL;
+        if (!checked_math && !checked_conversion) { integer_operator = true; integer_arithmetic = false; }
     }
     bool logical = op && ((!strcmp(op,"not") && arity == 1) ||
         ((!strcmp(op,"and") || !strcmp(op,"or")) && arity == 2));
     if (!conversion && !where && !comparison && !arithmetic && !integer_arithmetic &&
         !logical && !predicate && !unary_math && !binary_math && !float_operator &&
-        !integer_operator) return NULL;
+        !integer_operator && !checked_math) return NULL;
     char *args[3] = {0};
     for (int j = 0; j < arity; j++) {
         args[j] = pj_expr(p,n->parameters[j],defined,depth+1,constants);
@@ -191,11 +195,39 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
             return NULL;
         }
     }
-    size_t capacity = 128;
+    size_t capacity = 256;
     for (int j = 0; j < arity; j++) capacity += strlen(args[j]);
     char *out = malloc(capacity);
     if (out) {
-        if (where) snprintf(out,capacity,"((%s)((%s) ? (%s) : (%s)))",type,args[0],args[1],args[2]);
+        if (checked_conversion || checked_math) {
+            if (p->portable_jit_nchecked == ME_DSL_PORTABLE_JIT_BRIDGE_LIMIT) { free(out); out = NULL; }
+            else {
+                int id = p->portable_jit_nchecked++;
+                p->portable_jit_checked[id] = n;
+                char *packed[3] = {0};
+                bool ok = true;
+                for (int j = 0; j < arity; j++) {
+                    const me_expr *arg = n->parameters[j];
+                    size_t size = strlen(args[j]) + 64;
+                    packed[j] = malloc(size);
+                    if (!packed[j]) { ok = false; break; }
+                    snprintf(packed[j],size,"%s(%s)",arg->dtype == ME_FLOAT32 ? "pj_pack_f32" :
+                        arg->dtype == ME_FLOAT64 ? "pj_pack_f64" : "(uint64_t)",args[j]);
+                }
+                if (ok) {
+                    const char *decode = n->dtype == ME_FLOAT32 ? "pj_unpack_f32" :
+                        n->dtype == ME_FLOAT64 ? "pj_unpack_f64" : n->dtype == ME_BOOL ? "(_Bool)" : NULL;
+                    char integer_decode[64];
+                    if (!decode) { snprintf(integer_decode,sizeof(integer_decode),"pj_%s",type); decode = integer_decode; }
+                    snprintf(out,capacity,"%s(((pj_checked)inputs[%d])(inputs[%d],%s,%s,%s,&pj_status))",
+                        decode,p->n_inputs+ME_DSL_PORTABLE_JIT_CHECKED_OFF,
+                        p->n_inputs+ME_DSL_PORTABLE_JIT_CHECKED_OFF+1+id,
+                        packed[0],arity > 1 ? packed[1] : "0ULL",arity > 2 ? packed[2] : "0ULL");
+                } else { free(out); out = NULL; }
+                for (int j = 0; j < arity; j++) free(packed[j]);
+            }
+        }
+        else if (where) snprintf(out,capacity,"((%s)((%s) ? (%s) : (%s)))",type,args[0],args[1],args[2]);
         else if (int_cast) snprintf(out,capacity,"pj_%s((uint64_t)(%s))",type,args[0]);
         else if (conversion) snprintf(out,capacity,"((%s)(%s))",type,args[0]);
         else if (integer_comparison) {
@@ -467,6 +499,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     pj_text body = {0};
     p->portable_jit_ncomparisons = p->portable_jit_nmath = 0;
     p->portable_jit_nmath2 = p->portable_jit_npreds = p->portable_jit_niops = 0;
+    p->portable_jit_nchecked = 0;
     for (int i = 0; i < p->n_locals; i++) {
         int index = p->local_var_indices[i];
         if (!pj_type(p->vars.dtypes[index]) ||
@@ -542,7 +575,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
     snprintf(source,capacity,
-        "/* portable-1.1 lowering-r13 lane-local-loops abi-r7 */\n"
+        "/* portable-1.1 lowering-r14 checked-scalar-math abi-r8 */\n"
         "#include <stdint.h>\n"
         "#include <string.h>\n"
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"
@@ -550,6 +583,11 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "typedef double (*pj_math2)(const void *,double,double);\n"
         "typedef _Bool (*pj_pred)(const void *,double);\n"
         "typedef uint64_t (*pj_iop)(const void *,uint64_t,uint64_t,int *);\n"
+        "typedef uint64_t (*pj_checked)(const void *,uint64_t,uint64_t,uint64_t,int *);\n"
+        "static inline uint64_t pj_pack_f32(float x) { uint32_t u; memcpy(&u,&x,4); return u; }\n"
+        "static inline uint64_t pj_pack_f64(double x) { uint64_t u; memcpy(&u,&x,8); return u; }\n"
+        "static inline float pj_unpack_f32(uint64_t x) { uint32_t u=(uint32_t)x; float f; memcpy(&f,&u,4); return f; }\n"
+        "static inline double pj_unpack_f64(uint64_t x) { double f; memcpy(&f,&x,8); return f; }\n"
         /* Unsigned arithmetic followed by a bit copy implements modular signed
          * arithmetic without signed overflow or out-of-range signed casts. */
         "#define PJ_INT(S,U) static inline S pj_##S(uint64_t x) { U u=(U)x; S s; memcpy(&s,&u,sizeof(s)); return s; }\n"
