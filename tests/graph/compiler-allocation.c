@@ -71,9 +71,78 @@ static int check(const char *text, const float *expected, me_jit_mode jit) {
         jit, checkpoints, rejected, recovered);
     return !checkpoints || !rejected;
 }
+/* A simple scalar return must execute even when every compiler-owned allocation
+ * fails. Explicit masks/empty groups/locals/elementwise returns retain their
+ * bookkeeping, and must still recover after an injected allocation failure. */
+static int scalar_dispatch(const char *body, const char *output_dtype,
+    const char *contract, int count, const uint8_t *mask, bool direct, double expected) {
+    char json[2048];
+    snprintf(json, sizeof(json),
+        "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
+        "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x):\\n    %s\\n\","
+        "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"}],\"constants\":[],"
+        "\"output\":{\"dtype\":\"%s\",\"contract\":\"%s\"},\"context\":{\"ndim\":0},"
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}",
+        body, output_dtype, contract);
+    me_artifact *a = NULL; me_artifact_error native;
+    if (me_artifact_load(json, strlen(json), ME_JIT_OFF, &a, &native)) return 1;
+    double x[] = {1, 2, 3}, output[3] = {0};
+    me_artifact_buffer buffer = {"x", ME_FLOAT64, sizeof(double), x, sizeof(x)};
+    me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
+        .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = (size_t)count,
+        .output_capacity = sizeof(output), .valid_mask = mask,
+        .valid_mask_capacity = mask ? (size_t)count : 0};
+    calls = 0; fail_at = 0;
+    int rc = me_artifact_eval_ex(a, &buffer, 1, output, &descriptor, &native);
+    fail_at = -1;
+    if ((direct && (rc || calls)) || (!direct && (!rc || !calls))) {
+        fprintf(stderr, "scalar dispatch %s direct=%d rc=%d allocations=%ld\n", body, direct, rc, calls);
+        me_artifact_free(a); return 1;
+    }
+    memset(output, 0, sizeof(output));
+    rc = me_artifact_eval_ex(a, &buffer, 1, output, &descriptor, &native);
+    double actual = output[0];
+    if (!strcmp(output_dtype, "float32")) { float value; memcpy(&value, output, sizeof(value)); actual = value; }
+    if (rc || actual != expected) { me_artifact_free(a); return 1; }
+    /* The shortcut must not evade descriptor/buffer validation. */
+    int invalid = 0;
+    for (int test = 0; test < 5; test++) {
+        me_artifact_buffer bad = buffer;
+        me_artifact_eval_descriptor invalid_descriptor = descriptor;
+        uint8_t invalid_mask[] = {2, 1, 1};
+        if (test == 0) invalid_descriptor.output_capacity = 0;
+        else if (test == 1) bad.name = "missing";
+        else if (test == 2) bad.dtype = ME_INT64;
+        else if (test == 3 && count) bad.capacity = (size_t)count * sizeof(double) - 1;
+        else if (test == 4 && count) {
+            invalid_descriptor.valid_mask = invalid_mask;
+            invalid_descriptor.valid_mask_capacity = sizeof(invalid_mask);
+        } else continue;
+        calls = 0; fail_at = 0;
+        rc = me_artifact_eval_ex(a, &bad, 1, output, &invalid_descriptor, &native);
+        fail_at = -1;
+        invalid |= rc != ME_ARTIFACT_ERR_BINDING || calls != 0;
+    }
+    me_artifact_free(a);
+    return invalid;
+}
+static int scalar_dispatches(void) {
+    uint8_t full[] = {1, 1, 1}, partial[] = {0, 1, 1}, none[] = {0, 0, 0};
+    return scalar_dispatch("return sum(x)", "float64", "block_scalar", 3, NULL, true, 6) ||
+        scalar_dispatch("return sum(x * 2)", "float64", "block_scalar", 3, NULL, true, 12) ||
+        scalar_dispatch("return sum(x) + sum(x)", "float64", "block_scalar", 3, NULL, true, 12) ||
+        scalar_dispatch("return sum(x) / 3", "float64", "block_scalar", 3, NULL, true, 2) ||
+        scalar_dispatch("return sum(x)", "float32", "block_scalar", 3, NULL, true, 6) ||
+        scalar_dispatch("s = sum(x)\\n    return s", "float64", "block_scalar", 3, NULL, false, 6) ||
+        scalar_dispatch("return x * 2", "float64", "elementwise", 3, NULL, false, 2) ||
+        scalar_dispatch("return sum(x)", "float64", "block_scalar", 3, full, false, 6) ||
+        scalar_dispatch("return sum(x)", "float64", "block_scalar", 3, partial, false, 5) ||
+        scalar_dispatch("return sum(x)", "float64", "block_scalar", 3, none, false, 0) ||
+        scalar_dispatch("return sum(x)", "float64", "block_scalar", 0, NULL, false, 0);
+}
 int main(void) {
     const float affine[] = {3, 10, 21}, staged[] = {7, 8, 9};
-    return check("x * 2 + y", affine, ME_JIT_OFF) ||
+    return scalar_dispatches() || check("x * 2 + y", affine, ME_JIT_OFF) ||
         check("sqrt(x) + sum(y)", staged, ME_JIT_OFF) ||
         check("x * 2 + y", affine, ME_JIT_ON);
 }

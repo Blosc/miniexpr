@@ -1225,6 +1225,26 @@ static void dsl_wasm32_finalize_jit_output(const me_dsl_compiled_program *progra
 }
 #endif
 
+/* Single scalar returns have no statement-level participation or local state.
+ * Reuse the same expression evaluator as the general return path, without its
+ * per-lane flow masks. Keep masks/empty groups on that path for now. */
+static const me_expr *dsl_simple_scalar_return(const me_dsl_compiled_program *program,
+    const me_dsl_portable_eval_descriptor *descriptor) {
+    if (program->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_1 ||
+        !descriptor || !program->output_is_scalar || descriptor->nitems <= 0 ||
+        descriptor->valid_mask || program->n_locals ||
+        program->vars.count != program->n_inputs ||
+        program->uses_i_mask || program->uses_n_mask ||
+        program->uses_ndim || program->uses_flat_idx ||
+        program->block.nstmts != 1 ||
+        program->block.stmts[0]->kind != ME_DSL_STMT_RETURN) return NULL;
+    const me_expr *expr = program->block.stmts[0]->as.return_stmt.expr.expr;
+    if (!expr || expr->dtype < ME_BOOL || expr->dtype > ME_FLOAT64 ||
+        expr->dtype != program->output_dtype ||
+        me_get_itemsize(expr) != program->output_itemsize) return NULL;
+    return expr;
+}
+
 static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
                      const void **vars_block, int n_vars,
                      void *output_block, int nitems,
@@ -1412,6 +1432,13 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
         }
     }
 
+    /* JIT retains precedence. All descriptor/binding validation remains outside
+     * this dispatch, and numerical errors are returned, never retried. */
+    const me_expr *scalar_return = dsl_simple_scalar_return(program, descriptor);
+    if (scalar_return) {
+        return dsl_portable_eval_expr(scalar_return, (const void *const *)vars_block,
+            n_vars, NULL, 0, group_nitems, NULL, output_block);
+    }
     void **var_buffers = calloc(program->vars.count ? (size_t)program->vars.count : 1, sizeof(*var_buffers));
     void **local_buffers = calloc(program->n_locals ? (size_t)program->n_locals : 1, sizeof(*local_buffers));
     if (!var_buffers || !local_buffers) {

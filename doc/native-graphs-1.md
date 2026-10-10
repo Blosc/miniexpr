@@ -61,6 +61,18 @@ once; partial masks, potentially uninitialized variables and computed operands
 retain generic expression reduction. This is a block-reduction optimization, not
 conversion of DSL programs into graphs, and it does not imply JIT execution.
 
+Portable 1.1 programs containing a single numeric/Boolean scalar `return`, with
+no locals or reserved/context variables, can bypass statement bookkeeping on
+nonempty unmasked blocks. The same scalar expression evaluator executes the
+return, including computed operands, multiple reductions, output conversions
+and checked integer arithmetic. JIT retains precedence; binding/descriptor
+validation and FP status handling remain intact, and numerical errors are never
+retried through another route. Explicit masks (even all-one masks), empty blocks,
+elementwise outputs and more general programs keep the statement interpreter.
+This shortcut removes unnecessary per-lane flow/initialization arrays; it does
+not promise allocation-free execution for every expression (for example, lazy
+conditional reductions can still allocate participation state).
+
 `benchmark_sum_paths [items] [samples] [tile_items] [dtype] [direct|computed]
 [sum|prod|min|max|any|all]` times both warm native APIs on identical inputs, with
 preparation, Python and compression excluded. Each call verifies its result.

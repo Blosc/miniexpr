@@ -1,5 +1,5 @@
 /*
- * Portable 1.1 interpreter vs JIT lowering: warm per-evaluation benchmark.
+ * Portable 1.1 interpreter vs JIT vs graphs: warm per-evaluation benchmark.
  *
  * Every case is a valid portable 1.1 artifact that the interpreter executes,
  * and represent families originally outside the portable JIT. Math calls,
@@ -11,10 +11,13 @@
  * Cold load/compile time is deliberately excluded.
  *
  * Usage:
- *   ./benchmark_dsl_interpreter_vs_jit [nitems] [repeats]
+ *   ./benchmark_dsl_interpreter_vs_jit [nitems] [repeats] [graph_backend=tcc]
+ * Graph backend: interpreter, tcc, gcc-16 or clang. Graph preparation and
+ * specialization are excluded. NO_COLOR disables color; FORCE_COLOR enables it
+ * even when stdout is redirected. Otherwise highlight winners only on a TTY.
  */
 
-#include "miniexpr_artifact.h"
+#include "miniexpr_graph.h"
 
 #include <math.h>
 #include <stdbool.h>
@@ -24,11 +27,15 @@
 #include <string.h>
 #include <time.h>
 #ifdef _WIN32
+#include <io.h>
 #include <windows.h>
+#else
+#include <unistd.h>
 #endif
 
 #define MAX_INPUTS 2
 #define N_BACKENDS 4
+#define N_COLUMNS (N_BACKENDS + 1)
 
 typedef struct {
     const char *label;
@@ -56,6 +63,7 @@ typedef struct {
     const char *in_names[MAX_INPUTS];
     int n_inputs;
     int scalar;
+    const char *graph_expression; /* Equivalent numeric graph; NULL if unavailable. */
 } bench_case;
 
 /*
@@ -66,63 +74,63 @@ static const bench_case cases[] = {
     {"A1 math-call: sin(x)+cos(x)",
      "def k(x):\n    return sin(x) + cos(x)\n",
      "[{\"name\":\"x\",\"dtype\":\"float64\"}]", "[\"numeric\"]",
-     "float64", "elementwise", 0, ME_FLOAT64, {"x"}, 1, 0},
+     "float64", "elementwise", 0, ME_FLOAT64, {"x"}, 1, 0, "sin(x) + cos(x)"},
     {"A2 binary-math: hypot(x, y)",
      "def k(x, y):\n    return hypot(x, y)\n",
      "[{\"name\":\"x\",\"dtype\":\"float64\"},{\"name\":\"y\",\"dtype\":\"float64\"}]", "[\"numeric\"]",
-     "float64", "elementwise", 0, ME_FLOAT64, {"x", "y"}, 2, 0},
+     "float64", "elementwise", 0, ME_FLOAT64, {"x", "y"}, 2, 0, "hypot(x, y)"},
     {"A3 predicate: isfinite(x)",
      "def k(x):\n    return isfinite(x)\n",
      "[{\"name\":\"x\",\"dtype\":\"float64\"}]", "[\"numeric\"]",
-     "bool", "elementwise", 0, ME_FLOAT64, {"x"}, 1, 0},
+     "bool", "elementwise", 0, ME_FLOAT64, {"x"}, 1, 0, "isfinite(x)"},
     {"B1 integer-add: int32 x+y",
      "def k(x, y):\n    return x + y\n",
      "[{\"name\":\"x\",\"dtype\":\"int32\"},{\"name\":\"y\",\"dtype\":\"int32\"}]", "[\"numeric\"]",
-     "int32", "elementwise", 0, ME_INT32, {"x", "y"}, 2, 0},
+     "int32", "elementwise", 0, ME_INT32, {"x", "y"}, 2, 0, "x + y"},
     {"B2 integer-mod: x % 7",
      "def k(x):\n    return x % 7\n",
      "[{\"name\":\"x\",\"dtype\":\"int32\"}]", "[\"numeric\"]",
-     "int32", "elementwise", 0, ME_INT32, {"x"}, 1, 0},
+     "int32", "elementwise", 0, ME_INT32, {"x"}, 1, 0, "x % 7"},
     {"B3 integer-shift: x << 2",
      "def k(x):\n    return x << 2\n",
      "[{\"name\":\"x\",\"dtype\":\"int32\"}]", "[\"numeric\"]",
-     "int32", "elementwise", 0, ME_INT32, {"x"}, 1, 0},
+     "int32", "elementwise", 0, ME_INT32, {"x"}, 1, 0, "x << 2"},
     {"B4 narrow-cast: int16(x)*2",
      "def k(x):\n    return int16(x) * 2\n",
      "[{\"name\":\"x\",\"dtype\":\"int8\"}]", "[\"numeric\"]",
-     "int16", "elementwise", 0, ME_INT8, {"x"}, 1, 0},
+     "int16", "elementwise", 0, ME_INT8, {"x"}, 1, 0, "int16(x) * 2"},
     {"C1 float-floordiv: x // 3.0",
      "def k(x):\n    return x // 3.0\n",
      "[{\"name\":\"x\",\"dtype\":\"float64\"}]", "[\"numeric\"]",
-     "float64", "elementwise", 0, ME_FLOAT64, {"x"}, 1, 0},
+     "float64", "elementwise", 0, ME_FLOAT64, {"x"}, 1, 0, "x // 3.0"},
     {"C2 float-rem: x % 1.5",
      "def k(x):\n    return x % 1.5\n",
      "[{\"name\":\"x\",\"dtype\":\"float64\"}]", "[\"numeric\"]",
-     "float64", "elementwise", 0, ME_FLOAT64, {"x"}, 1, 0},
+     "float64", "elementwise", 0, ME_FLOAT64, {"x"}, 1, 0, "x % 1.5"},
     {"C3 float-pow: x ** 2.5",
      "def k(x):\n    return x ** 2.5\n",
      "[{\"name\":\"x\",\"dtype\":\"float64\"}]", "[\"numeric\"]",
-     "float64", "elementwise", 0, ME_FLOAT64, {"x"}, 1, 0},
+     "float64", "elementwise", 0, ME_FLOAT64, {"x"}, 1, 0, "x ** 2.5"},
     {"D local-temp: y=x*2; y+1",
      "def k(x):\n    y = x * 2.0\n    return y + 1.0\n",
      "[{\"name\":\"x\",\"dtype\":\"float64\"}]", "[\"numeric\"]",
-     "float64", "elementwise", 0, ME_FLOAT64, {"x"}, 1, 0},
+     "float64", "elementwise", 0, ME_FLOAT64, {"x"}, 1, 0, "(x * 2.0) + 1.0"},
     {"E control-flow: if x>0 else -x",
      "def k(x):\n    if x > 0.0:\n        return x\n    return -x\n",
      "[{\"name\":\"x\",\"dtype\":\"float64\"}]", "[\"numeric\",\"control-flow\"]",
-     "float64", "elementwise", 0, ME_FLOAT64, {"x"}, 1, 0},
+     "float64", "elementwise", 0, ME_FLOAT64, {"x"}, 1, 0, "where(x > 0.0, x, -x)"},
     {"F reduction: sum(x)",
      "def k(x):\n    return sum(x)\n",
      "[{\"name\":\"x\",\"dtype\":\"float64\"}]", "[\"numeric\",\"block-reductions\"]",
-     "float64", "block_scalar", 0, ME_FLOAT64, {"x"}, 1, 1},
+     "float64", "block_scalar", 0, ME_FLOAT64, {"x"}, 1, 1, "sum(x)"},
     {"G nd-context: x + _i0",
      "def k(x):\n    return x + _i0\n",
      "[{\"name\":\"x\",\"dtype\":\"float64\"}]", "[\"numeric\",\"nd-context\"]",
-     "float64", "elementwise", 1, ME_FLOAT64, {"x"}, 1, 0},
+     "float64", "elementwise", 1, ME_FLOAT64, {"x"}, 1, 0, NULL},
     {"control eligible: where(x!=0,y/x,y)",
      "def k(x, y):\n    return where(x != 0, y / x, y)\n",
      "[{\"name\":\"x\",\"dtype\":\"float64\"},{\"name\":\"y\",\"dtype\":\"float64\"}]", "[\"numeric\"]",
-     "float64", "elementwise", 0, ME_FLOAT64, {"x", "y"}, 2, 0},
+     "float64", "elementwise", 0, ME_FLOAT64, {"x", "y"}, 2, 0, "where(x != 0, y / x, y)"},
 };
 
 static size_t dtype_bytes(me_dtype dtype) {
@@ -249,6 +257,93 @@ static int eval_case(const me_artifact *artifact, const bench_case *c,
     return (int)me_artifact_eval_ex(artifact, buffers, c->n_inputs, out, &descriptor, error);
 }
 
+static bool use_color(void) {
+    if (getenv("NO_COLOR")) return false;
+    if (getenv("FORCE_COLOR")) return true;
+#ifdef _WIN32
+    if (!_isatty(_fileno(stdout))) return false;
+    HANDLE handle = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD mode;
+    return GetConsoleMode(handle, &mode) && SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+#else
+    const char *term = getenv("TERM");
+    return isatty(STDOUT_FILENO) && (!term || strcmp(term, "dumb"));
+#endif
+}
+
+static void print_row(const char *label, char cell[N_COLUMNS][20],
+    const double times[N_COLUMNS], bool color) {
+    double fastest = HUGE_VAL;
+    for (int b = 0; b < N_COLUMNS; b++) if (times[b] >= 0 && times[b] < fastest) fastest = times[b];
+    printf("%-38s", label);
+    for (int b = 0; b < N_COLUMNS; b++) {
+        bool winner = color && times[b] >= 0 && times[b] == fastest;
+        printf(" %s%16s%s", winner ? "\033[1;32m" : "", cell[b], winner ? "\033[0m" : "");
+    }
+    printf("\n");
+}
+
+static double bench_graph(const bench_case *c, const backend_def *backend,
+    void *const in_data[MAX_INPUTS], void *out, size_t capacity, size_t nitems,
+    int repeats, const void *reference, size_t ref_bytes, me_dtype ref_dtype,
+    char cell[20], bool *value_mismatch) {
+    if (!c->graph_expression) { snprintf(cell, 20, "n/a"); return -1; }
+    apply_backend(backend);
+    me_graph_input_metadata metadata[MAX_INPUTS] = {0};
+    me_array_view inputs[MAX_INPUTS] = {0};
+    size_t width = dtype_bytes(c->in_dtype);
+    for (int i = 0; i < c->n_inputs; i++) {
+        metadata[i] = (me_graph_input_metadata){c->in_names[i], c->in_dtype, 1, {(int64_t)nitems}};
+        inputs[i] = (me_array_view){.name = c->in_names[i], .dtype = c->in_dtype,
+            .base = in_data[i], .capacity = nitems * width, .rank = 1,
+            .shape = {(int64_t)nitems}, .strides = {(int64_t)width}};
+    }
+    me_graph_prepare_options prepare = {sizeof(prepare), ME_GRAPH_VERSION, backend->mode, false, true};
+    me_graph_plan *plan = NULL;
+    me_graph_schedule *schedule = NULL;
+    me_graph_error error = {0};
+    int rc = me_graph_prepare_expression(c->graph_expression, strlen(c->graph_expression),
+        metadata, c->n_inputs, &prepare, &plan, &error);
+    if (!rc) rc = me_graph_specialize(plan, metadata, c->n_inputs, NULL, &schedule, &error);
+    double best = -1;
+    if (rc) {
+        snprintf(cell, 20, rc == ME_GRAPH_ERR_UNSUPPORTED || rc == ME_GRAPH_ERR_CAPABILITY ? "n/a" : "prep!");
+        fprintf(stderr, "%s graph: %s\n", c->label, error.native.message);
+        goto cleanup;
+    }
+    me_graph_report report;
+    rc = me_graph_execute(schedule, inputs, c->n_inputs, out, capacity, NULL, &report, &error);
+    if (rc) { snprintf(cell, 20, "eval!"); goto cleanup; }
+    bool compiled = report.has_jit;
+    bool direct_reduction = c->scalar && report.array.evaluated_tiles == 0;
+    int batch = 1;
+    for (int r = 0; r < repeats; r++) {
+        double start = now_ns();
+        for (int k = 0; k < batch && !rc; k++) {
+            rc = me_graph_execute(schedule, inputs, c->n_inputs, out, capacity, NULL, NULL, &error);
+        }
+        double elapsed = (now_ns() - start) / batch;
+        if (rc) { snprintf(cell, 20, "eval!"); best = -1; goto cleanup; }
+        if (r == 0 && elapsed > 0 && elapsed < 2e6) {
+            double target = 2e6 / elapsed + 1;
+            batch = target > 100000 ? 100000 : (int)target;
+        }
+        if (r == 0 || elapsed < best) best = elapsed;
+    }
+    size_t bytes = me_graph_output_bytes(schedule);
+    bool match = ref_bytes && ref_dtype == me_graph_output_dtype(schedule) &&
+        ref_bytes == bytes && memcmp(reference, out, bytes) == 0;
+    if (ref_bytes && !match) *value_mismatch = true;
+    snprintf(cell, 20, "%8.3f %s%s", best / 1e6,
+        compiled ? "JIT" : direct_reduction ? "R" : backend->mode == ME_JIT_OFF ? "I" : "fb",
+        ref_bytes ? match ? "" : "*" : "?");
+    if (!match) best = -1; /* Unverified/mismatching cells cannot win a row. */
+cleanup:
+    me_graph_schedule_free(schedule);
+    me_graph_plan_free(plan);
+    return best;
+}
+
 int main(int argc, char **argv) {
     size_t nitems = 1u << 16;
     int repeats = 7;
@@ -256,12 +351,24 @@ int main(int argc, char **argv) {
     if (argc > 2) repeats = atoi(argv[2]);
     if (nitems < 1) nitems = 1;
     if (repeats < 1) repeats = 1;
+    const backend_def *graph_backend = &backends[1];
+    if (argc > 3) {
+        graph_backend = NULL;
+        for (int b = 0; b < N_BACKENDS; b++) if (!strcmp(argv[3], backends[b].label)) graph_backend = &backends[b];
+        if (!graph_backend) { fprintf(stderr, "Graph backend must be interpreter, tcc, gcc-16 or clang\n"); return 2; }
+    }
+    if (nitems > INT32_MAX || nitems > (SIZE_MAX - 64) / 8) {
+        fprintf(stderr, "nitems exceeds native block or allocation limits\n"); return 2;
+    }
+    bool color = use_color();
+    char graph_label[32]; snprintf(graph_label, sizeof(graph_label), "graph (%s)", graph_backend->label);
 
-    printf("MiniExpr portable 1.1: interpreter vs JIT (warm per-evaluation time)\n");
+    printf("MiniExpr portable 1.1: interpreter vs JIT vs graph (warm per-evaluation time)\n");
     printf("nitems=%zu repeats=%d  (cold load/compile excluded; best of warm runs; ms per full-array call)\n\n",
            nitems, repeats);
-    printf("%-38s %16s %16s %16s %16s\n", "case (family / example)",
-           backends[0].label, backends[1].label, backends[2].label, backends[3].label);
+    printf("graph: equivalent expressions, %s preference, 1024-item tiles; preparation/specialization excluded\n\n", graph_backend->label);
+    printf("%-38s %16s %16s %16s %16s %16s\n", "case (family / example)",
+           backends[0].label, backends[1].label, backends[2].label, backends[3].label, graph_label);
 
     bool backend_compiled[N_BACKENDS] = {false, false, false, false};
     bool value_mismatch = false;
@@ -270,7 +377,7 @@ int main(int argc, char **argv) {
         const bench_case *c = &cases[ci];
         char json[4096];
         if (!build_json(c, json, sizeof(json))) {
-            printf("%-38s %16s %16s %16s %16s\n", c->label, "BAD-JSON", "", "", "");
+            printf("%-38s %16s %16s %16s %16s %16s\n", c->label, "BAD-JSON", "", "", "", "");
             continue;
         }
 
@@ -284,11 +391,14 @@ int main(int argc, char **argv) {
         void *out = malloc(out_cap);
         void *reference = malloc(out_cap);
         size_t ref_bytes = 0;
+        me_dtype ref_dtype = ME_AUTO;
 
-        char cell[N_BACKENDS][20];
+        char cell[N_COLUMNS][20];
+        double times[N_COLUMNS];
+        for (int b = 0; b < N_COLUMNS; b++) times[b] = -1;
+        bool input_ok = out && reference;
+        for (int i = 0; i < c->n_inputs; i++) input_ok = input_ok && in_data[i];
         for (int b = 0; b < N_BACKENDS; b++) {
-            bool input_ok = out && reference;
-            for (int i = 0; i < c->n_inputs; i++) input_ok = input_ok && in_data[i];
             if (!input_ok) {
                 snprintf(cell[b], sizeof(cell[b]), "OOM");
                 continue;
@@ -321,9 +431,9 @@ int main(int argc, char **argv) {
                     }
                     double elapsed = (now_ns() - start) / batch;
                     if (rc != ME_ARTIFACT_SUCCESS) { best = -1.0; break; }
-                    if (r == 0 && elapsed < 2e6) {
-                        batch = (int)(2e6 / elapsed) + 1;
-                        if (batch > 100000) batch = 100000;
+                    if (r == 0 && elapsed > 0 && elapsed < 2e6) {
+                        double target = 2e6 / elapsed + 1;
+                        batch = target > 100000 ? 100000 : (int)target;
                     }
                     if (r == 0 || elapsed < best) best = elapsed;
                 }
@@ -334,20 +444,27 @@ int main(int argc, char **argv) {
                 else if (b == 0) {
                     memcpy(reference, out, out_bytes);
                     ref_bytes = out_bytes;
+                    ref_dtype = me_artifact_output_dtype(artifact);
+                    times[b] = best;
                     snprintf(cell[b], sizeof(cell[b]), "%8.3f %s", best / 1e6, "I");
                 }
                 else {
-                    bool match = ref_bytes == out_bytes && memcmp(reference, out, out_bytes) == 0;
-                    if (!match) value_mismatch = true;
+                    bool match = ref_bytes && ref_dtype == me_artifact_output_dtype(artifact) &&
+                        ref_bytes == out_bytes && memcmp(reference, out, out_bytes) == 0;
+                    if (ref_bytes && !match) value_mismatch = true;
+                    if (match) times[b] = best;
                     snprintf(cell[b], sizeof(cell[b]), "%8.3f %s%s", best / 1e6,
-                             compiled ? "JIT" : "fb", match ? "" : "*");
+                              compiled ? "JIT" : "fb", ref_bytes ? match ? "" : "*" : "?");
                 }
             }
             me_artifact_free(artifact);
         }
 
-        printf("%-38s %16s %16s %16s %16s\n", c->label,
-               cell[0], cell[1], cell[2], cell[3]);
+        if (input_ok) {
+            times[N_BACKENDS] = bench_graph(c, graph_backend, in_data, out, out_cap,
+                nitems, repeats, reference, ref_bytes, ref_dtype, cell[N_BACKENDS], &value_mismatch);
+        } else snprintf(cell[N_BACKENDS], sizeof(cell[N_BACKENDS]), "OOM");
+        print_row(c->label, cell, times, color);
 
         for (int i = 0; i < c->n_inputs; i++) free(in_data[i]);
         free(out);
@@ -356,6 +473,9 @@ int main(int argc, char **argv) {
 
     printf("\nlegend: I=interpreter  JIT=compiled kernel  fb=JIT declined, interpreter fallback");
     printf("\n        *=warm result differs bitwise from the interpreter reference\n");
+    printf("        ?=no interpreter reference  n/a=no equivalent graph/context support\n");
+    printf("        R=direct native graph reduction (identity map skipped)\n");
+    if (color) printf("        green=fastest matching cell per row (using unrounded timings)\n");
     printf("compiled control kernel per backend:");
     for (int b = 1; b < N_BACKENDS; b++) {
         printf("  %s=%s", backends[b].label, backend_compiled[b] ? "yes" : "no");
