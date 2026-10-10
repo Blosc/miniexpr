@@ -55,6 +55,9 @@ static const parity_case cases[] = {
     {"ldexp", "return ldexp(x, 2)", "float64", "float64", true},
     {"fma", "return fma(x, y, 1.0)", "float64", "float64", true},
     {"floating math", "return sin(x) + cos(y)", "float64", "float64", true},
+    {"sequenced elif", "if int(x) > 0:\\n        return x\\n    elif int(y) > 0:\\n        return y\\n    return 0.0", "float64", "float64", true},
+    {"lazy where casts", "return where(x > 0, int(y), 0)", "float64", "int64", true},
+    {"lazy logical casts", "return x > 0 and int(y) > 0", "float64", "bool", true},
 };
 
 static me_artifact *load_extra(const parity_case *test, me_jit_mode mode,
@@ -292,11 +295,41 @@ static void checked_cast_errors(void) {
     me_artifact_free(reference);
 }
 
+static void computed_weak_conversion(void) {
+    const char *constant = "{\"name\":\"y\",\"dtype\":\"int64\",\"category\":\"weak\","
+        "\"encoding\":\"decimal\",\"value\":\"127\"}";
+    parity_case test = {"computed weak narrowing", "if x == 0:\\n        return x\\n    return x + (y + 1)",
+        "int8", "int8", true};
+    me_artifact *jit = load_extra(&test, ME_JIT_ON, NULL, constant);
+    me_artifact *reference = load_extra(&test, ME_JIT_OFF, NULL, constant);
+    me_artifact *oracle = load(&cases[0], ME_JIT_ON);
+    CHECK(me_artifact_has_jit(jit) == me_artifact_has_jit(oracle));
+    int8_t x[] = {0, 0}, output[2], expected[2];
+    me_artifact_buffer buffer = {"x", ME_INT8, 1, x, sizeof(x)};
+    me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
+        .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = 2,
+        .output_capacity = sizeof(output)};
+    me_artifact_error error, reference_error;
+    CHECK(!me_artifact_eval_ex(jit, &buffer, 1, output, &descriptor, &error));
+    x[1] = 1;
+    int rc = me_artifact_eval_ex(jit, &buffer, 1, output, &descriptor, &error);
+    int reference_rc = me_artifact_eval_ex(reference, &buffer, 1, expected, &descriptor, &reference_error);
+    CHECK(rc && rc == reference_rc && error.native_status == reference_error.native_status);
+    uint8_t mask[] = {1, 0};
+    descriptor.valid_mask = mask;
+    descriptor.valid_mask_capacity = sizeof(mask);
+    CHECK(!me_artifact_eval_ex(jit, &buffer, 1, output, &descriptor, &error));
+    me_artifact_free(jit);
+    me_artifact_free(reference);
+    me_artifact_free(oracle);
+}
+
 int main(void) {
     matrix();
     exact_comparisons();
     weak_overflow();
     loop_errors();
     checked_cast_errors();
+    computed_weak_conversion();
     return 0;
 }

@@ -377,3 +377,11 @@ so downstream benchmarks cannot silently claim JIT performance while interpretin
   public-schema migration in the original directories invalidated shared builds.
   The isolated native suite passes all 442 tests; the independent wheel passes
   all 81 new Python parity cases, including cast boundaries and FP status.
+- P4: computed weak conversions and floating capture conversions use runtime
+  checks. Expression lowering now emits ordered temporaries with immediate status
+  checks; where/and/or operands and elif conditions stay inside their participating
+  branches. Immutable integral capture specialization is still deferred until
+  validated values are known, so its embedded-value fingerprint and out-of-range
+  fallback remain intact. Added computed narrowing, floating capture, lazy cast,
+  and cache-reuse regressions. All 442 native tests and 98 focused independent-
+  wheel Python tests pass; broader Python qualification is run separately.

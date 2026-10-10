@@ -1,4 +1,4 @@
-/* Portable 1.1 scalar C lowering, revision 14. Never translate source
+/* Portable 1.1 scalar C lowering, revision 15. Never translate source
  * text: the typed tree includes promotion and final output conversions. The
  * private kernel ABI appends a participating mask and host comparison/math bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
@@ -50,6 +50,13 @@ typedef struct {
     int count;
 } pj_constants;
 
+typedef struct {
+    char *text;
+    size_t used, capacity;
+} pj_text;
+
+static bool pj_append(pj_text *s, const char *format, ...);
+
 /* Only immutable integral capture leaves can be specialized. Validate the exact
  * checked weak conversion; out-of-range captures keep interpretation, including
  * its lazy participation/error timing. Never alter the shared typed tree. */
@@ -74,7 +81,7 @@ static char *pj_weak_conversion(const me_expr *n, const pj_constants *constants)
 }
 
 static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *defined, int depth,
-    const pj_constants *constants) {
+    const pj_constants *constants, pj_text *s, int *next_temp) {
     if (!n || depth > 128 || !pj_type(n->dtype)) return NULL;
     const char *type = pj_type(n->dtype);
     char leaf[256];
@@ -145,12 +152,26 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
     bool int_cast = conversion && pj_integer(n->dtype) && pj_integral(arg0->dtype) &&
         arg0->dtype != n->dtype && !weak_operand;
     if (conversion && pj_integer(n->dtype) && arg0->dtype != n->dtype && weak_operand) {
+        /* Artifact capture leaves are immutable, but their values arrive only
+         * after validation. Defer preparation so constant specialization keeps
+         * its fast path and out-of-range immutable leaves keep safe fallback. */
+        if (!constants && TYPE_MASK(arg0->type) == ME_VARIABLE && is_synthetic_address(arg0->bound) &&
+            (arg0->dtype == ME_INT64 || arg0->dtype == ME_BOOL)) {
+            int index = (int)((const char *)arg0->bound - synthetic_var_addresses);
+            if (index >= 0 && index < p->vars.count && p->vars.uniform[index]) return NULL;
+        }
         char *specialized = pj_weak_conversion(n, constants);
         if (specialized) return specialized;
-        if (TYPE_MASK(arg0->type) != ME_CONSTANT) return NULL;
+        /* Preserve fail-closed behavior for known out-of-range immutable integer
+         * captures. Unknown/computed/floating operands use runtime checks. */
+        if (constants && TYPE_MASK(arg0->type) == ME_VARIABLE && is_synthetic_address(arg0->bound) &&
+            (arg0->dtype == ME_INT64 || arg0->dtype == ME_BOOL)) {
+            int index = (int)((const char *)arg0->bound - synthetic_var_addresses);
+            if (index >= 0 && index < constants->count && constants->known[index]) return NULL;
+        }
     }
     bool checked_conversion = conversion && pj_integer(n->dtype) &&
-        arg0->dtype != n->dtype && !int_cast;
+        ((arg0->dtype != n->dtype && !int_cast) || weak_operand);
     bool where = op && !strcmp(op,"where") && arity == 3;
     bool comparison = op && is_comparison_node(n) && arity == 2;
     bool integer_comparison = comparison && pj_integral(arg0->dtype) && pj_integral(arg1->dtype);
@@ -179,7 +200,7 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
                          !strcmp(op,">>") || !strcmp(op,"&") || !strcmp(op,"|") || !strcmp(op,"^"))) ||
           (arity == 1 && !strcmp(op,"~")));
     if (checked_weak) {
-        if (!integer_arithmetic && !integer_operator && !checked_math && !checked_conversion) return NULL;
+        if (!integer_arithmetic && !integer_operator && !checked_math && !checked_conversion && !where) return NULL;
         if (!checked_math && !checked_conversion) { integer_operator = true; integer_arithmetic = false; }
     }
     bool logical = op && ((!strcmp(op,"not") && arity == 1) ||
@@ -187,9 +208,35 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
     if (!conversion && !where && !comparison && !arithmetic && !integer_arithmetic &&
         !logical && !predicate && !unary_math && !binary_math && !float_operator &&
         !integer_operator && !checked_math) return NULL;
+    /* Emit selected operands in their branch, never as eager C call arguments.
+     * Every other operation gets sequenced temporaries and an immediate status
+     * check, so a failed left operand prevents right-operand participation. */
+    if (where || (logical && arity == 2)) {
+        char *condition = pj_expr(p,arg0,defined,depth+1,constants,s,next_temp);
+        if (!condition) return NULL;
+        int id = (*next_temp)++;
+        bool is_or = logical && !strcmp(op,"or");
+        bool ok = pj_append(s,"%s pj_expr_%d; if (%s(%s)) {\n",type,id,is_or ? "!" : "",condition);
+        free(condition);
+        if (!ok) return NULL;
+        char *selected = pj_expr(p,arg1,defined,depth+1,constants,s,next_temp);
+        if (!selected) return NULL;
+        ok = pj_append(s,"pj_expr_%d = (%s)(%s); } else {\n",id,type,selected);
+        free(selected);
+        if (!ok) return NULL;
+        if (where) {
+            selected = pj_expr(p,n->parameters[2],defined,depth+1,constants,s,next_temp);
+            if (!selected) return NULL;
+            ok = pj_append(s,"pj_expr_%d = (%s)(%s); }\n",id,type,selected);
+            free(selected);
+        } else ok = pj_append(s,"pj_expr_%d = %d; }\n",id,is_or ? 1 : 0);
+        if (!ok) return NULL;
+        snprintf(leaf,sizeof(leaf),"pj_expr_%d",id);
+        return strdup(leaf);
+    }
     char *args[3] = {0};
     for (int j = 0; j < arity; j++) {
-        args[j] = pj_expr(p,n->parameters[j],defined,depth+1,constants);
+        args[j] = pj_expr(p,n->parameters[j],defined,depth+1,constants,s,next_temp);
         if (!args[j]) {
             for (int k = 0; k < arity; k++) free(args[k]);
             return NULL;
@@ -296,13 +343,14 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
             logical ? (!strcmp(op,"and") ? "&&" : "||") : op,args[1]);
     }
     for (int j = 0; j < arity; j++) free(args[j]);
-    return out;
+    if (!out) return NULL;
+    int id = (*next_temp)++;
+    bool ok = pj_append(s,"%s pj_expr_%d = %s; if (pj_status) return pj_status;\n",type,id,out);
+    free(out);
+    if (!ok) return NULL;
+    snprintf(leaf,sizeof(leaf),"pj_expr_%d",id);
+    return strdup(leaf);
 }
-
-typedef struct {
-    char *text;
-    size_t used, capacity;
-} pj_text;
 
 static bool pj_append(pj_text *s, const char *format, ...) {
     va_list ap;
@@ -335,6 +383,7 @@ static bool pj_append(pj_text *s, const char *format, ...) {
  * Definite assignment is checked again here; unsupported flow remains interpreted. */
 typedef struct {
     int *next_label;
+    int *next_temp;
     int loop_label;
 } pj_flow;
 
@@ -347,7 +396,7 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
         if (stmt->kind == ME_DSL_STMT_ASSIGN || stmt->kind == ME_DSL_STMT_RETURN) {
             bool assignment = stmt->kind == ME_DSL_STMT_ASSIGN;
             const me_expr *node = assignment ? stmt->as.assign.value.expr : stmt->as.return_stmt.expr.expr;
-            char *value = pj_expr(p,node,defined,0,constants);
+            char *value = pj_expr(p,node,defined,0,constants,s,flow.next_temp);
             if (!value) return false;
             bool ok;
             if (assignment) {
@@ -369,11 +418,14 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
                 if (j < alternatives) {
                     const me_expr *cond = j == 0 ? stmt->as.if_stmt.cond.expr :
                         stmt->as.if_stmt.elif_branches[j-1].cond.expr;
-                    char *value = pj_expr(p,cond,defined,0,constants);
+                    /* Nest else branches so condition preludes execute only
+                     * after preceding conditions are false. */
+                    if (j && !pj_append(s,"else {\n")) return false;
+                    char *value = pj_expr(p,cond,defined,0,constants,s,flow.next_temp);
                     if (!value) return false;
                     /* Test status after evaluating the condition, before either
                      * branch participates. Keep else-if chains syntactically intact. */
-                    bool ok = pj_append(s,"%sif (%s) { if (pj_status) return pj_status;\n",j ? "else " : "",value);
+                    bool ok = pj_append(s,"if (%s) { if (pj_status) return pj_status;\n",value);
                     free(value);
                     if (!ok) return false;
                     body = j == 0 ? &stmt->as.if_stmt.then_block : &stmt->as.if_stmt.elif_branches[j-1].block;
@@ -387,6 +439,7 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
                 if (j == 0) memcpy(merged,branch,sizeof(merged));
                 else for (int k = 0; k < p->vars.count; k++) merged[k] &= branch[k];
             }
+            for (int j = 1; j < alternatives; j++) if (!pj_append(s,"}\n")) return false;
             memcpy(defined,merged,sizeof(merged));
         }
         else if (stmt->kind == ME_DSL_STMT_FOR) {
@@ -401,7 +454,7 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
                     ok = false;
                     break;
                 }
-                values[j] = pj_expr(p,nodes[j],defined,0,constants);
+                values[j] = pj_expr(p,nodes[j],defined,0,constants,s,flow.next_temp);
                 if (!values[j]) { ok = false; break; }
             }
             int label = (*flow.next_label)++;
@@ -418,7 +471,7 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
             bool body_defined[ME_MAX_VARS];
             memcpy(body_defined,defined,sizeof(body_defined));
             body_defined[index] = true;
-            pj_flow loop_flow = {flow.next_label,label};
+            pj_flow loop_flow = {flow.next_label,flow.next_temp,label};
             if (!pj_block(p,&stmt->as.for_loop.body,body_defined,s,depth+1,constants,loop_flow)) return false;
             /* Continue performs advancement; overflow exhausts the range just as
              * in the interpreter, without executing overflowing signed addition. */
@@ -432,14 +485,14 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
         }
         else if (stmt->kind == ME_DSL_STMT_WHILE) {
             int label = (*flow.next_label)++;
-            pj_flow loop_flow = {flow.next_label,label};
+            pj_flow loop_flow = {flow.next_label,flow.next_temp,label};
             bool body_defined[ME_MAX_VARS];
             memcpy(body_defined,defined,sizeof(body_defined));
             if (!pj_append(s,"{ uint64_t pj_count_%d = 0; for (;;) {\npj_continue_%d: ;\n",label,label)) return false;
             me_dsl_compiled_block prefix = stmt->as.while_loop.body;
             prefix.nstmts = stmt->as.while_loop.condition_nstmts;
             if (!pj_block(p,&prefix,body_defined,s,depth+1,constants,loop_flow)) return false;
-            char *condition = pj_expr(p,stmt->as.while_loop.cond.expr,body_defined,0,constants);
+            char *condition = pj_expr(p,stmt->as.while_loop.cond.expr,body_defined,0,constants,s,flow.next_temp);
             if (!condition) return false;
             bool ok = pj_append(s,
                 "int pj_cond_%d = (%s); if (pj_status) return pj_status; if (!pj_cond_%d) break;\n"
@@ -457,7 +510,7 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
             if (flow.loop_label < 0) return false;
             const char *target = stmt->kind == ME_DSL_STMT_BREAK ? "break" : "continue";
             if (stmt->as.flow.cond.expr) {
-                char *condition = pj_expr(p,stmt->as.flow.cond.expr,defined,0,constants);
+                char *condition = pj_expr(p,stmt->as.flow.cond.expr,defined,0,constants,s,flow.next_temp);
                 if (!condition) return false;
                 bool ok = pj_append(s,"if (%s) { if (pj_status) return pj_status; goto pj_%s_%d; }\n"
                     "if (pj_status) return pj_status;\n",condition,target,flow.loop_label);
@@ -508,8 +561,8 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
             return;
         }
     }
-    int next_label = 0;
-    pj_flow flow = {&next_label,-1};
+    int next_label = 0, next_temp = 0;
+    pj_flow flow = {&next_label,&next_temp,-1};
     if (!pj_block(p,&p->block,defined,&body,0,constants,flow)) {
         free(body.text);
         dsl_tracef("portable jit ineligible: unsupported typed statements");
@@ -575,7 +628,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
     snprintf(source,capacity,
-        "/* portable-1.1 lowering-r14 checked-scalar-math abi-r8 */\n"
+        "/* portable-1.1 lowering-r15 sequenced-weak-checks abi-r8 */\n"
         "#include <stdint.h>\n"
         "#include <string.h>\n"
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"
