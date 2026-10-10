@@ -50,7 +50,7 @@ if(NOT EMSCRIPTEN)
         ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/portable-jit-cache")
     endforeach()
     # Optional JIT preference must still use the draft typed interpreter.
-    if(MINIEXPR_ENABLE_TCC_JIT)
+    if(MINIEXPR_ENABLE_TCC_JIT AND MINIEXPR_BUILD_BUNDLED_LIBTCC)
       add_test(NAME ${test_prefix}_${case_name}_on
         COMMAND portable_dsl_runner
           "${source_path}"

@@ -163,6 +163,11 @@ static void exact_comparisons(void) {
         me_artifact_error error;
         CHECK(!me_artifact_eval_ex(jit, buffers, 2, output, &descriptor, &error));
         CHECK(!me_artifact_eval_ex(reference, buffers, 2, expected, &descriptor, &error));
+        for (int lane = 0; lane < 5; lane++) {
+            if (output[lane] != expected[lane]) fprintf(stderr,
+                "comparison mixed=%d op=%s lane=%d actual=%d expected=%d\n",
+                mixed,operators[op],lane,output[lane],expected[lane]);
+        }
         CHECK(!memcmp(output, expected, sizeof(output)));
         if (!mixed && op == 2) CHECK(output[3]);
         me_artifact_free(jit);
@@ -367,12 +372,23 @@ static void scalar_reductions(void) {
                     me_artifact_error error;
                     CHECK(!me_artifact_eval_status(jit,buffers,2,&actual,&descriptor,0,&status,&error));
                     CHECK(!me_artifact_eval_status(reference,buffers,2,&expected,&descriptor,0,&reference_status,&error));
-                    if (actual != expected || status.flags != reference_status.flags) {
+                    bool equal = actual == expected;
+                    if (output64) {
+                        double a, e;
+                        memcpy(&a,&actual,8); memcpy(&e,&expected,8);
+                        equal |= isnan(a) && isnan(e);
+                    } else {
+                        float a, e;
+                        uint32_t ab = (uint32_t)actual, eb = (uint32_t)expected;
+                        memcpy(&a,&ab,4); memcpy(&e,&eb,4);
+                        equal |= isnan(a) && isnan(e);
+                    }
+                    if (!equal || status.flags != reference_status.flags) {
                         fprintf(stderr,"%s %s->%s edge=%d mask=%d bits=%llx/%llx flags=%u/%u\n",
                             bodies[b],input_name,output_name,edge,mask,(unsigned long long)actual,
                             (unsigned long long)expected,status.flags,reference_status.flags);
                     }
-                    CHECK(actual == expected && status.flags == reference_status.flags);
+                    CHECK(equal && status.flags == reference_status.flags);
                 }
             }
             me_artifact_free(jit);
