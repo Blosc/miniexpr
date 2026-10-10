@@ -1,4 +1,4 @@
-/* Portable 1.1 scalar C lowering, revision 17. Never translate source
+/* Portable 1.1 scalar C lowering, revision 18. Never translate source
  * text: the typed tree includes promotion and final output conversions. The
  * private kernel ABI appends a participating mask and host comparison/math bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
@@ -175,6 +175,11 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
     bool where = op && !strcmp(op,"where") && arity == 3;
     bool comparison = op && is_comparison_node(n) && arity == 2;
     bool integer_comparison = comparison && pj_integral(arg0->dtype) && pj_integral(arg1->dtype);
+    /* Keep mixed-domain comparisons on the authoritative exact-bit operation
+     * bridge. Host ARM64 system-CC qualification exposed a boundary mismatch
+     * in generated mixed comparison code; no floating transport is involved. */
+    bool checked_comparison = integer_comparison &&
+        pj_unsigned(arg0->dtype) != pj_unsigned(arg1->dtype);
     bool comparison_bridge = comparison && !integer_comparison;
     bool arithmetic = op && float_result &&
         (!strcmp(op,"+") || !strcmp(op,"-") || !strcmp(op,"*") || !strcmp(op,"/")) &&
@@ -247,7 +252,7 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
     for (int j = 0; j < arity; j++) capacity += strlen(args[j]);
     char *out = malloc(capacity);
     if (out) {
-        if (checked_conversion || checked_math) {
+        if (checked_conversion || checked_math || checked_comparison) {
             if (p->portable_jit_nchecked == ME_DSL_PORTABLE_JIT_BRIDGE_LIMIT) { free(out); out = NULL; }
             else {
                 int id = p->portable_jit_nchecked++;
@@ -666,7 +671,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
     snprintf(source,capacity,
-        "/* portable-1.1 lowering-r17 serial-floating-reductions abi-r8 */\n"
+        "/* portable-1.1 lowering-r18 exact-mixed-comparison-bridge abi-r8 */\n"
         "#include <stdint.h>\n"
         "#include <string.h>\n"
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"

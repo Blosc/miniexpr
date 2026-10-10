@@ -50,7 +50,7 @@ if(NOT EMSCRIPTEN)
         ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/portable-jit-cache")
     endforeach()
     # Optional JIT preference must still use the draft typed interpreter.
-    if(MINIEXPR_ENABLE_TCC_JIT AND MINIEXPR_BUILD_BUNDLED_LIBTCC)
+    if(MINIEXPR_ENABLE_TCC_JIT)
       add_test(NAME ${test_prefix}_${case_name}_on
         COMMAND portable_dsl_runner
           "${source_path}"
@@ -98,7 +98,7 @@ if(MINIEXPR_BUILD_ARTIFACT)
   endif()
   set_tests_properties(portable_jit_parity PROPERTIES TIMEOUT 120)
   if(NOT EMSCRIPTEN)
-    if(MINIEXPR_ENABLE_TCC_JIT)
+    if(MINIEXPR_ENABLE_TCC_JIT AND MINIEXPR_BUILD_BUNDLED_LIBTCC AND NOT WIN32)
       add_test(NAME portable_jit_parity_tcc COMMAND portable_jit_parity --require-jit)
       set_tests_properties(portable_jit_parity_tcc PROPERTIES TIMEOUT 120
         ENVIRONMENT "ME_DSL_JIT_COMPILER=tcc")
