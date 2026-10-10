@@ -1,10 +1,11 @@
-/* Compare warm sum(x) through the DSL block interpreter and native
+/* Compare warm sum(x) through DSL block interpretation/JIT and the native
  * graph logical-array reducer. No Python, compression, or preparation timed.
  * Usage: benchmark_sum_paths [items=1048576] [samples=9] [tile_items=1024]
  *                            [dtype=float64] [DSL operand=direct|computed]
- *                            [reduction=sum|prod|min|max|any|all]
- * computed uses sum(x + 0) to exercise the generic DSL reducer (not a historical
- * sum(x) baseline: it also includes the cost of the operand addition). */
+ *                            [reduction=sum|prod|min|max|any|all] [off|jit]
+ * computed uses block_sum(x + 0), including the operand addition. Optional jit
+ * requests DSL compilation with the configured backend and reports fallback;
+ * the graph reducer stays interpreted/native for a stable baseline. */
 #include "miniexpr_graph.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -90,6 +91,7 @@ int main(int argc, char **argv) {
     const char *output_type = floating ? name : unsigned_input ? "uint64" : "int64";
     bool computed = argc > 5 && !strcmp(argv[5], "computed");
     const char *op = argc > 6 ? argv[6] : "sum";
+    bool request_jit = argc > 7 && !strcmp(argv[7], "jit");
     const char *ops[] = {"sum", "prod", "min", "max", "any", "all"};
     int reduction = -1;
     for (int i = 0; i < 6; i++) if (!strcmp(op, ops[i])) reduction = i;
@@ -141,7 +143,7 @@ int main(int argc, char **argv) {
         "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"metadata\":{}}",
         op, computed ? "x + 0" : "x", name, output_type);
     me_artifact_error artifact_error;
-    if (me_artifact_load(json, strlen(json), ME_JIT_OFF, &w.artifact, &artifact_error)) {
+    if (me_artifact_load(json, strlen(json), request_jit ? ME_JIT_ON : ME_JIT_OFF, &w.artifact, &artifact_error)) {
         fprintf(stderr, "%s\n", artifact_error.message); return 1;
     }
     me_graph_input_metadata input = {"x", dtype, 1, {(int64_t)count}};
@@ -154,7 +156,8 @@ int main(int argc, char **argv) {
         me_graph_specialize(plan, &input, 1, &specialize, &w.schedule, &error)) {
         fprintf(stderr, "%s\n", error.native.message); return 1;
     }
-    if (me_graph_has_jit(plan) || me_artifact_has_jit(w.artifact)) return 1;
+    if (me_graph_has_jit(plan) || (!request_jit && me_artifact_has_jit(w.artifact))) return 1;
+    bool compiled = me_artifact_has_jit(w.artifact);
     w.buffer = (me_artifact_buffer){"x", dtype, width, x, count * width};
     w.descriptor = (me_artifact_eval_descriptor){.struct_size = sizeof(w.descriptor),
         .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = count, .output_capacity = sizeof(double)};
@@ -179,11 +182,12 @@ int main(int argc, char **argv) {
         }
     }
     for (int path = 0; path < 2; path++) qsort(timings[path], samples, sizeof(double), compare);
-    printf("items=%zu %s input_MiB=%.2f tile=%zu samples=%d %s=%.17g JIT=off DSL=%s\n",
-        count, name, count * width / 1048576.0, tile, samples, op, w.expected, computed ? "computed" : "direct");
+    printf("items=%zu %s input_MiB=%.2f tile=%zu samples=%d %s=%.17g graph_JIT=off DSL_JIT=%s DSL=%s\n",
+        count, name, count * width / 1048576.0, tile, samples, op, w.expected,
+        compiled ? "compiled" : request_jit ? "fallback" : "off", computed ? "computed" : "direct");
     printf("%-24s %12s %12s\n", "path", "best_ms", "median_ms");
     for (int path = 0; path < 2; path++) {
-        printf("%-24s %12.4f %12.4f\n", path ? "native graph reducer" : "DSL block interpreter",
+        printf("%-24s %12.4f %12.4f\n", path ? "native graph reducer" : compiled ? "DSL block JIT" : "DSL block interpreter",
             timings[path][0], timings[path][samples / 2]);
     }
     printf("graph / DSL median time: %.2fx\n", timings[1][samples / 2] / timings[0][samples / 2]);

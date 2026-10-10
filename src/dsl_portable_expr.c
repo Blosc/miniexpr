@@ -14,6 +14,15 @@
 #include <string.h>
 #include <stdlib.h>
 
+/* Portable FP status is observable. In particular, a masked generic product
+ * must not speculatively execute the unselected sum arm (inf + -inf). Clang
+ * otherwise permits this transformation even without fast-math. GCC's default
+ * trapping-math model already protects this path; it does not implement this
+ * standard pragma and warns about it under strict warning settings. */
+#if defined(__clang__) && !defined(__EMSCRIPTEN__)
+#pragma STDC FENV_ACCESS ON
+#endif
+
 #ifdef _MSC_VER
 static __declspec(thread) unsigned *p_status_collector;
 #else

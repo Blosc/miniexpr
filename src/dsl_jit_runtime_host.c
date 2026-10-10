@@ -224,7 +224,9 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
     if (!program || !program->jit_ir || !program->jit_c_source) {
         return;
     }
-    if (program->output_is_scalar) {
+    /* Portable source preparation audits its supported scalar reductions. The
+     * legacy/full lowerer still has an exclusively elementwise kernel contract. */
+    if (program->output_is_scalar && program->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_1) {
         dsl_tracef("jit runtime skip: fp=%s reason=scalar output",
                    dsl_fp_mode_name(program->fp_mode));
         return;

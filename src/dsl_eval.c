@@ -1268,10 +1268,13 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
     bool jit_attempted = false;
     if (program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_1 &&
         program->jit_kernel_fn && !me_eval_jit_disabled(params)) {
+        /* Scalar storage needs one slot even for an empty group, but a compiled
+         * reduction must traverse the original group, not that synthetic slot. */
+        int jit_nitems = program->output_is_scalar ? group_nitems : nitems;
         if (n_vars && !vars_block) return ME_EVAL_ERR_VAR_MISMATCH;
         const void *inputs[ME_MAX_VARS + ME_DSL_PORTABLE_JIT_EXTRA];
         for (int i = 0; i < n_vars; i++) {
-            if (nitems && !vars_block[i]) return ME_EVAL_ERR_VAR_MISMATCH;
+            if (jit_nitems && !vars_block[i]) return ME_EVAL_ERR_VAR_MISMATCH;
             inputs[i] = vars_block[i];
         }
         inputs[n_vars] = descriptor ? descriptor->valid_mask : NULL;
@@ -1323,7 +1326,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
         inputs[n_vars+ME_DSL_PORTABLE_JIT_CAP_OFF] = &while_cap;
         fenv_t saved;
         if (!dsl_portable_fp_begin(&saved)) return ME_EVAL_ERR_INVALID_ARG;
-        int rc = program->jit_kernel_fn(inputs,output_block,(int64_t)nitems);
+        int rc = program->jit_kernel_fn(inputs,output_block,(int64_t)jit_nitems);
         if (!dsl_portable_fp_end(&saved)) return ME_EVAL_ERR_INVALID_ARG;
         return rc == ME_EVAL_SUCCESS || rc == ME_EVAL_ERR_OOM ? rc : ME_EVAL_ERR_INVALID_ARG;
     }

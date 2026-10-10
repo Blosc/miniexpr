@@ -1,4 +1,4 @@
-/* Portable 1.1 scalar C lowering, revision 16. Never translate source
+/* Portable 1.1 scalar C lowering, revision 17. Never translate source
  * text: the typed tree includes promotion and final output conversions. The
  * private kernel ABI appends a participating mask and host comparison/math bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
@@ -530,6 +530,22 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
     return true;
 }
 
+/* First scalar-JIT scope: one float sum/product return, optionally mapped and
+ * finally converted to another floating dtype. Accumulation remains serial;
+ * integer overflow, mean, extrema/truth, multiple reductions, and statement
+ * programs retain their qualified native interpreter paths. */
+static const me_expr *pj_scalar_reduction(const me_dsl_compiled_program *p) {
+    if (p->block.nstmts != 1 || p->block.stmts[0]->kind != ME_DSL_STMT_RETURN ||
+        !pj_float(p->output_dtype)) return NULL;
+    const me_expr *node = p->block.stmts[0]->as.return_stmt.expr.expr;
+    if (node && IS_FUNCTION(node->type) && !node->function && ARITY(node->type) == 1) {
+        node = node->parameters[0];
+    }
+    if (!node || !is_reduction_node(node) || !pj_float(node->dtype)) return NULL;
+    me_reduce_kind kind = reduction_kind(node->function);
+    return kind == ME_REDUCE_SUM || kind == ME_REDUCE_PROD ? node : NULL;
+}
+
 static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *constants) {
 #ifdef __EMSCRIPTEN__
     /* Host function-pointer comparison/mask ABI is not the WASM adapter ABI. */
@@ -538,16 +554,18 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     (void)constants;
     return;
 #endif
-    /* Elementwise statements and lane-local loops; no reductions. ND logical
+    /* Elementwise statements, lane-local loops, and audited float reductions. ND logical
      * context is supported through lane-local reserved index recomputation. */
     if (!p || p->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_1 ||
-        p->jit_request_mode != ME_JIT_ON || p->output_is_scalar ||
+        p->jit_request_mode != ME_JIT_ON ||
         p->compile_ndims < 0 || p->compile_ndims > ME_DSL_MAX_NDIM ||
         !p->guaranteed_return || p->vars.count > ME_MAX_VARS ||
         !pj_type(p->output_dtype)) {
         if (p) dsl_tracef("portable jit ineligible: request=%d statements=%d rank=%d",p->jit_request_mode,p->block.nstmts,p->compile_ndims);
         return;
     }
+    const me_expr *scalar = p->output_is_scalar ? pj_scalar_reduction(p) : NULL;
+    if (p->output_is_scalar && !scalar) return;
     for (int i = 0; i < p->n_inputs; i++) if (!pj_type(p->vars.dtypes[i])) {
         dsl_tracef("portable jit ineligible: unsupported input dtype"); return;
     }
@@ -570,7 +588,20 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     int next_label = 0, next_temp = 0;
     pj_flow flow = {&next_label,&next_temp,-1};
-    if (!pj_block(p,&p->block,defined,&body,0,constants,flow)) {
+    char scalar_init[128] = "", scalar_store[128] = "";
+    bool lowered;
+    if (scalar) {
+        char *value = pj_expr(p,scalar->parameters[0],defined,0,constants,&body,&next_temp);
+        me_reduce_kind kind = reduction_kind(scalar->function);
+        lowered = value && pj_append(&body,"pj_acc = (%s)(pj_acc %s (%s));\n",
+            pj_type(scalar->dtype),kind == ME_REDUCE_SUM ? "+" : "*",value);
+        free(value);
+        snprintf(scalar_init,sizeof(scalar_init),"%s pj_acc = %d;\n",
+            pj_type(scalar->dtype),kind == ME_REDUCE_SUM ? 0 : 1);
+        snprintf(scalar_store,sizeof(scalar_store),"((%s *)output)[0] = (%s)pj_acc;\n",
+            pj_type(p->output_dtype),pj_type(p->output_dtype));
+    } else lowered = pj_block(p,&p->block,defined,&body,0,constants,flow);
+    if (!lowered) {
         free(body.text);
         dsl_tracef("portable jit ineligible: unsupported typed statements");
         return;
@@ -635,7 +666,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
     snprintf(source,capacity,
-        "/* portable-1.1 lowering-r16 inline-checked-weak-arithmetic abi-r8 */\n"
+        "/* portable-1.1 lowering-r17 serial-floating-reductions abi-r8 */\n"
         "#include <stdint.h>\n"
         "#include <string.h>\n"
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"
@@ -689,11 +720,12 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "const int64_t pj_cap = *(const int64_t *)inputs[%d];\n"
         "int pj_status = 0;\n"
         "%s"
+        "%s"
         "for (int64_t i=0; i<count; i++) { if (mask && !mask[i]) continue;\n"
         "%s"
-        "%s pj_lane_done: ; } return 0; }\n",
+        "%s pj_lane_done: ; } %s return 0; }\n",
         ME_DSL_JIT_SYMBOL_NAME,p->n_inputs,p->n_inputs+ME_DSL_PORTABLE_JIT_CAP_OFF,
-        nd_decl,preamble.text ? preamble.text : "",body.text);
+        nd_decl,scalar_init,preamble.text ? preamble.text : "",body.text,scalar_store);
     free(preamble.text);
     free(body.text);
     p->jit_ir = ir;

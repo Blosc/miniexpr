@@ -60,19 +60,19 @@ static const parity_case cases[] = {
     {"lazy logical casts", "return x > 0 and int(y) > 0", "float64", "bool", true},
 };
 
-static me_artifact *load_extra(const parity_case *test, me_jit_mode mode,
-    const char *second_input, const char *constants) {
+static me_artifact *load_contract(const parity_case *test, me_jit_mode mode,
+    const char *second_input, const char *constants, const char *contract) {
     char json[4096];
     char inputs[256];
     snprintf(inputs, sizeof(inputs), "{\"name\":\"x\",\"dtype\":\"%s\"}%s%s",
         test->input, second_input ? "," : "", second_input ? second_input : "");
     int length = snprintf(json, sizeof(json),
         "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
-        "\"requires\":[\"numeric\",\"control-flow\"],\"source\":\"def k(x, y):\\n    %s\\n\","
+        "\"requires\":[\"numeric\",\"control-flow\",\"block-reductions\"],\"source\":\"def k(x, y):\\n    %s\\n\","
         "\"entry_point\":\"k\",\"inputs\":[%s],"
-        "\"constants\":[%s],\"output\":{\"dtype\":\"%s\",\"contract\":\"elementwise\"},\"context\":{\"ndim\":0},"
+        "\"constants\":[%s],\"output\":{\"dtype\":\"%s\",\"contract\":\"%s\"},\"context\":{\"ndim\":0},"
         "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}",
-        test->body, inputs, constants ? constants : "", test->output);
+        test->body, inputs, constants ? constants : "", test->output, contract);
     CHECK(length > 0 && (size_t)length < sizeof(json));
     me_artifact *artifact = NULL;
     me_artifact_error error;
@@ -80,6 +80,11 @@ static me_artifact *load_extra(const parity_case *test, me_jit_mode mode,
     if (rc) fprintf(stderr, "%s: %s\n", test->name, error.message);
     CHECK(!rc && artifact);
     return artifact;
+}
+
+static me_artifact *load_extra(const parity_case *test, me_jit_mode mode,
+    const char *second_input, const char *constants) {
+    return load_contract(test,mode,second_input,constants,"elementwise");
 }
 
 static me_artifact *load(const parity_case *test, me_jit_mode mode) {
@@ -324,6 +329,59 @@ static void computed_weak_conversion(void) {
     me_artifact_free(oracle);
 }
 
+static void scalar_reductions(void) {
+    const char *bodies[] = {"return block_sum(x)", "return block_prod(x)",
+        "return block_sum(x * 2)", "return block_prod(x + y)",
+        "return block_sum(where(x >= 0, x, 0))", "return block_sum(sqrt(x))"};
+    for (int input64 = 0; input64 < 2; input64++) for (int output64 = 0; output64 < 2; output64++) {
+        const char *input_name = input64 ? "float64" : "float32";
+        const char *output_name = output64 ? "float64" : "float32";
+        char second[128];
+        snprintf(second,sizeof(second),"{\"name\":\"y\",\"dtype\":\"%s\"}",input_name);
+        for (size_t b = 0; b < sizeof(bodies)/sizeof(bodies[0]); b++) {
+            parity_case test = {"scalar reduction",bodies[b],input_name,output_name,true};
+            me_artifact *jit = load_contract(&test,ME_JIT_ON,second,NULL,"block_scalar");
+            me_artifact *reference = load_contract(&test,ME_JIT_OFF,second,NULL,"block_scalar");
+            me_artifact *oracle = load(&cases[0],ME_JIT_ON);
+            CHECK(me_artifact_has_jit(jit) == me_artifact_has_jit(oracle));
+            for (int edge = 0; edge < 4; edge++) {
+                float f[] = {1e16f,1,-1e16f,3};
+                double d[] = {1e16,1,-1e16,3};
+                if (edge == 1) { f[1] = NAN; d[1] = NAN; }
+                if (edge == 2) { f[0] = INFINITY; d[0] = INFINITY; f[2] = -INFINITY; d[2] = -INFINITY; }
+                if (edge == 3) { f[0] = -0.0f; d[0] = -0.0; f[2] = 0; d[2] = 0; }
+                void *data = input64 ? (void *)d : (void *)f;
+                size_t capacity = input64 ? sizeof(d) : sizeof(f);
+                me_dtype dtype = input64 ? ME_FLOAT64 : ME_FLOAT32;
+                me_artifact_buffer buffers[] = {{"x",dtype,input64 ? 8 : 4,data,capacity},
+                    {"y",dtype,input64 ? 8 : 4,data,capacity}};
+                uint8_t partial[] = {1,0,1,0}, none[] = {0,0,0,0};
+                for (int mask = 0; mask < 4; mask++) {
+                    uint64_t actual = 0, expected = 0;
+                    me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
+                        .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = mask == 3 ? 0 : 4,
+                        .output_capacity = sizeof(actual), .valid_mask = mask == 1 ? partial : mask == 2 ? none : NULL,
+                        .valid_mask_capacity = mask == 1 || mask == 2 ? 4 : 0};
+                    if (mask == 3) for (int j = 0; j < 2; j++) { buffers[j].data = NULL; buffers[j].capacity = 0; }
+                    me_artifact_fp_status status, reference_status;
+                    me_artifact_error error;
+                    CHECK(!me_artifact_eval_status(jit,buffers,2,&actual,&descriptor,0,&status,&error));
+                    CHECK(!me_artifact_eval_status(reference,buffers,2,&expected,&descriptor,0,&reference_status,&error));
+                    if (actual != expected || status.flags != reference_status.flags) {
+                        fprintf(stderr,"%s %s->%s edge=%d mask=%d bits=%llx/%llx flags=%u/%u\n",
+                            bodies[b],input_name,output_name,edge,mask,(unsigned long long)actual,
+                            (unsigned long long)expected,status.flags,reference_status.flags);
+                    }
+                    CHECK(actual == expected && status.flags == reference_status.flags);
+                }
+            }
+            me_artifact_free(jit);
+            me_artifact_free(reference);
+            me_artifact_free(oracle);
+        }
+    }
+}
+
 int main(int argc, char **argv) {
     if (argc > 1) {
         me_artifact *oracle = load(&cases[0], ME_JIT_ON);
@@ -338,5 +396,6 @@ int main(int argc, char **argv) {
     loop_errors();
     checked_cast_errors();
     computed_weak_conversion();
+    scalar_reductions();
     return 0;
 }

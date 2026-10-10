@@ -410,3 +410,17 @@ so downstream benchmarks cannot silently claim JIT performance while interpretin
   required-interpreter test instead of enabling an unsafe route. A new exact-i64
   typed-bridge adapter is still required; passing WASM fallback tests does not
   qualify portable WASM JIT.
+- P6 initial implementation: a single float32/float64 block sum/product return
+  can JIT, including an eligible mapped expression and a final floating conversion.
+  The map and accumulator share one serial participating-lane loop. Empty groups
+  use the original zero traversal length, not the scalar-storage placeholder.
+  Integer reductions, mean/extrema/truth, multiple reductions, and scalar statement
+  programs retain fallback. The generic interpreter now enables Clang FP-environment
+  access: otherwise masked product could speculatively execute an unselected sum
+  arm and raise invalid for `inf + -inf`. Regression tests cover values and FP
+  flags, masks, empty groups, dtype conversions, partitions, and allocation failures.
+  In a 65,536-float64 `block_sum(x + 0)` sample (best of seven), interpretation
+  took 67.2000 ms and Clang JIT 0.0390 ms, with matching results. Plain direct-input
+  reducers were already efficient native loops (1,048,576-float64 direct sum:
+  DSL 0.5168 ms, graph 0.5197 ms); the measured benefit is mapped reduction fusion,
+  not a universal promise that compiling a direct reducer is faster.
