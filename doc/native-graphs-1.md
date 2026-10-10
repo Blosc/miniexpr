@@ -49,6 +49,19 @@ do not contribute to `evaluated_tiles` or `jit_stages`, even if the prepared map
 is JIT-capable. The legacy `interpreter_stages` count includes non-JIT native
 reduction stages and does not imply that an identity map was interpreted.
 
+For portable 1.1 JIT maps, immutable weak int64/Boolean captures can specialize
+integer conversions after the same checked range validation used by the
+interpreter. In-range values are emitted as typed integer bit patterns in the
+generated source, allowing expressions such as `x % 7`, `x << 2` and
+`int16(x) * 2` to JIT without turning weak narrowing into modular casts. The
+typed tree, canonical graph and artifact captures remain unchanged. Specialized
+values contribute to the generated-source cache fingerprint. Unknown/computed
+weak operands and out-of-range captures retain interpretation, so errors still
+occur only when participating execution reaches the conversion. Floating weak
+captures are not covered by this specialization; strong integer casts keep their
+existing modular behavior. This changes neither the artifact schema nor the
+private JIT calling convention.
+
 The portable DSL interpreter shares the sum/product helpers for plain variables with
 unchanged float accumulator dtype or the default promoted integer accumulator,
 full participation and fully initialized lanes. Its integer sums/products preserve the

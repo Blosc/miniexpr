@@ -19,7 +19,9 @@ static me_array_view view(const char *name, me_dtype dtype, void *base, size_t c
     me_array_view v = {0};
     v.name = name; v.dtype = dtype; v.base = base; v.capacity = capacity; v.rank = rank;
     v.shape[0] = a; v.shape[1] = b;
-    size_t width = dtype == ME_BOOL ? 1 : dtype == ME_FLOAT32 ? 4 : 8;
+    size_t width = dtype == ME_BOOL || dtype == ME_INT8 || dtype == ME_UINT8 ? 1 :
+        dtype == ME_INT16 || dtype == ME_UINT16 ? 2 :
+        dtype == ME_FLOAT32 || dtype == ME_INT32 || dtype == ME_UINT32 ? 4 : 8;
     v.strides[1] = (int64_t)width; v.strides[0] = (int64_t)(rank == 2 ? b * width : width);
     return v;
 }
@@ -240,6 +242,50 @@ static void direct_reductions(void) {
         me_graph_schedule_free(s); me_graph_plan_free(p);
     }
 }
+static void weak_capture_conversions(void) {
+    struct { const char *expression; me_dtype dtype; size_t width; } cases[] = {
+        {"x % 7", ME_INT32, 4}, {"x % 3", ME_INT32, 4}, {"x << 2", ME_INT32, 4},
+        {"int16(x) * 2", ME_INT8, 1}, {"x + 127", ME_INT8, 1},
+        {"x + -128", ME_INT8, 1}, {"x + 255", ME_UINT8, 1},
+        {"x + 9223372036854775807", ME_UINT64, 8}
+    };
+    int32_t i32[] = {-10, 0, 5}; int8_t i8[] = {-3, 0, 5};
+    uint8_t u8[] = {0, 1, 2}; uint64_t u64[] = {0, 1, 2};
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        me_graph_input_metadata input = {"x", cases[i].dtype, 1, {3}};
+        me_graph_plan *oracle = prepare("x + x", &input, 1, true);
+        bool available = me_graph_has_jit(oracle); me_graph_plan_free(oracle);
+        me_graph_plan *p = prepare(cases[i].expression, &input, 1, true);
+        me_graph_plan *reference = prepare(cases[i].expression, &input, 1, false);
+        if (available) CHECK(me_graph_has_jit(p));
+        me_graph_schedule *s = NULL, *r = NULL;
+        CHECK(!me_graph_specialize(p, &input, 1, NULL, &s, &error));
+        CHECK(!me_graph_specialize(reference, &input, 1, NULL, &r, &error));
+        void *data = cases[i].dtype == ME_INT32 ? (void *)i32 : cases[i].dtype == ME_INT8 ?
+            (void *)i8 : cases[i].dtype == ME_UINT8 ? (void *)u8 : (void *)u64;
+        me_array_view v = view("x", cases[i].dtype, data, 3 * cases[i].width, 1, 3, 0);
+        uint64_t output[3] = {0}, expected[3] = {0}; me_graph_report report;
+        CHECK(!me_graph_execute(s, &v, 1, output, sizeof(output), NULL, &report, &error));
+        CHECK(!me_graph_execute(r, &v, 1, expected, sizeof(expected), NULL, NULL, &error));
+        CHECK(me_graph_output_dtype(s) == me_graph_output_dtype(r));
+        CHECK(!memcmp(output, expected, me_graph_output_bytes(s)));
+        if (available) CHECK(report.has_jit && report.jit_stages == 1);
+        me_graph_schedule_free(s); me_graph_schedule_free(r);
+        me_graph_plan_free(p); me_graph_plan_free(reference);
+    }
+    me_graph_input_metadata input = {"x", ME_INT8, 1, {3}};
+    me_graph_plan *p = prepare("where(x == 0, x, x + 128)", &input, 1, true);
+    CHECK(!me_graph_has_jit(p)); /* Never wrap an out-of-range weak capture. */
+    me_graph_schedule *s = NULL; CHECK(!me_graph_specialize(p, &input, 1, NULL, &s, &error));
+    int8_t x[] = {0, 0, 0}, output[3];
+    me_array_view v = view("x", ME_INT8, x, sizeof(x), 1, 3, 0);
+    CHECK(!me_graph_execute(s, &v, 1, output, sizeof(output), NULL, NULL, &error));
+    x[1] = 1;
+    CHECK(me_graph_execute(s, &v, 1, output, sizeof(output), NULL, NULL, &error));
+    x[1] = 0;
+    CHECK(!me_graph_execute(s, &v, 1, output, sizeof(output), NULL, NULL, &error));
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+}
 static void dsl_direct_sum(void) {
     const char *json =
         "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
@@ -347,6 +393,7 @@ int main(void) {
     RUN_CASE(maps(true)); RUN_CASE(lazy(true)); RUN_CASE(reductions(true));
     RUN_CASE(staged(false)); RUN_CASE(staged(true));
     RUN_CASE(direct_reductions());
+    RUN_CASE(weak_capture_conversions());
     RUN_CASE(dsl_direct_sum());
     RUN_CASE(dsl_direct_reductions());
     RUN_CASE(trusted(false)); RUN_CASE(trusted(true));

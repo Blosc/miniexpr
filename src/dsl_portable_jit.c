@@ -1,9 +1,10 @@
-/* Portable 1.1 scalar C lowering, revision 8. Never translate source
+/* Portable 1.1 scalar C lowering, revision 11. Never translate source
  * text: the typed tree includes promotion and final output conversions. The
  * private kernel ABI appends a participating mask and host comparison/math bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
 #include "dsl_compile_internal.h"
 #include "dsl_portable_expr.h"
+#include "dsl_portable_types.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,7 +44,37 @@ static bool pj_integral(me_dtype d) {
     return d == ME_BOOL || pj_integer(d);
 }
 
-static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *defined, int depth) {
+typedef struct {
+    const int64_t *values;
+    const bool *known;
+    int count;
+} pj_constants;
+
+/* Only immutable integral capture leaves can be specialized. Validate the exact
+ * checked weak conversion; out-of-range captures keep interpretation, including
+ * its lazy participation/error timing. Never alter the shared typed tree. */
+static char *pj_weak_conversion(const me_expr *n, const pj_constants *constants) {
+    const me_expr *arg = n->parameters[0];
+    if (!constants || TYPE_MASK(arg->type) != ME_VARIABLE ||
+        !is_synthetic_address(arg->bound) || (arg->dtype != ME_INT64 && arg->dtype != ME_BOOL)) return NULL;
+    int index = (int)((const char *)arg->bound - synthetic_var_addresses);
+    if (index < 0 || index >= constants->count || !constants->known[index]) return NULL;
+    int64_t value = constants->values[index];
+    uint64_t bits;
+    if (pj_unsigned(n->dtype)) {
+        if (dsl_portable_signed_to_unsigned(n->dtype, value, &bits)) return NULL;
+    } else {
+        int64_t converted;
+        if (dsl_portable_signed_to_signed(n->dtype, value, &converted)) return NULL;
+        bits = (uint64_t)converted;
+    }
+    char literal[128];
+    snprintf(literal, sizeof(literal), "pj_%s(UINT64_C(%llu))", pj_type(n->dtype), (unsigned long long)bits);
+    return strdup(literal);
+}
+
+static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *defined, int depth,
+    const pj_constants *constants) {
     if (!n || depth > 128 || !pj_type(n->dtype)) return NULL;
     const char *type = pj_type(n->dtype);
     char leaf[256];
@@ -111,6 +142,9 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
         (arg0->flags & (ME_EXPR_FLAG_WEAK_LITERAL | ME_EXPR_FLAG_WEAK_SCALAR)) != 0;
     bool int_cast = conversion && pj_integer(n->dtype) && pj_integral(arg0->dtype) &&
         arg0->dtype != n->dtype && !weak_operand;
+    if (conversion && pj_integer(n->dtype) && arg0->dtype != n->dtype && weak_operand) {
+        return pj_weak_conversion(n, constants);
+    }
     if (conversion && pj_integer(n->dtype) && arg0->dtype != n->dtype && !int_cast) return NULL;
     bool where = op && !strcmp(op,"where") && arity == 3;
     bool comparison = op && is_comparison_node(n) && arity == 2;
@@ -148,7 +182,7 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
         !integer_operator) return NULL;
     char *args[3] = {0};
     for (int j = 0; j < arity; j++) {
-        args[j] = pj_expr(p,n->parameters[j],defined,depth+1);
+        args[j] = pj_expr(p,n->parameters[j],defined,depth+1,constants);
         if (!args[j]) {
             for (int k = 0; k < arity; k++) free(args[k]);
             return NULL;
@@ -261,14 +295,14 @@ static bool pj_append(pj_text *s, const char *format, ...) {
 /* Lane-local statements preserve assignment rounding and observable exceptions.
  * Definite assignment is checked again here; unsupported flow remains interpreted. */
 static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *block,
-                     bool *defined, pj_text *s, int depth) {
+                     bool *defined, pj_text *s, int depth, const pj_constants *constants) {
     if (depth > 64) return false;
     for (int i = 0; i < block->nstmts; i++) {
         const me_dsl_compiled_stmt *stmt = block->stmts[i];
         if (stmt->kind == ME_DSL_STMT_ASSIGN || stmt->kind == ME_DSL_STMT_RETURN) {
             bool assignment = stmt->kind == ME_DSL_STMT_ASSIGN;
             const me_expr *node = assignment ? stmt->as.assign.value.expr : stmt->as.return_stmt.expr.expr;
-            char *value = pj_expr(p,node,defined,0);
+            char *value = pj_expr(p,node,defined,0,constants);
             if (!value) return false;
             bool ok;
             if (assignment) {
@@ -290,7 +324,7 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
                 if (j < alternatives) {
                     const me_expr *cond = j == 0 ? stmt->as.if_stmt.cond.expr :
                         stmt->as.if_stmt.elif_branches[j-1].cond.expr;
-                    char *value = pj_expr(p,cond,defined,0);
+                    char *value = pj_expr(p,cond,defined,0,constants);
                     if (!value) return false;
                     bool ok = pj_append(s,"%sif (%s) {\n",j ? "else " : "",value);
                     free(value);
@@ -302,7 +336,7 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
                     body = &stmt->as.if_stmt.else_block;
                 }
                 memcpy(branch,defined,sizeof(branch));
-                if (!pj_block(p,body,branch,s,depth+1) || !pj_append(s,"}\n")) return false;
+                if (!pj_block(p,body,branch,s,depth+1,constants) || !pj_append(s,"}\n")) return false;
                 if (j == 0) memcpy(merged,branch,sizeof(merged));
                 else for (int k = 0; k < p->vars.count; k++) merged[k] &= branch[k];
             }
@@ -313,10 +347,11 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
     return true;
 }
 
-void dsl_portable_prepare_jit_source(me_dsl_compiled_program *p) {
+static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *constants) {
 #ifdef __EMSCRIPTEN__
     /* Host function-pointer comparison/mask ABI is not the WASM adapter ABI. */
     (void)p;
+    (void)constants;
     return;
 #endif
     /* Bounded elementwise statements only; no loops or reductions. ND logical
@@ -348,7 +383,7 @@ void dsl_portable_prepare_jit_source(me_dsl_compiled_program *p) {
             return;
         }
     }
-    if (!pj_block(p,&p->block,defined,&body,0)) {
+    if (!pj_block(p,&p->block,defined,&body,0,constants)) {
         free(body.text);
         dsl_tracef("portable jit ineligible: unsupported typed statements");
         return;
@@ -413,7 +448,7 @@ void dsl_portable_prepare_jit_source(me_dsl_compiled_program *p) {
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
     snprintf(source,capacity,
-        "/* portable-1.1 lowering-r10 mask-compare-math-nd-abi-r6 */\n"
+        "/* portable-1.1 lowering-r11 immutable-weak-conversions abi-r6 */\n"
         "#include <stdint.h>\n"
         "#include <string.h>\n"
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"
@@ -456,6 +491,18 @@ void dsl_portable_prepare_jit_source(me_dsl_compiled_program *p) {
         hash ^= *c; hash *= UINT64_C(1099511628211);
     }
     p->jit_ir_fingerprint = hash;
+}
+
+void dsl_portable_prepare_jit_source(me_dsl_compiled_program *p) {
+    pj_prepare_source(p, NULL);
+}
+
+void dsl_portable_prepare_jit_constants(me_dsl_compiled_program *p,
+    const int64_t *values, const bool *known) {
+    if (!p || !values || !known || p->jit_c_source || p->jit_ir) return;
+    pj_constants constants = {values, known, p->n_inputs};
+    pj_prepare_source(p, &constants);
+    dsl_try_prepare_jit_runtime(p);
 }
 
 void dsl_portable_prepare_jit(me_dsl_compiled_program *p) {

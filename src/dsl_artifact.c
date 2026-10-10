@@ -709,6 +709,20 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
             status = artifact_error(error, ME_ARTIFACT_ERR_BINDING, "declared output width disagrees with source");
             goto cleanup;
         }
+        if (jit_mode == ME_JIT_ON && numpy_profile && !artifact->program->jit_c_source) {
+            int64_t values[ME_MAX_VARS] = {0};
+            bool known[ME_MAX_VARS] = {false};
+            bool any = false;
+            for (int b = 0; b < artifact->nbindings; b++) {
+                const artifact_binding *binding = &artifact->bindings[b];
+                if (!binding->constant || !binding->weak) continue;
+                if (binding->variable.dtype == ME_INT64) values[b] = binding->value.i64;
+                else if (binding->variable.dtype == ME_BOOL) values[b] = binding->value.boolean;
+                else continue;
+                known[b] = true; any = true;
+            }
+            if (any) dsl_portable_prepare_jit_constants(artifact->program, values, known);
+        }
         *out = artifact;
         artifact = NULL;
         status = ME_ARTIFACT_SUCCESS;

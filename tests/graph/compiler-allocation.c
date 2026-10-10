@@ -140,9 +140,43 @@ static int scalar_dispatches(void) {
         scalar_dispatch("return sum(x)", "float64", "block_scalar", 3, none, false, 0) ||
         scalar_dispatch("return sum(x)", "float64", "block_scalar", 0, NULL, false, 0);
 }
+static int weak_conversion_result(me_graph_plan *p) {
+    me_graph_input_metadata input = {"x", ME_INT32, 1, {3}};
+    me_graph_schedule *s = NULL;
+    if (me_graph_specialize(p, &input, 1, NULL, &s, &error)) return 1;
+    int32_t x[] = {-11, 4, 19}, output[3], expected[] = {3, 4, 5};
+    me_array_view v = {.name = "x", .dtype = ME_INT32, .base = x,
+        .capacity = sizeof(x), .rank = 1, .shape = {3}, .strides = {sizeof(int32_t)}};
+    int rc = me_graph_execute(s, &v, 1, output, sizeof(output), NULL, NULL, &error);
+    me_graph_schedule_free(s);
+    return rc || memcmp(output, expected, sizeof(output));
+}
+static int weak_conversion_allocations(void) {
+    me_graph_input_metadata input = {"x", ME_INT32, 1, {3}};
+    me_graph_prepare_options options = {sizeof(options), ME_GRAPH_VERSION, ME_JIT_ON, false, true};
+    me_graph_plan *p = NULL;
+    calls = 0;
+    int rc = me_graph_prepare_expression("x % 7", 5, &input, 1, &options, &p, &error);
+    long checkpoints = calls;
+    if (rc || !p || weak_conversion_result(p)) return 1;
+    me_graph_plan_free(p);
+    for (long i = 0; i < checkpoints; i++) {
+        p = (void *)1; calls = 0; fail_at = i;
+        rc = me_graph_prepare_expression("x % 7", 5, &input, 1, &options, &p, &error);
+        fail_at = -1;
+        if (rc ? p != NULL || !error.native.message[0] : !p || weak_conversion_result(p)) return 1;
+        me_graph_plan_free(p);
+        p = NULL;
+        rc = me_graph_prepare_expression("x % 7", 5, &input, 1, &options, &p, &error);
+        if (rc || !p || weak_conversion_result(p)) return 1;
+        me_graph_plan_free(p);
+    }
+    printf("weak conversion compiler checkpoints=%ld\n", checkpoints);
+    return !checkpoints;
+}
 int main(void) {
     const float affine[] = {3, 10, 21}, staged[] = {7, 8, 9};
-    return scalar_dispatches() || check("x * 2 + y", affine, ME_JIT_OFF) ||
+    return scalar_dispatches() || weak_conversion_allocations() || check("x * 2 + y", affine, ME_JIT_OFF) ||
         check("sqrt(x) + sum(y)", staged, ME_JIT_OFF) ||
         check("x * 2 + y", affine, ME_JIT_ON);
 }
