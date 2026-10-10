@@ -128,17 +128,17 @@ static int scalar_dispatch(const char *body, const char *output_dtype,
 }
 static int scalar_dispatches(void) {
     uint8_t full[] = {1, 1, 1}, partial[] = {0, 1, 1}, none[] = {0, 0, 0};
-    return scalar_dispatch("return sum(x)", "float64", "block_scalar", 3, NULL, true, 6) ||
-        scalar_dispatch("return sum(x * 2)", "float64", "block_scalar", 3, NULL, true, 12) ||
-        scalar_dispatch("return sum(x) + sum(x)", "float64", "block_scalar", 3, NULL, true, 12) ||
-        scalar_dispatch("return sum(x) / 3", "float64", "block_scalar", 3, NULL, true, 2) ||
-        scalar_dispatch("return sum(x)", "float32", "block_scalar", 3, NULL, true, 6) ||
-        scalar_dispatch("s = sum(x)\\n    return s", "float64", "block_scalar", 3, NULL, false, 6) ||
+    return scalar_dispatch("return block_sum(x)", "float64", "block_scalar", 3, NULL, true, 6) ||
+        scalar_dispatch("return block_sum(x * 2)", "float64", "block_scalar", 3, NULL, true, 12) ||
+        scalar_dispatch("return block_sum(x) + block_sum(x)", "float64", "block_scalar", 3, NULL, true, 12) ||
+        scalar_dispatch("return block_sum(x) / 3", "float64", "block_scalar", 3, NULL, true, 2) ||
+        scalar_dispatch("return block_sum(x)", "float32", "block_scalar", 3, NULL, true, 6) ||
+        scalar_dispatch("s = block_sum(x)\\n    return s", "float64", "block_scalar", 3, NULL, false, 6) ||
         scalar_dispatch("return x * 2", "float64", "elementwise", 3, NULL, false, 2) ||
-        scalar_dispatch("return sum(x)", "float64", "block_scalar", 3, full, false, 6) ||
-        scalar_dispatch("return sum(x)", "float64", "block_scalar", 3, partial, false, 5) ||
-        scalar_dispatch("return sum(x)", "float64", "block_scalar", 3, none, false, 0) ||
-        scalar_dispatch("return sum(x)", "float64", "block_scalar", 0, NULL, false, 0);
+        scalar_dispatch("return block_sum(x)", "float64", "block_scalar", 3, full, false, 6) ||
+        scalar_dispatch("return block_sum(x)", "float64", "block_scalar", 3, partial, false, 5) ||
+        scalar_dispatch("return block_sum(x)", "float64", "block_scalar", 3, none, false, 0) ||
+        scalar_dispatch("return block_sum(x)", "float64", "block_scalar", 0, NULL, false, 0);
 }
 static int weak_conversion_result(me_graph_plan *p) {
     me_graph_input_metadata input = {"x", ME_INT32, 1, {3}};

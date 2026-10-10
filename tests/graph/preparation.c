@@ -289,7 +289,7 @@ static void weak_capture_conversions(void) {
 static void dsl_direct_sum(void) {
     const char *json =
         "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
-        "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x):\\n    return sum(x)\\n\","
+        "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x):\\n    return block_sum(x)\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"}],\"constants\":[],"
         "\"output\":{\"dtype\":\"float64\",\"contract\":\"block_scalar\"},\"context\":{\"ndim\":0},"
         "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}";
@@ -325,7 +325,7 @@ static void dsl_direct_reductions(void) {
         const char *output = op >= 3 ? "bool" : op == 0 && type == 4 ? "int64" : names[type];
         snprintf(json, sizeof(json),
             "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
-            "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x):\\n    return %s(x)\\n\","
+            "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x):\\n    return block_%s(x)\\n\","
             "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"%s\"}],\"constants\":[],"
             "\"output\":{\"dtype\":\"%s\",\"contract\":\"block_scalar\"},\"context\":{\"ndim\":0},"
             "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}",

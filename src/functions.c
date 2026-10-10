@@ -701,6 +701,13 @@ static const me_variable functions[] = {
     {"atan", 0, atan, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"atan2", 0, atan2, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"atanh", 0, atanh, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
+    {"block_all", 0, all_reduce, ME_FUNCTION1, 0},
+    {"block_any", 0, any_reduce, ME_FUNCTION1, 0},
+    {"block_max", 0, max_reduce, ME_FUNCTION1, 0},
+    {"block_mean", 0, mean_reduce, ME_FUNCTION1, 0},
+    {"block_min", 0, min_reduce, ME_FUNCTION1, 0},
+    {"block_prod", 0, prod_reduce, ME_FUNCTION1, 0},
+    {"block_sum", 0, sum_reduce, ME_FUNCTION1, 0},
     {"cbrt", 0, cbrt, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"ceil", 0, ceil, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"conj", 0, conj_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
@@ -3882,6 +3889,15 @@ static void read_identifier_token(state* s) {
     bool builtin_binding = var == NULL;
     if (!var) {
         var = find_builtin(start, s->next - start);
+    }
+    /* Portable reductions explicitly name their evaluation block. Legacy
+     * expressions retain bare names; neither profile accepts the other's names. */
+    if (builtin_binding && var && reduction_kind(var->address)) {
+        bool block_name = len > 6 && !strncmp(start, "block_", 6);
+        if (block_name != dsl_portable_typed_profile(s->semantic_profile)) {
+            s->type = TOK_ERROR;
+            return;
+        }
     }
     /* New numerical spellings belong only to opt-in 1.1. Exposing them to
      * the full evaluator would change host routing/fallback and its legacy

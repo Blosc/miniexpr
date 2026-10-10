@@ -4093,7 +4093,7 @@
         "numeric",
         "block-reductions"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"block_scalar\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\", \"block-reductions\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return sum(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"block_scalar\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\", \"block-reductions\"], \"schema_version\": \"1.0\", \"semantics\": {\"fp\": \"strict\"}, \"source\": \"def k(x):\\n    return block_sum(x)\\n\"}",
       "inputs": [
         {
           "dtype": "int64",

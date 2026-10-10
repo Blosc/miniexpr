@@ -36,8 +36,8 @@
     {"names": ["replace"], "arity": 3, "signature": "same-kind fixed strings -> bounded same-kind string", "semantics": "reject unbounded widths"},
     {"names": ["substr"], "arity": 3, "signature": "fixed string, integral start, integral length -> bounded same-kind string", "semantics": "negative start counts from logical end then clamps at zero; start beyond end/negative length yield empty; length clips at end; large unsigned indices handled without floating loss"},
     {"names": ["split_part"], "arity": 3, "signature": "same-kind fixed strings, integral part -> bounded same-kind string", "semantics": "first separator only: part <= 0 selects head, part > 0 selects remainder; absent separator gives entire head or empty remainder"},
-    {"names": ["all", "any"], "arity": 1, "signature": "numeric/Boolean lanes -> block bool", "semantics": "active valid lanes; NaN is true; empty all=true, any=false; no direct string reduction"},
-    {"names": ["sum", "prod", "mean", "min", "max"], "arity": 1, "signature": "numeric lanes -> block scalar", "semantics": "ordered checked rules in reduction_rules; NaN propagation; scalar returns require coherent group control flow"}
+    {"names": ["block_all", "block_any"], "arity": 1, "signature": "numeric/Boolean lanes -> block bool", "semantics": "active valid lanes; NaN is true; empty all=true, any=false; no direct string reduction"},
+    {"names": ["block_sum", "block_prod", "block_mean", "block_min", "block_max"], "arity": 1, "signature": "numeric lanes -> block scalar", "semantics": "ordered checked rules in reduction_rules; NaN propagation; scalar returns require coherent group control flow"}
   ],
   "math_domains": {
     "sin_cos_tan_sinpi_cospi": "finite real inputs; infinities yield NaN; sinpi/cospi exact integral and half-integral anchors",
@@ -68,9 +68,11 @@
     "fma": "single-round x*y+z in promoted floating type; C99 invalid combinations -> NaN"
   },
   "reduction_rules": {
+    "names": ["block_sum", "block_prod", "block_mean", "block_min", "block_max", "block_any", "block_all"],
+    "scope": "one supplied evaluation block only; no axis/keepdims or implicit cross-block aggregation; bare reduction names reject in portable 1.0/1.1",
     "group": "valid currently participating lanes in original logical C-order; no padded lanes or reassociation",
     "sum_prod": "signed/bool -> int64, unsigned -> uint64, floats retain dtype; each accumulation checked/rounded; empty 0/1",
-    "mean": "checked ordered integer sum then float64 conversion/division; floating sum/division retains input dtype; empty NaN",
+    "mean": "checked ordered signed/bool int64 or unsigned uint64 sum then float64 conversion/division; floating sum/division retains input dtype; participating lane count is divisor; empty NaN; integer accumulation overflow errors",
     "min_max": "input dtype retained; empty error; NaN propagation; mixed signed-zero ties min=-0, max=+0; same-sign zero ties retain sign",
     "placement": "top-level values and supported nested conditions; reduction-valued assignments/returns inside control-flow bodies and nested reductions reject",
     "cardinality": "elementwise or block_scalar; divergent scalar return sites reject as ambiguous, not first/last-lane selection"

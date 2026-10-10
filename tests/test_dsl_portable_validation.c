@@ -42,10 +42,10 @@ static void descriptor_validation_fixture(void) {
      * domain/loop failures are not executed or guessed from sample arrays. */
     assert(me_validate_portable_dsl("# me:compiler=cc\ndef k(x):\n    return sin(x) / 0\n", "1.0",
                                    &x, 1, ME_FLOAT32, &error) == ME_PORTABLE_SUCCESS);
-    assert(me_validate_portable_dsl_ex("def k(x):\n    return sum(x)\n", "1.0", &x, 1,
+    assert(me_validate_portable_dsl_ex("def k(x):\n    return block_sum(x)\n", "1.0", &x, 1,
         ME_FLOAT32, &descriptor, &error) == ME_PORTABLE_ERR_SIGNATURE);
     descriptor.cardinality = ME_PORTABLE_BLOCK_SCALAR;
-    assert(me_validate_portable_dsl_ex("def k(x):\n    return sum(x)\n", "1.0", &x, 1,
+    assert(me_validate_portable_dsl_ex("def k(x):\n    return block_sum(x)\n", "1.0", &x, 1,
         ME_FLOAT32, &descriptor, NULL) == ME_PORTABLE_SUCCESS);
     descriptor.cardinality = ME_PORTABLE_ELEMENTWISE;
     assert(me_validate_portable_dsl_ex("def k(x):\n    return x + _i1\n", "1.0", &x, 1,
@@ -152,8 +152,8 @@ int main(void) {
         "def k(x):\n    return float(float(x))\n",
         "def k(x):\n    return bool((x + 1) - x)\n",
         "def k(x):\n    return (x / 2) > 0\n",
-        "def k(x):\n    return sum(x)\n",
-        "def k(x):\n    if any(x):\n        return x\n    return x\n",
+        "def k(x):\n    return block_sum(x)\n",
+        "def k(x):\n    if block_any(x):\n        return x\n    return x\n",
         "def k(x):\n    return x ** 2\n",
         "def k(x):\n    return x // 2\n"
     };
@@ -204,7 +204,7 @@ int main(void) {
                                    ME_INT64, &error) == ME_PORTABLE_ERR_VERSION);
     assert(error.line == 0 && strstr(error.message, "1.0"));
     x[0].dtype = ME_FLOAT64;
-    assert(me_validate_portable_dsl("def k(x):\n    return sum(x)\n", "0.1", x, 1,
+    assert(me_validate_portable_dsl("def k(x):\n    return block_sum(x)\n", "0.1", x, 1,
                                    ME_FLOAT64, &error) == ME_PORTABLE_ERR_VERSION);
     assert(error.line == 0 && strstr(error.message, "unsupported"));
     descriptor_validation_fixture();

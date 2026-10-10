@@ -91,7 +91,7 @@ comparisons, Boolean selection, lazy `where`, straight-line locals and simple
 not overflowing signed C operations. Integral widening/narrowing conversions
 lower to the same modular bit-copy; float-to-integer conversion stays interpreted
 because it must report out-of-range/nonfinite values as errors. Block reductions
-(`sum`, `min`, ...) remain on the interpreter.
+(`block_sum`, `block_min`, ...) remain on the interpreter.
 
 Unary and binary float functions, the float `//`/`%`/`**` operators, the boolean
 predicates (`isfinite`, `isinf`, `isnan`, `signbit`) and the integer

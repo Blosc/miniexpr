@@ -21,7 +21,7 @@ The corpus covers the advertised real numerical functions:
 - Native extensions: `erf`, `erfc`, `lgamma`, `tgamma`, `exp10`, `sinpi`, `cospi`,
   `fdim`, explicit fused `fma`, checked `fac` / `ncr` / `npr`, constants `e` / `pi`.
 
-Every spelling has arity/type/value coverage. `min`/`max` are reductions, not
+Every spelling has arity/type/value coverage. `block_min`/`block_max` are block reductions, not
 elementwise extrema. String operations/reduction families are separate milestones.
 Complex, half and extended floats remain unsupported. The corpus explicitly
 rejects NumPy signatures whose result loop would require float16 (including
@@ -139,3 +139,7 @@ The portable profile still has **no eligible SIMD/JIT route**. Off/on corpus
 requests explicitly report interpreter fallback; full-DSL TCC/GCC controls do not
 certify these rules. CI registers the same corpus on native Linux/macOS/Windows
 and standalone Node/WASM. Local macOS/WASM results are not remote CI results.
+
+Portable 1.1 inherits the seven explicit `block_*` reduction names and block scope
+from [the DSL spec](dsl-spec/1.0.md#limited-block-reductions). Bare reduction
+calls and axis arguments are rejected; array/graph reductions retain their names.

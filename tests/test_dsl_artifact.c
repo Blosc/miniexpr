@@ -275,7 +275,8 @@ int main(void) {
     reject(json, "\"name\": \"bias\"", "\"name\": \"x\"", ME_ARTIFACT_ERR_BINDING);
     reject(json, "\"name\": \"bias\"", "\"name\": \"unused\"", ME_ARTIFACT_ERR_BINDING);
     reject(json, "\"name\": \"scale\"", "\"name\": \"bias\"", ME_ARTIFACT_ERR_BINDING);
-    reject(json, "return x * scale + bias", "return sum(x)", ME_ARTIFACT_ERR_BINDING);
+    reject(json, "return x * scale + bias", "return block_sum(x)", ME_ARTIFACT_ERR_BINDING);
+    reject(json, "return x * scale + bias", "return sum(x)", ME_ARTIFACT_ERR_SOURCE);
     reject(json, "return x * scale + bias", "return missing", ME_ARTIFACT_ERR_SOURCE);
     reject(json, "# me:compiler=tcc", "# me:fp=fast\\n# me:compiler=tcc", ME_ARTIFACT_ERR_SOURCE);
     reject(json, "\"schema_version\":", "\"unknown\": 1, \"schema_version\":", ME_ARTIFACT_ERR_FORMAT);
@@ -350,7 +351,7 @@ int main(void) {
 
 static void schema1_fixture(void) {
     const char *json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
-        "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x,c):\\n    a = sum(x)\\n    return a + c\\n\","
+        "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x,c):\\n    a = block_sum(x)\\n    return a + c\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"int64\"}],"
         "\"constants\":[{\"name\":\"c\",\"dtype\":\"int64\",\"encoding\":\"decimal\",\"value\":\"1\"}],"
         "\"output\":{\"dtype\":\"int64\",\"contract\":\"block_scalar\"},\"semantics\":{\"fp\":\"strict\"},"
@@ -384,7 +385,7 @@ static void schema1_fixture(void) {
     reject(json, "numeric", "unimplemented", ME_ARTIFACT_ERR_UNSUPPORTED);
     reject(json, "numeric", "jit-required", ME_ARTIFACT_ERR_UNSUPPORTED);
     reject(json, "\"ndim\":0", "\"ndim\":1", ME_ARTIFACT_ERR_BINDING);
-    char *unsigned_json = replace(json, "a = sum(x)\\n    return a + c", "return x + c");
+    char *unsigned_json = replace(json, "a = block_sum(x)\\n    return a + c", "return x + c");
     char *unsigned_types = replace(unsigned_json, "\"name\":\"x\",\"dtype\":\"int64\"", "\"name\":\"x\",\"dtype\":\"uint64\"");
     free(unsigned_json);
     unsigned_json = replace(unsigned_types, "\"name\":\"c\",\"dtype\":\"int64\"", "\"name\":\"c\",\"dtype\":\"uint64\"");

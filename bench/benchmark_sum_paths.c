@@ -135,7 +135,7 @@ int main(int argc, char **argv) {
     char json[2048];
     snprintf(json, sizeof(json),
         "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
-        "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x):\\n    return %s(%s)\\n\","
+        "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x):\\n    return block_%s(%s)\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"%s\"}],\"constants\":[],"
         "\"output\":{\"dtype\":\"%s\",\"contract\":\"block_scalar\"},\"context\":{\"ndim\":0},"
         "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"metadata\":{}}",

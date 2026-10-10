@@ -209,16 +209,16 @@ int main(void) {
     x.dtype = ME_FLOAT32;
     float cancellation[] = {16777216.0f, 1.0f, -16777216.0f};
     inputs[0] = cancellation;
-    p = compile("def kernel(x):\n    return x + sum(x)\n", &x, 1, ME_FLOAT64);
+    p = compile("def kernel(x):\n    return x + block_sum(x)\n", &x, 1, ME_FLOAT64);
     double three_out[3];
     assert(eval(p, inputs, 1, three_out, 3) == 0 && three_out[0] == cancellation[0] && three_out[1] == 1.0 && three_out[2] == cancellation[2]);
     dsl_compiled_program_free(p);
     x.dtype = ME_INT64;
-    rejected("def kernel(x):\n    s = sum(x)\n    if x < 0:\n        return s + 1\n    return s\n", &x, 1, "ambiguous block-scalar");
-    rejected("def kernel(x):\n    s = sum(x)\n    for i in range(x):\n        return s\n    return s + 1\n", &x, 1, "ambiguous block-scalar");
-    rejected("def kernel(x):\n    s = sum(x)\n    for i in range(3):\n        if x < 0:\n            break\n        return s + 1\n    return s\n", &x, 1, "ambiguous block-scalar");
-    rejected("def kernel(x):\n    s = sum(x)\n    for i in range(3):\n        if x < 0:\n            continue\n        return s + 1\n    return s\n", &x, 1, "ambiguous block-scalar");
-    p = compile("def kernel(x):\n    s = sum(x)\n    if all(x > 0):\n        return s + 1\n    return s\n", &x, 1, ME_INT64);
+    rejected("def kernel(x):\n    s = block_sum(x)\n    if x < 0:\n        return s + 1\n    return s\n", &x, 1, "ambiguous block-scalar");
+    rejected("def kernel(x):\n    s = block_sum(x)\n    for i in range(x):\n        return s\n    return s + 1\n", &x, 1, "ambiguous block-scalar");
+    rejected("def kernel(x):\n    s = block_sum(x)\n    for i in range(3):\n        if x < 0:\n            break\n        return s + 1\n    return s\n", &x, 1, "ambiguous block-scalar");
+    rejected("def kernel(x):\n    s = block_sum(x)\n    for i in range(3):\n        if x < 0:\n            continue\n        return s + 1\n    return s\n", &x, 1, "ambiguous block-scalar");
+    p = compile("def kernel(x):\n    s = block_sum(x)\n    if block_all(x > 0):\n        return s + 1\n    return s\n", &x, 1, ME_INT64);
     int64_t coherent[] = {-1, 2};
     inputs[0] = coherent;
     me_dsl_portable_eval_descriptor scalar_desc = {2, NULL, sizeof(int64_t), 0, NULL, NULL, NULL};
@@ -226,52 +226,50 @@ int main(void) {
     coherent[0] = 1;
     assert(dsl_eval_program_portable(p, inputs, 1, result, &scalar_desc) == 0 && result[0] == 4);
     dsl_compiled_program_free(p);
-    p = compile("def kernel(x):\n    s = sum(x)\n    for i in range(3):\n        if s > 0:\n            return s + i\n    return s\n", &x, 1, ME_INT64);
+    p = compile("def kernel(x):\n    s = block_sum(x)\n    for i in range(3):\n        if s > 0:\n            return s + i\n    return s\n", &x, 1, ME_INT64);
     assert(dsl_eval_program_portable(p, inputs, 1, result, &scalar_desc) == 0 && result[0] == 3);
     dsl_compiled_program_free(p);
     int64_t masked[] = {INT64_MIN, 3, 4};
     inputs[0] = masked;
-    p = compile("def kernel(x):\n    if x > 0:\n        if all(x < 4):\n            return 1\n        return 2\n    return 0\n", &x, 1, ME_INT64);
+    p = compile("def kernel(x):\n    if x > 0:\n        if block_all(x < 4):\n            return 1\n        return 2\n    return 0\n", &x, 1, ME_INT64);
     int64_t three_result[3];
     assert(eval(p, inputs, 1, three_result, 3) == 0 && three_result[0] == 0 && three_result[1] == 2 && three_result[2] == 2);
     masked[2] = 2;
     assert(eval(p, inputs, 1, three_result, 3) == 0 && three_result[1] == 1 && three_result[2] == 1);
     dsl_compiled_program_free(p);
-    p = compile("def kernel(x):\n    if x > 0:\n        if all(-x < 0):\n            return 1\n    return 0\n", &x, 1, ME_INT64);
+    p = compile("def kernel(x):\n    if x > 0:\n        if block_all(-x < 0):\n            return 1\n    return 0\n", &x, 1, ME_INT64);
     assert(eval(p, inputs, 1, three_result, 3) == 0 && three_result[0] == 0 && three_result[1] == 1 && three_result[2] == 1);
     dsl_compiled_program_free(p);
-    p = compile("def kernel(x):\n    a = x\n    for i in range(3):\n        if a < 0:\n            return a\n        if all(a > 1):\n            break\n        a = a + 1\n    return a\n", &x, 1, ME_INT64);
+    p = compile("def kernel(x):\n    a = x\n    for i in range(3):\n        if a < 0:\n            return a\n        if block_all(a > 1):\n            break\n        a = a + 1\n    return a\n", &x, 1, ME_INT64);
     assert(eval(p, inputs, 1, three_result, 3) == 0 && three_result[0] == INT64_MIN && three_result[1] == 3 && three_result[2] == 2);
     dsl_compiled_program_free(p);
     p = compile("def kernel(x):\n    a = x\n    for i in range(3):\n        if i == 1:\n            continue\n        a = a + 1\n    return a\n", &x, 1, ME_INT64);
     assert(eval(p, inputs, 1, three_result, 3) == 0 && three_result[0] == INT64_MIN + 2 && three_result[1] == 5 && three_result[2] == 4);
     dsl_compiled_program_free(p);
-    p = compile("def kernel(x):\n    return sum(x)\n", &x, 1, ME_INT64);
+    p = compile("def kernel(x):\n    return block_sum(x)\n", &x, 1, ME_INT64);
     assert(p->output_is_scalar);
     assert(eval(p, inputs, 1, three_result, 3) == 0 && three_result[0] == INT64_MIN + 5);
     masked[0] = INT64_MAX;
     assert(eval(p, inputs, 1, three_result, 3) != 0);
     dsl_compiled_program_free(p);
-    rejected("def kernel(x):\n    if x > 0:\n        return sum(x)\n    return 0\n", &x, 1, "reductions");
+    rejected("def kernel(x):\n    if x > 0:\n        return block_sum(x)\n    return 0\n", &x, 1, "reductions");
 
     /* Empty-group identities are exercised directly until the extended
      * block-scalar descriptor replaces the old nitems-output ABI. */
-    const char *reductions[] = {"sum", "prod", "any", "all", "mean", "min", "max"};
+    const char *reductions[] = {"block_sum", "block_prod", "block_any", "block_all", "block_min", "block_max"};
     for (size_t i = 0; i < sizeof(reductions) / sizeof(reductions[0]); i++) {
         char source[128];
         snprintf(source, sizeof(source), "def kernel(x):\n    return %s(x)\n", reductions[i]);
         p = compile(source, &x, 1, ME_AUTO);
         me_expr *expr = p->block.stmts[0]->as.return_stmt.expr.expr;
-        union { int64_t integer; bool truth; double real; } empty_out = {.integer = -1};
-        void *destination = i < 2 || i >= 5 ? (void *)&empty_out.integer :
-                            i < 4 ? (void *)&empty_out.truth : (void *)&empty_out.real;
+        union { int64_t integer; bool truth; } empty_out = {.integer = -1};
+        void *destination = i < 2 || i >= 4 ? (void *)&empty_out.integer : (void *)&empty_out.truth;
         int rc = dsl_portable_eval_expr(expr, inputs, 1, NULL, 0, 0, NULL, destination);
-        if (i >= 5) assert(rc != 0);
+        if (i >= 4) assert(rc != 0);
         else {
             assert(rc == 0);
             if (i < 2) assert(empty_out.integer == (i == 0 ? 0 : 1));
-            else if (i < 4) assert(empty_out.truth == (i == 3));
-            else assert(isnan(empty_out.real));
+            else assert(empty_out.truth == (i == 3));
         }
         dsl_compiled_program_free(p);
     }
@@ -289,7 +287,7 @@ int main(void) {
     assert(eval(p, inputs, 1, out, 2) == 0 && out[0] == -3.5 && out[1] == 7.0);
     dsl_compiled_program_free(p);
     rejected("def kernel(x):\n    return x + _flat_idx\n", &x, 1, "ND context");
-    rejected("def kernel(x):\n    if x > 0:\n        return x\n    return sum(x)\n", &x, 1, "cardinality");
+    rejected("def kernel(x):\n    if x > 0:\n        return x\n    return block_sum(x)\n", &x, 1, "cardinality");
 
     x.dtype = ME_UINT64;
     uint64_t wide[] = {UINT64_C(9007199254740993), UINT64_MAX};
@@ -407,17 +405,17 @@ int main(void) {
     x.dtype = ME_INT64;
     int64_t lazy_reduce_input[] = {INT64_MIN, 2, 3};
     inputs[0] = lazy_reduce_input;
-    p = compile("def kernel(x):\n    return where(x > 0, sum(-x), 0)\n", &x, 1, ME_AUTO);
+    p = compile("def kernel(x):\n    return where(x > 0, block_sum(-x), 0)\n", &x, 1, ME_AUTO);
     assert(eval(p, inputs, 1, three_result, 3) == 0 && three_result[0] == 0 && three_result[1] == -5 && three_result[2] == -5);
     dsl_compiled_program_free(p);
-    p = compile("def kernel(x):\n    return x > 0 and all(-x < 0)\n", &x, 1, ME_BOOL);
+    p = compile("def kernel(x):\n    return x > 0 and block_all(-x < 0)\n", &x, 1, ME_BOOL);
     bool three_truth[3];
     assert(eval(p, inputs, 1, three_truth, 3) == 0 && !three_truth[0] && three_truth[1] && three_truth[2]);
     dsl_compiled_program_free(p);
-    p = compile("def kernel(x):\n    return where(x > 2, sum(x), sum(where(x > 0, x, 0)))\n", &x, 1, ME_AUTO);
+    p = compile("def kernel(x):\n    return where(x > 2, block_sum(x), block_sum(where(x > 0, x, 0)))\n", &x, 1, ME_AUTO);
     assert(eval(p, inputs, 1, three_result, 3) == 0 && three_result[0] == 2 && three_result[1] == 2 && three_result[2] == 3);
     dsl_compiled_program_free(p);
-    p = compile("def kernel(x):\n    return sum(-x)\n", &x, 1, ME_AUTO);
+    p = compile("def kernel(x):\n    return block_sum(-x)\n", &x, 1, ME_AUTO);
     struct { int64_t value; int64_t sentinel; } scalar_result = {0, INT64_C(123456789)};
     uint8_t valid_mask[] = {0, 1, 1};
     me_dsl_portable_eval_descriptor descriptor = {
@@ -435,14 +433,14 @@ int main(void) {
     const void *empty_inputs[] = {NULL};
     assert(dsl_eval_program_portable(p, empty_inputs, 1, &scalar_result.value, &descriptor) == 0 && scalar_result.value == 0);
     dsl_compiled_program_free(p);
-    p = compile("def kernel(x):\n    a = sum(x)\n    return a + 1\n", &x, 1, ME_AUTO);
+    p = compile("def kernel(x):\n    a = block_sum(x)\n    return a + 1\n", &x, 1, ME_AUTO);
     assert(p->output_is_scalar);
     assert(dsl_eval_program_portable(p, empty_inputs, 1, &scalar_result.value, &descriptor) == 0 && scalar_result.value == 1);
     dsl_compiled_program_free(p);
-    p = compile("def kernel(x):\n    return mean(x)\n", &x, 1, ME_AUTO);
+    p = compile("def kernel(x):\n    return block_mean(x)\n", &x, 1, ME_AUTO);
     assert(dsl_eval_program_portable(p, empty_inputs, 1, out, &descriptor) == 0 && isnan(out[0]));
     dsl_compiled_program_free(p);
-    p = compile("def kernel(x):\n    return min(x)\n", &x, 1, ME_AUTO);
+    p = compile("def kernel(x):\n    return block_min(x)\n", &x, 1, ME_AUTO);
     assert(dsl_eval_program_portable(p, empty_inputs, 1, &scalar_result.value, &descriptor) != 0);
     dsl_compiled_program_free(p);
     x.dtype = ME_INT64;
@@ -454,7 +452,7 @@ int main(void) {
     p = compile("def kernel(x):\n    if x > 0:\n        a = x\n    return where(x > 0, a, 0)\n", &x, 1, ME_AUTO);
     assert(eval(p, inputs, 1, three_result, 3) == 0 && three_result[0] == 0 && three_result[1] == 2 && three_result[2] == 3);
     dsl_compiled_program_free(p);
-    p = compile("def kernel(x):\n    if x > 0:\n        a = x\n    return sum(a)\n", &x, 1, ME_AUTO);
+    p = compile("def kernel(x):\n    if x > 0:\n        a = x\n    return block_sum(a)\n", &x, 1, ME_AUTO);
     assert(eval(p, inputs, 1, three_result, 3) != 0);
     valid_mask[0] = 0;
     valid_mask[1] = 1;
@@ -485,15 +483,15 @@ int main(void) {
     independent_anchor_fixture();
     x.dtype = ME_INT64;
     inputs[0] = definition_inputs;
-    p = compile("def k(x):\n    a = sum(x)\n    if x > 0:\n        a = 0\n    return a\n", &x, 1, ME_AUTO);
+    p = compile("def k(x):\n    a = block_sum(x)\n    if x > 0:\n        a = 0\n    return a\n", &x, 1, ME_AUTO);
     assert(!p->output_is_scalar);
     assert(eval(p, inputs, 1, three_result, 3) == 0 && three_result[0] == 4 && three_result[1] == 0 && three_result[2] == 0);
     dsl_compiled_program_free(p);
-    p = compile("def k(x):\n    a = sum(x)\n    for i in range(x):\n        a += 1\n    return a\n", &x, 1, ME_AUTO);
+    p = compile("def k(x):\n    a = block_sum(x)\n    for i in range(x):\n        a += 1\n    return a\n", &x, 1, ME_AUTO);
     assert(!p->output_is_scalar);
     assert(eval(p, inputs, 1, three_result, 3) == 0 && three_result[0] == 4 && three_result[1] == 6 && three_result[2] == 7);
     dsl_compiled_program_free(p);
-    p = compile("def k(x):\n    a = sum(x)\n    for i in range(3):\n        if x < i:\n            break\n        a += 1\n    return a\n", &x, 1, ME_AUTO);
+    p = compile("def k(x):\n    a = block_sum(x)\n    for i in range(3):\n        if x < i:\n            break\n        a += 1\n    return a\n", &x, 1, ME_AUTO);
     assert(!p->output_is_scalar);
     assert(eval(p, inputs, 1, three_result, 3) == 0 && three_result[0] == 4 && three_result[1] == 7 && three_result[2] == 7);
     dsl_compiled_program_free(p);
@@ -575,7 +573,7 @@ static void *concurrent_evaluate(void *arg) {
 static void concurrent_handle_fixture(void) {
 #if (defined(__unix__) || defined(__APPLE__)) && !defined(__EMSCRIPTEN__)
     me_variable x = {.name = "x", .dtype = ME_INT64};
-    me_dsl_compiled_program *program = compile("def k(x):\n    a = sum(x)\n    return a + 1\n", &x, 1, ME_AUTO);
+    me_dsl_compiled_program *program = compile("def k(x):\n    a = block_sum(x)\n    return a + 1\n", &x, 1, ME_AUTO);
     concurrent_case cases[] = {{program, FE_DOWNWARD, {1, 2, 3}, 7}, {program, FE_UPWARD, {4, 5, 6}, 16}};
     pthread_t threads[2];
     for (int i = 0; i < 2; i++) assert(pthread_create(&threads[i], NULL, concurrent_evaluate, &cases[i]) == 0);
