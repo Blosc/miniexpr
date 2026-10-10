@@ -92,6 +92,7 @@ if(MINIEXPR_BUILD_ARTIFACT)
   add_executable(graph_preparation graph/preparation.c)
   target_link_libraries(graph_preparation PRIVATE miniexpr_artifact)
   add_test(NAME graph_preparation COMMAND graph_preparation)
+  set_tests_properties(graph_preparation PROPERTIES TIMEOUT 120)
   add_executable(graph_allocation graph/allocation.c "${PROJECT_SOURCE_DIR}/src/dsl_graph.c"
     "${PROJECT_SOURCE_DIR}/src/dsl_graph_text.c" "${PROJECT_SOURCE_DIR}/src/dsl_artifact.c"
     "${PROJECT_SOURCE_DIR}/src/dsl_array.c"

@@ -7,6 +7,7 @@
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "%s:%d: %s (%s)\n", __FILE__, __LINE__, #x, error.native.message); exit(1); } } while (0)
 static me_graph_error error;
 static me_graph_plan *prepare(const char *source, me_graph_input_metadata *inputs, int n, bool jit) {
+    fprintf(stderr, "  prepare jit=%d: %s\n", jit, source); fflush(stderr);
     me_graph_plan *p = NULL;
     me_graph_prepare_options options = {sizeof(options), ME_GRAPH_VERSION, jit ? ME_JIT_ON : ME_JIT_OFF, false, true};
     CHECK(!me_graph_prepare_expression(source, strlen(source), inputs, n, &options, &p, &error));
@@ -129,6 +130,7 @@ static void limits(void) {
         for (int i = 1; i <= depth; i++) n += (size_t)snprintf(json + n, sizeof(json) - n, ",{\"id\":%d,\"op\":\"neg\",\"args\":[%d]}", i, i - 1);
         n += (size_t)snprintf(json + n, sizeof(json) - n, "],\"root\":%d,\"output\":{\"dtype\":\"auto\",\"casting\":\"unsafe\"}}", depth);
         me_graph_plan *p = NULL;
+        fprintf(stderr, "  graph depth=%d\n", depth); fflush(stderr);
         int rc = me_graph_prepare_json(json, n, NULL, &p, &error);
         CHECK(depth == ME_GRAPH_MAX_DEPTH ? rc == 0 : rc == ME_GRAPH_ERR_FORMAT);
         me_graph_plan_free(p);
@@ -205,9 +207,12 @@ static void trusted(bool jit) {
     me_graph_schedule_free(s); me_graph_plan_free(p);
 }
 int main(void) {
-    maps(false); lazy(false); reductions(false); validation(); limits();
-    maps(true); lazy(true); reductions(true);
-    staged(false); staged(true);
-    trusted(false); trusted(true);
+#define RUN_CASE(call) do { fprintf(stderr, "graph preparation: %s\n", #call); fflush(stderr); call; } while (0)
+    RUN_CASE(maps(false)); RUN_CASE(lazy(false)); RUN_CASE(reductions(false));
+    RUN_CASE(validation()); RUN_CASE(limits());
+    RUN_CASE(maps(true)); RUN_CASE(lazy(true)); RUN_CASE(reductions(true));
+    RUN_CASE(staged(false)); RUN_CASE(staged(true));
+    RUN_CASE(trusted(false)); RUN_CASE(trusted(true));
+#undef RUN_CASE
     puts("native graph preparation/execution passed"); return 0;
 }
