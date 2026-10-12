@@ -76,6 +76,23 @@ me_graph_status me_graph_specialize(const me_graph_plan *plan,
 me_graph_status me_graph_execute(const me_graph_schedule *schedule,
     const me_array_view *inputs, int ninputs, void *output, size_t capacity,
     const me_graph_execute_options *options, me_graph_report *report, me_graph_error *error);
+/* Single-region graphs may mix resident and storage-reader inputs. Staged
+ * graphs and reader-backed reduction masks reject before any reader call.
+ * Ordinary select/short-circuit map participation remains kernel-owned.
+ * Output remains disjoint, aligned C-order storage, as in me_graph_execute. */
+me_graph_status me_graph_execute_sources(const me_graph_schedule *schedule,
+    const me_array_source *inputs, int ninputs, void *output, size_t capacity,
+    const me_graph_execute_options *options, me_graph_report *report, me_graph_error *error);
+/* Explicit transactional alias adapter for resident inputs. Evaluate into a
+ * separate C-order result, then publish exactly output_bytes only on success.
+ * The final output may overlap inputs; ordinary execute still rejects aliases.
+ * staging_budget=0 selects 64 MiB. This full-result staging allocation is outside
+ * array iterator scratch reports and is bounded before input reads/execution.
+ * Failure leaves the final destination unchanged. No execution replay occurs. */
+me_graph_status me_graph_execute_alias(const me_graph_schedule *schedule,
+    const me_array_view *inputs, int ninputs, void *output, size_t capacity,
+    size_t staging_budget, const me_graph_execute_options *options,
+    me_graph_report *report, me_graph_error *error);
 int me_graph_ninputs(const me_graph_plan *plan);
 const char *me_graph_input_name(const me_graph_plan *plan, int index);
 me_dtype me_graph_input_dtype(const me_graph_plan *plan, int index);

@@ -87,6 +87,31 @@ static size_t a_offset(const me_array_view *v, int rank, const int64_t *coordina
     }
     return offset;
 }
+static void a_coordinates(int rank, const int64_t *shape, const bool *axes,
+    bool reduction, size_t group, size_t lane, int64_t *coordinates) {
+    for (int i = rank - 1; i >= 0; i--) {
+        size_t *index = reduction && !axes[i] ? &group : &lane;
+        coordinates[i] = (int64_t)(*index % (size_t)shape[i]);
+        *index /= (size_t)shape[i];
+    }
+}
+static size_t a_source_index(const me_array_view *v, int rank, const int64_t *coordinates) {
+    size_t index = 0;
+    for (int i = 0; i < v->rank; i++) {
+        index *= (size_t)v->shape[i];
+        if (v->shape[i] != 1) index += (size_t)coordinates[rank - v->rank + i];
+    }
+    return index;
+}
+static bool a_reader_valid(const me_array_view *v, int rank, const int64_t *shape) {
+    size_t count;
+    if (!a_width(v->dtype) || !a_product(v->rank, v->shape, &count) ||
+        v->rank > rank || v->base || v->capacity || v->offset || v->byte_order) return false;
+    for (int i = 0; i < v->rank; i++) {
+        if (v->shape[i] != 1 && v->shape[i] != shape[rank - v->rank + i]) return false;
+    }
+    return true;
+}
 static void a_load(const me_array_view *v, size_t offset, void *out) {
     size_t width = a_width(v->dtype);
     const uint8_t *p = (const uint8_t *)v->base + offset;
@@ -206,7 +231,8 @@ static void a_combine(me_dtype dtype, int op, void *acc, const void *value) {
 }
 static me_artifact_status a_run(const me_artifact *a, const me_array_view *inputs, int ninputs,
     int rank, const int64_t *shape, const me_array_options *o, void *output, size_t capacity,
-    me_array_report *report, me_artifact_error *error, bool execute, bool identity_map) {
+    me_array_report *report, me_artifact_error *error, bool execute, bool identity_map,
+    const me_array_source *sources) {
     int out_rank; int64_t out_shape[ME_ARRAY_MAX_RANK]; me_dtype dtype;
     me_array_report local = {0}; if (!report) report = &local; memset(report,0,sizeof(*report));
     int rc = me_array_result_shape(a,rank,shape,o,&out_rank,out_shape,&dtype,error);
@@ -222,7 +248,7 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
         out_count > SIZE_MAX / width || capacity < out_count * width ||
         (capacity && (!output || (uintptr_t)output > UINTPTR_MAX - capacity)) ||
         (out_count && (!output || (uintptr_t)output % width))) return a_error(error,ME_ARTIFACT_ERR_BINDING,"invalid output capacity or bindings");
-    int binding[128]; bool direct[128];
+    int binding[128]; bool direct[128]; bool readers = false;
     bool suffix = true, seen = false;
     for (int i = 0; i < rank; i++) { if (axes[i]) seen = true; else if (seen) suffix = false; }
     for (int b = 0; b < ninputs; b++) {
@@ -233,8 +259,12 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
         }
         if (binding[b] < 0) return a_error(error,ME_ARTIFACT_ERR_BINDING,"missing array input");
         const me_array_view *v = &inputs[binding[b]];
-        if (v->dtype != me_artifact_input_dtype(a,b) || !a_broadcast(v,rank,shape) || a_overlap(v->base,v->capacity,output,capacity)) return a_error(error,ME_ARTIFACT_ERR_BINDING,"invalid bounds, broadcast, dtype or overlap");
-        direct[b] = suffix && a_native(v) && a_contiguous(v) && v->rank == rank &&
+        bool reader = sources && sources[binding[b]].read;
+        readers |= reader;
+        if (v->dtype != me_artifact_input_dtype(a,b) ||
+            !(reader ? a_reader_valid(v,rank,shape) : a_broadcast(v,rank,shape)) ||
+            a_overlap(v->base,v->capacity,output,capacity)) return a_error(error,ME_ARTIFACT_ERR_BINDING,"invalid bounds, broadcast, dtype or overlap");
+        direct[b] = !reader && suffix && a_native(v) && a_contiguous(v) && v->rank == rank &&
                     (!rank || !memcmp(v->shape,shape,(size_t)rank*sizeof(int64_t))) &&
                     !(((uintptr_t)v->base + v->offset) % a_width(v->dtype));
     }
@@ -246,18 +276,20 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
     if (tile > red_count && o->reduction != ME_ARRAY_NONE) tile = red_count;
     if (tile > total && o->reduction == ME_ARRAY_NONE) tile = total;
     if (!tile) tile = 1;
+    if (readers && tile > SIZE_MAX / sizeof(size_t)) return a_error(error,ME_ARTIFACT_ERR_BINDING,"reader index scratch overflow");
     if (!execute) return ME_ARTIFACT_SUCCESS;
     /* Keep the complete shared preflight above. Only native contiguous tiles
      * without masks bypass map evaluation; other layouts use the original path. */
     bool direct_reduction = identity_map && o->reduction != ME_ARRAY_NONE &&
-        ninputs == 1 && direct[0] && !o->where &&
+        ninputs == 1 && (direct[0] || (sources && sources[binding[0]].read)) && !o->where &&
         inputs[binding[0]].dtype == me_artifact_output_dtype(a);
     void *owned[128] = {0}; me_artifact_buffer buffers[128];
+    size_t *indices = readers ? malloc(tile * sizeof(size_t)) : NULL;
     uint8_t *mask = o->where ? malloc(tile) : NULL;
     bool need_scratch = o->reduction != ME_ARRAY_NONE && !direct_reduction;
     void *scratch = need_scratch ? malloc(tile * source_width) : NULL;
-    if ((o->where && !mask) || (need_scratch && !scratch)) { rc = ME_ARTIFACT_ERR_OOM; goto cleanup; }
-    report->temporary_bytes = (mask ? tile : 0) + (scratch ? tile * source_width : 0);
+    if ((readers && !indices) || (o->where && !mask) || (need_scratch && !scratch)) { rc = ME_ARTIFACT_ERR_OOM; goto cleanup; }
+    report->temporary_bytes = (indices ? tile * sizeof(size_t) : 0) + (mask ? tile : 0) + (scratch ? tile * source_width : 0);
     for (int b = 0; b < ninputs; b++) {
         const me_array_view *v = &inputs[binding[b]]; size_t w = a_width(v->dtype);
         if (!direct[b]) {
@@ -286,16 +318,49 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
         for (size_t begin = 0; begin < lanes && !rc;) {
             size_t count = lanes - begin < tile ? lanes - begin : tile;
             for (size_t lane = 0; gather && lane < count; lane++) {
-                size_t outer = g, inner = begin + lane; int64_t coordinates[ME_ARRAY_MAX_RANK];
-                for (int i = rank - 1; i >= 0; i--) {
-                    size_t *index = o->reduction != ME_ARRAY_NONE && !axes[i] ? &outer : &inner;
-                    coordinates[i] = (int64_t)(*index % (size_t)shape[i]); *index /= (size_t)shape[i];
-                }
+                int64_t coordinates[ME_ARRAY_MAX_RANK];
+                a_coordinates(rank,shape,axes,o->reduction != ME_ARRAY_NONE,g,begin + lane,coordinates);
                 if (mask) { a_load(o->where,a_offset(o->where,rank,coordinates),&mask[lane]); if (mask[lane] > 1) { rc = ME_ARTIFACT_ERR_BINDING; break; } report->gathered_bytes++; }
-                for (int b = 0; b < ninputs; b++) if (!direct[b]) {
+                for (int b = 0; b < ninputs; b++) if (!direct[b] && !(sources && sources[binding[b]].read)) {
                     const me_array_view *v = &inputs[binding[b]];
                     a_load(v,a_offset(v,rank,coordinates),(uint8_t *)owned[b] + lane*buffers[b].itemsize);
                     report->gathered_bytes += buffers[b].itemsize;
+                }
+            }
+            if (rc) break;
+            for (int b = 0; b < ninputs && !rc; b++) if (sources && sources[binding[b]].read) {
+                const me_array_source *source = &sources[binding[b]];
+                memset(owned[b],0,count*buffers[b].itemsize);
+                size_t participating = 0;
+                for (size_t lane = 0; lane < count; lane++) {
+                    if (mask && !mask[lane]) continue;
+                    int64_t coordinates[ME_ARRAY_MAX_RANK];
+                    a_coordinates(rank,shape,axes,o->reduction != ME_ARRAY_NONE,g,begin + lane,coordinates);
+                    indices[participating++] = a_source_index(&source->view,rank,coordinates);
+                }
+                if (!participating) continue;
+                /* Storage callbacks do not contribute numerical FP diagnostics. */
+                fenv_t reader_environment;
+                if (fegetenv(&reader_environment)) {
+                    rc = a_error(error,ME_ARTIFACT_ERR_UNSUPPORTED,"cannot save reader floating environment");
+                    break;
+                }
+                unsigned reader_flags = 0;
+                unsigned *reader_previous = dsl_portable_status_begin(&reader_flags);
+                int read_status = source->read(source->owner,indices,participating,owned[b],participating*buffers[b].itemsize);
+                dsl_portable_status_end(reader_previous);
+                int restore_status = fesetenv(&reader_environment);
+                if (restore_status) rc = a_error(error,ME_ARTIFACT_ERR_UNSUPPORTED,"cannot restore reader floating environment");
+                else if (read_status) rc = a_error(error,ME_ARTIFACT_ERR_EVAL,"storage reader failed");
+                else {
+                    report->gathered_bytes += participating*buffers[b].itemsize;
+                    /* Scatter backward so compact reads can share the gather
+                     * buffer without overwriting not-yet-scattered values. */
+                    if (mask) for (size_t lane = count; lane-- > 0;) if (mask[lane]) {
+                        participating--;
+                        memmove((uint8_t *)owned[b] + lane*buffers[b].itemsize,
+                            (uint8_t *)owned[b] + participating*buffers[b].itemsize,buffers[b].itemsize);
+                    }
                 }
             }
             if (rc) break;
@@ -373,24 +438,52 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
     dsl_portable_status_end(previous);
 cleanup:
     for (int b = 0; b < ninputs; b++) free(owned[b]);
-    free(mask); free(scratch);
+    free(indices); free(mask); free(scratch);
     if (rc && (!error || !error->message[0])) return a_error(error,rc,"native array traversal failed");
     return rc;
 }
 me_artifact_status me_artifact_eval_array(const me_artifact *a, const me_array_view *inputs, int ninputs,
     int rank, const int64_t *shape, const me_array_options *o, void *output, size_t capacity,
     me_array_report *report, me_artifact_error *error) {
-    return a_run(a, inputs, ninputs, rank, shape, o, output, capacity, report, error, true, false);
+    return a_run(a, inputs, ninputs, rank, shape, o, output, capacity, report, error, true, false, NULL);
 }
 me_artifact_status dsl_array_eval_direct_input(const me_artifact *a, const me_array_view *inputs,
     int ninputs, int rank, const int64_t *shape, const me_array_options *o, void *output,
     size_t capacity, me_array_report *report, me_artifact_error *error) {
-    return a_run(a, inputs, ninputs, rank, shape, o, output, capacity, report, error, true, true);
+    return a_run(a, inputs, ninputs, rank, shape, o, output, capacity, report, error, true, true, NULL);
 }
 me_artifact_status dsl_array_preflight(const me_artifact *a, const me_array_view *inputs, int ninputs,
     int rank, const int64_t *shape, const me_array_options *o, void *output, size_t capacity,
     me_artifact_error *error) {
-    return a_run(a, inputs, ninputs, rank, shape, o, output, capacity, NULL, error, false, false);
+    return a_run(a, inputs, ninputs, rank, shape, o, output, capacity, NULL, error, false, false, NULL);
+}
+static me_artifact_status a_run_sources(const me_artifact *a, const me_array_source *sources,
+    int ninputs, int rank, const int64_t *shape, const me_array_options *o,
+    void *output, size_t capacity, me_array_report *report, me_artifact_error *error,
+    bool execute, bool identity_map) {
+    if (report) memset(report,0,sizeof(*report));
+    if (ninputs < 0 || ninputs > 128 || (ninputs && !sources))
+        return a_error(error,ME_ARTIFACT_ERR_BINDING,"invalid source bindings");
+    me_array_view views[128];
+    for (int i = 0; i < ninputs; i++) views[i] = sources[i].view;
+    return a_run(a,views,ninputs,rank,shape,o,output,capacity,report,error,execute,identity_map,sources);
+}
+me_artifact_status me_artifact_eval_array_sources(const me_artifact *a,
+    const me_array_source *sources, int ninputs, int rank, const int64_t *shape,
+    const me_array_options *o, void *output, size_t capacity,
+    me_array_report *report, me_artifact_error *error) {
+    return a_run_sources(a,sources,ninputs,rank,shape,o,output,capacity,report,error,true,false);
+}
+me_artifact_status dsl_array_sources_preflight(const me_artifact *a,
+    const me_array_source *sources, int ninputs, int rank, const int64_t *shape,
+    const me_array_options *o, void *output, size_t capacity, me_artifact_error *error) {
+    return a_run_sources(a,sources,ninputs,rank,shape,o,output,capacity,NULL,error,false,false);
+}
+me_artifact_status dsl_array_eval_direct_sources(const me_artifact *a,
+    const me_array_source *sources, int ninputs, int rank, const int64_t *shape,
+    const me_array_options *o, void *output, size_t capacity,
+    me_array_report *report, me_artifact_error *error) {
+    return a_run_sources(a,sources,ninputs,rank,shape,o,output,capacity,report,error,true,true);
 }
 me_artifact_status me_array_reshape(const me_array_view *v, int rank, const int64_t *shape,
     me_array_view *out, me_artifact_error *e) {

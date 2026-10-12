@@ -700,7 +700,7 @@ me_graph_status me_graph_specialize(const me_graph_plan *p,
         s->dtype = me_artifact_output_dtype(p->conversion);
         if (!g_product(s->output_rank, s->output_shape, g_width(s->dtype), &s->bytes)) goto fail;
     }
-    size_t per_item = me_artifact_output_itemsize(p->map) + (p->mask >= 0 ? 1 : 0);
+    size_t per_item = me_artifact_output_itemsize(p->map) + (p->mask >= 0 ? 1 : 0) + sizeof(size_t);
     for (int j = 0; j < p->ninputs; j++) if (p->map_indices[j] >= 0) per_item += g_width(p->types[j]);
     if (s->reduction.tile_items > SIZE_MAX / per_item) { message = "iterator scratch overflow"; goto fail; }
     s->scratch = s->reduction.tile_items * per_item;
@@ -709,9 +709,10 @@ me_graph_status me_graph_specialize(const me_graph_plan *p,
 fail:
     g_error(error, -1, rc, message); free(s); return rc;
 }
-me_graph_status me_graph_execute(const me_graph_schedule *s,
+static me_graph_status g_execute(const me_graph_schedule *s,
     const me_array_view *inputs, int ninputs, void *output, size_t capacity,
-    const me_graph_execute_options *options, me_graph_report *report, me_graph_error *error) {
+    const me_graph_execute_options *options, me_graph_report *report, me_graph_error *error,
+    const me_array_source *sources) {
     g_error(error, -1, ME_GRAPH_SUCCESS, "");
     if (report) memset(report, 0, sizeof(*report));
     if (!s || ninputs != s->plan->ninputs || (ninputs && !inputs))
@@ -723,11 +724,16 @@ me_graph_status me_graph_execute(const me_graph_schedule *s,
         return g_error(error, -1, ME_GRAPH_ERR_CAPABILITY, "floating status unavailable on this target");
 #endif
     const me_graph_plan *p = s->plan;
+    for (int i = 0; sources && i < ninputs; i++) if (sources[i].read) {
+        if (p->nstages || (p->mask >= 0 && (!inputs[i].name || g_find(p, inputs[i].name) == p->mask)))
+            return g_error(error, -1, ME_GRAPH_ERR_UNSUPPORTED, "storage readers require single-region graphs and resident reduction masks");
+    }
     if (p->nstages) return g_execute_staged(s, inputs, ninputs, output, capacity, options, report, error);
     if (capacity < s->bytes || (capacity && (!output || (uintptr_t)output > UINTPTR_MAX - capacity)) ||
         (s->bytes && (uintptr_t)output % g_width(s->dtype)))
         return g_error(error, -1, ME_GRAPH_ERR_BINDING, "invalid final output capacity or alignment");
     me_array_view views[ME_MAX_VARS], mask = {0}; bool found[ME_MAX_VARS] = {0};
+    me_array_source map_sources[ME_MAX_VARS];
     for (int i = 0; i < ninputs; i++) {
         int j = g_find(p, inputs[i].name);
         if (j < 0 || found[j] || inputs[i].dtype != p->types[j] || inputs[i].rank != s->inputs[j].rank)
@@ -742,7 +748,10 @@ me_graph_status me_graph_execute(const me_graph_schedule *s,
             return g_error(error, -1, ME_GRAPH_ERR_BINDING, "input shape changed; specialize again");
         if (j == p->mask) mask = inputs[i];
         int index = p->map_indices[j];
-        if (index >= 0) { views[index] = inputs[i]; views[index].name = me_artifact_input_name(p->map, index); }
+        if (index >= 0) {
+            views[index] = inputs[i]; views[index].name = me_artifact_input_name(p->map, index);
+            if (sources) { map_sources[index] = sources[i]; map_sources[index].view = views[index]; }
+        }
     }
     me_array_options reduction = s->reduction;
     if (p->mask >= 0) reduction.where = &mask;
@@ -753,7 +762,10 @@ me_graph_status me_graph_execute(const me_graph_schedule *s,
     void *temporary = p->conversion && s->intermediate ? malloc(s->intermediate) : NULL;
     if (p->conversion && s->intermediate && !temporary)
         return g_error(error, -1, ME_GRAPH_ERR_OOM, "final conversion allocation failed");
-    int status = dsl_array_preflight(p->map, views, me_artifact_ninputs(p->map), s->rank, s->shape,
+    int status = sources ? dsl_array_sources_preflight(p->map, map_sources,
+        me_artifact_ninputs(p->map), s->rank, s->shape, &reduction,
+        p->conversion ? temporary : output, p->conversion ? s->intermediate : capacity, &native) :
+        dsl_array_preflight(p->map, views, me_artifact_ninputs(p->map), s->rank, s->shape,
         &reduction, p->conversion ? temporary : output, p->conversion ? s->intermediate : capacity, &native);
     if (status) {
         free(temporary);
@@ -794,7 +806,10 @@ me_graph_status me_graph_execute(const me_graph_schedule *s,
         }
         reduction.initial = &initial;
     }
-    status = (p->direct_reduction ? dsl_array_eval_direct_input : me_artifact_eval_array)(
+    if (sources) status = (p->direct_reduction ? dsl_array_eval_direct_sources : me_artifact_eval_array_sources)(
+        p->map, map_sources, me_artifact_ninputs(p->map), s->rank, s->shape,
+        &reduction, p->conversion ? temporary : output, p->conversion ? s->intermediate : capacity, &array, &native);
+    else status = (p->direct_reduction ? dsl_array_eval_direct_input : me_artifact_eval_array)(
         p->map, views, me_artifact_ninputs(p->map), s->rank, s->shape,
         &reduction, p->conversion ? temporary : output, p->conversion ? s->intermediate : capacity, &array, &native);
     bool map_jit = me_artifact_has_jit(p->map) && array.evaluated_tiles != 0;
@@ -828,6 +843,42 @@ me_graph_status me_graph_execute(const me_graph_schedule *s,
     if (options && (array.fp_flags & options->raise_mask))
         return g_error(error, -1, ME_GRAPH_ERR_EXECUTION, "active floating operation raised a requested flag");
     return ME_GRAPH_SUCCESS;
+}
+me_graph_status me_graph_execute(const me_graph_schedule *s,
+    const me_array_view *inputs, int ninputs, void *output, size_t capacity,
+    const me_graph_execute_options *options, me_graph_report *report, me_graph_error *error) {
+    return g_execute(s,inputs,ninputs,output,capacity,options,report,error,NULL);
+}
+me_graph_status me_graph_execute_sources(const me_graph_schedule *s,
+    const me_array_source *sources, int ninputs, void *output, size_t capacity,
+    const me_graph_execute_options *options, me_graph_report *report, me_graph_error *error) {
+    if (ninputs < 0 || ninputs > ME_MAX_VARS || (ninputs && !sources)) {
+        if (report) memset(report,0,sizeof(*report));
+        return g_error(error,-1,ME_GRAPH_ERR_BINDING,"invalid source bindings");
+    }
+    me_array_view views[ME_MAX_VARS];
+    for (int i = 0; i < ninputs; i++) views[i] = sources[i].view;
+    return g_execute(s,views,ninputs,output,capacity,options,report,error,sources);
+}
+me_graph_status me_graph_execute_alias(const me_graph_schedule *s,
+    const me_array_view *inputs, int ninputs, void *output, size_t capacity,
+    size_t staging_budget, const me_graph_execute_options *options,
+    me_graph_report *report, me_graph_error *error) {
+    if (report) memset(report,0,sizeof(*report));
+    if (!s || capacity < s->bytes ||
+        (capacity && (!output || (uintptr_t)output > UINTPTR_MAX - capacity)) ||
+        (s->bytes && (uintptr_t)output % g_width(s->dtype)))
+        return g_error(error,-1,ME_GRAPH_ERR_BINDING,"invalid aliased output capacity or alignment");
+    size_t budget = staging_budget ? staging_budget : 64 * 1024 * 1024;
+    if (s->bytes > budget)
+        return g_error(error,-1,ME_GRAPH_ERR_BINDING,"aliased output staging budget exceeded");
+    void *temporary = s->bytes ? malloc(s->bytes) : NULL;
+    if (s->bytes && !temporary)
+        return g_error(error,-1,ME_GRAPH_ERR_OOM,"aliased output staging allocation failed");
+    me_graph_status status = me_graph_execute(s,inputs,ninputs,temporary,s->bytes,options,report,error);
+    if (!status && s->bytes) memmove(output,temporary,s->bytes);
+    free(temporary);
+    return status;
 }
 int me_graph_ninputs(const me_graph_plan *p) {
     return p ? p->ninputs : 0;

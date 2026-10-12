@@ -17,4 +17,11 @@ me_artifact_status dsl_array_eval_direct_input(const me_artifact *artifact,
 me_artifact_status dsl_array_validate_domain(const me_artifact *artifact, int rank,
     const int64_t *shape, const me_array_options *options, bool participating,
     me_artifact_error *error);
+me_artifact_status dsl_array_sources_preflight(const me_artifact *artifact,
+    const me_array_source *inputs, int ninputs, int rank, const int64_t *shape,
+    const me_array_options *options, void *output, size_t capacity, me_artifact_error *error);
+me_artifact_status dsl_array_eval_direct_sources(const me_artifact *artifact,
+    const me_array_source *inputs, int ninputs, int rank, const int64_t *shape,
+    const me_array_options *options, void *output, size_t capacity,
+    me_array_report *report, me_artifact_error *error);
 #endif

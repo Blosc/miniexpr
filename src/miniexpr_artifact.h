@@ -123,6 +123,24 @@ typedef struct {
     int64_t strides[ME_ARRAY_MAX_RANK];
     unsigned byte_order;
 } me_array_view;
+/* Storage-neutral gathered input. A reader fills native-endian values for the
+ * requested source C-order logical indices, in exactly that order (duplicates
+ * are permitted by broadcasting). The destination is invocation-owned scratch.
+ * No pointer survives a callback. Return zero on success, nonzero on failure;
+ * a failed read terminates the invocation and is never retried/replayed.
+ * Reader storage must be disjoint from output and remain stable during a call.
+ * Readers are called synchronously; shared owners provide their own locking.
+ * With read != NULL, view supplies name/dtype/rank/shape only: base/capacity,
+ * offset and byte_order must be zero. With read == NULL it is a resident view.
+ * Preparation/preflight never calls readers. Storage/decompression allocations
+ * owned by callbacks are outside the native iterator scratch bound. */
+typedef int (*me_array_reader)(void *owner, const size_t *indices, size_t count,
+    void *destination, size_t capacity);
+typedef struct {
+    me_array_view view;
+    me_array_reader read;
+    void *owner;
+} me_array_source;
 typedef enum { ME_ARRAY_NONE, ME_ARRAY_SUM, ME_ARRAY_PROD, ME_ARRAY_MIN,
                ME_ARRAY_MAX, ME_ARRAY_ANY, ME_ARRAY_ALL } me_array_reduction;
 typedef struct {
@@ -149,6 +167,10 @@ me_artifact_status me_array_result_shape(const me_artifact *artifact, int rank,
     int64_t *output_shape, me_dtype *output_dtype, me_artifact_error *error);
 me_artifact_status me_artifact_eval_array(const me_artifact *artifact,
     const me_array_view *inputs, int ninputs, int rank, const int64_t *shape,
+    const me_array_options *options, void *output, size_t output_capacity,
+    me_array_report *report, me_artifact_error *error);
+me_artifact_status me_artifact_eval_array_sources(const me_artifact *artifact,
+    const me_array_source *inputs, int ninputs, int rank, const int64_t *shape,
     const me_array_options *options, void *output, size_t output_capacity,
     me_array_report *report, me_artifact_error *error);
 /* Metadata-only borrowed views. No mutation/view-alias guarantees for results.

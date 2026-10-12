@@ -49,6 +49,50 @@ do not contribute to `evaluated_tiles` or `jit_stages`, even if the prepared map
 is JIT-capable. The legacy `interpreter_stages` count includes non-JIT native
 reduction stages and does not imply that an identity map was interpreted.
 
+### Bounded storage-reader inputs
+
+`me_graph_execute_sources` and `me_artifact_eval_array_sources` accept a mixture
+of resident `me_array_view` buffers and `me_array_source` readers. A reader's
+view is metadata-only (name, dtype, rank, shape; base/capacity/offset/byte-order
+are zero). The synchronous callback receives C-order source logical indices and
+fills caller-provided native-endian values in that order. Broadcasting can
+repeat indices. A host adapter can translate indices into compressed chunks,
+proxy fetches, field reads or normalized sliced coordinates without materializing
+the entire input. No compression/storage library dependency is added to miniexpr.
+
+Native traversal owns tile bounds, broadcasting, axis grouping and serial
+reduction order. Resident reduction masks suppress inactive reader requests.
+Callbacks run only after binding/shape/output validation, at most `tile_items`
+values per request; empty domains do not call them. A failed callback terminates
+the invocation without retry or interpreter replay. Callback floating flags and
+rounding changes are isolated from numerical graph status and caller state.
+Readers supply values eagerly for map inputs; kernel branch participation remains
+lazy, but this API does not promise branch-specific storage access.
+
+Iterator scratch includes one reusable tile of logical indices and one tile per
+gathered input. Output storage and host callback/decompression caches are outside
+that bound. Readers and storage owners are invocation-borrowed, never retained in
+plans or schedules; shared owners must synchronize their own reads. Direct input
+reductions can bypass the identity map for reader-backed tiles as well.
+
+This initial reader API supports single-region graphs, including mapped/root
+reductions, functions, division and powers, with either JIT or interpretation.
+Reader-backed staged graphs and reader-backed reduction masks reject before
+storage reads. Ordinary execution still rejects output aliases. This is native storage plumbing,
+not automatic Python proxy/table eligibility or nullable/table semantic lowering.
+
+### Explicit resident output aliases
+
+`me_graph_execute_alias` is an opt-in adapter for resident inputs and aligned
+C-order output, including overlapping input/output allocations. It executes once
+into an independent result and publishes only after complete success. Numerical,
+binding and requested-FP-status failures leave the destination unchanged; they
+never trigger replay. The ordinary execution APIs retain their disjoint-output
+contract. A caller-specified staging budget (zero selects 64 MiB) bounds the full
+result allocation before execution. This allocation is separate from iterator
+scratch reports and its size is `me_graph_output_bytes(schedule)`. Strided output
+scatter and storage-backed output publication remain host responsibilities.
+
 For Menudet 1.0 JIT maps, immutable weak int64/Boolean captures can specialize
 integer conversions after the same checked range validation used by the
 interpreter. In-range values are emitted as typed integer bit patterns in the

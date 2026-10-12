@@ -386,6 +386,135 @@ static void trusted(bool jit) {
     CHECK(output == 12);
     me_graph_schedule_free(s); me_graph_plan_free(p);
 }
+typedef struct {
+    double *values;
+    size_t count, calls, maximum, fail_at;
+    bool perturb_fp, reject_negative;
+} reader_owner;
+static int read_values(void *opaque, const size_t *indices, size_t count, void *destination, size_t capacity) {
+    reader_owner *owner = opaque;
+    owner->calls++;
+    if (count > owner->maximum) owner->maximum = count;
+    if (owner->fail_at == owner->calls || capacity != count * sizeof(double)) return 1;
+    for (size_t i = 0; i < count; i++) {
+        if (indices[i] >= owner->count || (owner->reject_negative && owner->values[indices[i]] < 0)) return 1;
+        ((double *)destination)[i] = owner->values[indices[i]];
+    }
+    if (owner->perturb_fp) { feraiseexcept(FE_INVALID); fesetround(FE_DOWNWARD); }
+    return 0;
+}
+static void storage_readers(bool jit) {
+    me_graph_input_metadata inputs[] = {{"x", ME_FLOAT64, 2, {2, 3}}, {"y", ME_FLOAT64, 1, {3}}};
+    double x[] = {1, 4, 9, 16, 25, 36}, y[] = {1, 2, 3}, output[6];
+    reader_owner owner = {x, 6, 0, 0, 0, true, false};
+    me_array_source sources[2] = {0};
+    sources[0].view = view("x",ME_FLOAT64,NULL,0,2,2,3);
+    sources[0].read = read_values; sources[0].owner = &owner;
+    sources[1].view = view("y",ME_FLOAT64,y,sizeof(y),1,3,0);
+    const char *expressions[] = {"x + (y - 1)", "sqrt(x) / (y ** 2)", "sum(x * 2 + y, axis=0)"};
+    me_graph_specialize_options options = {sizeof(options), ME_GRAPH_VERSION, 2, 0};
+    for (int k = 0; k < 3; k++) {
+        me_graph_plan *p = prepare(expressions[k],inputs,2,jit);
+        me_graph_schedule *s = NULL;
+        CHECK(!me_graph_specialize(p,inputs,2,&options,&s,&error));
+        CHECK(owner.calls == 0);
+        me_graph_report report;
+        output[0] = 99;
+        CHECK(me_graph_execute_sources(s,sources,2,output,1,NULL,&report,&error) == ME_GRAPH_ERR_BINDING);
+        CHECK(owner.calls == 0 && output[0] == 99);
+        int rounding = fegetround();
+        CHECK(!me_graph_execute_sources(s,sources,2,output,sizeof(output),NULL,&report,&error));
+        CHECK(fegetround() == rounding && report.array.fp_flags == 0);
+        CHECK(report.has_jit == me_graph_has_jit(p));
+        fprintf(stderr,"  reader route requested=%s actual=%s\n",jit ? "jit" : "interpreter",
+            report.has_jit ? "jit" : "interpreter");
+        CHECK(owner.maximum <= 2 && owner.calls > 0);
+        CHECK(report.array.temporary_bytes <= me_graph_scratch_bytes(s));
+        if (k == 0) for (int i = 0; i < 6; i++) CHECK(output[i] == x[i] + y[i % 3] - 1);
+        if (k == 1) for (int i = 0; i < 6; i++) CHECK(output[i] == sqrt(x[i]) / (y[i % 3] * y[i % 3]));
+        if (k == 2) for (int i = 0; i < 3; i++) CHECK(output[i] == 2 * x[i] + 2 * x[i + 3] + 2 * y[i]);
+        owner.calls = 0; owner.fail_at = 2;
+        CHECK(me_graph_execute_sources(s,sources,2,output,sizeof(output),NULL,&report,&error) == ME_GRAPH_ERR_EXECUTION);
+        CHECK(owner.calls == 2 && strstr(error.native.message,"storage reader failed"));
+        owner.calls = 0; owner.fail_at = 0;
+        CHECK(!me_graph_execute_sources(s,sources,2,output,sizeof(output),NULL,&report,&error));
+        owner.calls = 0;
+        me_graph_schedule_free(s); me_graph_plan_free(p);
+    }
+    /* Broadcast reader coordinates repeat source indices, not storage offsets. */
+    sources[0].view.shape[1] = 1; inputs[0].shape[1] = 1;
+    me_graph_plan *p = prepare("x + y",inputs,2,jit);
+    me_graph_schedule *s = NULL;
+    CHECK(!me_graph_specialize(p,inputs,2,&options,&s,&error));
+    CHECK(!me_graph_execute_sources(s,sources,2,output,sizeof(output),NULL,NULL,&error));
+    CHECK(output[0] == 2 && output[5] == 7);
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+    /* Direct reductions do not invoke the identity map, even with readers. */
+    me_graph_input_metadata input = {"x",ME_FLOAT64,1,{6}};
+    sources[0].view = view("x",ME_FLOAT64,NULL,0,1,6,0);
+    p = prepare("sum(x)",&input,1,jit);
+    CHECK(!me_graph_specialize(p,&input,1,&options,&s,&error));
+    me_graph_report report;
+    CHECK(!me_graph_execute_sources(s,sources,1,output,sizeof(output),NULL,&report,&error));
+    CHECK(output[0] == 91 && report.array.evaluated_tiles == 0);
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+    /* Empty domains perform no storage calls. */
+    input.shape[0] = sources[0].view.shape[0] = 0; owner.calls = 0;
+    p = prepare("sum(x)",&input,1,jit);
+    CHECK(!me_graph_specialize(p,&input,1,&options,&s,&error));
+    CHECK(!me_graph_execute_sources(s,sources,1,output,sizeof(output),NULL,NULL,&error));
+    CHECK(output[0] == 0 && owner.calls == 0);
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+    /* Resident masks suppress both numeric participation and reader requests. */
+    double masked[] = {-1, 4, -1, -1, 25, -1};
+    bool mask[] = {false, true, false};
+    owner.values = masked; owner.count = 6; owner.calls = owner.maximum = 0; owner.reject_negative = true;
+    me_graph_input_metadata masked_inputs[] = {{"x",ME_FLOAT64,2,{2,3}}, {"mask",ME_BOOL,1,{3}}};
+    sources[0].view = view("x",ME_FLOAT64,NULL,0,2,2,3);
+    sources[1].view = view("mask",ME_BOOL,mask,sizeof(mask),1,3,0);
+    p = prepare("sum(sqrt(x), axis=1, where=mask)",masked_inputs,2,jit);
+    CHECK(!me_graph_specialize(p,masked_inputs,2,&options,&s,&error));
+    CHECK(!me_graph_execute_sources(s,sources,2,output,sizeof(output),NULL,&report,&error));
+    CHECK(output[0] == 2 && output[1] == 5 && owner.calls == 2 && owner.maximum == 1);
+    CHECK(report.array.fp_flags == 0);
+    owner.calls = 0;
+    mask[1] = false;
+    CHECK(!me_graph_execute_sources(s,sources,2,output,sizeof(output),NULL,&report,&error));
+    CHECK(output[0] == 0 && output[1] == 0 && owner.calls == 0);
+    sources[1].view.base = NULL; sources[1].view.capacity = 0; sources[1].read = read_values;
+    CHECK(me_graph_execute_sources(s,sources,2,output,sizeof(output),NULL,&report,&error) == ME_GRAPH_ERR_UNSUPPORTED);
+    CHECK(owner.calls == 0);
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+    /* Staged streaming is not silently materialized or replayed. */
+    input.shape[0] = 6; sources[0].view = view("x",ME_FLOAT64,NULL,0,1,6,0);
+    p = prepare("sum(x) + x",&input,1,jit);
+    CHECK(!me_graph_specialize(p,&input,1,&options,&s,&error));
+    CHECK(me_graph_execute_sources(s,sources,1,output,sizeof(output),NULL,&report,&error) == ME_GRAPH_ERR_UNSUPPORTED);
+    CHECK(owner.calls == 0);
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+}
+static void output_aliases(bool jit) {
+    me_graph_input_metadata input = {"x",ME_FLOAT64,1,{4}};
+    double x[] = {0, 1, 2, 3};
+    me_array_view binding = view("x",ME_FLOAT64,x,sizeof(x),1,4,0);
+    me_graph_plan *p = prepare("x * 2 + 1",&input,1,jit);
+    me_graph_schedule *s = NULL;
+    CHECK(!me_graph_specialize(p,&input,1,NULL,&s,&error));
+    CHECK(me_graph_execute(s,&binding,1,x,sizeof(x),NULL,NULL,&error) == ME_GRAPH_ERR_BINDING);
+    CHECK(me_graph_execute_alias(s,&binding,1,x,sizeof(x),1,NULL,NULL,&error) == ME_GRAPH_ERR_BINDING);
+    CHECK(x[0] == 0 && x[3] == 3);
+    CHECK(!me_graph_execute_alias(s,&binding,1,x,sizeof(x),sizeof(x),NULL,NULL,&error));
+    CHECK(x[0] == 1 && x[3] == 7);
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+    /* An invocation-local numerical error does not publish a partial result. */
+    x[0] = 0; x[1] = 1; x[2] = 2; x[3] = 3;
+    p = prepare("1 / x",&input,1,jit);
+    CHECK(!me_graph_specialize(p,&input,1,NULL,&s,&error));
+    me_graph_execute_options options = {sizeof(options),ME_GRAPH_VERSION,ME_FP_DIVIDE};
+    CHECK(me_graph_execute_alias(s,&binding,1,x,sizeof(x),0,&options,NULL,&error) != ME_GRAPH_SUCCESS);
+    CHECK(x[0] == 0 && x[1] == 1 && x[2] == 2 && x[3] == 3);
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+}
 int main(void) {
 #define RUN_CASE(call) do { fprintf(stderr, "graph preparation: %s\n", #call); fflush(stderr); call; } while (0)
     RUN_CASE(maps(false)); RUN_CASE(lazy(false)); RUN_CASE(reductions(false));
@@ -397,6 +526,8 @@ int main(void) {
     RUN_CASE(dsl_direct_sum());
     RUN_CASE(dsl_direct_reductions());
     RUN_CASE(trusted(false)); RUN_CASE(trusted(true));
+    RUN_CASE(storage_readers(false)); RUN_CASE(storage_readers(true));
+    RUN_CASE(output_aliases(false)); RUN_CASE(output_aliases(true));
 #undef RUN_CASE
     puts("native graph preparation/execution passed"); return 0;
 }
