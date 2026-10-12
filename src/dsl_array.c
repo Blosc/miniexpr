@@ -248,7 +248,7 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
         out_count > SIZE_MAX / width || capacity < out_count * width ||
         (capacity && (!output || (uintptr_t)output > UINTPTR_MAX - capacity)) ||
         (out_count && (!output || (uintptr_t)output % width))) return a_error(error,ME_ARTIFACT_ERR_BINDING,"invalid output capacity or bindings");
-    int binding[128]; bool direct[128]; bool readers = false;
+    int binding[128]; bool direct[128], source_linear[128]; bool readers = false;
     bool suffix = true, seen = false;
     for (int i = 0; i < rank; i++) { if (axes[i]) seen = true; else if (seen) suffix = false; }
     for (int b = 0; b < ninputs; b++) {
@@ -261,6 +261,10 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
         const me_array_view *v = &inputs[binding[b]];
         bool reader = sources && sources[binding[b]].read;
         readers |= reader;
+        /* Matching shapes and suffix reductions traverse storage linearly;
+         * broadcasting/non-suffix reductions still require coordinate mapping. */
+        source_linear[b] = suffix && v->rank == rank &&
+            (!rank || !memcmp(v->shape,shape,(size_t)rank*sizeof(int64_t)));
         if (v->dtype != me_artifact_input_dtype(a,b) ||
             !(reader ? a_reader_valid(v,rank,shape) : a_broadcast(v,rank,shape)) ||
             a_overlap(v->base,v->capacity,output,capacity)) return a_error(error,ME_ARTIFACT_ERR_BINDING,"invalid bounds, broadcast, dtype or overlap");
@@ -307,7 +311,7 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
     size_t groups = o->reduction == ME_ARRAY_NONE ? 1 : out_count;
     size_t lanes = o->reduction == ME_ARRAY_NONE ? total : red_count;
     bool gather = mask != NULL;
-    for (int b = 0; b < ninputs; b++) gather |= !direct[b];
+    for (int b = 0; b < ninputs; b++) gather |= !direct[b] && !(sources && sources[binding[b]].read);
     for (size_t g = 0; g < groups && !rc; g++) {
         uint64_t acc = 0; bool initialized = false;
         if (o->initial) { memcpy(&acc,o->initial,width); initialized = true; }
@@ -330,10 +334,14 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
             if (rc) break;
             for (int b = 0; b < ninputs && !rc; b++) if (sources && sources[binding[b]].read) {
                 const me_array_source *source = &sources[binding[b]];
-                memset(owned[b],0,count*buffers[b].itemsize);
+                if (mask) memset(owned[b],0,count*buffers[b].itemsize);
                 size_t participating = 0;
                 for (size_t lane = 0; lane < count; lane++) {
                     if (mask && !mask[lane]) continue;
+                    if (source_linear[b]) {
+                        indices[participating++] = g * lanes + begin + lane;
+                        continue;
+                    }
                     int64_t coordinates[ME_ARRAY_MAX_RANK];
                     a_coordinates(rank,shape,axes,o->reduction != ME_ARRAY_NONE,g,begin + lane,coordinates);
                     indices[participating++] = a_source_index(&source->view,rank,coordinates);
