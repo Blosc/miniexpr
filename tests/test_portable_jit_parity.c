@@ -24,6 +24,9 @@ typedef struct {
 static const parity_case cases[] = {
     {"arithmetic", "return x * 2 + y", "float64", "float64", true},
     {"conditional return", "if x > 0:\\n        return x\\n    return -x", "float64", "float64", true},
+    {"live assignment join", "if x < 0:\\n        return x\\n    else:\\n        z = x + y\\n    return z", "float64", "float64", true},
+    {"checked float range", "s = 0.0\\n    for i in range(x):\\n        s = s + i\\n    return s", "float64", "float64", true},
+    {"checked unsigned range", "s = 0\\n    for i in range(x):\\n        s = s + i\\n    return s", "uint64", "int64", true},
     {"range", "s = 0.0\\n    for i in range(10):\\n        s = s + x\\n    return s", "float64", "float64", true},
     {"while", "s = 0.0\\n    i = 0\\n    while i < 10:\\n        s = s + x\\n        i = i + 1\\n    return s", "float64", "float64", true},
     {"break", "s = 0.0\\n    for i in range(10):\\n        if s > y:\\n            break\\n        s = s + x\\n    return s", "float64", "float64", true},
@@ -105,6 +108,7 @@ static void matrix(void) {
         CHECK(!me_artifact_has_jit(reference));
         double x[] = {-2, 0, 3}, y[] = {4, 2, 1};
         int32_t ix[] = {-2, 0, 3}, iy[] = {4, 2, 1};
+        uint64_t ux[] = {0,1,3}, uy[] = {4,2,1};
         if (!strcmp(test->name,"factorial") || !strcmp(test->name,"ncr") || !strcmp(test->name,"npr")) {
             ix[0] = 0; ix[1] = 3; ix[2] = 5;
             iy[0] = 0; iy[1] = 1; iy[2] = 2;
@@ -116,6 +120,10 @@ static void matrix(void) {
             {"y", integer ? ME_INT32 : ME_FLOAT64, integer ? 4 : 8,
                 integer ? (void *)iy : (void *)y, integer ? sizeof(iy) : sizeof(y)}
         };
+        if (!strcmp(test->input,"uint64")) {
+            buffers[0] = (me_artifact_buffer){"x",ME_UINT64,8,ux,sizeof(ux)};
+            buffers[1] = (me_artifact_buffer){"y",ME_UINT64,8,uy,sizeof(uy)};
+        }
         uint64_t result[3] = {0}, expected[3] = {0};
         me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
             .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = 3,
@@ -371,7 +379,12 @@ static void scalar_reductions(void) {
         "return block_min(x)", "return block_max(x)",
         "s = block_min(x * 2)\\n    return s / 2",
         "return block_any(x)", "return block_all(x)",
-        "return block_any(sqrt(x))", "return block_all(sqrt(x))"};
+        "return block_any(sqrt(x))", "return block_all(sqrt(x))",
+        "return block_sum(x) / block_sum(x * 2)",
+        "a = block_sum(x)\\n    b = block_prod(x)\\n    return a + b",
+        "s = block_sum(x)\\n    if s > 0:\\n        return block_mean(x)\\n    return s",
+        "s = block_sum(x)\\n    if s < 0:\\n        return s\\n    else:\\n        t = block_prod(x)\\n    return t",
+        "s = block_sum(x)\\n    if s > 0:\\n        return block_max(x)\\n    elif s < 0:\\n        return block_min(x)\\n    return s"};
     for (int input64 = 0; input64 < 2; input64++) for (int output64 = 0; output64 < 2; output64++) {
         const char *input_name = input64 ? "float64" : "float32";
         const char *output_name = output64 ? "float64" : "float32";
@@ -439,10 +452,53 @@ static void scalar_reductions(void) {
     }
 }
 
+static void integer_scalar_reductions(void) {
+    const char *bodies[] = {"return block_sum(x)", "return block_prod(x)",
+        "return block_sum(where(x != 0, x, x))", "return block_prod(where(x != 0, x, x))"};
+    for (int unsigned_input = 0; unsigned_input < 2; unsigned_input++) {
+        const char *dtype = unsigned_input ? "uint64" : "int64";
+        char second[128];
+        snprintf(second,sizeof(second),"{\"name\":\"y\",\"dtype\":\"%s\"}",dtype);
+        for (int body = 0; body < 4; body++) {
+            parity_case test = {"integer scalar reduction",bodies[body],dtype,dtype,true};
+            me_artifact *jit = load_contract(&test,ME_JIT_ON,second,NULL,"block_scalar");
+            me_artifact *reference = load_contract(&test,ME_JIT_OFF,second,NULL,"block_scalar");
+            me_artifact *oracle = load(&cases[0],ME_JIT_ON);
+            CHECK(me_artifact_has_jit(jit) == me_artifact_has_jit(oracle));
+            for (int edge = 0; edge < 4; edge++) {
+                uint64_t data[] = {edge == 0 ? 1 : unsigned_input ? UINT64_MAX : INT64_MAX,
+                    2};
+                uint64_t actual = 0, expected = 0;
+                me_dtype native_dtype = unsigned_input ? ME_UINT64 : ME_INT64;
+                me_artifact_buffer buffers[] = {{"x",native_dtype,8,data,sizeof(data)},
+                    {"y",native_dtype,8,data,sizeof(data)}};
+                uint8_t mask[] = {1,0};
+                me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
+                    .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = edge == 3 ? 0 : 2,
+                    .output_capacity = sizeof(actual), .valid_mask = edge == 2 ? mask : NULL,
+                    .valid_mask_capacity = edge == 2 ? sizeof(mask) : 0};
+                me_artifact_error error, reference_error;
+                me_artifact_fp_status status, reference_status;
+                int rc = me_artifact_eval_status(jit,buffers,2,&actual,&descriptor,0,&status,&error);
+                int reference_rc = me_artifact_eval_status(reference,buffers,2,&expected,&descriptor,0,
+                    &reference_status,&reference_error);
+                CHECK(rc == reference_rc && status.flags == reference_status.flags);
+                if (rc) CHECK(error.native_status == reference_error.native_status);
+                else CHECK(actual == expected);
+            }
+            me_artifact_free(jit);
+            me_artifact_free(reference);
+            me_artifact_free(oracle);
+        }
+    }
+}
+
 static void scalar_checked_order(void) {
     const char *bodies[] = {"return int64(1e100) + block_sum(sqrt(x))",
-        "return block_sum(sqrt(x)) + int64(1e100)"};
-    for (int first = 0; first < 2; first++) {
+        "return block_sum(sqrt(x)) + int64(1e100)",
+        "return block_sum(int64(x * 1e100)) + block_sum(sqrt(x))",
+        "return block_sum(sqrt(x)) + block_sum(int64(x * 1e100))"};
+    for (int first = 0; first < 4; first++) {
         parity_case test = {"scalar checked order",bodies[first],"float64","float64",true};
         const char *second = "{\"name\":\"y\",\"dtype\":\"float64\"}";
         me_artifact *jit = load_contract(&test,ME_JIT_ON,second,NULL,"block_scalar");
@@ -462,7 +518,7 @@ static void scalar_checked_order(void) {
             &reference_status,&reference_error);
         CHECK(rc && rc == reference_rc && error.native_status == reference_error.native_status);
         CHECK(status.flags == reference_status.flags);
-        if (status.supported) CHECK((status.flags & 1) == (unsigned)first);
+        if (status.supported) CHECK((status.flags & 1) == (unsigned)(first % 2));
         me_artifact_free(jit);
         me_artifact_free(reference);
         me_artifact_free(oracle);
@@ -485,5 +541,6 @@ int main(int argc, char **argv) {
     computed_weak_conversion();
     scalar_reductions();
     scalar_checked_order();
+    integer_scalar_reductions();
     return 0;
 }

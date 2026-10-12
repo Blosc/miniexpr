@@ -248,6 +248,16 @@ bool dsl_portable_convert_expr(me_expr **expr, me_dtype dtype) {
     return expr && *expr && p_numeric(dtype) && p_wrap(expr, dtype);
 }
 
+bool dsl_portable_convert_range_expr(me_expr **expr) {
+    if (!expr || !*expr) return false;
+    if ((*expr)->dtype == ME_INT64) return true;
+    if (!p_wrap(expr, ME_INT64)) return false;
+    /* Range-bound construction is checked, unlike an explicit strong integer
+     * cast. Do not alter operand flags or the arithmetic that computes the bound. */
+    (*expr)->flags &= ~ME_EXPR_FLAG_NUMPY_1_1;
+    return true;
+}
+
 static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool numpy) {
     me_expr *n = *slot;
     if (!n || depth > 128) return p_fail(reason, cap, "portable expression nesting limit exceeded");
@@ -1403,7 +1413,7 @@ static uint64_t p_jit_direct_reduction(const me_expr *operation, uint64_t values
     return p_jit_encode(operation->dtype, &result);
 }
 
-/* One extrema/truth step, with invocation-local accumulator and initialized flag.
+/* One integer-arithmetic/extrema/truth step with invocation-local state.
  * The map is evaluated by generated code before this call, even when a truth
  * result is already determined. Never reconstruct an expression or skip a lane. */
 static uint64_t p_jit_reduction_step(const me_expr *operation, uint64_t accumulator,
@@ -1414,6 +1424,19 @@ static uint64_t p_jit_reduction_step(const me_expr *operation, uint64_t accumula
     if (kind == ME_REDUCE_ANY || kind == ME_REDUCE_ALL) {
         bool lane = p_truth(arg->dtype, &value);
         return kind == ME_REDUCE_ALL ? accumulator != 0 && lane : accumulator != 0 || lane;
+    }
+    if (kind == ME_REDUCE_SUM || kind == ME_REDUCE_PROD) {
+        me_scalar acc = p_jit_decode(operation->dtype, accumulator), converted = {0};
+        me_portable_integer_op op = kind == ME_REDUCE_PROD ? ME_PORTABLE_MUL : ME_PORTABLE_ADD;
+        int rc = p_convert(arg->dtype, &value, operation->dtype, &converted);
+        if (!rc) rc = p_unsigned(operation->dtype) ?
+            dsl_portable_unsigned_op(operation->dtype,op,acc.u64,converted.u64,&acc.u64) :
+            dsl_portable_signed_op(operation->dtype,op,acc.i64,converted.i64,&acc.i64);
+        if (rc) {
+            *status = ME_EVAL_ERR_INVALID_ARG;
+            return 0;
+        }
+        return p_jit_encode(operation->dtype, &acc);
     }
     if (kind != ME_REDUCE_MIN && kind != ME_REDUCE_MAX) {
         *status = ME_EVAL_ERR_INVALID_ARG;

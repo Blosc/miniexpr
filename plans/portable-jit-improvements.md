@@ -477,3 +477,39 @@ so downstream benchmarks cannot silently claim JIT performance while interpretin
   remains approximately unchanged at 0.061 ms JIT versus 0.060 ms interpreted.
   These measurements exclude compilation; integer sum/product/mean, multiple
   reductions and scalar statement control flow remain outside this lowering scope.
+- Scalar/loop follow-up (lowering revision 21): multiple qualified reductions use
+  independent serial scans in expression order, including separate assignments
+  and selected lazy branches. Uniform scalar if/elif/else and early returns now
+  lower; the compiler admits reductions only in uniform, non-loop branches.
+  Varying branches and loop-body reductions remain rejected. Empty/fully masked
+  scalar groups with statement conditionals select interpretation before JIT
+  execution, preserving the interpreter's skipped control-flow/dependency-storage
+  rules without replay after failure. Integer sum/product use the existing
+  exact-bit accumulator bridge and authoritative checked 64-bit arithmetic;
+  plain inputs retain one optimized native-reducer call. Modular strong mapped
+  arithmetic remains distinct from checked accumulator overflow. Integer mean
+  remains interpreted. Conditional definite-assignment joins ignore paths exiting
+  via return/unconditional break/continue; potentially empty loops still cannot
+  establish new definitions for later reads.
+- Range follow-up: floating bounds already reach the checked cast bridge after
+  compiler-inserted int64 conversion; added explicit boundary/truncation/step/mask
+  qualification rather than duplicating lowering. Inspection exposed an implicit
+  strong uint64 bound conversion that wrapped above INT64_MAX. Range construction
+  now marks only its inserted conversion as checked; operand arithmetic and
+  explicit modular casts retain their original semantics. Tests cover all three
+  bound positions, nonfinite/out-of-range inputs, zero converted steps, recovery
+  and nonparticipating invalid lanes.
+- Revision 21 qualification used two focused incremental Python-extension cycles,
+  then one broad matrix with independent build directories. All 445 native tests
+  and three sanitizer parity tests qualified after isolated reruns of two cold
+  system-CC eligibility failures during concurrent runs (no value/status failure).
+  The independent wheel passes 1,468 Python tests (18 skips); each host backend
+  passes 374 required-JIT parity cases. Twelve WASM fallback/artifact/graph tests
+  pass. All 90 Python benchmark cases validate values/status; TCC/GCC/Clang each
+  compile 88 with two intentional fallbacks. Sequential Clang warm medians for
+  65,536 values (seven samples) include multiple plain sums 0.069 ms versus
+  0.085 ms interpreted, scalar conditional reduction 0.042 versus 65.526 ms,
+  and mapped integer sum 0.749 versus 65.394 ms. Plain integer sum remains
+  approximately unchanged (0.031 versus 0.030 ms). These local timings exclude
+  compilation. Parallel cold qualification should isolate host JIT cache paths
+  as well as build directories to avoid cross-process artifact contention.

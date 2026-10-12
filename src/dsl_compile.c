@@ -1188,9 +1188,12 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
      * results past element 0 (the reduction collapses the whole block while the
      * surrounding mask is per-element).  Reject it rather than mislead.
      * Conditions are exempt: any()/all() collapsing to a scalar is the
-     * documented idiom there. */
+     * documented idiom there. Portable 1.1 uniform conditionals are safe: all
+     * participating lanes select the same branch. Loops remain excluded. */
     if (ctx->control_depth > 0 && ctx->in_condition == 0 &&
-        !ctx->portable_synthetic_expr && contains_reduction(compiled)) {
+        !ctx->portable_synthetic_expr && contains_reduction(compiled) &&
+        !(ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_1 &&
+          ctx->loop_depth == 0 && ctx->varying_control_depth == 0)) {
         dsl_set_error_reason(ctx,
             "reductions (sum/mean/prod/min/max/any/all) are not supported inside "
             "if/for/while bodies; compute the reduction outside the control flow");
@@ -2759,9 +2762,9 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 return false;
             }
             if (dsl_portable_typed_profile(ctx->program->semantic_profile) &&
-                (!dsl_portable_convert_expr(&compiled->as.for_loop.start.expr, ME_INT64) ||
-                 !dsl_portable_convert_expr(&compiled->as.for_loop.stop.expr, ME_INT64) ||
-                 !dsl_portable_convert_expr(&compiled->as.for_loop.step.expr, ME_INT64))) {
+                (!dsl_portable_convert_range_expr(&compiled->as.for_loop.start.expr) ||
+                 !dsl_portable_convert_range_expr(&compiled->as.for_loop.stop.expr) ||
+                 !dsl_portable_convert_range_expr(&compiled->as.for_loop.step.expr))) {
                 dsl_set_error_reason(ctx, "range arguments require checked int64 conversion");
                 dsl_compiled_stmt_free(compiled);
                 return false;

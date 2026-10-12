@@ -1,4 +1,4 @@
-/* Portable 1.1 scalar C lowering, revision 18. Never translate source
+/* Portable 1.1 scalar C lowering, revision 21. Never translate source
  * text: the typed tree includes promotion and final output conversions. The
  * private kernel ABI appends a participating mask and host comparison/math bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
@@ -66,6 +66,7 @@ static bool pj_supported_reduction(const me_expr *n) {
     me_reduce_kind kind = reduction_kind(n->function);
     if (kind == ME_REDUCE_MIN || kind == ME_REDUCE_MAX ||
         kind == ME_REDUCE_ANY || kind == ME_REDUCE_ALL) return true;
+    if (kind == ME_REDUCE_SUM || kind == ME_REDUCE_PROD) return true;
     return pj_float(n->dtype) && pj_float(arg->dtype) &&
         (kind == ME_REDUCE_SUM || kind == ME_REDUCE_PROD || kind == ME_REDUCE_MEAN);
 }
@@ -104,16 +105,18 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
         if (!pj_supported_reduction(n)) return NULL;
         bool extrema = kind == ME_REDUCE_MIN || kind == ME_REDUCE_MAX;
         bool truth = kind == ME_REDUCE_ANY || kind == ME_REDUCE_ALL;
+        bool integer = (kind == ME_REDUCE_SUM || kind == ME_REDUCE_PROD) && pj_integral(arg->dtype);
+        bool bridged = extrema || truth || integer;
         int id = (*next_temp)++;
         const char *acc_type = pj_type(arg->dtype);
         int bridge = -1;
-        if (extrema || truth) {
+        if (bridged) {
             if (p->portable_jit_nchecked == ME_DSL_PORTABLE_JIT_BRIDGE_LIMIT) return NULL;
             bridge = p->portable_jit_nchecked++;
             p->portable_jit_checked[bridge] = n;
             acc_type = "uint64_t";
         }
-        if ((extrema || truth) && TYPE_MASK(arg->type) == ME_VARIABLE && is_synthetic_address(arg->bound)) {
+        if (bridged && TYPE_MASK(arg->type) == ME_VARIABLE && is_synthetic_address(arg->bound)) {
             int index = (int)((const char *)arg->bound - synthetic_var_addresses);
             if (index >= 0 && index < p->n_inputs && !p->vars.uniform[index]) {
                 const char *decode = n->dtype == ME_FLOAT32 ? "pj_unpack_f32" :
@@ -141,7 +144,7 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
         mapped.scalar_phase = false;
         char *value = ok ? pj_expr(p,arg,defined,depth+1,&mapped,s,next_temp) : NULL;
         if (!value) return NULL;
-        if (extrema || truth) {
+        if (bridged) {
             const char *pack = arg->dtype == ME_FLOAT32 ? "pj_pack_f32" :
                 arg->dtype == ME_FLOAT64 ? "pj_pack_f64" : "(uint64_t)";
             ok = pj_append(s,"pj_acc_%d = ((pj_checked)inputs[%d])(inputs[%d],pj_acc_%d,%s(%s),"
@@ -152,7 +155,7 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
             id,acc_type,id,kind == ME_REDUCE_PROD ? "*" : "+",value,id);
         free(value);
         if (!ok) return NULL;
-        if (extrema || truth) {
+        if (bridged) {
             if (extrema && !pj_append(s,"if (!pj_count_%d) return -5;\n",id)) return NULL;
             const char *decode = n->dtype == ME_FLOAT32 ? "pj_unpack_f32" :
                 n->dtype == ME_FLOAT64 ? "pj_unpack_f64" : NULL;
@@ -238,7 +241,7 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
     bool conversion = !n->function && arity == 1;
     bool weak_operand = arg0 &&
         (arg0->flags & (ME_EXPR_FLAG_WEAK_LITERAL | ME_EXPR_FLAG_WEAK_SCALAR)) != 0;
-    bool int_cast = conversion && pj_integer(n->dtype) && pj_integral(arg0->dtype) &&
+    bool int_cast = conversion && (n->flags & ME_EXPR_FLAG_NUMPY_1_1) && pj_integer(n->dtype) && pj_integral(arg0->dtype) &&
         arg0->dtype != n->dtype && !weak_operand;
     if (conversion && pj_integer(n->dtype) && arg0->dtype != n->dtype && weak_operand) {
         /* Artifact capture leaves are immutable, but their values arrive only
@@ -487,6 +490,27 @@ typedef struct {
     int loop_label;
 } pj_flow;
 
+/* Only paths reaching the join constrain definite assignment. Loops may execute
+ * zero times; their exits never establish definitions after the loop. */
+static bool pj_falls_through(const me_dsl_compiled_block *block, int depth) {
+    if (depth > 64) return true;
+    for (int i = 0; i < block->nstmts; i++) {
+        const me_dsl_compiled_stmt *stmt = block->stmts[i];
+        if (stmt->kind == ME_DSL_STMT_RETURN) return false;
+        if ((stmt->kind == ME_DSL_STMT_BREAK || stmt->kind == ME_DSL_STMT_CONTINUE) &&
+            !stmt->as.flow.cond.expr) return false;
+        if (stmt->kind == ME_DSL_STMT_IF && stmt->as.if_stmt.has_else) {
+            bool live = pj_falls_through(&stmt->as.if_stmt.then_block,depth+1) ||
+                pj_falls_through(&stmt->as.if_stmt.else_block,depth+1);
+            for (int j = 0; j < stmt->as.if_stmt.n_elifs; j++) {
+                live |= pj_falls_through(&stmt->as.if_stmt.elif_branches[j].block,depth+1);
+            }
+            if (!live) return false;
+        }
+    }
+    return true;
+}
+
 static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *block,
                      bool *defined, pj_text *s, int depth, const pj_constants *constants,
                      pj_flow flow) {
@@ -511,11 +535,13 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
             } else ok = pj_append(s,"((%s *)output)[i] = %s; if (pj_status) return pj_status; goto pj_lane_done;\n",pj_type(p->output_dtype),value);
             free(value);
             if (!ok) return false;
+            if (!assignment) return true;
         }
         else if (stmt->kind == ME_DSL_STMT_IF) {
             bool merged[ME_MAX_VARS], branch[ME_MAX_VARS];
             memcpy(merged,defined,sizeof(merged));
             int alternatives = 1 + stmt->as.if_stmt.n_elifs;
+            bool live = false;
             for (int j = 0; j <= alternatives; j++) {
                 const me_dsl_compiled_block *body;
                 if (j < alternatives) {
@@ -539,11 +565,15 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
                 }
                 memcpy(branch,defined,sizeof(branch));
                 if (!pj_block(p,body,branch,s,depth+1,constants,flow) || !pj_append(s,"}\n")) return false;
-                if (j == 0) memcpy(merged,branch,sizeof(merged));
-                else for (int k = 0; k < p->vars.count; k++) merged[k] &= branch[k];
+                if (pj_falls_through(body,depth+1)) {
+                    if (!live) memcpy(merged,branch,sizeof(merged));
+                    else for (int k = 0; k < p->vars.count; k++) merged[k] &= branch[k];
+                    live = true;
+                }
             }
             for (int j = 1; j < alternatives; j++) if (!pj_append(s,"}\n")) return false;
             memcpy(defined,merged,sizeof(merged));
+            if (!live) return true;
         }
         else if (stmt->kind == ME_DSL_STMT_FOR) {
             const me_expr *nodes[] = {stmt->as.for_loop.start.expr,
@@ -551,8 +581,8 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
             char *values[3] = {0};
             bool ok = true;
             for (int j = 0; j < 3; j++) {
-                /* Range's checked float/u64 conversions require a checked bridge.
-                 * Signed integral bounds are exactly representable in int64. */
+                /* The compiler inserts authoritative checked int64 conversions
+                 * for floating/unsigned bounds before lowering. */
                 if (!nodes[j] || !pj_integral(nodes[j]->dtype) || pj_unsigned(nodes[j]->dtype)) {
                     ok = false;
                     break;
@@ -620,22 +650,26 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
                 free(condition);
                 if (!ok) return false;
             }
-            else if (!pj_append(s,"goto pj_%s_%d;\n",target,flow.loop_label)) return false;
+            else {
+                if (!pj_append(s,"goto pj_%s_%d;\n",target,flow.loop_label)) return false;
+                return true;
+            }
         }
         else return false;
     }
     return true;
 }
 
-/* One qualified numeric reduction in a straight-line scalar recipe. Reduction loops are
+/* Qualified numeric reductions in a scalar recipe. Reduction loops are
  * emitted at their expression position, not hoisted ahead of checked/lazy
- * operands. Integer arithmetic/multiple reductions and statement control flow retain
- * interpretation. Scalar-phase input reads must be uniform captures. */
+ * operands. Independent scans are intentionally not fused. Scalar-phase input
+ * reads must be uniform captures; statement loops retain interpretation. */
 static bool pj_count_scalar_reductions(const me_expr *n, int *count, int depth) {
     if (!n || depth > 128) return false;
     if (!IS_FUNCTION(n->type)) return true;
     if (is_reduction_node(n)) {
-        if (++*count > 1 || !pj_supported_reduction(n)) return false;
+        ++*count;
+        if (!pj_supported_reduction(n)) return false;
     }
     int arity = ARITY(n->type);
     if (arity < 1 || arity > 3) return false;
@@ -645,18 +679,27 @@ static bool pj_count_scalar_reductions(const me_expr *n, int *count, int depth) 
     return true;
 }
 
-static bool pj_scalar_program(const me_dsl_compiled_program *p) {
-    if (!p->block.nstmts || p->block.stmts[p->block.nstmts-1]->kind != ME_DSL_STMT_RETURN) return false;
-    int count = 0;
-    for (int j = 0; j < p->block.nstmts; j++) {
-        const me_dsl_compiled_stmt *stmt = p->block.stmts[j];
+static bool pj_scalar_block(const me_dsl_compiled_block *block, int *count, int depth) {
+    if (depth > 64) return false;
+    for (int j = 0; j < block->nstmts; j++) {
+        const me_dsl_compiled_stmt *stmt = block->stmts[j];
         const me_expr *expr;
         if (stmt->kind == ME_DSL_STMT_ASSIGN) expr = stmt->as.assign.value.expr;
-        else if (stmt->kind == ME_DSL_STMT_RETURN && j == p->block.nstmts-1) expr = stmt->as.return_stmt.expr.expr;
+        else if (stmt->kind == ME_DSL_STMT_RETURN) expr = stmt->as.return_stmt.expr.expr;
+        else if (stmt->kind == ME_DSL_STMT_IF) {
+            if (!pj_count_scalar_reductions(stmt->as.if_stmt.cond.expr,count,0) ||
+                !pj_scalar_block(&stmt->as.if_stmt.then_block,count,depth+1) ||
+                !pj_scalar_block(&stmt->as.if_stmt.else_block,count,depth+1)) return false;
+            for (int k = 0; k < stmt->as.if_stmt.n_elifs; k++) {
+                if (!pj_count_scalar_reductions(stmt->as.if_stmt.elif_branches[k].cond.expr,count,0) ||
+                    !pj_scalar_block(&stmt->as.if_stmt.elif_branches[k].block,count,depth+1)) return false;
+            }
+            continue;
+        }
         else return false;
-        if (!pj_count_scalar_reductions(expr,&count,0)) return false;
+        if (!pj_count_scalar_reductions(expr,count,0)) return false;
     }
-    return count == 1;
+    return true;
 }
 
 static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *constants) {
@@ -678,7 +721,8 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         return;
     }
     bool scalar = p->output_is_scalar;
-    if (scalar && !pj_scalar_program(p)) return;
+    int reduction_count = 0;
+    if (scalar && (!pj_scalar_block(&p->block,&reduction_count,0) || !reduction_count)) return;
     for (int i = 0; i < p->n_inputs; i++) if (!pj_type(p->vars.dtypes[i])) {
         dsl_tracef("portable jit ineligible: unsupported input dtype"); return;
     }
@@ -780,7 +824,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
     snprintf(source,capacity,
-        "/* portable-1.1 lowering-r20 extrema-truth-recipes abi-r8 */\n"
+        "/* portable-1.1 lowering-r21 scalar-flow-integer-recipes abi-r8 */\n"
         "#include <stdint.h>\n"
         "#include <string.h>\n"
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"

@@ -14,6 +14,7 @@ bool dsl_portable_type_expr(me_expr **expr, me_dtype output_dtype,
 bool dsl_portable_type_expr_profile(me_expr **expr, me_dtype output_dtype,
                                     me_dsl_semantic_profile profile, char *reason, size_t reason_cap);
 bool dsl_portable_convert_expr(me_expr **expr, me_dtype dtype);
+bool dsl_portable_convert_range_expr(me_expr **expr);
 double dsl_portable_jit_unary_math(const void *node, double x);
 double dsl_portable_jit_binary_math(const void *node, double x, double y);
 bool dsl_portable_jit_predicate(const void *node, double x);

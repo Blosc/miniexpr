@@ -1266,8 +1266,17 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
     if (empty_group && nitems == 0) nitems = 1; /* Scalar dependency storage, not a valid input lane. */
 
     bool jit_attempted = false;
+    /* Empty scalar groups skip statement control flow in the interpreter, and
+     * use its initialized dependency storage. Decide fallback before execution,
+     * never replay generated code after a semantic error. */
+    bool empty_scalar_flow = false;
+    if (empty_group) {
+        for (int i = 0; i < program->block.nstmts; i++) {
+            empty_scalar_flow |= program->block.stmts[i]->kind == ME_DSL_STMT_IF;
+        }
+    }
     if (program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_1 &&
-        program->jit_kernel_fn && !me_eval_jit_disabled(params)) {
+        program->jit_kernel_fn && !empty_scalar_flow && !me_eval_jit_disabled(params)) {
         /* Scalar storage needs one slot even for an empty group, but a compiled
          * reduction must traverse the original group, not that synthetic slot. */
         int jit_nitems = program->output_is_scalar ? group_nitems : nitems;
