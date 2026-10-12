@@ -1,3 +1,6 @@
+> Historical qualification checkpoint. Current public Menudet 1.0 uses
+> NumPy numerical semantics and optional JIT; see [the specification](dsl-spec/1.0.md).
+
 # NumPy compatibility: first checkpoint
 
 Date: 2026-10-09. This is an inventory and conformance harness, **not a change to
@@ -18,7 +21,7 @@ Only macOS arm64, little endian, Python 3.14.4, NumPy 2.5.3 is verified here.
 NumPy 1.26 host support, secondary reference drift, Windows/Linux, WASM,
 sanitizers and optional-feature build variants remain separate verification work.
 
-Portable artifacts specify explicit widths. Existing `int()` means int64 and
+Menudet artifacts specify explicit widths. Existing `int()` means int64 and
 `float()` means float64, independent of C `long`/pointer width. `intp` is not a
 portable dtype. Future NumPy-default reductions must resolve the **authoring
 platform** default once and persist an explicit accumulator width, never consult
@@ -38,14 +41,14 @@ include unverified/unsupported rows, with reference signatures, shapes and evide
 
 | Route | Existing computation | NumPy claim at checkpoint |
 | --- | --- | --- |
-| Full miniexpr expressions / DSL | `miniexpr.c`, `dsl_compile.c`, `dsl_eval.c`; common/full evaluation paths, typed leaves, output-context computation and specialized casts | unverified; not portable semantics |
-| Portable compile/validate | `dsl_portable.c` -> `dsl_compile_program_profile` -> `dsl_portable_expr.c` typed annotation; metadata-only compilation | corpus validates explicit signatures |
-| Portable execution | `dsl_eval.c` profile branch -> `dsl_portable_eval_expr[_masked]`; checked arithmetic in `dsl_portable_types.c` | observed interpreter baseline |
-| Portable JIT/SIMD | draft profile disables full-DSL JIT IR/kernel selection; typed per-lane interpreter, not full math SIMD dispatch | unsupported acceleration, even when requested |
+| Full miniexpr expressions / DSL | `miniexpr.c`, `dsl_compile.c`, `dsl_eval.c`; common/full evaluation paths, typed leaves, output-context computation and specialized casts | unverified; not Menudet semantics |
+| Menudet compile/validate | `dsl_portable.c` -> `dsl_compile_program_profile` -> `dsl_portable_expr.c` typed annotation; metadata-only compilation | corpus validates explicit signatures |
+| Menudet execution | `dsl_eval.c` profile branch -> `dsl_portable_eval_expr[_masked]`; checked arithmetic in `dsl_portable_types.c` | observed interpreter baseline |
+| Menudet JIT/SIMD | draft profile disables full-DSL JIT IR/kernel selection; typed per-lane interpreter, not full math SIMD dispatch | unsupported acceleration, even when requested |
 | Full JIT/SIMD | `dsl_jit_ir.c`, `dsl_jit_cgen.c`, backend files, `functions-simd.c` | unverified for NumPy; audit independently |
 | Python export | `portable_kernel.py`: source literals retained; Python int/float captures become strong int64/float64; NumPy scalars keep explicit widths | no weak-capture category in artifacts |
 | Python import/evaluate | installed `blosc2_ext.pyx` artifact handle -> native load/eval_ex; fixed output dtype, copying endian/stride adapter; no numerical fallback | same corpus status/bits as native |
-| Ordinary LazyExpr / graph | NumExpr/full kernel routes and graph metadata; not automatically lowered to portable profile | unchanged, unverified here |
+| Ordinary LazyExpr / graph | NumExpr/full kernel routes and graph metadata; not automatically lowered to Menudet profile | unchanged, unverified here |
 
 Native promotion: same signedness uses the wider integer; signed/unsigned uses a
 signed width containing both ranges, rejecting the int64/uint64 pair. Integer
@@ -56,7 +59,7 @@ promotion. True integer division returns float64. Source literals are contextual
 weak literals, but **integral float literals can adopt integer context**, unlike
 NumPy weak Python floats. Strong typed captures do not become weak literals.
 
-Portable intermediates have operation/operand types, not the output buffer type.
+Menudet intermediates have operation/operand types, not the output buffer type.
 Output is a separate checked conversion. `int`, `float`, `bool` are the explicit
 cast spellings: int64, float64, truth conversion. Integer narrowing and sign
 changes reject out-of-range values; float-to-integer truncates finite in-range
@@ -81,7 +84,7 @@ Inventory-only rows name existing sources/tests; they are not conformance passes
 | D08 nonfinite float -> int; values/diagnostics | this machine returns INT64_MIN with invalid status suppressed | checked rejection; `float64-cast-infinity` | occasional; hardware-sensitive reference | investigate; sentinel bits are platform evidence, not universal contract |
 | D09 scalar categories; types/artifacts | weak scalar, typed scalar and 0-D distinctions | literals weak; captures strong; no weak capture encoding; typed and 0-D corpus probes included | high authoring impact; moderate artifact/lowering changes | fix after revision transition |
 | D10 half/complex/extended precision; capability | supported NumPy types | absent portable dtype support (`portable_width1`, Python descriptor rejects); no vectors | domain-specific; large extension cost | defer explicitly |
-| D11 real functions/aliases; values/types/diagnostics | signature-specific promotion, NaNs/zeros and FP flags | advertised portable builtin list in `dsl_portable_expr.c`; only sin zero signs tested here; most signatures unverified | high; substantial certification cost | inventory first, incremental common functions |
+| D11 real functions/aliases; values/types/diagnostics | signature-specific promotion, NaNs/zeros and FP flags | advertised Menudet builtin list in `dsl_portable_expr.c`; only sin zero signs tested here; most signatures unverified | high; substantial certification cost | inventory first, incremental common functions |
 | D12 broadcasting; shape/storage | singleton/scalar axes broadcast | Python adapter requires equal shapes; native elementwise adapter equal cardinality only | high; large native traversal work | milestone 5; unsupported here |
 | D13 axis reductions; shapes/type/grouping | logical axes, keepdims, NumPy accumulator defaults | explicit block-local reductions, PortableLazy combines selected reductions; not general native axis scheduling | high; large native ownership/scheduling work | milestone 5; axis API unsupported |
 | D14 layout/aliasing; storage | views/strides and overlapping outputs where permitted | Python normalizes to aligned contiguous host endian, allocates output; native explicit buffers prohibit overlap | high; functional copying available, zero-copy iterator costly | deliberate copying adapter; optimized iterator deferred |

@@ -78,7 +78,7 @@ static int scalar_dispatch(const char *body, const char *output_dtype,
     const char *contract, int count, const uint8_t *mask, bool direct, double expected) {
     char json[2048];
     snprintf(json, sizeof(json),
-        "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
+        "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
         "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x):\\n    %s\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"}],\"constants\":[],"
         "\"output\":{\"dtype\":\"%s\",\"contract\":\"%s\"},\"context\":{\"ndim\":0},"
@@ -212,7 +212,7 @@ static int artifact_allocations(const char *json, int (*result)(me_artifact *), 
 
 static int loop_allocations(void) {
     const char *json =
-        "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
+        "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
         "\"requires\":[\"numeric\",\"control-flow\"],\"source\":\"def k(x):\\n    s = 0.0\\n"
         "    for i in range(3):\\n        for j in range(4):\\n            if j == 1:\\n"
         "                continue\\n            if j == 3:\\n                break\\n"
@@ -236,7 +236,7 @@ static int mapped_sum_result(me_artifact *artifact) {
 
 static int mapped_sum_allocations(void) {
     const char *json =
-        "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
+        "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
         "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x):\\n    return block_sum(x * 2)\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"}],\"constants\":[],"
         "\"output\":{\"dtype\":\"float64\",\"contract\":\"block_scalar\"},\"context\":{\"ndim\":0},"

@@ -57,7 +57,7 @@ descriptor-based logical coordinates. Certification and host persistence remain.
 
 Required top-level keys are `schema_version: "1.0"`,
 `language: {"name":"miniexpr","version":"1.0"}`, `requires`, `source`,
-`entry_point`, `inputs`, `constants`, `output`, `semantics: {"fp":"strict"}`,
+`entry_point`, `inputs`, `constants`, `output`, `semantics: {"fp":"strict","numeric":"numpy-2.5","casting":"unsafe"}`,
 and `context: {"ndim": rank}`. Only object `metadata` is optional. Duplicate or
 unknown fields reject. Rank is 0 without ND, otherwise 1 through the native limit.
 Metadata may label records `implementation-draft`; it grants no capabilities.
@@ -71,8 +71,9 @@ and values above U+10FFFF reject. All eleven numeric types are supported.
 
 Output is `{dtype,contract}` with `elementwise` or `block_scalar`, adding
 `itemsize` for strings. Native compilation derives cardinality/width and rejects
-disagreements. Constants are strong typed immutable uniform operands, not weak
-source literals. Signatures/cardinality never change during evaluation.
+disagreements. Numeric constants declare `category: "weak"` or `"typed_scalar"`. Ordinary Python
+captures are weak; explicit capture dtypes and NumPy scalars are strong typed
+immutable uniform operands. Signatures/cardinality never change during evaluation.
 
 Implemented requirements are `numeric` (mandatory), `control-flow`,
 `block-reductions`, `fixed-strings`, and `nd-context`. Names must be unique/known;
@@ -91,7 +92,8 @@ checked; padded out-of-domain slots must be invalid. Invalid slots neither execu
 nor write. No physical-tile or implicit global context is synthesized.
 
 Native queries expose schema, capabilities, context rank, cardinality and widths.
-`me_artifact_eval` rejects draft 1.0 handles: use `me_artifact_eval_ex`. Loading
+`me_artifact_eval` accepts numeric rank-zero elementwise handles; use
+`me_artifact_eval_ex` for block scalars, strings and explicit ND context. Loading
 never executes source. Optional JIT falls back before execution. Full beta
-certification and host persistence remain open. Requirement `jit-required`
-explicitly rejects with an unavailable-required-JIT diagnostic in this draft.
+certification and host persistence remain open. Requirement `jit-required` reports an unavailable-required-JIT diagnostic when
+no eligible compiled backend is available.

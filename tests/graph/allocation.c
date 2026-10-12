@@ -61,17 +61,17 @@ static int check(const char *json) {
     return !prepared || !failures;
 }
 int main(void) {
-    const char *map = "{\"format\":\"menudet-graph-1\",\"semantics\":\"menudet-numpy-1.1\",\"requires\":[\"numeric\"],"
+    const char *map = "{\"format\":\"menudet-graph-1\",\"semantics\":\"menudet-numpy-1.0\",\"requires\":[\"numeric\"],"
         "\"nodes\":[{\"id\":0,\"op\":\"input\",\"name\":\"x\",\"dtype\":\"float32\"}],\"root\":0,"
         "\"output\":{\"dtype\":\"auto\",\"casting\":\"unsafe\"}}";
-    const char *staged = "{\"format\":\"menudet-graph-1\",\"semantics\":\"menudet-numpy-1.1\",\"requires\":[\"numeric\",\"staged\"],"
+    const char *staged = "{\"format\":\"menudet-graph-1\",\"semantics\":\"menudet-numpy-1.0\",\"requires\":[\"numeric\",\"staged\"],"
         "\"nodes\":[{\"id\":0,\"op\":\"input\",\"name\":\"x\",\"dtype\":\"float32\"},"
         "{\"id\":1,\"op\":\"sum\",\"args\":[0],\"axes\":null,\"keepdims\":false,\"dtype\":\"auto\",\"initial\":null,\"where\":null},"
         "{\"id\":2,\"op\":\"sub\",\"args\":[0,1]}],\"root\":2,\"output\":{\"dtype\":\"auto\",\"casting\":\"unsafe\"}}";
-    const char *conversion = "{\"format\":\"menudet-graph-1\",\"semantics\":\"menudet-numpy-1.1\",\"requires\":[\"numeric\"],"
+    const char *conversion = "{\"format\":\"menudet-graph-1\",\"semantics\":\"menudet-numpy-1.0\",\"requires\":[\"numeric\"],"
         "\"nodes\":[{\"id\":0,\"op\":\"input\",\"name\":\"x\",\"dtype\":\"float32\"}],\"root\":0,"
         "\"output\":{\"dtype\":\"float64\",\"casting\":\"safe\"}}";
-    const char *initial = "{\"format\":\"menudet-graph-1\",\"semantics\":\"menudet-numpy-1.1\",\"requires\":[\"numeric\"],"
+    const char *initial = "{\"format\":\"menudet-graph-1\",\"semantics\":\"menudet-numpy-1.0\",\"requires\":[\"numeric\"],"
         "\"nodes\":[{\"id\":0,\"op\":\"input\",\"name\":\"x\",\"dtype\":\"float32\"},"
         "{\"id\":1,\"op\":\"sum\",\"args\":[0],\"axes\":null,\"keepdims\":false,\"dtype\":\"auto\","
         "\"initial\":{\"dtype\":\"int64\",\"category\":\"weak\",\"encoding\":\"decimal\",\"value\":\"2\"},\"where\":null}],"

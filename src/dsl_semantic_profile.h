@@ -9,7 +9,9 @@
 typedef enum {
     ME_DSL_PROFILE_FULL = 0,
     ME_DSL_PROFILE_PORTABLE_0_1,
+    /* Historical checked-arithmetic test profile; no public artifact selects it. */
     ME_DSL_PROFILE_PORTABLE_1_0,
+    /* NumPy-style implementation used by public Menudet 1.0. */
     ME_DSL_PROFILE_PORTABLE_1_1
 } me_dsl_semantic_profile;
 

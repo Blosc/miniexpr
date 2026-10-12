@@ -1,7 +1,7 @@
 # Logical arrays and native graph deployment (M5/M6)
 
 The opt-in logical-array ABI (`ME_ARTIFACT_ARRAY_VERSION=1`) executes numeric,
-elementwise, rank-zero portable 1.1 artifacts over a logical domain. It does not
+elementwise, rank-zero Menudet 1.0 artifacts over a logical domain. It does not
 reinterpret explicit block-scalar artifacts or ND-context partitions as logical
 array reductions. Existing artifact language/schema semantics are unchanged.
 
@@ -81,16 +81,16 @@ same-output or same-storage mutation is not made safe automatically.
 Mean/variance/std, arg/cumulative reductions, arbitrary gathers/scatters, tuple
 results and mutable-view semantics are deferred, not implied by this ABI.
 
-## Opt-in portable host JIT
+## Opt-in Menudet host JIT
 
-`ME_JIT_ON` at 1.1 artifact load enables fail-closed typed-tree lowering for a
+`ME_JIT_ON` at Menudet 1.0 artifact load enables fail-closed typed-tree lowering for a
 elementwise program, with or without ND context: float32/float64 arithmetic,
 comparisons, Boolean selection, lazy `where`, straight-line locals and simple
 `if`/`elif`/`else` branches with returns. Same-dtype signed and unsigned integer
 `+`, `-`, `*` and negation use unsigned modular arithmetic and bit-copy results,
 not overflowing signed C operations. Integral widening/narrowing conversions
-lower to the same modular bit-copy; float-to-integer conversion stays interpreted
-because it must report out-of-range/nonfinite values as errors. Block reductions
+lower to the same modular bit-copy; float-to-integer conversion reports out-of-range/nonfinite values as errors
+in every backend. Block reductions
 (`block_sum`, `block_min`, ...) remain on the interpreter.
 
 Unary and binary float functions, the float `//`/`%`/`**` operators, the boolean
@@ -101,7 +101,7 @@ supplies already-evaluated operands, so promotion, libm choice, NaN rules, signe
 divmod zero/sentinel handling, oversized shifts and IEEE exceptions are identical
 to the interpreter. Check `me_artifact_has_jit()`;
 an acceleration request alone is not evidence of compiled execution. Default
-requests and checked 1.0 retain interpreter routing. TCC is the first backend;
+requests retain interpreter routing. The historical checked predecessor is private. TCC is the first backend;
 `ME_DSL_JIT_COMPILER=cc` with `CC` selects GCC or another system compiler.
 
 The generated loop uses a private participating-mask and separate
@@ -162,7 +162,7 @@ Python's `PortableKernel.evaluate_array` wraps this scheduler.
 Graph-enabled builds also provide [native metadata-only preparation](native-graphs-1.md)
 through `miniexpr_graph.h`, independently of the artifact ABI described here.
 `LazyExpr.compute(_require_native=True)` lowers an eligible safe numerical graph
-to a declarative native graph with a fused portable 1.1 map and optional root logical reduction.
+to a declarative native graph with a fused Menudet 1.0 map and optional root logical reduction.
 The frontend adapts syntax/owners and performs compressed storage reads; native code
 owns numerical validation, type/shape preparation, values, casts, masks, traversal and reduction. Supported direct
 operands are NumPy/Blosc2 arrays and plain/typed numeric scalars. Unsupported

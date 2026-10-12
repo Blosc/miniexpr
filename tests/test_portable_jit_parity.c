@@ -76,7 +76,7 @@ static me_artifact *load_contract(const parity_case *test, me_jit_mode mode,
     snprintf(inputs, sizeof(inputs), "{\"name\":\"x\",\"dtype\":\"%s\"}%s%s",
         test->input, second_input ? "," : "", second_input ? second_input : "");
     int length = snprintf(json, sizeof(json),
-        "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
+        "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
         "\"requires\":[\"numeric\",\"control-flow\",\"block-reductions\"],\"source\":\"def k(%s):\\n    %s\\n\","
         "\"entry_point\":\"k\",\"inputs\":[%s],"
         "\"constants\":[%s],\"output\":{\"dtype\":\"%s\",\"contract\":\"%s\"},\"context\":{\"ndim\":0},"

@@ -214,15 +214,7 @@ int main(int argc, char **argv) {
     bool expect_compile_error = !strcmp(outcome, "compile_error");
     int rc;
     if (argc == 4) {
-        me_portable_error profile_error;
-        me_portable_status profile = me_validate_portable_dsl(source, ME_PORTABLE_DSL_VERSION,
-            variables, nvars, output_dtype, &profile_error);
-        if ((expect_compile_error && profile == ME_PORTABLE_SUCCESS) ||
-            (!expect_compile_error && profile != ME_PORTABLE_SUCCESS)) {
-            fprintf(stderr, "unexpected portable validation status %d at %d:%d: %s\n",
-                    profile, profile_error.line, profile_error.column, profile_error.message);
-            goto cleanup;
-        }
+        /* Historical checked-arithmetic fixtures use only the private profile. */
         bool is_dsl;
         char reason[256];
         program = dsl_compile_program_profile(source, variables, nvars, output_dtype,

@@ -1,7 +1,7 @@
 # Materialized native stages (G5)
 
 This separately declared, opt-in subset extends native preparation without changing
-artifact 1.0/1.1. The lifecycle and ownership rules of `miniexpr_graph.h` still apply.
+artifact 1.0. The lifecycle and ownership rules of `miniexpr_graph.h` still apply.
 There are no new dependencies, storage readers, callbacks or numerical fallback.
 
 ## Two equivalent frontends
@@ -38,7 +38,7 @@ re-evaluating its producer. This differs intentionally from implicit masked shar
 
 ## Trusted portable regions
 
-A stage with `kind:"portable"` contains a portable artifact object under `artifact`
+A stage with `kind:"portable"` contains a Menudet artifact object under `artifact`
 and requires the exact contract:
 
 ```json
@@ -46,7 +46,7 @@ and requires the exact contract:
  "effects":"ordered-lazy","mask":"none"}
 ```
 
-Native artifact loading revalidates the schema/language 1.1 pair, numeric-only
+Native artifact loading revalidates the schema/language 1.0 pair, numeric-only
 capabilities, input/output signatures, elementwise cardinality and zero ND context.
 Control-flow/reduction/context/string capabilities reject, as do block-scalar or
 full-DSL recipes. Scalar constants, explicit precision and ordered lazy branches

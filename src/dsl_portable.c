@@ -60,9 +60,9 @@ me_portable_status me_validate_portable_dsl_ex(const char *source, const char *v
     const me_variable *inputs, int ninputs, me_dtype output_dtype,
     const me_portable_validation_descriptor *descriptor, me_portable_error *error) {
     if (error) memset(error, 0, sizeof(*error));
-    if (!version || (strcmp(version, ME_PORTABLE_DSL_VERSION) && strcmp(version, "1.1"))) {
+    if (!version || strcmp(version, ME_PORTABLE_DSL_VERSION)) {
         return portable_error(error, ME_PORTABLE_ERR_VERSION, 0, 0,
-                              "unsupported portable DSL version; expected 1.0 or 1.1");
+                              "unsupported portable DSL version; expected Menudet 1.0");
     }
     me_portable_validation_descriptor defaults = {
         .struct_size = sizeof(defaults), .version = ME_PORTABLE_DSL_VALIDATION_DESCRIPTOR_VERSION};
@@ -99,7 +99,8 @@ me_portable_status me_validate_portable_dsl_ex(const char *source, const char *v
         }
     }
     me_dsl_error parse_error;
-    me_dsl_semantic_profile profile = !strcmp(version, "1.1") ? ME_DSL_PROFILE_PORTABLE_1_1 : ME_DSL_PROFILE_PORTABLE_1_0;
+    /* The private enum keeps its pre-release name; public Menudet is 1.0. */
+    me_dsl_semantic_profile profile = ME_DSL_PROFILE_PORTABLE_1_1;
     me_dsl_program *parsed = me_dsl_parse_profile(source, profile, &parse_error);
     if (!parsed) {
         return portable_error(error, strstr(parse_error.message, "out of memory")

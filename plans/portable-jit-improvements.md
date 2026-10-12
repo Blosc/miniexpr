@@ -565,3 +565,9 @@ so downstream benchmarks cannot silently claim JIT performance while interpretin
   scalar for versus 14.257 ms, 0.011 ms for scalar while versus 43.122 ms and
   0.028 ms for reused array locals versus 8.633 ms. These are local small-block
   measurements, not cross-platform performance guarantees.
+- Parent-branch integration retains the single public Menudet 1.0 schema from
+  `graph-preparation` and all lowering/qualification work. Newly added parity and
+  allocation manifests now declare 1.0; the internal legacy profile identifiers
+  remain implementation details. Combined native/Python revisions are qualified
+  again before parent branches are advanced, rather than borrowing evidence
+  from the pre-integration revisions.

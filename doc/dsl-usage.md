@@ -3,7 +3,7 @@
 This guide focuses on practical usage of miniexpr DSL kernels.
 The versioned portable language is **Menudet**, a little language for portable
 computation on arrays and tables. Its [1.0 language draft](dsl-spec/1.0.md) and
-[artifact draft](dsl-spec/artifact-1.0.md) define the portable contract; this guide
+[artifact draft](dsl-spec/artifact-1.0.md) define the Menudet contract; this guide
 also covers ordinary full-DSL features that need not be portable.
 Canonical syntax, accepted statements, and exact error behavior are documented in `doc/dsl-syntax.md`.
 
@@ -47,7 +47,7 @@ Notes:
 - The order of `vars[]` defines input pointer order for `me_eval()`.
 - Full syntax constraints are in `doc/dsl-syntax.md`.
 
-## Portable-profile validation before execution
+## Menudet validation before execution
 
 The experimental versioned profile is smaller than the full DSL:
 
@@ -62,11 +62,11 @@ me_portable_status status = me_validate_portable_dsl(
 
 This checks native source and a typed signature without executing it or invoking
 a compiler. It does not require Python or a working JIT backend. Check `status`
-before portable artifact loading/evaluation; ordinary `me_compile()` retains the
+before Menudet artifact loading/evaluation; ordinary `me_compile()` retains the
 separate full-DSL semantics. See [the draft profile](dsl-spec/1.0.md)
 for supported features and diagnostic categories.
 
-## Portable artifact loading
+## Menudet artifact loading
 
 For a standalone versioned JSON kernel, enable `MINIEXPR_BUILD_ARTIFACT` and link
 the separate `miniexpr_artifact` target. This optional adapter decodes typed scalar

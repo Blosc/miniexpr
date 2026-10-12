@@ -1,7 +1,6 @@
-# Portable 1.1 functions and floating status (M4)
+# Menudet 1.0 functions and floating status
 
-This extends the experimental opt-in 1.1 numerical profile; checked 1.0 keeps
-its existing rules. The native-owned `tests/numpy-compat/functions-v1.1.json`
+This defines the experimental Menudet 1.0 numerical functions and status rules. The native-owned `tests/numpy-compat/functions-v1.0.json`
 enumerates function/type signatures, aliases, exceptional vectors and accuracy
 policies. NumPy **2.5.3** is the reference. Native library extensions that have no
 NumPy equivalent are explicitly marked `native-contract`, not NumPy passes.
@@ -33,10 +32,10 @@ the pinned NumPy version; Boolean `square` and `conj` produce int8. `fabs` promo
 integrals to a floating loop whereas `abs`/`absolute` preserve their integer dtype.
 Predicates return bool without narrowing large integers through float64.
 
-In 1.1, `round` and `rint` use ties-even independent of caller rounding; `sign`
+In Menudet 1.0, `round` and `rint` use ties-even independent of caller rounding; `sign`
 maps both floating zeros to positive zero and propagates NaN. `remainder` uses
 NumPy's divisor-sign remainder, while `fmod` uses truncation/sign-of-dividend,
-including integral loops. Legacy 1.0 `round`/`remainder` rules are retained.
+including integral loops. Legacy/full DSL rules are unchanged.
 
 `minimum`/`maximum` propagate NaN; `fmin`/`fmax` select the non-NaN operand, and
 return NaN if both operands are NaN. **Defined divergence:** zero ties use
@@ -59,7 +58,7 @@ source validation, not evaluation via Python or an external callback.
 
 Inverse functions use canonical Array API/C names only. The former NumPy aliases
 `arcsin`, `arccos`, `arctan`, `arctan2`, `arcsinh`, `arccosh`, `arctanh` are no
-longer native builtins, in either full expressions or portable profiles. Python
+longer native builtins, in either full expressions or Menudet profiles. Python
 authoring normalizes these spellings before compilation/export. Existing raw DSL
 sources/artifacts containing these calls must be updated or re-exported; artifact
 import rejects them rather than silently rewriting saved source. See
@@ -135,11 +134,11 @@ claim follows from these numerical tests.
 continues the default ignore behavior; standalone block users explicitly aggregate
 status. Old native builds reject status requests rather than silently ignoring them.
 
-The portable profile still has **no eligible SIMD/JIT route**. Off/on corpus
-requests explicitly report interpreter fallback; full-DSL TCC/GCC controls do not
-certify these rules. CI registers the same corpus on native Linux/macOS/Windows
+Menudet 1.0 optionally uses typed-tree JIT; unsupported kernels explicitly report
+interpreter fallback. Full-DSL TCC/GCC controls do not certify Menudet semantics.
+See [current JIT capabilities](native-arrays-1.0.md#opt-in-menudet-host-jit). CI registers the same corpus on native Linux/macOS/Windows
 and standalone Node/WASM. Local macOS/WASM results are not remote CI results.
 
-Portable 1.1 inherits the seven explicit `block_*` reduction names and block scope
+Menudet 1.0 inherits the seven explicit `block_*` reduction names and block scope
 from [the DSL spec](dsl-spec/1.0.md#limited-block-reductions). Bare reduction
 calls and axis arguments are rejected; array/graph reductions retain their names.

@@ -1,14 +1,14 @@
 # Native numerical graph preparation (opt-in, graph format 1)
 
 `src/miniexpr_graph.h` introduces a **new, experimental** interface, independent
-of artifact schema/language 1.0/1.1 and of product version numbering. Build with
+of artifact schema/language 1.0 and of product version numbering. Build with
 `MINIEXPR_BUILD_ARTIFACT=ON` and link `miniexpr_artifact` and its miniexpr dependency.
 There are no new dependencies: JSON uses the existing yyjson library.
 
 ## Lifecycle and ownership
 
 1. `me_graph_prepare_json` copies a declarative graph and captures, validates it,
-   and infers numerical types using the portable **1.1** compiler. No array
+   and infers numerical types using the Menudet **1.0** compiler. No array
    pointers, Python, numerical evaluation, callbacks or full-DSL fallback exist
    in this path. Caller FP flags and rounding are preserved, including on errors.
 2. `me_graph_specialize` accepts names, dtypes, ranks and shapes only. It performs
@@ -49,7 +49,7 @@ do not contribute to `evaluated_tiles` or `jit_stages`, even if the prepared map
 is JIT-capable. The legacy `interpreter_stages` count includes non-JIT native
 reduction stages and does not imply that an identity map was interpreted.
 
-For portable 1.1 JIT maps, immutable weak int64/Boolean captures can specialize
+For Menudet 1.0 JIT maps, immutable weak int64/Boolean captures can specialize
 integer conversions after the same checked range validation used by the
 interpreter. In-range values are emitted as typed integer bit patterns in the
 generated source, allowing expressions such as `x % 7`, `x << 2` and
@@ -62,7 +62,7 @@ captures are not covered by this specialization; strong integer casts keep their
 existing modular behavior. This changes neither the artifact schema nor the
 private JIT calling convention.
 
-The portable DSL interpreter shares the sum/product helpers for plain variables with
+The Menudet interpreter shares the sum/product helpers for plain variables with
 unchanged float accumulator dtype or the default promoted integer accumulator,
 full participation and fully initialized lanes. Its integer sums/products preserve the
 existing checked-overflow behavior (unlike graph modular accumulation), including
@@ -74,7 +74,7 @@ once; partial masks, potentially uninitialized variables and computed operands
 retain generic expression reduction. This is a block-reduction optimization, not
 conversion of DSL programs into graphs, and it does not imply JIT execution.
 
-Portable 1.1 programs containing a single numeric/Boolean scalar `return`, with
+Menudet 1.0 programs containing a single numeric/Boolean scalar `return`, with
 no locals or reserved/context variables, can bypass statement bookkeeping on
 nonempty unmasked blocks. The same scalar expression evaluator executes the
 return, including computed operands, multiple reductions, output conversions
@@ -107,7 +107,7 @@ keys and preserved node/operand order. Import is preparation and revalidation,
 never deserialization of executable machine code or cached inference. Captures
 retain categories and value bytes. No global native graph/result cache exists.
 `me_graph_export_map_json` additionally exports eligible elementwise graphs as
-ordinary typed 1.1 artifacts; reductions and final conversions are not silently
+ordinary typed Menudet 1.0 artifacts; reductions and final conversions are not silently
 changed into block-scalar recipes.
 
 ## Format and supported subset
@@ -116,7 +116,7 @@ See `native-graph-1.schema.json` and executable fixtures in `tests/graph/fixture
 All root fields are required:
 
 ```json
-{"format":"menudet-graph-1","semantics":"menudet-numpy-1.1",
+{"format":"menudet-graph-1","semantics":"menudet-numpy-1.0",
  "requires":["numeric"],"nodes":[],"root":0,
  "output":{"dtype":"auto","casting":"unsafe"}}
 ```
@@ -142,7 +142,7 @@ names colliding with generated `_me_capture_<node-id>` bindings reject.
 Numerical types are bool, signed/unsigned 8/16/32/64-bit integers and float32/64.
 Function arities/signatures/promotions are validated by the existing portable
 compiler, not a graph-owned promotion/function table. See
-`numpy-arithmetic-1.1.md` and `numpy-functions-1.1.md` for exact numerical policies.
+`numpy-arithmetic-1.0.md` and `numpy-functions-1.0.md` for exact numerical policies.
 
 Weak constants use bool/int64/float64 transport; typed scalars retain their declared
 dtype. Integers are canonical decimal **strings** (including full uint64 values).
@@ -160,7 +160,7 @@ preparation. Any/all forbid initial/dtype overrides. `where:null` selects all
 coordinates, otherwise it references a strong Boolean input. A participation-only
 input may broadcast **to** the map shape but cannot expand it. Computed participation
 masks are not yet admitted. Initial/masked extrema and empty identities follow
-`native-arrays-1.1.md`. Each group accumulates in serial logical C order;
+`native-arrays-1.0.md`. Each group accumulates in serial logical C order;
 tile size never changes grouping.
 
 `output.dtype:"auto"` preserves the inferred result. A numeric final dtype with
@@ -175,7 +175,7 @@ conversion stage is **not** general multi-stage DAG support.
 ### Participation, sharing and resource limits
 
 Operand order is retained by bounded textual lowering into the authoritative typed
-portable kernel. `select` and Boolean short-circuiting remain lazy. Reduction masks
+Menudet kernel. `select` and Boolean short-circuiting remain lazy. Reduction masks
 gate the map before evaluation. All computed nodes are conservatively treated as
 potentially effectful. Inputs and capture bindings may be shared; **shared computed
 nodes reject**, rather than silently duplicate/hoist work across active domains.
@@ -226,7 +226,7 @@ longer generates DSL twice, promotes graph types, or broadcasts graph shapes.
 Storage selection/decompression and output persistence remain Python adapters;
 `_require_native=True` is still opt-in. The 128-entry Python handle cache keys
 declarative graph/captures/backend configuration, never numerical array values.
-Elementwise `native_kernel()` preserves existing portable artifact persistence.
+Elementwise `native_kernel()` preserves existing Menudet artifact persistence.
 This migration requires a graph-enabled miniexpr build: older dependency revisions
 reject explicitly rather than retaining a second hidden semantic planner.
 For local exact-pair testing build Python with
@@ -241,7 +241,7 @@ pin has not been changed to an unpublished native revision.
 The first slice is map plus an optional root logical reduction, with a distinct
 optional final conversion. G5 now has a separate opt-in materialized subset for
 intermediate reductions, shared strong stage values, broadcast consumers and
-trusted validated portable 1.1 regions. See `native-stages-1.md` for its explicit
+trusted validated Menudet 1.0 regions. See `native-stages-1.md` for its explicit
 participation, lifetime and resource contracts; it does not broaden the first slice.
 Current platform CI already runs graph hosts/corpus tests wherever artifact tests
 run, including interpreter-only and Node/WASM configurations. Actual publication
@@ -271,7 +271,7 @@ Standalone Node/WASM32 interpreter hosts pass the five fixtures, lifecycle and
 inference tests; native ASan graph/array/artifact tests also pass.
 
 Latest local G5 qualification: 439 native CTests passed; the paired Python graph,
-array, JIT, portable artifact/DSL, persistence and nullable-table regression selection
+array, JIT, Menudet artifact/DSL, persistence and nullable-table regression selection
 passed 919 tests with 17 skips in 149 seconds. Graph runtime was required, so none
 of those skips hide missing graph support. The Node/WASM graph selection passed
 9 tests and the ASan graph/array/artifact selection passed 11. A standalone native

@@ -427,11 +427,12 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
     }
     yyjson_val *schema = yyjson_obj_get(root, "schema_version");
     yyjson_val *language_version = yyjson_obj_get(yyjson_obj_get(root, "language"), "version");
-    bool numpy_profile = artifact_equal(schema, "1.1") && artifact_equal(language_version, "1.1");
+    bool numpy_profile = artifact_equal(schema, ME_ARTIFACT_SCHEMA_VERSION) &&
+        artifact_equal(language_version, ME_PORTABLE_DSL_VERSION);
     if (!numpy_profile && ((artifact_string(schema) && !artifact_equal(schema, ME_ARTIFACT_SCHEMA_VERSION)) ||
         (artifact_string(language_version) && !artifact_equal(language_version, ME_PORTABLE_DSL_VERSION)))) {
         status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED,
-                                "unsupported portable artifact version pair; expected 1.0/1.0 or 1.1/1.1");
+                                "unsupported portable artifact version pair; expected Menudet 1.0/1.0");
         goto cleanup;
     }
     const char *const language_fields[] = {"name", "version"};
@@ -489,7 +490,7 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
         !(artifact_equal(yyjson_obj_get(semantics, "casting"), "unsafe") ||
           artifact_equal(yyjson_obj_get(semantics, "casting"), "same_kind") ||
           artifact_equal(yyjson_obj_get(semantics, "casting"), "safe")))) {
-        status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported 1.1 numerical or casting policy");
+        status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported Menudet 1.0 numerical or casting policy");
         goto cleanup;
     }
     bool core = false;
@@ -531,7 +532,7 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
         goto cleanup;
     }
     artifact->capabilities = capabilities;
-    artifact->profile = numpy_profile ? ME_DSL_PROFILE_PORTABLE_1_1 : ME_DSL_PROFILE_PORTABLE_1_0;
+    artifact->profile = ME_DSL_PROFILE_PORTABLE_1_1;
     {
         const char *const context_fields[] = {"ndim"};
         yyjson_val *context = yyjson_obj_get(root, "context");
@@ -932,7 +933,7 @@ int me_artifact_context_ndim(const me_artifact *artifact) {
 }
 
 const char *me_artifact_schema_version(const me_artifact *artifact) {
-    return artifact ? (artifact->profile == ME_DSL_PROFILE_PORTABLE_1_1 ? "1.1" : ME_ARTIFACT_SCHEMA_VERSION) : NULL;
+    return artifact ? ME_ARTIFACT_SCHEMA_VERSION : NULL;
 }
 
 me_dtype me_artifact_inferred_dtype(const me_artifact *artifact) {

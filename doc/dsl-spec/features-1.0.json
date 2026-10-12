@@ -7,6 +7,8 @@
     "fixed_width": ["unicode32", "bytes"],
     "excluded": ["complex", "float16", "object", "datetime", "structured", "dynamic_width"]
   },
+  "numeric_semantics": "numpy-2.5",
+  "numeric_signature_tables": ["../numpy-arithmetic-1.0.md", "../numpy-functions-1.0.md"],
   "capabilities": ["numeric", "control-flow", "nd-context", "fixed-strings", "block-reductions"],
   "operators": {
     "arithmetic": ["+", "-", "*", "/", "//", "%", "**"],
@@ -18,16 +20,16 @@
     {"names": ["int", "float"], "arity": 1, "signature": "numeric -> int64/float64 respectively", "semantics": "argument evaluated first; int truncates toward zero with finite/range checks"},
     {"names": ["bool"], "arity": 1, "signature": "numeric/fixed-string -> bool", "semantics": "numeric zero false, NaN true; string logical emptiness before first NUL"},
     {"names": ["range"], "arity": [1, 2, 3], "signature": "integer loop bounds", "semantics": "loop syntax only; zero step errors"},
-    {"names": ["abs", "square", "sign"], "arity": 1, "signature": "numeric -> operand-derived numeric", "semantics": "checked integer operations"},
-    {"names": ["acos", "acosh", "asin", "asinh", "atan", "atanh", "cbrt", "cos", "cosh", "cospi", "erf", "erfc", "exp", "exp10", "exp2", "expm1", "lgamma", "ln", "log", "log10", "log1p", "log2", "sin", "sinh", "sinpi", "sqrt", "tan", "tanh", "tgamma"], "arity": 1, "signature": "numeric -> float32 for float32 input, float64 otherwise", "semantics": "log/ln natural log independent of build flags; domain/IEEE cases defined in math_domains and 1.0.md; cross-platform accuracy bound pending release certification"},
-    {"names": ["ceil", "floor", "rint", "round", "trunc"], "arity": 1, "signature": "numeric -> same dtype, bool -> int64", "semantics": "ceil toward +infinity; floor toward -infinity; trunc toward zero; rint nearest/ties-even; round nearest/ties-away; integer identities; preserve signed zero/NaN/infinity"},
-    {"names": ["atan2", "copysign", "fdim", "fmax", "fmin", "fmod", "hypot", "logaddexp", "nextafter", "remainder"], "arity": 2, "signature": "numeric pair -> float32 if common numeric type is float32, float64 otherwise; unsupported numeric promotions reject", "semantics": "per-lane, not reductions; math_special_values specifies NaN/zero rules; independent platform accuracy pending"},
-    {"names": ["pow", "power"], "arity": 2, "signature": "numeric pair -> same semantics as **", "semantics": "checked integer power when result is integral"},
-    {"names": ["ldexp"], "arity": 2, "signature": "numeric, integral exponent -> float32 for float32 first operand, float64 otherwise", "semantics": "exponent converts exactly to int64 then must fit C int; floating overflow/underflow yields IEEE values"},
+    {"names": ["abs", "square", "sign"], "arity": 1, "signature": "NumPy numeric signature table in ../numpy-functions-1.0.md (arithmetic in ../numpy-arithmetic-1.0.md)", "semantics": "Current Menudet 1.0 NumPy signature and special-value rules in the referenced tables"},
+    {"names": ["acos", "acosh", "asin", "asinh", "atan", "atanh", "cbrt", "cos", "cosh", "cospi", "erf", "erfc", "exp", "exp10", "exp2", "expm1", "lgamma", "ln", "log", "log10", "log1p", "log2", "sin", "sinh", "sinpi", "sqrt", "tan", "tanh", "tgamma"], "arity": 1, "signature": "NumPy numeric signature table in ../numpy-functions-1.0.md (arithmetic in ../numpy-arithmetic-1.0.md)", "semantics": "Current Menudet 1.0 NumPy signature and special-value rules in the referenced tables"},
+    {"names": ["ceil", "floor", "rint", "round", "trunc"], "arity": 1, "signature": "NumPy numeric signature table in ../numpy-functions-1.0.md (arithmetic in ../numpy-arithmetic-1.0.md)", "semantics": "Current Menudet 1.0 NumPy signature and special-value rules in the referenced tables"},
+    {"names": ["atan2", "copysign", "fdim", "fmax", "fmin", "fmod", "hypot", "logaddexp", "nextafter", "remainder"], "arity": 2, "signature": "NumPy numeric signature table in ../numpy-functions-1.0.md (arithmetic in ../numpy-arithmetic-1.0.md)", "semantics": "Current Menudet 1.0 NumPy signature and special-value rules in the referenced tables"},
+    {"names": ["pow", "power"], "arity": 2, "signature": "NumPy numeric signature table in ../numpy-functions-1.0.md (arithmetic in ../numpy-arithmetic-1.0.md)", "semantics": "Current Menudet 1.0 NumPy signature and special-value rules in the referenced tables"},
+    {"names": ["ldexp"], "arity": 2, "signature": "NumPy numeric signature table in ../numpy-functions-1.0.md (arithmetic in ../numpy-arithmetic-1.0.md)", "semantics": "Current Menudet 1.0 NumPy signature and special-value rules in the referenced tables"},
     {"names": ["fma"], "arity": 3, "signature": "numeric triple -> promoted floating type", "semantics": "explicit single-round fused operation; no implicit contraction elsewhere"},
     {"names": ["where"], "arity": 3, "signature": "predicate, compatible alternatives -> joined alternative type", "semantics": "only selected participating lanes evaluate each alternative"},
     {"names": ["e", "pi"], "arity": 0, "signature": "float64 constant", "semantics": "fixed correctly rounded binary64 constants"},
-    {"names": ["conj", "real", "imag"], "arity": 1, "signature": "real numeric only", "semantics": "identity/identity/zero respectively; no complex support"},
+    {"names": ["conj", "real", "imag"], "arity": 1, "signature": "NumPy numeric signature table in ../numpy-functions-1.0.md (arithmetic in ../numpy-arithmetic-1.0.md)", "semantics": "Current Menudet 1.0 NumPy signature and special-value rules in the referenced tables"},
     {"names": ["fac"], "arity": 1, "signature": "integral -> same dtype, bool -> int64", "semantics": "n >= 0; exact n!, 0! = 1; checked multiplication and result conversion; overflow/domain error, never floating approximation"},
     {"names": ["ncr", "npr"], "arity": 2, "signature": "integral pair -> common integral dtype, bool arithmetic -> int64", "semantics": "0 <= k <= n; exact binomial/falling factorial, k=0 yields 1; ncr uses cancellation before multiplication; all intermediates/result checked; no signed64/unsigned64 implicit arithmetic join"},
     {"names": ["contains", "endswith", "startswith"], "arity": 2, "signature": "same-kind fixed strings -> bool", "semantics": "first-NUL logical values"},
@@ -37,7 +39,8 @@
     {"names": ["substr"], "arity": 3, "signature": "fixed string, integral start, integral length -> bounded same-kind string", "semantics": "negative start counts from logical end then clamps at zero; start beyond end/negative length yield empty; length clips at end; large unsigned indices handled without floating loss"},
     {"names": ["split_part"], "arity": 3, "signature": "same-kind fixed strings, integral part -> bounded same-kind string", "semantics": "first separator only: part <= 0 selects head, part > 0 selects remainder; absent separator gives entire head or empty remainder"},
     {"names": ["block_all", "block_any"], "arity": 1, "signature": "numeric/Boolean lanes -> block bool", "semantics": "active valid lanes; NaN is true; empty all=true, any=false; no direct string reduction"},
-    {"names": ["block_sum", "block_prod", "block_mean", "block_min", "block_max"], "arity": 1, "signature": "numeric lanes -> block scalar", "semantics": "ordered checked rules in reduction_rules; NaN propagation; scalar returns require coherent group control flow"}
+    {"names": ["block_sum", "block_prod", "block_mean", "block_min", "block_max"], "arity": 1, "signature": "numeric lanes -> block scalar", "semantics": "ordered checked rules in reduction_rules; NaN propagation; scalar returns require coherent group control flow"},
+    {"names": ["minimum", "maximum", "isfinite", "isinf", "isnan", "signbit", "fabs", "absolute"], "arity": [1, 2], "signature": "Per-function arities and NumPy numeric signatures in ../numpy-functions-1.0.md", "semantics": "Predicates return bool; minimum/maximum propagate NaNs; abs/absolute/fabs follow their numeric signatures"}
   ],
   "math_domains": {
     "sin_cos_tan_sinpi_cospi": "finite real inputs; infinities yield NaN; sinpi/cospi exact integral and half-integral anchors",
@@ -50,7 +53,7 @@
     "tgamma": "real excluding nonpositive integer poles; negative integer poles NaN; signed zero poles signed infinity; positive infinity -> infinity, negative infinity -> NaN",
     "lgamma": "log(abs(Gamma(x))); integer poles -> +infinity; either infinity -> +infinity",
     "atan_asinh_sinh_cosh_tanh_cbrt_erf_erfc_exp_exp2_exp10_expm1": "all finite reals; C99/IEEE limiting infinity/underflow/overflow values; exp10 is pow(10,x)",
-    "pow_floating": "C99 real pow domain: negative base with nonintegral exponent -> NaN; poles/overflow/underflow yield IEEE values; integral power uses checked integer rules instead"
+    "pow_floating": "C99 real pow domain: negative base with nonintegral exponent -> NaN; poles/overflow/underflow yield IEEE values; integral power uses fixed-width wrapping rules instead"
   },
   "math_special_values": {
     "general": "NaN propagates unless stated otherwise; NaN payloads unspecified; nontrapping nearest/ties-even, caller FP state restored",
@@ -69,7 +72,7 @@
   },
   "reduction_rules": {
     "names": ["block_sum", "block_prod", "block_mean", "block_min", "block_max", "block_any", "block_all"],
-    "scope": "one supplied evaluation block only; no axis/keepdims or implicit cross-block aggregation; bare reduction names reject in portable 1.0/1.1",
+    "scope": "one supplied evaluation block only; no axis/keepdims or implicit cross-block aggregation; bare reduction names reject in Menudet 1.0",
     "group": "valid currently participating lanes in original logical C-order; no padded lanes or reassociation",
     "sum_prod": "signed/bool -> int64, unsigned -> uint64, floats retain dtype; each accumulation checked/rounded; empty 0/1",
     "mean": "checked ordered signed/bool int64 or unsigned uint64 sum then float64 conversion/division; floating sum/division retains input dtype; participating lane count is divisor; empty NaN; integer accumulation overflow errors",
@@ -89,7 +92,7 @@
   },
   "excluded_effects": ["print", "external_calls", "closures", "input_mutation"],
   "accuracy_release_gate": {
-    "exact": "integer checked results/comparisons, fixed constants pi/e, stated tie/zero rules, nextafter steps and sinpi/cospi integral/half-integral anchors",
+    "exact": "integer wrapping results/comparisons, fixed constants pi/e, stated tie/zero rules, nextafter steps and sinpi/cospi integral/half-integral anchors",
     "local_fixture_bounds": "analytic anchors and rounded independent hex constants use stated test-specific 8-epsilon relative regression bounds, zero anchors exact; not a universal ULP guarantee",
     "pending": "independent function-specific accuracy certification on Windows/Linux/macOS/WASM and stock published-pin wheels; no global libm tolerance invented"
   },
