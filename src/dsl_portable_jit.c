@@ -59,6 +59,17 @@ typedef struct {
 
 static bool pj_append(pj_text *s, const char *format, ...);
 
+static bool pj_supported_reduction(const me_expr *n) {
+    if (!n || !is_reduction_node(n) || !pj_type(n->dtype)) return false;
+    const me_expr *arg = n->parameters[0];
+    if (!arg || !pj_type(arg->dtype)) return false;
+    me_reduce_kind kind = reduction_kind(n->function);
+    if (kind == ME_REDUCE_MIN || kind == ME_REDUCE_MAX ||
+        kind == ME_REDUCE_ANY || kind == ME_REDUCE_ALL) return true;
+    return pj_float(n->dtype) && pj_float(arg->dtype) &&
+        (kind == ME_REDUCE_SUM || kind == ME_REDUCE_PROD || kind == ME_REDUCE_MEAN);
+}
+
 /* Only immutable integral capture leaves can be specialized. Validate the exact
  * checked weak conversion; out-of-range captures keep interpretation, including
  * its lazy participation/error timing. Never alter the shared typed tree. */
@@ -90,23 +101,68 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
     if (is_reduction_node(n) && constants && constants->scalar_phase) {
         me_reduce_kind kind = reduction_kind(n->function);
         const me_expr *arg = n->parameters[0];
-        if (!pj_float(n->dtype) || !pj_float(arg->dtype) ||
-            (kind != ME_REDUCE_SUM && kind != ME_REDUCE_PROD && kind != ME_REDUCE_MEAN)) return NULL;
+        if (!pj_supported_reduction(n)) return NULL;
+        bool extrema = kind == ME_REDUCE_MIN || kind == ME_REDUCE_MAX;
+        bool truth = kind == ME_REDUCE_ANY || kind == ME_REDUCE_ALL;
         int id = (*next_temp)++;
         const char *acc_type = pj_type(arg->dtype);
+        int bridge = -1;
+        if (extrema || truth) {
+            if (p->portable_jit_nchecked == ME_DSL_PORTABLE_JIT_BRIDGE_LIMIT) return NULL;
+            bridge = p->portable_jit_nchecked++;
+            p->portable_jit_checked[bridge] = n;
+            acc_type = "uint64_t";
+        }
+        if ((extrema || truth) && TYPE_MASK(arg->type) == ME_VARIABLE && is_synthetic_address(arg->bound)) {
+            int index = (int)((const char *)arg->bound - synthetic_var_addresses);
+            if (index >= 0 && index < p->n_inputs && !p->vars.uniform[index]) {
+                const char *decode = n->dtype == ME_FLOAT32 ? "pj_unpack_f32" :
+                    n->dtype == ME_FLOAT64 ? "pj_unpack_f64" : NULL;
+                char integer_decode[64];
+                if (!decode) {
+                    snprintf(integer_decode,sizeof(integer_decode),"pj_%s",type);
+                    decode = n->dtype == ME_BOOL ? "(_Bool)" : integer_decode;
+                }
+                if (!pj_append(s,"uint64_t pj_bits_%d = ((pj_checked)inputs[%d])(inputs[%d],"
+                    "(uint64_t)(uintptr_t)inputs[%d],(uint64_t)(uintptr_t)mask,"
+                    "(uint64_t)count | (UINT64_C(1) << 63),&pj_status); if (pj_status) return pj_status;\n"
+                    "%s pj_reduced_%d = %s(pj_bits_%d);\n",
+                    id,p->n_inputs+ME_DSL_PORTABLE_JIT_CHECKED_OFF,
+                    p->n_inputs+ME_DSL_PORTABLE_JIT_CHECKED_OFF+1+bridge,index,type,id,decode,id)) return NULL;
+                snprintf(leaf,sizeof(leaf),"pj_reduced_%d",id);
+                return strdup(leaf);
+            }
+        }
         bool ok = pj_append(s,"%s pj_acc_%d = %d; int64_t pj_count_%d = 0;\n"
             "for (int64_t i=0; i<count; i++) { if (mask && !mask[i]) continue;\n%s",
-            acc_type,id,kind == ME_REDUCE_PROD ? 1 : 0,id,
+            acc_type,id,kind == ME_REDUCE_PROD || kind == ME_REDUCE_ALL ? 1 : 0,id,
             constants->nd_preamble ? constants->nd_preamble : "");
         pj_constants mapped = *constants;
         mapped.scalar_phase = false;
         char *value = ok ? pj_expr(p,arg,defined,depth+1,&mapped,s,next_temp) : NULL;
         if (!value) return NULL;
-        ok = pj_append(s,"pj_acc_%d = (%s)(pj_acc_%d %s (%s)); pj_count_%d++;\n}\n",
+        if (extrema || truth) {
+            const char *pack = arg->dtype == ME_FLOAT32 ? "pj_pack_f32" :
+                arg->dtype == ME_FLOAT64 ? "pj_pack_f64" : "(uint64_t)";
+            ok = pj_append(s,"pj_acc_%d = ((pj_checked)inputs[%d])(inputs[%d],pj_acc_%d,%s(%s),"
+                "pj_count_%d != 0,&pj_status); if (pj_status) return pj_status; pj_count_%d++;\n}\n",
+                id,p->n_inputs+ME_DSL_PORTABLE_JIT_CHECKED_OFF,
+                p->n_inputs+ME_DSL_PORTABLE_JIT_CHECKED_OFF+1+bridge,id,pack,value,id,id);
+        } else ok = pj_append(s,"pj_acc_%d = (%s)(pj_acc_%d %s (%s)); pj_count_%d++;\n}\n",
             id,acc_type,id,kind == ME_REDUCE_PROD ? "*" : "+",value,id);
         free(value);
         if (!ok) return NULL;
-        if (kind == ME_REDUCE_MEAN) {
+        if (extrema || truth) {
+            if (extrema && !pj_append(s,"if (!pj_count_%d) return -5;\n",id)) return NULL;
+            const char *decode = n->dtype == ME_FLOAT32 ? "pj_unpack_f32" :
+                n->dtype == ME_FLOAT64 ? "pj_unpack_f64" : NULL;
+            char integer_decode[64];
+            if (!decode) {
+                snprintf(integer_decode,sizeof(integer_decode),"pj_%s",type);
+                decode = n->dtype == ME_BOOL ? "(_Bool)" : integer_decode;
+            }
+            if (!pj_append(s,"%s pj_reduced_%d = %s(pj_acc_%d);\n",type,id,decode,id)) return NULL;
+        } else if (kind == ME_REDUCE_MEAN) {
             const char *nan = arg->dtype == ME_FLOAT32 ?
                 "pj_unpack_f32(UINT64_C(0x7fc00000))" : "pj_unpack_f64(UINT64_C(0x7ff8000000000000))";
             if (!pj_append(s,"%s pj_reduced_%d = pj_count_%d ? pj_acc_%d / (%s)pj_count_%d : %s;\n",
@@ -571,17 +627,15 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
     return true;
 }
 
-/* One floating reduction in a straight-line scalar recipe. Reduction loops are
+/* One qualified numeric reduction in a straight-line scalar recipe. Reduction loops are
  * emitted at their expression position, not hoisted ahead of checked/lazy
- * operands. Integer and multiple reductions, and statement control flow, retain
+ * operands. Integer arithmetic/multiple reductions and statement control flow retain
  * interpretation. Scalar-phase input reads must be uniform captures. */
 static bool pj_count_scalar_reductions(const me_expr *n, int *count, int depth) {
     if (!n || depth > 128) return false;
     if (!IS_FUNCTION(n->type)) return true;
     if (is_reduction_node(n)) {
-        me_reduce_kind kind = reduction_kind(n->function);
-        if (++*count > 1 || !pj_float(n->dtype) || !pj_float(((me_expr *)n->parameters[0])->dtype) ||
-            (kind != ME_REDUCE_SUM && kind != ME_REDUCE_PROD && kind != ME_REDUCE_MEAN)) return false;
+        if (++*count > 1 || !pj_supported_reduction(n)) return false;
     }
     int arity = ARITY(n->type);
     if (arity < 1 || arity > 3) return false;
@@ -726,7 +780,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
     snprintf(source,capacity,
-        "/* portable-1.1 lowering-r19 scalar-recipes abi-r8 */\n"
+        "/* portable-1.1 lowering-r20 extrema-truth-recipes abi-r8 */\n"
         "#include <stdint.h>\n"
         "#include <string.h>\n"
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"

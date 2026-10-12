@@ -882,6 +882,21 @@ static bool p_all_lanes(const uint8_t *lanes, int count) {
     return true;
 }
 
+/* Shared by generic reduction evaluation and the exact-bit JIT step helper. */
+static void p_extrema_step(me_dtype dtype, me_scalar *acc, const me_scalar *value,
+    bool initialized, bool minimum) {
+    if (!initialized) *acc = *value;
+    else if (p_float(dtype)) {
+        double x = p_double(dtype, acc), y = p_double(dtype, value);
+        if (isnan(y) || (!isnan(x) && (minimum ? y < x : y > x)) ||
+            (!isnan(x) && x == 0.0 && y == 0.0 && (minimum ? signbit(y) : !signbit(y)))) *acc = *value;
+    } else if (dtype == ME_BOOL) {
+        acc->b = minimum ? acc->b && value->b : acc->b || value->b;
+    } else if (p_unsigned(dtype)) {
+        if (minimum ? value->u64 < acc->u64 : value->u64 > acc->u64) *acc = *value;
+    } else if (minimum ? value->i64 < acc->i64 : value->i64 > acc->i64) *acc = *value;
+}
+
 static int p_reduce(const me_expr *n, p_eval_context *ctx, me_scalar *out) {
     me_reduce_kind kind = reduction_kind(n->function);
     const me_expr *arg = n->parameters[0];
@@ -964,18 +979,7 @@ static int p_reduce(const me_expr *n, p_eval_context *ctx, me_scalar *out) {
         }
         if (p_convert(arg->dtype, &value, acc_dtype, &converted) != 0) return ME_EVAL_ERR_INVALID_ARG;
         if (kind == ME_REDUCE_MIN || kind == ME_REDUCE_MAX) {
-            bool minimum = kind == ME_REDUCE_MIN;
-            if (!count) acc = converted;
-            else if (p_float(acc_dtype)) {
-                double x = p_double(acc_dtype, &acc), y = p_double(acc_dtype, &converted);
-                if (isnan(y) || (!isnan(x) && (minimum ? y < x : y > x)) ||
-                    (!isnan(x) && x == 0.0 && y == 0.0 && (minimum ? signbit(y) : !signbit(y)))) acc = converted;
-            }
-            else if (acc_dtype == ME_BOOL) acc.b = minimum ? acc.b && converted.b : acc.b || converted.b;
-            else if (p_unsigned(acc_dtype)) {
-                if (minimum ? converted.u64 < acc.u64 : converted.u64 > acc.u64) acc = converted;
-            }
-            else if (minimum ? converted.i64 < acc.i64 : converted.i64 > acc.i64) acc = converted;
+            p_extrema_step(acc_dtype, &acc, &converted, count != 0, kind == ME_REDUCE_MIN);
         }
         else if (acc_dtype == ME_FLOAT32) {
             acc.f32 = kind == ME_REDUCE_PROD ? acc.f32 * converted.f32 : acc.f32 + converted.f32;
@@ -1323,24 +1327,30 @@ uint64_t dsl_portable_jit_int_op(const void *node, uint64_t a, uint64_t b, int *
     return (uint64_t)result.i64;
 }
 
-/* Cast-only checked bridge: reuse the authoritative conversion routines without
- * reconstructing an expression/context for each lane. Strong integer casts stay
- * modular; weak operands and floating inputs retain their checked conversions. */
-static uint64_t p_jit_checked_cast(const me_expr *operation, uint64_t bits, int *status) {
-    const me_expr *arg = operation->parameters[0];
-    me_scalar value = {0}, result = {0};
-    if (arg->dtype == ME_FLOAT32) {
+/* Exact-bit transport for specialized checked-operation helpers. */
+static me_scalar p_jit_decode(me_dtype dtype, uint64_t bits) {
+    me_scalar value = {0};
+    if (dtype == ME_FLOAT32) {
         uint32_t raw = (uint32_t)bits;
         memcpy(&value.f32, &raw, sizeof(raw));
-    } else if (arg->dtype == ME_FLOAT64) {
+    } else if (dtype == ME_FLOAT64) {
         memcpy(&value.f64, &bits, sizeof(bits));
-    } else if (arg->dtype == ME_BOOL) {
+    } else if (dtype == ME_BOOL) {
         value.b = bits != 0;
-    } else if (p_unsigned(arg->dtype)) {
+    } else if (p_unsigned(dtype)) {
         value.u64 = bits;
     } else {
         memcpy(&value.i64, &bits, sizeof(bits));
     }
+    return value;
+}
+
+/* Reuse the authoritative conversion routines without reconstructing an
+ * expression/context. Strong integer casts stay modular; weak operands and
+ * floating inputs retain their checked conversions. */
+static uint64_t p_jit_checked_cast(const me_expr *operation, uint64_t bits, int *status) {
+    const me_expr *arg = operation->parameters[0];
+    me_scalar value = p_jit_decode(arg->dtype, bits), result = {0};
     me_portable_numeric_status rc = p_numpy(operation) && !p_weak(arg) ?
         p_numpy_convert(arg->dtype, &value, operation->dtype, &result) :
         p_convert(arg->dtype, &value, operation->dtype, &result);
@@ -1351,14 +1361,89 @@ static uint64_t p_jit_checked_cast(const me_expr *operation, uint64_t bits, int 
     return p_unsigned(operation->dtype) ? result.u64 : (uint64_t)result.i64;
 }
 
-/* Replay only one audited scalar operation, not its expression subtree. Typed
+/* Encode the scalar representation without floating arithmetic. */
+static uint64_t p_jit_encode(me_dtype dtype, const me_scalar *value) {
+    if (dtype == ME_BOOL) return value->b;
+    if (p_unsigned(dtype)) return value->u64;
+    uint64_t result = 0;
+    if (dtype == ME_FLOAT32) {
+        uint32_t raw;
+        memcpy(&raw, &value->f32, sizeof(raw));
+        result = raw;
+    } else if (dtype == ME_FLOAT64) memcpy(&result, &value->f64, sizeof(result));
+    else memcpy(&result, &value->i64, sizeof(result));
+    return result;
+}
+
+/* Plain inputs keep the already optimized reducer, including its masked/NaN
+ * fallback. One block-local context is inexpensive; no expression is rebuilt. */
+static uint64_t p_jit_direct_reduction(const me_expr *operation, uint64_t values,
+    uint64_t mask, uint64_t count, int *status) {
+    const me_expr *arg = operation->parameters[0];
+    if (count > INT_MAX || TYPE_MASK(arg->type) != ME_VARIABLE || !is_synthetic_address(arg->bound)) {
+        *status = ME_EVAL_ERR_INVALID_ARG;
+        return 0;
+    }
+    int index = (int)((const char *)arg->bound - synthetic_var_addresses);
+    if (index < 0 || index >= ME_MAX_VARS) {
+        *status = ME_EVAL_ERR_INVALID_ARG;
+        return 0;
+    }
+    const void *vars[ME_MAX_VARS] = {0};
+    vars[index] = (const void *)(uintptr_t)values;
+    p_eval_context context = {.vars = vars, .nvars = index + 1, .nitems = (int)count,
+        .mask = (const uint8_t *)(uintptr_t)mask};
+    me_scalar result = {0};
+    int rc = p_reduce(operation, &context, &result);
+    p_context_free(&context);
+    if (rc) {
+        *status = rc;
+        return 0;
+    }
+    return p_jit_encode(operation->dtype, &result);
+}
+
+/* One extrema/truth step, with invocation-local accumulator and initialized flag.
+ * The map is evaluated by generated code before this call, even when a truth
+ * result is already determined. Never reconstruct an expression or skip a lane. */
+static uint64_t p_jit_reduction_step(const me_expr *operation, uint64_t accumulator,
+    uint64_t bits, bool initialized, int *status) {
+    const me_expr *arg = operation->parameters[0];
+    me_reduce_kind kind = reduction_kind(operation->function);
+    me_scalar value = p_jit_decode(arg->dtype, bits);
+    if (kind == ME_REDUCE_ANY || kind == ME_REDUCE_ALL) {
+        bool lane = p_truth(arg->dtype, &value);
+        return kind == ME_REDUCE_ALL ? accumulator != 0 && lane : accumulator != 0 || lane;
+    }
+    if (kind != ME_REDUCE_MIN && kind != ME_REDUCE_MAX) {
+        *status = ME_EVAL_ERR_INVALID_ARG;
+        return 0;
+    }
+    me_scalar acc = p_jit_decode(operation->dtype, accumulator), converted = {0};
+    if (p_convert(arg->dtype, &value, operation->dtype, &converted)) {
+        *status = ME_EVAL_ERR_INVALID_ARG;
+        return 0;
+    }
+    p_extrema_step(operation->dtype, &acc, &converted, initialized, kind == ME_REDUCE_MIN);
+    return p_jit_encode(operation->dtype, &acc);
+}
+
+/* Execute an audited scalar operation or a qualified plain-input reduction. Typed
  * operands arrive as exact bits; replacement variable leaves retain categories
  * so checked weak conversions and modular strong operations stay distinct. */
 uint64_t dsl_portable_jit_checked(const void *node, uint64_t a, uint64_t b, uint64_t c, int *status) {
     if (*status) return 0;
     const me_expr *original = node;
     int arity = ARITY(original->type);
-    if (arity < 1 || arity > 3 || is_reduction_node(original)) {
+    if (is_reduction_node(original)) {
+        /* The high count bit distinguishes a whole-block plain-input request
+         * from a per-lane extrema/truth step (whose c is only zero or one). */
+        if (c & (UINT64_C(1) << 63)) {
+            return p_jit_direct_reduction(original, a, b, c & INT64_MAX, status);
+        }
+        return p_jit_reduction_step(original, a, b, c != 0, status);
+    }
+    if (arity < 1 || arity > 3) {
         *status = ME_EVAL_ERR_INVALID_ARG;
         return 0;
     }

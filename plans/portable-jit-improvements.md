@@ -457,3 +457,23 @@ so downstream benchmarks cannot silently claim JIT performance while interpretin
   mapped mean plus scalar post-processing drops from 66.664 ms to 0.048 ms. Plain
   sum plus a scalar assignment/return drops from 0.606 ms to 0.036 ms. These are
   selected local workloads and exclude compilation; portable WASM JIT remains disabled.
+- Extrema/truth follow-up (lowering revision 20): one numeric min/max/any/all
+  reduction can compile in the same scalar recipes. Mapped operands use an exact-bit
+  accumulator step sharing the interpreter's extrema/truth semantics; every
+  participating map lane executes, including after a truth result is determined.
+  Plain array inputs use one block-level bridge call to the existing reducer,
+  avoiding a per-lane callback regression. Uniform captures remain on the mapped
+  path so they are never mistaken for lane buffers. Empty extrema report the same
+  checked error; empty truth groups retain their identities. Qualification covers
+  all eleven numeric dtypes, integer boundaries, signed zeros, quiet/signaling NaNs,
+  masks, partitions, lazy empty extrema, late mapped errors/status and recovery.
+  All 445 native tests pass, as do 306 required-JIT parity tests on each of TCC,
+  GCC and Clang, 1,400 independent-wheel Python tests (18 skips), three sanitizer
+  parity tests and 12 WASM fallback/artifact/graph tests. All 80 Python benchmark
+  cases validate values/status; each backend compiles 78 with two deliberate
+  fallbacks. Sequential local Clang warm medians (65,536 float64 values, seven
+  samples) are 0.516/0.514 ms for mapped min/max versus 65.411/65.690 ms interpreted,
+  and 0.321 ms for mapped any/all versus 66.098/65.905 ms interpreted. Plain min
+  remains approximately unchanged at 0.061 ms JIT versus 0.060 ms interpreted.
+  These measurements exclude compilation; integer sum/product/mean, multiple
+  reductions and scalar statement control flow remain outside this lowering scope.

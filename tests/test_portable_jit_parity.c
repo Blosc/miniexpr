@@ -367,7 +367,11 @@ static void scalar_reductions(void) {
         "s = block_sum(x)\\n    return s + 1",
         "a = 2.0\\n    s = block_sum(x * a)\\n    t = s / a\\n    return t",
         "return block_mean(x)", "return block_mean(x * 2) / 2",
-        "s = block_mean(x)\\n    return s + 1"};
+        "s = block_mean(x)\\n    return s + 1",
+        "return block_min(x)", "return block_max(x)",
+        "s = block_min(x * 2)\\n    return s / 2",
+        "return block_any(x)", "return block_all(x)",
+        "return block_any(sqrt(x))", "return block_all(sqrt(x))"};
     for (int input64 = 0; input64 < 2; input64++) for (int output64 = 0; output64 < 2; output64++) {
         const char *input_name = input64 ? "float64" : "float32";
         const char *output_name = output64 ? "float64" : "float32";
@@ -399,9 +403,16 @@ static void scalar_reductions(void) {
                         .valid_mask_capacity = mask == 1 || mask == 2 ? 4 : 0};
                     if (mask == 3) for (int j = 0; j < 2; j++) { buffers[j].data = NULL; buffers[j].capacity = 0; }
                     me_artifact_fp_status status, reference_status;
-                    me_artifact_error error;
-                    CHECK(!me_artifact_eval_status(jit,buffers,2,&actual,&descriptor,0,&status,&error));
-                    CHECK(!me_artifact_eval_status(reference,buffers,2,&expected,&descriptor,0,&reference_status,&error));
+                    me_artifact_error error, reference_error;
+                    int rc = me_artifact_eval_status(jit,buffers,2,&actual,&descriptor,0,&status,&error);
+                    int reference_rc = me_artifact_eval_status(reference,buffers,2,&expected,&descriptor,0,
+                        &reference_status,&reference_error);
+                    CHECK(rc == reference_rc);
+                    if (rc) {
+                        CHECK(error.native_status == reference_error.native_status);
+                        CHECK(status.flags == reference_status.flags);
+                        continue;
+                    }
                     bool equal = actual == expected;
                     if (output64) {
                         double a, e;
