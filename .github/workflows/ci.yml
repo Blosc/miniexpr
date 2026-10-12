@@ -324,7 +324,9 @@ jobs:
             '-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
             '-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined' \
             '-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address,undefined'
-          cmake --build build-asan --parallel 4
+          # Only this executable is exercised below; do not build unrelated
+          # legacy tests under the sanitizer job's Clang configuration.
+          cmake --build build-asan --target portable_jit_parity --parallel 4
       - name: Qualify sanitized bridges and interpretation
         run: ctest --test-dir build-asan -R portable_jit_parity --output-on-failure
 
