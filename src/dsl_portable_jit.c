@@ -1,4 +1,4 @@
-/* Portable 1.1 scalar C lowering, revision 21. Never translate source
+/* Portable 1.1 scalar C lowering, revision 23. Never translate source
  * text: the typed tree includes promotion and final output conversions. The
  * private kernel ABI appends a participating mask and host comparison/math bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
@@ -67,7 +67,7 @@ static bool pj_supported_reduction(const me_expr *n) {
     if (kind == ME_REDUCE_MIN || kind == ME_REDUCE_MAX ||
         kind == ME_REDUCE_ANY || kind == ME_REDUCE_ALL) return true;
     if (kind == ME_REDUCE_SUM || kind == ME_REDUCE_PROD) return true;
-    return pj_float(n->dtype) && pj_float(arg->dtype) &&
+    return pj_float(n->dtype) && (pj_float(arg->dtype) || pj_integral(arg->dtype)) &&
         (kind == ME_REDUCE_SUM || kind == ME_REDUCE_PROD || kind == ME_REDUCE_MEAN);
 }
 
@@ -105,7 +105,8 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
         if (!pj_supported_reduction(n)) return NULL;
         bool extrema = kind == ME_REDUCE_MIN || kind == ME_REDUCE_MAX;
         bool truth = kind == ME_REDUCE_ANY || kind == ME_REDUCE_ALL;
-        bool integer = (kind == ME_REDUCE_SUM || kind == ME_REDUCE_PROD) && pj_integral(arg->dtype);
+        bool integer = (kind == ME_REDUCE_SUM || kind == ME_REDUCE_PROD || kind == ME_REDUCE_MEAN) &&
+            pj_integral(arg->dtype);
         bool bridged = extrema || truth || integer;
         int id = (*next_temp)++;
         const char *acc_type = pj_type(arg->dtype);
@@ -157,6 +158,13 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
         if (!ok) return NULL;
         if (bridged) {
             if (extrema && !pj_append(s,"if (!pj_count_%d) return -5;\n",id)) return NULL;
+            /* Integer mean retains a checked integer accumulator. Finalize in
+             * the host bridge so uint64 conversion/rounding matches p_reduce. */
+            if (integer && kind == ME_REDUCE_MEAN && !pj_append(s,
+                "pj_acc_%d = ((pj_checked)inputs[%d])(inputs[%d],pj_acc_%d,"
+                "(uint64_t)pj_count_%d,UINT64_C(1) << 62,&pj_status); if (pj_status) return pj_status;\n",
+                id,p->n_inputs+ME_DSL_PORTABLE_JIT_CHECKED_OFF,
+                p->n_inputs+ME_DSL_PORTABLE_JIT_CHECKED_OFF+1+bridge,id,id)) return NULL;
             const char *decode = n->dtype == ME_FLOAT32 ? "pj_unpack_f32" :
                 n->dtype == ME_FLOAT64 ? "pj_unpack_f64" : NULL;
             char integer_decode[64];
@@ -204,7 +212,7 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
         int index = (int)((const char *)n->bound - synthetic_var_addresses);
         if (index < 0 || index >= p->vars.count) return NULL;
         if (constants && constants->scalar_phase &&
-            (index < p->n_inputs ? !p->vars.uniform[index] : !defined[index])) return NULL;
+            (!p->vars.uniform[index] || (index >= p->n_inputs && !defined[index]))) return NULL;
         /* ND reserved symbols are recomputed per lane in the kernel preamble. */
         if (p->idx_ndim >= 0 && index == p->idx_ndim) return strdup("nd[0]");
         if (p->idx_flat_idx >= 0 && index == p->idx_flat_idx) return strdup("flat");
@@ -221,7 +229,8 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
         if (index < p->n_inputs) snprintf(leaf,sizeof(leaf),"((const %s *)inputs[%d])[%s]",type,index,
             constants && constants->scalar_phase ? "0" : "i");
         else if (p->local_slots && p->local_slots[index] >= 0 && defined[index]) {
-            snprintf(leaf,sizeof(leaf),"local_%d",index);
+            snprintf(leaf,sizeof(leaf),p->output_is_scalar && !p->vars.uniform[index] ?
+                "local_%d[i]" : "local_%d",index);
         }
         else return NULL;
         return strdup(leaf);
@@ -520,6 +529,26 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
         if (stmt->kind == ME_DSL_STMT_ASSIGN || stmt->kind == ME_DSL_STMT_RETURN) {
             bool assignment = stmt->kind == ME_DSL_STMT_ASSIGN;
             const me_expr *node = assignment ? stmt->as.assign.value.expr : stmt->as.return_stmt.expr.expr;
+            if (assignment && constants && constants->scalar_phase) {
+                int index = p->local_var_indices[stmt->as.assign.local_slot];
+                if (!p->vars.uniform[index]) {
+                    /* Materialize whole-participation array assignments in
+                     * statement order. Branch/loop-local arrays need per-lane
+                     * initialization tracking and deliberately retain fallback. */
+                    if (depth || node->dtype != p->vars.dtypes[index]) return false;
+                    pj_constants mapped = *constants;
+                    mapped.scalar_phase = false;
+                    if (!pj_append(s,"for (int64_t i=0; i<count; i++) { if (mask && !mask[i]) continue;\n%s",
+                        constants->nd_preamble ? constants->nd_preamble : "")) return false;
+                    char *lane = pj_expr(p,node,defined,0,&mapped,s,flow.next_temp);
+                    if (!lane) return false;
+                    bool ok = pj_append(s,"local_%d[i] = %s; if (pj_status) return pj_status;\n}\n",index,lane);
+                    free(lane);
+                    if (!ok) return false;
+                    defined[index] = true;
+                    continue;
+                }
+            }
             char *value = pj_expr(p,node,defined,0,constants,s,flow.next_temp);
             if (!value) return false;
             bool ok;
@@ -663,7 +692,7 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
 /* Qualified numeric reductions in a scalar recipe. Reduction loops are
  * emitted at their expression position, not hoisted ahead of checked/lazy
  * operands. Independent scans are intentionally not fused. Scalar-phase input
- * reads must be uniform captures; statement loops retain interpretation. */
+ * reads must be uniform captures or previously initialized scalar locals. */
 static bool pj_count_scalar_reductions(const me_expr *n, int *count, int depth) {
     if (!n || depth > 128) return false;
     if (!IS_FUNCTION(n->type)) return true;
@@ -695,6 +724,22 @@ static bool pj_scalar_block(const me_dsl_compiled_block *block, int *count, int 
                     !pj_scalar_block(&stmt->as.if_stmt.elif_branches[k].block,count,depth+1)) return false;
             }
             continue;
+        }
+        else if (stmt->kind == ME_DSL_STMT_FOR) {
+            if (!pj_count_scalar_reductions(stmt->as.for_loop.start.expr,count,0) ||
+                !pj_count_scalar_reductions(stmt->as.for_loop.stop.expr,count,0) ||
+                !pj_count_scalar_reductions(stmt->as.for_loop.step.expr,count,0) ||
+                !pj_scalar_block(&stmt->as.for_loop.body,count,depth+1)) return false;
+            continue;
+        }
+        else if (stmt->kind == ME_DSL_STMT_WHILE) {
+            if (!pj_count_scalar_reductions(stmt->as.while_loop.cond.expr,count,0) ||
+                !pj_scalar_block(&stmt->as.while_loop.body,count,depth+1)) return false;
+            continue;
+        }
+        else if (stmt->kind == ME_DSL_STMT_BREAK || stmt->kind == ME_DSL_STMT_CONTINUE) {
+            expr = stmt->as.flow.cond.expr;
+            if (!expr) continue;
         }
         else return false;
         if (!pj_count_scalar_reductions(expr,count,0)) return false;
@@ -737,6 +782,16 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     p->portable_jit_nchecked = 0;
     for (int i = 0; i < p->n_locals; i++) {
         int index = p->local_var_indices[i];
+        if (scalar && !p->vars.uniform[index]) {
+            if (!pj_type(p->vars.dtypes[index]) || !pj_append(&body,
+                "volatile %s *local_%d = (%s *)((void *const *)inputs[%d])[%d];\n",
+                pj_type(p->vars.dtypes[index]),index,pj_type(p->vars.dtypes[index]),
+                p->n_inputs+ME_DSL_PORTABLE_JIT_LOCALS_OFF,i)) {
+                free(body.text);
+                return;
+            }
+            continue;
+        }
         if (!pj_type(p->vars.dtypes[index]) ||
             !pj_append(&body,"volatile %s local_%d;\n",pj_type(p->vars.dtypes[index]),index)) {
             free(body.text);
@@ -824,7 +879,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
     snprintf(source,capacity,
-        "/* portable-1.1 lowering-r21 scalar-flow-integer-recipes abi-r8 */\n"
+        "/* portable-1.1 lowering-r23 scalar-loops-array-locals abi-r9 */\n"
         "#include <stdint.h>\n"
         "#include <string.h>\n"
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"

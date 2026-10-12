@@ -1272,7 +1272,9 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
     bool empty_scalar_flow = false;
     if (empty_group) {
         for (int i = 0; i < program->block.nstmts; i++) {
-            empty_scalar_flow |= program->block.stmts[i]->kind == ME_DSL_STMT_IF;
+            me_dsl_stmt_kind kind = program->block.stmts[i]->kind;
+            empty_scalar_flow |= kind == ME_DSL_STMT_IF || kind == ME_DSL_STMT_FOR ||
+                kind == ME_DSL_STMT_WHILE;
         }
     }
     if (program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_1 &&
@@ -1333,10 +1335,33 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
         int64_t while_cap = dsl_while_max_iters();
         if (while_cap < 0) while_cap = 0;
         inputs[n_vars+ME_DSL_PORTABLE_JIT_CAP_OFF] = &while_cap;
+        /* Scratch ownership stays in the invocation, so every generated early
+         * return/error releases array locals without interpreter replay. */
+        void *jit_locals[ME_MAX_VARS] = {0};
+        if (program->output_is_scalar && jit_nitems > 0) {
+            for (int i = 0; i < program->n_locals; i++) {
+                int index = program->local_var_indices[i];
+                if (program->vars.uniform[index]) continue;
+                size_t size = dtype_size(program->vars.dtypes[index]);
+                if (!size || (size_t)jit_nitems > SIZE_MAX / size) {
+                    for (int j = 0; j < i; j++) free(jit_locals[j]);
+                    return ME_EVAL_ERR_OOM;
+                }
+                jit_locals[i] = malloc((size_t)jit_nitems * size);
+                if (!jit_locals[i]) {
+                    for (int j = 0; j < i; j++) free(jit_locals[j]);
+                    return ME_EVAL_ERR_OOM;
+                }
+            }
+        }
+        inputs[n_vars+ME_DSL_PORTABLE_JIT_LOCALS_OFF] = jit_locals;
         fenv_t saved;
-        if (!dsl_portable_fp_begin(&saved)) return ME_EVAL_ERR_INVALID_ARG;
-        int rc = program->jit_kernel_fn(inputs,output_block,(int64_t)jit_nitems);
-        if (!dsl_portable_fp_end(&saved)) return ME_EVAL_ERR_INVALID_ARG;
+        int rc = ME_EVAL_ERR_INVALID_ARG;
+        if (dsl_portable_fp_begin(&saved)) {
+            rc = program->jit_kernel_fn(inputs,output_block,(int64_t)jit_nitems);
+            if (!dsl_portable_fp_end(&saved)) rc = ME_EVAL_ERR_INVALID_ARG;
+        }
+        for (int i = 0; i < program->n_locals; i++) free(jit_locals[i]);
         return rc == ME_EVAL_SUCCESS || rc == ME_EVAL_ERR_OOM ? rc : ME_EVAL_ERR_INVALID_ARG;
     }
     int64_t current_cap = dsl_while_max_iters();

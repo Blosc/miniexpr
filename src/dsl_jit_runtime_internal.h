@@ -54,7 +54,8 @@
 /* Invocation-local while limit; zero disables the cap, matching interpretation. */
 #define ME_DSL_PORTABLE_JIT_CAP_OFF 647
 #define ME_DSL_PORTABLE_JIT_CHECKED_OFF 648
-#define ME_DSL_PORTABLE_JIT_EXTRA 777
+#define ME_DSL_PORTABLE_JIT_LOCALS_OFF 777
+#define ME_DSL_PORTABLE_JIT_EXTRA 778
 
 #if ME_USE_WASM32_JIT
 typedef int (*me_dsl_jit_kernel_fn)(const void **inputs, void *output, int nitems);

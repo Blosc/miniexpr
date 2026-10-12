@@ -536,3 +536,32 @@ so downstream benchmarks cannot silently claim JIT performance while interpretin
   cases successfully. Workflow YAML/change-detection Python parse and Ruff checks
   pass; no new compiler warnings were observed. Live exact-SHA GitHub evidence
   verification awaits a full native workflow run after these CI changes land.
+- Revisions 22–23: integer mean, scalar statement loops and top-level array
+  locals in scalar recipes are lowered. Integer mean uses the authoritative
+  checked int64/uint64 sum and host conversion/division; direct means reuse the
+  optimized integer sum helper. Mapped means retain fused maps with checked
+  accumulator steps. Empty groups produce the interpreter's NaN, and masked
+  overflow/nonfinite conversions only participate on selected lanes.
+- Scalar for/while post-processing reuses the qualified loop emitter, including
+  checked range conversions, break/continue/early return and invocation-local
+  while caps. Empty/fully masked groups with statement loops select interpretation
+  before execution. Reductions inside loop bodies remain compiler-rejected.
+- Array locals are materialized at their top-level assignment, in statement
+  order, with typed invocation-owned scratch passed through private ABI revision
+  9. They support chains, reassignment and reuse across independent reductions;
+  errors/FP status from unused assignments remain observable. Every generated
+  exit returns through host-owned scratch cleanup. Branch/loop-local arrays remain
+  deliberate fallback pending per-lane initialization tracking, and unsafe
+  post-loop local reads remain fallback.
+- Local qualification: 444 native tests and exhaustive required-JIT TCC/GCC/Clang
+  parity pass; four sanitizer parity tests pass (the slow cold CC gate was resumed
+  separately after the initial command timeout); 12 WASM interpretation/artifact/
+  graph tests pass. Independent-wheel integration/reference coverage qualified
+  908 cases with 17 skips, including all 374 original parity cases after updating
+  two obsolete fallback expectations. The 97-case benchmark compiles 95 cases
+  on each backend with two intentional array-control-flow fallbacks and no
+  value/status mismatches. At 4096 items/three samples, TCC warm medians were
+  0.077 ms for mapped integer mean versus 4.322 ms interpreted, 0.011 ms for
+  scalar for versus 14.257 ms, 0.011 ms for scalar while versus 43.122 ms and
+  0.028 ms for reused array locals versus 8.633 ms. These are local small-block
+  measurements, not cross-platform performance guarantees.

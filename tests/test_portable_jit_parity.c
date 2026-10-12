@@ -401,7 +401,19 @@ static void scalar_reductions(void) {
         "a = block_sum(x)\\n    b = block_prod(x)\\n    return a + b",
         "s = block_sum(x)\\n    if s > 0:\\n        return block_mean(x)\\n    return s",
         "s = block_sum(x)\\n    if s < 0:\\n        return s\\n    else:\\n        t = block_prod(x)\\n    return t",
-        "s = block_sum(x)\\n    if s > 0:\\n        return block_max(x)\\n    elif s < 0:\\n        return block_min(x)\\n    return s"};
+        "s = block_sum(x)\\n    if s > 0:\\n        return block_max(x)\\n    elif s < 0:\\n        return block_min(x)\\n    return s",
+        "s = block_sum(x)\\n    for i in range(3):\\n        s = s + 1\\n    return s",
+        "s = block_mean(x)\\n    for i in range(3, 0, -1):\\n        if i == 2:\\n            continue\\n        s = s * 2\\n    return s",
+        "s = block_sum(x)\\n    for i in range(4):\\n        if i == 2:\\n            break\\n        s = s + i\\n    return s",
+        "s = block_mean(x)\\n    j = 0\\n    while j < 3:\\n        j = j + 1\\n        if j == 2:\\n            continue\\n        s = s + 1\\n    return s",
+        "s = block_sum(x)\\n    for i in range(3):\\n        for j in range(2):\\n            s = s + 1\\n        if i == 1:\\n            return s\\n    return s",
+        "s = block_sum(x)\\n    for i in range(0, 3, 0):\\n        s = s + 1\\n    return s",
+        "v = x * 2\\n    return block_sum(v)",
+        "v = x * 2\\n    w = v + x\\n    return block_sum(v) + block_mean(w)",
+        "v = sqrt(x)\\n    return block_sum(x)",
+        "v = x * 2\\n    v = v + 1\\n    return block_max(v)",
+        "v = int64(x)\\n    return block_mean(v)",
+        "v = x * 2\\n    s = block_sum(v)\\n    for i in range(3):\\n        s = s + 1\\n    return s"};
     for (int input64 = 0; input64 < 2; input64++) for (int output64 = 0; output64 < 2; output64++) {
         if (compact && input64 != output64) continue;
         const char *input_name = input64 ? "float64" : "float32";
@@ -474,13 +486,17 @@ static void scalar_reductions(void) {
 
 static void integer_scalar_reductions(void) {
     const char *bodies[] = {"return block_sum(x)", "return block_prod(x)",
-        "return block_sum(where(x != 0, x, x))", "return block_prod(where(x != 0, x, x))"};
+        "return block_sum(where(x != 0, x, x))", "return block_prod(where(x != 0, x, x))",
+        "return block_mean(x)", "return block_mean(where(x != 0, x, x))",
+        "m = block_mean(x)\\n    return m / 2",
+        "return where(block_any(x), block_mean(x), 0.0)"};
     for (int unsigned_input = 0; unsigned_input < 2; unsigned_input++) {
         const char *dtype = unsigned_input ? "uint64" : "int64";
         char second[128];
         snprintf(second,sizeof(second),"{\"name\":\"y\",\"dtype\":\"%s\"}",dtype);
-        for (int body = 0; body < 4; body++) {
-            parity_case test = {"integer scalar reduction",bodies[body],dtype,dtype,true};
+        for (size_t body = 0; body < sizeof(bodies)/sizeof(bodies[0]); body++) {
+            bool mean = body >= 4;
+            parity_case test = {"integer scalar reduction",bodies[body],dtype,mean ? "float64" : dtype,true};
             me_artifact *jit = load_contract(&test,ME_JIT_ON,second,NULL,"block_scalar");
             me_artifact *reference = load_contract(&test,ME_JIT_OFF,second,NULL,"block_scalar");
             me_artifact *oracle = load(&cases[0],ME_JIT_ON);
@@ -504,7 +520,11 @@ static void integer_scalar_reductions(void) {
                     &reference_status,&reference_error);
                 CHECK(rc == reference_rc && status.flags == reference_status.flags);
                 if (rc) CHECK(error.native_status == reference_error.native_status);
-                else CHECK(actual == expected);
+                else if (mean) {
+                    double a, e;
+                    memcpy(&a,&actual,8); memcpy(&e,&expected,8);
+                    CHECK(actual == expected || (isnan(a) && isnan(e)));
+                } else CHECK(actual == expected);
             }
             me_artifact_free(jit);
             me_artifact_free(reference);
@@ -520,7 +540,7 @@ static void numeric_dtype_matrix(void) {
     me_dtype dtypes[] = {ME_BOOL,ME_INT8,ME_UINT8,ME_INT16,ME_UINT16,ME_INT32,ME_UINT32,ME_INT64,ME_UINT64,ME_FLOAT32,ME_FLOAT64};
     size_t sizes[] = {1,1,1,2,2,4,4,8,8,4,8};
     const char *builtins[] = {"abs","sign","square","floor","ceil","trunc","round","real","imag","conj"};
-    const char *reductions[] = {"min","max","any","all","sum","prod"};
+    const char *reductions[] = {"min","max","any","all","sum","prod","mean"};
     const char *arithmetic[] = {"x + y","x - y","x * y","-x","where(x > y, x + y, x * y)","x + 1"};
     const char *floating_ops[] = {"sin(x) + cos(x)","tan(x)","exp(x)","log(x)","sqrt(x)","floor(x)","ceil(x)",
         "where(x > 0, log(x), y)","x // y","x == y","x != y","x < y","x <= y","x > y","x >= y",
@@ -542,23 +562,24 @@ static void numeric_dtype_matrix(void) {
         for (int lane = 0; lane < 4; lane++) memcpy(data+lane*sizes[dtype],&values[lane],sizes[dtype]);
         char second[128];
         snprintf(second,sizeof(second),"{\"name\":\"y\",\"dtype\":\"%s\"}",names[dtype]);
-        for (int recipe = 0; recipe < 45; recipe++) {
+        for (int recipe = 0; recipe < 47; recipe++) {
             bool builtin = recipe < 10;
-            bool scalar = recipe >= 10 && recipe < 22;
-            bool arithmetic_recipe = recipe >= 22;
+            bool mean = recipe >= 45;
+            bool scalar = (recipe >= 10 && recipe < 22) || mean;
+            bool arithmetic_recipe = recipe >= 22 && !mean;
             bool comparison = recipe >= 37 && recipe <= 42;
             if (builtin && (floating || dtype == 0)) continue;
             if (arithmetic_recipe && (dtype == 0 || (recipe >= 28 && !floating))) continue;
-            int reduction = builtin ? 0 : (recipe-10)/2;
-            bool mapped = !builtin && (recipe-10)%2;
+            int reduction = mean ? 6 : builtin ? 0 : (recipe-10)/2;
+            bool mapped = mean ? recipe == 46 : !builtin && (recipe-10)%2;
             char body[192];
             if (builtin) snprintf(body,sizeof(body),"return %s(x)",builtins[recipe]);
             else if (arithmetic_recipe) snprintf(body,sizeof(body),"return %s",recipe < 28 ? arithmetic[recipe-22] : floating_ops[recipe-28]);
             else snprintf(body,sizeof(body),"return block_%s(%s)",reductions[reduction],
                 mapped ? "where(x != 0, x, x)" : "x");
-            const char *output = comparison ? "bool" : builtin || arithmetic_recipe || reduction < 2 ? names[dtype] :
+            const char *output = mean ? (floating ? names[dtype] : "float64") : comparison ? "bool" : builtin || arithmetic_recipe || reduction < 2 ? names[dtype] :
                 reduction < 4 ? "bool" : floating ? names[dtype] : unsigned_input ? "uint64" : "int64";
-            size_t output_size = comparison ? 1 : builtin || arithmetic_recipe || reduction < 2 ? sizes[dtype] : reduction < 4 ? 1 : floating ? sizes[dtype] : 8;
+            size_t output_size = mean ? (floating ? sizes[dtype] : 8) : comparison ? 1 : builtin || arithmetic_recipe || reduction < 2 ? sizes[dtype] : reduction < 4 ? 1 : floating ? sizes[dtype] : 8;
             parity_case test = {"numeric dtype matrix",body,names[dtype],output,true};
             me_artifact *jit = load_contract(&test,ME_JIT_ON,second,NULL,scalar ? "block_scalar" : "elementwise");
             me_artifact *reference = load_contract(&test,ME_JIT_OFF,second,NULL,scalar ? "block_scalar" : "elementwise");
@@ -593,7 +614,7 @@ static void numeric_dtype_matrix(void) {
                 }
                 CHECK(rc == reference_rc && status.flags == reference_status.flags);
                 if (rc) CHECK(error.native_status == reference_error.native_status);
-                else if (floating && !comparison && (arithmetic_recipe || reduction < 2 || reduction >= 4)) {
+                else if (mean || (floating && !comparison && (arithmetic_recipe || reduction < 2 || reduction >= 4))) {
                     for (int lane = 0; lane < (scalar ? 1 : 4); lane++) {
                         double a, e;
                         if (dtype == 9) {
@@ -733,6 +754,62 @@ static void scalar_checked_order(void) {
     }
 }
 
+static void scalar_array_fallbacks(void) {
+    const char *bodies[] = {
+        "s = block_sum(x)\\n    if s > 0:\\n        v = x\\n    else:\\n        v = x * 2\\n    return block_sum(v)",
+        "v = x\\n    for i in range(3):\\n        v = v * 2\\n    return block_sum(v)"};
+    for (size_t i = 0; i < sizeof(bodies)/sizeof(bodies[0]); i++) {
+        parity_case test = {"branch/loop array fallback",bodies[i],"float64","float64",false};
+        me_artifact *artifact = load_contract(&test,ME_JIT_ON,
+            "{\"name\":\"y\",\"dtype\":\"float64\"}",NULL,"block_scalar");
+        CHECK(!me_artifact_has_jit(artifact));
+        me_artifact_free(artifact);
+    }
+}
+
+static void scalar_loop_cap(void) {
+    parity_case test = {"scalar loop invocation cap",
+        "s = block_mean(x)\\n    j = 0\\n    while j < 5:\\n        j = j + 1\\n        s = s + 1\\n    return s",
+        "int64","float64",true};
+    me_artifact *jit = load_contract(&test,ME_JIT_ON,
+        "{\"name\":\"y\",\"dtype\":\"int64\"}",NULL,"block_scalar");
+    me_artifact *reference = load_contract(&test,ME_JIT_OFF,
+        "{\"name\":\"y\",\"dtype\":\"int64\"}",NULL,"block_scalar");
+    me_artifact *oracle = load(&cases[0],ME_JIT_ON);
+    CHECK(me_artifact_has_jit(jit) == me_artifact_has_jit(oracle));
+    me_artifact_free(oracle);
+    const char *previous = getenv("ME_DSL_WHILE_MAX_ITERS");
+    char *saved = previous ? strdup(previous) : NULL;
+    int64_t data[] = {1,3};
+    me_artifact_buffer buffers[] = {{"x",ME_INT64,8,data,sizeof(data)},
+        {"y",ME_INT64,8,data,sizeof(data)}};
+    me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
+        .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = 2, .output_capacity = 8};
+    for (int cap = 0; cap < 2; cap++) {
+#ifdef _WIN32
+        _putenv_s("ME_DSL_WHILE_MAX_ITERS",cap ? "0" : "2");
+#else
+        setenv("ME_DSL_WHILE_MAX_ITERS",cap ? "0" : "2",1);
+#endif
+        double actual = 0, expected = 0;
+        me_artifact_error error, reference_error;
+        me_artifact_fp_status status, reference_status;
+        int rc = me_artifact_eval_status(jit,buffers,2,&actual,&descriptor,0,&status,&error);
+        int reference_rc = me_artifact_eval_status(reference,buffers,2,&expected,&descriptor,0,&reference_status,&reference_error);
+        CHECK(rc == reference_rc && status.flags == reference_status.flags);
+        if (!cap) CHECK(rc && error.native_status == reference_error.native_status);
+        else CHECK(!rc && actual == 7 && expected == 7);
+    }
+#ifdef _WIN32
+    _putenv_s("ME_DSL_WHILE_MAX_ITERS",saved ? saved : "");
+#else
+    if (saved) setenv("ME_DSL_WHILE_MAX_ITERS",saved,1);
+    else unsetenv("ME_DSL_WHILE_MAX_ITERS");
+#endif
+    free(saved);
+    me_artifact_free(jit); me_artifact_free(reference);
+}
+
 int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i],"--compact")) {
@@ -753,6 +830,8 @@ int main(int argc, char **argv) {
     computed_weak_conversion();
     scalar_reductions();
     scalar_checked_order();
+    scalar_array_fallbacks();
+    scalar_loop_cap();
     integer_scalar_reductions();
     numeric_dtype_matrix();
     range_bound_matrix();

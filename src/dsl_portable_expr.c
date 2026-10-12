@@ -911,6 +911,9 @@ static int p_reduce(const me_expr *n, p_eval_context *ctx, me_scalar *out) {
     me_reduce_kind kind = reduction_kind(n->function);
     const me_expr *arg = n->parameters[0];
     me_dtype acc_dtype = n->dtype;
+    if (kind == ME_REDUCE_MEAN) {
+        acc_dtype = p_float(arg->dtype) ? arg->dtype : p_unsigned(arg->dtype) ? ME_UINT64 : ME_INT64;
+    }
     /* Plain, fully initialized fully participating inputs need neither expression
      * dispatch nor scalar conversion for every lane. The DSL may supply all-one
      * masks/initialization arrays even for inputs: validate those once. Partial
@@ -918,7 +921,8 @@ static int p_reduce(const me_expr *n, p_eval_context *ctx, me_scalar *out) {
     bool direct_float = arg->dtype == acc_dtype && p_float(acc_dtype);
     bool direct_integer = !p_float(arg->dtype) && p_numeric(arg->dtype) &&
         acc_dtype == (p_unsigned(arg->dtype) ? ME_UINT64 : ME_INT64);
-    bool arithmetic = kind == ME_REDUCE_SUM || kind == ME_REDUCE_PROD;
+    bool arithmetic = kind == ME_REDUCE_SUM || kind == ME_REDUCE_PROD ||
+        (kind == ME_REDUCE_MEAN && direct_integer);
     bool extrema = kind == ME_REDUCE_MIN || kind == ME_REDUCE_MAX;
     bool logical = kind == ME_REDUCE_ANY || kind == ME_REDUCE_ALL;
     if (((arithmetic && (direct_float || direct_integer)) ||
@@ -960,12 +964,14 @@ static int p_reduce(const me_expr *n, p_eval_context *ctx, me_scalar *out) {
                     dsl_portable_sum_integer(arg->dtype, values, count, 0, true, &sum);
                 if (!ok) return ME_EVAL_ERR_INVALID_ARG;
                 memcpy(out, &sum, sizeof(sum));
+                if (kind == ME_REDUCE_MEAN) {
+                    double mean = p_double(acc_dtype, out) / (double)count;
+                    *out = (me_scalar){0};
+                    out->f64 = mean;
+                }
                 return ME_EVAL_SUCCESS;
             }
         }
-    }
-    if (kind == ME_REDUCE_MEAN) {
-        acc_dtype = p_float(arg->dtype) ? arg->dtype : p_unsigned(arg->dtype) ? ME_UINT64 : ME_INT64;
     }
     me_scalar acc = {0};
     bool truth = kind == ME_REDUCE_ALL;
@@ -1425,18 +1431,20 @@ static uint64_t p_jit_reduction_step(const me_expr *operation, uint64_t accumula
         bool lane = p_truth(arg->dtype, &value);
         return kind == ME_REDUCE_ALL ? accumulator != 0 && lane : accumulator != 0 || lane;
     }
-    if (kind == ME_REDUCE_SUM || kind == ME_REDUCE_PROD) {
-        me_scalar acc = p_jit_decode(operation->dtype, accumulator), converted = {0};
+    if (kind == ME_REDUCE_SUM || kind == ME_REDUCE_PROD || kind == ME_REDUCE_MEAN) {
+        me_dtype acc_dtype = kind == ME_REDUCE_MEAN ?
+            (p_unsigned(arg->dtype) ? ME_UINT64 : ME_INT64) : operation->dtype;
+        me_scalar acc = p_jit_decode(acc_dtype, accumulator), converted = {0};
         me_portable_integer_op op = kind == ME_REDUCE_PROD ? ME_PORTABLE_MUL : ME_PORTABLE_ADD;
-        int rc = p_convert(arg->dtype, &value, operation->dtype, &converted);
-        if (!rc) rc = p_unsigned(operation->dtype) ?
-            dsl_portable_unsigned_op(operation->dtype,op,acc.u64,converted.u64,&acc.u64) :
-            dsl_portable_signed_op(operation->dtype,op,acc.i64,converted.i64,&acc.i64);
+        int rc = p_convert(arg->dtype, &value, acc_dtype, &converted);
+        if (!rc) rc = p_unsigned(acc_dtype) ?
+            dsl_portable_unsigned_op(acc_dtype,op,acc.u64,converted.u64,&acc.u64) :
+            dsl_portable_signed_op(acc_dtype,op,acc.i64,converted.i64,&acc.i64);
         if (rc) {
             *status = ME_EVAL_ERR_INVALID_ARG;
             return 0;
         }
-        return p_jit_encode(operation->dtype, &acc);
+        return p_jit_encode(acc_dtype, &acc);
     }
     if (kind != ME_REDUCE_MIN && kind != ME_REDUCE_MAX) {
         *status = ME_EVAL_ERR_INVALID_ARG;
@@ -1463,6 +1471,13 @@ uint64_t dsl_portable_jit_checked(const void *node, uint64_t a, uint64_t b, uint
          * from a per-lane extrema/truth step (whose c is only zero or one). */
         if (c & (UINT64_C(1) << 63)) {
             return p_jit_direct_reduction(original, a, b, c & INT64_MAX, status);
+        }
+        if (c == (UINT64_C(1) << 62) && reduction_kind(original->function) == ME_REDUCE_MEAN) {
+            const me_expr *arg = original->parameters[0];
+            me_dtype acc_dtype = p_unsigned(arg->dtype) ? ME_UINT64 : ME_INT64;
+            me_scalar acc = p_jit_decode(acc_dtype, a), result = {0};
+            result.f64 = b ? p_double(acc_dtype, &acc) / (double)b : NAN;
+            return p_jit_encode(original->dtype, &result);
         }
         return p_jit_reduction_step(original, a, b, c != 0, status);
     }
