@@ -3,6 +3,7 @@
 #endif
 #include "miniexpr_artifact.h"
 #include <math.h>
+#include <float.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +19,11 @@ typedef struct {
     const char *output;
     bool eligible;
 } parity_case;
+
+/* PR system-compiler gates retain every recipe and known backend-sensitive
+ * regression, but omit repeated dtype combinations. TCC and full qualification
+ * execute the entire matrix. */
+static bool compact = false;
 
 /* JSON-escaped bodies deliberately exercise the production artifact loader.
  * Eligibility expectations advance with each qualified implementation phase. */
@@ -71,10 +77,11 @@ static me_artifact *load_contract(const parity_case *test, me_jit_mode mode,
         test->input, second_input ? "," : "", second_input ? second_input : "");
     int length = snprintf(json, sizeof(json),
         "{\"schema_version\":\"1.1\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.1\"},"
-        "\"requires\":[\"numeric\",\"control-flow\",\"block-reductions\"],\"source\":\"def k(x, y):\\n    %s\\n\","
+        "\"requires\":[\"numeric\",\"control-flow\",\"block-reductions\"],\"source\":\"def k(%s):\\n    %s\\n\","
         "\"entry_point\":\"k\",\"inputs\":[%s],"
         "\"constants\":[%s],\"output\":{\"dtype\":\"%s\",\"contract\":\"%s\"},\"context\":{\"ndim\":0},"
         "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}",
+        constants && strstr(constants,"\"name\":\"z\"") ? "x, y, z" : "x, y",
         test->body, inputs, constants ? constants : "", test->output, contract);
     CHECK(length > 0 && (size_t)length < sizeof(json));
     me_artifact *artifact = NULL;
@@ -338,9 +345,10 @@ static void checked_cast_errors(void) {
     }
 }
 
-static void computed_weak_conversion(void) {
-    const char *constant = "{\"name\":\"y\",\"dtype\":\"int64\",\"category\":\"weak\","
-        "\"encoding\":\"decimal\",\"value\":\"127\"}";
+static void computed_weak_capture_case(int64_t capture) {
+    char constant[192];
+    snprintf(constant,sizeof(constant),"{\"name\":\"y\",\"dtype\":\"int64\",\"category\":\"weak\","
+        "\"encoding\":\"decimal\",\"value\":\"%lld\"}",(long long)capture);
     parity_case test = {"computed weak narrowing", "if x == 0:\\n        return x\\n    return x + (y + 1)",
         "int8", "int8", true};
     me_artifact *jit = load_extra(&test, ME_JIT_ON, NULL, constant);
@@ -357,7 +365,9 @@ static void computed_weak_conversion(void) {
     x[1] = 1;
     int rc = me_artifact_eval_ex(jit, &buffer, 1, output, &descriptor, &error);
     int reference_rc = me_artifact_eval_ex(reference, &buffer, 1, expected, &descriptor, &reference_error);
-    CHECK(rc && rc == reference_rc && error.native_status == reference_error.native_status);
+    CHECK(rc == reference_rc);
+    if (rc) CHECK(error.native_status == reference_error.native_status);
+    else CHECK(!memcmp(output,expected,sizeof(output)));
     uint8_t mask[] = {1, 0};
     descriptor.valid_mask = mask;
     descriptor.valid_mask_capacity = sizeof(mask);
@@ -365,6 +375,13 @@ static void computed_weak_conversion(void) {
     me_artifact_free(jit);
     me_artifact_free(reference);
     me_artifact_free(oracle);
+}
+
+static void computed_weak_conversion(void) {
+    int64_t captures[] = {-130,-129,-1,0,126,127,INT64_MAX};
+    for (size_t capture = 0; capture < sizeof(captures)/sizeof(captures[0]); capture++) {
+        computed_weak_capture_case(captures[capture]);
+    }
 }
 
 static void scalar_reductions(void) {
@@ -386,6 +403,7 @@ static void scalar_reductions(void) {
         "s = block_sum(x)\\n    if s < 0:\\n        return s\\n    else:\\n        t = block_prod(x)\\n    return t",
         "s = block_sum(x)\\n    if s > 0:\\n        return block_max(x)\\n    elif s < 0:\\n        return block_min(x)\\n    return s"};
     for (int input64 = 0; input64 < 2; input64++) for (int output64 = 0; output64 < 2; output64++) {
+        if (compact && input64 != output64) continue;
         const char *input_name = input64 ? "float64" : "float32";
         const char *output_name = output64 ? "float64" : "float32";
         char second[128];
@@ -396,12 +414,14 @@ static void scalar_reductions(void) {
             me_artifact *reference = load_contract(&test,ME_JIT_OFF,second,NULL,"block_scalar");
             me_artifact *oracle = load(&cases[0],ME_JIT_ON);
             CHECK(me_artifact_has_jit(jit) == me_artifact_has_jit(oracle));
-            for (int edge = 0; edge < 4; edge++) {
+            for (int edge = 0; edge < 6; edge++) {
                 float f[] = {1e16f,1,-1e16f,3};
                 double d[] = {1e16,1,-1e16,3};
                 if (edge == 1) { f[1] = NAN; d[1] = NAN; }
                 if (edge == 2) { f[0] = INFINITY; d[0] = INFINITY; f[2] = -INFINITY; d[2] = -INFINITY; }
                 if (edge == 3) { f[0] = -0.0f; d[0] = -0.0; f[2] = 0; d[2] = 0; }
+                if (edge == 4) { f[0] = FLT_MAX; d[0] = DBL_MAX; f[2] = 2; d[2] = 2; }
+                if (edge == 5) { f[0] = f[2] = FLT_MIN; d[0] = d[2] = DBL_MIN; }
                 void *data = input64 ? (void *)d : (void *)f;
                 size_t capacity = input64 ? sizeof(d) : sizeof(f);
                 me_dtype dtype = input64 ? ME_FLOAT64 : ME_FLOAT32;
@@ -493,6 +513,194 @@ static void integer_scalar_reductions(void) {
     }
 }
 
+/* Exhaustive numeric dtype/builtin/extrema/truth qualification belongs here,
+ * not in Python's repeated production-binding matrix. */
+static void numeric_dtype_matrix(void) {
+    const char *names[] = {"bool","int8","uint8","int16","uint16","int32","uint32","int64","uint64","float32","float64"};
+    me_dtype dtypes[] = {ME_BOOL,ME_INT8,ME_UINT8,ME_INT16,ME_UINT16,ME_INT32,ME_UINT32,ME_INT64,ME_UINT64,ME_FLOAT32,ME_FLOAT64};
+    size_t sizes[] = {1,1,1,2,2,4,4,8,8,4,8};
+    const char *builtins[] = {"abs","sign","square","floor","ceil","trunc","round","real","imag","conj"};
+    const char *reductions[] = {"min","max","any","all","sum","prod"};
+    const char *arithmetic[] = {"x + y","x - y","x * y","-x","where(x > y, x + y, x * y)","x + 1"};
+    const char *floating_ops[] = {"sin(x) + cos(x)","tan(x)","exp(x)","log(x)","sqrt(x)","floor(x)","ceil(x)",
+        "where(x > 0, log(x), y)","x // y","x == y","x != y","x < y","x <= y","x > y","x >= y",
+        "x + (1.0 / 0.0)","where(x > 0, 1.0 / 0.0, x)"};
+    for (int dtype = 0; dtype < 11; dtype++) {
+        if (compact && dtype != 7 && dtype != 8 && dtype != 9 && dtype != 10) continue;
+        bool floating = dtype >= 9;
+        bool unsigned_input = dtype > 0 && dtype < 9 && dtype % 2 == 0;
+        int bits = (int)sizes[dtype] * 8;
+        uint64_t maximum = unsigned_input ? UINT64_MAX >> (64-bits) : UINT64_MAX >> (65-bits);
+        uint64_t values[] = {dtype == 0 || unsigned_input ? 0 : UINT64_C(1) << (bits-1),0,1,maximum};
+        if (floating) {
+            values[0] = dtype == 9 ? UINT64_C(0x80000000) : UINT64_C(0x8000000000000000);
+            values[2] = dtype == 9 ? UINT64_C(0x7f800001) : UINT64_C(0x7ff0000000000001);
+            values[3] = dtype == 9 ? UINT64_C(0x3f800000) : UINT64_C(0x3ff0000000000000);
+        } else if (dtype == 0) values[2] = values[3] = 1;
+        uint64_t data_storage[4] = {0};
+        unsigned char *data = (unsigned char *)data_storage;
+        for (int lane = 0; lane < 4; lane++) memcpy(data+lane*sizes[dtype],&values[lane],sizes[dtype]);
+        char second[128];
+        snprintf(second,sizeof(second),"{\"name\":\"y\",\"dtype\":\"%s\"}",names[dtype]);
+        for (int recipe = 0; recipe < 45; recipe++) {
+            bool builtin = recipe < 10;
+            bool scalar = recipe >= 10 && recipe < 22;
+            bool arithmetic_recipe = recipe >= 22;
+            bool comparison = recipe >= 37 && recipe <= 42;
+            if (builtin && (floating || dtype == 0)) continue;
+            if (arithmetic_recipe && (dtype == 0 || (recipe >= 28 && !floating))) continue;
+            int reduction = builtin ? 0 : (recipe-10)/2;
+            bool mapped = !builtin && (recipe-10)%2;
+            char body[192];
+            if (builtin) snprintf(body,sizeof(body),"return %s(x)",builtins[recipe]);
+            else if (arithmetic_recipe) snprintf(body,sizeof(body),"return %s",recipe < 28 ? arithmetic[recipe-22] : floating_ops[recipe-28]);
+            else snprintf(body,sizeof(body),"return block_%s(%s)",reductions[reduction],
+                mapped ? "where(x != 0, x, x)" : "x");
+            const char *output = comparison ? "bool" : builtin || arithmetic_recipe || reduction < 2 ? names[dtype] :
+                reduction < 4 ? "bool" : floating ? names[dtype] : unsigned_input ? "uint64" : "int64";
+            size_t output_size = comparison ? 1 : builtin || arithmetic_recipe || reduction < 2 ? sizes[dtype] : reduction < 4 ? 1 : floating ? sizes[dtype] : 8;
+            parity_case test = {"numeric dtype matrix",body,names[dtype],output,true};
+            me_artifact *jit = load_contract(&test,ME_JIT_ON,second,NULL,scalar ? "block_scalar" : "elementwise");
+            me_artifact *reference = load_contract(&test,ME_JIT_OFF,second,NULL,scalar ? "block_scalar" : "elementwise");
+            if (floating) {
+                values[2] = dtype == 9 ? UINT64_C(0x7f800001) : UINT64_C(0x7ff0000000000001);
+                memcpy(data+2*sizes[dtype],&values[2],sizes[dtype]);
+            }
+            me_artifact *oracle = load(&cases[0],ME_JIT_ON);
+            CHECK(me_artifact_has_jit(jit) == me_artifact_has_jit(oracle));
+            uint8_t partial[] = {1,0,1,0}, none[] = {0,0,0,0}, nan_only[] = {0,0,1,0};
+            for (int mask = 0; mask < (floating ? 9 : 4); mask++) {
+                int participation = mask % 4;
+                if (floating && mask == 4) {
+                    values[2] |= dtype == 9 ? UINT64_C(0x00400000) : UINT64_C(0x0008000000000000);
+                    memcpy(data+2*sizes[dtype],&values[2],sizes[dtype]);
+                }
+                uint64_t actual_storage[4] = {0}, expected_storage[4] = {0};
+                unsigned char *actual = (unsigned char *)actual_storage, *expected = (unsigned char *)expected_storage;
+                me_artifact_buffer buffers[] = {{"x",dtypes[dtype],sizes[dtype],data,sizeof(data_storage)},
+                    {"y",dtypes[dtype],sizes[dtype],data,sizeof(data_storage)}};
+                me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
+                    .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = participation == 3 ? 0 : 4,
+                    .output_capacity = sizeof(actual_storage), .valid_mask = mask == 8 ? nan_only : participation == 1 ? partial : participation == 2 ? none : NULL,
+                    .valid_mask_capacity = mask == 8 || participation == 1 || participation == 2 ? 4 : 0};
+                me_artifact_error error, reference_error;
+                me_artifact_fp_status status, reference_status;
+                int rc = me_artifact_eval_status(jit,buffers,2,actual,&descriptor,0,&status,&error);
+                int reference_rc = me_artifact_eval_status(reference,buffers,2,expected,&descriptor,0,&reference_status,&reference_error);
+                if (rc != reference_rc || status.flags != reference_status.flags) {
+                    fprintf(stderr,"numeric matrix dtype=%s body=%s mask=%d rc=%d/%d fp=%u/%u\n",
+                        names[dtype],body,mask,rc,reference_rc,status.flags,reference_status.flags);
+                }
+                CHECK(rc == reference_rc && status.flags == reference_status.flags);
+                if (rc) CHECK(error.native_status == reference_error.native_status);
+                else if (floating && !comparison && (arithmetic_recipe || reduction < 2 || reduction >= 4)) {
+                    for (int lane = 0; lane < (scalar ? 1 : 4); lane++) {
+                        double a, e;
+                        if (dtype == 9) {
+                            float af, ef;
+                            memcpy(&af,actual+lane*4,4); memcpy(&ef,expected+lane*4,4); a=af; e=ef;
+                        } else { memcpy(&a,actual+lane*8,8); memcpy(&e,expected+lane*8,8); }
+                        CHECK((isnan(a) && isnan(e)) || !memcmp(actual+lane*output_size,expected+lane*output_size,output_size));
+                    }
+                } else CHECK(!memcmp(actual,expected,scalar ? output_size : sizeof(actual_storage)));
+            }
+            me_artifact_free(jit); me_artifact_free(reference); me_artifact_free(oracle);
+        }
+    }
+}
+
+static void range_bound_matrix(void) {
+    const char *names[] = {"float32","float64","uint32","uint64"};
+    me_dtype dtypes[] = {ME_FLOAT32,ME_FLOAT64,ME_UINT32,ME_UINT64};
+    const char *bounds[] = {"x", "x, 5, 1", "0, 5, x", "5, 0, x"};
+    for (int dtype = 0; dtype < 4; dtype++) {
+        if (compact && (dtype == 0 || dtype == 2)) continue;
+        char second[128];
+        snprintf(second,sizeof(second),"{\"name\":\"y\",\"dtype\":\"%s\"}",names[dtype]);
+        for (int bound = 0; bound < 4; bound++) {
+            char body[256];
+            snprintf(body,sizeof(body),"s = 0\\n    for i in range(%s):\\n        s = s + i\\n    return s",bounds[bound]);
+            parity_case test = {"checked range matrix",body,names[dtype],"int64",true};
+            me_artifact *jit = load(&cases[0],ME_JIT_ON);
+            bool available = me_artifact_has_jit(jit);
+            me_artifact_free(jit);
+            jit = load_extra(&test,ME_JIT_ON,second,NULL);
+            me_artifact *reference = load_extra(&test,ME_JIT_OFF,second,NULL);
+            CHECK(me_artifact_has_jit(jit) == available);
+            double edges[] = {3.9,-2.9,0.9,NAN,INFINITY,-INFINITY,0x1p63,3};
+            for (int edge = 0; edge < 8; edge++) {
+                uint64_t data_storage = 0;
+                unsigned char *data = (unsigned char *)&data_storage;
+                size_t size = dtype == 0 || dtype == 2 ? 4 : 8;
+                if (dtype == 0) { float value = (float)edges[edge]; memcpy(data,&value,4); }
+                else if (dtype == 1) memcpy(data,&edges[edge],8);
+                else if (dtype == 2) { uint32_t value = edge == 6 ? UINT32_MAX : 3; memcpy(data,&value,4); }
+                else { uint64_t value = edge == 6 ? UINT64_MAX : 3; memcpy(data,&value,8); }
+                /* Avoid impractically long, valid uint32 ranges; high-bit errors
+                 * are meaningful only for uint64. */
+                if (dtype == 2 && edge == 6) continue;
+                for (int masked = 0; masked < 2; masked++) {
+                    uint8_t mask = 0;
+                    int64_t actual = 0, expected = 0;
+                    me_artifact_buffer buffers[] = {{"x",dtypes[dtype],size,data,size},{"y",dtypes[dtype],size,data,size}};
+                    me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
+                        .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = 1,
+                        .output_capacity = sizeof(actual), .valid_mask = masked ? &mask : NULL,
+                        .valid_mask_capacity = masked ? 1 : 0};
+                    me_artifact_error error, reference_error;
+                    me_artifact_fp_status status, reference_status;
+                    int rc = me_artifact_eval_status(jit,buffers,2,&actual,&descriptor,0,&status,&error);
+                    int reference_rc = me_artifact_eval_status(reference,buffers,2,&expected,&descriptor,0,&reference_status,&reference_error);
+                    CHECK(rc == reference_rc && status.flags == reference_status.flags);
+                    if (rc) CHECK(error.native_status == reference_error.native_status);
+                    else CHECK(actual == expected);
+                }
+            }
+            me_artifact_free(jit); me_artifact_free(reference);
+        }
+    }
+}
+
+static void weak_capture_matrix(void) {
+    int64_t pairs[][2] = {{INT64_MAX,1},{INT64_MIN,-1},{INT64_MAX,2},{INT64_MIN,0},
+        {0,INT64_MIN},{INT64_MAX,-1},{INT64_MIN,1},{7,-3},{0,0}};
+    const char *expressions[] = {"y + z","y - z","y * z","-y"};
+    for (int expression = 0; expression < 4; expression++) {
+        for (int pair = 0; pair < 9; pair++) {
+            char constants[384], body[192];
+            snprintf(constants,sizeof(constants),
+                "{\"name\":\"y\",\"dtype\":\"int64\",\"category\":\"weak\",\"encoding\":\"decimal\",\"value\":\"%lld\"},"
+                "{\"name\":\"z\",\"dtype\":\"int64\",\"category\":\"weak\",\"encoding\":\"decimal\",\"value\":\"%lld\"}",
+                (long long)pairs[pair][0],(long long)pairs[pair][1]);
+            snprintf(body,sizeof(body),"if x == 0:\\n        return x\\n    return x + (%s)",expressions[expression]);
+            parity_case test = {"weak capture matrix",body,"int64","int64",true};
+            me_artifact *jit = load_extra(&test,ME_JIT_ON,NULL,constants);
+            me_artifact *reference = load_extra(&test,ME_JIT_OFF,NULL,constants);
+            me_artifact *oracle = load(&cases[0],ME_JIT_ON);
+            CHECK(me_artifact_has_jit(jit) == me_artifact_has_jit(oracle));
+            int64_t x[] = {0,1};
+            me_artifact_buffer buffer = {"x",ME_INT64,8,x,sizeof(x)};
+            for (int masked = 0; masked < 3; masked++) {
+                uint8_t mask[] = {1,0};
+                int64_t actual[2] = {0}, expected[2] = {0};
+                if (masked == 2) x[1] = 0;
+                me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
+                    .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = 2,
+                    .output_capacity = sizeof(actual), .valid_mask = masked == 1 ? mask : NULL,
+                    .valid_mask_capacity = masked == 1 ? 2 : 0};
+                me_artifact_error error, reference_error;
+                me_artifact_fp_status status, reference_status;
+                int rc = me_artifact_eval_status(jit,&buffer,1,actual,&descriptor,0,&status,&error);
+                int reference_rc = me_artifact_eval_status(reference,&buffer,1,expected,&descriptor,0,&reference_status,&reference_error);
+                CHECK(rc == reference_rc && status.flags == reference_status.flags);
+                if (rc) CHECK(error.native_status == reference_error.native_status);
+                else CHECK(!memcmp(actual,expected,sizeof(actual)));
+            }
+            me_artifact_free(jit); me_artifact_free(reference); me_artifact_free(oracle);
+        }
+    }
+}
+
 static void scalar_checked_order(void) {
     const char *bodies[] = {"return int64(1e100) + block_sum(sqrt(x))",
         "return block_sum(sqrt(x)) + int64(1e100)",
@@ -526,10 +734,14 @@ static void scalar_checked_order(void) {
 }
 
 int main(int argc, char **argv) {
-    if (argc > 1) {
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i],"--compact")) {
+            compact = true;
+            continue;
+        }
         me_artifact *oracle = load(&cases[0], ME_JIT_ON);
-        if (!strcmp(argv[1],"--require-jit")) CHECK(me_artifact_has_jit(oracle));
-        else if (!strcmp(argv[1],"--require-interpreter")) CHECK(!me_artifact_has_jit(oracle));
+        if (!strcmp(argv[i],"--require-jit")) CHECK(me_artifact_has_jit(oracle));
+        else if (!strcmp(argv[i],"--require-interpreter")) CHECK(!me_artifact_has_jit(oracle));
         else CHECK(false);
         me_artifact_free(oracle);
     }
@@ -542,5 +754,8 @@ int main(int argc, char **argv) {
     scalar_reductions();
     scalar_checked_order();
     integer_scalar_reductions();
+    numeric_dtype_matrix();
+    range_bound_matrix();
+    weak_capture_matrix();
     return 0;
 }

@@ -513,3 +513,26 @@ so downstream benchmarks cannot silently claim JIT performance while interpretin
   approximately unchanged (0.031 versus 0.030 ms). These local timings exclude
   compilation. Parallel cold qualification should isolate host JIT cache paths
   as well as build directories to avoid cross-process artifact contention.
+- Qualification ownership: native parity now owns exhaustive builtin, modular
+  arithmetic, floating-operation/NaN, all-numeric extrema/truth/sum/product,
+  range-bound and weak-capture boundary matrices formerly duplicated by Python.
+  Original Python reference tests remain opt-in, rather than being deleted;
+  production bindings have a separate compact Python integration gate. Native
+  `portable_jit_parity --require-jit --compact` retains every recipe and known
+  backend-sensitive checks, narrowing repeated dtype combinations. CTest labels
+  distinguish `jit-gate` and `jit-full`, and per-test CC cache directories isolate
+  concurrent runs. Ordinary CI runs full TCC plus compact GCC/Clang checks;
+  weekly/manual `full_qualification=true` runs qualify the exhaustive matrix,
+  sanitizers and existing host/ARM64/WASM tests before publishing exact-SHA
+  evidence. Python's final paired workflow verifies the completed full job for
+  its exact native SHA, builds only its required corpus runner, and no longer
+  executes the complete native CTest suite or repeated GCC/Clang Python matrices.
+- Ownership-split validation: 444 ordinary native tests, the required TCC/compact
+  CC gates, exhaustive GCC and Clang parity, four sanitizer parity tests and 12
+  WASM interpretation/artifact/graph tests pass locally. Python's selected JIT
+  gate now runs nine binding/integration checks plus nine qualification-evidence
+  checks (18 total, 0.22 seconds warm), deselecting 584 optional reference/backend
+  combinations. Explicit `--native-semantics` still runs all 374 original parity
+  cases successfully. Workflow YAML/change-detection Python parse and Ruff checks
+  pass; no new compiler warnings were observed. Live exact-SHA GitHub evidence
+  verification awaits a full native workflow run after these CI changes land.

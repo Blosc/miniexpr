@@ -96,7 +96,7 @@ if(MINIEXPR_BUILD_ARTIFACT)
   else()
     add_test(NAME portable_jit_parity COMMAND portable_jit_parity)
   endif()
-  set_tests_properties(portable_jit_parity PROPERTIES TIMEOUT 120)
+   set_tests_properties(portable_jit_parity PROPERTIES TIMEOUT 600)
   if(NOT EMSCRIPTEN)
     if(MINIEXPR_ENABLE_TCC_JIT AND MINIEXPR_BUILD_BUNDLED_LIBTCC AND NOT WIN32)
       add_test(NAME portable_jit_parity_tcc COMMAND portable_jit_parity --require-jit)
@@ -105,8 +105,11 @@ if(MINIEXPR_BUILD_ARTIFACT)
     endif()
     if(MINIEXPR_PORTABLE_CC)
       add_test(NAME portable_jit_parity_cc COMMAND portable_jit_parity --require-jit)
-      set_tests_properties(portable_jit_parity_cc PROPERTIES TIMEOUT 120
-        ENVIRONMENT "ME_DSL_JIT_COMPILER=cc;CC=${MINIEXPR_PORTABLE_CC}")
+      set_tests_properties(portable_jit_parity_cc PROPERTIES TIMEOUT 600 LABELS "jit-full"
+        ENVIRONMENT "ME_DSL_JIT_COMPILER=cc;CC=${MINIEXPR_PORTABLE_CC};ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/jit-cache-cc-full")
+      add_test(NAME portable_jit_parity_cc_gate COMMAND portable_jit_parity --require-jit --compact)
+      set_tests_properties(portable_jit_parity_cc_gate PROPERTIES TIMEOUT 180 LABELS "jit-gate"
+        ENVIRONMENT "ME_DSL_JIT_COMPILER=cc;CC=${MINIEXPR_PORTABLE_CC};ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/jit-cache-cc-gate")
     endif()
     add_test(NAME portable_jit_parity_custom_flags COMMAND portable_jit_parity --require-interpreter)
     set_tests_properties(portable_jit_parity_custom_flags PROPERTIES TIMEOUT 120

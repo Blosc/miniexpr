@@ -4,11 +4,48 @@ on:
   push:
     branches: [ main, numpy-compat, graph-preparation, portable-jit-improvements ]
   workflow_dispatch:
+    inputs:
+      full_qualification:
+        description: Run exhaustive backend qualification and publish exact-revision evidence
+        type: boolean
+        default: false
+  schedule:
+    - cron: '23 3 * * 0'
   pull_request:
     branches: [ main ]
 
+concurrency:
+  group: native-ci-${{ github.workflow }}-${{ github.ref }}-${{ (github.event_name == 'schedule' || inputs.full_qualification == true) && 'full' || 'gate' }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
+
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.paths.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: paths
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          event = json.load(open(os.environ['GITHUB_EVENT_PATH']))
+          relevant = True
+          base = event.get('pull_request', {}).get('base', {}).get('sha') or event.get('before')
+          if base and os.environ['GITHUB_EVENT_NAME'] in ('push', 'pull_request'):
+              result = subprocess.run(['git', 'diff', '--name-only', base, 'HEAD'], capture_output=True, text=True)
+              if result.returncode == 0:
+                  relevant = any(not (path.endswith('.md') or path.startswith(('doc/', 'docs/', 'plans/')))
+                                 for path in result.stdout.splitlines())
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'relevant={str(relevant).lower()}\n')
+          PY
+
   build-and-test:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -49,12 +86,33 @@ jobs:
       shell: bash
       run: |
         if [ "$RUNNER_OS" == "Windows" ]; then
-          ctest --test-dir build -C Release --timeout 120 --output-on-failure || \
-            ctest --test-dir build -C Release --timeout 120 --rerun-failed --output-on-failure
+          ctest --test-dir build -C Release -LE 'jit-(full|gate)' --timeout 120 --output-on-failure
         else
-          ctest --test-dir build --output-on-failure || \
-            ctest --test-dir build --rerun-failed --output-on-failure
+          ctest --test-dir build -LE 'jit-(full|gate)' --output-on-failure
         fi
+
+    - name: Qualify both supported system compilers
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        FULL_QUALIFICATION: ${{ github.event_name == 'schedule' || inputs.full_qualification == true }}
+      run: |
+        mode=--compact
+        if [ "$FULL_QUALIFICATION" = true ]; then mode=; fi
+        gcc=$(command -v gcc)
+        if [ "$RUNNER_OS" = macOS ]; then
+          gcc=
+          for version in 16 15 14 13; do
+            if command -v "gcc-$version" >/dev/null; then gcc=$(command -v "gcc-$version"); break; fi
+          done
+          test -n "$gcc"
+        fi
+        clang=$(command -v clang)
+        for compiler in "$gcc" "$clang"; do
+          backend=$(basename "$compiler")
+          ME_DSL_JIT_COMPILER=cc CC="$compiler" ME_DSL_JIT_CACHE_DIR="$PWD/build/jit-cache-$backend" \
+            build/tests/portable_jit_parity --require-jit $mode
+        done
 
     - name: Trace DSL JIT backend activity
       if: ${{ false }}
@@ -84,6 +142,8 @@ jobs:
         path: graph-dist
 
   linux-arm64-jit:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-24.04-arm
 
     steps:
@@ -103,10 +163,11 @@ jobs:
     - name: Test
       shell: bash
       run: |
-        ME_DSL_JIT=1 ctest --test-dir build-arm64-jit --output-on-failure || \
-          ME_DSL_JIT=1 ctest --test-dir build-arm64-jit --rerun-failed --output-on-failure
+        ME_DSL_JIT=1 ctest --test-dir build-arm64-jit -LE jit-full --output-on-failure
 
   linux-arm64-interpreter:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-24.04-arm
 
     steps:
@@ -129,10 +190,11 @@ jobs:
         # Individual interpreter tests already select ME_JIT_OFF/ME_DSL_JIT=0.
         # Do not globally disable the required-CC cases: CC remains independently
         # available even when the TCC backend is disabled in this build.
-        ctest --test-dir build-arm64-interpreter -E "^test_dsl_jit_runtime_cache$" --output-on-failure || \
-          ctest --test-dir build-arm64-interpreter -E "^test_dsl_jit_runtime_cache$" --rerun-failed --output-on-failure
+        ctest --test-dir build-arm64-interpreter -LE jit-full -E "^test_dsl_jit_runtime_cache$" --output-on-failure
 
   windows-arm64:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: windows-11-arm
 
     steps:
@@ -168,6 +230,8 @@ jobs:
           ME_DSL_JIT=0 ctest --test-dir build-win-arm64 -C Release --timeout 120 -E "^test_dsl_jit_runtime_cache$" --rerun-failed --output-on-failure
 
   miniexpr-wasm32:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -246,3 +310,35 @@ jobs:
           echo "No DSL JIT trace lines captured"
         fi
         echo "=== End Summary ==="
+
+  sanitizer-qualification:
+    if: github.event_name == 'schedule' || inputs.full_qualification == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build checked native helpers with sanitizers
+        run: |
+          CC=clang cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug \
+            -DMINIEXPR_BUILD_ARTIFACT=ON -DMINIEXPR_BUILD_BUNDLED_LIBTCC=OFF \
+            -DMINIEXPR_ENABLE_TCC_JIT=OFF -DMINIEXPR_BUILD_EXAMPLES=OFF -DMINIEXPR_BUILD_BENCH=OFF \
+            '-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
+            '-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined' \
+            '-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address,undefined'
+          cmake --build build-asan --parallel 4
+      - name: Qualify sanitized bridges and interpretation
+        run: ctest --test-dir build-asan -R portable_jit_parity --output-on-failure
+
+  qualification-evidence:
+    name: Publish full native qualification
+    if: github.event_name == 'schedule' || inputs.full_qualification == true
+    needs: [build-and-test, linux-arm64-jit, linux-arm64-interpreter, windows-arm64, miniexpr-wasm32, sanitizer-qualification]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record qualified revision
+        run: |
+          printf '{"native_sha":"%s","run_id":"%s","tier":"full"}\n' \
+            '${{ github.sha }}' '${{ github.run_id }}' > native-qualification.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-qualification-${{ github.sha }}
+          path: native-qualification.json
