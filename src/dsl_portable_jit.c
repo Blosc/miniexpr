@@ -48,6 +48,8 @@ typedef struct {
     const int64_t *values;
     const bool *known;
     int count;
+    bool scalar_phase;
+    const char *nd_preamble;
 } pj_constants;
 
 typedef struct {
@@ -62,7 +64,7 @@ static bool pj_append(pj_text *s, const char *format, ...);
  * its lazy participation/error timing. Never alter the shared typed tree. */
 static char *pj_weak_conversion(const me_expr *n, const pj_constants *constants) {
     const me_expr *arg = n->parameters[0];
-    if (!constants || TYPE_MASK(arg->type) != ME_VARIABLE ||
+    if (!constants || !constants->known || TYPE_MASK(arg->type) != ME_VARIABLE ||
         !is_synthetic_address(arg->bound) || (arg->dtype != ME_INT64 && arg->dtype != ME_BOOL)) return NULL;
     int index = (int)((const char *)arg->bound - synthetic_var_addresses);
     if (index < 0 || index >= constants->count || !constants->known[index]) return NULL;
@@ -85,6 +87,34 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
     if (!n || depth > 128 || !pj_type(n->dtype)) return NULL;
     const char *type = pj_type(n->dtype);
     char leaf[256];
+    if (is_reduction_node(n) && constants && constants->scalar_phase) {
+        me_reduce_kind kind = reduction_kind(n->function);
+        const me_expr *arg = n->parameters[0];
+        if (!pj_float(n->dtype) || !pj_float(arg->dtype) ||
+            (kind != ME_REDUCE_SUM && kind != ME_REDUCE_PROD && kind != ME_REDUCE_MEAN)) return NULL;
+        int id = (*next_temp)++;
+        const char *acc_type = pj_type(arg->dtype);
+        bool ok = pj_append(s,"%s pj_acc_%d = %d; int64_t pj_count_%d = 0;\n"
+            "for (int64_t i=0; i<count; i++) { if (mask && !mask[i]) continue;\n%s",
+            acc_type,id,kind == ME_REDUCE_PROD ? 1 : 0,id,
+            constants->nd_preamble ? constants->nd_preamble : "");
+        pj_constants mapped = *constants;
+        mapped.scalar_phase = false;
+        char *value = ok ? pj_expr(p,arg,defined,depth+1,&mapped,s,next_temp) : NULL;
+        if (!value) return NULL;
+        ok = pj_append(s,"pj_acc_%d = (%s)(pj_acc_%d %s (%s)); pj_count_%d++;\n}\n",
+            id,acc_type,id,kind == ME_REDUCE_PROD ? "*" : "+",value,id);
+        free(value);
+        if (!ok) return NULL;
+        if (kind == ME_REDUCE_MEAN) {
+            const char *nan = arg->dtype == ME_FLOAT32 ?
+                "pj_unpack_f32(UINT64_C(0x7fc00000))" : "pj_unpack_f64(UINT64_C(0x7ff8000000000000))";
+            if (!pj_append(s,"%s pj_reduced_%d = pj_count_%d ? pj_acc_%d / (%s)pj_count_%d : %s;\n",
+                type,id,id,id,acc_type,id,nan)) return NULL;
+        } else if (!pj_append(s,"%s pj_reduced_%d = pj_acc_%d;\n",type,id,id)) return NULL;
+        snprintf(leaf,sizeof(leaf),"pj_reduced_%d",id);
+        return strdup(leaf);
+    }
     if (TYPE_MASK(n->type) == ME_CONSTANT) {
         if (n->flags & ME_EXPR_FLAG_INTEGER_LITERAL) {
             if (pj_integer(n->dtype)) {
@@ -114,6 +144,8 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
         if (!is_synthetic_address(n->bound)) return NULL;
         int index = (int)((const char *)n->bound - synthetic_var_addresses);
         if (index < 0 || index >= p->vars.count) return NULL;
+        if (constants && constants->scalar_phase &&
+            (index < p->n_inputs ? !p->vars.uniform[index] : !defined[index])) return NULL;
         /* ND reserved symbols are recomputed per lane in the kernel preamble. */
         if (p->idx_ndim >= 0 && index == p->idx_ndim) return strdup("nd[0]");
         if (p->idx_flat_idx >= 0 && index == p->idx_flat_idx) return strdup("flat");
@@ -127,7 +159,8 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
                 return strdup(leaf);
             }
         }
-        if (index < p->n_inputs) snprintf(leaf,sizeof(leaf),"((const %s *)inputs[%d])[i]",type,index);
+        if (index < p->n_inputs) snprintf(leaf,sizeof(leaf),"((const %s *)inputs[%d])[%s]",type,index,
+            constants && constants->scalar_phase ? "0" : "i");
         else if (p->local_slots && p->local_slots[index] >= 0 && defined[index]) {
             snprintf(leaf,sizeof(leaf),"local_%d",index);
         }
@@ -155,7 +188,7 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
         /* Artifact capture leaves are immutable, but their values arrive only
          * after validation. Defer preparation so constant specialization keeps
          * its fast path and out-of-range immutable leaves keep safe fallback. */
-        if (!constants && TYPE_MASK(arg0->type) == ME_VARIABLE && is_synthetic_address(arg0->bound) &&
+        if ((!constants || !constants->known) && TYPE_MASK(arg0->type) == ME_VARIABLE && is_synthetic_address(arg0->bound) &&
             (arg0->dtype == ME_INT64 || arg0->dtype == ME_BOOL)) {
             int index = (int)((const char *)arg0->bound - synthetic_var_addresses);
             if (index >= 0 && index < p->vars.count && p->vars.uniform[index]) return NULL;
@@ -416,7 +449,10 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
                     pj_append(s,"local_%d = %s; if (pj_status) return pj_status;\n",index,value);
                 defined[index] = true;
             }
-            else ok = pj_append(s,"((%s *)output)[i] = %s; if (pj_status) return pj_status; goto pj_lane_done;\n",pj_type(p->output_dtype),value);
+            else if (constants && constants->scalar_phase) {
+                ok = pj_append(s,"((%s *)output)[0] = %s; if (pj_status) return pj_status; return 0;\n",
+                    pj_type(p->output_dtype),value);
+            } else ok = pj_append(s,"((%s *)output)[i] = %s; if (pj_status) return pj_status; goto pj_lane_done;\n",pj_type(p->output_dtype),value);
             free(value);
             if (!ok) return false;
         }
@@ -535,20 +571,38 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
     return true;
 }
 
-/* First scalar-JIT scope: one float sum/product return, optionally mapped and
- * finally converted to another floating dtype. Accumulation remains serial;
- * integer overflow, mean, extrema/truth, multiple reductions, and statement
- * programs retain their qualified native interpreter paths. */
-static const me_expr *pj_scalar_reduction(const me_dsl_compiled_program *p) {
-    if (p->block.nstmts != 1 || p->block.stmts[0]->kind != ME_DSL_STMT_RETURN ||
-        !pj_float(p->output_dtype)) return NULL;
-    const me_expr *node = p->block.stmts[0]->as.return_stmt.expr.expr;
-    if (node && IS_FUNCTION(node->type) && !node->function && ARITY(node->type) == 1) {
-        node = node->parameters[0];
+/* One floating reduction in a straight-line scalar recipe. Reduction loops are
+ * emitted at their expression position, not hoisted ahead of checked/lazy
+ * operands. Integer and multiple reductions, and statement control flow, retain
+ * interpretation. Scalar-phase input reads must be uniform captures. */
+static bool pj_count_scalar_reductions(const me_expr *n, int *count, int depth) {
+    if (!n || depth > 128) return false;
+    if (!IS_FUNCTION(n->type)) return true;
+    if (is_reduction_node(n)) {
+        me_reduce_kind kind = reduction_kind(n->function);
+        if (++*count > 1 || !pj_float(n->dtype) || !pj_float(((me_expr *)n->parameters[0])->dtype) ||
+            (kind != ME_REDUCE_SUM && kind != ME_REDUCE_PROD && kind != ME_REDUCE_MEAN)) return false;
     }
-    if (!node || !is_reduction_node(node) || !pj_float(node->dtype)) return NULL;
-    me_reduce_kind kind = reduction_kind(node->function);
-    return kind == ME_REDUCE_SUM || kind == ME_REDUCE_PROD ? node : NULL;
+    int arity = ARITY(n->type);
+    if (arity < 1 || arity > 3) return false;
+    for (int j = 0; j < arity; j++) {
+        if (!pj_count_scalar_reductions(n->parameters[j],count,depth+1)) return false;
+    }
+    return true;
+}
+
+static bool pj_scalar_program(const me_dsl_compiled_program *p) {
+    if (!p->block.nstmts || p->block.stmts[p->block.nstmts-1]->kind != ME_DSL_STMT_RETURN) return false;
+    int count = 0;
+    for (int j = 0; j < p->block.nstmts; j++) {
+        const me_dsl_compiled_stmt *stmt = p->block.stmts[j];
+        const me_expr *expr;
+        if (stmt->kind == ME_DSL_STMT_ASSIGN) expr = stmt->as.assign.value.expr;
+        else if (stmt->kind == ME_DSL_STMT_RETURN && j == p->block.nstmts-1) expr = stmt->as.return_stmt.expr.expr;
+        else return false;
+        if (!pj_count_scalar_reductions(expr,&count,0)) return false;
+    }
+    return count == 1;
 }
 
 static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *constants) {
@@ -569,8 +623,8 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         if (p) dsl_tracef("portable jit ineligible: request=%d statements=%d rank=%d",p->jit_request_mode,p->block.nstmts,p->compile_ndims);
         return;
     }
-    const me_expr *scalar = p->output_is_scalar ? pj_scalar_reduction(p) : NULL;
-    if (p->output_is_scalar && !scalar) return;
+    bool scalar = p->output_is_scalar;
+    if (scalar && !pj_scalar_program(p)) return;
     for (int i = 0; i < p->n_inputs; i++) if (!pj_type(p->vars.dtypes[i])) {
         dsl_tracef("portable jit ineligible: unsupported input dtype"); return;
     }
@@ -593,19 +647,9 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     int next_label = 0, next_temp = 0;
     pj_flow flow = {&next_label,&next_temp,-1};
-    char scalar_init[128] = "", scalar_store[128] = "";
     bool lowered;
-    if (scalar) {
-        char *value = pj_expr(p,scalar->parameters[0],defined,0,constants,&body,&next_temp);
-        me_reduce_kind kind = reduction_kind(scalar->function);
-        lowered = value && pj_append(&body,"pj_acc = (%s)(pj_acc %s (%s));\n",
-            pj_type(scalar->dtype),kind == ME_REDUCE_SUM ? "+" : "*",value);
-        free(value);
-        snprintf(scalar_init,sizeof(scalar_init),"%s pj_acc = %d;\n",
-            pj_type(scalar->dtype),kind == ME_REDUCE_SUM ? 0 : 1);
-        snprintf(scalar_store,sizeof(scalar_store),"((%s *)output)[0] = (%s)pj_acc;\n",
-            pj_type(p->output_dtype),pj_type(p->output_dtype));
-    } else lowered = pj_block(p,&p->block,defined,&body,0,constants,flow);
+    /* Scalar loops need the ND preamble; lower them after constructing it. */
+    lowered = scalar || pj_block(p,&p->block,defined,&body,0,constants,flow);
     if (!lowered) {
         free(body.text);
         dsl_tracef("portable jit ineligible: unsupported typed statements");
@@ -649,6 +693,17 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
             return;
         }
     }
+    if (scalar) {
+        pj_constants scalar_constants = constants ? *constants : (pj_constants){0};
+        scalar_constants.scalar_phase = true;
+        scalar_constants.nd_preamble = preamble.text;
+        if (!pj_block(p,&p->block,defined,&body,0,&scalar_constants,flow)) {
+            free(preamble.text);
+            free(body.text);
+            dsl_tracef("portable jit ineligible: unsupported scalar recipe");
+            return;
+        }
+    }
     size_t capacity = body.used + preamble.used + 8192;
     char *source = malloc(capacity);
     me_dsl_jit_ir_program *ir = calloc(1,sizeof(*ir));
@@ -671,7 +726,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
     snprintf(source,capacity,
-        "/* portable-1.1 lowering-r18 exact-mixed-comparison-bridge abi-r8 */\n"
+        "/* portable-1.1 lowering-r19 scalar-recipes abi-r8 */\n"
         "#include <stdint.h>\n"
         "#include <string.h>\n"
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"
@@ -726,11 +781,12 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "int pj_status = 0;\n"
         "%s"
         "%s"
-        "for (int64_t i=0; i<count; i++) { if (mask && !mask[i]) continue;\n"
         "%s"
-        "%s pj_lane_done: ; } %s return 0; }\n",
+        "%s %s return 0; }\n",
         ME_DSL_JIT_SYMBOL_NAME,p->n_inputs,p->n_inputs+ME_DSL_PORTABLE_JIT_CAP_OFF,
-        nd_decl,scalar_init,preamble.text ? preamble.text : "",body.text,scalar_store);
+        nd_decl,scalar ? "" : "for (int64_t i=0; i<count; i++) { if (mask && !mask[i]) continue;\n",
+        scalar ? "" : (preamble.text ? preamble.text : ""),body.text,
+        scalar ? "" : "pj_lane_done: ; }");
     free(preamble.text);
     free(body.text);
     p->jit_ir = ir;
@@ -750,7 +806,7 @@ void dsl_portable_prepare_jit_source(me_dsl_compiled_program *p) {
 void dsl_portable_prepare_jit_constants(me_dsl_compiled_program *p,
     const int64_t *values, const bool *known) {
     if (!p || !values || !known || p->jit_c_source || p->jit_ir) return;
-    pj_constants constants = {values, known, p->n_inputs};
+    pj_constants constants = {.values = values, .known = known, .count = p->n_inputs};
     pj_prepare_source(p, &constants);
     dsl_try_prepare_jit_runtime(p);
 }

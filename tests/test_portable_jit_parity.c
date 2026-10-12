@@ -362,7 +362,12 @@ static void computed_weak_conversion(void) {
 static void scalar_reductions(void) {
     const char *bodies[] = {"return block_sum(x)", "return block_prod(x)",
         "return block_sum(x * 2)", "return block_prod(x + y)",
-        "return block_sum(where(x >= 0, x, 0))", "return block_sum(sqrt(x))"};
+        "return block_sum(where(x >= 0, x, 0))", "return block_sum(sqrt(x))",
+        "return block_sum(x * 2) / 2", "return sqrt(block_sum(x))",
+        "s = block_sum(x)\\n    return s + 1",
+        "a = 2.0\\n    s = block_sum(x * a)\\n    t = s / a\\n    return t",
+        "return block_mean(x)", "return block_mean(x * 2) / 2",
+        "s = block_mean(x)\\n    return s + 1"};
     for (int input64 = 0; input64 < 2; input64++) for (int output64 = 0; output64 < 2; output64++) {
         const char *input_name = input64 ? "float64" : "float32";
         const char *output_name = output64 ? "float64" : "float32";
@@ -423,6 +428,36 @@ static void scalar_reductions(void) {
     }
 }
 
+static void scalar_checked_order(void) {
+    const char *bodies[] = {"return int64(1e100) + block_sum(sqrt(x))",
+        "return block_sum(sqrt(x)) + int64(1e100)"};
+    for (int first = 0; first < 2; first++) {
+        parity_case test = {"scalar checked order",bodies[first],"float64","float64",true};
+        const char *second = "{\"name\":\"y\",\"dtype\":\"float64\"}";
+        me_artifact *jit = load_contract(&test,ME_JIT_ON,second,NULL,"block_scalar");
+        me_artifact *reference = load_contract(&test,ME_JIT_OFF,second,NULL,"block_scalar");
+        me_artifact *oracle = load(&cases[0],ME_JIT_ON);
+        CHECK(me_artifact_has_jit(jit) == me_artifact_has_jit(oracle));
+        double x[] = {-1,4}, actual, expected;
+        me_artifact_buffer buffers[] = {{"x",ME_FLOAT64,8,x,sizeof(x)},
+            {"y",ME_FLOAT64,8,x,sizeof(x)}};
+        me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
+            .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = 2,
+            .output_capacity = sizeof(actual)};
+        me_artifact_error error, reference_error;
+        me_artifact_fp_status status, reference_status;
+        int rc = me_artifact_eval_status(jit,buffers,2,&actual,&descriptor,0,&status,&error);
+        int reference_rc = me_artifact_eval_status(reference,buffers,2,&expected,&descriptor,0,
+            &reference_status,&reference_error);
+        CHECK(rc && rc == reference_rc && error.native_status == reference_error.native_status);
+        CHECK(status.flags == reference_status.flags);
+        if (status.supported) CHECK((status.flags & 1) == (unsigned)first);
+        me_artifact_free(jit);
+        me_artifact_free(reference);
+        me_artifact_free(oracle);
+    }
+}
+
 int main(int argc, char **argv) {
     if (argc > 1) {
         me_artifact *oracle = load(&cases[0], ME_JIT_ON);
@@ -438,5 +473,6 @@ int main(int argc, char **argv) {
     checked_cast_errors();
     computed_weak_conversion();
     scalar_reductions();
+    scalar_checked_order();
     return 0;
 }

@@ -437,3 +437,23 @@ so downstream benchmarks cannot silently claim JIT performance while interpretin
   3.190 ms to 0.603 ms, GCC from 3.190 ms to 0.648 ms, and TCC from 3.459 ms to
   0.931 ms. Interpretation remains around 0.99 ms. All seven cast/masked-cast
   cases validate outputs and FP status; these timings exclude compilation.
+- Scalar-recipe follow-up (lowering revision 19): straight-line scalar assignments
+  and returns containing one floating sum/product/mean now compile, including
+  scalar post-processing, uniform captures, scalar locals used in the map, and
+  final checked conversions. Reduction scans are emitted at the original expression
+  position, including in selected lazy branches; they are not hoisted across earlier
+  checked operations. Means use serial accumulation and the participating count,
+  with a quiet NaN for empty groups rather than an executed zero division. Multiple,
+  integer and extrema/truth reductions, statement-level scalar control flow, and
+  array-valued assignments outside the map remain interpreted. Boundary/value/FP
+  tests include masks, empty groups, local precision, checked-error order and
+  recovery, original partitions, captures, and logical ND context. Local qualification
+  passes 445 native tests, 1,074 Python tests (one skip), 474 independent-wheel tests
+  (17 skips), three sanitizer parity tests and 12 WASM fallback/artifact/graph tests.
+  The Python JIT benchmark now has 70 cases: each host backend compiles 68, with
+  two deliberate fallbacks, and all outputs/statuses match interpretation. In
+  sequential local Clang runs (65,536 float64 values, median of seven warm samples),
+  mapped sum plus division drops from 66.032 ms interpreted fallback to 0.047 ms JIT;
+  mapped mean plus scalar post-processing drops from 66.664 ms to 0.048 ms. Plain
+  sum plus a scalar assignment/return drops from 0.606 ms to 0.036 ms. These are
+  selected local workloads and exclude compilation; portable WASM JIT remains disabled.
