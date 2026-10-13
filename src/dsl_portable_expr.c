@@ -1042,8 +1042,9 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
         int index = (int)((const char *)n->bound - synthetic_var_addresses);
         if (index < 0 || index >= ctx->nvars || !ctx->vars[index]) return ME_EVAL_ERR_VAR_MISMATCH;
         if (ctx->initialized && ctx->initialized[index] && !ctx->initialized[index][item]) return ME_EVAL_ERR_INVALID_ARG;
-        if (is_string_dtype(n->dtype)) out->string = (const unsigned char *)ctx->vars[index] + (size_t)item * n->itemsize;
-        else read_scalar((const unsigned char *)ctx->vars[index] + (size_t)item * dtype_size(n->dtype), n->dtype, out);
+        size_t lane = n->flags & ME_EXPR_FLAG_UNIFORM_INPUT ? 0 : (size_t)item;
+        if (is_string_dtype(n->dtype)) out->string = (const unsigned char *)ctx->vars[index] + lane * n->itemsize;
+        else read_scalar((const unsigned char *)ctx->vars[index] + lane * dtype_size(n->dtype), n->dtype, out);
         return ME_EVAL_SUCCESS;
     }
     if (me_portable_string_operation(n)) {

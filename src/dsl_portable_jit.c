@@ -227,7 +227,7 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
             }
         }
         if (index < p->n_inputs) snprintf(leaf,sizeof(leaf),"((const %s *)inputs[%d])[%s]",type,index,
-            constants && constants->scalar_phase ? "0" : "i");
+            p->vars.uniform[index] || (constants && constants->scalar_phase) ? "0" : "i");
         else if (p->local_slots && p->local_slots[index] >= 0 && defined[index]) {
             snprintf(leaf,sizeof(leaf),p->output_is_scalar && !p->vars.uniform[index] ?
                 "local_%d[i]" : "local_%d",index);

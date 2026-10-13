@@ -384,6 +384,54 @@ static void computed_weak_conversion(void) {
     }
 }
 
+static void uniform_capture_storage(void) {
+    /* More than one lane must read the same scalar allocation in both engines.
+     * Include a uniform local: its storage must remain per-lane after assignment. */
+    const char *bodies[] = {"return x + (y - 1)",
+        "a = y\\n    if x > 0:\\n        a = a + x\\n    return a"};
+    for (int weak = 0; weak < 2; weak++) {
+        char constant[192];
+        snprintf(constant, sizeof(constant), "{\"name\":\"y\",\"dtype\":\"int64\","
+            "\"category\":\"%s\",\"encoding\":\"decimal\",\"value\":\"1\"}",
+            weak ? "weak" : "typed_scalar");
+        for (size_t body = 0; body < sizeof(bodies) / sizeof(bodies[0]); body++) {
+            parity_case test = {"uniform scalar storage", bodies[body], "float64", "float64", true};
+            me_artifact *jit = load_extra(&test, ME_JIT_ON, NULL, constant);
+            me_artifact *reference = load_extra(&test, ME_JIT_OFF, NULL, constant);
+            double x[257], output[257], expected[257];
+            uint8_t mask[257];
+            for (int i = 0; i < 257; i++) {
+                x[i] = i - 128;
+                mask[i] = i % 3 != 0;
+            }
+            me_artifact_buffer buffer = {"x", ME_FLOAT64, sizeof(double), x, sizeof(x)};
+            me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
+                .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = 257,
+                .output_capacity = sizeof(output)};
+            me_artifact_error error;
+            for (int masked = 0; masked < 2; masked++) {
+                memset(output, 0, sizeof(output));
+                memset(expected, 0, sizeof(expected));
+                descriptor.valid_mask = masked ? mask : NULL;
+                descriptor.valid_mask_capacity = masked ? sizeof(mask) : 0;
+                CHECK(!me_artifact_eval_ex(jit, &buffer, 1, output, &descriptor, &error));
+                CHECK(!me_artifact_eval_ex(reference, &buffer, 1, expected, &descriptor, &error));
+                CHECK(!memcmp(output, expected, sizeof(output)));
+                for (int i = 0; i < 257; i++) {
+                    if (!masked || mask[i]) CHECK(output[i] == (body ? (x[i] > 0 ? x[i] + 1 : 1) : x[i]));
+                }
+            }
+            descriptor.nitems = 0;
+            descriptor.valid_mask = NULL;
+            descriptor.valid_mask_capacity = 0;
+            CHECK(!me_artifact_eval_ex(jit, &buffer, 1, output, &descriptor, &error));
+            CHECK(!me_artifact_eval_ex(reference, &buffer, 1, expected, &descriptor, &error));
+            me_artifact_free(jit);
+            me_artifact_free(reference);
+        }
+    }
+}
+
 static void scalar_reductions(void) {
     const char *bodies[] = {"return block_sum(x)", "return block_prod(x)",
         "return block_sum(x * 2)", "return block_prod(x + y)",
@@ -828,6 +876,7 @@ int main(int argc, char **argv) {
     loop_errors();
     checked_cast_errors();
     computed_weak_conversion();
+    uniform_capture_storage();
     scalar_reductions();
     scalar_checked_order();
     scalar_array_fallbacks();

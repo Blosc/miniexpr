@@ -991,13 +991,19 @@ fail:
     return false;
 }
 
-static void dsl_mark_weak_scalars(me_expr *expr, const me_dsl_compiled_program *program) {
+static void dsl_mark_scalar_inputs(me_expr *expr, const me_dsl_compiled_program *program) {
     if (!expr) return;
     if (TYPE_MASK(expr->type) == ME_VARIABLE && is_synthetic_address(expr->bound)) {
         int index = (int)((const char *)expr->bound - synthetic_var_addresses);
-        if (index >= 0 && index < ME_MAX_VARS && program->numpy_weak_vars[index]) expr->flags |= ME_EXPR_FLAG_WEAK_SCALAR;
+        if (index >= 0 && index < ME_MAX_VARS &&
+            program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_1 && program->numpy_weak_vars[index]) {
+            expr->flags |= ME_EXPR_FLAG_WEAK_SCALAR;
+        }
+        if (index >= 0 && index < program->n_inputs && program->vars.uniform[index]) {
+            expr->flags |= ME_EXPR_FLAG_UNIFORM_INPUT;
+        }
     }
-    for (int i = 0; i < ARITY(expr->type); i++) dsl_mark_weak_scalars(expr->parameters[i], program);
+    for (int i = 0; i < ARITY(expr->type); i++) dsl_mark_scalar_inputs(expr->parameters[i], program);
 }
 
 me_dtype dsl_portable_cast_dtype(const me_expr *expr) {
@@ -1167,7 +1173,7 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
     int *indices = NULL;
     if (dsl_portable_typed_profile(ctx->program->semantic_profile)) {
         char reason[256];
-        if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_1) dsl_mark_weak_scalars(compiled, ctx->program);
+        dsl_mark_scalar_inputs(compiled, ctx->program);
         if (!dsl_portable_type_expr_profile(&compiled, expr_dtype, ctx->program->semantic_profile, reason, sizeof(reason))) {
             dsl_set_error_reason(ctx, reason);
             if (ctx->error_pos) *ctx->error_pos = dsl_offset_from_linecol(ctx->source, expr_node->line, expr_node->column);

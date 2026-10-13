@@ -858,7 +858,6 @@ me_artifact_status me_artifact_eval_ex(const me_artifact *artifact,
         if (descriptor->valid_mask && descriptor->valid_mask[lane] > 1) return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "invalid lane mask value");
     }
     const void *data[ME_MAX_VARS];
-    void *owned[ME_MAX_VARS] = {0};
     for (int b = 0; b < artifact->ninputs; b++) {
         int found = -1;
         for (int i = 0; i < ninputs; i++) {
@@ -884,15 +883,9 @@ me_artifact_status me_artifact_eval_ex(const me_artifact *artifact,
     }
     me_artifact_status result = ME_ARTIFACT_SUCCESS;
     for (int b = artifact->ninputs; b < artifact->nbindings; b++) {
-        size_t width = artifact->bindings[b].variable.itemsize;
-        size_t count = nitems ? nitems : 1;
-        if (count > SIZE_MAX / width || !(owned[b] = malloc(count * width))) {
-            result = artifact_error(error, ME_ARTIFACT_ERR_OOM, "constant buffer allocation failed");
-            break;
-        }
-        const void *constant = artifact->bindings[b].string_value ? artifact->bindings[b].string_value : (const void *)&artifact->bindings[b].value;
-        for (size_t i = 0; i < count; i++) memcpy((char *)owned[b] + i * width, constant, width);
-        data[b] = owned[b];
+        /* Immutable uniform bindings are borrowed for the duration of this call.
+         * Both typed interpretation and JIT read lane zero, not a broadcast copy. */
+        data[b] = artifact->bindings[b].string_value ? artifact->bindings[b].string_value : (const void *)&artifact->bindings[b].value;
     }
     if (result == ME_ARTIFACT_SUCCESS) {
         me_dsl_portable_eval_descriptor native = {(int)nitems, descriptor->valid_mask, descriptor->output_capacity,
@@ -903,7 +896,6 @@ me_artifact_status me_artifact_eval_ex(const me_artifact *artifact,
             result = artifact_error(error, ME_ARTIFACT_ERR_EVAL, "portable interpreter evaluation failed");
         }
     }
-    for (int b = 0; b < artifact->nbindings; b++) free(owned[b]);
     return result;
 }
 

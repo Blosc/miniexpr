@@ -74,6 +74,10 @@ Output is `{dtype,contract}` with `elementwise` or `block_scalar`, adding
 disagreements. Numeric constants declare `category: "weak"` or `"typed_scalar"`. Ordinary Python
 captures are weak; explicit capture dtypes and NumPy scalars are strong typed
 immutable uniform operands. Signatures/cardinality never change during evaluation.
+Constant bindings retain scalar storage owned by the artifact. Both typed
+interpretation and JIT read lane zero rather than materializing broadcast arrays;
+concurrent evaluations borrow this immutable storage. Uniform local variables
+still use their existing local storage and are not scalar external bindings.
 
 Implemented requirements are `numeric` (mandatory), `control-flow`,
 `block-reductions`, `fixed-strings`, and `nd-context`. Names must be unique/known;
