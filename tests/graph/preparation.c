@@ -400,7 +400,14 @@ static int read_values(void *opaque, const size_t *indices, size_t count, void *
         if (indices[i] >= owner->count || (owner->reject_negative && owner->values[indices[i]] < 0)) return 1;
         ((double *)destination)[i] = owner->values[indices[i]];
     }
-    if (owner->perturb_fp) { feraiseexcept(FE_INVALID); fesetround(FE_DOWNWARD); }
+#ifndef __EMSCRIPTEN__
+    /* wasm32 has no observable floating-point exception flags or rounding mode.
+     * Keep the reader/value/failure tests there, but perturb fenv only on hosts. */
+    if (owner->perturb_fp) {
+        feraiseexcept(FE_INVALID);
+        fesetround(FE_DOWNWARD);
+    }
+#endif
     return 0;
 }
 static void storage_readers(bool jit) {
