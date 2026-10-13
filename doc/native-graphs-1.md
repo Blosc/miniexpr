@@ -42,7 +42,12 @@ comparisons when the accumulator dtype matches the input, preserving signed-zero
 selection. Any/all use typed truth tests and introduce no early exit. Float
 extrema/truth tiles containing NaNs (or NaN extrema initials) retain generic logic
 to preserve payload selection and signaling-NaN diagnostics.
-Gathered layouts, masks and computed maps keep the original map/reducer route.
+Unmasked computed maps also reuse these typed reducers when the map output and
+accumulator signatures match (or integer sums/products use their default promoted
+64-bit accumulator). Map execution still precedes reduction; serial accumulation
+order and per-operation rounding are unchanged. Gathered inputs can benefit once
+their computed map produces a contiguous tile. Masks and nondefault accumulator
+conversions keep the generic reducer.
 No tile partial sums or reassociation are introduced. Scratch queries remain
 conservative bounds; actual reported temporary memory can be zero. Bypassed maps
 do not contribute to `evaluated_tiles` or `jit_stages`, even if the prepared map

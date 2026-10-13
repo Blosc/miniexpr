@@ -386,7 +386,10 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
             }
             const void *values = direct_reduction ? buffers[0].data : scratch;
             bool handled = false;
-            if (!rc && direct_reduction &&
+            /* Computed maps produce the same typed, contiguous tile as direct
+             * inputs. Without a participation mask, reuse the serial typed
+             * reducers instead of casting/dispatching once per mapped lane. */
+            if (!rc && !mask && values &&
                 (o->reduction == ME_ARRAY_MIN || o->reduction == ME_ARRAY_MAX) &&
                 dtype == me_artifact_output_dtype(a)) {
                 uint64_t normalized = acc, result;
@@ -398,14 +401,14 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
                     else a_cast(ME_UINT64, &result, dtype, &acc);
                     initialized = true;
                 }
-            } else if (!rc && direct_reduction && dtype == ME_BOOL &&
+            } else if (!rc && !mask && values && dtype == ME_BOOL &&
                 (o->reduction == ME_ARRAY_ANY || o->reduction == ME_ARRAY_ALL)) {
                 bool truth;
                 handled = dsl_portable_truth_reduce(me_artifact_output_dtype(a), values,
                     count, a_integer(dtype, &acc) != 0, o->reduction == ME_ARRAY_ALL, &truth);
                 if (handled) { uint64_t result = truth; a_cast(ME_UINT64, &result, dtype, &acc); }
             }
-            if (!rc && !handled && direct_reduction &&
+            if (!rc && !handled && !mask && values &&
                 (o->reduction == ME_ARRAY_SUM || o->reduction == ME_ARRAY_PROD) &&
                 dtype == me_artifact_output_dtype(a) && a_float(dtype)) {
                 /* Fixed serial order, with one float32 rounding per operation.
@@ -421,7 +424,7 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
                         dsl_portable_sum_f32(sum, values, count);
                     memcpy(&acc, &sum, sizeof(sum));
                 }
-            } else if (!rc && !handled && direct_reduction &&
+            } else if (!rc && !handled && !mask && values &&
                 (o->reduction == ME_ARRAY_SUM || o->reduction == ME_ARRAY_PROD) &&
                 !a_float(me_artifact_output_dtype(a)) &&
                 ((dtype == ME_UINT64 && a_unsigned(me_artifact_output_dtype(a)) &&
