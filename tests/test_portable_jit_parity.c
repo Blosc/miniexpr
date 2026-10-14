@@ -879,15 +879,36 @@ static void runtime_literal_parity(void) {
                 int rc = me_artifact_eval_status(jit,buffers,2,actual,&descriptor,0,&status,&error);
                 int reference_rc = me_artifact_eval_status(reference,buffers,2,expected,&descriptor,0,
                     &reference_status,&reference_error);
+                bool equal = true;
+                if (!rc && !reference_rc) {
+                    for (int lane = 0; lane < 16; lane++) {
+                        if (!memcmp(actual+lane*itemsize,expected+lane*itemsize,itemsize)) continue;
+                        /* The portable contract leaves NaN payload/sign
+                         * unspecified; all other bits (including zero sign and
+                         * untouched masked output) must still match exactly. */
+                        double a, e;
+                        if (narrow) {
+                            float af, ef;
+                            memcpy(&af,actual+lane*itemsize,itemsize);
+                            memcpy(&ef,expected+lane*itemsize,itemsize);
+                            a = af;
+                            e = ef;
+                        } else {
+                            memcpy(&a,actual+lane*itemsize,itemsize);
+                            memcpy(&e,expected+lane*itemsize,itemsize);
+                        }
+                        equal &= isnan(a) && isnan(e);
+                    }
+                }
                 if (rc != reference_rc || status.flags != reference_status.flags ||
-                    (!rc && memcmp(actual,expected,16*itemsize))) {
+                    (!rc && !equal)) {
                     fprintf(stderr,"literal parity dtype=%s body=%s selection=%d rc=%d/%d flags=%u/%u\n",
                         dtype,bodies[body],selection,rc,reference_rc,status.flags,reference_status.flags);
                 }
                 CHECK(rc == reference_rc);
                 CHECK(status.flags == reference_status.flags);
                 CHECK(status.supported == reference_status.supported);
-                if (!rc) CHECK(!memcmp(actual,expected,16*itemsize));
+                if (!rc) CHECK(equal);
                 else CHECK(error.native_status == reference_error.native_status);
                 if (selection == 0) {
                     const unsigned raises[] = {ME_FP_INVALID,ME_FP_DIVIDE,ME_FP_OVERFLOW,ME_FP_UNDERFLOW};
