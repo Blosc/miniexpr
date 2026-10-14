@@ -1,4 +1,4 @@
-/* Portable 1.1 scalar C lowering, revision 23. Never translate source
+/* Portable 1.1 scalar C lowering, revision 24. Never translate source
  * text: the typed tree includes promotion and final output conversions. The
  * private kernel ABI appends a participating mask and host comparison/math bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
@@ -94,8 +94,52 @@ static char *pj_weak_conversion(const me_expr *n, const pj_constants *constants)
     return strdup(literal);
 }
 
+/* Prove runtime participation only through floating arithmetic and array inputs.
+ * In particular, a constant-only subtree of a larger array expression is not
+ * runtime arithmetic and must retain its exception-preserving literal loads. */
+static bool pj_runtime_float(const me_dsl_compiled_program *p, const me_expr *n, int depth) {
+    if (!n || depth > 128 || !pj_float(n->dtype)) return false;
+    if (TYPE_MASK(n->type) == ME_VARIABLE && is_synthetic_address(n->bound)) {
+        int index = (int)((const char *)n->bound - synthetic_var_addresses);
+        return index >= 0 && index < p->n_inputs && !p->vars.uniform[index];
+    }
+    if (!IS_FUNCTION(n->type) || is_reduction_node(n)) return false;
+    const char *op = me_portable_operator(n);
+    int arity = ARITY(n->type);
+    if (!op || arity != 2 || (strcmp(op,"+") && strcmp(op,"-") &&
+        strcmp(op,"*") && strcmp(op,"/"))) return false;
+    return pj_runtime_float(p,n->parameters[0],depth+1) ||
+        pj_runtime_float(p,n->parameters[1],depth+1);
+}
+
+static bool pj_plain_literal(const me_expr *n, const char *op) {
+    if (!n || TYPE_MASK(n->type) != ME_CONSTANT || !pj_float(n->dtype)) return false;
+    double value;
+    if (n->flags & ME_EXPR_FLAG_INTEGER_LITERAL) {
+        /* Conservatively accept only the contiguous exact-integer range. Do not
+         * fold a potentially inexact integer-to-float conversion into a literal. */
+        uint64_t limit = UINT64_C(1) << (n->dtype == ME_FLOAT32 ? 24 : 53);
+        if (n->integer_magnitude > limit) return false;
+        value = (double)n->integer_magnitude;
+    } else {
+        value = n->dtype == ME_FLOAT32 ? (double)n->literal_f32 : n->value;
+    }
+    /* Identities can erase the runtime operation, including signaling-NaN
+     * exceptions. Keep their barriers even though the literal itself is exact. */
+    return isfinite(value) && value != 0 &&
+        ((strcmp(op,"*") && strcmp(op,"/")) || fabs(value) != 1);
+}
+
+static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bool *defined, int depth,
+    const pj_constants *constants, pj_text *s, int *next_temp, bool plain_literal);
+
 static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *defined, int depth,
     const pj_constants *constants, pj_text *s, int *next_temp) {
+    return pj_expr_impl(p,n,defined,depth,constants,s,next_temp,false);
+}
+
+static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bool *defined, int depth,
+    const pj_constants *constants, pj_text *s, int *next_temp, bool plain_literal) {
     if (!n || depth > 128 || !pj_type(n->dtype)) return NULL;
     const char *type = pj_type(n->dtype);
     char leaf[256];
@@ -201,6 +245,7 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
             if (!isfinite(value)) return NULL;
             snprintf(leaf,sizeof(leaf),"((%s)%a)",type,value);
         }
+        if (plain_literal) return strdup(leaf);
         char literal[300];
         /* A volatile scalar compound literal prevents arithmetic on constants
          * being folded away together with its observable IEEE exceptions. */
@@ -343,7 +388,9 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
     }
     char *args[3] = {0};
     for (int j = 0; j < arity; j++) {
-        args[j] = pj_expr(p,n->parameters[j],defined,depth+1,constants,s,next_temp);
+        bool plain = arithmetic && arity == 2 && pj_plain_literal(n->parameters[j],op) &&
+            pj_runtime_float(p,n->parameters[1-j],0);
+        args[j] = pj_expr_impl(p,n->parameters[j],defined,depth+1,constants,s,next_temp,plain);
         if (!args[j]) {
             for (int k = 0; k < arity; k++) free(args[k]);
             return NULL;
@@ -879,7 +926,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
     snprintf(source,capacity,
-        "/* portable-1.1 lowering-r23 scalar-loops-array-locals abi-r9 */\n"
+        "/* portable-1.1 lowering-r24 runtime-literals abi-r9 */\n"
         "#include <stdint.h>\n"
         "#include <string.h>\n"
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"

@@ -2,6 +2,8 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 #include "miniexpr_artifact.h"
+#include "dsl_compile_internal.h"
+#include "dsl_jit_test.h"
 #include <math.h>
 #include <float.h>
 #include <stdio.h>
@@ -802,6 +804,108 @@ static void scalar_checked_order(void) {
     }
 }
 
+static void runtime_literal_parity(void) {
+    const char *bodies[] = {
+        "return x + (y - 1)", "return x + 2", "return 2 - x",
+        "return x * 2", "return (x + y) * 2", "return x / 2",
+        "return x + 0.25", "return x * 0", "return x * 1",
+        "return x * -1", "return x / 1", "return x + 0", "return x - 0",
+        "return x + (1.0 / 0.0)", "return x + (0.0 / 0.0)",
+        "return x + (1e30 * 1e30)", "return x + (1e-30 * 1e-30)",
+        "return x + (16777217 * 1.0)", "return x + 9007199254740993",
+        "return where(x > 0, y - 1, 0.0 / 0.0)",
+        "z = 1e30 * 1e30\\n    return x + z",
+        "return x + (1e308 * 1e308)", "return x + (1e-300 * 1e-300)"
+    };
+    uint64_t bits64[] = {UINT64_C(0x7ff0000000000001), UINT64_C(0x7ff8000000000000),
+        UINT64_C(0x7ff0000000000000), UINT64_C(0xfff0000000000000),
+        0, UINT64_C(0x8000000000000000), 1, UINT64_C(0x7fefffffffffffff)};
+    uint32_t bits32[] = {UINT32_C(0x7f800001), UINT32_C(0x7fc00000),
+        UINT32_C(0x7f800000), UINT32_C(0xff800000),
+        0, UINT32_C(0x80000000), 1, UINT32_C(0x7f7fffff)};
+    for (int narrow = 0; narrow < 2; narrow++) {
+        size_t itemsize = narrow ? 4 : 8;
+        uint64_t x_storage[16] = {0}, y_storage[16] = {0};
+        unsigned char *x = (unsigned char *)x_storage, *y = (unsigned char *)y_storage;
+        for (int lane = 0; lane < 16; lane++) {
+            if (narrow) {
+                memcpy(x+lane*itemsize,&bits32[lane%8],itemsize);
+                float value = lane+1;
+                memcpy(y+lane*itemsize,&value,itemsize);
+            } else {
+                memcpy(x+lane*itemsize,&bits64[lane%8],itemsize);
+                double value = lane+1;
+                memcpy(y+lane*itemsize,&value,itemsize);
+            }
+        }
+        for (size_t body = 0; body < sizeof(bodies)/sizeof(bodies[0]); body++) {
+            if (narrow && body >= 21) continue;
+            const char *dtype = narrow ? "float32" : "float64";
+            parity_case test = {"runtime literal parity",bodies[body],dtype,dtype,true};
+            me_artifact *jit = load(&test,ME_JIT_ON);
+            me_artifact *reference = load(&test,ME_JIT_OFF);
+            me_artifact *oracle = load(&cases[0],ME_JIT_ON);
+            CHECK(me_artifact_has_jit(jit) == me_artifact_has_jit(oracle));
+            me_artifact_free(oracle);
+            if (me_artifact_has_jit(jit)) {
+                me_dsl_compiled_program *program = dsl_artifact_program_for_tests(jit);
+                CHECK(program && program->jit_c_source);
+                /* Also test the optimization itself: semantic parity alone
+                 * would not catch restoring the per-lane volatile barrier. */
+                CHECK((strstr(program->jit_c_source,"((volatile ") != NULL) == (body >= 7));
+            }
+            me_artifact_buffer buffers[] = {{"x",narrow ? ME_FLOAT32 : ME_FLOAT64,itemsize,x,16*itemsize},
+                {"y",narrow ? ME_FLOAT32 : ME_FLOAT64,itemsize,y,16*itemsize}};
+            /* Full reads exercise SIMD; singleton, empty and masked reads audit
+             * per-lane exceptions and nonparticipating constant-only subtrees. */
+            for (int selection = 0; selection < 20; selection++) {
+                uint64_t actual_storage[16], expected_storage[16];
+                unsigned char *actual = (unsigned char *)actual_storage;
+                unsigned char *expected = (unsigned char *)expected_storage;
+                memset(actual_storage,0xa5,sizeof(actual_storage));
+                memset(expected_storage,0xa5,sizeof(expected_storage));
+                uint8_t mask[16] = {0};
+                for (int lane = 0; lane < 16; lane++) {
+                    mask[lane] = selection == 0 || (selection == 2 && lane%2) ||
+                        (selection >= 4 && lane == selection-4);
+                }
+                me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
+                    .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,
+                    .nitems = selection == 3 ? 0 : 16, .output_capacity = sizeof(actual_storage),
+                    .valid_mask = selection == 0 ? NULL : mask,
+                    .valid_mask_capacity = sizeof(mask)};
+                me_artifact_fp_status status, reference_status;
+                me_artifact_error error, reference_error;
+                int rc = me_artifact_eval_status(jit,buffers,2,actual,&descriptor,0,&status,&error);
+                int reference_rc = me_artifact_eval_status(reference,buffers,2,expected,&descriptor,0,
+                    &reference_status,&reference_error);
+                if (rc != reference_rc || status.flags != reference_status.flags ||
+                    (!rc && memcmp(actual,expected,16*itemsize))) {
+                    fprintf(stderr,"literal parity dtype=%s body=%s selection=%d rc=%d/%d flags=%u/%u\n",
+                        dtype,bodies[body],selection,rc,reference_rc,status.flags,reference_status.flags);
+                }
+                CHECK(rc == reference_rc);
+                CHECK(status.flags == reference_status.flags);
+                CHECK(status.supported == reference_status.supported);
+                if (!rc) CHECK(!memcmp(actual,expected,16*itemsize));
+                else CHECK(error.native_status == reference_error.native_status);
+                if (selection == 0) {
+                    const unsigned raises[] = {ME_FP_INVALID,ME_FP_DIVIDE,ME_FP_OVERFLOW,ME_FP_UNDERFLOW};
+                    for (size_t flag = 0; flag < sizeof(raises)/sizeof(raises[0]); flag++) {
+                        rc = me_artifact_eval_status(jit,buffers,2,actual,&descriptor,raises[flag],&status,&error);
+                        reference_rc = me_artifact_eval_status(reference,buffers,2,expected,&descriptor,
+                            raises[flag],&reference_status,&reference_error);
+                        CHECK(rc == reference_rc && status.flags == reference_status.flags);
+                        if (rc) CHECK(error.native_status == reference_error.native_status);
+                    }
+                }
+            }
+            me_artifact_free(jit);
+            me_artifact_free(reference);
+        }
+    }
+}
+
 static void scalar_array_fallbacks(void) {
     const char *bodies[] = {
         "s = block_sum(x)\\n    if s > 0:\\n        v = x\\n    else:\\n        v = x * 2\\n    return block_sum(v)",
@@ -879,6 +983,7 @@ int main(int argc, char **argv) {
     uniform_capture_storage();
     scalar_reductions();
     scalar_checked_order();
+    runtime_literal_parity();
     scalar_array_fallbacks();
     scalar_loop_cap();
     integer_scalar_reductions();
