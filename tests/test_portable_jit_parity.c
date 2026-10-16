@@ -592,6 +592,9 @@ static void numeric_dtype_matrix(void) {
     const char *builtins[] = {"abs","sign","square","floor","ceil","trunc","round","real","imag","conj"};
     const char *reductions[] = {"min","max","any","all","sum","prod","mean"};
     const char *arithmetic[] = {"x + y","x - y","x * y","-x","where(x > y, x + y, x * y)","x + 1"};
+    /* Keep exhaustive integer operator/width parity in the native matrix;
+     * Python integration tests only need representative scheduler signatures. */
+    const char *integer_ops[] = {"x - 1","x * 3","~x","x + (y - 1)","x ^ (y | 1)"};
     const char *floating_ops[] = {"sin(x) + cos(x)","tan(x)","exp(x)","log(x)","sqrt(x)","floor(x)","ceil(x)",
         "where(x > 0, log(x), y)","x // y","x == y","x != y","x < y","x <= y","x > y","x >= y",
         "x + (1.0 / 0.0)","where(x > 0, 1.0 / 0.0, x)"};
@@ -612,19 +615,21 @@ static void numeric_dtype_matrix(void) {
         for (int lane = 0; lane < 4; lane++) memcpy(data+lane*sizes[dtype],&values[lane],sizes[dtype]);
         char second[128];
         snprintf(second,sizeof(second),"{\"name\":\"y\",\"dtype\":\"%s\"}",names[dtype]);
-        for (int recipe = 0; recipe < 47; recipe++) {
+        for (int recipe = 0; recipe < 47 + (int)(sizeof(integer_ops)/sizeof(integer_ops[0])); recipe++) {
             bool builtin = recipe < 10;
-            bool mean = recipe >= 45;
+            bool integer_recipe = recipe >= 47;
+            bool mean = recipe >= 45 && !integer_recipe;
             bool scalar = (recipe >= 10 && recipe < 22) || mean;
             bool arithmetic_recipe = recipe >= 22 && !mean;
             bool comparison = recipe >= 37 && recipe <= 42;
             if (builtin && (floating || dtype == 0)) continue;
-            if (arithmetic_recipe && (dtype == 0 || (recipe >= 28 && !floating))) continue;
+            if (integer_recipe && floating) continue;
+            if (arithmetic_recipe && (dtype == 0 || (recipe >= 28 && !floating && !integer_recipe))) continue;
             int reduction = mean ? 6 : builtin ? 0 : (recipe-10)/2;
             bool mapped = mean ? recipe == 46 : !builtin && (recipe-10)%2;
             char body[192];
             if (builtin) snprintf(body,sizeof(body),"return %s(x)",builtins[recipe]);
-            else if (arithmetic_recipe) snprintf(body,sizeof(body),"return %s",recipe < 28 ? arithmetic[recipe-22] : floating_ops[recipe-28]);
+            else if (arithmetic_recipe) snprintf(body,sizeof(body),"return %s",integer_recipe ? integer_ops[recipe-47] : recipe < 28 ? arithmetic[recipe-22] : floating_ops[recipe-28]);
             else snprintf(body,sizeof(body),"return block_%s(%s)",reductions[reduction],
                 mapped ? "where(x != 0, x, x)" : "x");
             const char *output = mean ? (floating ? names[dtype] : "float64") : comparison ? "bool" : builtin || arithmetic_recipe || reduction < 2 ? names[dtype] :
@@ -639,6 +644,20 @@ static void numeric_dtype_matrix(void) {
             }
             me_artifact *oracle = load(&cases[0],ME_JIT_ON);
             CHECK(me_artifact_has_jit(jit) == me_artifact_has_jit(oracle));
+            if (me_artifact_has_jit(jit) && dtype > 0 && dtype < 9 &&
+                (recipe == 22 || recipe == 23 || recipe == 24 || recipe == 27 || recipe == 47 || recipe == 48)) {
+                me_dsl_compiled_program *program = dsl_artifact_program_for_tests(jit);
+                CHECK(program && program->jit_c_source);
+                /* Wrapping boundary/mask parity below also guards the direct
+                 * unsigned store; assert that the TCC fast lowering is used. */
+                char store[128];
+                snprintf(store,sizeof(store),"((%s%s_t *)output)[i] = (%s%s_t)",
+                    unsigned_input ? "" : "u",names[dtype],
+                    unsigned_input ? "" : "u",names[dtype]);
+                CHECK(strstr(program->jit_c_source,store));
+                CHECK(!strstr(program->jit_c_source,"((volatile "));
+                CHECK(!strstr(program->jit_c_source,"memcpy(&s"));
+            }
             uint8_t partial[] = {1,0,1,0}, none[] = {0,0,0,0}, nan_only[] = {0,0,1,0};
             for (int mask = 0; mask < (floating ? 9 : 4); mask++) {
                 int participation = mask % 4;

@@ -1,4 +1,4 @@
-/* Portable 1.1 scalar C lowering, revision 24. Never translate source
+/* Portable 1.1 scalar C lowering, revision 25. Never translate source
  * text: the typed tree includes promotion and final output conversions. The
  * private kernel ABI appends a participating mask and host comparison/math bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
@@ -245,7 +245,10 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
             if (!isfinite(value)) return NULL;
             snprintf(leaf,sizeof(leaf),"((%s)%a)",type,value);
         }
-        if (plain_literal) return strdup(leaf);
+        /* Integer literal construction has no observable FP exceptions. Keep
+         * any checked conversions in the typed tree, but do not force an
+         * otherwise constant integer through a volatile load on every lane. */
+        if (plain_literal || pj_integral(n->dtype)) return strdup(leaf);
         char literal[300];
         /* A volatile scalar compound literal prevents arithmetic on constants
          * being folded away together with its observable IEEE exceptions. */
@@ -567,6 +570,45 @@ static bool pj_falls_through(const me_dsl_compiled_block *block, int depth) {
     return true;
 }
 
+/* A terminal same-width modular operation can store its unsigned bit pattern
+ * directly. Corresponding signed/unsigned types may alias in C99. This avoids
+ * per-lane representation temporaries with non-inlining compilers such as TCC;
+ * checked conversions, computed operands and uniform captures use normal lowering. */
+static bool pj_integer_leaf(const me_dsl_compiled_program *p, const me_expr *n,
+                            me_dtype dtype, const char *type, char *out, size_t size) {
+    if (!n || n->dtype != dtype) return false;
+    if (TYPE_MASK(n->type) == ME_CONSTANT && (n->flags & ME_EXPR_FLAG_INTEGER_LITERAL)) {
+        snprintf(out,size,"((%s)(%s%lluULL))",type,
+            n->flags & ME_EXPR_FLAG_NEGATIVE_LITERAL ? "0ULL-" : "",
+            (unsigned long long)n->integer_magnitude);
+        return true;
+    }
+    if (TYPE_MASK(n->type) != ME_VARIABLE || !is_synthetic_address(n->bound)) return false;
+    int index = (int)((const char *)n->bound - synthetic_var_addresses);
+    if (index < 0 || index >= p->n_inputs || p->vars.uniform[index]) return false;
+    snprintf(out,size,"((const %s *)inputs[%d])[i]",type,index);
+    return true;
+}
+
+static int pj_direct_integer_return(const me_dsl_compiled_program *p, const me_expr *n,
+                                    pj_text *s) {
+    if (!n || !pj_integer(n->dtype) || n->dtype != p->output_dtype ||
+        !IS_FUNCTION(n->type) || ARITY(n->type) != 2 ||
+        (n->flags & ME_EXPR_FLAG_WEAK_SCALAR)) return false;
+    const char *op = me_portable_operator(n);
+    if (!op || (strcmp(op,"+") && strcmp(op,"-") && strcmp(op,"*"))) return false;
+    const char *type = pj_type(n->dtype);
+    if (!pj_unsigned(n->dtype)) {
+        type = n->dtype == ME_INT8 ? "uint8_t" : n->dtype == ME_INT16 ? "uint16_t" :
+            n->dtype == ME_INT32 ? "uint32_t" : "uint64_t";
+    }
+    char left[256], right[256];
+    if (!pj_integer_leaf(p,n->parameters[0],n->dtype,type,left,sizeof(left)) ||
+        !pj_integer_leaf(p,n->parameters[1],n->dtype,type,right,sizeof(right))) return false;
+    return pj_append(s,"((%s *)output)[i] = (%s)((uint64_t)(%s) %s (uint64_t)(%s)); goto pj_lane_done;\n",
+        type,type,left,op,right) ? 1 : -1;
+}
+
 static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *block,
                      bool *defined, pj_text *s, int depth, const pj_constants *constants,
                      pj_flow flow) {
@@ -576,6 +618,10 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
         if (stmt->kind == ME_DSL_STMT_ASSIGN || stmt->kind == ME_DSL_STMT_RETURN) {
             bool assignment = stmt->kind == ME_DSL_STMT_ASSIGN;
             const me_expr *node = assignment ? stmt->as.assign.value.expr : stmt->as.return_stmt.expr.expr;
+            if (!assignment && !(constants && constants->scalar_phase)) {
+                int direct = pj_direct_integer_return(p,node,s);
+                if (direct) return direct > 0;
+            }
             if (assignment && constants && constants->scalar_phase) {
                 int index = p->local_var_indices[stmt->as.assign.local_slot];
                 if (!p->vars.uniform[index]) {
@@ -926,7 +972,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
     snprintf(source,capacity,
-        "/* portable-1.1 lowering-r24 runtime-literals abi-r9 */\n"
+        "/* portable-1.1 lowering-r25 integer-literals abi-r9 */\n"
         "#include <stdint.h>\n"
         "#include <string.h>\n"
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"
@@ -939,11 +985,19 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "static inline uint64_t pj_pack_f64(double x) { uint64_t u; memcpy(&u,&x,8); return u; }\n"
         "static inline float pj_unpack_f32(uint64_t x) { uint32_t u=(uint32_t)x; float f; memcpy(&f,&u,4); return f; }\n"
         "static inline double pj_unpack_f64(uint64_t x) { double f; memcpy(&f,&x,8); return f; }\n"
-        /* Unsigned arithmetic followed by a bit copy implements modular signed
-         * arithmetic without signed overflow or out-of-range signed casts. */
-        "#define PJ_INT(S,U) static inline S pj_##S(uint64_t x) { U u=(U)x; S s; memcpy(&s,&u,sizeof(s)); return s; }\n"
-        "PJ_INT(int8_t,uint8_t)\nPJ_INT(int16_t,uint16_t)\nPJ_INT(int32_t,uint32_t)\nPJ_INT(int64_t,uint64_t)\n"
-        "PJ_INT(uint8_t,uint8_t)\nPJ_INT(uint16_t,uint16_t)\nPJ_INT(uint32_t,uint32_t)\nPJ_INT(uint64_t,uint64_t)\n"
+        /* C99 union representation access implements modular signed arithmetic
+         * on exact-width two's-complement types without overflowing signed C
+         * arithmetic or out-of-range signed casts. Expression macros evaluate
+         * x once and avoid helper/memcpy calls even when TCC does not inline. */
+        "#define PJ_SIGNED(S,U,x) (((union { U u; S s; }){ .u = (U)(x) }).s)\n"
+        "#define pj_int8_t(x) PJ_SIGNED(int8_t,uint8_t,x)\n"
+        "#define pj_int16_t(x) PJ_SIGNED(int16_t,uint16_t,x)\n"
+        "#define pj_int32_t(x) PJ_SIGNED(int32_t,uint32_t,x)\n"
+        "#define pj_int64_t(x) PJ_SIGNED(int64_t,uint64_t,x)\n"
+        "#define pj_uint8_t(x) ((uint8_t)(x))\n"
+        "#define pj_uint16_t(x) ((uint16_t)(x))\n"
+        "#define pj_uint32_t(x) ((uint32_t)(x))\n"
+        "#define pj_uint64_t(x) ((uint64_t)(x))\n"
         /* Overflow is detected in unsigned representations, never by executing
          * overflowing signed C arithmetic. Multiplication checks bounds before
          * producing the modular bit pattern. Weak int64 stays checked. */
