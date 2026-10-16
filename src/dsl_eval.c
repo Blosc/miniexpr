@@ -1303,9 +1303,13 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
             inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH2_OFF+1+i] = program->portable_jit_math2[i];
             inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH2_FN_OFF+i] = (const void *)program->portable_jit_math2_fn[i];
         }
+        for (int i = 0; i < program->portable_jit_nmath3; i++) {
+            inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH3_FN_OFF+i] = program->portable_jit_math3_fn[i];
+        }
         inputs[n_vars+ME_DSL_PORTABLE_JIT_PRED_OFF] = (const void *)dsl_portable_jit_predicate;
         for (int i = 0; i < program->portable_jit_npreds; i++) {
             inputs[n_vars+ME_DSL_PORTABLE_JIT_PRED_OFF+1+i] = program->portable_jit_preds[i];
+            inputs[n_vars+ME_DSL_PORTABLE_JIT_PRED_FN_OFF+i] = program->portable_jit_pred_fn[i];
         }
         inputs[n_vars+ME_DSL_PORTABLE_JIT_IOP_OFF] = (const void *)dsl_portable_jit_int_op;
         for (int i = 0; i < program->portable_jit_niops; i++) {
@@ -1831,8 +1835,12 @@ int dsl_eval_program_portable(const me_dsl_compiled_program *program,
     size_t itemsize = program->output_itemsize;
     if (!itemsize || count > SIZE_MAX / itemsize || descriptor->output_capacity < count * itemsize ||
         (count && !output)) return ME_EVAL_ERR_INVALID_ARG;
-    for (int i = 0; i < descriptor->nitems; i++) {
-        if (descriptor->valid_mask && descriptor->valid_mask[i] > 1) return ME_EVAL_ERR_INVALID_ARG;
+    if (descriptor->valid_mask) {
+        unsigned invalid_bits = 0;
+        for (int i = 0; i < descriptor->nitems; i++) {
+            invalid_bits |= descriptor->valid_mask[i] & ~1U;
+        }
+        if (invalid_bits) return ME_EVAL_ERR_INVALID_ARG;
     }
     int ndim = descriptor->ndim;
     bool needs_context = program->uses_i_mask || program->uses_n_mask || program->uses_ndim || program->uses_flat_idx;

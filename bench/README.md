@@ -14,6 +14,31 @@ Run a specific benchmark (examples below). CMake builds place binaries under `bu
 
 ## Benchmarks
 
+### Menudet/full-DSL profile qualification
+
+`benchmark_profile_parity.c` is an artifact-library worker; build it with
+`MINIEXPR_BUILD_ARTIFACT=ON` and the benchmark targets enabled. The matrix driver
+uses only the Python standard library:
+
+```bash
+python bench/profile_parity.py --runner build/bench/benchmark_profile_parity --output results/profile-parity
+python bench/profile_parity.py --output results/profile-parity --report-only
+```
+
+The default serial matrix covers Boolean, integer widths and float32/64 across
+arithmetic, mixed signatures, casts, captures, control flow, math, reductions,
+coordinates and participation masks. Use `--family`, `--name`, `--dtype`,
+`--backends`, `--sizes` and `--trials` to confirm a finding in fresh processes.
+Use `--resume` only with the same native binary and configuration. Keep the
+machine otherwise idle; do not run independent benchmark processes concurrently.
+
+Reports retain every warm sample, preparation/first-call/allocation-inclusive
+timings, generated C, bridge counts and reproduction argv. Sampled numerical
+agreement on the chosen domain is **not** proof of equivalent profile semantics.
+Unsupported cases, result differences, masks, captures, exceptional domains and
+JIT fallback are classified separately. The existing native numerical and IEEE
+status suites, not this benchmark, own exhaustive semantic qualification.
+
 ### benchmark_reductions.c
 Reductions (sum/prod/min/max/any/all) vs pure C.
 

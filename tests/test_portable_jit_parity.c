@@ -751,6 +751,57 @@ static void range_bound_matrix(void) {
     }
 }
 
+static void captured_integer_trees(void) {
+    const char *names[] = {"int8","uint8","int16","uint16","int32","uint32","int64","uint64"};
+    me_dtype types[] = {ME_INT8,ME_UINT8,ME_INT16,ME_UINT16,ME_INT32,ME_UINT32,ME_INT64,ME_UINT64};
+    int64_t captures[] = {-129,-1,0,1,127,128,32768,INT64_MAX};
+    for (int dtype=0; dtype<8; dtype++) {
+        if (compact && dtype != 2 && dtype != 7) continue;
+        size_t width=dtype_size(types[dtype]);
+        uint64_t input[8]={0}, actual[8], expected[8];
+        for (int i=0; i<8; i++) {
+            uint64_t bits=i%2 ? UINT64_MAX-(uint64_t)i : (uint64_t)i;
+            switch (width) {
+                case 1: ((uint8_t *)input)[i]=(uint8_t)bits; break;
+                case 2: ((uint16_t *)input)[i]=(uint16_t)bits; break;
+                case 4: ((uint32_t *)input)[i]=(uint32_t)bits; break;
+                case 8: input[i]=bits; break;
+            }
+        }
+        for (int capture=0; capture<8; capture++) {
+            char constant[256];
+            snprintf(constant,sizeof(constant),"{\"name\":\"y\",\"dtype\":\"int64\",\"category\":\"weak\","
+                "\"encoding\":\"decimal\",\"value\":\"%lld\"}",(long long)captures[capture]);
+            parity_case test={"captured modular integer tree","return x + (x - y)",names[dtype],names[dtype],true};
+            me_artifact *jit=load_extra(&test,ME_JIT_ON,NULL,constant);
+            me_artifact *oracle=load_extra(&test,ME_JIT_OFF,NULL,constant);
+            for (int selection=0; selection<4; selection++) {
+                uint8_t mask[8];
+                for (int i=0; i<8; i++) mask[i]=selection == 1 ? 0 : i%2;
+                memset(actual,0xa5,sizeof(actual)); memset(expected,0xa5,sizeof(expected));
+                me_artifact_buffer buffer={"x",types[dtype],width,input,8*width};
+                me_artifact_eval_descriptor descriptor={.struct_size=sizeof(descriptor),
+                    .version=ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,.nitems=selection == 3 ? 0 : 8,
+                    .output_capacity=8*width,.valid_mask=selection ? mask : NULL,.valid_mask_capacity=selection ? 8 : 0};
+                me_artifact_error error, reference_error;
+                me_artifact_fp_status status, reference_status;
+                int rc=me_artifact_eval_status(jit,&buffer,1,actual,&descriptor,0,&status,&error);
+                int reference_rc=me_artifact_eval_status(oracle,&buffer,1,expected,&descriptor,0,&reference_status,&reference_error);
+                CHECK(rc == reference_rc && status.flags == reference_status.flags);
+                if (rc) CHECK(error.native_status == reference_error.native_status);
+                else CHECK(!memcmp(actual,expected,sizeof(actual)));
+            }
+            if (captures[capture] == 1 && me_artifact_has_jit(jit)) {
+                me_dsl_compiled_program *program=dsl_artifact_program_for_tests(jit);
+                CHECK(strstr(program->jit_c_source,"*)output)[i] =") != NULL);
+                /* No per-node signed conversion temporaries in the fused tree. */
+                CHECK(strstr(program->jit_c_source,"pj_expr_") == NULL);
+            }
+            me_artifact_free(jit); me_artifact_free(oracle);
+        }
+    }
+}
+
 static void weak_capture_matrix(void) {
     int64_t pairs[][2] = {{INT64_MAX,1},{INT64_MIN,-1},{INT64_MAX,2},{INT64_MIN,0},
         {0,INT64_MIN},{INT64_MAX,-1},{INT64_MIN,1},{7,-3},{0,0}};
@@ -829,10 +880,12 @@ static void scalar_checked_order(void) {
 static void resolved_libm_parity(void) {
     const char *unary[] = {"acos","acosh","asin","asinh","atan","atanh","cbrt",
         "cos","cosh","erf","erfc","exp","exp2","expm1","lgamma","log","log10",
-        "log1p","log2","sin","sinh","sqrt","tan","tanh","tgamma","abs","ceil","floor","trunc"};
-    const char *binary[] = {"atan2","copysign","fdim","hypot","nextafter","fmod","pow"};
-    const char *special[] = {"round(x)","rint(x)","sinpi(x)","cospi(x)",
-        "minimum(x, y)","maximum(x, y)","fmin(x, y)","fmax(x, y)","logaddexp(x, y)","remainder(x, y)"};
+        "log1p","log2","sin","sinh","sqrt","tan","tanh","tgamma","abs","ceil","floor","trunc",
+        "square","sign","real","imag","conj","round","rint","exp10","sinpi","cospi"};
+    const char *binary[] = {"atan2","copysign","fdim","hypot","nextafter","fmod","pow",
+        "minimum","maximum","fmin","fmax","logaddexp"};
+    const char *special[] = {"remainder(x, y)","fma(x, y, 1.0)","ldexp(x, 2)"};
+    const char *predicates[] = {"isfinite","isinf","isnan","signbit"};
     uint64_t bits64[] = {0,UINT64_C(0x8000000000000000),UINT64_C(0x3ff0000000000000),
         UINT64_C(0xbff0000000000000),UINT64_C(0x3fe0000000000000),UINT64_C(0xbfe0000000000000),
         UINT64_C(0x0010000000000000),1,UINT64_C(0x8000000000000001),
@@ -846,6 +899,7 @@ static void resolved_libm_parity(void) {
     int nunary = (int)(sizeof(unary)/sizeof(unary[0]));
     int nbinary = (int)(sizeof(binary)/sizeof(binary[0]));
     int nspecial = (int)(sizeof(special)/sizeof(special[0]));
+    int npredicates = (int)(sizeof(predicates)/sizeof(predicates[0]));
     for (int narrow = 0; narrow < 2; narrow++) {
         me_dtype dtype = narrow ? ME_FLOAT32 : ME_FLOAT64;
         size_t width = narrow ? 4 : 8;
@@ -857,23 +911,25 @@ static void resolved_libm_parity(void) {
             int other = (lane+3)%16;
             memcpy(y+lane*width,narrow ? (void *)&bits32[other] : (void *)&bits64[other],width);
         }
-        for (int op = 0; op < nunary+nbinary+nspecial; op++) {
+        for (int op = 0; op < nunary+nbinary+nspecial+npredicates; op++) {
             char body[160];
+            bool predicate = op >= nunary+nbinary+nspecial;
             if (op < nunary) snprintf(body,sizeof(body),"return %s(x)",unary[op]);
             else if (op < nunary+nbinary) snprintf(body,sizeof(body),"return %s(x, y)",binary[op-nunary]);
-            else snprintf(body,sizeof(body),"return %s",special[op-nunary-nbinary]);
-            parity_case test = {"resolved libm",body,name,name,true};
+            else if (!predicate) snprintf(body,sizeof(body),"return %s",special[op-nunary-nbinary]);
+            else snprintf(body,sizeof(body),"return %s(x)",predicates[op-nunary-nbinary-nspecial]);
+            parity_case test = {"resolved libm",body,name,predicate ? "bool" : name,true};
             me_artifact *jit = load(&test,ME_JIT_ON), *reference = load(&test,ME_JIT_OFF);
             me_artifact *oracle = load(&cases[0],ME_JIT_ON);
             CHECK(me_artifact_has_jit(jit) == me_artifact_has_jit(oracle));
             me_artifact_free(oracle);
             if (me_artifact_has_jit(jit)) {
                 me_dsl_compiled_program *program = dsl_artifact_program_for_tests(jit);
-                bool direct = op < nunary ? program->portable_jit_nmath == 1 && program->portable_jit_math_fn[0] != NULL :
-                    op < nunary+nbinary ? program->portable_jit_nmath2 == 1 && program->portable_jit_math2_fn[0] != NULL :
-                    (program->portable_jit_nmath && program->portable_jit_math_fn[0]) ||
-                    (program->portable_jit_nmath2 && program->portable_jit_math2_fn[0]);
-                CHECK(direct == (op < nunary+nbinary));
+                bool direct = (program->portable_jit_nmath && program->portable_jit_math_fn[0]) ||
+                    (program->portable_jit_nmath2 && program->portable_jit_math2_fn[0]) ||
+                    (program->portable_jit_nmath3 && program->portable_jit_math3_fn[0]) ||
+                    (program->portable_jit_npreds && program->portable_jit_pred_fn[0]);
+                CHECK(direct == (op != nunary+nbinary));
             }
             for (int selection = 0; selection < 20; selection++) {
                 uint64_t actual_storage[16], expected_storage[16];
@@ -898,9 +954,11 @@ static void resolved_libm_parity(void) {
                 CHECK(rc == expected_rc && status.flags == reference_status.flags);
                 CHECK(!rc);
                 for (int lane = 0; lane < 16; lane++) {
-                    const unsigned char *a = (unsigned char *)actual_storage+lane*width;
-                    const unsigned char *b = (unsigned char *)expected_storage+lane*width;
-                    if (!memcmp(a,b,width)) continue;
+                    size_t output_width = predicate ? 1 : width;
+                    const unsigned char *a = (unsigned char *)actual_storage+lane*output_width;
+                    const unsigned char *b = (unsigned char *)expected_storage+lane*output_width;
+                    if (!memcmp(a,b,output_width)) continue;
+                    CHECK(!predicate);
                     /* NaN payloads are not part of the portable contract. */
                     double av, bv;
                     if (narrow) {
@@ -915,6 +973,66 @@ static void resolved_libm_parity(void) {
             me_artifact_free(jit);
             me_artifact_free(reference);
         }
+    }
+}
+
+static void integer_tree_parity(void) {
+    const char *names[] = {"int8","uint8","int16","uint16","int32","uint32","int64","uint64","bool"};
+    me_dtype types[] = {ME_INT8,ME_UINT8,ME_INT16,ME_UINT16,ME_INT32,ME_UINT32,ME_INT64,ME_UINT64,ME_BOOL};
+    const char *expressions[] = {"x + y","(x + y) * (x - y) + x","((x + y) * 2 - y) * 3 + x * 2 - y",
+        "x & y","x | y","x ^ y","~x","-x","x << y","x >> y","x // y","x % y",
+        "abs(x)","sign(x)","square(x)","real(x)","imag(x)","conj(x)","floor(x)","ceil(x)","trunc(x)","round(x)","x ** y"};
+    const char *boolean[] = {"(x & y) ^ (~x | y)","(x + y) * (~y)"};
+    for (int dtype=0; dtype<9; dtype++) {
+        if (compact && dtype != 0 && dtype != 6 && dtype != 7 && dtype != 8) continue;
+        size_t width=dtype_size(types[dtype]);
+        int bits=(int)(width*8);
+        uint64_t maximum=UINT64_MAX >> (64-bits), minimum=UINT64_C(1) << (bits-1);
+        uint64_t left[] = {0,1,maximum,minimum,maximum>>1,2,7,minimum+1};
+        uint64_t right[] = {0,1,maximum,(uint64_t)bits-1,(uint64_t)bits,(uint64_t)bits+1,2,3};
+        void *x=malloc(8*width), *y=malloc(8*width), *actual=malloc(8*width), *expected=malloc(8*width);
+        CHECK(x && y && actual && expected);
+        for (int lane=0; lane<8; lane++) {
+            if (types[dtype] == ME_BOOL) { ((bool *)x)[lane]=lane%2; ((bool *)y)[lane]=(lane/2)%2; }
+            else switch (width) {
+                case 1: ((uint8_t *)x)[lane]=(uint8_t)left[lane]; ((uint8_t *)y)[lane]=(uint8_t)right[lane]; break;
+                case 2: ((uint16_t *)x)[lane]=(uint16_t)left[lane]; ((uint16_t *)y)[lane]=(uint16_t)right[lane]; break;
+                case 4: ((uint32_t *)x)[lane]=(uint32_t)left[lane]; ((uint32_t *)y)[lane]=(uint32_t)right[lane]; break;
+                case 8: ((uint64_t *)x)[lane]=left[lane]; ((uint64_t *)y)[lane]=right[lane]; break;
+            }
+        }
+        int count=dtype == 8 ? 2 : (int)(sizeof(expressions)/sizeof(expressions[0]));
+        for (int expression=0; expression<count; expression++) {
+            char body[256];
+            snprintf(body,sizeof(body),"return %s",dtype == 8 ? boolean[expression] : expressions[expression]);
+            parity_case test={"integer tree",body,names[dtype],names[dtype],true};
+            me_artifact *jit=load(&test,ME_JIT_ON), *reference=load(&test,ME_JIT_OFF);
+            me_artifact *oracle=load(&cases[0],ME_JIT_ON);
+            CHECK(me_artifact_has_jit(jit) == me_artifact_has_jit(oracle));
+            me_artifact_free(oracle);
+            for (int selection=0; selection<12; selection++) {
+                uint8_t mask[8];
+                for (int lane=0; lane<8; lane++) mask[lane]=selection == 0 ||
+                    (selection == 2 && lane%2) || (selection >= 4 && lane == selection-4);
+                memset(actual,0xa5,8*width); memset(expected,0xa5,8*width);
+                me_artifact_buffer buffers[]={{"x",types[dtype],width,x,8*width},{"y",types[dtype],width,y,8*width}};
+                me_artifact_eval_descriptor descriptor={.struct_size=sizeof(descriptor),
+                    .version=ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,.nitems=selection == 3 ? 0 : 8,
+                    .output_capacity=8*width,.valid_mask=selection ? mask : NULL,.valid_mask_capacity=selection ? 8 : 0};
+                me_artifact_error error, reference_error;
+                me_artifact_fp_status status, reference_status;
+                int rc=me_artifact_eval_status(jit,buffers,2,actual,&descriptor,0,&status,&error);
+                int expected_rc=me_artifact_eval_status(reference,buffers,2,expected,&descriptor,0,&reference_status,&reference_error);
+                if (rc != expected_rc || status.flags != reference_status.flags || (!rc && memcmp(actual,expected,8*width)))
+                    fprintf(stderr,"integer lowering %s %s selection=%d rc=%d/%d flags=%u/%u\n",
+                        names[dtype],body,selection,rc,expected_rc,status.flags,reference_status.flags);
+                CHECK(rc == expected_rc && status.flags == reference_status.flags);
+                if (rc) CHECK(error.native_status == reference_error.native_status);
+                else CHECK(!memcmp(actual,expected,8*width));
+            }
+            me_artifact_free(jit); me_artifact_free(reference);
+        }
+        free(x); free(y); free(actual); free(expected);
     }
 }
 
@@ -1120,11 +1238,13 @@ int main(int argc, char **argv) {
     scalar_checked_order();
     runtime_literal_parity();
     resolved_libm_parity();
+    integer_tree_parity();
     scalar_array_fallbacks();
     scalar_loop_cap();
     integer_scalar_reductions();
     numeric_dtype_matrix();
     range_bound_matrix();
     weak_capture_matrix();
+    captured_integer_trees();
     return 0;
 }

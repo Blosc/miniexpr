@@ -607,6 +607,40 @@ static int p_combinatoric(const me_expr *node, const char *name, const me_scalar
     return p_convert(ME_UINT64, &(me_scalar){.u64 = acc}, node->dtype, out) == 0 ? 0 : ME_EVAL_ERR_INVALID_ARG;
 }
 
+/* Shared range reduction for the interpreter and prepared semantic callbacks. */
+static double p_sincospi(me_dtype dtype, bool cosine, double x) {
+    double reduced = remainder(x, 2.0);
+    double magnitude = fabs(reduced), result;
+    if (!isfinite(x)) result = NAN;
+    else if (cosine && (magnitude == 0.0 || magnitude == 1.0)) result = magnitude == 0.0 ? 1.0 : -1.0;
+    else if (cosine && magnitude == 0.5) result = 0.0;
+    else if (!cosine && (magnitude == 0.0 || magnitude == 1.0)) result = copysign(0.0, x);
+    else if (!cosine && magnitude == 0.5) result = copysign(1.0, reduced);
+    else {
+        bool use_cosine;
+        double fraction, sign = 1.0;
+        if (cosine) {
+            sign = magnitude > 0.5 ? -1.0 : 1.0;
+            fraction = magnitude > 0.5 ? 1.0 - magnitude : magnitude;
+            use_cosine = fraction <= 0.25;
+            if (!use_cosine) fraction = 0.5 - fraction;
+        } else {
+            sign = copysign(1.0, reduced);
+            fraction = magnitude > 0.5 ? 1.0 - magnitude : magnitude;
+            use_cosine = fraction > 0.25;
+            if (use_cosine) fraction = 0.5 - fraction;
+        }
+        if (dtype == ME_FLOAT32) {
+            float angle = 0x1.921fb6p1f * (float)fraction;
+            result = sign * (use_cosine ? cosf(angle) : sinf(angle));
+        } else {
+            double angle = 0x1.921fb54442d18p1 * fraction;
+            result = sign * (use_cosine ? cos(angle) : sin(angle));
+        }
+    }
+    return result;
+}
+
 static int p_math(const me_expr *n, const char *name, const me_scalar *a,
                     const me_scalar *b, me_scalar *out) {
     if (!strcmp(name, "minimum") || !strcmp(name, "maximum") ||
@@ -706,40 +740,7 @@ static int p_math(const me_expr *n, const char *name, const me_scalar *a,
     if (!strcmp(name, "sinpi") || !strcmp(name, "cospi")) {
         /* Reduce in units of pi, not radians: multiplication first loses the
          * fractional part of large inputs and gives nonzero integer sinpi. */
-        bool cosine = !strcmp(name, "cospi");
-        double reduced = remainder(x, 2.0);
-        double magnitude = fabs(reduced), result;
-        if (!isfinite(x)) result = NAN;
-        else if (cosine && (magnitude == 0.0 || magnitude == 1.0)) result = magnitude == 0.0 ? 1.0 : -1.0;
-        else if (cosine && magnitude == 0.5) result = 0.0;
-        else if (!cosine && (magnitude == 0.0 || magnitude == 1.0)) result = copysign(0.0, x);
-        else if (!cosine && magnitude == 0.5) result = copysign(1.0, reduced);
-        else {
-            /* Reflect into [0, 1/4] before evaluating. Subtraction near an
-             * integer/half-integer is exact; no large radian argument remains. */
-            bool use_cosine;
-            double fraction, sign = 1.0;
-            if (cosine) {
-                sign = magnitude > 0.5 ? -1.0 : 1.0;
-                fraction = magnitude > 0.5 ? 1.0 - magnitude : magnitude;
-                use_cosine = fraction <= 0.25;
-                if (!use_cosine) fraction = 0.5 - fraction;
-            }
-            else {
-                sign = copysign(1.0, reduced);
-                fraction = magnitude > 0.5 ? 1.0 - magnitude : magnitude;
-                use_cosine = fraction > 0.25;
-                if (use_cosine) fraction = 0.5 - fraction;
-            }
-            if (n->dtype == ME_FLOAT32) {
-                float angle = 0x1.921fb6p1f * (float)fraction;
-                result = sign * (use_cosine ? cosf(angle) : sinf(angle));
-            }
-            else {
-                double angle = 0x1.921fb54442d18p1 * fraction;
-                result = sign * (use_cosine ? cos(angle) : sin(angle));
-            }
-        }
+        double result = p_sincospi(n->dtype,!strcmp(name,"cospi"),x);
         if (n->dtype == ME_FLOAT32) out->f32 = (float)result;
         else out->f64 = result;
         return 0;
@@ -815,7 +816,34 @@ struct p_eval_context {
     p_branch_cache branches[64];
     int nbranches;
     struct p_string_allocation *strings;
+    /* Invocation-local metadata cache; compiled trees remain immutable and
+     * concurrent evaluations never share mutable dispatch state. */
+    struct {
+        const me_expr *node;
+        const char *op, *math;
+    } operations[64];
 };
+
+static void p_operation(p_eval_context *ctx, const me_expr *node, const char **op, const char **math) {
+    size_t slot = ((uintptr_t)node >> 4) & 63;
+    for (int probe=0; probe<8; probe++,slot=(slot+1)&63) {
+        if (ctx->operations[slot].node == node) {
+            *op=ctx->operations[slot].op;
+            *math=ctx->operations[slot].math;
+            return;
+        }
+        if (!ctx->operations[slot].node) {
+            *op=me_portable_operator(node);
+            *math=*op ? NULL : me_portable_math_name(node);
+            ctx->operations[slot].node=node;
+            ctx->operations[slot].op=*op;
+            ctx->operations[slot].math=*math;
+            return;
+        }
+    }
+    *op=me_portable_operator(node);
+    *math=*op ? NULL : me_portable_math_name(node);
+}
 
 typedef struct p_string_allocation {
     struct p_string_allocation *next;
@@ -1095,9 +1123,8 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
         return (p_numpy(n) && !p_weak(a_node) ? p_numpy_convert(a_node->dtype, &a, n->dtype, out) :
                              p_convert(a_node->dtype, &a, n->dtype, out)) == 0 ? 0 : ME_EVAL_ERR_INVALID_ARG;
     }
-    const char *op = me_portable_operator(n);
-    const char *math_name = me_portable_math_name(n);
-    if (p_numpy(n) && op && !strcmp(op, "%")) math_name = NULL;
+    const char *op, *math_name;
+    p_operation(ctx,n,&op,&math_name);
     if (p_predicate(math_name)) {
         double x = p_float(a_node->dtype) ? p_double(a_node->dtype, &a) : 0;
         out->b = !strcmp(math_name, "isfinite") ? !p_float(a_node->dtype) || isfinite(x) :
@@ -1291,6 +1318,72 @@ static float p_libm_copysign_f32(float x, float y) {
         p_libm_sensitive_f32("copysign",x,y) : copysignf(x,y);
 }
 
+static bool p_libm_nan_f32(float x) {
+    uint32_t bits;
+    memcpy(&bits,&x,sizeof(bits));
+    return (bits & UINT32_C(0x7fffffff)) > UINT32_C(0x7f800000);
+}
+
+static bool p_libm_nan_f64(double x) {
+    uint64_t bits;
+    memcpy(&bits,&x,sizeof(bits));
+    return (bits & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000);
+}
+
+static double p_libm_sensitive_f64(const char *name, double x, double y) {
+    static const me_expr node = {.dtype = ME_FLOAT64,.flags = ME_EXPR_FLAG_NUMPY_1_1};
+    me_scalar a = {.f64 = x}, b = {.f64 = y}, result = {0};
+    int (*volatile evaluate)(const me_expr *,const char *,const me_scalar *,const me_scalar *,me_scalar *) = p_math;
+    evaluate(&node,name,&a,&b,&result);
+    return result.f64;
+}
+
+/* These are semantic callbacks, not substitutions with similarly named libm
+ * functions. Normal lanes avoid name dispatch; NaN lanes use the authoritative
+ * interpreter path before any floating comparison can alter their status. */
+#define P_SEMANTIC_UNARY(T,S,NAN_TEST,FALLBACK,POW) \
+static T p_semantic_square_##S(T x) { return NAN_TEST(x) ? FALLBACK("square",x,0) : x*x; } \
+static T p_semantic_sign_##S(T x) { return NAN_TEST(x) ? FALLBACK("sign",x,0) : x == 0 ? (T)0 : x > 0 ? (T)1 : (T)-1; } \
+static T p_semantic_real_##S(T x) { return NAN_TEST(x) ? FALLBACK("real",x,0) : x; } \
+static T p_semantic_conj_##S(T x) { return NAN_TEST(x) ? FALLBACK("conj",x,0) : x; } \
+static T p_semantic_imag_##S(T x) { return NAN_TEST(x) ? FALLBACK("imag",x,0) : (T)0; } \
+static T p_semantic_round_##S(T x) { return NAN_TEST(x) ? FALLBACK("round",x,0) : (T)p_round_even((double)x); } \
+static T p_semantic_exp10_##S(T x) { return NAN_TEST(x) ? FALLBACK("exp10",x,0) : POW((T)10,x); }
+P_SEMANTIC_UNARY(float,f32,p_libm_nan_f32,p_libm_sensitive_f32,powf)
+P_SEMANTIC_UNARY(double,f64,p_libm_nan_f64,p_libm_sensitive_f64,pow)
+#undef P_SEMANTIC_UNARY
+
+#define P_MINMAX_CALLBACK(T,S,NAME,MINIMUM,NAN_TEST,FALLBACK) \
+static T p_semantic_##NAME##_##S(T x, T y) { \
+    if (NAN_TEST(x) || NAN_TEST(y)) return FALLBACK(#NAME,x,y); \
+    if (x == 0 && y == 0) { bool negative = MINIMUM ? signbit(x) || signbit(y) : signbit(x) && signbit(y); \
+        return negative ? -(T)0.0 : (T)0.0; } \
+    return (MINIMUM ? x < y : x > y) ? x : y; }
+#define P_MINMAX_PRECISION(T,S,NAN_TEST,FALLBACK) \
+    P_MINMAX_CALLBACK(T,S,minimum,true,NAN_TEST,FALLBACK) \
+    P_MINMAX_CALLBACK(T,S,maximum,false,NAN_TEST,FALLBACK) \
+    P_MINMAX_CALLBACK(T,S,fmin,true,NAN_TEST,FALLBACK) \
+    P_MINMAX_CALLBACK(T,S,fmax,false,NAN_TEST,FALLBACK)
+P_MINMAX_PRECISION(float,f32,p_libm_nan_f32,p_libm_sensitive_f32)
+P_MINMAX_PRECISION(double,f64,p_libm_nan_f64,p_libm_sensitive_f64)
+#undef P_MINMAX_PRECISION
+#undef P_MINMAX_CALLBACK
+
+#define P_LOGADDEXP_CALLBACK(T,S,NAN_TEST,FALLBACK,MAXIMUM,MINIMUM,LOG1P,EXP) \
+static T p_semantic_logaddexp_##S(T x, T y) { \
+    if (NAN_TEST(x) || NAN_TEST(y)) return FALLBACK("logaddexp",x,y); \
+    if (isinf(x) && x == y) return x; \
+    T high = MAXIMUM(x,y), low = MINIMUM(x,y); \
+    T difference = low-high; T term = LOG1P(EXP(difference)); return high+term; }
+P_LOGADDEXP_CALLBACK(float,f32,p_libm_nan_f32,p_libm_sensitive_f32,fmaxf,fminf,log1pf,expf)
+P_LOGADDEXP_CALLBACK(double,f64,p_libm_nan_f64,p_libm_sensitive_f64,fmax,fmin,log1p,exp)
+#undef P_LOGADDEXP_CALLBACK
+
+static float p_semantic_sinpi_f32(float x) { return (float)p_sincospi(ME_FLOAT32,false,(double)x); }
+static float p_semantic_cospi_f32(float x) { return (float)p_sincospi(ME_FLOAT32,true,(double)x); }
+static double p_semantic_sinpi_f64(double x) { return p_sincospi(ME_FLOAT64,false,x); }
+static double p_semantic_cospi_f64(double x) { return p_sincospi(ME_FLOAT64,true,x); }
+
 const void *dsl_portable_resolve_unary_math(const me_expr *node) {
     if (!node || !IS_FUNCTION(node->type) || ARITY(node->type) != 1 ||
         (node->dtype != ME_FLOAT32 && node->dtype != ME_FLOAT64)) return NULL;
@@ -1305,7 +1398,17 @@ const void *dsl_portable_resolve_unary_math(const me_expr *node) {
 #define P_UNARY_ENTRY(fn) {#fn, fn##f, fn},
         P_DIRECT_UNARY(P_UNARY_ENTRY)
 #undef P_UNARY_ENTRY
-        {"floating_abs", fabsf, fabs}
+        {"floating_abs", fabsf, fabs},
+        {"square", p_semantic_square_f32, p_semantic_square_f64},
+        {"sign", p_semantic_sign_f32, p_semantic_sign_f64},
+        {"real", p_semantic_real_f32, p_semantic_real_f64},
+        {"conj", p_semantic_conj_f32, p_semantic_conj_f64},
+        {"imag", p_semantic_imag_f32, p_semantic_imag_f64},
+        {"round", p_semantic_round_f32, p_semantic_round_f64},
+        {"rint", p_semantic_round_f32, p_semantic_round_f64},
+        {"exp10", p_semantic_exp10_f32, p_semantic_exp10_f64},
+        {"sinpi", p_semantic_sinpi_f32, p_semantic_sinpi_f64},
+        {"cospi", p_semantic_cospi_f32, p_semantic_cospi_f64},
     };
     for (size_t i = 0; i < sizeof(functions)/sizeof(functions[0]); i++) {
         if (!strcmp(name, functions[i].name)) return node->dtype == ME_FLOAT32 ?
@@ -1326,6 +1429,7 @@ const void *dsl_portable_resolve_binary_math(const me_expr *node) {
     const char *name = me_portable_math_name(node);
     if (!name) return NULL;
     if (node->dtype == ME_FLOAT32 && !strcmp(name,"copysign")) return (const void *)p_libm_copysign_f32;
+    if (!strcmp(name,"ldexp")) return node->dtype == ME_FLOAT32 ? (const void *)ldexpf : (const void *)ldexp;
     static const struct {
         const char *name;
         float (*f32)(float, float);
@@ -1334,11 +1438,48 @@ const void *dsl_portable_resolve_binary_math(const me_expr *node) {
 #define P_BINARY_ENTRY(fn) {#fn, fn##f, fn},
         P_DIRECT_BINARY(P_BINARY_ENTRY)
 #undef P_BINARY_ENTRY
+        {"minimum", p_semantic_minimum_f32, p_semantic_minimum_f64},
+        {"maximum", p_semantic_maximum_f32, p_semantic_maximum_f64},
+        {"fmin", p_semantic_fmin_f32, p_semantic_fmin_f64},
+        {"fmax", p_semantic_fmax_f32, p_semantic_fmax_f64},
+        {"logaddexp", p_semantic_logaddexp_f32, p_semantic_logaddexp_f64},
     };
     for (size_t i = 0; i < sizeof(functions)/sizeof(functions[0]); i++) {
         if (!strcmp(name, functions[i].name)) return node->dtype == ME_FLOAT32 ?
             (const void *)functions[i].f32 : (const void *)functions[i].f64;
     }
+    return NULL;
+}
+
+const void *dsl_portable_resolve_ternary_math(const me_expr *node) {
+    if (!node || !IS_FUNCTION(node->type) || ARITY(node->type) != 3 ||
+        (node->dtype != ME_FLOAT32 && node->dtype != ME_FLOAT64)) return NULL;
+    const char *name = me_portable_math_name(node);
+    return name && !strcmp(name,"fma") ? (node->dtype == ME_FLOAT32 ? (const void *)fmaf : (const void *)fma) : NULL;
+}
+
+#define P_PREDICATE_CALLBACK(NAME) \
+static bool p_predicate_##NAME##_f64(double x) { return NAME(x) != 0; } \
+static bool p_predicate_##NAME##_f32(float x) { double wide=(double)x; return NAME(wide) != 0; }
+P_PREDICATE_CALLBACK(isfinite)
+P_PREDICATE_CALLBACK(isinf)
+P_PREDICATE_CALLBACK(isnan)
+P_PREDICATE_CALLBACK(signbit)
+#undef P_PREDICATE_CALLBACK
+
+const void *dsl_portable_resolve_predicate(const me_expr *node) {
+    if (!node || !IS_FUNCTION(node->type) || ARITY(node->type) != 1) return NULL;
+    const me_expr *arg = node->parameters[0];
+    if (!arg || (arg->dtype != ME_FLOAT32 && arg->dtype != ME_FLOAT64)) return NULL;
+    const char *name = me_portable_math_name(node);
+    if (!name) return NULL;
+#define P_PREDICATE_ENTRY(NAME) if (!strcmp(name,#NAME)) return arg->dtype == ME_FLOAT32 ? \
+    (const void *)p_predicate_##NAME##_f32 : (const void *)p_predicate_##NAME##_f64;
+    P_PREDICATE_ENTRY(isfinite)
+    P_PREDICATE_ENTRY(isinf)
+    P_PREDICATE_ENTRY(isnan)
+    P_PREDICATE_ENTRY(signbit)
+#undef P_PREDICATE_ENTRY
     return NULL;
 }
 #undef P_DIRECT_UNARY

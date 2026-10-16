@@ -2978,15 +2978,17 @@ static void promote_logical_bool(me_expr* node) {
 /* Stable operation identity for the portable typed pass. Do not dispatch
  * checked integers through these double-valued full-DSL callbacks. */
 const char* me_portable_operator(const me_expr* n) {
+    /* Ordinary operators must not search the builtin registry on every lane.
+     * Only the CRT remainder alias needs the slower registration-address check. */
+    if (n && IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == (void *)add) return "+";
+    const char *op = me_arithmetic_operator(n);
+    if (op) return op;
     if (n && (n->flags & ME_EXPR_FLAG_NUMPY_1_1)) {
         /* Windows CRT inline/import aliases can differ from the registered address.
          * Both spellings must select NumPy modulo, never C's nearest-quotient remainder. */
         const me_variable *builtin = find_builtin("remainder", strlen("remainder"));
         if (n->function == (void *)remainder || (builtin && n->function == builtin->address)) return "%";
     }
-    if (n && IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == (void *)add) return "+";
-    const char *op = me_arithmetic_operator(n);
-    if (op) return op;
     if (!n || !IS_FUNCTION(n->type)) return NULL;
     if (n->function == (void *)bit_and) return "&";
     if (n->function == (void *)bit_or) return "|";

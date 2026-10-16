@@ -29,7 +29,7 @@
 #endif
 
 #ifndef ME_DSL_JIT_CGEN_VERSION
-#define ME_DSL_JIT_CGEN_VERSION 21
+#define ME_DSL_JIT_CGEN_VERSION 23
 #endif
 
 #ifndef ME_DSL_JIT_BRIDGE_ABI_VERSION
@@ -59,7 +59,9 @@
  * in generated source/artifacts. Generic node/dispatcher families stay intact. */
 #define ME_DSL_PORTABLE_JIT_MATH1_FN_OFF 778
 #define ME_DSL_PORTABLE_JIT_MATH2_FN_OFF 906
-#define ME_DSL_PORTABLE_JIT_EXTRA 1034
+#define ME_DSL_PORTABLE_JIT_MATH3_FN_OFF 1034
+#define ME_DSL_PORTABLE_JIT_PRED_FN_OFF 1162
+#define ME_DSL_PORTABLE_JIT_EXTRA 1290
 
 #if ME_USE_WASM32_JIT
 typedef int (*me_dsl_jit_kernel_fn)(const void **inputs, void *output, int nitems);
@@ -198,7 +200,11 @@ typedef struct {
     const me_expr *portable_jit_math2[128]; /* Borrowed binary typed nodes. */
     const void *portable_jit_math2_fn[128];
     int portable_jit_nmath2;
+    const me_expr *portable_jit_math3[128];
+    const void *portable_jit_math3_fn[128];
+    int portable_jit_nmath3;
     const me_expr *portable_jit_preds[128]; /* Borrowed predicate typed nodes. */
+    const void *portable_jit_pred_fn[128];
     int portable_jit_npreds;
     const me_expr *portable_jit_iops[128]; /* Borrowed integer-operator typed nodes. */
     int portable_jit_niops;

@@ -1,4 +1,4 @@
-/* Portable 1.1 scalar C lowering, revision 26. Never translate source
+/* Portable 1.1 scalar C lowering, revision 28. Never translate source
  * text: the typed tree includes promotion and final output conversions. The
  * private kernel ABI appends a participating mask and host comparison/math bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
@@ -59,6 +59,85 @@ typedef struct {
 
 static bool pj_append(pj_text *s, const char *format, ...);
 
+static const char *pj_unsigned_type(me_dtype dtype) {
+    switch (dtype) {
+        case ME_INT8: case ME_UINT8: return "uint8_t";
+        case ME_INT16: case ME_UINT16: return "uint16_t";
+        case ME_INT32: case ME_UINT32: return "uint32_t";
+        case ME_INT64: case ME_UINT64: return "uint64_t";
+        default: return NULL;
+    }
+}
+
+static bool pj_literal_integer_bits(const me_expr *n, me_dtype dtype, uint64_t *out) {
+    if (!n || TYPE_MASK(n->type) != ME_CONSTANT || !(n->flags & ME_EXPR_FLAG_INTEGER_LITERAL) ||
+        !pj_integer(n->dtype) || !pj_integer(dtype)) return false;
+    int bits = (int)(dtype_size(dtype)*8);
+    bool negative = (n->flags & ME_EXPR_FLAG_NEGATIVE_LITERAL) != 0;
+    uint64_t limit = pj_unsigned(dtype) ? (negative ? 0 : UINT64_MAX >> (64-bits)) :
+        negative ? UINT64_C(1) << (bits-1) : UINT64_MAX >> (65-bits);
+    if (n->integer_magnitude > limit) return false;
+    *out = negative ? 0ULL-n->integer_magnitude : n->integer_magnitude;
+    return true;
+}
+
+/* Projection to the low N bits commutes with +,-,*,&,|,^ and unary -/~.
+ * Keep a whole same-width strong integer tree unsigned until its consumer,
+ * instead of materializing a signed representation after every node. Never
+ * absorb checked weak subtrees, casts, shifts, comparisons or mixed widths. */
+static bool pj_integer_tree(const me_dsl_compiled_program *p, const me_expr *n,
+    const bool *defined, const pj_constants *constants, me_dtype dtype, pj_text *out, int depth) {
+    if (!n || n->dtype != dtype || !pj_integer(dtype) || depth > 128) return false;
+    if (TYPE_MASK(n->type) == ME_CONSTANT && (n->flags & ME_EXPR_FLAG_INTEGER_LITERAL)) {
+        uint64_t bits;
+        if (!pj_literal_integer_bits(n,dtype,&bits)) return false;
+        return pj_append(out,"%lluULL",(unsigned long long)bits);
+    }
+    if (IS_FUNCTION(n->type) && !n->function && ARITY(n->type) == 1) {
+        const me_expr *arg = n->parameters[0];
+        uint64_t bits, original;
+        if (!arg || !(arg->flags & (ME_EXPR_FLAG_WEAK_LITERAL | ME_EXPR_FLAG_WEAK_SCALAR))) return false;
+        if (pj_literal_integer_bits(arg,arg->dtype,&original) && pj_literal_integer_bits(arg,dtype,&bits))
+            return pj_append(out,"%lluULL",(unsigned long long)bits);
+        if (!constants || !constants->known || TYPE_MASK(arg->type) != ME_VARIABLE ||
+            !is_synthetic_address(arg->bound) || (arg->dtype != ME_INT64 && arg->dtype != ME_BOOL)) return false;
+        int index = (int)((const char *)arg->bound-synthetic_var_addresses);
+        if (index < 0 || index >= constants->count || !constants->known[index] || !p->vars.uniform[index]) return false;
+        /* Artifact-owned weak captures are immutable. Only absorb a conversion
+         * after checking its exact target range; never fold scalar arithmetic or
+         * an out-of-range leaf, whose error still depends on lane participation. */
+        if (pj_unsigned(dtype)) {
+            if (dsl_portable_signed_to_unsigned(dtype,constants->values[index],&bits)) return false;
+        } else {
+            int64_t value;
+            if (dsl_portable_signed_to_signed(dtype,constants->values[index],&value)) return false;
+            bits = (uint64_t)value;
+        }
+        return pj_append(out,"%lluULL",(unsigned long long)bits);
+    }
+    if (TYPE_MASK(n->type) == ME_VARIABLE && is_synthetic_address(n->bound)) {
+        int index = (int)((const char *)n->bound-synthetic_var_addresses);
+        if (index < 0 || index >= p->vars.count) return false;
+        if (index < p->n_inputs) return pj_append(out,"((uint64_t)pj_input_%d[%s])",index,
+            p->vars.uniform[index] ? "0" : "i");
+        if (defined && p->local_slots && p->local_slots[index] >= 0 && defined[index] && !p->output_is_scalar)
+            return pj_append(out,"((uint64_t)local_%d)",index);
+        return false;
+    }
+    if (!IS_FUNCTION(n->type) || !n->function || (n->flags & ME_EXPR_FLAG_WEAK_SCALAR) ||
+        !(n->flags & ME_EXPR_FLAG_NUMPY_1_1)) return false;
+    int arity = ARITY(n->type);
+    const char *op = me_portable_operator(n);
+    if (!op || (arity == 1 ? (strcmp(op,"-") && strcmp(op,"+") && strcmp(op,"~")) :
+        arity != 2 || (strcmp(op,"+") && strcmp(op,"-") && strcmp(op,"*") &&
+                       strcmp(op,"&") && strcmp(op,"|") && strcmp(op,"^")))) return false;
+    if (!pj_append(out,"(%s",arity == 1 ? (!strcmp(op,"-") ? "0ULL-" : op) : "")) return false;
+    if (!pj_integer_tree(p,n->parameters[0],defined,constants,dtype,out,depth+1)) return false;
+    if (arity == 2 && (!pj_append(out," %s ",op) ||
+        !pj_integer_tree(p,n->parameters[1],defined,constants,dtype,out,depth+1))) return false;
+    return pj_append(out,")");
+}
+
 static bool pj_supported_reduction(const me_expr *n) {
     if (!n || !is_reduction_node(n) || !pj_type(n->dtype)) return false;
     const me_expr *arg = n->parameters[0];
@@ -106,10 +185,11 @@ static bool pj_runtime_float(const me_dsl_compiled_program *p, const me_expr *n,
     if (!IS_FUNCTION(n->type) || is_reduction_node(n)) return false;
     const char *op = me_portable_operator(n);
     int arity = ARITY(n->type);
-    if (!op || arity != 2 || (strcmp(op,"+") && strcmp(op,"-") &&
-        strcmp(op,"*") && strcmp(op,"/"))) return false;
-    return pj_runtime_float(p,n->parameters[0],depth+1) ||
-        pj_runtime_float(p,n->parameters[1],depth+1);
+    bool arithmetic = op && arity == 2 && (!strcmp(op,"+") || !strcmp(op,"-") || !strcmp(op,"*") || !strcmp(op,"/"));
+    bool math = !arithmetic && (dsl_portable_resolve_unary_math(n) || dsl_portable_resolve_binary_math(n) || dsl_portable_resolve_ternary_math(n));
+    if (!arithmetic && !math) return false;
+    for (int i=0; i<arity; i++) if (pj_runtime_float(p,n->parameters[i],depth+1)) return true;
+    return false;
 }
 
 static bool pj_plain_literal(const me_expr *n, const char *op) {
@@ -143,6 +223,17 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
     if (!n || depth > 128 || !pj_type(n->dtype)) return NULL;
     const char *type = pj_type(n->dtype);
     char leaf[256];
+    if (IS_FUNCTION(n->type) && pj_integer(n->dtype)) {
+        pj_text integer = {0};
+        if (pj_integer_tree(p,n,defined,constants,n->dtype,&integer,0)) {
+            size_t length = integer.used + 64;
+            char *result = malloc(length);
+            if (result) snprintf(result,length,"pj_%s(%s)",type,integer.text);
+            free(integer.text);
+            return result;
+        }
+        free(integer.text);
+    }
     if (is_reduction_node(n) && constants && constants->scalar_phase) {
         me_reduce_kind kind = reduction_kind(n->function);
         const me_expr *arg = n->parameters[0];
@@ -174,7 +265,7 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                 if (!pj_append(s,"uint64_t pj_bits_%d = ((pj_checked)inputs[%d])(inputs[%d],"
                     "(uint64_t)(uintptr_t)inputs[%d],(uint64_t)(uintptr_t)mask,"
                     "(uint64_t)count | (UINT64_C(1) << 63),&pj_status); if (pj_status) return pj_status;\n"
-                    "%s pj_reduced_%d = %s(pj_bits_%d);\n",
+                    "volatile %s pj_reduced_%d = %s(pj_bits_%d);\n",
                     id,p->n_inputs+ME_DSL_PORTABLE_JIT_CHECKED_OFF,
                     p->n_inputs+ME_DSL_PORTABLE_JIT_CHECKED_OFF+1+bridge,index,type,id,decode,id)) return NULL;
                 snprintf(leaf,sizeof(leaf),"pj_reduced_%d",id);
@@ -216,13 +307,13 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                 snprintf(integer_decode,sizeof(integer_decode),"pj_%s",type);
                 decode = n->dtype == ME_BOOL ? "(_Bool)" : integer_decode;
             }
-            if (!pj_append(s,"%s pj_reduced_%d = %s(pj_acc_%d);\n",type,id,decode,id)) return NULL;
+            if (!pj_append(s,"volatile %s pj_reduced_%d = %s(pj_acc_%d);\n",type,id,decode,id)) return NULL;
         } else if (kind == ME_REDUCE_MEAN) {
             const char *nan = arg->dtype == ME_FLOAT32 ?
                 "pj_unpack_f32(UINT64_C(0x7fc00000))" : "pj_unpack_f64(UINT64_C(0x7ff8000000000000))";
-            if (!pj_append(s,"%s pj_reduced_%d = pj_count_%d ? pj_acc_%d / (%s)pj_count_%d : %s;\n",
+            if (!pj_append(s,"volatile %s pj_reduced_%d = pj_count_%d ? pj_acc_%d / (%s)pj_count_%d : %s;\n",
                 type,id,id,id,acc_type,id,nan)) return NULL;
-        } else if (!pj_append(s,"%s pj_reduced_%d = pj_acc_%d;\n",type,id,id)) return NULL;
+        } else if (!pj_append(s,"volatile %s pj_reduced_%d = pj_acc_%d;\n",type,id,id)) return NULL;
         snprintf(leaf,sizeof(leaf),"pj_reduced_%d",id);
         return strdup(leaf);
     }
@@ -274,7 +365,7 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                 return strdup(leaf);
             }
         }
-        if (index < p->n_inputs) snprintf(leaf,sizeof(leaf),"((const %s *)inputs[%d])[%s]",type,index,
+        if (index < p->n_inputs) snprintf(leaf,sizeof(leaf),"pj_input_%d[%s]",index,
             p->vars.uniform[index] || (constants && constants->scalar_phase) ? "0" : "i");
         else if (p->local_slots && p->local_slots[index] >= 0 && defined[index]) {
             snprintf(leaf,sizeof(leaf),p->output_is_scalar && !p->vars.uniform[index] ?
@@ -298,6 +389,14 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
     bool conversion = !n->function && arity == 1;
     bool weak_operand = arg0 &&
         (arg0->flags & (ME_EXPR_FLAG_WEAK_LITERAL | ME_EXPR_FLAG_WEAK_SCALAR)) != 0;
+    if (conversion && pj_integer(n->dtype) && weak_operand) {
+        uint64_t original, converted;
+        if (pj_literal_integer_bits(arg0,arg0->dtype,&original) && pj_literal_integer_bits(arg0,n->dtype,&converted)) {
+            char literal[128];
+            snprintf(literal,sizeof(literal),"pj_%s(%lluULL)",type,(unsigned long long)converted);
+            return strdup(literal);
+        }
+    }
     bool int_cast = conversion && (n->flags & ME_EXPR_FLAG_NUMPY_1_1) && pj_integer(n->dtype) && pj_integral(arg0->dtype) &&
         arg0->dtype != n->dtype && !weak_operand;
     if (conversion && pj_integer(n->dtype) && arg0->dtype != n->dtype && weak_operand) {
@@ -341,12 +440,24 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
      * through host bridges that replay the exact interpreter scalar path. */
     const char *math = me_portable_math_name(n);
     bool predicate = math && arity == 1 && n->dtype == ME_BOOL && arg0 && pj_float(arg0->dtype);
+    bool integer_predicate = math && arity == 1 && n->dtype == ME_BOOL && arg0 && pj_integral(arg0->dtype) &&
+        (!strcmp(math,"isfinite") || !strcmp(math,"isinf") || !strcmp(math,"isnan") || !strcmp(math,"signbit"));
+    bool integer_math = math && arity == 1 && !checked_weak && arg0 && pj_integral(n->dtype) && arg0->dtype == n->dtype &&
+        (!strcmp(math,"fabs") || !strcmp(math,"sign") || !strcmp(math,"square") || !strcmp(math,"real") ||
+         !strcmp(math,"imag") || !strcmp(math,"conj") || !strcmp(math,"floor") || !strcmp(math,"ceil") ||
+         !strcmp(math,"trunc") || !strcmp(math,"round") || !strcmp(math,"rint"));
+    bool native_power = op && !strcmp(op,"**") && arity == 2 && !checked_weak && pj_integer(n->dtype) &&
+        (n->flags & ME_EXPR_FLAG_NUMPY_1_1) && arg0 && arg1 && arg0->dtype == n->dtype && arg1->dtype == n->dtype;
     bool unary_math = math && arity == 1 && !predicate && float_result && arg0 && pj_float(arg0->dtype);
     bool binary_math = math && arity == 2 && float_result && arg0 && arg1 &&
         pj_float(arg0->dtype) && pj_float(arg1->dtype);
+    bool exponent_math = math && !strcmp(math,"ldexp") && arity == 2 && float_result && arg0 && arg1 &&
+        pj_float(arg0->dtype) && arg1->dtype == ME_INT64;
+    bool ternary_math = math && !strcmp(math,"fma") && arity == 3 && float_result && arg0 && arg1 &&
+        pj_float(arg0->dtype) && pj_float(arg1->dtype) && pj_float(((const me_expr *)n->parameters[2])->dtype);
     bool checked_math = (math && arity >= 1 && arity <= 3 &&
-        !predicate && !unary_math && !binary_math) ||
-        (op && !strcmp(op,"**") && arity == 2 && pj_integer(n->dtype));
+        !predicate && !integer_predicate && !integer_math && !unary_math && !binary_math && !exponent_math && !ternary_math) ||
+        (op && !strcmp(op,"**") && arity == 2 && pj_integer(n->dtype) && !native_power);
     bool float_operator = op && arity == 2 && float_result && arg0 && arg1 &&
         (!strcmp(op,"//") || !strcmp(op,"%") || !strcmp(op,"**")) &&
         pj_float(arg0->dtype) && pj_float(arg1->dtype);
@@ -354,6 +465,14 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
         ((arity == 2 && (!strcmp(op,"%") || !strcmp(op,"//") || !strcmp(op,"<<") ||
                          !strcmp(op,">>") || !strcmp(op,"&") || !strcmp(op,"|") || !strcmp(op,"^"))) ||
           (arity == 1 && !strcmp(op,"~")));
+    bool boolean_bitwise = op && n->dtype == ME_BOOL &&
+        ((arity == 2 && (!strcmp(op,"&") || !strcmp(op,"|") || !strcmp(op,"^") ||
+                        !strcmp(op,"+") || !strcmp(op,"*"))) ||
+         (arity == 1 && !strcmp(op,"~")));
+    bool native_shift = integer_operator && !checked_weak && (n->flags & ME_EXPR_FLAG_NUMPY_1_1) &&
+        arity == 2 && (!strcmp(op,"<<") || !strcmp(op,">>"));
+    bool native_divmod = integer_operator && !checked_weak && (n->flags & ME_EXPR_FLAG_NUMPY_1_1) &&
+        arity == 2 && (!strcmp(op,"//") || !strcmp(op,"%"));
     if (checked_weak) {
         if (!integer_arithmetic && !integer_operator && !checked_math && !checked_conversion && !where) return NULL;
         if (!checked_math && !checked_conversion) { integer_operator = true; integer_arithmetic = false; }
@@ -361,8 +480,8 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
     bool logical = op && ((!strcmp(op,"not") && arity == 1) ||
         ((!strcmp(op,"and") || !strcmp(op,"or")) && arity == 2));
     if (!conversion && !where && !comparison && !arithmetic && !integer_arithmetic &&
-        !logical && !predicate && !unary_math && !binary_math && !float_operator &&
-        !integer_operator && !checked_math) return NULL;
+        !logical && !predicate && !integer_predicate && !unary_math && !binary_math && !float_operator && !exponent_math && !ternary_math &&
+        !integer_operator && !checked_math && !boolean_bitwise && !integer_math && !native_power) return NULL;
     /* Emit selected operands in their branch, never as eager C call arguments.
      * Every other operation gets sequenced temporaries and an immediate status
      * check, so a failed left operand prevents right-operand participation. */
@@ -393,17 +512,50 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
     for (int j = 0; j < arity; j++) {
         bool plain = arithmetic && arity == 2 && pj_plain_literal(n->parameters[j],op) &&
             pj_runtime_float(p,n->parameters[1-j],0);
+        /* Runtime-bound callbacks cannot be folded into compile-time libm
+         * answers. Exact nonzero call literals therefore need no barrier. */
+        plain = plain || ((predicate || unary_math || binary_math || exponent_math || ternary_math) &&
+            pj_plain_literal(n->parameters[j],"+"));
         args[j] = pj_expr_impl(p,n->parameters[j],defined,depth+1,constants,s,next_temp,plain);
         if (!args[j]) {
             for (int k = 0; k < arity; k++) free(args[k]);
             return NULL;
         }
     }
-    size_t capacity = 256;
-    for (int j = 0; j < arity; j++) capacity += strlen(args[j]);
+    size_t capacity = 512;
+    for (int j = 0; j < arity; j++) capacity += 8*strlen(args[j]);
     char *out = malloc(capacity);
     if (out) {
-        if (checked_conversion || checked_math || checked_comparison) {
+        if (integer_predicate) {
+            if (!strcmp(math,"isfinite")) snprintf(out,capacity,"((_Bool)1)");
+            else if (strcmp(math,"signbit") || pj_unsigned(arg0->dtype) || arg0->dtype == ME_BOOL)
+                snprintf(out,capacity,"((_Bool)0)");
+            else snprintf(out,capacity,"((_Bool)((%s) < 0))",args[0]);
+        }
+        else if (integer_math) {
+            if (!strcmp(math,"imag")) snprintf(out,capacity,"((%s)0)",type);
+            else if (n->dtype == ME_BOOL) snprintf(out,capacity,"((_Bool)(%s))",args[0]);
+            else if (!strcmp(math,"sign")) {
+                if (pj_unsigned(n->dtype)) snprintf(out,capacity,"((%s)((%s) != 0))",type,args[0]);
+                else snprintf(out,capacity,"((%s)(((%s) > 0) - ((%s) < 0)))",type,args[0],args[0]);
+            }
+            else if (!strcmp(math,"square")) snprintf(out,capacity,"pj_%s((uint64_t)(%s)*(uint64_t)(%s))",type,args[0],args[0]);
+            else if (!strcmp(math,"fabs") && !pj_unsigned(n->dtype)) snprintf(out,capacity,
+                "pj_%s((%s) < 0 ? 0ULL-(uint64_t)(%s) : (uint64_t)(%s))",type,args[0],args[0],args[0]);
+            else snprintf(out,capacity,"((%s)(%s))",type,args[0]);
+        }
+        else if (native_power) {
+            int id = (*next_temp)++;
+            bool ok = pj_append(s,"uint64_t pj_power_base_%d = (uint64_t)(%s), pj_power_exp_%d = (uint64_t)(%s), pj_power_result_%d = 1;\n",
+                id,args[0],id,args[1],id);
+            if (!pj_unsigned(n->dtype)) ok = ok && pj_append(s,"if ((%s) < 0) return -5;\n",args[1]);
+            ok = ok && pj_append(s,"while (pj_power_exp_%d) { if (pj_power_exp_%d & 1) pj_power_result_%d *= pj_power_base_%d;\n"
+                "pj_power_exp_%d >>= 1; if (pj_power_exp_%d) pj_power_base_%d *= pj_power_base_%d; }\n",
+                id,id,id,id,id,id,id,id);
+            if (!ok) { free(out); out = NULL; }
+            else snprintf(out,capacity,"pj_%s(pj_power_result_%d)",type,id);
+        }
+        else if (checked_conversion || checked_math || checked_comparison) {
             if (p->portable_jit_nchecked == ME_DSL_PORTABLE_JIT_BRIDGE_LIMIT) { free(out); out = NULL; }
             else {
                 int id = p->portable_jit_nchecked++;
@@ -431,26 +583,80 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                 for (int j = 0; j < arity; j++) free(packed[j]);
             }
         }
+        else if (boolean_bitwise) {
+            if (arity == 1) snprintf(out,capacity,"((_Bool)!(%s))",args[0]);
+            else snprintf(out,capacity,"((_Bool)((%s) %s (%s)))",args[0],
+                !strcmp(op,"+") ? "|" : !strcmp(op,"*") ? "&" : op,args[1]);
+        }
         else if (where) snprintf(out,capacity,"((%s)((%s) ? (%s) : (%s)))",type,args[0],args[1],args[2]);
         else if (int_cast) snprintf(out,capacity,"pj_%s((uint64_t)(%s))",type,args[0]);
         else if (conversion) snprintf(out,capacity,"((%s)(%s))",type,args[0]);
         else if (integer_comparison) {
-            snprintf(out,capacity,"(pj_icmp((uint64_t)(%s),(uint64_t)(%s),%d,%d) %s 0)",
-                args[0],args[1],pj_unsigned(arg0->dtype),pj_unsigned(arg1->dtype),op);
+            /* Mixed signed/unsigned comparisons were routed to the checked
+             * bridge above. Same-domain integer C comparisons need no helper. */
+            snprintf(out,capacity,"((%s) %s (%s))",args[0],op,args[1]);
         }
         else if (checked_arithmetic) {
-            const char *name = !strcmp(op,"+") ? "add" : !strcmp(op,"-") ? "sub" : "mul";
-            snprintf(out,capacity,"pj_int64_t(pj_weak_%s((uint64_t)(%s),(uint64_t)(%s),&pj_status))",
-                name,arity == 1 ? "0ULL" : args[0],arity == 1 ? args[0] : args[1]);
+            int id = (*next_temp)++;
+            const char *left = arity == 1 ? "0ULL" : args[0];
+            const char *right = arity == 1 ? args[0] : args[1];
+            bool ok = pj_append(s,"uint64_t pj_weak_a_%d = (uint64_t)(%s), pj_weak_b_%d = (uint64_t)(%s);\n",
+                id,left,id,right);
+            if (!strcmp(op,"*")) {
+                ok = ok && pj_append(s,"int64_t pj_weak_x_%d = pj_int64_t(pj_weak_a_%d), pj_weak_y_%d = pj_int64_t(pj_weak_b_%d);\n"
+                    "if (pj_weak_x_%d > 0 ? (pj_weak_y_%d > 0 ? pj_weak_x_%d > INT64_MAX/pj_weak_y_%d : "
+                    "pj_weak_y_%d < INT64_MIN/pj_weak_x_%d) : (pj_weak_x_%d < 0 && "
+                    "(pj_weak_y_%d > 0 ? pj_weak_x_%d < INT64_MIN/pj_weak_y_%d : pj_weak_y_%d < INT64_MAX/pj_weak_x_%d))) return -5;\n",
+                    id,id,id,id,id,id,id,id,id,id,id,id,id,id,id,id);
+            }
+            ok = ok && pj_append(s,"uint64_t pj_weak_r_%d = pj_weak_a_%d %s pj_weak_b_%d;\n",id,id,op,id);
+            if (strcmp(op,"*")) {
+                ok = ok && pj_append(s,!strcmp(op,"+") ?
+                    "if ((~(pj_weak_a_%d ^ pj_weak_b_%d) & (pj_weak_a_%d ^ pj_weak_r_%d)) >> 63) return -5;\n" :
+                    "if (((pj_weak_a_%d ^ pj_weak_b_%d) & (pj_weak_a_%d ^ pj_weak_r_%d)) >> 63) return -5;\n",
+                    id,id,id,id);
+            }
+            if (!ok) { free(out); out = NULL; }
+            else snprintf(out,capacity,"pj_int64_t(pj_weak_r_%d)",id);
         }
         else if (predicate) {
             if (p->portable_jit_npreds == ME_DSL_PORTABLE_JIT_BRIDGE_LIMIT) { free(out); out = NULL; }
             else {
                 int id = p->portable_jit_npreds++;
                 p->portable_jit_preds[id] = n;
-                snprintf(out,capacity,"((_Bool)(((pj_pred)inputs[%d])(inputs[%d],(double)(%s))))",
+                p->portable_jit_pred_fn[id] = dsl_portable_resolve_predicate(n);
+                if (p->portable_jit_pred_fn[id]) snprintf(out,capacity,"((_Bool)(((%s)inputs[%d])((%s)(%s))))",
+                    arg0->dtype == ME_FLOAT32 ? "pj_predf" : "pj_predd",
+                    p->n_inputs+ME_DSL_PORTABLE_JIT_PRED_FN_OFF+id,pj_type(arg0->dtype),args[0]);
+                else snprintf(out,capacity,"((_Bool)(((pj_pred)inputs[%d])(inputs[%d],(double)(%s))))",
                     p->n_inputs+ME_DSL_PORTABLE_JIT_PRED_OFF,
                     p->n_inputs+ME_DSL_PORTABLE_JIT_PRED_OFF+1+id,args[0]);
+            }
+        }
+        else if (exponent_math) {
+            if (p->portable_jit_nmath2 == ME_DSL_PORTABLE_JIT_BRIDGE_LIMIT) { free(out); out = NULL; }
+            else {
+                int id = p->portable_jit_nmath2++, exponent = (*next_temp)++;
+                p->portable_jit_math2[id] = n;
+                p->portable_jit_math2_fn[id] = dsl_portable_resolve_binary_math(n);
+                if (!p->portable_jit_math2_fn[id] || !pj_append(s,
+                    "int64_t pj_exponent_%d = (int64_t)(%s); if (pj_exponent_%d < INT_MIN || pj_exponent_%d > INT_MAX) return -5;\n",
+                    exponent,args[1],exponent,exponent)) { free(out); out = NULL; }
+                else snprintf(out,capacity,"((%s)(((%s)inputs[%d])((%s)(%s),(int)pj_exponent_%d)))",
+                    type,n->dtype == ME_FLOAT32 ? "pj_ldexpf" : "pj_ldexpd",
+                    p->n_inputs+ME_DSL_PORTABLE_JIT_MATH2_FN_OFF+id,type,args[0],exponent);
+            }
+        }
+        else if (ternary_math) {
+            if (p->portable_jit_nmath3 == ME_DSL_PORTABLE_JIT_BRIDGE_LIMIT) { free(out); out = NULL; }
+            else {
+                int id = p->portable_jit_nmath3++;
+                p->portable_jit_math3[id] = n;
+                p->portable_jit_math3_fn[id] = dsl_portable_resolve_ternary_math(n);
+                if (!p->portable_jit_math3_fn[id]) { free(out); out = NULL; }
+                else snprintf(out,capacity,"((%s)(((%s)inputs[%d])((%s)(%s),(%s)(%s),(%s)(%s))))",
+                    type,n->dtype == ME_FLOAT32 ? "pj_libm3f" : "pj_libm3",
+                    p->n_inputs+ME_DSL_PORTABLE_JIT_MATH3_FN_OFF+id,type,args[0],type,args[1],type,args[2]);
             }
         }
         else if (unary_math) {
@@ -483,6 +689,50 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                     p->n_inputs+ME_DSL_PORTABLE_JIT_MATH2_OFF+1+id,args[0],args[1]);
             }
         }
+        else if (native_shift) {
+            int bits = (int)(dtype_size(n->dtype)*8);
+            bool right = !strcmp(op,">>");
+            if (pj_unsigned(n->dtype)) {
+                snprintf(out,capacity,"pj_%s((uint64_t)(%s) >= %d ? 0ULL : ((uint64_t)(%s) %s (uint64_t)(%s)))",
+                    type,args[1],bits,args[0],op,args[1]);
+            } else if (!right) {
+                snprintf(out,capacity,"pj_%s((uint64_t)(%s) >= %d ? 0ULL : ((uint64_t)(%s) << (uint64_t)(%s)))",
+                    type,args[1],bits,args[0],args[1]);
+            } else {
+                snprintf(out,capacity,"pj_%s((uint64_t)(%s) >= %d ? ((%s) < 0 ? UINT64_MAX : 0ULL) : "
+                    "((%s) < 0 ? ~((~(uint64_t)(%s)) >> (uint64_t)(%s)) : (uint64_t)(%s) >> (uint64_t)(%s)))",
+                    type,args[1],bits,args[0],args[0],args[0],args[1],args[0],args[1]);
+            }
+        }
+        else if (native_divmod) {
+            int id = (*next_temp)++;
+            bool modulo = !strcmp(op,"%");
+            bool ok;
+            if (pj_unsigned(n->dtype)) {
+                ok = pj_append(s,"uint64_t pj_div_left_%d = (uint64_t)(%s), pj_div_right_%d = (uint64_t)(%s);\n"
+                    "uint64_t pj_div_bits_%d = pj_div_right_%d ? pj_div_left_%d %s pj_div_right_%d : 0ULL;\n",
+                    id,args[0],id,args[1],id,id,id,modulo ? "%" : "/",id);
+            } else {
+                int bits = (int)(dtype_size(n->dtype)*8);
+                char overflow[64];
+                if (modulo) strcpy(overflow,"0ULL");
+                else snprintf(overflow,sizeof(overflow),"(uint64_t)pj_div_left_%d",id);
+                ok = pj_append(s,"int64_t pj_div_left_%d = (int64_t)(%s), pj_div_right_%d = (int64_t)(%s);\n"
+                    "uint64_t pj_div_bits_%d = 0;\n",id,args[0],id,args[1],id);
+                ok = ok && pj_append(s,
+                    "if (pj_div_right_%d) { if ((uint64_t)pj_div_left_%d == (UINT64_MAX << %d) && pj_div_right_%d == -1) "
+                    "pj_div_bits_%d = %s; else {\n",id,id,bits-1,id,id,overflow);
+                ok = ok && pj_append(s,
+                    "int64_t pj_div_q_%d = pj_div_left_%d / pj_div_right_%d;\n"
+                    "int64_t pj_div_r_%d = pj_div_left_%d %% pj_div_right_%d;\n",id,id,id,id,id,id);
+                ok = ok && pj_append(s,
+                    "if (pj_div_r_%d && ((pj_div_left_%d < 0) != (pj_div_right_%d < 0))) "
+                    "{ pj_div_q_%d--; pj_div_r_%d += pj_div_right_%d; }\n",id,id,id,id,id,id);
+                ok = ok && pj_append(s,"pj_div_bits_%d = (uint64_t)pj_div_%s_%d; } }\n",id,modulo ? "r" : "q",id);
+            }
+            if (!ok) { free(out); out = NULL; }
+            else snprintf(out,capacity,"pj_%s(pj_div_bits_%d)",type,id);
+        }
         else if (integer_operator) {
             if (p->portable_jit_niops == ME_DSL_PORTABLE_JIT_BRIDGE_LIMIT) { free(out); out = NULL; }
             else {
@@ -502,12 +752,21 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
             else {
                 int id = p->portable_jit_ncomparisons++;
                 p->portable_jit_comparisons[id] = n;
-                const char *name = !strcmp(op, "==") ? "eq" : !strcmp(op, "!=") ? "ne" :
-                    !strcmp(op, "<") ? "lt" : !strcmp(op, "<=") ? "le" :
-                    !strcmp(op, ">") ? "gt" : "ge";
-                snprintf(out,capacity,"pj_%s((pj_cmp)inputs[%d],inputs[%d],(double)(%s),(double)(%s))",
-                    name,p->n_inputs+ME_DSL_PORTABLE_JIT_CMP_OFF,
-                    p->n_inputs+ME_DSL_PORTABLE_JIT_CMP_OFF+1+id,args[0],args[1]);
+                int temporary = (*next_temp)++;
+                bool ok = pj_append(s,
+                    "union { double f; uint64_t u; } pj_cmp_a_%d, pj_cmp_b_%d;\n"
+                    "pj_cmp_a_%d.f = (double)(%s); pj_cmp_b_%d.f = (double)(%s);\n"
+                    "_Bool pj_cmp_result_%d;\n",temporary,temporary,temporary,args[0],temporary,args[1],temporary);
+                ok = ok && pj_append(s,
+                    "if ((pj_cmp_a_%d.u & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000) || "
+                    "(pj_cmp_b_%d.u & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000))\n"
+                    "pj_cmp_result_%d = ((pj_cmp)inputs[%d])(inputs[%d],pj_cmp_a_%d.f,pj_cmp_b_%d.f);\n"
+                    "else pj_cmp_result_%d = pj_cmp_a_%d.f %s pj_cmp_b_%d.f;\n",
+                    temporary,temporary,temporary,p->n_inputs+ME_DSL_PORTABLE_JIT_CMP_OFF,
+                    p->n_inputs+ME_DSL_PORTABLE_JIT_CMP_OFF+1+id,temporary,temporary,
+                    temporary,temporary,op,temporary);
+                if (!ok) { free(out); out = NULL; }
+                else snprintf(out,capacity,"pj_cmp_result_%d",temporary);
             }
         }
         else if (arity == 1) snprintf(out,capacity,"((%s)(%s(%s)))",type,logical ? "!" : "-",args[0]);
@@ -584,39 +843,15 @@ static bool pj_falls_through(const me_dsl_compiled_block *block, int depth) {
  * directly. Corresponding signed/unsigned types may alias in C99. This avoids
  * per-lane representation temporaries with non-inlining compilers such as TCC;
  * checked conversions, computed operands and uniform captures use normal lowering. */
-static bool pj_integer_leaf(const me_dsl_compiled_program *p, const me_expr *n,
-                            me_dtype dtype, const char *type, char *out, size_t size) {
-    if (!n || n->dtype != dtype) return false;
-    if (TYPE_MASK(n->type) == ME_CONSTANT && (n->flags & ME_EXPR_FLAG_INTEGER_LITERAL)) {
-        snprintf(out,size,"((%s)(%s%lluULL))",type,
-            n->flags & ME_EXPR_FLAG_NEGATIVE_LITERAL ? "0ULL-" : "",
-            (unsigned long long)n->integer_magnitude);
-        return true;
-    }
-    if (TYPE_MASK(n->type) != ME_VARIABLE || !is_synthetic_address(n->bound)) return false;
-    int index = (int)((const char *)n->bound - synthetic_var_addresses);
-    if (index < 0 || index >= p->n_inputs || p->vars.uniform[index]) return false;
-    snprintf(out,size,"((const %s *)inputs[%d])[i]",type,index);
-    return true;
-}
-
 static int pj_direct_integer_return(const me_dsl_compiled_program *p, const me_expr *n,
-                                    pj_text *s) {
-    if (!n || !pj_integer(n->dtype) || n->dtype != p->output_dtype ||
-        !IS_FUNCTION(n->type) || ARITY(n->type) != 2 ||
-        (n->flags & ME_EXPR_FLAG_WEAK_SCALAR)) return false;
-    const char *op = me_portable_operator(n);
-    if (!op || (strcmp(op,"+") && strcmp(op,"-") && strcmp(op,"*"))) return false;
-    const char *type = pj_type(n->dtype);
-    if (!pj_unsigned(n->dtype)) {
-        type = n->dtype == ME_INT8 ? "uint8_t" : n->dtype == ME_INT16 ? "uint16_t" :
-            n->dtype == ME_INT32 ? "uint32_t" : "uint64_t";
-    }
-    char left[256], right[256];
-    if (!pj_integer_leaf(p,n->parameters[0],n->dtype,type,left,sizeof(left)) ||
-        !pj_integer_leaf(p,n->parameters[1],n->dtype,type,right,sizeof(right))) return false;
-    return pj_append(s,"((%s *)output)[i] = (%s)((uint64_t)(%s) %s (uint64_t)(%s)); goto pj_lane_done;\n",
-        type,type,left,op,right) ? 1 : -1;
+                                    const bool *defined, const pj_constants *constants, pj_text *s) {
+    if (!n || !pj_integer(n->dtype) || n->dtype != p->output_dtype) return 0;
+    pj_text integer = {0};
+    if (!pj_integer_tree(p,n,defined,constants,n->dtype,&integer,0)) { free(integer.text); return 0; }
+    const char *type = pj_unsigned_type(n->dtype);
+    bool ok = pj_append(s,"((%s *)output)[i] = (%s)(%s); goto pj_lane_done;\n",type,type,integer.text);
+    free(integer.text);
+    return ok ? 1 : -1;
 }
 
 static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *block,
@@ -629,7 +864,7 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
             bool assignment = stmt->kind == ME_DSL_STMT_ASSIGN;
             const me_expr *node = assignment ? stmt->as.assign.value.expr : stmt->as.return_stmt.expr.expr;
             if (!assignment && !(constants && constants->scalar_phase)) {
-                int direct = pj_direct_integer_return(p,node,s);
+                int direct = pj_direct_integer_return(p,node,defined,constants,s);
                 if (direct) return direct > 0;
             }
             if (assignment && constants && constants->scalar_phase) {
@@ -882,6 +1117,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     pj_text body = {0};
     p->portable_jit_ncomparisons = p->portable_jit_nmath = 0;
     p->portable_jit_nmath2 = p->portable_jit_npreds = p->portable_jit_niops = 0;
+    p->portable_jit_nmath3 = 0;
     p->portable_jit_nchecked = 0;
     for (int i = 0; i < p->n_locals; i++) {
         int index = p->local_var_indices[i];
@@ -960,7 +1196,29 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
             return;
         }
     }
-    size_t capacity = body.used + preamble.used + 8192;
+    pj_text input_declarations = {0}, unmasked_body = {0};
+    bool declarations_ok = true;
+    for (int i=0; i<p->n_inputs; i++) {
+        const char *type = pj_type(p->vars.dtypes[i]);
+        declarations_ok = declarations_ok && type && pj_append(&input_declarations,
+            "const %s *pj_input_%d = (const %s *)inputs[%d];\n",type,i,type,i);
+    }
+    /* Pointer-table reads must be outside byte-output loops: a char store may
+     * otherwise alias inputs[] and force a reload on every lane. Separate
+     * unmasked/masked functions also make vectorization independent of loop
+     * unswitching heuristics, without duplicating function-scoped goto labels. */
+    const char *skip = "if (mask && !mask[i]) continue;\n";
+    const char *scan = body.text ? body.text : "", *found;
+    while ((found=strstr(scan,skip)) != NULL) {
+        declarations_ok = declarations_ok && pj_append(&unmasked_body,"%.*s",(int)(found-scan),scan);
+        scan = found+strlen(skip);
+    }
+    declarations_ok = declarations_ok && pj_append(&unmasked_body,"%s",scan);
+    if (!declarations_ok) {
+        free(input_declarations.text); free(unmasked_body.text); free(body.text); free(preamble.text);
+        return;
+    }
+    size_t capacity = 2*(body.used + preamble.used + input_declarations.used) + 16384;
     char *source = malloc(capacity);
     me_dsl_jit_ir_program *ir = calloc(1,sizeof(*ir));
     if (!source || !ir) {
@@ -968,6 +1226,8 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         free(body.text);
         free(source);
         free(ir);
+        free(input_declarations.text);
+        free(unmasked_body.text);
         return;
     }
     ir->nparams = p->n_inputs;
@@ -978,12 +1238,15 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         free(body.text);
         free(source);
         me_dsl_jit_ir_free(ir);
+        free(input_declarations.text);
+        free(unmasked_body.text);
         return;
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
-    snprintf(source,capacity,
-        "/* portable-1.1 lowering-r26 resolved-libm abi-r10 */\n"
+    int used = snprintf(source,capacity,
+        "/* portable-1.1 lowering-r28 captured-integer-trees abi-r11 */\n"
         "#include <stdint.h>\n"
+        "#include <limits.h>\n"
         "#include <string.h>\n"
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"
         "typedef double (*pj_math)(const void *,double);\n"
@@ -992,6 +1255,12 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "typedef double (*pj_libm2)(double,double);\n"
         "typedef float (*pj_libmf)(float);\n"
         "typedef float (*pj_libm2f)(float,float);\n"
+        "typedef double (*pj_libm3)(double,double,double);\n"
+        "typedef float (*pj_libm3f)(float,float,float);\n"
+        "typedef double (*pj_ldexpd)(double,int);\n"
+        "typedef float (*pj_ldexpf)(float,int);\n"
+        "typedef _Bool (*pj_predf)(float);\n"
+        "typedef _Bool (*pj_predd)(double);\n"
         "typedef _Bool (*pj_pred)(const void *,double);\n"
         "typedef uint64_t (*pj_iop)(const void *,uint64_t,uint64_t,int *);\n"
         "typedef uint64_t (*pj_checked)(const void *,uint64_t,uint64_t,uint64_t,int *);\n"
@@ -1043,20 +1312,40 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "return x op y; }\n"
         "PJ_COMPARE(eq, ==)\nPJ_COMPARE(ne, !=)\nPJ_COMPARE(lt, <)\n"
         "PJ_COMPARE(le, <=)\nPJ_COMPARE(gt, >)\nPJ_COMPARE(ge, >=)\n"
-        "int %s(const void *const *inputs, void *output, int64_t count) {\n"
-        "const unsigned char *mask = inputs[%d];\n"
+        "static int %s(const void *const *inputs, void *restrict output, int64_t count) {\n"
+        "const unsigned char *mask = 0;\n"
         "const int64_t pj_cap = *(const int64_t *)inputs[%d];\n"
         "int pj_status = 0;\n"
         "%s"
         "%s"
         "%s"
+        "%s"
         "%s %s return 0; }\n",
-        ME_DSL_JIT_SYMBOL_NAME,p->n_inputs,p->n_inputs+ME_DSL_PORTABLE_JIT_CAP_OFF,
-        nd_decl,scalar ? "" : "for (int64_t i=0; i<count; i++) { if (mask && !mask[i]) continue;\n",
-        scalar ? "" : (preamble.text ? preamble.text : ""),body.text,
+        "pj_unmasked",p->n_inputs+ME_DSL_PORTABLE_JIT_CAP_OFF,
+        input_declarations.text ? input_declarations.text : "",nd_decl,
+        scalar ? "" : "for (int64_t i=0; i<count; i++) {\n",
+        scalar ? "" : (preamble.text ? preamble.text : ""),unmasked_body.text,
         scalar ? "" : "pj_lane_done: ; }");
+    if (used >= 0 && (size_t)used < capacity) {
+        int appended = snprintf(source+used,capacity-(size_t)used,
+            "static int pj_masked(const void *const *inputs, void *restrict output, int64_t count) {\n"
+            "const unsigned char *mask = inputs[%d];\n"
+            "const int64_t pj_cap = *(const int64_t *)inputs[%d];\nint pj_status = 0;\n"
+            "%s%s%s%s%s %s return 0; }\n"
+            "int %s(const void *const *inputs, void *output, int64_t count) {\n"
+            "return inputs[%d] ? pj_masked(inputs,output,count) : pj_unmasked(inputs,output,count); }\n",
+            p->n_inputs,p->n_inputs+ME_DSL_PORTABLE_JIT_CAP_OFF,
+            input_declarations.text ? input_declarations.text : "",nd_decl,
+            scalar ? "" : "for (int64_t i=0; i<count; i++) { if (mask && !mask[i]) continue;\n",
+            scalar ? "" : (preamble.text ? preamble.text : ""),body.text,
+            scalar ? "" : "pj_lane_done: ; }",ME_DSL_JIT_SYMBOL_NAME,p->n_inputs);
+        if (appended < 0 || (size_t)appended >= capacity-(size_t)used) used = -1;
+    } else used = -1;
+    free(input_declarations.text);
+    free(unmasked_body.text);
     free(preamble.text);
     free(body.text);
+    if (used < 0) { free(source); me_dsl_jit_ir_free(ir); return; }
     p->jit_ir = ir;
     p->jit_c_source = source;
     p->jit_nparams = p->n_inputs;

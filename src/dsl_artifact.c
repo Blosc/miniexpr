@@ -854,8 +854,16 @@ me_artifact_status me_artifact_eval_ex(const me_artifact *artifact,
                 artifact_ranges_overlap(context[i], bytes, output, output_count * output_width)) return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "invalid or overlapping logical context");
         }
     }
-    for (size_t lane = 0; lane < nitems; lane++) {
-        if (descriptor->valid_mask && descriptor->valid_mask[lane] > 1) return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "invalid lane mask value");
+    bool all_active = true;
+    if (descriptor->valid_mask) {
+        unsigned invalid_bits = 0, missing = 0;
+        for (size_t lane = 0; lane < nitems; lane++) {
+            unsigned value = descriptor->valid_mask[lane];
+            invalid_bits |= value & ~1U;
+            missing |= value ^ 1U;
+        }
+        if (invalid_bits) return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "invalid lane mask value");
+        all_active = missing == 0;
     }
     const void *data[ME_MAX_VARS];
     for (int b = 0; b < artifact->ninputs; b++) {
@@ -888,7 +896,9 @@ me_artifact_status me_artifact_eval_ex(const me_artifact *artifact,
         data[b] = artifact->bindings[b].string_value ? artifact->bindings[b].string_value : (const void *)&artifact->bindings[b].value;
     }
     if (result == ME_ARTIFACT_SUCCESS) {
-        me_dsl_portable_eval_descriptor native = {(int)nitems, descriptor->valid_mask, descriptor->output_capacity,
+        /* An all-active mask has identical participation to no mask. Validate
+         * it once, then use the unmasked JIT path rather than inhibit SIMD. */
+        me_dsl_portable_eval_descriptor native = {(int)nitems, all_active ? NULL : descriptor->valid_mask, descriptor->output_capacity,
             descriptor->ndim, descriptor->logical_shape, descriptor->block_origin, descriptor->block_extent};
         int rc = dsl_eval_program_portable(artifact->program, data, artifact->nbindings, output, &native);
         if (rc) {
