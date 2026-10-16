@@ -72,7 +72,7 @@ static int check(const char *text, const float *expected, me_jit_mode jit) {
     return !checkpoints || !rejected;
 }
 /* A simple scalar return must execute even when every compiler-owned allocation
- * fails. Explicit masks/empty groups/locals/elementwise returns retain their
+ * fails. Partial/empty masks, empty groups, locals and elementwise returns retain their
  * bookkeeping, and must still recover after an injected allocation failure. */
 static int scalar_dispatch(const char *body, const char *output_dtype,
     const char *contract, int count, const uint8_t *mask, bool direct, double expected) {
@@ -135,7 +135,8 @@ static int scalar_dispatches(void) {
         scalar_dispatch("return block_sum(x)", "float32", "block_scalar", 3, NULL, true, 6) ||
         scalar_dispatch("s = block_sum(x)\\n    return s", "float64", "block_scalar", 3, NULL, false, 6) ||
         scalar_dispatch("return x * 2", "float64", "elementwise", 3, NULL, false, 2) ||
-        scalar_dispatch("return block_sum(x)", "float64", "block_scalar", 3, full, false, 6) ||
+        /* Validated all-active masks normalize to the allocation-free path. */
+        scalar_dispatch("return block_sum(x)", "float64", "block_scalar", 3, full, true, 6) ||
         scalar_dispatch("return block_sum(x)", "float64", "block_scalar", 3, partial, false, 5) ||
         scalar_dispatch("return block_sum(x)", "float64", "block_scalar", 3, none, false, 0) ||
         scalar_dispatch("return block_sum(x)", "float64", "block_scalar", 0, NULL, false, 0);

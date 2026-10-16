@@ -1,6 +1,6 @@
 /* Test-only bulk compilation: every eligible typed kernel is still emitted and
  * executed. Amortize external compiler startup/linking, not numerical coverage.
- * Per-kernel source differs from production only in its exported symbol name. */
+ * Per-kernel source differs from production only in its entry/helper symbol names. */
 #include "batch-jit.h"
 #include "dsl_compile_internal.h"
 #include "dsl_jit_test.h"
@@ -47,7 +47,10 @@ int numpy_compat_batch_compile(me_artifact **artifacts, size_t count, void **han
         p->jit_request_mode = ME_JIT_ON;
         dsl_portable_prepare_jit_source(p);
         if (!p->jit_c_source) continue; /* identical production eligibility */
-        const char *entry = strstr(p->jit_c_source,"int " ME_DSL_JIT_SYMBOL_NAME "(");
+        /* Masked/unmasked entry bodies are per-kernel, not a shared header.
+         * Give their static names the same isolation as the exported entry. */
+        const char *entry = strstr(p->jit_c_source,"static int pj_unmasked(");
+        if (!entry) entry = strstr(p->jit_c_source,"int " ME_DSL_JIT_SYMBOL_NAME "(");
         if (!entry) {
             failed = 1;
             break;
@@ -68,8 +71,9 @@ int numpy_compat_batch_compile(me_artifact **artifacts, size_t count, void **han
             failed = 1;
             break;
         }
-        const char *body = entry + strlen("int " ME_DSL_JIT_SYMBOL_NAME);
-        if (fprintf(file,"int %s_%zu%s\n",ME_DSL_JIT_SYMBOL_NAME,i,body) < 0) failed = 1;
+        if (fprintf(file,"#define %s %s_%zu\n#define pj_unmasked pj_unmasked_%zu\n"
+            "#define pj_masked pj_masked_%zu\n%s\n#undef %s\n#undef pj_unmasked\n#undef pj_masked\n",
+            ME_DSL_JIT_SYMBOL_NAME,ME_DSL_JIT_SYMBOL_NAME,i,i,i,entry,ME_DSL_JIT_SYMBOL_NAME) < 0) failed = 1;
         kernels++;
     }
     if (fclose(file)) failed = 1;
