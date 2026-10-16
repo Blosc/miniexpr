@@ -29,7 +29,7 @@
 #endif
 
 #ifndef ME_DSL_JIT_CGEN_VERSION
-#define ME_DSL_JIT_CGEN_VERSION 20
+#define ME_DSL_JIT_CGEN_VERSION 21
 #endif
 
 #ifndef ME_DSL_JIT_BRIDGE_ABI_VERSION
@@ -55,7 +55,11 @@
 #define ME_DSL_PORTABLE_JIT_CAP_OFF 647
 #define ME_DSL_PORTABLE_JIT_CHECKED_OFF 648
 #define ME_DSL_PORTABLE_JIT_LOCALS_OFF 777
-#define ME_DSL_PORTABLE_JIT_EXTRA 778
+/* Pre-resolved libm callbacks; addresses are bound per invocation, never cached
+ * in generated source/artifacts. Generic node/dispatcher families stay intact. */
+#define ME_DSL_PORTABLE_JIT_MATH1_FN_OFF 778
+#define ME_DSL_PORTABLE_JIT_MATH2_FN_OFF 906
+#define ME_DSL_PORTABLE_JIT_EXTRA 1034
 
 #if ME_USE_WASM32_JIT
 typedef int (*me_dsl_jit_kernel_fn)(const void **inputs, void *output, int nitems);
@@ -189,8 +193,10 @@ typedef struct {
     const me_expr *portable_jit_comparisons[128]; /* Borrowed typed nodes. */
     int portable_jit_ncomparisons;
     const me_expr *portable_jit_math[128]; /* Borrowed unary typed nodes. */
+    const void *portable_jit_math_fn[128]; /* Native float/double callback ABI. */
     int portable_jit_nmath;
     const me_expr *portable_jit_math2[128]; /* Borrowed binary typed nodes. */
+    const void *portable_jit_math2_fn[128];
     int portable_jit_nmath2;
     const me_expr *portable_jit_preds[128]; /* Borrowed predicate typed nodes. */
     int portable_jit_npreds;

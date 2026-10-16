@@ -823,6 +823,101 @@ static void scalar_checked_order(void) {
     }
 }
 
+/* Qualification stays native: every resolved libm operation/precision, exceptional
+ * bit patterns, empty/masked calls and per-lane IEEE status. The special-policy
+ * cases also assert that the resolver leaves them on the generic bridge. */
+static void resolved_libm_parity(void) {
+    const char *unary[] = {"acos","acosh","asin","asinh","atan","atanh","cbrt",
+        "cos","cosh","erf","erfc","exp","exp2","expm1","lgamma","log","log10",
+        "log1p","log2","sin","sinh","sqrt","tan","tanh","tgamma","abs","ceil","floor","trunc"};
+    const char *binary[] = {"atan2","copysign","fdim","hypot","nextafter","fmod","pow"};
+    const char *special[] = {"round(x)","rint(x)","sinpi(x)","cospi(x)",
+        "minimum(x, y)","maximum(x, y)","fmin(x, y)","fmax(x, y)","logaddexp(x, y)","remainder(x, y)"};
+    uint64_t bits64[] = {0,UINT64_C(0x8000000000000000),UINT64_C(0x3ff0000000000000),
+        UINT64_C(0xbff0000000000000),UINT64_C(0x3fe0000000000000),UINT64_C(0xbfe0000000000000),
+        UINT64_C(0x0010000000000000),1,UINT64_C(0x8000000000000001),
+        UINT64_C(0x7ff0000000000000),UINT64_C(0xfff0000000000000),
+        UINT64_C(0x7ff8000000000001),UINT64_C(0x7ff0000000000001),
+        UINT64_C(0x7fefffffffffffff),UINT64_C(0xffefffffffffffff),UINT64_C(0x4004000000000000)};
+    uint32_t bits32[] = {0,UINT32_C(0x80000000),UINT32_C(0x3f800000),UINT32_C(0xbf800000),
+        UINT32_C(0x3f000000),UINT32_C(0xbf000000),UINT32_C(0x00800000),1,UINT32_C(0x80000001),
+        UINT32_C(0x7f800000),UINT32_C(0xff800000),UINT32_C(0x7fc00001),UINT32_C(0x7f800001),
+        UINT32_C(0x7f7fffff),UINT32_C(0xff7fffff),UINT32_C(0x40200000)};
+    int nunary = (int)(sizeof(unary)/sizeof(unary[0]));
+    int nbinary = (int)(sizeof(binary)/sizeof(binary[0]));
+    int nspecial = (int)(sizeof(special)/sizeof(special[0]));
+    for (int narrow = 0; narrow < 2; narrow++) {
+        me_dtype dtype = narrow ? ME_FLOAT32 : ME_FLOAT64;
+        size_t width = narrow ? 4 : 8;
+        const char *name = narrow ? "float32" : "float64";
+        uint64_t xs[16] = {0}, ys[16] = {0};
+        unsigned char *x = (unsigned char *)xs, *y = (unsigned char *)ys;
+        for (int lane = 0; lane < 16; lane++) {
+            memcpy(x+lane*width,narrow ? (void *)&bits32[lane] : (void *)&bits64[lane],width);
+            int other = (lane+3)%16;
+            memcpy(y+lane*width,narrow ? (void *)&bits32[other] : (void *)&bits64[other],width);
+        }
+        for (int op = 0; op < nunary+nbinary+nspecial; op++) {
+            char body[160];
+            if (op < nunary) snprintf(body,sizeof(body),"return %s(x)",unary[op]);
+            else if (op < nunary+nbinary) snprintf(body,sizeof(body),"return %s(x, y)",binary[op-nunary]);
+            else snprintf(body,sizeof(body),"return %s",special[op-nunary-nbinary]);
+            parity_case test = {"resolved libm",body,name,name,true};
+            me_artifact *jit = load(&test,ME_JIT_ON), *reference = load(&test,ME_JIT_OFF);
+            me_artifact *oracle = load(&cases[0],ME_JIT_ON);
+            CHECK(me_artifact_has_jit(jit) == me_artifact_has_jit(oracle));
+            me_artifact_free(oracle);
+            if (me_artifact_has_jit(jit)) {
+                me_dsl_compiled_program *program = dsl_artifact_program_for_tests(jit);
+                bool direct = op < nunary ? program->portable_jit_nmath == 1 && program->portable_jit_math_fn[0] != NULL :
+                    op < nunary+nbinary ? program->portable_jit_nmath2 == 1 && program->portable_jit_math2_fn[0] != NULL :
+                    (program->portable_jit_nmath && program->portable_jit_math_fn[0]) ||
+                    (program->portable_jit_nmath2 && program->portable_jit_math2_fn[0]);
+                CHECK(direct == (op < nunary+nbinary));
+            }
+            for (int selection = 0; selection < 20; selection++) {
+                uint64_t actual_storage[16], expected_storage[16];
+                memset(actual_storage,0xa5,sizeof(actual_storage));
+                memset(expected_storage,0xa5,sizeof(expected_storage));
+                uint8_t mask[16] = {0};
+                for (int lane = 0; lane < 16; lane++) mask[lane] = selection == 0 ||
+                    (selection == 2 && lane%2) || (selection >= 4 && lane == selection-4);
+                me_artifact_buffer buffers[] = {{"x",dtype,width,x,16*width},{"y",dtype,width,y,16*width}};
+                me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
+                    .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,.nitems = selection == 3 ? 0 : 16,
+                    .output_capacity = sizeof(actual_storage),.valid_mask = selection ? mask : NULL,
+                    .valid_mask_capacity = selection ? 16 : 0};
+                me_artifact_error error, reference_error;
+                me_artifact_fp_status status, reference_status;
+                int rc = me_artifact_eval_status(jit,buffers,2,actual_storage,&descriptor,0,&status,&error);
+                int expected_rc = me_artifact_eval_status(reference,buffers,2,expected_storage,&descriptor,0,
+                    &reference_status,&reference_error);
+                if (rc != expected_rc || status.flags != reference_status.flags) fprintf(stderr,
+                    "resolved libm %s %s selection=%d rc=%d/%d flags=%u/%u\n",
+                    name,body,selection,rc,expected_rc,status.flags,reference_status.flags);
+                CHECK(rc == expected_rc && status.flags == reference_status.flags);
+                CHECK(!rc);
+                for (int lane = 0; lane < 16; lane++) {
+                    const unsigned char *a = (unsigned char *)actual_storage+lane*width;
+                    const unsigned char *b = (unsigned char *)expected_storage+lane*width;
+                    if (!memcmp(a,b,width)) continue;
+                    /* NaN payloads are not part of the portable contract. */
+                    double av, bv;
+                    if (narrow) {
+                        float af, bf;
+                        memcpy(&af,a,4); memcpy(&bf,b,4); av=af; bv=bf;
+                    } else { memcpy(&av,a,8); memcpy(&bv,b,8); }
+                    if (!(isnan(av) && isnan(bv))) fprintf(stderr,
+                        "resolved libm value %s %s selection=%d lane=%d\n",name,body,selection,lane);
+                    CHECK(isnan(av) && isnan(bv));
+                }
+            }
+            me_artifact_free(jit);
+            me_artifact_free(reference);
+        }
+    }
+}
+
 static void runtime_literal_parity(void) {
     const char *bodies[] = {
         "return x + (y - 1)", "return x + 2", "return 2 - x",
@@ -1024,6 +1119,7 @@ int main(int argc, char **argv) {
     scalar_reductions();
     scalar_checked_order();
     runtime_literal_parity();
+    resolved_libm_parity();
     scalar_array_fallbacks();
     scalar_loop_cap();
     integer_scalar_reductions();

@@ -23,6 +23,14 @@
 #pragma STDC FENV_ACCESS ON
 #endif
 
+/* Shared by scalar interpretation and preparation-time JIT callback binding. */
+#define P_DIRECT_UNARY(X) \
+    X(acos) X(acosh) X(asin) X(asinh) X(atan) X(atanh) X(cbrt) \
+    X(cos) X(cosh) X(erf) X(erfc) X(exp) X(exp2) X(expm1) X(lgamma) \
+    X(log) X(log10) X(log1p) X(log2) X(sin) X(sinh) X(sqrt) X(tan) X(tanh) \
+    X(tgamma) X(fabs) X(ceil) X(floor) X(trunc)
+#define P_DIRECT_BINARY(X) X(atan2) X(copysign) X(fdim) X(hypot) X(nextafter) X(remainder) X(fmod)
+
 #ifdef _MSC_VER
 static __declspec(thread) unsigned *p_status_collector;
 #else
@@ -769,18 +777,14 @@ static int p_math(const me_expr *n, const char *name, const me_scalar *a,
 #define P_UNARY(fn) if (!strcmp(name, #fn)) { \
     if (n->dtype == ME_FLOAT32) out->f32 = fn##f(a->f32); \
     else out->f64 = fn(a->f64); return 0; }
-    P_UNARY(acos); P_UNARY(acosh); P_UNARY(asin); P_UNARY(asinh);
-    P_UNARY(atan); P_UNARY(atanh); P_UNARY(cbrt); P_UNARY(cos); P_UNARY(cosh);
-    P_UNARY(erf); P_UNARY(erfc); P_UNARY(exp); P_UNARY(exp2); P_UNARY(expm1);
-    P_UNARY(lgamma); P_UNARY(log); P_UNARY(log10); P_UNARY(log1p); P_UNARY(log2);
-    P_UNARY(sin); P_UNARY(sinh); P_UNARY(sqrt); P_UNARY(tan); P_UNARY(tanh);
-    P_UNARY(tgamma); P_UNARY(fabs); P_UNARY(ceil); P_UNARY(floor); P_UNARY(round); P_UNARY(trunc);
+    P_DIRECT_UNARY(P_UNARY)
+    P_UNARY(round);
 #undef P_UNARY
 #define P_BINARY(fn) if (!strcmp(name, #fn)) { \
     if (n->dtype == ME_FLOAT32) out->f32 = fn##f(a->f32, b->f32); \
     else out->f64 = fn(a->f64, b->f64); return 0; }
-    P_BINARY(atan2); P_BINARY(copysign); P_BINARY(fdim); P_BINARY(fmax); P_BINARY(fmin);
-    P_BINARY(hypot); P_BINARY(nextafter); P_BINARY(remainder); P_BINARY(fmod);
+    P_DIRECT_BINARY(P_BINARY)
+    P_BINARY(fmax); P_BINARY(fmin);
 #undef P_BINARY
     return ME_EVAL_ERR_INVALID_ARG;
 }
@@ -1251,6 +1255,94 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
         p_signed_op(n, integer_op, a.i64, b.i64, &out->i64);
     return status == 0 ? 0 : ME_EVAL_ERR_INVALID_ARG;
 }
+
+/* Ordinary libm functions share one preparation-time registry. Float32 callbacks
+ * use native float arguments/results: widening an sNaN just to transport it can
+ * add exceptions to bit-oriented operations such as copysign. Do not substitute
+ * vector math or reinterpret special Menudet rules
+ * (rint/round, minimum/maximum/fmin/fmax, sinpi/cospi, etc.) as plain libm calls. */
+static bool p_libm_snan_f32(float x) {
+    uint32_t bits;
+    memcpy(&bits,&x,sizeof(bits));
+    return (bits & UINT32_C(0x7fc00000)) == UINT32_C(0x7f800000) &&
+        (bits & UINT32_C(0x003fffff)) != 0;
+}
+
+static float p_libm_sensitive_f32(const char *name, float x, float y) {
+    /* Preserve the installed interpreter's exact sNaN observation and payload
+     * handling, including any host-compiler choices about p_math's double x.
+     * Indirection prevents specializing a different copy of p_math here. */
+    static const me_expr node = {.dtype = ME_FLOAT32,.flags = ME_EXPR_FLAG_NUMPY_1_1};
+    me_scalar a = {.f32 = x}, b = {.f32 = y}, result = {0};
+    int (*volatile evaluate)(const me_expr *,const char *,const me_scalar *,const me_scalar *,me_scalar *) = p_math;
+    evaluate(&node,name,&a,&b,&result);
+    return result.f32;
+}
+
+static float p_libm_fabs_f32(float x) {
+    /* Ordinary fabs and floating_abs have different interpreter paths. Only
+     * ordinary fabs needs this rare fallback; normal inputs still call libm. */
+    return p_libm_snan_f32(x) ? p_libm_sensitive_f32("fabs",x,0) : fabsf(x);
+}
+
+static float p_libm_copysign_f32(float x, float y) {
+    /* Do not widen y: a signaling NaN can merely supply its sign bit. */
+    return p_libm_snan_f32(x) || p_libm_snan_f32(y) ?
+        p_libm_sensitive_f32("copysign",x,y) : copysignf(x,y);
+}
+
+const void *dsl_portable_resolve_unary_math(const me_expr *node) {
+    if (!node || !IS_FUNCTION(node->type) || ARITY(node->type) != 1 ||
+        (node->dtype != ME_FLOAT32 && node->dtype != ME_FLOAT64)) return NULL;
+    const char *name = me_portable_math_name(node);
+    if (!name) return NULL;
+    if (node->dtype == ME_FLOAT32 && !strcmp(name,"fabs")) return (const void *)p_libm_fabs_f32;
+    static const struct {
+        const char *name;
+        float (*f32)(float);
+        double (*f64)(double);
+    } functions[] = {
+#define P_UNARY_ENTRY(fn) {#fn, fn##f, fn},
+        P_DIRECT_UNARY(P_UNARY_ENTRY)
+#undef P_UNARY_ENTRY
+        {"floating_abs", fabsf, fabs}
+    };
+    for (size_t i = 0; i < sizeof(functions)/sizeof(functions[0]); i++) {
+        if (!strcmp(name, functions[i].name)) return node->dtype == ME_FLOAT32 ?
+            (const void *)functions[i].f32 : (const void *)functions[i].f64;
+    }
+    return NULL;
+}
+
+const void *dsl_portable_resolve_binary_math(const me_expr *node) {
+    if (!node || !IS_FUNCTION(node->type) || ARITY(node->type) != 2 ||
+        (node->dtype != ME_FLOAT32 && node->dtype != ME_FLOAT64)) return NULL;
+    /* Operator identity wins over a libm alias: NumPy remainder is floor-mod,
+     * not C remainder's nearest-quotient operation. Floating power, unlike
+     * divmod, already delegates directly to the matching libm precision. */
+    const char *op = me_portable_operator(node);
+    if (op && (!strcmp(op,"%") || !strcmp(op,"//"))) return NULL;
+    if (op && !strcmp(op,"**")) return node->dtype == ME_FLOAT32 ? (const void *)powf : (const void *)pow;
+    const char *name = me_portable_math_name(node);
+    if (!name) return NULL;
+    if (node->dtype == ME_FLOAT32 && !strcmp(name,"copysign")) return (const void *)p_libm_copysign_f32;
+    static const struct {
+        const char *name;
+        float (*f32)(float, float);
+        double (*f64)(double, double);
+    } functions[] = {
+#define P_BINARY_ENTRY(fn) {#fn, fn##f, fn},
+        P_DIRECT_BINARY(P_BINARY_ENTRY)
+#undef P_BINARY_ENTRY
+    };
+    for (size_t i = 0; i < sizeof(functions)/sizeof(functions[0]); i++) {
+        if (!strcmp(name, functions[i].name)) return node->dtype == ME_FLOAT32 ?
+            (const void *)functions[i].f32 : (const void *)functions[i].f64;
+    }
+    return NULL;
+}
+#undef P_DIRECT_UNARY
+#undef P_DIRECT_BINARY
 
 /* Private JIT bridges replay the evaluator's scalar routines so the host
  * compiler never has to reproduce promotion, libm choice or exception policy. */

@@ -1296,10 +1296,12 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
         inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH1_OFF] = (const void *)dsl_portable_jit_unary_math;
         for (int i = 0; i < program->portable_jit_nmath; i++) {
             inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH1_OFF+1+i] = program->portable_jit_math[i];
+            inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH1_FN_OFF+i] = (const void *)program->portable_jit_math_fn[i];
         }
         inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH2_OFF] = (const void *)dsl_portable_jit_binary_math;
         for (int i = 0; i < program->portable_jit_nmath2; i++) {
             inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH2_OFF+1+i] = program->portable_jit_math2[i];
+            inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH2_FN_OFF+i] = (const void *)program->portable_jit_math2_fn[i];
         }
         inputs[n_vars+ME_DSL_PORTABLE_JIT_PRED_OFF] = (const void *)dsl_portable_jit_predicate;
         for (int i = 0; i < program->portable_jit_npreds; i++) {

@@ -1,4 +1,4 @@
-/* Portable 1.1 scalar C lowering, revision 25. Never translate source
+/* Portable 1.1 scalar C lowering, revision 26. Never translate source
  * text: the typed tree includes promotion and final output conversions. The
  * private kernel ABI appends a participating mask and host comparison/math bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
@@ -458,7 +458,12 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
             else {
                 int id = p->portable_jit_nmath++;
                 p->portable_jit_math[id] = n;
-                snprintf(out,capacity,"((%s)(((pj_math)inputs[%d])(inputs[%d],(double)(%s))))",
+                p->portable_jit_math_fn[id] = dsl_portable_resolve_unary_math(n);
+                if (p->portable_jit_math_fn[id]) {
+                    snprintf(out,capacity,"((%s)(((%s)inputs[%d])((%s)(%s))))",
+                        type,n->dtype == ME_FLOAT32 ? "pj_libmf" : "pj_libm",
+                        p->n_inputs+ME_DSL_PORTABLE_JIT_MATH1_FN_OFF+id,type,args[0]);
+                } else snprintf(out,capacity,"((%s)(((pj_math)inputs[%d])(inputs[%d],(double)(%s))))",
                     type,p->n_inputs+ME_DSL_PORTABLE_JIT_MATH1_OFF,
                     p->n_inputs+ME_DSL_PORTABLE_JIT_MATH1_OFF+1+id,args[0]);
             }
@@ -468,7 +473,12 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
             else {
                 int id = p->portable_jit_nmath2++;
                 p->portable_jit_math2[id] = n;
-                snprintf(out,capacity,"((%s)(((pj_math2)inputs[%d])(inputs[%d],(double)(%s),(double)(%s))))",
+                p->portable_jit_math2_fn[id] = dsl_portable_resolve_binary_math(n);
+                if (p->portable_jit_math2_fn[id]) {
+                    snprintf(out,capacity,"((%s)(((%s)inputs[%d])((%s)(%s),(%s)(%s))))",
+                        type,n->dtype == ME_FLOAT32 ? "pj_libm2f" : "pj_libm2",
+                        p->n_inputs+ME_DSL_PORTABLE_JIT_MATH2_FN_OFF+id,type,args[0],type,args[1]);
+                } else snprintf(out,capacity,"((%s)(((pj_math2)inputs[%d])(inputs[%d],(double)(%s),(double)(%s))))",
                     type,p->n_inputs+ME_DSL_PORTABLE_JIT_MATH2_OFF,
                     p->n_inputs+ME_DSL_PORTABLE_JIT_MATH2_OFF+1+id,args[0],args[1]);
             }
@@ -972,12 +982,16 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
     snprintf(source,capacity,
-        "/* portable-1.1 lowering-r25 integer-literals abi-r9 */\n"
+        "/* portable-1.1 lowering-r26 resolved-libm abi-r10 */\n"
         "#include <stdint.h>\n"
         "#include <string.h>\n"
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"
         "typedef double (*pj_math)(const void *,double);\n"
         "typedef double (*pj_math2)(const void *,double,double);\n"
+        "typedef double (*pj_libm)(double);\n"
+        "typedef double (*pj_libm2)(double,double);\n"
+        "typedef float (*pj_libmf)(float);\n"
+        "typedef float (*pj_libm2f)(float,float);\n"
         "typedef _Bool (*pj_pred)(const void *,double);\n"
         "typedef uint64_t (*pj_iop)(const void *,uint64_t,uint64_t,int *);\n"
         "typedef uint64_t (*pj_checked)(const void *,uint64_t,uint64_t,uint64_t,int *);\n"

@@ -17,6 +17,11 @@ bool dsl_portable_convert_expr(me_expr **expr, me_dtype dtype);
 bool dsl_portable_convert_range_expr(me_expr **expr);
 double dsl_portable_jit_unary_math(const void *node, double x);
 double dsl_portable_jit_binary_math(const void *node, double x, double y);
+/* Resolve exact interpreter/libm equivalents, with float or double arguments and
+ * result according to node->dtype. NULL retains generic semantics. Addresses use
+ * the private JIT input ABI's function-pointer transport, never serialization. */
+const void *dsl_portable_resolve_unary_math(const me_expr *node);
+const void *dsl_portable_resolve_binary_math(const me_expr *node);
 bool dsl_portable_jit_predicate(const void *node, double x);
 uint64_t dsl_portable_jit_int_op(const void *node, uint64_t a, uint64_t b, int *status);
 uint64_t dsl_portable_jit_checked(const void *node, uint64_t a, uint64_t b, uint64_t c, int *status);
