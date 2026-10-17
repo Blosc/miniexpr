@@ -1,4 +1,4 @@
-/* Portable 1.1 scalar C lowering, revision 28. Never translate source
+/* Portable 1.1 scalar C lowering, revision 29. Never translate source
  * text: the typed tree includes promotion and final output conversions. The
  * private kernel ABI appends a participating mask and host comparison/math bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
@@ -445,7 +445,17 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
     bool integer_math = math && arity == 1 && !checked_weak && arg0 && pj_integral(n->dtype) && arg0->dtype == n->dtype &&
         (!strcmp(math,"fabs") || !strcmp(math,"sign") || !strcmp(math,"square") || !strcmp(math,"real") ||
          !strcmp(math,"imag") || !strcmp(math,"conj") || !strcmp(math,"floor") || !strcmp(math,"ceil") ||
-         !strcmp(math,"trunc") || !strcmp(math,"round") || !strcmp(math,"rint"));
+          !strcmp(math,"trunc") || !strcmp(math,"round") || !strcmp(math,"rint"));
+    /* Typed integral extrema require neither conversion nor checked arithmetic.
+     * Keep them in the generated loop instead of rebuilding an interpreter
+     * operation per lane. Mixed domains/weak computed results retain the bridge. */
+    bool integer_extrema = math && arity == 2 && !checked_weak && arg0 && arg1 &&
+        pj_integral(n->dtype) && arg0->dtype == n->dtype && arg1->dtype == n->dtype &&
+        (!strcmp(math,"minimum") || !strcmp(math,"maximum") ||
+         !strcmp(math,"fmin") || !strcmp(math,"fmax"));
+    bool integer_fmod = math && !strcmp(math,"fmod") && arity == 2 && !checked_weak &&
+        (n->flags & ME_EXPR_FLAG_NUMPY_1_1) && arg0 && arg1 && pj_integer(n->dtype) &&
+        arg0->dtype == n->dtype && arg1->dtype == n->dtype;
     bool native_power = op && !strcmp(op,"**") && arity == 2 && !checked_weak && pj_integer(n->dtype) &&
         (n->flags & ME_EXPR_FLAG_NUMPY_1_1) && arg0 && arg1 && arg0->dtype == n->dtype && arg1->dtype == n->dtype;
     bool unary_math = math && arity == 1 && !predicate && float_result && arg0 && pj_float(arg0->dtype);
@@ -456,7 +466,7 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
     bool ternary_math = math && !strcmp(math,"fma") && arity == 3 && float_result && arg0 && arg1 &&
         pj_float(arg0->dtype) && pj_float(arg1->dtype) && pj_float(((const me_expr *)n->parameters[2])->dtype);
     bool checked_math = (math && arity >= 1 && arity <= 3 &&
-        !predicate && !integer_predicate && !integer_math && !unary_math && !binary_math && !exponent_math && !ternary_math) ||
+        !predicate && !integer_predicate && !integer_math && !integer_extrema && !integer_fmod && !unary_math && !binary_math && !exponent_math && !ternary_math) ||
         (op && !strcmp(op,"**") && arity == 2 && pj_integer(n->dtype) && !native_power);
     bool float_operator = op && arity == 2 && float_result && arg0 && arg1 &&
         (!strcmp(op,"//") || !strcmp(op,"%") || !strcmp(op,"**")) &&
@@ -481,7 +491,7 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
         ((!strcmp(op,"and") || !strcmp(op,"or")) && arity == 2));
     if (!conversion && !where && !comparison && !arithmetic && !integer_arithmetic &&
         !logical && !predicate && !integer_predicate && !unary_math && !binary_math && !float_operator && !exponent_math && !ternary_math &&
-        !integer_operator && !checked_math && !boolean_bitwise && !integer_math && !native_power) return NULL;
+         !integer_operator && !checked_math && !boolean_bitwise && !integer_math && !integer_extrema && !integer_fmod && !native_power) return NULL;
     /* Emit selected operands in their branch, never as eager C call arguments.
      * Every other operation gets sequenced temporaries and an immediate status
      * check, so a failed left operand prevents right-operand participation. */
@@ -543,6 +553,10 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
             else if (!strcmp(math,"fabs") && !pj_unsigned(n->dtype)) snprintf(out,capacity,
                 "pj_%s((%s) < 0 ? 0ULL-(uint64_t)(%s) : (uint64_t)(%s))",type,args[0],args[0],args[0]);
             else snprintf(out,capacity,"((%s)(%s))",type,args[0]);
+        }
+        else if (integer_extrema) {
+            snprintf(out,capacity,"((%s)((%s) %s (%s) ? (%s) : (%s)))",type,args[0],
+                !strcmp(math,"minimum") || !strcmp(math,"fmin") ? "<" : ">",args[1],args[0],args[1]);
         }
         else if (native_power) {
             int id = (*next_temp)++;
@@ -704,9 +718,9 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                     type,args[1],bits,args[0],args[0],args[0],args[1],args[0],args[1]);
             }
         }
-        else if (native_divmod) {
+        else if (native_divmod || integer_fmod) {
             int id = (*next_temp)++;
-            bool modulo = !strcmp(op,"%");
+            bool modulo = integer_fmod || !strcmp(op,"%");
             bool ok;
             if (pj_unsigned(n->dtype)) {
                 ok = pj_append(s,"uint64_t pj_div_left_%d = (uint64_t)(%s), pj_div_right_%d = (uint64_t)(%s);\n"
@@ -725,7 +739,7 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                 ok = ok && pj_append(s,
                     "int64_t pj_div_q_%d = pj_div_left_%d / pj_div_right_%d;\n"
                     "int64_t pj_div_r_%d = pj_div_left_%d %% pj_div_right_%d;\n",id,id,id,id,id,id);
-                ok = ok && pj_append(s,
+                if (!integer_fmod) ok = ok && pj_append(s,
                     "if (pj_div_r_%d && ((pj_div_left_%d < 0) != (pj_div_right_%d < 0))) "
                     "{ pj_div_q_%d--; pj_div_r_%d += pj_div_right_%d; }\n",id,id,id,id,id,id);
                 ok = ok && pj_append(s,"pj_div_bits_%d = (uint64_t)pj_div_%s_%d; } }\n",id,modulo ? "r" : "q",id);
@@ -1244,7 +1258,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
     int used = snprintf(source,capacity,
-        "/* portable-1.1 lowering-r28 captured-integer-trees abi-r11 */\n"
+        "/* portable-1.1 lowering-r29 integral-math abi-r11 */\n"
         "#include <stdint.h>\n"
         "#include <limits.h>\n"
         "#include <string.h>\n"

@@ -585,6 +585,60 @@ static void integer_scalar_reductions(void) {
 
 /* Exhaustive numeric dtype/builtin/extrema/truth qualification belongs here,
  * not in Python's repeated production-binding matrix. */
+static void integer_extrema_lowering(void) {
+    const char *names[]={"bool","int8","uint8","int16","uint16","int32","uint32","int64","uint64"};
+    me_dtype dtypes[]={ME_BOOL,ME_INT8,ME_UINT8,ME_INT16,ME_UINT16,ME_INT32,ME_UINT32,ME_INT64,ME_UINT64};
+    size_t widths[]={1,1,1,2,2,4,4,8,8};
+    const char *recipes[]={"minimum(x,y)","maximum(x,y)","fmin(x,y)","fmax(x,y)","fmod(x,y)"};
+    for (int dtype=0; dtype<9; dtype++) {
+        if (compact && dtype!=7 && dtype!=8) continue;
+        int bits=(int)widths[dtype]*8;
+        bool unsign=dtype && !(dtype%2);
+        uint64_t high=unsign ? UINT64_MAX >> (64-bits) : UINT64_MAX >> (65-bits);
+        uint64_t values[]={dtype && !unsign ? UINT64_C(1)<<(bits-1) : 0,0,1,dtype ? high : 1};
+        uint64_t x[4]={0},y[4]={0};
+        for (int i=0; i<4; i++) {
+            memcpy((char *)x+i*widths[dtype],values+i,widths[dtype]);
+            memcpy((char *)y+i*widths[dtype],values+3-i,widths[dtype]);
+        }
+        char second[128];
+        snprintf(second,sizeof(second),"{\"name\":\"y\",\"dtype\":\"%s\"}",names[dtype]);
+        for (int recipe=0; recipe<5; recipe++) {
+            if (!dtype && recipe==4) continue;
+            if (recipe==4) {
+                uint64_t negative_one=UINT64_MAX;
+                memcpy(y,&negative_one,widths[dtype]); /* signed minimum / -1 must not execute UB */
+            }
+            char body[128]; snprintf(body,sizeof(body),"return %s",recipes[recipe]);
+            parity_case test={"integral extrema lowering",body,names[dtype],names[dtype],true};
+            me_artifact *jit=load_contract(&test,ME_JIT_ON,second,NULL,"elementwise");
+            me_artifact *reference=load_contract(&test,ME_JIT_OFF,second,NULL,"elementwise");
+            me_artifact *oracle=load(&cases[0],ME_JIT_ON);
+            CHECK(me_artifact_has_jit(jit)==me_artifact_has_jit(oracle));
+            if (me_artifact_has_jit(jit)) {
+                me_dsl_compiled_program *program=dsl_artifact_program_for_tests(jit);
+                CHECK(program && program->jit_c_source && !program->portable_jit_nchecked);
+            }
+            uint8_t mask[]={1,0,1,0};
+            me_artifact_buffer inputs[]={{"x",dtypes[dtype],widths[dtype],x,4*widths[dtype]},
+                {"y",dtypes[dtype],widths[dtype],y,4*widths[dtype]}};
+            for (int masked=0; masked<2; masked++) {
+                uint64_t actual[4]={0},expected[4]={0};
+                me_artifact_eval_descriptor descriptor={.struct_size=sizeof(descriptor),.version=1,
+                    .nitems=4,.output_capacity=4*widths[dtype],.valid_mask=masked ? mask : NULL,
+                    .valid_mask_capacity=masked ? 4 : 0};
+                me_artifact_error error;
+                me_artifact_fp_status a,b;
+                CHECK(!me_artifact_eval_status(reference,inputs,2,expected,&descriptor,0,&a,&error));
+                CHECK(!me_artifact_eval_status(jit,inputs,2,actual,&descriptor,0,&b,&error));
+                CHECK(a.flags==b.flags && a.supported==b.supported);
+                CHECK(!memcmp(actual,expected,4*widths[dtype]));
+            }
+            me_artifact_free(jit); me_artifact_free(reference); me_artifact_free(oracle);
+        }
+    }
+}
+
 static void numeric_dtype_matrix(void) {
     const char *names[] = {"bool","int8","uint8","int16","uint16","int32","uint32","int64","uint64","float32","float64"};
     me_dtype dtypes[] = {ME_BOOL,ME_INT8,ME_UINT8,ME_INT16,ME_UINT16,ME_INT32,ME_UINT32,ME_INT64,ME_UINT64,ME_FLOAT32,ME_FLOAT64};
@@ -1243,6 +1297,7 @@ int main(int argc, char **argv) {
     scalar_loop_cap();
     integer_scalar_reductions();
     numeric_dtype_matrix();
+    integer_extrema_lowering();
     range_bound_matrix();
     weak_capture_matrix();
     captured_integer_trees();

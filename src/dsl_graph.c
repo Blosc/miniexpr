@@ -366,7 +366,8 @@ static bool g_partitionable(graph_node *nodes, int count) {
                 const char *promoted[]={"sqrt","cbrt","exp","exp2","expm1","log","log1p","log2","log10",
                     "sin","cos","tan","asin","acos","atan","atan2","sinh","cosh","tanh","asinh","acosh","atanh",
                     "arcsin","arccos","arctan","arctan2","arcsinh","arccosh","arctanh","hypot","fmod","copysign","nextafter",
-                    "isfinite","isnan","isinf","signbit"};
+                    "isfinite","isnan","isinf","signbit","minimum","maximum","fmin","fmax",
+                    "floor","ceil","trunc","round","rint"};
                 for (size_t j=0; name && j<sizeof(promoted)/sizeof(*promoted); j++) ok |= !strcmp(name,promoted[j]);
             }
             if (!ok) return false;
@@ -377,7 +378,7 @@ static bool g_partitionable(graph_node *nodes, int count) {
             const char *allowed[] = {"abs","fabs","sqrt","cbrt","exp","exp2","expm1","log","log1p","log2","log10",
                 "sin","cos","tan","asin","acos","atan","atan2","sinh","cosh","tanh","asinh","acosh","atanh",
                 "arcsin","arccos","arctan","arctan2","arcsinh","arccosh","arctanh","fma","rint",
-                "minimum","maximum","fmod","hypot","copysign","nextafter","ceil","floor","round","trunc","sign",
+                "minimum","maximum","fmin","fmax","fmod","hypot","copysign","nextafter","ceil","floor","round","trunc","sign",
                 "isfinite","isnan","isinf","signbit"};
             bool ok = false;
             for (size_t j = 0; name && j < sizeof(allowed)/sizeof(*allowed); j++) ok |= !strcmp(name,allowed[j]);

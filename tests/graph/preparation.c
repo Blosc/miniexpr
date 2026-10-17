@@ -136,6 +136,33 @@ static void partition_policies(void) {
         me_graph_plan_free(plan);
     }
 }
+static void integer_extrema(bool jit) {
+    /* Exercise exact signed/unsigned boundaries and generated nested extrema,
+     * not floating transport or the scalar checked-operation interpreter. */
+    uint64_t x[]={0,UINT64_MAX,UINT64_C(1)<<63,7,42};
+    uint64_t y[]={UINT64_MAX,0,INT64_MAX,7,43};
+    for (int unsign=0; unsign<2; unsign++) {
+        me_dtype dtype=unsign ? ME_UINT64 : ME_INT64;
+        me_graph_input_metadata metadata[]={{"x",dtype,1,{5}},{"y",dtype,1,{5}}};
+        const char *expressions[]={"minimum(x,y)","maximum(x,y)","minimum(maximum(x,y),x)"};
+        for (int op=0; op<3; op++) {
+            me_graph_plan *plan=prepare(expressions[op],metadata,2,jit);
+            CHECK(me_graph_execution_capabilities(plan) & ME_GRAPH_EXEC_PARTITIONABLE);
+            me_graph_schedule *schedule=NULL;
+            CHECK(!me_graph_specialize(plan,metadata,2,NULL,&schedule,&error));
+            me_array_view inputs[]={view("x",dtype,x,sizeof(x),1,5,0),view("y",dtype,y,sizeof(y),1,5,0)};
+            uint64_t output[5];
+            CHECK(!me_graph_execute(schedule,inputs,2,output,sizeof(output),NULL,NULL,&error));
+            for (int i=0; i<5; i++) {
+                int64_t sx,sy; memcpy(&sx,x+i,8); memcpy(&sy,y+i,8);
+                bool less=unsign ? x[i]<y[i] : sx<sy;
+                uint64_t expected=op==2 ? x[i] : (op==0 ? less : !less) ? x[i] : y[i];
+                CHECK(output[i]==expected);
+            }
+            me_graph_schedule_free(schedule); me_graph_plan_free(plan);
+        }
+    }
+}
 static void reductions(bool jit) {
     me_graph_input_metadata inputs[] = {{"x", ME_FLOAT64, 2, {2, 3}}, {"mask", ME_BOOL, 1, {3}}};
     double x[] = {1, -1, 4, 9, -2, 16}, output[2]; bool mask[] = {true, false, true};
@@ -598,6 +625,7 @@ int main(void) {
     RUN_CASE(maps(false)); RUN_CASE(lazy(false)); RUN_CASE(reductions(false));
     RUN_CASE(identity_destinations(false)); RUN_CASE(identity_destinations(true));
     RUN_CASE(partition_policies());
+    RUN_CASE(integer_extrema(false)); RUN_CASE(integer_extrema(true));
     RUN_CASE(validation()); RUN_CASE(limits());
     RUN_CASE(maps(true)); RUN_CASE(lazy(true)); RUN_CASE(reductions(true));
     RUN_CASE(staged(false)); RUN_CASE(staged(true));
