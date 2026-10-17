@@ -46,6 +46,7 @@ struct me_graph_plan {
     bool declared_staged;
     bool direct_reduction;
     bool partitionable;
+    bool costly_map;
 };
 struct me_graph_schedule {
     me_graph_plan *plan;
@@ -548,6 +549,14 @@ static me_graph_status g_prepare_json(const char *json, size_t length,
     int reduction = g_reduce(nodes[result].op), map_root = reduction ? nodes[result].args[0] : result;
     p->direct_reduction = !strcmp(nodes[map_root].op, "input");
     p->partitionable = !reduction && final_dtype == ME_AUTO && g_partitionable(nodes,count);
+    for (int i=0; i<count; i++) if (nodes[i].reachable && !strcmp(nodes[i].op,"function")) {
+        const char *name=g_str(yyjson_obj_get(nodes[i].value,"name"));
+        const char *costly[]={"sin","cos","tan","sinh","cosh","tanh","asin","acos","atan","atan2",
+            "asinh","acosh","atanh","arcsin","arccos","arctan","arctan2","arcsinh","arccosh","arctanh",
+            "exp","exp2","expm1","log","log1p","log2","log10","cbrt","hypot","fmod"};
+        for (size_t j=0; name && j<sizeof(costly)/sizeof(*costly); j++)
+            p->costly_map |= !strcmp(name,costly[j]);
+    }
     p->reduction.reduction = (me_array_reduction)reduction;
     p->reduction.naxes = reduction ? -1 : 0;
     if (reduction) {
@@ -1051,6 +1060,32 @@ static bool g_advance(size_t *offset, int64_t stride, size_t count) {
     else { if (bytes > SIZE_MAX-*offset) return false; *offset += bytes; }
     return true;
 }
+static me_graph_status g_serial_map(const me_graph_schedule *s, const me_array_view *inputs,
+    int ninputs, const me_array_output *output, const me_graph_execute_options *options,
+    const me_graph_executor *executor, me_graph_report *report, me_graph_error *error) {
+    size_t items=s->bytes/g_width(s->dtype);
+    size_t tile=executor->tile_items ? executor->tile_items : 64*1024;
+    if (tile > items) tile=items;
+    if (!tile || tile == s->reduction.tile_items)
+        return me_graph_execute_into(s,inputs,ninputs,output,options,report,error);
+    size_t original=s->reduction.tile_items ? s->reduction.tile_items : 1024;
+    size_t per_item=s->scratch/original+g_width(s->dtype);
+    size_t budget=executor->workspace_budget ? executor->workspace_budget : 64*1024*1024;
+    if (tile > budget/per_item) tile=budget/per_item;
+    if (!tile || tile > INT32_MAX)
+        return g_error(error,-1,ME_GRAPH_ERR_BINDING,"workspace cannot hold a serial map tile");
+    me_graph_input_metadata metadata[ME_MAX_VARS];
+    for (int i=0; i<ninputs; i++) {
+        metadata[i].name=inputs[i].name; metadata[i].dtype=inputs[i].dtype; metadata[i].rank=inputs[i].rank;
+        memcpy(metadata[i].shape,inputs[i].shape,sizeof(metadata[i].shape));
+    }
+    me_graph_specialize_options specialization={sizeof(specialization),ME_GRAPH_VERSION,tile,0};
+    me_graph_schedule *serial=NULL;
+    me_graph_status rc=me_graph_specialize(s->plan,metadata,ninputs,&specialization,&serial,error);
+    if (!rc) rc=me_graph_execute_into(serial,inputs,ninputs,output,options,report,error);
+    me_graph_schedule_free(serial);
+    return rc;
+}
 me_graph_status me_graph_execute_parallel_into(const me_graph_schedule *s,
     const me_array_view *inputs, int ninputs, const me_array_output *output,
     const me_graph_execute_options *options, const me_graph_executor *executor,
@@ -1061,7 +1096,7 @@ me_graph_status me_graph_execute_parallel_into(const me_graph_schedule *s,
         return g_error(error,-1,ME_GRAPH_ERR_BINDING,"invalid schedule, output or executor");
     if (!executor || !executor->fork_join || executor->max_tasks < 2 || !s->rank ||
         !me_graph_execution_capabilities(s->plan)) {
-        me_graph_report serial;
+        me_graph_report serial={0};
         me_graph_status rc = me_graph_execute_into(s,inputs,ninputs,output,options,&serial,error);
         if (report) { report->execution = serial; report->tasks = 1;
             report->iterator_workspace_bound = serial.array.temporary_bytes; }
@@ -1077,11 +1112,17 @@ me_graph_status me_graph_execute_parallel_into(const me_graph_schedule *s,
         if (magnitude > slowest) { slowest=magnitude; axis=i; }
     }
     size_t count = executor->max_tasks;
-    size_t useful = s->bytes/g_width(s->dtype)/(executor->minimum_task_items ? executor->minimum_task_items : 128*1024);
+    size_t minimum=executor->minimum_task_items ? executor->minimum_task_items :
+        s->plan->costly_map ? 16*1024 : 128*1024;
+    size_t useful = s->bytes/g_width(s->dtype)/minimum;
     if (useful < count) count = useful;
+    /* Small costly maps benefit from concurrency before the bandwidth-oriented
+     * cutoff, but should not pay for a large host fork/join just to run tiny jobs.
+     * An explicit host threshold overrides this automatic cost policy. */
+    if (!executor->minimum_task_items && s->bytes/g_width(s->dtype) < 128*1024 && count > 4) count=4;
     if (count < 2) {
-        me_graph_report serial;
-        rc=me_graph_execute_into(s,inputs,ninputs,output,options,&serial,error);
+        me_graph_report serial={0};
+        rc=g_serial_map(s,inputs,ninputs,output,options,executor,&serial,error);
         if (report) { report->execution=serial; report->tasks=1;
             report->iterator_workspace_bound=serial.array.temporary_bytes; }
         return rc;
@@ -1101,8 +1142,8 @@ me_graph_status me_graph_execute_parallel_into(const me_graph_schedule *s,
     if (per_task && count > budget/per_task) count = budget/per_task;
     if (!count) return g_error(error,-1,ME_GRAPH_ERR_BINDING,"workspace budget cannot hold one task");
     if (count < 2) {
-        me_graph_report serial;
-        rc = me_graph_execute_into(s,inputs,ninputs,output,options,&serial,error);
+        me_graph_report serial={0};
+        rc = g_serial_map(s,inputs,ninputs,output,options,executor,&serial,error);
         if (report) { report->execution=serial; report->tasks=1;
             report->iterator_workspace_bound=serial.array.temporary_bytes; }
         return rc;

@@ -42,9 +42,13 @@ Tasks have independent execution state; output injectivity is checked on the
 complete destination before partitioning. Reports aggregate FP/copy/scratch data.
 
 The executor's task budget is capped at 64. `minimum_task_items=0` defaults to
-128 Ki elements; callers may override this performance policy. Executor tiles
-default to at most 64 Ki elements, bounded by the task extent, and can be overridden
-with `tile_items`. Retiling is restricted to the proven lane-local subset. An aggregate
+128 Ki elements for cheap maps and 16 Ki elements for admitted costly math maps;
+small automatic math jobs use at most four tasks. Callers may override this
+performance policy. Executor tiles default to at most 64 Ki elements, bounded by
+the task extent, and can be overridden with `tile_items`. Retiling is restricted
+to the proven lane-local subset. The automatic executor also retiles eligible
+serial fallbacks, rather than paying a small-kernel invocation cost for every 1K
+elements. An aggregate
 iterator-workspace budget reduces concurrency; a budget that cannot hold even
 one planned parallel task is rejected. Compiler/interpreter-private allocations,
 task metadata and staged intermediates are not iterator scratch. Serial fallback
@@ -55,6 +59,31 @@ supports destination descriptors serially; no existing reader callback is assume
 thread-safe. Storage hosts can continue caller-driven block execution on their
 own workers, which is also the appropriate mode inside compression callbacks.
 Avoid nesting a whole-array executor inside a host's parallel region.
+
+## No-JIT arithmetic interpretation
+
+The portable interpreter recognizes bounded straight-line numerical recipes and
+executes their instructions over 256-element vectors. Static C primitives permit
+ordinary SIMD vectorization without runtime compilation. The initial subset
+includes float32/float64 arithmetic, same-width strong modular integer arithmetic,
+total integer-to-float/float conversions, and qualified unary math callbacks.
+Each operation preserves its typed intermediate rounding; no fast-math or FMA
+contraction is introduced.
+
+Admission is metadata-only. Partial masks, possibly uninitialized locals,
+checked casts/arithmetic, unsupported control flow/reductions, excessive plan
+depth and ambiguous aliases retain scalar interpretation. An all-participating
+mask can use the vector path. Execution of an admitted recipe cannot produce a
+checked numerical error, so moving total operations across lanes preserves the
+aggregate IEEE status contract. Exact same-width lane-local in-place arrays are
+safe; other overlap retains scalar traversal. Numerical failures are never
+replayed.
+
+Workspace is invocation-local, at most 64 instruction slots of 256 doubles
+(128 KiB), independent of result extent. Leaves can borrow input tiles, and
+uniform scalar conversions are performed once per tile. This private interpreter
+workspace is additional to iterator scratch, not part of the executor's iterator
+workspace budget. Plans never retain operand arrays or share mutable workspaces.
 
 ## Compatibility and limitations
 

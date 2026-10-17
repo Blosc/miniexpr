@@ -1,10 +1,12 @@
 #ifndef DSL_JIT_TEST_H
 #define DSL_JIT_TEST_H
+#include <stddef.h>
 
 #define ME_DSL_JIT_TEST_NEG_CACHE_FLAG "-me_intentional_bad_flag_for_neg_cache"
 
 /* Private conformance harness access; never part of the artifact API. */
 void *dsl_artifact_program_for_tests(void *artifact);
+size_t dsl_portable_batch_calls_for_tests(void);
 
 #ifndef ME_DSL_JIT_WASM_POS_CACHE_SLOTS
 #define ME_DSL_JIT_WASM_POS_CACHE_SLOTS 64
