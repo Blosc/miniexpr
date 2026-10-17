@@ -62,11 +62,11 @@ static void maps(bool jit) {
     CHECK(column_major[0]==-99 && column_major[7]==-99);
     CHECK(column_major[1]==5 && column_major[2]==7 && column_major[5]==7 && column_major[6]==9);
     size_t dispatched=0;
-    me_graph_executor executor={sizeof(executor),ME_GRAPH_EXECUTOR_VERSION,4,1024*1024,reverse_executor,&dispatched,1};
+    me_graph_executor executor={sizeof(executor),ME_GRAPH_EXECUTOR_VERSION,4,1024*1024,reverse_executor,&dispatched,1,0};
     me_graph_parallel_report parallel;
     CHECK(execution_caps & ME_GRAPH_EXEC_PARTITIONABLE);
     CHECK(!me_graph_execute_parallel_into(s,bindings,2,&destination,NULL,&executor,&parallel,&error));
-    CHECK(dispatched==2 && parallel.tasks==2);
+    CHECK(dispatched==3 && parallel.tasks==3);
     CHECK(column_major[1]==5 && column_major[2]==7 && column_major[5]==7 && column_major[6]==9);
     executor.fork_join=failed_executor;
     CHECK(me_graph_execute_parallel_into(s,bindings,2,&destination,NULL,&executor,&parallel,&error)==ME_GRAPH_ERR_EXECUTION);
@@ -98,6 +98,28 @@ static void lazy(bool jit) {
     CHECK(!me_graph_execute(s, bindings, 2, output, sizeof(output), NULL, &report, &error));
     CHECK(output[0] == 8 && output[1] == 4 && output[2] == 2 && report.array.fp_flags == 0);
     me_graph_schedule_free(s); me_graph_plan_free(p);
+}
+static void identity_destinations(bool jit) {
+    me_graph_input_metadata metadata={"x",ME_FLOAT64,2,{2,3}};
+    double values[]={1,4,2,5,3,6}, output[]={-99,-99,-99,-99,-99,-99,-99,-99};
+    me_array_view input=view("x",ME_FLOAT64,values,sizeof(values),2,2,3);
+    input.strides[0]=8; input.strides[1]=16;
+    me_graph_plan *plan=prepare("x",&metadata,1,jit);
+    me_graph_schedule *schedule=NULL;
+    CHECK(!me_graph_specialize(plan,&metadata,1,NULL,&schedule,&error));
+    me_array_output destination={.struct_size=sizeof(destination),.version=ME_ARRAY_OUTPUT_VERSION,
+        .dtype=ME_FLOAT64,.base=output,.capacity=sizeof(output),.offset=8,
+        .rank=2,.shape={2,3},.strides={8,16}};
+    me_graph_report report;
+    CHECK(!me_graph_execute_into(schedule,&input,1,&destination,NULL,&report,&error));
+    CHECK(!memcmp(output+1,values,sizeof(values)) && output[0]==-99 && output[7]==-99);
+    CHECK(report.array.evaluated_tiles==0 && report.array.temporary_bytes==0);
+    input.offset=40; input.strides[0]=-8; input.strides[1]=-16;
+    destination.offset=48; destination.strides[0]=-8; destination.strides[1]=-16;
+    CHECK(!me_graph_execute_into(schedule,&input,1,&destination,NULL,&report,&error));
+    CHECK(!memcmp(output+1,values,sizeof(values)) && output[0]==-99 && output[7]==-99);
+    CHECK(report.array.evaluated_tiles==0 && report.array.temporary_bytes==0);
+    me_graph_schedule_free(schedule); me_graph_plan_free(plan);
 }
 static void reductions(bool jit) {
     me_graph_input_metadata inputs[] = {{"x", ME_FLOAT64, 2, {2, 3}}, {"mask", ME_BOOL, 1, {3}}};
@@ -559,6 +581,7 @@ static void output_aliases(bool jit) {
 int main(void) {
 #define RUN_CASE(call) do { fprintf(stderr, "graph preparation: %s\n", #call); fflush(stderr); call; } while (0)
     RUN_CASE(maps(false)); RUN_CASE(lazy(false)); RUN_CASE(reductions(false));
+    RUN_CASE(identity_destinations(false)); RUN_CASE(identity_destinations(true));
     RUN_CASE(validation()); RUN_CASE(limits());
     RUN_CASE(maps(true)); RUN_CASE(lazy(true)); RUN_CASE(reductions(true));
     RUN_CASE(staged(false)); RUN_CASE(staged(true));

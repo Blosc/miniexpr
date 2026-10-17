@@ -362,8 +362,9 @@ static bool g_partitionable(graph_node *nodes, int count) {
                    !strcmp(node->op,"lshift") || !strcmp(node->op,"rshift")) return false;
         if (!strcmp(node->op,"function")) {
             const char *name = g_str(yyjson_obj_get(node->value,"name"));
-            const char *allowed[] = {"abs","sqrt","cbrt","exp","exp2","expm1","log","log1p","log2","log10",
+            const char *allowed[] = {"abs","fabs","sqrt","cbrt","exp","exp2","expm1","log","log1p","log2","log10",
                 "sin","cos","tan","asin","acos","atan","atan2","sinh","cosh","tanh","asinh","acosh","atanh",
+                "arcsin","arccos","arctan","arctan2","arcsinh","arccosh","arctanh","fma","rint",
                 "minimum","maximum","fmod","hypot","copysign","nextafter","ceil","floor","round","trunc","sign",
                 "isfinite","isnan","isinf","signbit"};
             bool ok = false;
@@ -532,7 +533,7 @@ static me_graph_status g_prepare_json(const char *json, size_t length,
     p->mask = -1; p->ninputs = ni;
     p->reduction.version = ME_ARTIFACT_ARRAY_VERSION;
     int reduction = g_reduce(nodes[result].op), map_root = reduction ? nodes[result].args[0] : result;
-    p->direct_reduction = reduction && !strcmp(nodes[map_root].op, "input");
+    p->direct_reduction = !strcmp(nodes[map_root].op, "input");
     p->partitionable = !reduction && final_dtype == ME_AUTO && g_partitionable(nodes,count);
     p->reduction.reduction = (me_array_reduction)reduction;
     p->reduction.naxes = reduction ? -1 : 0;
@@ -947,12 +948,61 @@ me_graph_status me_graph_execute_sources(const me_graph_schedule *s,
 me_graph_status me_graph_execute_into(const me_graph_schedule *s,
     const me_array_view *inputs, int ninputs, const me_array_output *output,
     const me_graph_execute_options *options, me_graph_report *report, me_graph_error *error) {
+    if (report) memset(report,0,sizeof(*report));
     if (!output) return g_error(error,-1,ME_GRAPH_ERR_BINDING,"missing output descriptor");
+    /* Only proven lane-local maps may change traversal. Re-express all resident
+     * views in destination-friendly axis order; kernels remain contiguous and
+     * shared by interpretation/JIT. Reductions, checked recipes and sources keep
+     * their original logical traversal. */
+    if (s && s->rank > 1 && me_graph_execution_capabilities(s->plan)) {
+        me_graph_status rc=g_execute(s,inputs,ninputs,NULL,0,options,NULL,error,NULL,output,false);
+        if (rc) { if (report) memset(report,0,sizeof(*report)); return rc; }
+        int permutation[ME_ARRAY_MAX_RANK]; bool changed=false;
+        for (int i=0; i<s->rank; i++) {
+            int j=i; int64_t stride=output->strides[i];
+            uint64_t magnitude=stride < 0 ? (uint64_t)(-(stride+1))+1 : (uint64_t)stride;
+            while (j) {
+                int64_t previous=output->strides[permutation[j-1]];
+                uint64_t prior=previous < 0 ? (uint64_t)(-(previous+1))+1 : (uint64_t)previous;
+                if (prior >= magnitude) break;
+                permutation[j]=permutation[j-1]; j--;
+            }
+            permutation[j]=i;
+        }
+        for (int i=0; i<s->rank; i++) changed |= permutation[i] != i;
+        if (changed) {
+            me_array_view views[ME_MAX_VARS];
+            me_graph_input_metadata metadata[ME_MAX_VARS];
+            me_array_output destination=*output;
+            for (int i=0; i<s->rank; i++) {
+                destination.shape[i]=output->shape[permutation[i]];
+                destination.strides[i]=output->strides[permutation[i]];
+            }
+            for (int i=0; i<ninputs; i++) {
+                views[i]=inputs[i]; views[i].rank=s->rank;
+                for (int axis=0; axis<s->rank; axis++) {
+                    int original=permutation[axis]-(s->rank-inputs[i].rank);
+                    views[i].shape[axis]=original < 0 ? 1 : inputs[i].shape[original];
+                    views[i].strides[axis]=original < 0 ? 0 : inputs[i].strides[original];
+                }
+                metadata[i].name=views[i].name; metadata[i].dtype=views[i].dtype; metadata[i].rank=s->rank;
+                memcpy(metadata[i].shape,views[i].shape,sizeof(metadata[i].shape));
+            }
+            me_graph_specialize_options specialization={sizeof(specialization),ME_GRAPH_VERSION,s->reduction.tile_items,0};
+            me_graph_schedule *ordered=NULL;
+            rc=me_graph_specialize(s->plan,metadata,ninputs,&specialization,&ordered,error);
+            if (!rc) rc=g_execute(ordered,views,ninputs,NULL,0,options,report,error,NULL,&destination,true);
+            else if (report) memset(report,0,sizeof(*report));
+            me_graph_schedule_free(ordered);
+            return rc;
+        }
+    }
     return g_execute(s,inputs,ninputs,NULL,0,options,report,error,NULL,output,true);
 }
 me_graph_status me_graph_execute_sources_into(const me_graph_schedule *s,
     const me_array_source *sources, int ninputs, const me_array_output *output,
     const me_graph_execute_options *options, me_graph_report *report, me_graph_error *error) {
+    if (report) memset(report,0,sizeof(*report));
     if (!output || ninputs < 0 || ninputs > ME_MAX_VARS || (ninputs && !sources))
         return g_error(error,-1,ME_GRAPH_ERR_BINDING,"invalid output or source bindings");
     me_array_view views[ME_MAX_VARS];
@@ -997,7 +1047,7 @@ me_graph_status me_graph_execute_parallel_into(const me_graph_schedule *s,
         executor->version != ME_GRAPH_EXECUTOR_VERSION || executor->max_tasks > 64)))
         return g_error(error,-1,ME_GRAPH_ERR_BINDING,"invalid schedule, output or executor");
     if (!executor || !executor->fork_join || executor->max_tasks < 2 || !s->rank ||
-        s->shape[0] < 2 || !me_graph_execution_capabilities(s->plan)) {
+        !me_graph_execution_capabilities(s->plan)) {
         me_graph_report serial;
         me_graph_status rc = me_graph_execute_into(s,inputs,ninputs,output,options,&serial,error);
         if (report) { report->execution = serial; report->tasks = 1;
@@ -1006,6 +1056,13 @@ me_graph_status me_graph_execute_parallel_into(const me_graph_schedule *s,
     }
     me_graph_status rc = g_execute(s,inputs,ninputs,NULL,0,options,NULL,error,NULL,output,false);
     if (rc) return rc;
+    int axis = 0;
+    uint64_t slowest = 0;
+    for (int i = 0; i < s->rank; i++) if (s->shape[i] > 1) {
+        int64_t stride=output->strides[i];
+        uint64_t magnitude=stride < 0 ? (uint64_t)(-(stride+1))+1 : (uint64_t)stride;
+        if (magnitude > slowest) { slowest=magnitude; axis=i; }
+    }
     size_t count = executor->max_tasks;
     size_t useful = s->bytes/g_width(s->dtype)/(executor->minimum_task_items ? executor->minimum_task_items : 128*1024);
     if (useful < count) count = useful;
@@ -1016,12 +1073,15 @@ me_graph_status me_graph_execute_parallel_into(const me_graph_schedule *s,
             report->iterator_workspace_bound=serial.array.temporary_bytes; }
         return rc;
     }
-    if ((uint64_t)s->shape[0] < count) count = (size_t)s->shape[0];
-    size_t tile = s->reduction.tile_items ? s->reduction.tile_items : 1024;
-    size_t per_task = s->scratch;
-    if (tile > (SIZE_MAX-per_task)/g_width(s->dtype))
+    if ((uint64_t)s->shape[axis] < count) count = (size_t)s->shape[axis];
+    size_t tile = executor->tile_items ? executor->tile_items : 64*1024;
+    size_t items=s->bytes/g_width(s->dtype), task_items=items/count + (items%count != 0);
+    if (tile > task_items) tile=task_items;
+    size_t original_tile=s->reduction.tile_items ? s->reduction.tile_items : 1024;
+    size_t per_item=s->scratch/original_tile + g_width(s->dtype);
+    if (!tile || tile > INT32_MAX || tile > SIZE_MAX/per_item)
         return g_error(error,-1,ME_GRAPH_ERR_BINDING,"workspace bound overflow");
-    per_task += tile*g_width(s->dtype);
+    size_t per_task=tile*per_item;
     size_t budget = executor->workspace_budget ? executor->workspace_budget : 64*1024*1024;
     /* Native estimates include gather buffers; reduce concurrency to honor the
      * aggregate budget rather than multiplying a per-worker budget silently. */
@@ -1039,14 +1099,15 @@ me_graph_status me_graph_execute_parallel_into(const me_graph_schedule *s,
     for (size_t t = 0; t < count; t++) {
         graph_task *task = &tasks[t];
         atomic_init(&task->visited,0);
-        size_t q = (size_t)s->shape[0]/count, r = (size_t)s->shape[0]%count;
+        size_t q = (size_t)s->shape[axis]/count, r = (size_t)s->shape[axis]%count;
         size_t begin = q*t + (t < r ? t : r), extent = q + (t < r);
         me_graph_input_metadata metadata[ME_MAX_VARS];
         for (int i = 0; i < ninputs; i++) {
             task->inputs[i] = inputs[i];
-            if (inputs[i].rank == s->rank && inputs[i].shape[0] != 1) {
-                task->inputs[i].shape[0] = (int64_t)extent;
-                if (!g_advance(&task->inputs[i].offset,inputs[i].strides[0],begin)) {
+            int source_axis=axis-(s->rank-inputs[i].rank);
+            if (source_axis >= 0 && inputs[i].shape[source_axis] != 1) {
+                task->inputs[i].shape[source_axis] = (int64_t)extent;
+                if (!g_advance(&task->inputs[i].offset,inputs[i].strides[source_axis],begin)) {
                     rc = g_error(error,-1,ME_GRAPH_ERR_BINDING,"task input offset overflow"); goto cleanup_tasks;
                 }
             }
@@ -1054,8 +1115,8 @@ me_graph_status me_graph_execute_parallel_into(const me_graph_schedule *s,
             metadata[i].rank = task->inputs[i].rank;
             memcpy(metadata[i].shape,task->inputs[i].shape,sizeof(metadata[i].shape));
         }
-        task->output = *output; task->output.shape[0] = (int64_t)extent;
-        if (!g_advance(&task->output.offset,output->strides[0],begin)) {
+        task->output = *output; task->output.shape[axis] = (int64_t)extent;
+        if (!g_advance(&task->output.offset,output->strides[axis],begin)) {
             rc = g_error(error,-1,ME_GRAPH_ERR_BINDING,"task output offset overflow"); goto cleanup_tasks;
         }
         me_graph_specialize_options specialization = {sizeof(specialization),ME_GRAPH_VERSION,tile,0};

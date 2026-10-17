@@ -34,14 +34,16 @@ before returning, including on submission failure. A zero return means every tas
 completed. The callback and invocation pointers must not escape the call. This
 interface does not require pthreads, Python, C-Blosc2 or a global native pool.
 
-miniexpr owns first-axis partitioning, per-task binding/schedule metadata,
+miniexpr owns destination-aware axis partitioning, per-task binding/schedule metadata,
 destination offsets, preflight, worker FP status and deterministic error selection
 in logical task order. It specializes and preflights every task before dispatch.
 Tasks have independent execution state; output injectivity is checked on the
 complete destination before partitioning. Reports aggregate FP/copy/scratch data.
 
 The executor's task budget is capped at 64. `minimum_task_items=0` defaults to
-128 Ki elements; callers may override this performance policy. An aggregate
+128 Ki elements; callers may override this performance policy. Executor tiles
+default to at most 64 Ki elements, bounded by the task extent, and can be overridden
+with `tile_items`. Retiling is restricted to the proven lane-local subset. An aggregate
 iterator-workspace budget reduces concurrency; a budget that cannot hold even
 one planned parallel task is rejected. Compiler/interpreter-private allocations,
 task metadata and staged intermediates are not iterator scratch. Serial fallback
@@ -55,10 +57,13 @@ Avoid nesting a whole-array executor inside a host's parallel region.
 
 ## Compatibility and limitations
 
-Destination scatter preserves logical C traversal; it does not yet choose an
-F-friendly axis order or generate strided-store kernels. First-axis task counts
-can be limited by short leading dimensions. These are performance limitations,
-not reasons to allocate a full contiguous result. Native complex/string arrays,
+Certified resident maps reorder descriptor axes to favor destination locality;
+matching F-order/permuted inputs and outputs can then use contiguous inner loops.
+Partitioning uses a slow destination axis. Reductions, checked recipes and storage
+callbacks retain their original logical traversal. Identity graphs bypass kernels
+entirely for matching dense layouts; other identity layouts use bounded copies.
+Mixed-layout traversal still needs performance work and no specialized strided-store
+JIT kernels are generated. Native complex/string arrays,
 general output casting and arbitrary in-place aliases are outside this contract.
 
 Examples of descriptor construction and an out-of-order host executor are covered

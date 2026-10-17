@@ -339,6 +339,44 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
     if (!tile) tile = 1;
     if (readers && tile > SIZE_MAX / sizeof(size_t)) return a_error(error,ME_ARTIFACT_ERR_BINDING,"reader index scratch overflow");
     if (!execute) return ME_ARTIFACT_SUCCESS;
+    /* Identity maps need no interpreter/JIT or floating-state transition.
+     * This shortcut follows the complete shared validation, including bounds,
+     * dtype, shape, overlap and tile options. Hosts can parallelize disjoint
+     * regions through the same native executor regardless of JIT availability. */
+    if (identity_map && o->reduction == ME_ARRAY_NONE && ninputs == 1 &&
+        direct[0] && !scatter && inputs[binding[0]].dtype == dtype) {
+        const me_array_view *input = &inputs[binding[0]];
+        if (total) memcpy((uint8_t *)output + destination.offset,
+            (const uint8_t *)input->base + input->offset,total*width);
+        report->zero_copy_tiles = total ? 1 : 0;
+#ifndef __EMSCRIPTEN__
+        report->fp_supported = 1;
+#endif
+        return ME_ARTIFACT_SUCCESS;
+    }
+    if (identity_map && o->reduction == ME_ARRAY_NONE && ninputs == 1 && destination_view) {
+        const me_array_view *input = &inputs[binding[0]];
+        bool same = !(sources && sources[binding[0]].read) && a_native(input) && input->dtype == dtype && input->rank == out_rank &&
+            (!out_rank || !memcmp(input->shape,out_shape,(size_t)out_rank*sizeof(*out_shape)));
+        size_t low = destination.offset, high = destination.offset, source_low = input->offset;
+        for (int i = 0; same && i < out_rank; i++) if (out_shape[i] > 1) {
+            same = input->strides[i] == destination.strides[i];
+            if (!same) break;
+            int64_t stride = destination.strides[i];
+            a_add(stride < 0 ? low : high,stride,(uint64_t)out_shape[i]-1,stride < 0 ? &low : &high);
+            if (stride < 0) a_add(source_low,stride,(uint64_t)out_shape[i]-1,&source_low);
+        }
+        /* Matching dense permutations/reversals have identical physical value
+         * order. Copy their interval without visiting logical coordinates. */
+        if (same && (!total || high-low+width == total*width)) {
+            if (total) memcpy((uint8_t *)output+low,(const uint8_t *)input->base+source_low,total*width);
+            report->zero_copy_tiles = total ? 1 : 0;
+#ifndef __EMSCRIPTEN__
+            report->fp_supported = 1;
+#endif
+            return ME_ARTIFACT_SUCCESS;
+        }
+    }
     /* Keep the complete shared preflight above. Only native contiguous tiles
      * without masks bypass map evaluation; other layouts use the original path. */
     bool direct_reduction = identity_map && o->reduction != ME_ARRAY_NONE &&
@@ -438,8 +476,12 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
             if (!direct_reduction) {
                 void *tile_output = scratch ? scratch : (uint8_t *)output + destination.offset + begin*source_width;
                 me_artifact_eval_descriptor descriptor = {sizeof(descriptor),ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,count,count*source_width,mask,mask ? count : 0,0,NULL,NULL,NULL};
-                rc = me_artifact_eval_ex(a,buffers,ninputs,tile_output,&descriptor,error);
-                report->evaluated_tiles++;
+                if (identity_map && o->reduction == ME_ARRAY_NONE && ninputs == 1) {
+                    memcpy(tile_output,buffers[0].data,count*source_width);
+                } else {
+                    rc = me_artifact_eval_ex(a,buffers,ninputs,tile_output,&descriptor,error);
+                    report->evaluated_tiles++;
+                }
                 if (!rc && scatter && o->reduction == ME_ARRAY_NONE) {
                     for (size_t lane = 0; lane < count; lane++) {
                         int64_t coordinates[ME_ARRAY_MAX_RANK];
@@ -558,6 +600,7 @@ me_artifact_status dsl_array_run_into(const me_artifact *a,
     const me_array_output *output, me_array_report *report, me_artifact_error *error,
     bool execute, bool identity_map) {
     me_array_view views[128];
+    if (report) memset(report,0,sizeof(*report));
     if (!output || ninputs < 0 || ninputs > 128 || (ninputs && !inputs && !sources))
         return a_error(error,ME_ARTIFACT_ERR_BINDING,"invalid destination or bindings");
     if (sources) {

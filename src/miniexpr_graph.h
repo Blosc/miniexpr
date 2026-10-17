@@ -77,6 +77,7 @@ typedef struct {
     me_graph_fork_join_fn fork_join;
     void *host;
     size_t minimum_task_items; /* 0 = 128 Ki elements; performance policy only. */
+    size_t tile_items; /* 0 = automatic, up to 64 Ki elements for proven maps. */
 } me_graph_executor;
 typedef struct {
     me_graph_report execution;
