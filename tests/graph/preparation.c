@@ -7,6 +7,16 @@
 #include <string.h>
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "%s:%d: %s (%s)\n", __FILE__, __LINE__, #x, error.native.message); exit(1); } } while (0)
 static me_graph_error error;
+static int reverse_executor(void *host, size_t count, me_graph_task_fn task, void *invocation) {
+    size_t *observed=host; *observed=count;
+    for (size_t i=count; i-- > 0;) task(invocation,i);
+    return 0;
+}
+static int failed_executor(void *host, size_t count, me_graph_task_fn task, void *invocation) {
+    (void)host;
+    if (count) task(invocation,0);
+    return 1;
+}
 static me_graph_plan *prepare(const char *source, me_graph_input_metadata *inputs, int n, bool jit) {
     fprintf(stderr, "  prepare jit=%d: %s\n", jit, source); fflush(stderr);
     me_graph_plan *p = NULL;
@@ -38,6 +48,7 @@ static void maps(bool jit) {
     CHECK(!me_graph_specialize(p, inputs, 2, NULL, &s, &error));
     CHECK(me_graph_output_rank(s) == 2 && me_graph_output_shape(s)[1] == 3);
     CHECK(me_graph_output_bytes(s) == sizeof(output));
+    unsigned execution_caps=me_graph_execution_capabilities(p);
     me_graph_plan_free(p); /* The schedule owns retention, not input pointers. */
     me_array_view bindings[] = {view("y", ME_FLOAT32, y, sizeof(y), 1, 3, 0), view("x", ME_FLOAT32, x, sizeof(x), 2, 2, 1)};
     me_graph_report report;
@@ -50,6 +61,19 @@ static void maps(bool jit) {
     CHECK(!me_graph_execute_into(s,bindings,2,&destination,NULL,&report,&error));
     CHECK(column_major[0]==-99 && column_major[7]==-99);
     CHECK(column_major[1]==5 && column_major[2]==7 && column_major[5]==7 && column_major[6]==9);
+    size_t dispatched=0;
+    me_graph_executor executor={sizeof(executor),ME_GRAPH_EXECUTOR_VERSION,4,1024*1024,reverse_executor,&dispatched,1};
+    me_graph_parallel_report parallel;
+    CHECK(execution_caps & ME_GRAPH_EXEC_PARTITIONABLE);
+    CHECK(!me_graph_execute_parallel_into(s,bindings,2,&destination,NULL,&executor,&parallel,&error));
+    CHECK(dispatched==2 && parallel.tasks==2);
+    CHECK(column_major[1]==5 && column_major[2]==7 && column_major[5]==7 && column_major[6]==9);
+    executor.fork_join=failed_executor;
+    CHECK(me_graph_execute_parallel_into(s,bindings,2,&destination,NULL,&executor,&parallel,&error)==ME_GRAPH_ERR_EXECUTION);
+    executor.fork_join=reverse_executor; executor.workspace_budget=1;
+    column_major[1]=-77;
+    CHECK(me_graph_execute_parallel_into(s,bindings,2,&destination,NULL,&executor,&parallel,&error)==ME_GRAPH_ERR_BINDING);
+    CHECK(column_major[1]==-77);
     destination.strides[1]=0;
     CHECK(me_graph_execute_into(s,bindings,2,&destination,NULL,&report,&error)==ME_GRAPH_ERR_BINDING);
     CHECK(column_major[0]==-99);

@@ -14,6 +14,8 @@ extern "C" {
 #define ME_GRAPH_MAX_BYTES (1024 * 1024)
 #define ME_GRAPH_MAX_NODES 256
 #define ME_GRAPH_MAX_DEPTH 64
+#define ME_GRAPH_EXECUTOR_VERSION 1
+#define ME_GRAPH_EXEC_PARTITIONABLE 1u
 typedef struct me_graph_plan me_graph_plan;
 typedef struct me_graph_schedule me_graph_schedule;
 typedef enum {
@@ -60,6 +62,34 @@ typedef struct {
     size_t jit_stages;
     size_t interpreter_stages;
 } me_graph_report;
+/* Host fork/join contract: dispatch each index at most once, join ALL started
+ * tasks before returning, including on submission failure. Return zero only if
+ * every index completed. No callbacks or state may escape this synchronous call.
+ * The host owns its pool; miniexpr owns task partitioning and worker state. */
+typedef void (*me_graph_task_fn)(void *invocation, size_t task_index);
+typedef int (*me_graph_fork_join_fn)(void *host, size_t tasks,
+    me_graph_task_fn task, void *invocation);
+typedef struct {
+    size_t struct_size;
+    unsigned version;
+    size_t max_tasks; /* 0/1 or NULL executor selects serial execution; max 64. */
+    size_t workspace_budget; /* Aggregate iterator scratch; 0 selects 64 MiB. */
+    me_graph_fork_join_fn fork_join;
+    void *host;
+    size_t minimum_task_items; /* 0 = 128 Ki elements; performance policy only. */
+} me_graph_executor;
+typedef struct {
+    me_graph_report execution;
+    size_t tasks;
+    size_t iterator_workspace_bound;
+} me_graph_parallel_report;
+/* Conservative native-IR proof, not just a cardinality/JIT check. Unsupported
+ * partitioning is executed serially; reductions never change numerical order. */
+unsigned me_graph_execution_capabilities(const me_graph_plan *plan);
+me_graph_status me_graph_execute_parallel_into(const me_graph_schedule *schedule,
+    const me_array_view *inputs, int ninputs, const me_array_output *output,
+    const me_graph_execute_options *options, const me_graph_executor *executor,
+    me_graph_parallel_report *report, me_graph_error *error);
 /* NULL options select interpretation/default geometry. Errors may be NULL.
  * Preparation copies graph/captures, reads no arrays and evaluates no constants.
  * Failure sets *out=NULL. There is no Python or full-DSL fallback. */

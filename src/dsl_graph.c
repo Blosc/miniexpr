@@ -45,6 +45,7 @@ struct me_graph_plan {
     bool portable_stage;
     bool declared_staged;
     bool direct_reduction;
+    bool partitionable;
 };
 struct me_graph_schedule {
     me_graph_plan *plan;
@@ -306,6 +307,73 @@ static char *g_copy(const char *s) {
     if (p) memcpy(p, s, n);
     return p;
 }
+static bool g_partitionable(graph_node *nodes, int count) {
+    bool runtime[ME_GRAPH_MAX_NODES] = {0};
+    /* Initial native policy: floating runtime expressions, plus same-signature
+     * modular integer maps. No casts, scalar-only computed subtrees or shifts.
+     * Capabilities can broaden without duplicating these rules in each host. */
+    me_dtype integer = ME_AUTO;
+    bool floating = true;
+    for (int i = 0; i < count; i++) if (!strcmp(nodes[i].op,"input")) {
+        me_dtype dtype = g_dtype(g_str(yyjson_obj_get(nodes[i].value,"dtype")));
+        if (dtype != ME_FLOAT32 && dtype != ME_FLOAT64) {
+            floating = false;
+            if (integer == ME_AUTO) integer = dtype;
+            if (integer != dtype || dtype == ME_BOOL) return false;
+        } else if (integer != ME_AUTO) return false;
+    }
+    if (!floating) for (int i = 0; i < count; i++) if (!strcmp(nodes[i].op,"input") &&
+        g_dtype(g_str(yyjson_obj_get(nodes[i].value,"dtype"))) != integer) return false;
+    for (int i = 0; i < count; i++) {
+        graph_node *node = &nodes[i];
+        if (!strcmp(node->op,"input")) { runtime[i] = true; continue; }
+        if (!strcmp(node->op,"constant")) {
+            if (!g_equal(yyjson_obj_get(node->value,"category"),"weak")) return false;
+            me_dtype dtype = g_dtype(g_str(yyjson_obj_get(node->value,"dtype")));
+            if (!floating) {
+                if (dtype != ME_INT64 || !g_equal(yyjson_obj_get(node->value,"encoding"),"decimal")) return false;
+                const char *text = g_str(yyjson_obj_get(node->value,"value"));
+                if (!text) return false;
+                int64_t value = strtoll(text,NULL,10);
+                size_t width = g_width(integer);
+                bool unsign = integer == ME_UINT8 || integer == ME_UINT16 || integer == ME_UINT32 || integer == ME_UINT64;
+                if ((unsign && value < 0) || (width < 8 && (unsign ?
+                    (uint64_t)value >= (UINT64_C(1) << (width*8)) :
+                    value < -(INT64_C(1) << (width*8-1)) || value >= (INT64_C(1) << (width*8-1))))) return false;
+            } else if (dtype == ME_FLOAT64) {
+                const char *text = g_str(yyjson_obj_get(node->value,"value"));
+                if (!text || !g_equal(yyjson_obj_get(node->value,"encoding"),"ieee754-hex")) return false;
+                uint64_t bits = strtoull(text,NULL,16) & UINT64_C(0x7fffffffffffffff);
+                /* Double encoding of FLT_MAX; inspect bits rather than execute
+                 * floating operations during metadata-only preparation. */
+                if (bits > UINT64_C(0x47efffffe0000000)) return false;
+            } else if (dtype != ME_INT64 && dtype != ME_BOOL) return false;
+            continue;
+        }
+        bool array = false;
+        for (int j = 0; j < node->nargs; j++) array |= runtime[node->args[j]];
+        if (!array) return false;
+        if (!floating) {
+            const char *allowed[] = {"add","sub","mul","neg","pos","invert","bitand","bitor","bitxor", "eq","ne","lt","le","gt","ge"};
+            bool ok = false;
+            for (size_t j = 0; j < sizeof(allowed)/sizeof(*allowed); j++) ok |= !strcmp(node->op,allowed[j]);
+            if (!ok) return false;
+        } else if (!strcmp(node->op,"cast") || g_reduce(node->op) ||
+                   !strcmp(node->op,"lshift") || !strcmp(node->op,"rshift")) return false;
+        if (!strcmp(node->op,"function")) {
+            const char *name = g_str(yyjson_obj_get(node->value,"name"));
+            const char *allowed[] = {"abs","sqrt","cbrt","exp","exp2","expm1","log","log1p","log2","log10",
+                "sin","cos","tan","asin","acos","atan","atan2","sinh","cosh","tanh","asinh","acosh","atanh",
+                "minimum","maximum","fmod","hypot","copysign","nextafter","ceil","floor","round","trunc","sign",
+                "isfinite","isnan","isinf","signbit"};
+            bool ok = false;
+            for (size_t j = 0; name && j < sizeof(allowed)/sizeof(*allowed); j++) ok |= !strcmp(name,allowed[j]);
+            if (!ok) return false;
+        }
+        runtime[i] = true;
+    }
+    return count && runtime[count-1];
+}
 static me_graph_status g_prepare_json(const char *json, size_t length,
     const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error) {
     if (out) *out = NULL;
@@ -465,6 +533,7 @@ static me_graph_status g_prepare_json(const char *json, size_t length,
     p->reduction.version = ME_ARTIFACT_ARRAY_VERSION;
     int reduction = g_reduce(nodes[result].op), map_root = reduction ? nodes[result].args[0] : result;
     p->direct_reduction = reduction && !strcmp(nodes[map_root].op, "input");
+    p->partitionable = !reduction && final_dtype == ME_AUTO && g_partitionable(nodes,count);
     p->reduction.reduction = (me_array_reduction)reduction;
     p->reduction.naxes = reduction ? -1 : 0;
     if (reduction) {
@@ -713,7 +782,7 @@ fail:
 static me_graph_status g_execute(const me_graph_schedule *s,
     const me_array_view *inputs, int ninputs, void *output, size_t capacity,
     const me_graph_execute_options *options, me_graph_report *report, me_graph_error *error,
-    const me_array_source *sources, const me_array_output *destination) {
+    const me_array_source *sources, const me_array_output *destination, bool execute) {
     g_error(error, -1, ME_GRAPH_SUCCESS, "");
     if (report) memset(report, 0, sizeof(*report));
     if (!s || ninputs != s->plan->ninputs || (ninputs && !inputs))
@@ -816,6 +885,7 @@ static me_graph_status g_execute(const me_graph_schedule *s,
         }
         reduction.initial = &initial;
     }
+    if (!execute) { free(temporary); return ME_GRAPH_SUCCESS; }
     if (destination && !p->conversion) status = dsl_array_run_into(p->map,views,
         sources ? map_sources : NULL,me_artifact_ninputs(p->map),s->rank,s->shape,
         &reduction,destination,&array,&native,true,p->direct_reduction);
@@ -861,7 +931,7 @@ static me_graph_status g_execute(const me_graph_schedule *s,
 me_graph_status me_graph_execute(const me_graph_schedule *s,
     const me_array_view *inputs, int ninputs, void *output, size_t capacity,
     const me_graph_execute_options *options, me_graph_report *report, me_graph_error *error) {
-    return g_execute(s,inputs,ninputs,output,capacity,options,report,error,NULL,NULL);
+    return g_execute(s,inputs,ninputs,output,capacity,options,report,error,NULL,NULL,true);
 }
 me_graph_status me_graph_execute_sources(const me_graph_schedule *s,
     const me_array_source *sources, int ninputs, void *output, size_t capacity,
@@ -872,13 +942,13 @@ me_graph_status me_graph_execute_sources(const me_graph_schedule *s,
     }
     me_array_view views[ME_MAX_VARS];
     for (int i = 0; i < ninputs; i++) views[i] = sources[i].view;
-    return g_execute(s,views,ninputs,output,capacity,options,report,error,sources,NULL);
+    return g_execute(s,views,ninputs,output,capacity,options,report,error,sources,NULL,true);
 }
 me_graph_status me_graph_execute_into(const me_graph_schedule *s,
     const me_array_view *inputs, int ninputs, const me_array_output *output,
     const me_graph_execute_options *options, me_graph_report *report, me_graph_error *error) {
     if (!output) return g_error(error,-1,ME_GRAPH_ERR_BINDING,"missing output descriptor");
-    return g_execute(s,inputs,ninputs,NULL,0,options,report,error,NULL,output);
+    return g_execute(s,inputs,ninputs,NULL,0,options,report,error,NULL,output,true);
 }
 me_graph_status me_graph_execute_sources_into(const me_graph_schedule *s,
     const me_array_source *sources, int ninputs, const me_array_output *output,
@@ -887,7 +957,146 @@ me_graph_status me_graph_execute_sources_into(const me_graph_schedule *s,
         return g_error(error,-1,ME_GRAPH_ERR_BINDING,"invalid output or source bindings");
     me_array_view views[ME_MAX_VARS];
     for (int i = 0; i < ninputs; i++) views[i] = sources[i].view;
-    return g_execute(s,views,ninputs,NULL,0,options,report,error,sources,output);
+    return g_execute(s,views,ninputs,NULL,0,options,report,error,sources,output,true);
+}
+unsigned me_graph_execution_capabilities(const me_graph_plan *p) {
+    return p && p->partitionable && !p->nstages && !p->conversion ? ME_GRAPH_EXEC_PARTITIONABLE : 0;
+}
+typedef struct {
+    me_graph_schedule *schedule;
+    me_array_view inputs[ME_MAX_VARS];
+    me_array_output output;
+    me_graph_execute_options options;
+    me_graph_report report;
+    me_graph_error error;
+    me_graph_status status;
+    int ninputs;
+    atomic_int visited;
+} graph_task;
+static void g_task(void *invocation, size_t index) {
+    graph_task *tasks = invocation, *task = &tasks[index];
+    int expected = 0;
+    if (!atomic_compare_exchange_strong(&task->visited,&expected,1)) return;
+    task->status = me_graph_execute_into(task->schedule,task->inputs,task->ninputs,
+        &task->output,&task->options,&task->report,&task->error);
+}
+static bool g_advance(size_t *offset, int64_t stride, size_t count) {
+    uint64_t magnitude = stride < 0 ? (uint64_t)(-(stride+1))+1 : (uint64_t)stride;
+    if (magnitude && count > SIZE_MAX/magnitude) return false;
+    size_t bytes = (size_t)(count*magnitude);
+    if (stride < 0) { if (bytes > *offset) return false; *offset -= bytes; }
+    else { if (bytes > SIZE_MAX-*offset) return false; *offset += bytes; }
+    return true;
+}
+me_graph_status me_graph_execute_parallel_into(const me_graph_schedule *s,
+    const me_array_view *inputs, int ninputs, const me_array_output *output,
+    const me_graph_execute_options *options, const me_graph_executor *executor,
+    me_graph_parallel_report *report, me_graph_error *error) {
+    if (report) memset(report,0,sizeof(*report));
+    if (!s || !output || (executor && (executor->struct_size != sizeof(*executor) ||
+        executor->version != ME_GRAPH_EXECUTOR_VERSION || executor->max_tasks > 64)))
+        return g_error(error,-1,ME_GRAPH_ERR_BINDING,"invalid schedule, output or executor");
+    if (!executor || !executor->fork_join || executor->max_tasks < 2 || !s->rank ||
+        s->shape[0] < 2 || !me_graph_execution_capabilities(s->plan)) {
+        me_graph_report serial;
+        me_graph_status rc = me_graph_execute_into(s,inputs,ninputs,output,options,&serial,error);
+        if (report) { report->execution = serial; report->tasks = 1;
+            report->iterator_workspace_bound = serial.array.temporary_bytes; }
+        return rc;
+    }
+    me_graph_status rc = g_execute(s,inputs,ninputs,NULL,0,options,NULL,error,NULL,output,false);
+    if (rc) return rc;
+    size_t count = executor->max_tasks;
+    size_t useful = s->bytes/g_width(s->dtype)/(executor->minimum_task_items ? executor->minimum_task_items : 128*1024);
+    if (useful < count) count = useful;
+    if (count < 2) {
+        me_graph_report serial;
+        rc=me_graph_execute_into(s,inputs,ninputs,output,options,&serial,error);
+        if (report) { report->execution=serial; report->tasks=1;
+            report->iterator_workspace_bound=serial.array.temporary_bytes; }
+        return rc;
+    }
+    if ((uint64_t)s->shape[0] < count) count = (size_t)s->shape[0];
+    size_t tile = s->reduction.tile_items ? s->reduction.tile_items : 1024;
+    size_t per_task = s->scratch;
+    if (tile > (SIZE_MAX-per_task)/g_width(s->dtype))
+        return g_error(error,-1,ME_GRAPH_ERR_BINDING,"workspace bound overflow");
+    per_task += tile*g_width(s->dtype);
+    size_t budget = executor->workspace_budget ? executor->workspace_budget : 64*1024*1024;
+    /* Native estimates include gather buffers; reduce concurrency to honor the
+     * aggregate budget rather than multiplying a per-worker budget silently. */
+    if (per_task && count > budget/per_task) count = budget/per_task;
+    if (!count) return g_error(error,-1,ME_GRAPH_ERR_BINDING,"workspace budget cannot hold one task");
+    if (count < 2) {
+        me_graph_report serial;
+        rc = me_graph_execute_into(s,inputs,ninputs,output,options,&serial,error);
+        if (report) { report->execution=serial; report->tasks=1;
+            report->iterator_workspace_bound=serial.array.temporary_bytes; }
+        return rc;
+    }
+    graph_task *tasks = calloc(count,sizeof(*tasks));
+    if (!tasks) return g_error(error,-1,ME_GRAPH_ERR_OOM,"task metadata allocation failed");
+    for (size_t t = 0; t < count; t++) {
+        graph_task *task = &tasks[t];
+        atomic_init(&task->visited,0);
+        size_t q = (size_t)s->shape[0]/count, r = (size_t)s->shape[0]%count;
+        size_t begin = q*t + (t < r ? t : r), extent = q + (t < r);
+        me_graph_input_metadata metadata[ME_MAX_VARS];
+        for (int i = 0; i < ninputs; i++) {
+            task->inputs[i] = inputs[i];
+            if (inputs[i].rank == s->rank && inputs[i].shape[0] != 1) {
+                task->inputs[i].shape[0] = (int64_t)extent;
+                if (!g_advance(&task->inputs[i].offset,inputs[i].strides[0],begin)) {
+                    rc = g_error(error,-1,ME_GRAPH_ERR_BINDING,"task input offset overflow"); goto cleanup_tasks;
+                }
+            }
+            metadata[i].name = inputs[i].name; metadata[i].dtype = inputs[i].dtype;
+            metadata[i].rank = task->inputs[i].rank;
+            memcpy(metadata[i].shape,task->inputs[i].shape,sizeof(metadata[i].shape));
+        }
+        task->output = *output; task->output.shape[0] = (int64_t)extent;
+        if (!g_advance(&task->output.offset,output->strides[0],begin)) {
+            rc = g_error(error,-1,ME_GRAPH_ERR_BINDING,"task output offset overflow"); goto cleanup_tasks;
+        }
+        me_graph_specialize_options specialization = {sizeof(specialization),ME_GRAPH_VERSION,tile,0};
+        rc = me_graph_specialize(s->plan,metadata,ninputs,&specialization,&task->schedule,error);
+        if (rc) goto cleanup_tasks;
+        task->ninputs = ninputs;
+        task->options = options ? *options : (me_graph_execute_options){sizeof(task->options),ME_GRAPH_VERSION,0};
+        task->status = ME_GRAPH_ERR_EXECUTION;
+        rc = g_execute(task->schedule,task->inputs,ninputs,NULL,0,&task->options,NULL,error,NULL,&task->output,false);
+        if (rc) goto cleanup_tasks;
+    }
+    {
+        int submitted = executor->fork_join(executor->host,count,g_task,tasks);
+        for (size_t t = 0; t < count; t++) {
+            if (!atomic_load(&tasks[t].visited)) {
+                rc = g_error(error,-1,ME_GRAPH_ERR_EXECUTION,"executor did not complete every task"); break;
+            }
+            if (tasks[t].status) { rc=tasks[t].status; if (error) *error=tasks[t].error; break; }
+        }
+        if (!rc && submitted) rc=g_error(error,-1,ME_GRAPH_ERR_EXECUTION,"host executor submission failed");
+        if (report) {
+            report->tasks=count; report->iterator_workspace_bound=count*per_task;
+            for (size_t t = 0; t < count; t++) {
+                me_graph_report *part=&tasks[t].report;
+                report->execution.array.fp_flags |= part->array.fp_flags;
+                report->execution.array.fp_supported |= part->array.fp_supported;
+                report->execution.array.temporary_bytes += part->array.temporary_bytes;
+                report->execution.array.gathered_bytes += part->array.gathered_bytes;
+                report->execution.array.evaluated_tiles += part->array.evaluated_tiles;
+                report->execution.array.zero_copy_tiles += part->array.zero_copy_tiles;
+                if (part->stages > report->execution.stages) report->execution.stages=part->stages;
+                if (part->jit_stages > report->execution.jit_stages) report->execution.jit_stages=part->jit_stages;
+                if (part->interpreter_stages > report->execution.interpreter_stages) report->execution.interpreter_stages=part->interpreter_stages;
+                report->execution.has_jit |= part->has_jit;
+            }
+        }
+    }
+cleanup_tasks:
+    for (size_t t = 0; t < count; t++) me_graph_schedule_free(tasks[t].schedule);
+    free(tasks);
+    return rc;
 }
 me_graph_status me_graph_execute_alias(const me_graph_schedule *s,
     const me_array_view *inputs, int ninputs, void *output, size_t capacity,
