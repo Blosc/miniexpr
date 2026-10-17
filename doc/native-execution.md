@@ -23,8 +23,9 @@ includes output tile storage and is independent of total map extent.
 ## Host-owned parallelism
 
 `me_graph_execution_capabilities()` exposes a conservative native-IR partitioning
-proof. It currently admits floating maps and same-signature modular integer maps,
-excluding casts, typed captures, scalar-only computed subtrees, shifts, staged
+proof. It currently admits floating maps, same-signature modular integer maps,
+and real-math promotion/true division of integral arrays where conversion cannot fail,
+excluding checked casts, typed captures, scalar-only computed subtrees, shifts, staged
 graphs and reductions. Rejection of parallel admission does not reject numerical
 execution: `me_graph_execute_parallel_into()` uses the serial native path.
 

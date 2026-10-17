@@ -330,6 +330,13 @@ static bool g_partitionable(graph_node *nodes, int count) {
         if (!strcmp(node->op,"constant")) {
             if (!g_equal(yyjson_obj_get(node->value,"category"),"weak")) return false;
             me_dtype dtype = g_dtype(g_str(yyjson_obj_get(node->value,"dtype")));
+            if (dtype == ME_FLOAT64) {
+                const char *text=g_str(yyjson_obj_get(node->value,"value"));
+                if (!text || !g_equal(yyjson_obj_get(node->value,"encoding"),"ieee754-hex")) return false;
+                uint64_t bits=strtoull(text,NULL,16) & UINT64_C(0x7fffffffffffffff);
+                if (bits > UINT64_C(0x47efffffe0000000)) return false;
+                continue;
+            }
             if (!floating) {
                 if (dtype != ME_INT64 || !g_equal(yyjson_obj_get(node->value,"encoding"),"decimal")) return false;
                 const char *text = g_str(yyjson_obj_get(node->value,"value"));
@@ -340,13 +347,6 @@ static bool g_partitionable(graph_node *nodes, int count) {
                 if ((unsign && value < 0) || (width < 8 && (unsign ?
                     (uint64_t)value >= (UINT64_C(1) << (width*8)) :
                     value < -(INT64_C(1) << (width*8-1)) || value >= (INT64_C(1) << (width*8-1))))) return false;
-            } else if (dtype == ME_FLOAT64) {
-                const char *text = g_str(yyjson_obj_get(node->value,"value"));
-                if (!text || !g_equal(yyjson_obj_get(node->value,"encoding"),"ieee754-hex")) return false;
-                uint64_t bits = strtoull(text,NULL,16) & UINT64_C(0x7fffffffffffffff);
-                /* Double encoding of FLT_MAX; inspect bits rather than execute
-                 * floating operations during metadata-only preparation. */
-                if (bits > UINT64_C(0x47efffffe0000000)) return false;
             } else if (dtype != ME_INT64 && dtype != ME_BOOL) return false;
             continue;
         }
@@ -354,9 +354,21 @@ static bool g_partitionable(graph_node *nodes, int count) {
         for (int j = 0; j < node->nargs; j++) array |= runtime[node->args[j]];
         if (!array) return false;
         if (!floating) {
-            const char *allowed[] = {"add","sub","mul","neg","pos","invert","bitand","bitor","bitxor", "eq","ne","lt","le","gt","ge"};
+            const char *allowed[] = {"add","sub","mul","div","neg","pos","invert","bitand","bitor","bitxor", "eq","ne","lt","le","gt","ge","select"};
             bool ok = false;
             for (size_t j = 0; j < sizeof(allowed)/sizeof(*allowed); j++) ok |= !strcmp(node->op,allowed[j]);
+            /* Real math promotes integral arrays to floating computation; every
+             * integral lane fits the floating range. These conversions cannot
+             * fail, unlike checked float-to-int casts or integer division/pow.
+             * Integer subtrees admitted above remain same-width modular maps. */
+            if (!strcmp(node->op,"function")) {
+                const char *name=g_str(yyjson_obj_get(node->value,"name"));
+                const char *promoted[]={"sqrt","cbrt","exp","exp2","expm1","log","log1p","log2","log10",
+                    "sin","cos","tan","asin","acos","atan","atan2","sinh","cosh","tanh","asinh","acosh","atanh",
+                    "arcsin","arccos","arctan","arctan2","arcsinh","arccosh","arctanh","hypot","fmod","copysign","nextafter",
+                    "isfinite","isnan","isinf","signbit"};
+                for (size_t j=0; name && j<sizeof(promoted)/sizeof(*promoted); j++) ok |= !strcmp(name,promoted[j]);
+            }
             if (!ok) return false;
         } else if (!strcmp(node->op,"cast") || g_reduce(node->op) ||
                    !strcmp(node->op,"lshift") || !strcmp(node->op,"rshift")) return false;

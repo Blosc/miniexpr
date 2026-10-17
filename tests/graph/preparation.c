@@ -121,6 +121,21 @@ static void identity_destinations(bool jit) {
     CHECK(report.array.evaluated_tiles==0 && report.array.temporary_bytes==0);
     me_graph_schedule_free(schedule); me_graph_plan_free(plan);
 }
+static void partition_policies(void) {
+    me_graph_input_metadata input={"x",ME_INT64,1,{3}};
+    const char *safe[]={"x + 1","x / (x + 1)","sin(x)","sqrt(x * x)","where(x > 0.5, x + 1, x - 1)"};
+    const char *checked[]={"int8(x)","x // 2","x ** 2","x >> 2","x + (2 ** 63)"};
+    for (size_t i=0; i<sizeof(safe)/sizeof(*safe); i++) {
+        me_graph_plan *plan=prepare(safe[i],&input,1,false);
+        CHECK(me_graph_execution_capabilities(plan) & ME_GRAPH_EXEC_PARTITIONABLE);
+        me_graph_plan_free(plan);
+    }
+    for (size_t i=0; i<sizeof(checked)/sizeof(*checked); i++) {
+        me_graph_plan *plan=prepare(checked[i],&input,1,false);
+        CHECK(!(me_graph_execution_capabilities(plan) & ME_GRAPH_EXEC_PARTITIONABLE));
+        me_graph_plan_free(plan);
+    }
+}
 static void reductions(bool jit) {
     me_graph_input_metadata inputs[] = {{"x", ME_FLOAT64, 2, {2, 3}}, {"mask", ME_BOOL, 1, {3}}};
     double x[] = {1, -1, 4, 9, -2, 16}, output[2]; bool mask[] = {true, false, true};
@@ -582,6 +597,7 @@ int main(void) {
 #define RUN_CASE(call) do { fprintf(stderr, "graph preparation: %s\n", #call); fflush(stderr); call; } while (0)
     RUN_CASE(maps(false)); RUN_CASE(lazy(false)); RUN_CASE(reductions(false));
     RUN_CASE(identity_destinations(false)); RUN_CASE(identity_destinations(true));
+    RUN_CASE(partition_policies());
     RUN_CASE(validation()); RUN_CASE(limits());
     RUN_CASE(maps(true)); RUN_CASE(lazy(true)); RUN_CASE(reductions(true));
     RUN_CASE(staged(false)); RUN_CASE(staged(true));
