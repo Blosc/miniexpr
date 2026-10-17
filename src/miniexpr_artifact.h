@@ -123,6 +123,23 @@ typedef struct {
     int64_t strides[ME_ARRAY_MAX_RANK];
     unsigned byte_order;
 } me_array_view;
+/* Writable, native-endian, non-overlapping array destination. Bounds refer to
+ * the complete accessible allocation; offset is the logical origin. Ordinary
+ * execution requires disjoint input/output allocations. Version 1 accepts a
+ * conservative, provably injective stride subset (including F order, transposes,
+ * stepped and reversed views). Empty arrays are validated but never accessed. */
+#define ME_ARRAY_OUTPUT_VERSION 1
+typedef struct {
+    size_t struct_size;
+    unsigned version;
+    me_dtype dtype;
+    void *base;
+    size_t capacity;
+    size_t offset;
+    int rank;
+    int64_t shape[ME_ARRAY_MAX_RANK];
+    int64_t strides[ME_ARRAY_MAX_RANK];
+} me_array_output;
 /* Storage-neutral gathered input. A reader fills native-endian values for the
  * requested source C-order logical indices, in exactly that order (duplicates
  * are permitted by broadcasting). The destination is invocation-owned scratch.
@@ -172,6 +189,17 @@ me_artifact_status me_artifact_eval_array(const me_artifact *artifact,
 me_artifact_status me_artifact_eval_array_sources(const me_artifact *artifact,
     const me_array_source *inputs, int ninputs, int rank, const int64_t *shape,
     const me_array_options *options, void *output, size_t output_capacity,
+    me_array_report *report, me_artifact_error *error);
+/* Descriptor-output variants preserve logical C traversal and reduction order.
+ * Non-contiguous maps use bounded tile scratch, not full-result staging. Failed
+ * calls may leave earlier successful tiles written; execution is not replayed. */
+me_artifact_status me_artifact_eval_array_into(const me_artifact *artifact,
+    const me_array_view *inputs, int ninputs, int rank, const int64_t *shape,
+    const me_array_options *options, const me_array_output *output,
+    me_array_report *report, me_artifact_error *error);
+me_artifact_status me_artifact_eval_array_sources_into(const me_artifact *artifact,
+    const me_array_source *inputs, int ninputs, int rank, const int64_t *shape,
+    const me_array_options *options, const me_array_output *output,
     me_array_report *report, me_artifact_error *error);
 /* Metadata-only borrowed views. No mutation/view-alias guarantees for results.
  * Reshape requires C contiguous input. Slice uses normalized start/count/step. */

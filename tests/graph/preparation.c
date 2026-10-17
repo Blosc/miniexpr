@@ -43,6 +43,16 @@ static void maps(bool jit) {
     me_graph_report report;
     CHECK(!me_graph_execute(s, bindings, 2, output, sizeof(output), NULL, &report, &error));
     CHECK(output[0] == 5 && output[5] == 9);
+    float column_major[8] = {-99,-99,-99,-99,-99,-99,-99,-99};
+    me_array_output destination = {.struct_size=sizeof(destination),.version=ME_ARRAY_OUTPUT_VERSION,
+        .dtype=ME_FLOAT32,.base=column_major,.capacity=sizeof(column_major),.offset=4,
+        .rank=2,.shape={2,3},.strides={4,8}};
+    CHECK(!me_graph_execute_into(s,bindings,2,&destination,NULL,&report,&error));
+    CHECK(column_major[0]==-99 && column_major[7]==-99);
+    CHECK(column_major[1]==5 && column_major[2]==7 && column_major[5]==7 && column_major[6]==9);
+    destination.strides[1]=0;
+    CHECK(me_graph_execute_into(s,bindings,2,&destination,NULL,&report,&error)==ME_GRAPH_ERR_BINDING);
+    CHECK(column_major[0]==-99);
     x[0] = 10;
     CHECK(!me_graph_execute(s, bindings, 2, output, sizeof(output), NULL, &report, &error));
     CHECK(output[0] == 23); /* No result cache. */

@@ -1,6 +1,13 @@
 #ifndef MINIEXPR_GRAPH_INTERNAL_H
 #define MINIEXPR_GRAPH_INTERNAL_H
 #include "miniexpr_artifact.h"
+me_artifact_status dsl_array_output_validate(const me_array_output *output,
+    int rank, const int64_t *shape, me_dtype dtype, me_artifact_error *error);
+me_artifact_status dsl_array_run_into(const me_artifact *artifact,
+    const me_array_view *inputs, const me_array_source *sources, int ninputs,
+    int rank, const int64_t *shape, const me_array_options *options,
+    const me_array_output *output, me_array_report *report, me_artifact_error *error,
+    bool execute, bool identity_map);
 /* Private graph lowering boundary. Only this entry permits inferred output;
  * public artifact schemas and validation remain unchanged. */
 me_artifact_status dsl_graph_load_map(const char *json, size_t length,

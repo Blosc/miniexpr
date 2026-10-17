@@ -25,6 +25,28 @@ int main(void) {
     assert(me_artifact_eval_array(artifact,inputs,2,2,shape,&options,output,sizeof(output),&report,&error) == 0);
     int64_t expected[] = {11,22,33,14,25,36}; assert(!memcmp(output,expected,sizeof(output)));
     assert(report.temporary_bytes == 16 && report.gathered_bytes == 48 && report.zero_copy_tiles == 3);
+    /* F-order and reversed destinations preserve logical mapping and canaries.
+     * Scatter scratch is one tile, independent of the full output size. */
+    int64_t storage[16];
+    for (int i=0; i<16; i++) storage[i]=-999;
+    me_array_output destination = {.struct_size=sizeof(destination),.version=ME_ARRAY_OUTPUT_VERSION,
+        .dtype=ME_INT64,.base=storage,.capacity=sizeof(storage),.offset=8,
+        .rank=2,.shape={2,3},.strides={8,16}};
+    assert(me_artifact_eval_array_into(artifact,inputs,2,2,shape,&options,&destination,&report,&error)==0);
+    int64_t f_expected[]={-999,11,14,22,25,33,36,-999};
+    assert(!memcmp(storage,f_expected,sizeof(f_expected)));
+    assert(report.temporary_bytes==32);
+    destination.offset=80; destination.strides[0]=-48; destination.strides[1]=-16;
+    assert(me_artifact_eval_array_into(artifact,inputs,2,2,shape,&options,&destination,&report,&error)==0);
+    assert(storage[10]==11 && storage[8]==22 && storage[6]==33);
+    assert(storage[4]==14 && storage[2]==25 && storage[0]==36);
+    destination.strides[1]=0; storage[10]=-777;
+    assert(me_artifact_eval_array_into(artifact,inputs,2,2,shape,&options,&destination,&report,&error)==ME_ARTIFACT_ERR_BINDING);
+    assert(storage[10]==-777);
+    destination.strides[1]=8; destination.strides[0]=8;
+    assert(me_artifact_eval_array_into(artifact,inputs,2,2,shape,&options,&destination,&report,&error)==ME_ARTIFACT_ERR_BINDING);
+    destination.offset=0; destination.strides[0]=-8;
+    assert(me_artifact_eval_array_into(artifact,inputs,2,2,shape,&options,&destination,&report,&error)==ME_ARTIFACT_ERR_BINDING);
     options.reduction=ME_ARRAY_SUM; options.naxes=1; options.axes[0]=-1;
     for (size_t tile=1; tile<=7; tile++) {
         options.tile_items=tile;
@@ -34,6 +56,9 @@ int main(void) {
     options.axes[0]=0;
     assert(me_artifact_eval_array(artifact,inputs,2,2,shape,&options,output,24,&report,&error) == 0);
     assert(output[0]==25 && output[1]==47 && output[2]==69);
+    destination.rank=1; destination.shape[0]=3; destination.offset=40; destination.strides[0]=-16;
+    assert(me_artifact_eval_array_into(artifact,inputs,2,2,shape,&options,&destination,&report,&error)==0);
+    assert(storage[5]==25 && storage[3]==47 && storage[1]==69);
     /* Native metadata-only basic views; reversal keeps its checked allocation. */
     me_array_view sliced, transposed, reshaped;
     assert(me_array_slice(&inputs[0],1,2,3,-1,&sliced,&error)==0);

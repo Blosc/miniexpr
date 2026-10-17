@@ -83,6 +83,14 @@ me_graph_status me_graph_execute(const me_graph_schedule *schedule,
 me_graph_status me_graph_execute_sources(const me_graph_schedule *schedule,
     const me_array_source *inputs, int ninputs, void *output, size_t capacity,
     const me_graph_execute_options *options, me_graph_report *report, me_graph_error *error);
+/* Descriptor-output variants. Traversal and numerical ordering are unchanged;
+ * arbitrary destination layout does not imply permission to reorder kernels. */
+me_graph_status me_graph_execute_into(const me_graph_schedule *schedule,
+    const me_array_view *inputs, int ninputs, const me_array_output *output,
+    const me_graph_execute_options *options, me_graph_report *report, me_graph_error *error);
+me_graph_status me_graph_execute_sources_into(const me_graph_schedule *schedule,
+    const me_array_source *inputs, int ninputs, const me_array_output *output,
+    const me_graph_execute_options *options, me_graph_report *report, me_graph_error *error);
 /* Explicit transactional alias adapter for resident inputs. Evaluate into a
  * separate C-order result, then publish exactly output_bytes only on success.
  * The final output may overlap inputs; ordinary execute still rejects aliases.
