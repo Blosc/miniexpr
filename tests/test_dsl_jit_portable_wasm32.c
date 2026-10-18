@@ -55,7 +55,7 @@ static int portable_wasm32_reject(const unsigned char *wasm_bytes, int wasm_len,
 #else
 static double portable_bench_now_ms(void) {
     struct timespec now;
-    assert(clock_gettime(CLOCK_MONOTONIC,&now) == 0);
+    assert(timespec_get(&now, TIME_UTC) == TIME_UTC);
     return (double)now.tv_sec*1000.0 + (double)now.tv_nsec/1000000.0;
 }
 #endif
