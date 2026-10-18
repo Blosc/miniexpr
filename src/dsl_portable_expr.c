@@ -2126,7 +2126,7 @@ static bool p_batch_eval(const me_expr *expr, p_eval_context *ctx, int nitems,
                 } \
                 instruction->math_dispatch->unary_##S[instruction->math_op](a, d, pad); \
             } else { \
-                T (*fn)(T)=(T (*)(T))instruction->math; \
+                T (*volatile fn)(T)=(T (*)(T))instruction->math; \
                 for (int i=0; i<count; i++) d[i]=fn(a[i]); \
             } \
             break; } \
