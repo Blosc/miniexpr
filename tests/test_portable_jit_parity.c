@@ -640,6 +640,23 @@ static void integer_extrema_lowering(void) {
     }
 }
 
+static bool batch_lane_equal(const void *actual, const void *expected, size_t width) {
+    if (!memcmp(actual, expected, width)) return true;
+    if (width == sizeof(float)) {
+        float a, e;
+        memcpy(&a, actual, sizeof(a));
+        memcpy(&e, expected, sizeof(e));
+        return isnan(a) && isnan(e);
+    }
+    if (width == sizeof(double)) {
+        double a, e;
+        memcpy(&a, actual, sizeof(a));
+        memcpy(&e, expected, sizeof(e));
+        return isnan(a) && isnan(e);
+    }
+    return false;
+}
+
 static void batch_interpreter_parity(void) {
     const char *recipes[]={"x + y","x - y","x * y","x / y","-x",
         "(x + y) * (x - y)","x * 2 + y","sin(x) + cos(y)","sqrt(x*x + y*y)",
@@ -692,7 +709,14 @@ static void batch_interpreter_parity(void) {
                 CHECK(!me_artifact_eval_status(artifact,inputs,2,actual,&descriptor,0,&status,&error));
                 CHECK(dsl_portable_batch_calls_for_tests()==before+(masked==2 ? 0 : 1));
                 CHECK(status.flags==flags);
-                CHECK(!memcmp(actual,expected,lanes*width));
+                bool lanes_equal = true;
+                for (int lane = 0; lane < lanes; lane++) {
+                    if (!batch_lane_equal(actual + lane, expected + lane, width)) {
+                        lanes_equal = false;
+                        break;
+                    }
+                }
+                CHECK(lanes_equal);
             }
             me_artifact_free(artifact);
         }
