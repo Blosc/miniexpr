@@ -428,6 +428,17 @@ EM_JS(int, me_wasm_jit_instantiate,
     var patched = new Uint8Array(out);
     try {
         var mod = new WebAssembly.Module(patched);
+        if (!bridge_lookup_fn_idx) {
+            var imports = WebAssembly.Module.imports(mod);
+            for (var ii = 0; ii < imports.length; ii++) {
+                var imp = imports[ii];
+                var allowedMemory = imp.module === "env" && imp.name === "memory" && imp.kind === "memory";
+                var allowedMemset = imp.module === "env" && imp.name === "memset" && imp.kind === "function";
+                if (!allowedMemory && !allowedMemset) {
+                    throw new Error("portable wasm kernel has unexpected import " + imp.module + "." + imp.name);
+                }
+            }
+        }
         var inst = new WebAssembly.Instance(mod, { env: buildEnvImports() });
     } catch (e) {
         if (emit_warnings) {
@@ -438,10 +449,10 @@ EM_JS(int, me_wasm_jit_instantiate,
         return 0;
     }
     var fn = inst.exports["me_dsl_jit_kernel"];
-    if (!fn) {
+    if (!fn || fn.length !== 3) {
         if (emit_warnings) {
             globalThis.__meJitWarningCount = ((globalThis.__meJitWarningCount | 0) + 1) | 0;
-            globalThis.__meJitLastWarning = "[me-wasm-jit] missing export";
+            globalThis.__meJitLastWarning = "[me-wasm-jit] missing export or wrong kernel arity";
             err(globalThis.__meJitLastWarning);
         }
         return 0;
@@ -673,6 +684,46 @@ static char *dsl_wasm32_patch_source(const char *src) {
     return patched;
 }
 
+/* MiniCC's wasm target is intentionally invoked with -nostdinc. Portable
+ * Menudet source uses standard fixed-width names, so provide the precise wasm32
+ * typedefs locally rather than applying the lossy legacy type substitutions. */
+static char *dsl_wasm32_prepare_portable_source(const char *src) {
+    static const char preamble[] =
+        "typedef signed char int8_t; typedef unsigned char uint8_t;\n"
+        "typedef signed short int16_t; typedef unsigned short uint16_t;\n"
+        "typedef signed int int32_t; typedef unsigned int uint32_t;\n"
+        "typedef signed long long int64_t; typedef unsigned long long uint64_t;\n"
+        "typedef unsigned int uintptr_t; typedef unsigned int size_t;\n"
+        "typedef char me_assert_i8[(sizeof(int8_t)==1)?1:-1];\n"
+        "typedef char me_assert_i16[(sizeof(int16_t)==2)?1:-1];\n"
+        "typedef char me_assert_i32[(sizeof(int32_t)==4)?1:-1];\n"
+        "typedef char me_assert_i64[(sizeof(int64_t)==8)?1:-1];\n"
+        "typedef char me_assert_ptr[(sizeof(void *)==4)?1:-1];\n"
+        "#define UINT64_C(x) x##ULL\n"
+        "#define UINT64_MAX 0xffffffffffffffffULL\n"
+        "#define INT64_MAX 0x7fffffffffffffffLL\n"
+        "#define INT64_MIN (-0x7fffffffffffffffLL-1LL)\n"
+        "#define INT_MAX 2147483647\n#define INT_MIN (-2147483647-1)\n"
+        "static void *memcpy(void *d, const void *s, size_t n) {\n"
+        "unsigned char *x=(unsigned char *)d; const unsigned char *y=(const unsigned char *)s;\n"
+        "for (size_t i=0; i<n; i++) x[i]=y[i]; return d; }\n";
+    if (!src) return NULL;
+    size_t capacity = strlen(src) + sizeof(preamble) + 1;
+    char *out = malloc(capacity);
+    if (!out) return NULL;
+    memcpy(out, preamble, sizeof(preamble)-1);
+    size_t used = sizeof(preamble)-1;
+    const char *p = src;
+    while (*p) {
+        if (strncmp(p, "#include <stdint.h>\n", 20) == 0) p += 20;
+        else if (strncmp(p, "#include <limits.h>\n", 20) == 0) p += 20;
+        else if (strncmp(p, "#include <string.h>\n", 20) == 0) p += 20;
+        else out[used++] = *p++;
+    }
+    out[used] = '\0';
+    return out;
+}
+
 static bool dsl_wasm32_source_calls_symbol(const char *src, const char *name) {
     if (!src || !name || name[0] == '\0') {
         return false;
@@ -791,11 +842,17 @@ bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
         return false;
     }
 #endif
-    char *patched_src = dsl_wasm32_patch_source(program->jit_c_source);
+    /* Portable Menudet source already has an explicit wasm32 entry ABI and
+     * exact-width scalar types. Never run the legacy 64-to-32-bit rewrite on it. */
+    char *patched_src = program->jit_portable_wasm_source ?
+        dsl_wasm32_prepare_portable_source(program->jit_c_source) :
+        dsl_wasm32_patch_source(program->jit_c_source);
     if (!patched_src) {
         return false;
     }
-    dsl_tracef("jit wasm32: source patched (%zu bytes)", strlen(patched_src));
+    dsl_tracef("jit wasm32: %s source prepared (%zu bytes)",
+               program->jit_portable_wasm_source ? "portable" : "legacy",
+               strlen(patched_src));
 
     TCCState *state = tcc_new();
     if (!state) {
@@ -838,7 +895,11 @@ bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
     }
     free(patched_src);
 
-    const char *wasm_path = "/tmp/me_jit_kernel.wasm";
+    char wasm_path[64];
+    /* A live TCCState has a unique wasm32 address, avoiding collisions when
+     * independent compilations overlap in the Emscripten virtual filesystem. */
+    snprintf(wasm_path, sizeof(wasm_path), "/tmp/me_jit_%08x.wasm",
+             (unsigned int)(uintptr_t)state);
     if (tcc_output_file(state, wasm_path) < 0) {
         tcc_delete(state);
         free(jit_scratch);
@@ -849,6 +910,7 @@ bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
 
     FILE *fp = fopen(wasm_path, "rb");
     if (!fp) {
+        remove(wasm_path);
         free(jit_scratch);
         dsl_tracef("jit runtime skip: cannot read wasm file");
         return false;
@@ -858,6 +920,7 @@ bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
     fseek(fp, 0, SEEK_SET);
     if (wasm_len <= 0 || wasm_len > 1024 * 1024) {
         fclose(fp);
+        remove(wasm_path);
         free(jit_scratch);
         dsl_tracef("jit runtime skip: wasm file size %ld unexpected", wasm_len);
         return false;
@@ -865,12 +928,14 @@ bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
     unsigned char *wasm_bytes = (unsigned char *)malloc((size_t)wasm_len);
     if (!wasm_bytes) {
         fclose(fp);
+        remove(wasm_path);
         free(jit_scratch);
         return false;
     }
     if ((long)fread(wasm_bytes, 1, (size_t)wasm_len, fp) != wasm_len) {
         free(wasm_bytes);
         fclose(fp);
+        remove(wasm_path);
         free(jit_scratch);
         return false;
     }
@@ -879,7 +944,8 @@ bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
 
     int force_invalid = dsl_env_flag_enabled("ME_WASM_JIT_TEST_FORCE_INVALID", false) ? 1 : 0;
     int fn_idx = me_wasm_jit_instantiate_dispatch(wasm_bytes, (int)wasm_len,
-                                                  (int)(uintptr_t)&dsl_wasm32_lookup_bridge_symbol,
+                                                  program->jit_portable_wasm_source ? 0 :
+                                                      (int)(uintptr_t)&dsl_wasm32_lookup_bridge_symbol,
                                                   dsl_wasm_jit_emit_warnings(program) ? 1 : 0,
                                                   force_invalid);
     free(wasm_bytes);

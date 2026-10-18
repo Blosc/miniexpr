@@ -84,6 +84,10 @@ uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program) {
     }
     h = dsl_jit_hash_u64(h, program->jit_ir_fingerprint);
     h = dsl_jit_hash_i32(h, (int)program->semantic_profile);
+#if ME_USE_WASM32_JIT
+    h = dsl_jit_hash_i32(h, program->jit_portable_wasm_source ? 2 : 1);
+    h = dsl_jit_hash_i32(h, program->jit_portable_wasm_source ? 1 : 0); /* portable wasm ABI revision */
+#endif
     h = dsl_jit_hash_i32(h, (int)program->output_dtype);
     h = dsl_jit_hash_i32(h, (int)program->fp_mode);
     h = dsl_jit_hash_i32(h, program->math_backend == ME_DSL_MATH_AUTO ?

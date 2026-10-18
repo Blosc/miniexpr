@@ -1873,6 +1873,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     program->jit_dl_handle_cached = false;
     free(program->jit_c_source);
     program->jit_c_source = NULL;
+    program->jit_portable_wasm_source = false;
     program->jit_use_runtime_math_bridge = false;
     program->jit_scalar_math_bridge_enabled = false;
     program->jit_synth_reserved_non_nd = false;

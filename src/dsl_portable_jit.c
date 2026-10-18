@@ -58,6 +58,17 @@ typedef struct {
     size_t used, capacity;
 } pj_text;
 
+typedef struct {
+    const me_expr *node;
+    uint64_t hash;
+    char value[256];
+} pj_cse_entry;
+
+typedef struct {
+    pj_cse_entry entries[64];
+    int count;
+} pj_cse_context;
+
 static bool pj_append(pj_text *s, const char *format, ...);
 
 static const char *pj_unsigned_type(me_dtype dtype) {
@@ -211,17 +222,87 @@ static bool pj_plain_literal(const me_expr *n, const char *op) {
         ((strcmp(op,"*") && strcmp(op,"/")) || fabs(value) != 1);
 }
 
-static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bool *defined, int depth,
-    const pj_constants *constants, pj_text *s, int *next_temp, bool plain_literal);
+static bool pj_cse_key(const me_dsl_compiled_program *p, const me_expr *n, uint64_t *hash,
+                       int depth) {
+    if (!n || depth > 32 || n->flags & (ME_EXPR_FLAG_WEAK_LITERAL | ME_EXPR_FLAG_WEAK_SCALAR))
+        return false;
+    uint64_t h = UINT64_C(1469598103934665603);
+#define PJ_CSE_MIX(v) do { uint64_t pj_v_ = (uint64_t)(v); \
+    for (int pj_b_ = 0; pj_b_ < 8; pj_b_++) { h ^= (unsigned char)(pj_v_ >> (pj_b_ * 8)); \
+    h *= UINT64_C(1099511628211); } } while (0)
+    PJ_CSE_MIX(n->type); PJ_CSE_MIX(n->dtype); PJ_CSE_MIX(n->flags);
+    int kind = TYPE_MASK(n->type), arity = ARITY(n->type);
+    if (kind == ME_VARIABLE) {
+        if (!is_synthetic_address(n->bound)) return false;
+        int index = (int)((const char *)n->bound - synthetic_var_addresses);
+        if (index < 0 || index >= p->n_inputs) return false;
+        PJ_CSE_MIX(index);
+    } else if (kind == ME_CONSTANT) {
+        if (pj_float(n->dtype)) {
+            uint64_t bits = 0;
+            if (n->dtype == ME_FLOAT32) memcpy(&bits, &n->literal_f32, sizeof(float));
+            else memcpy(&bits, &n->value, sizeof(double));
+            PJ_CSE_MIX(bits);
+        } else {
+            PJ_CSE_MIX(n->integer_magnitude);
+        }
+    } else {
+        const char *op = me_portable_operator(n);
+        if (!op || (strcmp(op,"+") && strcmp(op,"-") &&
+            strcmp(op,"*") && strcmp(op,"/")) || arity < 1 || arity > 2) return false;
+        for (int i = 0; i < arity; i++) {
+            uint64_t child;
+            if (!pj_cse_key(p,(const me_expr *)n->parameters[i],&child,depth+1)) return false;
+            PJ_CSE_MIX(child);
+        }
+    }
+    *hash = h;
+#undef PJ_CSE_MIX
+    return true;
+}
 
-static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *defined, int depth,
-    const pj_constants *constants, pj_text *s, int *next_temp) {
-    return pj_expr_impl(p,n,defined,depth,constants,s,next_temp,false);
+static bool pj_cse_equal(const me_dsl_compiled_program *p, const me_expr *a,
+                         const me_expr *b, int depth) {
+    if (!a || !b || depth > 32 || a->type != b->type || a->dtype != b->dtype ||
+        a->flags != b->flags) return false;
+    int kind = TYPE_MASK(a->type), arity = ARITY(a->type);
+    if (kind == ME_VARIABLE) return a->bound == b->bound;
+    if (kind == ME_CONSTANT) {
+        if (pj_float(a->dtype)) return a->dtype == ME_FLOAT32 ?
+            memcmp(&a->literal_f32,&b->literal_f32,sizeof(float)) == 0 :
+            memcmp(&a->value,&b->value,sizeof(double)) == 0;
+        return a->integer_magnitude == b->integer_magnitude;
+    }
+    if (a->function != b->function || !me_portable_operator(a) || arity < 1 || arity > 2)
+        return false;
+    for (int i = 0; i < arity; i++)
+        if (!pj_cse_equal(p,(const me_expr *)a->parameters[i],
+                          (const me_expr *)b->parameters[i],depth+1)) return false;
+    (void)p;
+    return true;
 }
 
 static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bool *defined, int depth,
-    const pj_constants *constants, pj_text *s, int *next_temp, bool plain_literal) {
+    const pj_constants *constants, pj_text *s, int *next_temp, bool plain_literal,
+    pj_cse_context *cse);
+
+static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *defined, int depth,
+    const pj_constants *constants, pj_text *s, int *next_temp) {
+    pj_cse_context cse = {0};
+    return pj_expr_impl(p,n,defined,depth,constants,s,next_temp,false,&cse);
+}
+
+static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bool *defined, int depth,
+    const pj_constants *constants, pj_text *s, int *next_temp, bool plain_literal,
+    pj_cse_context *cse) {
     if (!n || depth > 128 || !pj_type(n->dtype)) return NULL;
+    uint64_t cse_hash = 0;
+    bool cse_eligible = !plain_literal && pj_cse_key(p,n,&cse_hash,0);
+    if (cse_eligible) for (int i = 0; i < cse->count; i++) {
+        pj_cse_entry *entry = &cse->entries[i];
+        if (entry->hash == cse_hash && pj_cse_equal(p,entry->node,n,0))
+            return strdup(entry->value);
+    }
     const char *type = pj_type(n->dtype);
     char leaf[256];
     if (IS_FUNCTION(n->type) && pj_integer(n->dtype)) {
@@ -527,7 +608,7 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
          * answers. Exact nonzero call literals therefore need no barrier. */
         plain = plain || ((predicate || unary_math || binary_math || exponent_math || ternary_math) &&
             pj_plain_literal(n->parameters[j],"+"));
-        args[j] = pj_expr_impl(p,n->parameters[j],defined,depth+1,constants,s,next_temp,plain);
+        args[j] = pj_expr_impl(p,n->parameters[j],defined,depth+1,constants,s,next_temp,plain,cse);
         if (!args[j]) {
             for (int k = 0; k < arity; k++) free(args[k]);
             return NULL;
@@ -791,10 +872,15 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
     for (int j = 0; j < arity; j++) free(args[j]);
     if (!out) return NULL;
     int id = (*next_temp)++;
-    bool ok = pj_append(s,"%s pj_expr_%d = %s; if (pj_status) return pj_status;\n",type,id,out);
+    bool ok = pj_append(s,"%s pj_expr_%d = %s; PJ_STATUS_CHECK();\n",type,id,out);
     free(out);
     if (!ok) return NULL;
     snprintf(leaf,sizeof(leaf),"pj_expr_%d",id);
+    if (cse_eligible && cse->count < (int)(sizeof(cse->entries)/sizeof(cse->entries[0]))) {
+        pj_cse_entry *entry = &cse->entries[cse->count++];
+        entry->node = n; entry->hash = cse_hash;
+        snprintf(entry->value,sizeof(entry->value),"%s",leaf);
+    }
     return strdup(leaf);
 }
 
@@ -895,7 +981,7 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
                         constants->nd_preamble ? constants->nd_preamble : "")) return false;
                     char *lane = pj_expr(p,node,defined,0,&mapped,s,flow.next_temp);
                     if (!lane) return false;
-                    bool ok = pj_append(s,"local_%d[i] = %s; if (pj_status) return pj_status;\n}\n",index,lane);
+                    bool ok = pj_append(s,"local_%d[i] = %s; PJ_STATUS_CHECK();\n}\n",index,lane);
                     free(lane);
                     if (!ok) return false;
                     defined[index] = true;
@@ -908,13 +994,16 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
             if (assignment) {
                 int index = p->local_var_indices[stmt->as.assign.local_slot];
                 ok = node->dtype == p->vars.dtypes[index] &&
-                    pj_append(s,"local_%d = %s; if (pj_status) return pj_status;\n",index,value);
+                    pj_append(s,"local_%d = %s; PJ_STATUS_CHECK();\n",index,value);
                 defined[index] = true;
             }
             else if (constants && constants->scalar_phase) {
-                ok = pj_append(s,"((%s *)output)[0] = %s; if (pj_status) return pj_status; return 0;\n",
+                ok = pj_append(s,"((%s *)output)[0] = %s; PJ_STATUS_CHECK(); return 0;\n",
                     pj_type(p->output_dtype),value);
-            } else ok = pj_append(s,"((%s *)output)[i] = %s; if (pj_status) return pj_status; goto pj_lane_done;\n",pj_type(p->output_dtype),value);
+            } else {
+                ok = pj_append(s,"((%s *)output)[i] = %s; PJ_STATUS_CHECK(); goto pj_lane_done;\n",
+                    pj_type(p->output_dtype),value);
+            }
             free(value);
             if (!ok) return false;
             if (!assignment) return true;
@@ -936,13 +1025,13 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
                     if (!value) return false;
                     /* Test status after evaluating the condition, before either
                      * branch participates. Keep else-if chains syntactically intact. */
-                    bool ok = pj_append(s,"if (%s) { if (pj_status) return pj_status;\n",value);
+                    bool ok = pj_append(s,"if (%s) { PJ_STATUS_CHECK();\n",value);
                     free(value);
                     if (!ok) return false;
                     body = j == 0 ? &stmt->as.if_stmt.then_block : &stmt->as.if_stmt.elif_branches[j-1].block;
                 }
                 else {
-                    if (!pj_append(s,"else { if (pj_status) return pj_status;\n")) return false;
+                    if (!pj_append(s,"else { PJ_STATUS_CHECK();\n")) return false;
                     body = &stmt->as.if_stmt.else_block;
                 }
                 memcpy(branch,defined,sizeof(branch));
@@ -1101,13 +1190,7 @@ static bool pj_scalar_block(const me_dsl_compiled_block *block, int *count, int 
 }
 
 static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *constants) {
-#ifdef __EMSCRIPTEN__
-    /* Host function-pointer comparison/mask ABI is not the WASM adapter ABI. */
-    dsl_tracef("portable jit ineligible: wasm adapter lacks exact i64 and typed bridge ABI");
-    (void)p;
-    (void)constants;
-    return;
-#endif
+    if (p) dsl_tracef("portable jit prepare: request=%d profile=%d",p->jit_request_mode,p->semantic_profile);
     /* Elementwise statements, lane-local loops, and audited float reductions. ND logical
      * context is supported through lane-local reserved index recomputation. */
     if (!p || p->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_1 ||
@@ -1170,6 +1253,19 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         dsl_tracef("portable jit ineligible: unsupported typed statements");
         return;
     }
+#ifdef __EMSCRIPTEN__
+    /* The initial wasm ABI supports only elementwise source with all operations
+     * emitted inline. Host callbacks and pointer-table scratch state are not
+     * portable across the independently instantiated wasm module. */
+    if (scalar || p->uses_i_mask || p->uses_n_mask || p->uses_ndim ||
+        p->uses_flat_idx || p->portable_jit_nchecked || p->portable_jit_niops ||
+        p->portable_jit_ncomparisons || p->portable_jit_npreds || p->portable_jit_nmath ||
+        p->portable_jit_nmath2 || p->portable_jit_nmath3) {
+        free(body.text);
+        dsl_tracef("portable jit ineligible: wasm32 first slice requires bridge-free elementwise kernel");
+        return;
+    }
+#endif
     /* Lane-local ND index recomputation, range-checked like the interpreter's
      * logical traversal. Masked lanes are skipped before this preamble. */
     pj_text preamble = {0};
@@ -1266,6 +1362,16 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         return;
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
+    const char *entry_count_type = "int64_t";
+    const char *unmasked_loop = "for (int64_t i=0; i<count; i++) {\n";
+    const char *masked_loop = "for (int64_t i=0; i<count; i++) { if (mask && !mask[i]) continue;\n";
+#ifdef __EMSCRIPTEN__
+    /* Keep counts and address induction on wasm32 i32. Exact typed values still
+     * use int64_t/uint64_t in linear memory and arithmetic where required. */
+    entry_count_type = "int";
+    unmasked_loop = "for (int i=0; i<count; i++) {\n";
+    masked_loop = "for (int i=0; i<count; i++) { if (mask && !mask[i]) continue;\n";
+#endif
     int used = snprintf(source,capacity,
         "/* portable-1.1 lowering-r29 integral-math abi-r11 */\n"
         "#include <stdint.h>\n"
@@ -1335,7 +1441,8 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "return x op y; }\n"
         "PJ_COMPARE(eq, ==)\nPJ_COMPARE(ne, !=)\nPJ_COMPARE(lt, <)\n"
         "PJ_COMPARE(le, <=)\nPJ_COMPARE(gt, >)\nPJ_COMPARE(ge, >=)\n"
-        "static int %s(const void *const *inputs, void *restrict output, int64_t count) {\n"
+        "%s"
+        "static int %s(const void *const *inputs, void *restrict output, %s count) {\n"
         "const unsigned char *mask = 0;\n"
         "const int64_t pj_cap = *(const int64_t *)inputs[%d];\n"
         "int pj_status = 0;\n"
@@ -1344,24 +1451,30 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "%s"
         "%s"
         "%s %s return 0; }\n",
-        "pj_unmasked",p->n_inputs+ME_DSL_PORTABLE_JIT_CAP_OFF,
+        p->portable_jit_nchecked || p->portable_jit_niops || p->portable_jit_ncomparisons ||
+            p->portable_jit_npreds || p->portable_jit_nmath || p->portable_jit_nmath2 ||
+            p->portable_jit_nmath3 ?
+            "#define PJ_STATUS_CHECK() do { if (pj_status) return pj_status; } while (0)\n" :
+            "#define PJ_STATUS_CHECK() ((void)0)\n",
+        "pj_unmasked",entry_count_type,p->n_inputs+ME_DSL_PORTABLE_JIT_CAP_OFF,
         input_declarations.text ? input_declarations.text : "",nd_decl,
-        scalar ? "" : "for (int64_t i=0; i<count; i++) {\n",
+        scalar ? "" : unmasked_loop,
         scalar ? "" : (preamble.text ? preamble.text : ""),unmasked_body.text,
         scalar ? "" : "pj_lane_done: ; }");
     if (used >= 0 && (size_t)used < capacity) {
         int appended = snprintf(source+used,capacity-(size_t)used,
-            "static int pj_masked(const void *const *inputs, void *restrict output, int64_t count) {\n"
+            "static int pj_masked(const void *const *inputs, void *restrict output, %s count) {\n"
             "const unsigned char *mask = inputs[%d];\n"
             "const int64_t pj_cap = *(const int64_t *)inputs[%d];\nint pj_status = 0;\n"
             "%s%s%s%s%s %s return 0; }\n"
-            "int %s(const void *const *inputs, void *output, int64_t count) {\n"
-            "return inputs[%d] ? pj_masked(inputs,output,count) : pj_unmasked(inputs,output,count); }\n",
-            p->n_inputs,p->n_inputs+ME_DSL_PORTABLE_JIT_CAP_OFF,
-            input_declarations.text ? input_declarations.text : "",nd_decl,
-            scalar ? "" : "for (int64_t i=0; i<count; i++) { if (mask && !mask[i]) continue;\n",
-            scalar ? "" : (preamble.text ? preamble.text : ""),body.text,
-            scalar ? "" : "pj_lane_done: ; }",ME_DSL_JIT_SYMBOL_NAME,p->n_inputs);
+             "int %s(const void *const *inputs, void *output, %s count) {\n"
+             "if (count < 0) return -1;\n"
+             "return inputs[%d] ? pj_masked(inputs,output,count) : pj_unmasked(inputs,output,count); }\n",
+             entry_count_type,p->n_inputs,p->n_inputs+ME_DSL_PORTABLE_JIT_CAP_OFF,
+             input_declarations.text ? input_declarations.text : "",nd_decl,
+             scalar ? "" : masked_loop,
+             scalar ? "" : (preamble.text ? preamble.text : ""),body.text,
+             scalar ? "" : "pj_lane_done: ; }",ME_DSL_JIT_SYMBOL_NAME,entry_count_type,p->n_inputs);
         if (appended < 0 || (size_t)appended >= capacity-(size_t)used) used = -1;
     } else used = -1;
     free(input_declarations.text);
@@ -1371,6 +1484,9 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     if (used < 0) { free(source); me_dsl_jit_ir_free(ir); return; }
     p->jit_ir = ir;
     p->jit_c_source = source;
+#ifdef __EMSCRIPTEN__
+    p->jit_portable_wasm_source = true;
+#endif
     p->jit_nparams = p->n_inputs;
     uint64_t hash = UINT64_C(1469598103934665603);
     for (const unsigned char *c = (const unsigned char *)source; *c; c++) {

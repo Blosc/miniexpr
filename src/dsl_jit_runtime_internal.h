@@ -195,6 +195,8 @@ typedef struct {
     size_t output_itemsize;   /* width bound when output_dtype is a string type */
     me_dsl_jit_ir_program *jit_ir;
     uint64_t jit_ir_fingerprint;
+    /* Distinguishes typed portable source from legacy wasm-patchable C. */
+    bool jit_portable_wasm_source;
     int jit_ir_error_line;
     int jit_ir_error_column;
     char jit_ir_error[128];
