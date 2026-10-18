@@ -958,124 +958,203 @@ static int dsl_eval_for_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_st
         return ME_EVAL_ERR_INVALID_ARG;
     }
 
+    int slot = stmt->as.for_loop.loop_var_slot;
+    int loop_var_index = ctx->program->local_var_indices[slot];
+    int64_t *loop_buf = (int64_t *)ctx->local_buffers[slot];
+
+    bool uniform_bounds = !contains_reduction(start_expr->expr) &&
+                          !contains_reduction(stop_expr->expr) &&
+                          !contains_reduction(step_expr->expr);
+    const me_dsl_compiled_expr *bound_exprs[3] = {start_expr, stop_expr, step_expr};
+    for (int b = 0; b < 3 && uniform_bounds; b++) {
+        for (int k = 0; k < bound_exprs[b]->n_vars; k++) {
+            int v = bound_exprs[b]->var_indices[k];
+            if (v < 0 || v >= ctx->program->vars.count ||
+                (ctx->program->local_slots && ctx->program->local_slots[v] >= 0) ||
+                !ctx->program->vars.uniform || !ctx->program->vars.uniform[v]) {
+                uniform_bounds = false;
+                break;
+            }
+        }
+    }
+
     void *start_buf = malloc(start_size);
     void *stop_buf = malloc(stop_size);
     void *step_buf = malloc(step_size);
-    int64_t *iter_vals = malloc((size_t)ctx->nitems * sizeof(*iter_vals));
-    int64_t *stop_vals = malloc((size_t)ctx->nitems * sizeof(*stop_vals));
-    int64_t *step_vals = malloc((size_t)ctx->nitems * sizeof(*step_vals));
-    if (!start_buf || !stop_buf || !step_buf || !iter_vals || !stop_vals || !step_vals) {
-        free(start_buf);
-        free(stop_buf);
-        free(step_buf);
-        free(iter_vals);
-        free(stop_vals);
-        free(step_vals);
-        free(active_mask);
-        return ME_EVAL_ERR_OOM;
+    int64_t *iter_vals = uniform_bounds ? NULL : malloc((size_t)ctx->nitems * sizeof(*iter_vals));
+    int64_t *stop_vals = uniform_bounds ? NULL : malloc((size_t)ctx->nitems * sizeof(*stop_vals));
+    int64_t *step_vals = uniform_bounds ? NULL : malloc((size_t)ctx->nitems * sizeof(*step_vals));
+    uint8_t *run_mask = malloc((size_t)ctx->nitems);
+    uint8_t *break_mask = malloc((size_t)ctx->nitems);
+    uint8_t *continue_mask = malloc((size_t)ctx->nitems);
+    if (!start_buf || !stop_buf || !step_buf || !run_mask || !break_mask || !continue_mask ||
+        (!uniform_bounds && (!iter_vals || !stop_vals || !step_vals))) {
+        rc = ME_EVAL_ERR_OOM;
+        goto cleanup;
     }
 
-    for (int i = 0; i < ctx->nitems; i++) {
-        if (!active_mask[i]) {
-            continue;
+    int64_t uniform_iter = 0;
+    int64_t uniform_stop = 0;
+    int64_t uniform_step = 0;
+    if (uniform_bounds) {
+        int first_active = 0;
+        while (first_active < ctx->nitems && !active_mask[first_active]) {
+            first_active++;
         }
-        int64_t start_val = 0;
-        int64_t stop_val = 0;
-        int64_t step_val = 0;
-        rc = dsl_eval_expr_item(ctx, start_expr, i, start_buf);
-        if (rc != ME_EVAL_SUCCESS) {
-            goto cleanup;
-        }
-        rc = dsl_eval_expr_item(ctx, stop_expr, i, stop_buf);
-        if (rc != ME_EVAL_SUCCESS) {
-            goto cleanup;
-        }
-        rc = dsl_eval_expr_item(ctx, step_expr, i, step_buf);
-        if (rc != ME_EVAL_SUCCESS) {
-            goto cleanup;
-        }
-        if (!dsl_read_int64(start_buf, start_dtype, &start_val) ||
-            !dsl_read_int64(stop_buf, stop_dtype, &stop_val) ||
-            !dsl_read_int64(step_buf, step_dtype, &step_val)) {
+        rc = dsl_eval_expr_item(ctx, start_expr, first_active, start_buf);
+        if (rc != ME_EVAL_SUCCESS) goto cleanup;
+        rc = dsl_eval_expr_item(ctx, stop_expr, first_active, stop_buf);
+        if (rc != ME_EVAL_SUCCESS) goto cleanup;
+        rc = dsl_eval_expr_item(ctx, step_expr, first_active, step_buf);
+        if (rc != ME_EVAL_SUCCESS) goto cleanup;
+        if (!dsl_read_int64(start_buf, start_dtype, &uniform_iter) ||
+            !dsl_read_int64(stop_buf, stop_dtype, &uniform_stop) ||
+            !dsl_read_int64(step_buf, step_dtype, &uniform_step) ||
+            uniform_step == 0) {
             rc = ME_EVAL_ERR_INVALID_ARG;
             goto cleanup;
         }
-        if (step_val == 0) {
-            rc = ME_EVAL_ERR_INVALID_ARG;
+        if ((uniform_step > 0 && uniform_iter >= uniform_stop) ||
+            (uniform_step < 0 && uniform_iter <= uniform_stop)) {
+            rc = ME_EVAL_SUCCESS;
             goto cleanup;
-        }
-        iter_vals[i] = start_val;
-        stop_vals[i] = stop_val;
-        step_vals[i] = step_val;
-        if ((step_val > 0 && start_val >= stop_val) ||
-            (step_val < 0 && start_val <= stop_val)) {
-            active_mask[i] = 0;
         }
     }
-
-    int slot = stmt->as.for_loop.loop_var_slot;
-    int64_t *loop_buf = (int64_t *)ctx->local_buffers[slot];
-
-    while (dsl_mask_any(active_mask, ctx->nitems)) {
-        for (int i = 0; i < ctx->nitems; i++) {
-            /* A lane that exhausted its range or broke retains its last local
-             * value. Do not let other lanes' iterations overwrite it. */
-            if (!active_mask[i] && dsl_portable_typed_profile(ctx->program->semantic_profile)) continue;
-            loop_buf[i] = active_mask[i] ? iter_vals[i] : 0;
-            if (ctx->initialized && active_mask[i]) ctx->initialized[ctx->program->local_var_indices[slot]][i] = 1;
-        }
-
-        uint8_t *run_mask = malloc((size_t)ctx->nitems);
-        uint8_t *break_mask = calloc((size_t)ctx->nitems, sizeof(*break_mask));
-        uint8_t *continue_mask = calloc((size_t)ctx->nitems, sizeof(*continue_mask));
-        if (!run_mask || !break_mask || !continue_mask) {
-            free(run_mask);
-            free(break_mask);
-            free(continue_mask);
-            rc = ME_EVAL_ERR_OOM;
-            goto cleanup;
-        }
-        memcpy(run_mask, active_mask, (size_t)ctx->nitems);
-
-        rc = dsl_eval_block_element_loop(ctx, &stmt->as.for_loop.body, run_mask,
-                                         break_mask, continue_mask, return_mask);
-        free(run_mask);
-        if (rc != ME_EVAL_SUCCESS) {
-            free(break_mask);
-            free(continue_mask);
-            goto cleanup;
-        }
-
+    else {
         for (int i = 0; i < ctx->nitems; i++) {
             if (!active_mask[i]) {
                 continue;
             }
-            if (break_mask[i] || (return_mask && return_mask[i])) {
-                active_mask[i] = 0;
-                continue;
+            int64_t start_val = 0;
+            int64_t stop_val = 0;
+            int64_t step_val = 0;
+            rc = dsl_eval_expr_item(ctx, start_expr, i, start_buf);
+            if (rc != ME_EVAL_SUCCESS) {
+                goto cleanup;
             }
-            int64_t step_val = step_vals[i];
-            if (step_val > 0) {
-                if (iter_vals[i] > INT64_MAX - step_val) {
-                    active_mask[i] = 0;
-                    continue;
-                }
+            rc = dsl_eval_expr_item(ctx, stop_expr, i, stop_buf);
+            if (rc != ME_EVAL_SUCCESS) {
+                goto cleanup;
             }
-            else {
-                if (iter_vals[i] < INT64_MIN - step_val) {
-                    active_mask[i] = 0;
-                    continue;
-                }
+            rc = dsl_eval_expr_item(ctx, step_expr, i, step_buf);
+            if (rc != ME_EVAL_SUCCESS) {
+                goto cleanup;
             }
-            iter_vals[i] += step_val;
-            if ((step_val > 0 && iter_vals[i] >= stop_vals[i]) ||
-                (step_val < 0 && iter_vals[i] <= stop_vals[i])) {
+            if (!dsl_read_int64(start_buf, start_dtype, &start_val) ||
+                !dsl_read_int64(stop_buf, stop_dtype, &stop_val) ||
+                !dsl_read_int64(step_buf, step_dtype, &step_val)) {
+                rc = ME_EVAL_ERR_INVALID_ARG;
+                goto cleanup;
+            }
+            if (step_val == 0) {
+                rc = ME_EVAL_ERR_INVALID_ARG;
+                goto cleanup;
+            }
+            iter_vals[i] = start_val;
+            stop_vals[i] = stop_val;
+            step_vals[i] = step_val;
+            if ((step_val > 0 && start_val >= stop_val) ||
+                (step_val < 0 && start_val <= stop_val)) {
                 active_mask[i] = 0;
             }
         }
+    }
 
-        free(break_mask);
-        free(continue_mask);
+    bool body_reads_loop_var = false;
+    if (uniform_bounds && stmt->as.for_loop.body.nstmts == 1 &&
+        stmt->as.for_loop.body.stmts[0] &&
+        stmt->as.for_loop.body.stmts[0]->kind == ME_DSL_STMT_ASSIGN) {
+        const me_dsl_compiled_stmt *only = stmt->as.for_loop.body.stmts[0];
+        body_reads_loop_var = (only->as.assign.local_slot == slot);
+        for (int k = 0; k < only->as.assign.value.n_vars && !body_reads_loop_var; k++) {
+            if (only->as.assign.value.var_indices[k] == loop_var_index) {
+                body_reads_loop_var = true;
+            }
+        }
+    }
+    else {
+        body_reads_loop_var = true;
+    }
+
+    bool initialized_marked = false;
+    bool typed_profile = dsl_portable_typed_profile(ctx->program->semantic_profile);
+
+    while (dsl_mask_any(active_mask, ctx->nitems)) {
+        if (!initialized_marked && ctx->initialized) {
+            uint8_t *init_lanes = ctx->initialized[loop_var_index];
+            for (int i = 0; i < ctx->nitems; i++) {
+                if (active_mask[i]) init_lanes[i] = 1;
+            }
+            initialized_marked = true;
+        }
+        if (body_reads_loop_var) {
+            for (int i = 0; i < ctx->nitems; i++) {
+                /* A lane that exhausted its range or broke retains its last local
+                 * value. Do not let other lanes' iterations overwrite it. */
+                if (!active_mask[i] && typed_profile) continue;
+                int64_t val = uniform_bounds ? uniform_iter : iter_vals[i];
+                loop_buf[i] = active_mask[i] ? val : 0;
+            }
+        }
+
+        memcpy(run_mask, active_mask, (size_t)ctx->nitems);
+        memset(break_mask, 0, (size_t)ctx->nitems);
+        memset(continue_mask, 0, (size_t)ctx->nitems);
+
+        rc = dsl_eval_block_element_loop(ctx, &stmt->as.for_loop.body, run_mask,
+                                         break_mask, continue_mask, return_mask);
+        if (rc != ME_EVAL_SUCCESS) {
+            goto cleanup;
+        }
+
+        if (uniform_bounds) {
+            bool range_done = (uniform_step > 0) ?
+                (uniform_iter > INT64_MAX - uniform_step || uniform_iter + uniform_step >= uniform_stop) :
+                (uniform_iter < INT64_MIN - uniform_step || uniform_iter + uniform_step <= uniform_stop);
+            for (int i = 0; i < ctx->nitems; i++) {
+                if (!active_mask[i]) {
+                    if (!body_reads_loop_var && !typed_profile) loop_buf[i] = 0;
+                    continue;
+                }
+                if (break_mask[i] || (return_mask && return_mask[i]) || range_done) {
+                    if (!body_reads_loop_var) loop_buf[i] = uniform_iter;
+                    active_mask[i] = 0;
+                }
+            }
+            if (range_done) {
+                break;
+            }
+            uniform_iter += uniform_step;
+        }
+        else {
+            for (int i = 0; i < ctx->nitems; i++) {
+                if (!active_mask[i]) {
+                    continue;
+                }
+                if (break_mask[i] || (return_mask && return_mask[i])) {
+                    active_mask[i] = 0;
+                    continue;
+                }
+                int64_t step_val = step_vals[i];
+                if (step_val > 0) {
+                    if (iter_vals[i] > INT64_MAX - step_val) {
+                        active_mask[i] = 0;
+                        continue;
+                    }
+                }
+                else {
+                    if (iter_vals[i] < INT64_MIN - step_val) {
+                        active_mask[i] = 0;
+                        continue;
+                    }
+                }
+                iter_vals[i] += step_val;
+                if ((step_val > 0 && iter_vals[i] >= stop_vals[i]) ||
+                    (step_val < 0 && iter_vals[i] <= stop_vals[i])) {
+                    active_mask[i] = 0;
+                }
+            }
+        }
     }
 
     rc = ME_EVAL_SUCCESS;
@@ -1087,6 +1166,9 @@ cleanup:
     free(iter_vals);
     free(stop_vals);
     free(step_vals);
+    free(run_mask);
+    free(break_mask);
+    free(continue_mask);
     free(active_mask);
     return rc;
 }

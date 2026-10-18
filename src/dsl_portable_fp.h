@@ -22,6 +22,10 @@ bool dsl_portable_float_compare(const void *node, double x, double y);
  * exceptions. Save/restore the calling thread's environment (including flags).
  * No compiled handle or process-global policy is mutated. */
 static inline bool dsl_portable_fp_begin(fenv_t *saved) {
+#ifdef __EMSCRIPTEN__
+    (void)saved;
+    return true;
+#else
     if (feholdexcept(saved) != 0) return false;
     if (fesetround(FE_TONEAREST) == 0 && fegetround() == FE_TONEAREST) {
         /* fenv does not portably expose flush-to-zero/denormals-are-zero.
@@ -37,11 +41,17 @@ static inline bool dsl_portable_fp_begin(fenv_t *saved) {
     }
     fesetenv(saved);
     return false;
+#endif
 }
 
 static inline bool dsl_portable_fp_end(const fenv_t *saved) {
+#ifdef __EMSCRIPTEN__
+    (void)saved;
+    return true;
+#else
     dsl_portable_status_capture();
     return fesetenv(saved) == 0;
+#endif
 }
 
 #endif

@@ -26,6 +26,9 @@
 EM_JS(int, me_wasm_jit_instantiate,
       (const unsigned char *wasm_bytes, int wasm_len, int bridge_lookup_fn_idx,
        int emit_warnings, int force_invalid), {
+    if (typeof addFunction !== "function") {
+        return 0;
+    }
     var src = HEAPU8.subarray(wasm_bytes, wasm_bytes + wasm_len);
     if (force_invalid) {
         src = new Uint8Array([0x00]);
@@ -131,11 +134,19 @@ EM_JS(int, me_wasm_jit_instantiate,
         return sec.concat(body);
     }
     function buildEnvImports() {
-        var bridgeLookup = null;
-        var bridgeCache = Object.create(null);
-        if (bridge_lookup_fn_idx) {
-            bridgeLookup = wasmTable.get(bridge_lookup_fn_idx);
+        if (!bridge_lookup_fn_idx) {
+            return {
+                memory: wasmMemory,
+                memset: function(ptr, value, n) {
+                    if (n > 0) {
+                        HEAPU8.fill(value & 255, ptr, ptr + n);
+                    }
+                    return ptr | 0;
+                }
+            };
         }
+        var bridgeLookup = wasmTable.get(bridge_lookup_fn_idx);
+        var bridgeCache = Object.create(null);
         function lookupBridge(name) {
             if (!bridgeLookup) {
                 return null;
@@ -461,7 +472,11 @@ EM_JS(int, me_wasm_jit_instantiate,
 });
 
 EM_JS(void, me_wasm_jit_free_fn, (int idx), {
-    if (idx) removeFunction(idx);
+    if (idx && typeof removeFunction === "function") removeFunction(idx);
+});
+
+EM_JS(int, me_wasm_jit_has_add_function, (void), {
+    return typeof addFunction === "function" ? 1 : 0;
 });
 #endif
 
@@ -694,19 +709,11 @@ static char *dsl_wasm32_prepare_portable_source(const char *src) {
         "typedef signed int int32_t; typedef unsigned int uint32_t;\n"
         "typedef signed long long int64_t; typedef unsigned long long uint64_t;\n"
         "typedef unsigned int uintptr_t; typedef unsigned int size_t;\n"
-        "typedef char me_assert_i8[(sizeof(int8_t)==1)?1:-1];\n"
-        "typedef char me_assert_i16[(sizeof(int16_t)==2)?1:-1];\n"
-        "typedef char me_assert_i32[(sizeof(int32_t)==4)?1:-1];\n"
-        "typedef char me_assert_i64[(sizeof(int64_t)==8)?1:-1];\n"
-        "typedef char me_assert_ptr[(sizeof(void *)==4)?1:-1];\n"
         "#define UINT64_C(x) x##ULL\n"
         "#define UINT64_MAX 0xffffffffffffffffULL\n"
         "#define INT64_MAX 0x7fffffffffffffffLL\n"
         "#define INT64_MIN (-0x7fffffffffffffffLL-1LL)\n"
-        "#define INT_MAX 2147483647\n#define INT_MIN (-2147483647-1)\n"
-        "static void *memcpy(void *d, const void *s, size_t n) {\n"
-        "unsigned char *x=(unsigned char *)d; const unsigned char *y=(const unsigned char *)s;\n"
-        "for (size_t i=0; i<n; i++) x[i]=y[i]; return d; }\n";
+        "#define INT_MAX 2147483647\n#define INT_MIN (-2147483647-1)\n";
     if (!src) return NULL;
     size_t capacity = strlen(src) + sizeof(preamble) + 1;
     char *out = malloc(capacity);
@@ -841,6 +848,11 @@ bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
         dsl_tracef("jit runtime skip: side-module wasm32 helpers are not registered");
         return false;
     }
+#else
+    if (!me_wasm_jit_has_add_function()) {
+        dsl_tracef("jit runtime skip: Emscripten addFunction helper is not exported");
+        return false;
+    }
 #endif
     /* Portable Menudet source already has an explicit wasm32 entry ABI and
      * exact-width scalar types. Never run the legacy 64-to-32-bit rewrite on it. */
@@ -879,7 +891,8 @@ bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
     unsigned int jit_base = ((unsigned int)(uintptr_t)jit_scratch + 0xFFFFu) & ~0xFFFFu;
     tcc_set_wasm_data_base(state, jit_base);
 
-    if (!dsl_wasm32_register_required_symbols(state, patched_src)) {
+    if (!program->jit_portable_wasm_source &&
+        !dsl_wasm32_register_required_symbols(state, patched_src)) {
         tcc_delete(state);
         free(patched_src);
         free(jit_scratch);

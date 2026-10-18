@@ -61,6 +61,7 @@ typedef struct {
 typedef struct {
     const me_expr *node;
     uint64_t hash;
+    int uses;
     char value[256];
 } pj_cse_entry;
 
@@ -192,7 +193,11 @@ static bool pj_runtime_float(const me_dsl_compiled_program *p, const me_expr *n,
     if (!n || depth > 128 || !pj_float(n->dtype)) return false;
     if (TYPE_MASK(n->type) == ME_VARIABLE && is_synthetic_address(n->bound)) {
         int index = (int)((const char *)n->bound - synthetic_var_addresses);
+#ifdef __EMSCRIPTEN__
+        return index >= 0 && index < p->vars.count;
+#else
         return index >= 0 && index < p->n_inputs && !p->vars.uniform[index];
+#endif
     }
     if (!IS_FUNCTION(n->type) || is_reduction_node(n)) return false;
     const char *op = me_portable_operator(n);
@@ -235,7 +240,8 @@ static bool pj_cse_key(const me_dsl_compiled_program *p, const me_expr *n, uint6
     if (kind == ME_VARIABLE) {
         if (!is_synthetic_address(n->bound)) return false;
         int index = (int)((const char *)n->bound - synthetic_var_addresses);
-        if (index < 0 || index >= p->n_inputs) return false;
+        if (index < 0 || index >= p->vars.count ||
+            (p->output_is_scalar && !p->vars.uniform[index])) return false;
         PJ_CSE_MIX(index);
     } else if (kind == ME_CONSTANT) {
         if (pj_float(n->dtype)) {
@@ -282,6 +288,33 @@ static bool pj_cse_equal(const me_dsl_compiled_program *p, const me_expr *a,
     return true;
 }
 
+static void pj_cse_prescan(const me_dsl_compiled_program *p, const me_expr *n,
+                           pj_cse_context *cse, int depth) {
+    if (!n || depth > 32 || !IS_FUNCTION(n->type) || is_reduction_node(n)) return;
+    uint64_t hash = 0;
+    if (pj_cse_key(p, n, &hash, 0)) {
+        for (int i = 0; i < cse->count; i++) {
+            if (cse->entries[i].hash == hash && pj_cse_equal(p, cse->entries[i].node, n, 0)) {
+                cse->entries[i].uses++;
+                return;
+            }
+        }
+        if (cse->count < (int)(sizeof(cse->entries) / sizeof(cse->entries[0]))) {
+            pj_cse_entry *entry = &cse->entries[cse->count++];
+            entry->node = n;
+            entry->hash = hash;
+            entry->uses = 1;
+            entry->value[0] = '\0';
+        }
+    }
+    const char *op = me_portable_operator(n);
+    if (op && (!strcmp(op, "where") || !strcmp(op, "and") || !strcmp(op, "or"))) return;
+    int arity = ARITY(n->type);
+    for (int i = 0; i < arity && i < 3; i++) {
+        pj_cse_prescan(p, (const me_expr *)n->parameters[i], cse, depth + 1);
+    }
+}
+
 static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bool *defined, int depth,
     const pj_constants *constants, pj_text *s, int *next_temp, bool plain_literal,
     pj_cse_context *cse);
@@ -289,6 +322,7 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
 static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *defined, int depth,
     const pj_constants *constants, pj_text *s, int *next_temp) {
     pj_cse_context cse = {0};
+    pj_cse_prescan(p, n, &cse, 0);
     return pj_expr_impl(p,n,defined,depth,constants,s,next_temp,false,&cse);
 }
 
@@ -298,10 +332,14 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
     if (!n || depth > 128 || !pj_type(n->dtype)) return NULL;
     uint64_t cse_hash = 0;
     bool cse_eligible = !plain_literal && pj_cse_key(p,n,&cse_hash,0);
+    pj_cse_entry *cse_slot = NULL;
     if (cse_eligible) for (int i = 0; i < cse->count; i++) {
         pj_cse_entry *entry = &cse->entries[i];
-        if (entry->hash == cse_hash && pj_cse_equal(p,entry->node,n,0))
-            return strdup(entry->value);
+        if (entry->hash == cse_hash && pj_cse_equal(p,entry->node,n,0)) {
+            if (entry->value[0]) return strdup(entry->value);
+            cse_slot = entry;
+            break;
+        }
     }
     const char *type = pj_type(n->dtype);
     char leaf[256];
@@ -510,7 +548,11 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
      * in generated mixed comparison code; no floating transport is involved. */
     bool checked_comparison = integer_comparison &&
         pj_unsigned(arg0->dtype) != pj_unsigned(arg1->dtype);
+#ifdef __EMSCRIPTEN__
+    bool comparison_bridge = false;
+#else
     bool comparison_bridge = comparison && !integer_comparison;
+#endif
     bool arithmetic = op && float_result &&
         (!strcmp(op,"+") || !strcmp(op,"-") || !strcmp(op,"*") || !strcmp(op,"/")) &&
         (arity == 2 || (arity == 1 && !strcmp(op,"-")));
@@ -604,6 +646,11 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
     for (int j = 0; j < arity; j++) {
         bool plain = arithmetic && arity == 2 && pj_plain_literal(n->parameters[j],op) &&
             pj_runtime_float(p,n->parameters[1-j],0);
+#ifdef __EMSCRIPTEN__
+        plain = plain || (comparison && arity == 2 &&
+            TYPE_MASK(((const me_expr *)n->parameters[j])->type) == ME_CONSTANT &&
+            pj_runtime_float(p,n->parameters[1-j],0));
+#endif
         /* Runtime-bound callbacks cannot be folded into compile-time libm
          * answers. Exact nonzero call literals therefore need no barrier. */
         plain = plain || ((predicate || unary_math || binary_math || exponent_math || ternary_math) &&
@@ -871,14 +918,22 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
     }
     for (int j = 0; j < arity; j++) free(args[j]);
     if (!out) return NULL;
+#ifdef __EMSCRIPTEN__
+    if (!cse_slot || cse_slot->uses <= 1) {
+        return out;
+    }
+#endif
     int id = (*next_temp)++;
     bool ok = pj_append(s,"%s pj_expr_%d = %s; PJ_STATUS_CHECK();\n",type,id,out);
     free(out);
     if (!ok) return NULL;
     snprintf(leaf,sizeof(leaf),"pj_expr_%d",id);
-    if (cse_eligible && cse->count < (int)(sizeof(cse->entries)/sizeof(cse->entries[0]))) {
+    if (cse_slot) {
+        snprintf(cse_slot->value,sizeof(cse_slot->value),"%s",leaf);
+    }
+    else if (cse_eligible && cse->count < (int)(sizeof(cse->entries)/sizeof(cse->entries[0]))) {
         pj_cse_entry *entry = &cse->entries[cse->count++];
-        entry->node = n; entry->hash = cse_hash;
+        entry->node = n; entry->hash = cse_hash; entry->uses = 1;
         snprintf(entry->value,sizeof(entry->value),"%s",leaf);
     }
     return strdup(leaf);
@@ -938,6 +993,19 @@ static bool pj_falls_through(const me_dsl_compiled_block *block, int depth) {
         }
     }
     return true;
+}
+
+static bool pj_expr_uses_var(const me_expr *n, int var_index, int depth) {
+    if (!n || depth > 128) return true;
+    if (TYPE_MASK(n->type) == ME_VARIABLE) {
+        return n->bound == synthetic_var_addresses + var_index;
+    }
+    if (!IS_FUNCTION(n->type)) return false;
+    int arity = ARITY(n->type);
+    for (int i = 0; i < arity && i < 3; i++) {
+        if (pj_expr_uses_var((const me_expr *)n->parameters[i], var_index, depth + 1)) return true;
+    }
+    return false;
 }
 
 /* A terminal same-width modular operation can store its unsigned bit pattern
@@ -1049,6 +1117,101 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
         else if (stmt->kind == ME_DSL_STMT_FOR) {
             const me_expr *nodes[] = {stmt->as.for_loop.start.expr,
                 stmt->as.for_loop.stop.expr, stmt->as.for_loop.step.expr};
+            int index = p->local_var_indices[stmt->as.for_loop.loop_var_slot];
+            uint64_t ubounds[3] = {0};
+            if (p->vars.dtypes[index] == ME_INT64 &&
+                nodes[0] && pj_integral(nodes[0]->dtype) && !pj_unsigned(nodes[0]->dtype) &&
+                nodes[1] && pj_integral(nodes[1]->dtype) && !pj_unsigned(nodes[1]->dtype) &&
+                nodes[2] && pj_integral(nodes[2]->dtype) && !pj_unsigned(nodes[2]->dtype) &&
+                pj_literal_integer_bits(nodes[0],ME_INT64,&ubounds[0]) &&
+                pj_literal_integer_bits(nodes[1],ME_INT64,&ubounds[1]) &&
+                pj_literal_integer_bits(nodes[2],ME_INT64,&ubounds[2])) {
+                int64_t cstart = (int64_t)ubounds[0], cstop = (int64_t)ubounds[1], cstep = (int64_t)ubounds[2];
+                if (cstep != 0) {
+                    int trips = 0;
+                    int64_t iter = cstart, last_iter = cstart;
+                    while (cstep > 0 ? iter < cstop : iter > cstop) {
+                        last_iter = iter;
+                        trips++;
+                        if (trips > 64) break;
+                        if (cstep > 0 ? iter > INT64_MAX - cstep : iter < INT64_MIN - cstep) break;
+                        iter += cstep;
+                    }
+                    if (trips == 0) continue;
+                    if (trips <= 64 && !(constants && constants->scalar_phase) &&
+                        stmt->as.for_loop.body.nstmts == 1 &&
+                        stmt->as.for_loop.body.stmts[0] &&
+                        stmt->as.for_loop.body.stmts[0]->kind == ME_DSL_STMT_ASSIGN) {
+                        const me_dsl_compiled_stmt *only = stmt->as.for_loop.body.stmts[0];
+                        int target_idx = p->local_var_indices[only->as.assign.local_slot];
+                        const me_expr *rhs = only->as.assign.value.expr;
+                        const char *op = rhs && IS_FUNCTION(rhs->type) && ARITY(rhs->type) == 2 ?
+                            me_portable_operator(rhs) : NULL;
+                        if (target_idx >= 0 && target_idx < p->vars.count &&
+                            target_idx != index && defined[target_idx] &&
+                            !(p->output_is_scalar && !p->vars.uniform[target_idx]) &&
+                            rhs && pj_float(rhs->dtype) && rhs->dtype == p->vars.dtypes[target_idx] &&
+                            op && (!strcmp(op,"+") || !strcmp(op,"-") || !strcmp(op,"*") || !strcmp(op,"/"))) {
+                            const me_expr *a0 = (const me_expr *)rhs->parameters[0];
+                            const me_expr *a1 = (const me_expr *)rhs->parameters[1];
+                            bool left_is_target = TYPE_MASK(a0->type) == ME_VARIABLE &&
+                                a0->bound == synthetic_var_addresses + target_idx &&
+                                a0->dtype == rhs->dtype;
+                            bool right_is_target = !left_is_target &&
+                                TYPE_MASK(a1->type) == ME_VARIABLE &&
+                                a1->bound == synthetic_var_addresses + target_idx &&
+                                a1->dtype == rhs->dtype;
+                            const me_expr *other = left_is_target ? a1 : (right_is_target ? a0 : NULL);
+                            if (other && other->dtype == rhs->dtype &&
+                                !pj_expr_uses_var(other,target_idx,0) &&
+                                !pj_expr_uses_var(other,index,0)) {
+                                char *other_val = pj_expr(p,other,defined,0,constants,s,flow.next_temp);
+                                if (!other_val) return false;
+                                int step_id = (*flow.next_temp)++;
+                                const char *ttype = pj_type(rhs->dtype);
+                                bool next_is_return = (i + 1 < block->nstmts &&
+                                    block->stmts[i + 1] &&
+                                    block->stmts[i + 1]->kind == ME_DSL_STMT_RETURN);
+                                const me_expr *ret_expr = next_is_return ?
+                                    block->stmts[i + 1]->as.return_stmt.expr.expr : NULL;
+                                bool fuse_return = next_is_return && ret_expr &&
+                                    TYPE_MASK(ret_expr->type) == ME_VARIABLE &&
+                                    ret_expr->bound == synthetic_var_addresses + target_idx &&
+                                    ret_expr->dtype == p->output_dtype &&
+                                    ret_expr->dtype == rhs->dtype;
+                                bool need_loop_var = !next_is_return ||
+                                    (ret_expr && pj_expr_uses_var(ret_expr,index,0));
+                                bool ok = pj_append(s,"const %s pj_for_rhs_%d = %s; PJ_STATUS_CHECK();\n",
+                                    ttype,step_id,other_val);
+                                free(other_val);
+                                if (!ok) return false;
+                                if (need_loop_var &&
+                                    !pj_append(s,"local_%d = %lldLL;\n",index,(long long)last_iter)) {
+                                    return false;
+                                }
+                                if (fuse_return ? !pj_append(s,"((%s *)output)[i] = ",ttype) :
+                                                  !pj_append(s,"local_%d = ",target_idx)) {
+                                    return false;
+                                }
+                                for (int t = 0; t < trips; t++) {
+                                    if (!pj_append(s,left_is_target ? "((%s)(" : "((%s)(pj_for_rhs_%d %s ",
+                                        ttype,step_id,op)) return false;
+                                }
+                                if (!pj_append(s,"local_%d",target_idx)) return false;
+                                for (int t = 0; t < trips; t++) {
+                                    if (!pj_append(s,left_is_target ? " %s pj_for_rhs_%d))" : "))",
+                                        op,step_id)) return false;
+                                }
+                                if (fuse_return) {
+                                    return pj_append(s,"; goto pj_lane_done;\n");
+                                }
+                                if (!pj_append(s,";\n")) return false;
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
             char *values[3] = {0};
             bool ok = true;
             for (int j = 0; j < 3; j++) {
@@ -1062,7 +1225,6 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
                 if (!values[j]) { ok = false; break; }
             }
             int label = (*flow.next_label)++;
-            int index = p->local_var_indices[stmt->as.for_loop.loop_var_slot];
             ok = ok && p->vars.dtypes[index] == ME_INT64 && pj_append(s,
                 "{ int64_t pj_iter_%d = %s; int64_t pj_stop_%d = %s; int64_t pj_step_%d = %s;\n"
                 "if (pj_status) return pj_status; if (!pj_step_%d) return -5;\n"
@@ -1092,7 +1254,7 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
             pj_flow loop_flow = {flow.next_label,flow.next_temp,label};
             bool body_defined[ME_MAX_VARS];
             memcpy(body_defined,defined,sizeof(body_defined));
-            if (!pj_append(s,"{ uint64_t pj_count_%d = 0; for (;;) {\npj_continue_%d: ;\n",label,label)) return false;
+            if (!pj_append(s,"{ uint64_t pj_count_%d = 0; while (1) {\npj_continue_%d: ;\n",label,label)) return false;
             me_dsl_compiled_block prefix = stmt->as.while_loop.body;
             prefix.nstmts = stmt->as.while_loop.condition_nstmts;
             if (!pj_block(p,&prefix,body_defined,s,depth+1,constants,loop_flow)) return false;
@@ -1238,7 +1400,11 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
             continue;
         }
         if (!pj_type(p->vars.dtypes[index]) ||
+#ifdef __EMSCRIPTEN__
+            !pj_append(&body,"%s local_%d;\n",pj_type(p->vars.dtypes[index]),index)) {
+#else
             !pj_append(&body,"volatile %s local_%d;\n",pj_type(p->vars.dtypes[index]),index)) {
+#endif
             free(body.text);
             return;
         }
@@ -1365,12 +1531,15 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     const char *entry_count_type = "int64_t";
     const char *unmasked_loop = "for (int64_t i=0; i<count; i++) {\n";
     const char *masked_loop = "for (int64_t i=0; i<count; i++) { if (mask && !mask[i]) continue;\n";
+    const char *loop_close = "pj_lane_done: ; }";
 #ifdef __EMSCRIPTEN__
-    /* Keep counts and address induction on wasm32 i32. Exact typed values still
-     * use int64_t/uint64_t in linear memory and arithmetic where required. */
+    /* Keep counts and address induction on wasm32 i32. Use a single-header
+     * while loop so TCC's wasm32 backend emits structured loop/br_if control
+     * flow instead of falling back to the br_table state-machine dispatcher. */
     entry_count_type = "int";
-    unmasked_loop = "for (int i=0; i<count; i++) {\n";
-    masked_loop = "for (int i=0; i<count; i++) { if (mask && !mask[i]) continue;\n";
+    unmasked_loop = "{ int i=0; while (i<count) {\n";
+    masked_loop = "{ int i=0; while (i<count) { if (mask && !mask[i]) goto pj_lane_done;\n";
+    loop_close = "pj_lane_done: i++; } }";
 #endif
     int used = snprintf(source,capacity,
         "/* portable-1.1 lowering-r29 integral-math abi-r11 */\n"
@@ -1393,14 +1562,13 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "typedef _Bool (*pj_pred)(const void *,double);\n"
         "typedef uint64_t (*pj_iop)(const void *,uint64_t,uint64_t,int *);\n"
         "typedef uint64_t (*pj_checked)(const void *,uint64_t,uint64_t,uint64_t,int *);\n"
-        "static inline uint64_t pj_pack_f32(float x) { uint32_t u; memcpy(&u,&x,4); return u; }\n"
-        "static inline uint64_t pj_pack_f64(double x) { uint64_t u; memcpy(&u,&x,8); return u; }\n"
-        "static inline float pj_unpack_f32(uint64_t x) { uint32_t u=(uint32_t)x; float f; memcpy(&f,&u,4); return f; }\n"
-        "static inline double pj_unpack_f64(uint64_t x) { double f; memcpy(&f,&x,8); return f; }\n"
-        /* C99 union representation access implements modular signed arithmetic
-         * on exact-width two's-complement types without overflowing signed C
-         * arithmetic or out-of-range signed casts. Expression macros evaluate
-         * x once and avoid helper/memcpy calls even when TCC does not inline. */
+        /* C99 union representation access implements bit-exact packing and
+         * modular signed arithmetic on exact-width two's-complement types
+         * without overflowing signed C arithmetic or helper/memcpy calls. */
+        "#define pj_pack_f32(x) ((uint64_t)((union { float f; uint32_t u; }){ .f = (x) }).u)\n"
+        "#define pj_pack_f64(x) (((union { double f; uint64_t u; }){ .f = (x) }).u)\n"
+        "#define pj_unpack_f32(x) (((union { uint32_t u; float f; }){ .u = (uint32_t)(x) }).f)\n"
+        "#define pj_unpack_f64(x) (((union { uint64_t u; double f; }){ .u = (uint64_t)(x) }).f)\n"
         "#define PJ_SIGNED(S,U,x) (((union { U u; S s; }){ .u = (U)(x) }).s)\n"
         "#define pj_int8_t(x) PJ_SIGNED(int8_t,uint8_t,x)\n"
         "#define pj_int16_t(x) PJ_SIGNED(int16_t,uint16_t,x)\n"
@@ -1410,38 +1578,6 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "#define pj_uint16_t(x) ((uint16_t)(x))\n"
         "#define pj_uint32_t(x) ((uint32_t)(x))\n"
         "#define pj_uint64_t(x) ((uint64_t)(x))\n"
-        /* Overflow is detected in unsigned representations, never by executing
-         * overflowing signed C arithmetic. Multiplication checks bounds before
-         * producing the modular bit pattern. Weak int64 stays checked. */
-        "static inline uint64_t pj_weak_add(uint64_t a,uint64_t b,int *status) {\n"
-        "uint64_t r=a+b; if ((~(a^b)&(a^r))>>63) *status=-5; return r; }\n"
-        "static inline uint64_t pj_weak_sub(uint64_t a,uint64_t b,int *status) {\n"
-        "uint64_t r=a-b; if (((a^b)&(a^r))>>63) *status=-5; return r; }\n"
-        "static inline uint64_t pj_weak_mul(uint64_t a,uint64_t b,int *status) {\n"
-        "int64_t x=pj_int64_t(a), y=pj_int64_t(b);\n"
-        "if (x>0 ? (y>0 ? x>INT64_MAX/y : y<INT64_MIN/x) :\n"
-        "    (x<0 && (y>0 ? x<INT64_MIN/y : y<INT64_MAX/x))) *status=-5;\n"
-        "return a*b; }\n"
-        /* Signed values are sign-extended before transport. Only compare their
-         * unsigned representations once both operands are known nonnegative. */
-        "static inline int pj_icmp(uint64_t a,uint64_t b,int au,int bu) {\n"
-        "int an=!au && pj_int64_t(a)<0, bn=!bu && pj_int64_t(b)<0;\n"
-        "if (an!=bn) return an ? -1 : 1;\n"
-        "return (a>b)-(a<b); }\n"
-        /* Inspect representation without executing any floating comparison on
-         * a NaN (especially sNaN). Arguments are evaluated once, preserving lazy
-         * branch participation and the tree's float32->float64 widening. GCC and
-         * Clang inline/specialize these helpers; TCC may emit local calls. */
-        "#define PJ_COMPARE(name, op) \\\n"
-        "static inline _Bool pj_##name(pj_cmp slow, const void *node, double x, double y) { \\\n"
-        "union { double f; uint64_t u; } a, b; a.f=x; b.f=y; \\\n"
-        "if ((a.u & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000) || \\\n"
-        "    (b.u & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000)) \\\n"
-        "    return slow(node,x,y); \\\n"
-        "return x op y; }\n"
-        "PJ_COMPARE(eq, ==)\nPJ_COMPARE(ne, !=)\nPJ_COMPARE(lt, <)\n"
-        "PJ_COMPARE(le, <=)\nPJ_COMPARE(gt, >)\nPJ_COMPARE(ge, >=)\n"
-        "%s"
         "static int %s(const void *const *inputs, void *restrict output, %s count) {\n"
         "const unsigned char *mask = 0;\n"
         "const int64_t pj_cap = *(const int64_t *)inputs[%d];\n"
@@ -1450,17 +1586,18 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "%s"
         "%s"
         "%s"
+        "%s"
         "%s %s return 0; }\n",
+        "pj_unmasked",entry_count_type,p->n_inputs+ME_DSL_PORTABLE_JIT_CAP_OFF,
         p->portable_jit_nchecked || p->portable_jit_niops || p->portable_jit_ncomparisons ||
             p->portable_jit_npreds || p->portable_jit_nmath || p->portable_jit_nmath2 ||
             p->portable_jit_nmath3 ?
-            "#define PJ_STATUS_CHECK() do { if (pj_status) return pj_status; } while (0)\n" :
-            "#define PJ_STATUS_CHECK() ((void)0)\n",
-        "pj_unmasked",entry_count_type,p->n_inputs+ME_DSL_PORTABLE_JIT_CAP_OFF,
+            "#undef PJ_STATUS_CHECK\n#define PJ_STATUS_CHECK() do { if (pj_status) return pj_status; } while (0)\n" :
+            "#undef PJ_STATUS_CHECK\n#define PJ_STATUS_CHECK() ((void)0)\n",
         input_declarations.text ? input_declarations.text : "",nd_decl,
         scalar ? "" : unmasked_loop,
         scalar ? "" : (preamble.text ? preamble.text : ""),unmasked_body.text,
-        scalar ? "" : "pj_lane_done: ; }");
+        scalar ? "" : loop_close);
     if (used >= 0 && (size_t)used < capacity) {
         int appended = snprintf(source+used,capacity-(size_t)used,
             "static int pj_masked(const void *const *inputs, void *restrict output, %s count) {\n"
@@ -1474,7 +1611,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
              input_declarations.text ? input_declarations.text : "",nd_decl,
              scalar ? "" : masked_loop,
              scalar ? "" : (preamble.text ? preamble.text : ""),body.text,
-             scalar ? "" : "pj_lane_done: ; }",ME_DSL_JIT_SYMBOL_NAME,entry_count_type,p->n_inputs);
+             scalar ? "" : loop_close,ME_DSL_JIT_SYMBOL_NAME,entry_count_type,p->n_inputs);
         if (appended < 0 || (size_t)appended >= capacity-(size_t)used) used = -1;
     } else used = -1;
     free(input_declarations.text);

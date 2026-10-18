@@ -144,11 +144,19 @@
         return sec.concat(body);
     }
     function buildEnvImports() {
-        var bridgeLookup = null;
-        var bridgeCache = Object.create(null);
-        if (bridgeLookupFnIdx) {
-            bridgeLookup = wasmTable.get(bridgeLookupFnIdx);
+        if (!bridgeLookupFnIdx) {
+            return {
+                memory: wasmMemory,
+                memset: function(ptr, value, n) {
+                    if (n > 0 && runtime.HEAPU8) {
+                        runtime.HEAPU8.fill(value & 255, ptr, ptr + n);
+                    }
+                    return ptr | 0;
+                }
+            };
         }
+        var bridgeLookup = wasmTable.get(bridgeLookupFnIdx);
+        var bridgeCache = Object.create(null);
         function lookupBridge(name) {
             if (!bridgeLookup) {
                 return null;
