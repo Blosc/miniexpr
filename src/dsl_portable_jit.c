@@ -62,7 +62,7 @@ typedef struct {
     const me_expr *node;
     uint64_t hash;
     int uses;
-    char value[256];
+    char value[32];
 } pj_cse_entry;
 
 typedef struct {
@@ -321,9 +321,20 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
 
 static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *defined, int depth,
     const pj_constants *constants, pj_text *s, int *next_temp) {
+#ifdef __EMSCRIPTEN__
+    /* Nested lazy expressions call this wrapper recursively. Keep the CSE table
+     * off the wasm stack, whose default budget is much smaller than a host's. */
+    pj_cse_context *cse = calloc(1,sizeof(*cse));
+    if (!cse) return NULL;
+    pj_cse_prescan(p, n, cse, 0);
+    char *result = pj_expr_impl(p,n,defined,depth,constants,s,next_temp,false,cse);
+    free(cse);
+    return result;
+#else
     pj_cse_context cse = {0};
     pj_cse_prescan(p, n, &cse, 0);
     return pj_expr_impl(p,n,defined,depth,constants,s,next_temp,false,&cse);
+#endif
 }
 
 static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bool *defined, int depth,
@@ -1057,7 +1068,10 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
                 }
             }
             char *value = pj_expr(p,node,defined,0,constants,s,flow.next_temp);
-            if (!value) return false;
+            if (!value) {
+                dsl_tracef("portable jit ineligible: expression lowering failed dtype=%d",(int)node->dtype);
+                return false;
+            }
             bool ok;
             if (assignment) {
                 int index = p->local_var_indices[stmt->as.assign.local_slot];
@@ -1373,14 +1387,20 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     bool scalar = p->output_is_scalar;
     int reduction_count = 0;
-    if (scalar && (!pj_scalar_block(&p->block,&reduction_count,0) || !reduction_count)) return;
+    if (scalar && (!pj_scalar_block(&p->block,&reduction_count,0) || !reduction_count)) {
+        dsl_tracef("portable jit ineligible: unsupported scalar recipe");
+        return;
+    }
     for (int i = 0; i < p->n_inputs; i++) if (!pj_type(p->vars.dtypes[i])) {
         dsl_tracef("portable jit ineligible: unsupported input dtype"); return;
     }
     /* User compiler switches can override strict flags, so fail closed rather
      * than claim qualification under arbitrary host toolchain configuration. */
     const char *flags = me_jit_option_value("CFLAGS"), *tcc = getenv("ME_DSL_JIT_TCC_OPTIONS");
-    if ((flags && *flags) || (tcc && *tcc)) return;
+    if ((flags && *flags) || (tcc && *tcc)) {
+        dsl_tracef("portable jit ineligible: explicit compiler flags");
+        return;
+    }
     bool defined[ME_MAX_VARS] = {false};
     pj_text body = {0};
     p->portable_jit_ncomparisons = p->portable_jit_nmath = 0;
@@ -1395,6 +1415,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
                 pj_type(p->vars.dtypes[index]),index,pj_type(p->vars.dtypes[index]),
                 p->n_inputs+ME_DSL_PORTABLE_JIT_LOCALS_OFF,i)) {
                 free(body.text);
+                dsl_tracef("portable jit ineligible: scalar scratch declaration");
                 return;
             }
             continue;
@@ -1406,6 +1427,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
             !pj_append(&body,"volatile %s local_%d;\n",pj_type(p->vars.dtypes[index]),index)) {
 #endif
             free(body.text);
+            dsl_tracef("portable jit ineligible: local declaration");
             return;
         }
     }
@@ -1465,6 +1487,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         }
         ok = ok && pj_append(&preamble, "}\n}\nif (jit_bad) return -2;\n");
         if (!ok) {
+            dsl_tracef("portable jit ineligible: ND preamble");
             free(preamble.text);
             free(body.text);
             return;
@@ -1500,6 +1523,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     declarations_ok = declarations_ok && pj_append(&unmasked_body,"%s",scan);
     if (!declarations_ok) {
+        dsl_tracef("portable jit ineligible: input declarations");
         free(input_declarations.text); free(unmasked_body.text); free(body.text); free(preamble.text);
         return;
     }
@@ -1618,7 +1642,10 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     free(unmasked_body.text);
     free(preamble.text);
     free(body.text);
-    if (used < 0) { free(source); me_dsl_jit_ir_free(ir); return; }
+    if (used < 0) {
+        dsl_tracef("portable jit ineligible: generated source exceeds capacity");
+        free(source); me_dsl_jit_ir_free(ir); return;
+    }
     p->jit_ir = ir;
     p->jit_c_source = source;
 #ifdef __EMSCRIPTEN__

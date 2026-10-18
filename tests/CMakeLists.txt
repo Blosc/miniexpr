@@ -334,6 +334,30 @@ foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
           "SHELL:--pre-js ${PROJECT_SOURCE_DIR}/src/me_jit_glue.js"
           "-sEXPORTED_RUNTIME_METHODS=addFunction,removeFunction,stackSave,stackAlloc,stackRestore,lengthBytesUTF8,stringToUTF8")
       endif()
+      # Same differential test without Node's raw filesystem. SINGLE_FILE keeps
+      # the wasm payload in the JS so a static page can exercise the browser
+      # runtime directly; Node runs this target too as a portability check.
+      add_executable(test_dsl_jit_portable_wasm32_browser
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_dsl_jit_portable_wasm32.c")
+      target_link_libraries(test_dsl_jit_portable_wasm32_browser PRIVATE miniexpr_artifact)
+      target_compile_definitions(test_dsl_jit_portable_wasm32_browser PRIVATE
+        ME_USE_WASM32_JIT=1)
+      if(MINIEXPR_WASM32_SIDE_MODULE)
+        target_compile_definitions(test_dsl_jit_portable_wasm32_browser PRIVATE
+          ME_WASM32_SIDE_MODULE=1)
+        target_link_options(test_dsl_jit_portable_wasm32_browser PRIVATE
+          "SHELL:--pre-js ${PROJECT_SOURCE_DIR}/src/me_jit_glue.js")
+      else()
+        target_compile_definitions(test_dsl_jit_portable_wasm32_browser PRIVATE
+          ME_WASM32_SIDE_MODULE=0)
+      endif()
+      target_link_options(test_dsl_jit_portable_wasm32_browser PRIVATE
+        "-sSINGLE_FILE=1" "-sALLOW_MEMORY_GROWTH=1" "-sINITIAL_MEMORY=134217728"
+        "-sEXIT_RUNTIME=1" "-sALLOW_TABLE_GROWTH=1"
+        "-sEXPORTED_RUNTIME_METHODS=addFunction,removeFunction,stackSave,stackAlloc,stackRestore,lengthBytesUTF8,stringToUTF8")
+      add_test(NAME test_dsl_jit_portable_wasm32_browser
+        COMMAND test_dsl_jit_portable_wasm32_browser)
+      set_tests_properties(test_dsl_jit_portable_wasm32_browser PROPERTIES TIMEOUT 180)
     endif()
   endif()
   if(EMSCRIPTEN)
