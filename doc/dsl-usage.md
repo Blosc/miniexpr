@@ -85,20 +85,46 @@ Use source pragmas or API policy to control JIT behavior.
 ```python
 # me:fp=strict
 # me:compiler=tcc
+# me:math=sleef
+# me:ulp=u35
 def kernel(x):
-    return x
+    return sin(x) + cos(x)
 ```
 
 Supported values:
 - `# me:fp=strict|contract|fast`
 - `# me:compiler=tcc|cc`
+- `# me:math=auto|system|sleef|accelerate`
+- `# me:ulp=u10|u35` (SLEEF only; defaults to `u35`)
 
 Only these pragmas are supported. See `doc/dsl-syntax.md` for exact pragma parsing rules.
+
+Math-library selection is independent of floating-point mode. `auto` and
+`system` both use the system math library; `auto` is the built-in default.
+`scalar` remains an accepted environment-only spelling for forced system scalar
+math. Explicit unavailable `sleef`/`accelerate` requests fail during preparation
+instead of falling back to another library.
+
+Accelerated math kernels use the bounded vector interpreter over tiles, which
+reuses the same resolved callback table as scalar interpretation. Scalar calls
+and partial-vector tails are lane-packed so a SLEEF/Accelerate kernel does not
+switch libraries merely because a tile is shorter than the SIMD width. They are
+intentionally ineligible for the fused per-lane generated JIT, whose math bridge
+would otherwise pay a lane-packing dispatch per element; optional JIT therefore
+falls back to the vector interpreter. System math keeps generated-JIT support,
+including `contract`/`fast` with the `cc` backend.
 
 An explicit compiler pragma takes precedence over the `ME_DSL_JIT_COMPILER`
 environment default. Compiler selection is a preference, not a requirement to
 have that compiler available. Explicit `ME_JIT_OFF` still disables JIT, and
-best-effort interpreter fallback remains available.
+best-effort interpreter fallback remains available. The TCC backend supports
+strict floating point only; use `# me:compiler=cc` with `contract` or `fast`.
+
+Precedence for each setting is: explicit source pragma, artifact declaration,
+environment (`ME_SIMD_MATH_BACKEND`, `ME_DSL_FP_MODE`), built-in default.
+`ME_SIMD_MATH_BACKEND` accepts `auto|system|sleef|accelerate|scalar`; malformed
+values are errors. An explicit `me:math=auto` selects the system policy without
+consulting the environment.
 
 ### API policy override
 

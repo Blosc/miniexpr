@@ -8,6 +8,7 @@
 #include "dsl_portable_reduce.h"
 #include "dsl_portable_batch.h"
 #include "dsl_jit_test.h"
+#include "dsl_math_dispatch.h"
 #include "miniexpr_internal.h"
 
 #include <math.h>
@@ -786,12 +787,54 @@ static int p_math(const me_expr *n, const char *name, const me_scalar *a,
 #define P_UNARY(fn) if (!strcmp(name, #fn)) { \
     if (n->dtype == ME_FLOAT32) out->f32 = fn##f(a->f32); \
     else out->f64 = fn(a->f64); return 0; }
+    /* Kernel-local accelerated selection. Only direct libm-named operations are
+     * redirected; Menudet-defined operations above retain their own identity. */
+    {
+        const me_math_dispatch *dispatch = me_math_dispatch_current();
+        me_math_op op = dispatch && dispatch->accelerated ? me_math_op_from_name(name) : ME_MATHOP_COUNT;
+        if (op < ME_MATHOP_COUNT) {
+            if (n->dtype == ME_FLOAT32) {
+                float result;
+                if (me_math_scalar_unary_f32(op, a->f32, &result)) {
+                    out->f32 = result;
+                    return 0;
+                }
+            }
+            else {
+                double result;
+                if (me_math_scalar_unary_f64(op, a->f64, &result)) {
+                    out->f64 = result;
+                    return 0;
+                }
+            }
+        }
+    }
     P_DIRECT_UNARY(P_UNARY)
     P_UNARY(round);
 #undef P_UNARY
 #define P_BINARY(fn) if (!strcmp(name, #fn)) { \
     if (n->dtype == ME_FLOAT32) out->f32 = fn##f(a->f32, b->f32); \
     else out->f64 = fn(a->f64, b->f64); return 0; }
+    {
+        const me_math_dispatch *dispatch = me_math_dispatch_current();
+        me_math_op op = dispatch && dispatch->accelerated ? me_math_op_from_name(name) : ME_MATHOP_COUNT;
+        if (op < ME_MATHOP_COUNT) {
+            if (n->dtype == ME_FLOAT32) {
+                float result;
+                if (me_math_scalar_binary_f32(op, a->f32, b->f32, &result)) {
+                    out->f32 = result;
+                    return 0;
+                }
+            }
+            else {
+                double result;
+                if (me_math_scalar_binary_f64(op, a->f64, b->f64, &result)) {
+                    out->f64 = result;
+                    return 0;
+                }
+            }
+        }
+    }
     P_DIRECT_BINARY(P_BINARY)
     P_BINARY(fmax); P_BINARY(fmin);
 #undef P_BINARY
@@ -1231,6 +1274,12 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
         return 0;
     }
     if (p_float(n->dtype)) {
+        if (!strcmp(op, "**")) {
+            if (n->dtype == ME_FLOAT32) {
+                if (me_math_scalar_binary_f32(ME_MATHOP_POW, a.f32, b.f32, &out->f32)) return 0;
+            }
+            else if (me_math_scalar_binary_f64(ME_MATHOP_POW, a.f64, b.f64, &out->f64)) return 0;
+        }
         if (n->dtype == ME_FLOAT32) {
             float x = a.f32, y = b.f32;
             if (!strcmp(op, "+")) out->f32 = x + y;
@@ -1397,6 +1446,17 @@ const void *dsl_portable_resolve_unary_math(const me_expr *node) {
         (node->dtype != ME_FLOAT32 && node->dtype != ME_FLOAT64)) return NULL;
     const char *name = me_portable_math_name(node);
     if (!name) return NULL;
+    {
+        me_math_op op = me_math_op_from_name(name);
+        const me_math_dispatch *dispatch = me_math_dispatch_current();
+        if (op < ME_MATHOP_COUNT && dispatch) {
+            bool mapped = node->dtype == ME_FLOAT32 ? dispatch->unary_f32[op] != NULL :
+                                                     dispatch->unary_f64[op] != NULL;
+            /* Per-lane accelerated calls must replay the kernel policy through
+             * the generic node bridge, never a bare libm pointer. */
+            if (mapped) return NULL;
+        }
+    }
     if (node->dtype == ME_FLOAT32 && !strcmp(name,"fabs")) return (const void *)p_libm_fabs_f32;
     static const struct {
         const char *name;
@@ -1433,9 +1493,19 @@ const void *dsl_portable_resolve_binary_math(const me_expr *node) {
      * divmod, already delegates directly to the matching libm precision. */
     const char *op = me_portable_operator(node);
     if (op && (!strcmp(op,"%") || !strcmp(op,"//"))) return NULL;
-    if (op && !strcmp(op,"**")) return node->dtype == ME_FLOAT32 ? (const void *)powf : (const void *)pow;
-    const char *name = me_portable_math_name(node);
+    bool power = op && !strcmp(op,"**");
+    const char *name = power ? "pow" : me_portable_math_name(node);
     if (!name) return NULL;
+    {
+        me_math_op op = me_math_op_from_name(name);
+        const me_math_dispatch *dispatch = me_math_dispatch_current();
+        if (op < ME_MATHOP_COUNT && dispatch) {
+            bool mapped = node->dtype == ME_FLOAT32 ? dispatch->binary_f32[op] != NULL :
+                                                     dispatch->binary_f64[op] != NULL;
+            if (mapped) return NULL;
+        }
+    }
+    if (power) return node->dtype == ME_FLOAT32 ? (const void *)powf : (const void *)pow;
     if (node->dtype == ME_FLOAT32 && !strcmp(name,"copysign")) return (const void *)p_libm_copysign_f32;
     if (!strcmp(name,"ldexp")) return node->dtype == ME_FLOAT32 ? (const void *)ldexpf : (const void *)ldexp;
     static const struct {
@@ -1857,6 +1927,8 @@ typedef struct {
     p_batch_op op;
     int left, right;
     const void *math;
+    me_math_op math_op;
+    const me_math_dispatch *math_dispatch;
     bool uniform;
 } p_batch_instruction;
 typedef struct {
@@ -1909,6 +1981,17 @@ static int p_batch_build(p_batch_program *program, const me_expr *n,
             } else if (floating && arity == 1 && left->dtype == n->dtype &&
                        (instruction.math=dsl_portable_resolve_unary_math(n)) != NULL)
                 instruction.op=P_BATCH_MATH;
+            else if (floating && arity == 1 && left->dtype == n->dtype) {
+                const char *name=me_portable_math_name(n);
+                me_math_op op=me_math_op_from_name(name);
+                const me_math_dispatch *dispatch=me_math_dispatch_current();
+                bool mapped=dispatch && op < ME_MATHOP_COUNT && (n->dtype == ME_FLOAT32 ?
+                    dispatch->unary_f32[op] != NULL : dispatch->unary_f64[op] != NULL);
+                if (!mapped) return -1;
+                instruction.op=P_BATCH_MATH;
+                instruction.math_op=op;
+                instruction.math_dispatch=dispatch;
+            }
             else return -1;
         }
         instruction.left=p_batch_build(program,left,ctx,depth+1);
@@ -2032,8 +2115,21 @@ static bool p_batch_eval(const me_expr *expr, p_eval_context *ctx, int nitems,
         case P_BATCH_MUL: dsl_portable_batch_mul_##S(a,b,d,count); break; \
         case P_BATCH_DIV: dsl_portable_batch_div_##S(a,b,d,count); break; \
         case P_BATCH_NEG: dsl_portable_batch_neg_##S(a,b,d,count); break; \
-        case P_BATCH_MATH: { T (*fn)(T)=(T (*)(T))instruction->math; \
-            for (int i=0; i<count; i++) d[i]=fn(a[i]); break; } \
+        case P_BATCH_MATH: { \
+            if (instruction->math_dispatch) { \
+                int width = (int)(sizeof(T) == 4 ? 8 : 4); \
+                int pad = (count + width - 1) & ~(width - 1); \
+                if (pad != count) { \
+                    memmove(d, a, (size_t)count * sizeof(T)); \
+                    for (int i = count; i < pad; i++) d[i] = d[count - 1]; \
+                    a = d; \
+                } \
+                instruction->math_dispatch->unary_##S[instruction->math_op](a, d, pad); \
+            } else { \
+                T (*fn)(T)=(T (*)(T))instruction->math; \
+                for (int i=0; i<count; i++) d[i]=fn(a[i]); \
+            } \
+            break; } \
         default: break; \
     } \
 } while (0)

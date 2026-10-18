@@ -3,6 +3,7 @@
  * private kernel ABI appends a participating mask and host comparison/math bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
 #include "dsl_compile_internal.h"
+#include "dsl_math_dispatch.h"
 #include "dsl_portable_expr.h"
 #include "dsl_portable_types.h"
 #include <math.h>
@@ -1117,6 +1118,14 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         if (p) dsl_tracef("portable jit ineligible: request=%d statements=%d rank=%d",p->jit_request_mode,p->block.nstmts,p->compile_ndims);
         return;
     }
+    if (p->math_backend == ME_DSL_MATH_SLEEF || p->math_backend == ME_DSL_MATH_ACCELERATE) {
+        /* Generated kernels are fused per lane; their scalar callback bridge
+         * would pay one lane-packing dispatch per element. The bounded vector
+         * interpreter already batches the same math policy over tiles and is the
+         * documented optional-JIT fallback for accelerated backends. */
+        dsl_tracef("portable jit ineligible: accelerated math uses bounded vector interpretation");
+        return;
+    }
     bool scalar = p->output_is_scalar;
     int reduction_count = 0;
     if (scalar && (!pj_scalar_block(&p->block,&reduction_count,0) || !reduction_count)) return;
@@ -1371,14 +1380,18 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
 }
 
 void dsl_portable_prepare_jit_source(me_dsl_compiled_program *p) {
+    const me_math_dispatch *previous = me_math_dispatch_set(p ? &p->math_dispatch : NULL);
     pj_prepare_source(p, NULL);
+    me_math_dispatch_set(previous);
 }
 
 void dsl_portable_prepare_jit_constants(me_dsl_compiled_program *p,
     const int64_t *values, const bool *known) {
     if (!p || !values || !known || p->jit_c_source || p->jit_ir) return;
     pj_constants constants = {.values = values, .known = known, .count = p->n_inputs};
+    const me_math_dispatch *previous = me_math_dispatch_set(&p->math_dispatch);
     pj_prepare_source(p, &constants);
+    me_math_dispatch_set(previous);
     dsl_try_prepare_jit_runtime(p);
 }
 

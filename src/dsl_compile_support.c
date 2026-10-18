@@ -64,46 +64,6 @@ static char *me_strdup(const char *s) {
 #endif
 }
 
-static bool dsl_source_has_pragma(const char *source, const char *key) {
-    if (!source) {
-        return false;
-    }
-    const char *line = source;
-    while (*line) {
-        const char *line_end = line;
-        while (*line_end && *line_end != '\n') {
-            line_end++;
-        }
-        const char *p = line;
-        while (p < line_end && (*p == ' ' || *p == '\t' || *p == '\r')) {
-            p++;
-        }
-        if (p == line_end) {
-            if (*line_end == '\0') {
-                break;
-            }
-            line = line_end + 1;
-            continue;
-        }
-        if (*p != '#') {
-            break;
-        }
-        p++;
-        while (p < line_end && isspace((unsigned char)*p)) {
-            p++;
-        }
-        size_t key_len = strlen(key);
-        if ((size_t)(line_end - p) >= key_len && strncmp(p, key, key_len) == 0) {
-            return true;
-        }
-        if (*line_end == '\0') {
-            break;
-        }
-        line = line_end + 1;
-    }
-    return false;
-}
-
 static bool dsl_env_jit_compiler_override(me_dsl_compiler *out_compiler) {
     const char *env = getenv("ME_DSL_JIT_COMPILER");
 
@@ -280,12 +240,17 @@ me_dsl_compiled_program *dsl_compiled_program_alloc(const me_dsl_program *parsed
         return NULL;
     }
     program->fp_mode = parsed->fp_mode;
-    if (!dsl_source_has_pragma(source, "me:fp")) {
+    program->math_backend = parsed->math;
+    program->sleef_ulp = parsed->ulp;
+    program->fp_explicit = parsed->fp_explicit;
+    program->math_explicit = parsed->math_explicit;
+    program->ulp_explicit = parsed->ulp_explicit;
+    if (!parsed->fp_explicit) {
         program->fp_mode = dsl_default_fp_mode_from_env();
     }
     program->compiler = parsed->compiler;
     /* Source preferences win; environment configuration supplies the default. */
-    if (!dsl_source_has_pragma(source, "me:compiler")) {
+    if (!parsed->compiler_explicit) {
         (void)dsl_env_jit_compiler_override(&program->compiler);
     }
     program->compile_ndims = compile_ndims;

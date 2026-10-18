@@ -130,7 +130,7 @@ The public/runtime-stable DSL JIT controls remain documented in [README.md](READ
 
 ### Internal/Test-Only Environment Variables
 
-- `ME_SIMD_MATH_BACKEND=auto|sleef|accelerate|scalar`: Force the SIMD math backend selection used by `src/functions-simd.c` for benchmarking and debugging. Default: `auto` (prefers SLEEF when available, otherwise falls back to Accelerate on macOS when enabled, then the existing scalar fallback).
+- `ME_SIMD_MATH_BACKEND=auto|system|sleef|accelerate|scalar`: Force the math backend for benchmarking and debugging. `auto` and `system` both select system math (no automatic SLEEF preference); `scalar` forces system scalar math. Explicit `sleef`/`accelerate` selections fail when unavailable instead of silently substituting another library.
 - The SIMD math benchmarks print backend-aware columns. For `accelerate` and `scalar`, do not interpret the `ME_SIMD_ULP_1` / `ME_SIMD_ULP_3_5` labels as distinct math implementations.
 - `ME_DSL_WHILE_MAX_ITERS=<n>`: Override the runtime safety cap for DSL `while` loops.
 - `ME_DSL_JIT_COMPILER=tcc|cc`: Force the DSL JIT compiler backend at compile time. When unset, the parsed DSL compiler selection is used.

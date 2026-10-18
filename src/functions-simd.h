@@ -12,11 +12,21 @@ Blosc - Blocked Shuffling and Compression Library
 #define MINIEXPR_FUNCTIONS_SIMD_H
 
 #include "miniexpr.h"
+#include "dsl_math_dispatch.h"
 
 typedef struct {
     int force_scalar;
     int override_u35;
 } me_simd_params_state;
+
+/* Kernel-scoped SLEEF accuracy. Unlike per-call params, an explicit kernel
+ * policy is not weakened by a caller's ULP override. */
+typedef struct {
+    int override_u35;
+} me_simd_accuracy_state;
+
+void me_simd_accuracy_push(me_dsl_sleef_ulp ulp, me_simd_accuracy_state *state);
+void me_simd_accuracy_pop(const me_simd_accuracy_state *state);
 
 void me_simd_params_push(const me_eval_params *params, me_simd_params_state *state);
 void me_simd_params_pop(const me_simd_params_state *state);

@@ -12,6 +12,7 @@ extern "C" {
 #endif
 
 #define ME_ARTIFACT_SCHEMA_VERSION "1.0"
+#define ME_ARTIFACT_MATH_POLICY_VERSION 1
 #define ME_ARTIFACT_NUMPY_SCHEMA_VERSION ME_ARTIFACT_SCHEMA_VERSION
 #define ME_ARTIFACT_MAX_BYTES (1024 * 1024)
 #define ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION 1
@@ -22,7 +23,8 @@ enum {
     ME_ARTIFACT_CAP_CONTROL_FLOW = 2,
     ME_ARTIFACT_CAP_BLOCK_REDUCTIONS = 4,
     ME_ARTIFACT_CAP_ND_CONTEXT = 8,
-    ME_ARTIFACT_CAP_FIXED_STRINGS = 16
+    ME_ARTIFACT_CAP_FIXED_STRINGS = 16,
+    ME_ARTIFACT_CAP_FLEXIBLE_MATH = 32
 };
 
 typedef struct me_artifact me_artifact;
@@ -229,6 +231,15 @@ size_t me_artifact_output_itemsize(const me_artifact *artifact);
 unsigned int me_artifact_capabilities(const me_artifact *artifact);
 int me_artifact_context_ndim(const me_artifact *artifact);
 const char *me_artifact_schema_version(const me_artifact *artifact);
+/* Effective immutable policy resolved at load/preparation. Returns "unknown"
+ * for NULL handles. `me_artifact_sleef_accuracy` returns "" when not SLEEF. */
+const char *me_artifact_math_backend(const me_artifact *artifact);
+const char *me_artifact_sleef_accuracy(const me_artifact *artifact);
+const char *me_artifact_fp_mode(const me_artifact *artifact);
+/* Explicit backend coverage for one direct math operation name. Returns 1 when
+ * the effective accelerated backend supplies it, 0 for a documented system
+ * fallback, and -1 for an unknown name/NULL handle. */
+int me_artifact_math_covers(const me_artifact *artifact, const char *operation);
 
 /* Borrowed strings remain valid until free; invalid query indices return NULL
  * or ME_AUTO. Invalid handles return NULL/0/ME_AUTO as appropriate. */

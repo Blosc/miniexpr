@@ -38,6 +38,35 @@ typedef enum {
     ME_DSL_COMPILER_CC = 1
 } me_dsl_compiler;
 
+/* Explicit or environment-selected math library. AUTO is the source spelling
+ * for the default system policy; the resolver retains it so an explicit
+ * `me:math=auto` never consults the environment. */
+typedef enum {
+    ME_DSL_MATH_AUTO = 0,
+    ME_DSL_MATH_SYSTEM = 1,
+    ME_DSL_MATH_SLEEF = 2,
+    ME_DSL_MATH_ACCELERATE = 3,
+    ME_DSL_MATH_SCALAR = 4
+} me_dsl_math_backend;
+
+typedef enum {
+    ME_DSL_ULP_OMIT = 0,
+    ME_DSL_ULP_U10 = 1,
+    ME_DSL_ULP_U35 = 2
+} me_dsl_sleef_ulp;
+
+/* Artifact-declared policy. Presence is independent of the parsed enum value,
+ * so an omitted field can inherit the environment instead of silently
+ * becoming a built-in default. */
+typedef struct {
+    bool has_fp;
+    me_dsl_fp_mode fp;
+    bool has_math;
+    me_dsl_math_backend math;
+    bool has_ulp;
+    me_dsl_sleef_ulp ulp;
+} me_dsl_declared_policy;
+
 typedef struct me_dsl_expr {
     char *text;
     int line;
@@ -108,6 +137,12 @@ typedef struct {
     int param_capacity;
     me_dsl_fp_mode fp_mode;
     me_dsl_compiler compiler;
+    me_dsl_math_backend math;
+    me_dsl_sleef_ulp ulp;
+    bool fp_explicit;
+    bool compiler_explicit;
+    bool math_explicit;
+    bool ulp_explicit;
     me_dsl_block block;
 } me_dsl_program;
 

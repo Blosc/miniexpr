@@ -13,6 +13,7 @@
 
 #include "dsl_config.h"
 #include "dsl_jit_ir.h"
+#include "dsl_math_dispatch.h"
 #include "miniexpr.h"
 
 #include <stdbool.h>
@@ -38,7 +39,7 @@
 #endif
 
 #define ME_DSL_JIT_META_MAGIC 0x4d454a49544d4554ULL
-#define ME_DSL_JIT_META_VERSION 7
+#define ME_DSL_JIT_META_VERSION 8
 
 /* Portable 1.1 private kernel bridge layout. The kernel receives the mask, then
  * a dispatcher pointer and up to 128 borrowed typed nodes per family, addressed
@@ -177,7 +178,13 @@ typedef struct {
     bool uses_flat_idx;
     int compile_ndims;
     me_dsl_fp_mode fp_mode;
+    me_dsl_math_backend math_backend;
+    me_dsl_sleef_ulp sleef_ulp;
+    bool fp_explicit;
+    bool math_explicit;
+    bool ulp_explicit;
     me_dsl_semantic_profile semantic_profile;
+    me_math_dispatch math_dispatch;
     bool numpy_weak_vars[ME_MAX_VARS];
     bool portable_reduced_vars[ME_MAX_VARS];
     me_dsl_compiler compiler;
@@ -259,6 +266,8 @@ typedef struct {
     int32_t output_dtype;
     int32_t fp_mode;
     int32_t compiler;
+    int32_t math_backend;
+    int32_t sleef_ulp;
     int32_t nparams;
     int32_t param_dtypes[ME_MAX_VARS];
     int32_t binding_kinds[ME_MAX_VARS];

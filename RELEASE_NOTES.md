@@ -4,6 +4,15 @@ Release notes for miniexpr
 Changes from 0.2.0 to 0.2.1
 ===========================
 
+* Flexible math libraries and floating-point modes for Menudet kernels.
+  - New source pragmas `me:math=auto|system|sleef|accelerate` and
+    `me:ulp=u10|u35`; `me:fp=strict|contract|fast` now reaches portable kernels.
+  - Resolution precedence: source pragma, artifact declaration,
+    `ME_SIMD_MATH_BACKEND`/`ME_DSL_FP_MODE`, built-in default.
+  - `auto` no longer prefers SLEEF; it follows the system-math policy.
+  - Explicit unavailable SLEEF/Accelerate requests fail during preparation.
+  - Accelerated math uses a kernel-local immutable callback table and bounded
+    vector interpretation; artifacts declare the `flexible-math` capability.
 * New varlen output for string expressions: `me_eval_varlen()` writes the Arrow
   layout (int64 offsets + a tight byte blob) instead of fixed-width slots.
   - `ME_STRING` yields UTF-8 (`large_string`); `ME_BYTES` copies bytes verbatim

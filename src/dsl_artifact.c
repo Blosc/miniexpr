@@ -7,6 +7,7 @@
 #include "dsl_parser.h"
 #include "dsl_eval_internal.h"
 #include "dsl_jit_test.h"
+#include "dsl_math_policy.h"
 #include "dsl_portable_types.h"
 #include "dsl_portable_fp.h"
 #include "functions.h"
@@ -145,7 +146,37 @@ static bool artifact_tree(yyjson_val *value, int depth) {
     return true;
 }
 
-/* Require all schema keys except designated optional metadata. */
+/* Require all schema keys except designated optional metadata and explicitly
+ * optional semantic fields. */
+static bool artifact_fields_optional(yyjson_val *object, const char *const *fields, size_t count,
+                                     const char *const *optional, size_t optional_count,
+                                     bool metadata) {
+    if (!yyjson_is_obj(object)) {
+        return false;
+    }
+    for (size_t i = 0; i < count; i++) {
+        if (!yyjson_obj_get(object, fields[i])) {
+            return false;
+        }
+    }
+    size_t index, max;
+    yyjson_val *key, *value;
+    yyjson_obj_foreach(object, index, max, key, value) {
+        const char *name = artifact_string(key);
+        bool found = metadata && !strcmp(name, "metadata") && yyjson_is_obj(value);
+        for (size_t i = 0; i < count; i++) {
+            found = found || !strcmp(name, fields[i]);
+        }
+        for (size_t i = 0; i < optional_count; i++) {
+            found = found || !strcmp(name, optional[i]);
+        }
+        if (!found) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool artifact_fields(yyjson_val *object, const char *const *fields, size_t count,
                             bool metadata) {
     if (!yyjson_is_obj(object)) {
@@ -438,7 +469,8 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
     const char *const language_fields[] = {"name", "version"};
     const char *const output_fields[] = {"dtype", "contract"};
     const char *const semantics_fields[] = {"fp"};
-    const char *const numpy_semantics_fields[] = {"fp", "numeric", "casting"};
+    const char *const numpy_semantics_fields[] = {"numeric", "casting"};
+    const char *const flexible_semantics_fields[] = {"fp", "math", "ulp"};
     const char *const input_fields[] = {"name", "dtype"};
     const char *const constant_fields[] = {"name", "dtype", "encoding", "value"};
     const char *const numpy_constant_fields[] = {"name", "dtype", "encoding", "value", "category"};
@@ -460,9 +492,18 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
     const char *source = artifact_string(yyjson_obj_get(root, "source"));
     const char *entry = artifact_string(yyjson_obj_get(root, "entry_point"));
     bool string_output = is_string_dtype(artifact_dtype1(yyjson_obj_get(output, "dtype")));
+    const char *fp_text = artifact_string(yyjson_obj_get(semantics, "fp"));
+    const char *math_text = artifact_string(yyjson_obj_get(semantics, "math"));
+    const char *ulp_text = artifact_string(yyjson_obj_get(semantics, "ulp"));
+    bool has_fp_field = yyjson_obj_get(semantics, "fp") != NULL;
+    bool has_math_field = yyjson_obj_get(semantics, "math") != NULL;
+    bool has_ulp_field = yyjson_obj_get(semantics, "ulp") != NULL;
     if (!artifact_fields(language, language_fields, 2, false) ||
         !artifact_fields(output, string_output ? string_output_fields : output_fields, string_output ? 3 : 2, false) ||
-        !artifact_fields(semantics, numpy_profile ? numpy_semantics_fields : semantics_fields, numpy_profile ? 3 : 1, false) ||
+        !(numpy_profile ?
+          artifact_fields_optional(semantics, numpy_semantics_fields, 2,
+                                   flexible_semantics_fields, 3, false) :
+          artifact_fields(semantics, semantics_fields, 1, false)) ||
         !yyjson_is_arr(requires) || !yyjson_is_arr(inputs) || !yyjson_is_arr(constants) ||
         !source || !entry || !*entry) {
         artifact_error(error, status, "invalid manifest structure");
@@ -473,7 +514,10 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
         !artifact_string(yyjson_obj_get(language, "version")) ||
         !artifact_string(yyjson_obj_get(output, "contract")) ||
         !artifact_string(yyjson_obj_get(output, "dtype")) ||
-        !artifact_string(yyjson_obj_get(semantics, "fp"))) {
+        (numpy_profile && !artifact_string(yyjson_obj_get(semantics, "numeric"))) ||
+        (numpy_profile && !artifact_string(yyjson_obj_get(semantics, "casting"))) ||
+        (has_fp_field && !fp_text) || (has_math_field && !math_text) ||
+        (has_ulp_field && !ulp_text)) {
         artifact_error(error, status, "versions, semantic requirements, and dtypes must be strings");
         goto cleanup;
     }
@@ -482,7 +526,16 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
         (!numpy_profile && !artifact_equal(yyjson_obj_get(language, "version"), ME_PORTABLE_DSL_VERSION)) ||
         !(artifact_equal(yyjson_obj_get(output, "contract"), "elementwise") ||
           artifact_equal(yyjson_obj_get(output, "contract"), "block_scalar")) ||
-        !artifact_equal(yyjson_obj_get(semantics, "fp"), "strict")) {
+        (has_fp_field && !(artifact_equal(yyjson_obj_get(semantics, "fp"), "strict") ||
+                           artifact_equal(yyjson_obj_get(semantics, "fp"), "contract") ||
+                           artifact_equal(yyjson_obj_get(semantics, "fp"), "fast"))) ||
+        (!numpy_profile && !artifact_equal(yyjson_obj_get(semantics, "fp"), "strict")) ||
+        (has_math_field && !(artifact_equal(yyjson_obj_get(semantics, "math"), "auto") ||
+                             artifact_equal(yyjson_obj_get(semantics, "math"), "system") ||
+                             artifact_equal(yyjson_obj_get(semantics, "math"), "sleef") ||
+                             artifact_equal(yyjson_obj_get(semantics, "math"), "accelerate"))) ||
+        (has_ulp_field && !(artifact_equal(yyjson_obj_get(semantics, "ulp"), "u10") ||
+                            artifact_equal(yyjson_obj_get(semantics, "ulp"), "u35")))) {
         status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported version or semantic requirement");
         goto cleanup;
     }
@@ -511,6 +564,7 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
             artifact_equal(value, "block-reductions") ? 4 :
             artifact_equal(value, "nd-context") ? 8 : 0;
         if (artifact_equal(value, "fixed-strings")) capability = 16;
+        if (artifact_equal(value, "flexible-math")) capability = 32;
         if (!capability) {
             status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported required capability");
             goto cleanup;
@@ -526,6 +580,9 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
         artifact_error(error, status, "missing core capability or too many bindings");
         goto cleanup;
     }
+    bool flexible_math = false;
+    if (has_fp_field && !artifact_equal(yyjson_obj_get(semantics, "fp"), "strict")) flexible_math = true;
+    if (has_math_field || has_ulp_field) flexible_math = true;
     artifact = calloc(1, sizeof(*artifact));
     if (!artifact) {
         status = artifact_error(error, ME_ARTIFACT_ERR_OOM, "out of memory");
@@ -639,6 +696,42 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
         status = artifact_error(error, ME_ARTIFACT_ERR_BINDING, "entry point or binding coverage mismatch");
         goto cleanup;
     }
+    me_dsl_declared_policy declared = {0};
+    if (has_fp_field) {
+        declared.has_fp = true;
+        declared.fp = artifact_equal(yyjson_obj_get(semantics, "fp"), "contract") ? ME_DSL_FP_CONTRACT :
+                      artifact_equal(yyjson_obj_get(semantics, "fp"), "fast") ? ME_DSL_FP_FAST :
+                      ME_DSL_FP_STRICT;
+    }
+    if (has_math_field) {
+        declared.has_math = true;
+        declared.math = artifact_equal(yyjson_obj_get(semantics, "math"), "auto") ? ME_DSL_MATH_AUTO :
+                        artifact_equal(yyjson_obj_get(semantics, "math"), "sleef") ? ME_DSL_MATH_SLEEF :
+                        artifact_equal(yyjson_obj_get(semantics, "math"), "accelerate") ? ME_DSL_MATH_ACCELERATE :
+                        ME_DSL_MATH_SYSTEM;
+    }
+    if (has_ulp_field) {
+        declared.has_ulp = true;
+        declared.ulp = artifact_equal(yyjson_obj_get(semantics, "ulp"), "u10") ?
+                       ME_DSL_ULP_U10 : ME_DSL_ULP_U35;
+    }
+    if ((parsed->fp_explicit && declared.has_fp && parsed->fp_mode != declared.fp) ||
+        (parsed->math_explicit && declared.has_math &&
+         parsed->math != declared.math &&
+         !((parsed->math == ME_DSL_MATH_AUTO && declared.math == ME_DSL_MATH_SYSTEM) ||
+           (parsed->math == ME_DSL_MATH_SYSTEM && declared.math == ME_DSL_MATH_AUTO))) ||
+        (parsed->ulp_explicit && declared.has_ulp && parsed->ulp != declared.ulp)) {
+        status = artifact_error(error, ME_ARTIFACT_ERR_SOURCE,
+                                "source pragmas conflict with declared artifact math policy");
+        goto cleanup;
+    }
+    flexible_math = flexible_math || parsed->math_explicit || parsed->ulp_explicit ||
+                    (parsed->fp_explicit && parsed->fp_mode != ME_DSL_FP_STRICT);
+    if (flexible_math && !(capabilities & ME_ARTIFACT_CAP_FLEXIBLE_MATH)) {
+        status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED,
+                                "flexible math policy requires the 'flexible-math' capability");
+        goto cleanup;
+    }
     int input_index = 0;
     for (int p = 0; p < parsed->nparams; p++) {
         int found = -1;
@@ -662,8 +755,8 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
         bool is_dsl;
         if (numpy_profile && !infer_output) {
             /* Metadata-only inference: output policy cannot drive intermediates. */
-            me_dsl_compiled_program *inferred = dsl_compile_program_profile(source, variables, artifact->nbindings,
-                ME_AUTO, artifact->context_ndim, ME_JIT_OFF, artifact->profile,
+            me_dsl_compiled_program *inferred = dsl_compile_program_profile_declared(source, variables, artifact->nbindings,
+                ME_AUTO, artifact->context_ndim, ME_JIT_OFF, artifact->profile, &declared,
                 &position, &is_dsl, reason, sizeof(reason));
             if (!inferred) {
                 status = artifact_error(error, strstr(reason, "out of memory") ? ME_ARTIFACT_ERR_OOM : ME_ARTIFACT_ERR_SOURCE, reason);
@@ -678,8 +771,8 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
                 goto cleanup;
             }
         }
-        artifact->program = dsl_compile_program_profile(source, variables, artifact->nbindings,
-            artifact->output_dtype, artifact->context_ndim, jit_mode, artifact->profile,
+        artifact->program = dsl_compile_program_profile_declared(source, variables, artifact->nbindings,
+            artifact->output_dtype, artifact->context_ndim, jit_mode, artifact->profile, &declared,
             &position, &is_dsl, reason, sizeof(reason));
         if (!artifact->program) {
             status = artifact_error(error, strstr(reason, "out of memory") ? ME_ARTIFACT_ERR_OOM : ME_ARTIFACT_ERR_SOURCE, reason);
@@ -936,6 +1029,32 @@ int me_artifact_context_ndim(const me_artifact *artifact) {
 
 const char *me_artifact_schema_version(const me_artifact *artifact) {
     return artifact ? ME_ARTIFACT_SCHEMA_VERSION : NULL;
+}
+
+const char *me_artifact_math_backend(const me_artifact *artifact) {
+    if (!artifact || !artifact->program) return "unknown";
+    return dsl_math_backend_name(artifact->program->math_backend);
+}
+
+const char *me_artifact_sleef_accuracy(const me_artifact *artifact) {
+    if (!artifact || !artifact->program ||
+        artifact->program->math_backend != ME_DSL_MATH_SLEEF) return "";
+    return dsl_sleef_ulp_name(artifact->program->sleef_ulp);
+}
+
+const char *me_artifact_fp_mode(const me_artifact *artifact) {
+    if (!artifact || !artifact->program) return "unknown";
+    return dsl_fp_mode_name(artifact->program->fp_mode);
+}
+
+int me_artifact_math_covers(const me_artifact *artifact, const char *operation) {
+    if (!artifact || !artifact->program || !operation) return -1;
+    me_math_op op = me_math_op_from_name(operation);
+    if (op >= ME_MATHOP_COUNT) return -1;
+    const me_math_dispatch *dispatch = &artifact->program->math_dispatch;
+    if (!dispatch->accelerated) return 0;
+    return dispatch->unary_f64[op] || dispatch->unary_f32[op] ||
+           dispatch->binary_f64[op] || dispatch->binary_f32[op] ? 1 : 0;
 }
 
 me_dtype me_artifact_inferred_dtype(const me_artifact *artifact) {

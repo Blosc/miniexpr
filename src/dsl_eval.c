@@ -10,8 +10,10 @@
 
 #include "dsl_eval_internal.h"
 #include "dsl_jit_cgen.h"
+#include "dsl_math_dispatch.h"
 #include "dsl_portable_fp.h"
 #include "dsl_portable_expr.h"
+#include "functions-simd.h"
 
 #include "functions.h"
 
@@ -1817,7 +1819,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
     return rc;
 }
 
-int dsl_eval_program(const me_dsl_compiled_program *program,
+static int dsl_eval_program_body(const me_dsl_compiled_program *program,
                       const void **vars_block, int n_vars, void *output_block, int nitems,
                       const me_eval_params *params, int ndim, const int64_t *shape,
                       int64_t **idx_buffers, const int64_t *global_linear_idx_buffer,
@@ -1826,7 +1828,24 @@ int dsl_eval_program(const me_dsl_compiled_program *program,
                                  ndim, shape, idx_buffers, global_linear_idx_buffer, nd_synth_ctx_buffer, NULL);
 }
 
-int dsl_eval_program_portable(const me_dsl_compiled_program *program,
+int dsl_eval_program(const me_dsl_compiled_program *program,
+                      const void **vars_block, int n_vars, void *output_block, int nitems,
+                      const me_eval_params *params, int ndim, const int64_t *shape,
+                      int64_t **idx_buffers, const int64_t *global_linear_idx_buffer,
+                      const int64_t *nd_synth_ctx_buffer) {
+    const me_math_dispatch *previous = me_math_dispatch_set(
+        program ? &program->math_dispatch : NULL);
+    me_simd_accuracy_state accuracy;
+    me_simd_accuracy_push(program ? program->sleef_ulp : ME_DSL_ULP_OMIT, &accuracy);
+    int rc = dsl_eval_program_body(program, vars_block, n_vars, output_block, nitems, params,
+                                   ndim, shape, idx_buffers, global_linear_idx_buffer,
+                                   nd_synth_ctx_buffer);
+    me_simd_accuracy_pop(&accuracy);
+    me_math_dispatch_set(previous);
+    return rc;
+}
+
+static int dsl_eval_program_portable_body(const me_dsl_compiled_program *program,
                                const void **inputs, int ninputs, void *output,
                                const me_dsl_portable_eval_descriptor *descriptor) {
     if (!program || !dsl_portable_typed_profile(program->semantic_profile) || !descriptor ||
@@ -1907,6 +1926,19 @@ int dsl_eval_program_portable(const me_dsl_compiled_program *program,
         for (int d = 0; d < ndim; d++) free(indices[d]);
         free(flat);
     }
+    return rc;
+}
+
+int dsl_eval_program_portable(const me_dsl_compiled_program *program,
+                               const void **inputs, int ninputs, void *output,
+                               const me_dsl_portable_eval_descriptor *descriptor) {
+    const me_math_dispatch *previous = me_math_dispatch_set(
+        program ? &program->math_dispatch : NULL);
+    me_simd_accuracy_state accuracy;
+    me_simd_accuracy_push(program ? program->sleef_ulp : ME_DSL_ULP_OMIT, &accuracy);
+    int rc = dsl_eval_program_portable_body(program, inputs, ninputs, output, descriptor);
+    me_simd_accuracy_pop(&accuracy);
+    me_math_dispatch_set(previous);
     return rc;
 }
 

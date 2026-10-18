@@ -4,8 +4,8 @@ Status: implemented staged wire schema, **implementation draft, not certified**.
 Final compatibility guarantees await complete release gates.
 
 Retain standalone UTF-8 JSON, explicit language/schema versions, named typed
-signatures, strict semantics, entry point, required capabilities and exact typed
-constant encodings. Reject duplicate/unknown required fields, unavailable
+signatures, validated numerical policy, entry point, required capabilities and
+exact typed constant encodings. Reject duplicate/unknown required fields, unavailable
 capabilities, invalid types, malformed constants and incompatible source.
 
 Add fixed-width string descriptors, explicit result cardinality, and context
@@ -57,10 +57,23 @@ descriptor-based logical coordinates. Certification and host persistence remain.
 
 Required top-level keys are `schema_version: "1.0"`,
 `language: {"name":"miniexpr","version":"1.0"}`, `requires`, `source`,
-`entry_point`, `inputs`, `constants`, `output`, `semantics: {"fp":"strict","numeric":"numpy-2.5","casting":"unsafe"}`,
-and `context: {"ndim": rank}`. Only object `metadata` is optional. Duplicate or
+`entry_point`, `inputs`, `constants`, `output`, `semantics` (with
+`numeric: "numpy-2.5"` and `casting: "unsafe"|"same_kind"|"safe"`), and
+`context: {"ndim": rank}`. Only object `metadata` is optional. Duplicate or
 unknown fields reject. Rank is 0 without ND, otherwise 1 through the native limit.
 Metadata may label records `implementation-draft`; it grants no capabilities.
+
+`semantics` may additionally declare an explicit math policy:
+`fp: "strict"|"contract"|"fast"`, `math: "auto"|"system"|"sleef"|"accelerate"`,
+and `ulp: "u10"|"u35"` (SLEEF only). Omitted fields request inheritance from the
+preparation environment (`ME_DSL_FP_MODE`, `ME_SIMD_MATH_BACKEND`); an exporter
+must not bake a machine-specific environment choice into an artifact. Artifacts
+using any non-default math policy, including non-strict `fp`, must declare the
+`flexible-math` capability; readers without that capability reject the artifact.
+Explicit `fp: "strict"` remains strict. An unavailable explicit `sleef` or
+`accelerate` backend fails at load/preparation instead of falling back.
+Source pragmas are validated against the declared policy; conflicting explicit
+choices reject.
 
 Inputs are `{name,dtype}` for numeric types, adding byte `itemsize` for `bytes`
 or `unicode32`. Constants add `encoding` and `value`: exact range-checked decimal
@@ -80,8 +93,8 @@ concurrent evaluations borrow this immutable storage. Uniform local variables
 still use their existing local storage and are not scalar external bindings.
 
 Implemented requirements are `numeric` (mandatory), `control-flow`,
-`block-reductions`, `fixed-strings`, and `nd-context`. Names must be unique/known;
-native tree validation rejects missing used capabilities. Unimplemented operations
+`block-reductions`, `fixed-strings`, `nd-context` and `flexible-math`. Names must
+be unique/known; native tree validation rejects missing used capabilities. Unimplemented operations
 and signatures reject explicitly. String indices accept typed integral expressions;
 large indices clamp beyond the bounded subject extent before legacy index casts.
 Dynamic substring length conservatively retains the subject width. `replace`

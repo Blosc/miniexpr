@@ -2067,14 +2067,38 @@ static int test_fp_pragma_modes(void) {
     me_free(expr);
 
     expr = NULL;
-    if (me_compile(src_contract, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+    if (me_compile(src_contract, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: contract fp pragma accepted with TCC\n");
+        me_free(expr);
+        return 1;
+    }
+
+    const char *src_contract_cc =
+        "# me:compiler=cc\n"
+        "# me:fp=contract\n"
+        "def kernel(x):\n"
+        "    return x * x + 1\n";
+    expr = NULL;
+    if (me_compile(src_contract_cc, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: contract fp pragma compile error at %d\n", err);
         return 1;
     }
     me_free(expr);
 
     expr = NULL;
-    if (me_compile(src_fast, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+    if (me_compile(src_fast, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
+        printf("  ❌ FAILED: fast fp pragma accepted with TCC\n");
+        me_free(expr);
+        return 1;
+    }
+
+    const char *src_fast_cc =
+        "# me:compiler=cc\n"
+        "# me:fp=fast\n"
+        "def kernel(x):\n"
+        "    return x * x + 1\n";
+    expr = NULL;
+    if (me_compile(src_fast_cc, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
         printf("  ❌ FAILED: fast fp pragma compile error at %d\n", err);
         return 1;
     }

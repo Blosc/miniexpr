@@ -35,12 +35,22 @@ Supported file-header pragmas:
 
 - `# me:fp=strict|contract|fast`
 - `# me:compiler=tcc|cc`
+- `# me:math=auto|system|sleef|accelerate`
+- `# me:ulp=u10|u35`
 
 Notes:
 
 - Pragma keys must be unique.
 - Unknown `me:*` pragmas are errors.
 - Malformed pragma values are errors.
+- `me:math=auto` and `me:math=system` both select system math; `auto` never
+  consults `ME_SIMD_MATH_BACKEND`. `scalar` is an environment-only spelling.
+- `me:ulp` is meaningful only with `me:math=sleef` (including a SLEEF backend
+  selected by the environment); otherwise it is rejected. Omitted SLEEF
+  accuracy is `u35`.
+- Explicit `sleef` or `accelerate` requests fail during preparation when the
+  backend is unavailable on the build, platform or CPU.
+- `me:fp=contract|fast` requires `# me:compiler=cc`; TCC supports strict only.
 - An explicit compiler pragma overrides the `ME_DSL_JIT_COMPILER` environment
   default. With no compiler pragma, that environment setting selects the default.
   `ME_JIT_OFF` disables JIT independently of compiler selection; unavailable JIT

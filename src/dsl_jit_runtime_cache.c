@@ -86,6 +86,9 @@ uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program) {
     h = dsl_jit_hash_i32(h, (int)program->semantic_profile);
     h = dsl_jit_hash_i32(h, (int)program->output_dtype);
     h = dsl_jit_hash_i32(h, (int)program->fp_mode);
+    h = dsl_jit_hash_i32(h, program->math_backend == ME_DSL_MATH_AUTO ?
+                            (int)ME_DSL_MATH_SYSTEM : (int)program->math_backend);
+    h = dsl_jit_hash_i32(h, (int)program->sleef_ulp);
     h = dsl_jit_hash_i32(h, program->jit_nparams);
     if (program->jit_ir) {
         for (int i = 0; i < program->jit_ir->nparams; i++) {
@@ -188,6 +191,9 @@ void dsl_jit_fill_cache_meta(me_dsl_jit_cache_meta *meta,
     meta->output_dtype = (int32_t)program->output_dtype;
     meta->fp_mode = (int32_t)program->fp_mode;
     meta->compiler = (int32_t)program->compiler;
+    meta->math_backend = (int32_t)(program->math_backend == ME_DSL_MATH_AUTO ?
+                                   ME_DSL_MATH_SYSTEM : program->math_backend);
+    meta->sleef_ulp = (int32_t)program->sleef_ulp;
     meta->nparams = (int32_t)program->jit_nparams;
     for (int i = 0; i < ME_MAX_VARS; i++) {
         meta->param_dtypes[i] = -1;

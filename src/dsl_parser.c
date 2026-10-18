@@ -578,15 +578,157 @@ static bool dsl_parse_compiler_pragma_line(const char *start, const char *end,
     return false;
 }
 
+static bool dsl_parse_math_pragma_line(const char *start, const char *end,
+                                       me_dsl_math_backend *math_out,
+                                       int line, me_dsl_error *error) {
+    const char *p = start;
+    while (p < end && (*p == ' ' || *p == '\t' || *p == '\r')) {
+        p++;
+    }
+    if (p >= end || *p != '#') {
+        return false;
+    }
+    p++;
+    while (p < end && isspace((unsigned char)*p)) {
+        p++;
+    }
+    static const char prefix[] = "me:math";
+    size_t prefix_len = sizeof(prefix) - 1;
+    if ((size_t)(end - p) < prefix_len || strncmp(p, prefix, prefix_len) != 0) {
+        return false;
+    }
+    p += prefix_len;
+    while (p < end && isspace((unsigned char)*p)) {
+        p++;
+    }
+    if (p >= end || *p != '=') {
+        dsl_set_error(error, line, (int)(p - start) + 1, "expected '=' after me:math");
+        return false;
+    }
+    p++;
+    while (p < end && isspace((unsigned char)*p)) {
+        p++;
+    }
+    const char *value_start = p;
+    while (p < end && is_ident_char(*p)) {
+        p++;
+    }
+    const char *value_end = p;
+    while (p < end && isspace((unsigned char)*p)) {
+        p++;
+    }
+    if (p < end) {
+        dsl_set_error(error, line, (int)(p - start) + 1, "unexpected trailing content in me:math pragma");
+        return false;
+    }
+    if (value_start == value_end) {
+        dsl_set_error(error, line, (int)(value_start - start) + 1, "expected math backend value after me:math=");
+        return false;
+    }
+    size_t value_len = (size_t)(value_end - value_start);
+    if (value_len == 4 && strncmp(value_start, "auto", value_len) == 0) {
+        *math_out = ME_DSL_MATH_AUTO;
+        return true;
+    }
+    if (value_len == 6 && strncmp(value_start, "system", value_len) == 0) {
+        *math_out = ME_DSL_MATH_SYSTEM;
+        return true;
+    }
+    if (value_len == 5 && strncmp(value_start, "sleef", value_len) == 0) {
+        *math_out = ME_DSL_MATH_SLEEF;
+        return true;
+    }
+    if (value_len == 10 && strncmp(value_start, "accelerate", value_len) == 0) {
+        *math_out = ME_DSL_MATH_ACCELERATE;
+        return true;
+    }
+    dsl_set_error(error, line, (int)(value_start - start) + 1,
+                  "unknown me:math value (expected 'auto', 'system', 'sleef', or 'accelerate')");
+    return false;
+}
+
+static bool dsl_parse_ulp_pragma_line(const char *start, const char *end,
+                                      me_dsl_sleef_ulp *ulp_out,
+                                      int line, me_dsl_error *error) {
+    const char *p = start;
+    while (p < end && (*p == ' ' || *p == '\t' || *p == '\r')) {
+        p++;
+    }
+    if (p >= end || *p != '#') {
+        return false;
+    }
+    p++;
+    while (p < end && isspace((unsigned char)*p)) {
+        p++;
+    }
+    static const char prefix[] = "me:ulp";
+    size_t prefix_len = sizeof(prefix) - 1;
+    if ((size_t)(end - p) < prefix_len || strncmp(p, prefix, prefix_len) != 0) {
+        return false;
+    }
+    p += prefix_len;
+    while (p < end && isspace((unsigned char)*p)) {
+        p++;
+    }
+    if (p >= end || *p != '=') {
+        dsl_set_error(error, line, (int)(p - start) + 1, "expected '=' after me:ulp");
+        return false;
+    }
+    p++;
+    while (p < end && isspace((unsigned char)*p)) {
+        p++;
+    }
+    const char *value_start = p;
+    while (p < end && is_ident_char(*p)) {
+        p++;
+    }
+    const char *value_end = p;
+    while (p < end && isspace((unsigned char)*p)) {
+        p++;
+    }
+    if (p < end) {
+        dsl_set_error(error, line, (int)(p - start) + 1, "unexpected trailing content in me:ulp pragma");
+        return false;
+    }
+    if (value_start == value_end) {
+        dsl_set_error(error, line, (int)(value_start - start) + 1, "expected SLEEF accuracy value after me:ulp=");
+        return false;
+    }
+    size_t value_len = (size_t)(value_end - value_start);
+    if (value_len == 3 && strncmp(value_start, "u10", value_len) == 0) {
+        *ulp_out = ME_DSL_ULP_U10;
+        return true;
+    }
+    if (value_len == 3 && strncmp(value_start, "u35", value_len) == 0) {
+        *ulp_out = ME_DSL_ULP_U35;
+        return true;
+    }
+    dsl_set_error(error, line, (int)(value_start - start) + 1,
+                  "unknown me:ulp value (expected 'u10' or 'u35')");
+    return false;
+}
+
 static bool dsl_parse_program_pragmas(const char *source,
                                       me_dsl_fp_mode *fp_mode_out,
                                       me_dsl_compiler *compiler_out,
+                                      me_dsl_math_backend *math_out,
+                                      me_dsl_sleef_ulp *ulp_out,
+                                      bool *fp_explicit_out,
+                                      bool *compiler_explicit_out,
+                                      bool *math_explicit_out,
+                                      bool *ulp_explicit_out,
                                       me_dsl_error *error) {
-    if (!fp_mode_out || !compiler_out) {
+    if (!fp_mode_out || !compiler_out || !math_out || !ulp_out) {
         return false;
     }
     *fp_mode_out = ME_DSL_FP_STRICT;
     *compiler_out = ME_DSL_COMPILER_LIBTCC;
+    *math_out = ME_DSL_MATH_AUTO;
+    *ulp_out = ME_DSL_ULP_OMIT;
+    if (fp_explicit_out) *fp_explicit_out = false;
+    if (compiler_explicit_out) *compiler_explicit_out = false;
+    if (math_explicit_out) *math_explicit_out = false;
+    if (ulp_explicit_out) *ulp_explicit_out = false;
     if (!source) {
         return true;
     }
@@ -595,6 +737,8 @@ static bool dsl_parse_program_pragmas(const char *source,
     int line = 1;
     bool seen_fp_mode = false;
     bool seen_compiler = false;
+    bool seen_math = false;
+    bool seen_ulp = false;
 
     while (*line_start) {
         const char *line_end = line_start;
@@ -612,6 +756,8 @@ static bool dsl_parse_program_pragmas(const char *source,
         else if (*p == '#') {
             me_dsl_fp_mode parsed_fp_mode = *fp_mode_out;
             me_dsl_compiler parsed_compiler = *compiler_out;
+            me_dsl_math_backend parsed_math = *math_out;
+            me_dsl_sleef_ulp parsed_ulp = *ulp_out;
             const char *body = p + 1;
             while (body < line_end && isspace((unsigned char)*body)) {
                 body++;
@@ -627,6 +773,7 @@ static bool dsl_parse_program_pragmas(const char *source,
                 }
                 *fp_mode_out = parsed_fp_mode;
                 seen_fp_mode = true;
+                if (fp_explicit_out) *fp_explicit_out = true;
             }
             else if ((size_t)(line_end - body) >= 11 && strncmp(body, "me:compiler", 11) == 0) {
                 if (seen_compiler) {
@@ -639,10 +786,37 @@ static bool dsl_parse_program_pragmas(const char *source,
                 }
                 *compiler_out = parsed_compiler;
                 seen_compiler = true;
+                if (compiler_explicit_out) *compiler_explicit_out = true;
+            }
+            else if ((size_t)(line_end - body) >= 7 && strncmp(body, "me:math", 7) == 0) {
+                if (seen_math) {
+                    dsl_set_error(error, line, (int)(p - line_start) + 1,
+                                  "duplicate me:math pragma");
+                    return false;
+                }
+                if (!dsl_parse_math_pragma_line(line_start, line_end, &parsed_math, line, error)) {
+                    return false;
+                }
+                *math_out = parsed_math;
+                seen_math = true;
+                if (math_explicit_out) *math_explicit_out = true;
+            }
+            else if ((size_t)(line_end - body) >= 6 && strncmp(body, "me:ulp", 6) == 0) {
+                if (seen_ulp) {
+                    dsl_set_error(error, line, (int)(p - line_start) + 1,
+                                  "duplicate me:ulp pragma");
+                    return false;
+                }
+                if (!dsl_parse_ulp_pragma_line(line_start, line_end, &parsed_ulp, line, error)) {
+                    return false;
+                }
+                *ulp_out = parsed_ulp;
+                seen_ulp = true;
+                if (ulp_explicit_out) *ulp_explicit_out = true;
             }
             else if ((size_t)(line_end - body) >= 3 && strncmp(body, "me:", 3) == 0) {
                 dsl_set_error(error, line, (int)(p - line_start) + 1,
-                              "unknown me:* pragma (supported: me:fp, me:compiler)");
+                              "unknown me:* pragma (supported: me:fp, me:compiler, me:math, me:ulp)");
                 return false;
             }
         }
@@ -1851,10 +2025,18 @@ static bool parse_program(me_dsl_lexer *lex, me_dsl_program *program, me_dsl_err
     memset(program, 0, sizeof(*program));
     program->fp_mode = ME_DSL_FP_STRICT;
     program->compiler = ME_DSL_COMPILER_LIBTCC;
+    program->math = ME_DSL_MATH_AUTO;
+    program->ulp = ME_DSL_ULP_OMIT;
 
     if (!dsl_parse_program_pragmas(lex ? lex->source : NULL,
                                    &program->fp_mode,
-                                   &program->compiler, error)) {
+                                   &program->compiler,
+                                   &program->math,
+                                   &program->ulp,
+                                   &program->fp_explicit,
+                                   &program->compiler_explicit,
+                                   &program->math_explicit,
+                                   &program->ulp_explicit, error)) {
         return false;
     }
 

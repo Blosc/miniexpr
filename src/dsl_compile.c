@@ -9,6 +9,7 @@
 **********************************************************************/
 
 #include "dsl_compile_internal.h"
+#include "dsl_math_policy.h"
 #include "dsl_portable_expr.h"
 #include "dsl_portable_types.h"
 #include "dsl_portable_fp.h"
@@ -2854,6 +2855,7 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
                                                      const me_variable *variables, int var_count,
                                                      me_dtype dtype, int compile_ndims, int jit_mode,
                                                      me_dsl_semantic_profile profile,
+                                                     const me_dsl_declared_policy *declared,
                                                      int *error_pos, bool *is_dsl,
                                                      char *error_reason, size_t error_reason_cap) {
     me_dsl_error parse_error;
@@ -2896,19 +2898,39 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
         return NULL;
     }
     program->semantic_profile = profile;
-    if (dsl_portable_typed_profile(profile)) {
-        /* Portable semantics cannot inherit a full-DSL host FP default. Explicit
-         * non-strict source pragmas still reject, rather than being overridden. */
-        program->fp_mode = parsed->fp_mode;
-        if (program->fp_mode != ME_DSL_FP_STRICT) {
-            if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap,
-                                                          "portable 1.0 requires strict floating point");
+    {
+        /* Resolve one immutable policy before any typed preparation or JIT
+         * eligibility decision. Source pragmas override artifact declarations,
+         * which override the environment. */
+        char policy_error[256];
+        if (parsed->math_explicit || parsed->ulp_explicit) {
+            if (!dsl_portable_typed_profile(profile)) {
+                if (error_reason && error_reason_cap) {
+                    snprintf(error_reason, error_reason_cap,
+                             "me:math and me:ulp are supported only by Menudet portable kernels");
+                }
+                dsl_compiled_program_free(program);
+                me_dsl_program_free(parsed);
+                if (error_pos) *error_pos = -1;
+                return NULL;
+            }
+        }
+        if (!dsl_math_policy_resolve(parsed, declared, program->compiler,
+                                     &program->fp_mode, &program->math_backend,
+                                     &program->sleef_ulp, &program->math_dispatch,
+                                     policy_error, sizeof(policy_error))) {
+            if (error_reason && error_reason_cap) {
+                snprintf(error_reason, error_reason_cap, "%s", policy_error);
+            }
             dsl_compiled_program_free(program);
             me_dsl_program_free(parsed);
+            if (error_pos) *error_pos = -1;
             return NULL;
         }
-        /* Optional acceleration falls back before building any uncertified IR. */
-        if (profile != ME_DSL_PROFILE_PORTABLE_1_1) jit_mode = ME_JIT_OFF;
+        if (dsl_portable_typed_profile(profile)) {
+            /* Optional acceleration falls back before building any uncertified IR. */
+            if (profile != ME_DSL_PROFILE_PORTABLE_1_1) jit_mode = ME_JIT_OFF;
+        }
     }
     if (jit_mode == ME_JIT_ON || jit_mode == ME_JIT_OFF) {
         program->jit_request_mode = (me_jit_mode)jit_mode;
@@ -3394,6 +3416,18 @@ me_dsl_compiled_program *dsl_compile_program_profile(const char *source,
                                                      me_dsl_semantic_profile profile,
                                                      int *error_pos, bool *is_dsl,
                                                      char *error_reason, size_t error_reason_cap) {
+    return dsl_compile_program_profile_declared(source, variables, var_count, dtype, compile_ndims,
+                                                jit_mode, profile, NULL, error_pos, is_dsl,
+                                                error_reason, error_reason_cap);
+}
+
+me_dsl_compiled_program *dsl_compile_program_profile_declared(const char *source,
+                                                     const me_variable *variables, int var_count,
+                                                     me_dtype dtype, int compile_ndims, int jit_mode,
+                                                     me_dsl_semantic_profile profile,
+                                                     const me_dsl_declared_policy *declared,
+                                                     int *error_pos, bool *is_dsl,
+                                                     char *error_reason, size_t error_reason_cap) {
     fenv_t saved;
     bool strict = dsl_portable_typed_profile(profile);
     if (strict && !dsl_portable_fp_begin(&saved)) {
@@ -3403,7 +3437,7 @@ me_dsl_compiled_program *dsl_compile_program_profile(const char *source,
         return NULL;
     }
     me_dsl_compiled_program *program = dsl_compile_program_profile_impl(source, variables, var_count,
-        dtype, compile_ndims, jit_mode, profile, error_pos, is_dsl, error_reason, error_reason_cap);
+        dtype, compile_ndims, jit_mode, profile, declared, error_pos, is_dsl, error_reason, error_reason_cap);
     if (strict && !dsl_portable_fp_end(&saved)) {
         dsl_compiled_program_free(program);
         if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap, "cannot restore caller floating environment");

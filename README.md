@@ -244,7 +244,8 @@ them persistently; it requires a compiler and a usable executable cache location
 - `ME_DSL_JIT_POS_CACHE=0`: Disable process-local positive cache reuse for loaded JIT kernels.
 - `ME_DSL_JIT_INDEX_VARS=0`: Disable runtime JIT for DSL kernels that use reserved index vars (`_i*`, `_n*`, `_ndim`, `_flat_idx`).
 - `ME_DSL_TRACE=1`: Print DSL compile/JIT trace lines to stderr. When unset, the default comes from `MINIEXPR_DSL_TRACE_DEFAULT`.
-- `ME_DSL_FP_MODE=strict|contract|fast|relaxed`: Select default floating-point mode for DSL JIT kernels. `strict` is the default; `relaxed` is an alias of `fast`.
+- `ME_DSL_FP_MODE=strict|contract|fast|relaxed`: Select default floating-point mode for DSL JIT kernels. `strict` is the default; `relaxed` is an alias of `fast`. Malformed values are preparation errors.
+- `ME_SIMD_MATH_BACKEND=auto|system|sleef|accelerate|scalar`: Select the default math library. `auto` and `system` both mean system math; legacy `auto` no longer prefers SLEEF. `scalar` forces system scalar math. Explicit `sleef`/`accelerate` requests fail when unavailable. Malformed values are preparation errors.
 - `ME_DSL_JIT_TCC_OPTIONS="..."`: Extra options passed to `tcc_set_options()` for the `libtcc` backend.
 - `CC=...`: Compiler executable used by the `# me:compiler=cc` runtime JIT backend. Defaults to `cc`.
 - `CFLAGS="..."`: Standard C compiler flags honored by the `cc` backend runtime JIT path.
@@ -264,6 +265,15 @@ Backend selection is done in DSL source via pragma:
 
 - `# me:compiler=tcc` (default when omitted)
 - `# me:compiler=cc`
+- `# me:fp=strict|contract|fast`
+- `# me:math=auto|system|sleef|accelerate`
+- `# me:ulp=u10|u35` (SLEEF only; defaults to `u35`)
+
+`contract` and `fast` require the `cc` backend. Math-library choice is
+independent of floating-point mode: strict plus SLEEF/Accelerate is valid.
+Accelerated math uses bounded vector interpretation over tiles; optional JIT
+falls back to that path because the fused per-lane generated bridge would pay a
+lane-packing dispatch per element. System math retains generated-JIT support.
 - On Linux, the libtcc JIT automatically appends common multiarch library directories
   (for example `/usr/lib/x86_64-linux-gnu`) to help `-lm` resolve without extra flags.
 
