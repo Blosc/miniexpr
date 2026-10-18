@@ -294,6 +294,9 @@ void dsl_compiled_program_free(me_dsl_compiled_program *program) {
     }
 #endif
 #if ME_USE_WASM32_JIT
+    if (program->jit_dl_handle_cached) {
+        dsl_jit_wasm_pos_cache_release_program(program);
+    }
     if (program->jit_kernel_fn && !program->jit_dl_handle_cached) {
         dsl_wasm_jit_free_dispatch((int)(uintptr_t)program->jit_kernel_fn);
     }

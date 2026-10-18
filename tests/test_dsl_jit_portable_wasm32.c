@@ -559,6 +559,48 @@ static void check_cache_cycles(void) {
         assert(out == 1.0 + (double)(i + 1));
         me_artifact_free(artifact);
     }
+#if defined(__EMSCRIPTEN__)
+    /* Eviction must not invalidate a kernel that is still owned by a live
+     * artifact. Fill every cache slot with live programs, then execute the
+     * oldest one after additional programs have fallen back to private slots. */
+    me_artifact *active[ME_DSL_JIT_WASM_POS_CACHE_SLOTS + 6] = {0};
+    for (int i = 0; i < unique; i++) {
+        char source[256];
+        snprintf(source, sizeof(source),
+                 "def k(x, y):\\n    return x + %.1f\\n", (double)(i + 101));
+        active[i] = load_elementwise(source, "float64", "float64", ME_JIT_ON);
+        assert(me_artifact_has_jit(active[i]));
+        double x[] = {1.0}, y[] = {2.0}, out = 0;
+        me_artifact_buffer inputs[] = {
+            {"x", ME_FLOAT64, sizeof(double), x, sizeof(x)},
+            {"y", ME_FLOAT64, sizeof(double), y, sizeof(y)},
+        };
+        me_artifact_eval_descriptor descriptor = {
+            .struct_size = sizeof(descriptor), .version = 1, .nitems = 1,
+            .output_capacity = sizeof(out),
+        };
+        me_artifact_error error = {0};
+        assert(me_artifact_eval_ex(active[i], inputs, 2, &out, &descriptor, &error) ==
+               ME_ARTIFACT_SUCCESS);
+        assert(out == 1.0 + (double)(i + 101));
+    }
+    {
+        double x[] = {1.0}, y[] = {2.0}, out = 0;
+        me_artifact_buffer inputs[] = {
+            {"x", ME_FLOAT64, sizeof(double), x, sizeof(x)},
+            {"y", ME_FLOAT64, sizeof(double), y, sizeof(y)},
+        };
+        me_artifact_eval_descriptor descriptor = {
+            .struct_size = sizeof(descriptor), .version = 1, .nitems = 1,
+            .output_capacity = sizeof(out),
+        };
+        me_artifact_error error = {0};
+        assert(me_artifact_eval_ex(active[0], inputs, 2, &out, &descriptor, &error) ==
+               ME_ARTIFACT_SUCCESS);
+        assert(out == 102.0);
+    }
+    for (int i = 0; i < unique; i++) me_artifact_free(active[i]);
+#endif
     /* Reusing one source must keep returning an executeable kernel. */
     for (int i = 0; i < 16; i++) {
         double x[] = {2.0}, y[] = {3.0}, out = 0;

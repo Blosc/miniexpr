@@ -538,6 +538,7 @@ typedef struct {
     uint64_t key;
     int fn_idx;
     void *scratch;
+    unsigned int ref_count;
 } me_dsl_jit_wasm_pos_cache_entry;
 
 static me_dsl_jit_wasm_pos_cache_entry g_dsl_jit_wasm_pos_cache[ME_DSL_JIT_WASM_POS_CACHE_SLOTS];
@@ -586,7 +587,18 @@ bool dsl_jit_wasm_pos_cache_bind_program(me_dsl_compiled_program *program, uint6
     program->jit_dl_handle = NULL;
     program->jit_runtime_key = key;
     program->jit_dl_handle_cached = true;
+    g_dsl_jit_wasm_pos_cache[slot].ref_count++;
     return true;
+}
+
+void dsl_jit_wasm_pos_cache_release_program(me_dsl_compiled_program *program) {
+    if (!program || !program->jit_dl_handle_cached) {
+        return;
+    }
+    int slot = dsl_jit_wasm_pos_cache_find_slot(program->jit_runtime_key);
+    if (slot >= 0 && g_dsl_jit_wasm_pos_cache[slot].ref_count > 0) {
+        g_dsl_jit_wasm_pos_cache[slot].ref_count--;
+    }
 }
 
 static bool dsl_jit_wasm_pos_cache_store_program(me_dsl_compiled_program *program, uint64_t key,
@@ -605,26 +617,34 @@ static bool dsl_jit_wasm_pos_cache_store_program(me_dsl_compiled_program *progra
         program->jit_dl_handle = NULL;
         program->jit_runtime_key = key;
         program->jit_dl_handle_cached = true;
+        g_dsl_jit_wasm_pos_cache[slot].ref_count++;
         return true;
     }
 
     slot = dsl_jit_wasm_pos_cache_find_free_slot();
     if (slot < 0) {
-        slot = g_dsl_jit_wasm_pos_cache_cursor;
-        g_dsl_jit_wasm_pos_cache_cursor =
-            (g_dsl_jit_wasm_pos_cache_cursor + 1) % ME_DSL_JIT_WASM_POS_CACHE_SLOTS;
-        if (g_dsl_jit_wasm_pos_cache[slot].valid) {
-            if (g_dsl_jit_wasm_pos_cache[slot].fn_idx != 0) {
-                dsl_wasm_jit_free_dispatch(g_dsl_jit_wasm_pos_cache[slot].fn_idx);
+        for (int offset = 0; offset < ME_DSL_JIT_WASM_POS_CACHE_SLOTS; offset++) {
+            int candidate =
+                (g_dsl_jit_wasm_pos_cache_cursor + offset) % ME_DSL_JIT_WASM_POS_CACHE_SLOTS;
+            if (g_dsl_jit_wasm_pos_cache[candidate].ref_count == 0) {
+                slot = candidate;
+                break;
             }
-            free(g_dsl_jit_wasm_pos_cache[slot].scratch);
         }
+        if (slot < 0) {
+            return false;
+        }
+        g_dsl_jit_wasm_pos_cache_cursor = (slot + 1) % ME_DSL_JIT_WASM_POS_CACHE_SLOTS;
+        dsl_wasm_jit_free_dispatch(g_dsl_jit_wasm_pos_cache[slot].fn_idx);
+        free(g_dsl_jit_wasm_pos_cache[slot].scratch);
+        memset(&g_dsl_jit_wasm_pos_cache[slot], 0, sizeof(g_dsl_jit_wasm_pos_cache[slot]));
     }
 
     g_dsl_jit_wasm_pos_cache[slot].valid = true;
     g_dsl_jit_wasm_pos_cache[slot].key = key;
     g_dsl_jit_wasm_pos_cache[slot].fn_idx = fn_idx;
     g_dsl_jit_wasm_pos_cache[slot].scratch = scratch;
+    g_dsl_jit_wasm_pos_cache[slot].ref_count = 1;
 
     program->jit_kernel_fn = (me_dsl_jit_kernel_fn)(uintptr_t)fn_idx;
     program->jit_dl_handle = NULL;
