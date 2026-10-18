@@ -422,12 +422,52 @@ cleanup:
     return failed;
 }
 
-int numpy_compat_run_v2(yyjson_val *root, me_jit_mode mode, bool observe) {
+static bool compact_case(yyjson_val *test) {
+    const char *id = text(test, "id");
+    if (!id) return true;
+    uint64_t hash = UINT64_C(1469598103934665603);
+    for (const unsigned char *p = (const unsigned char *)id; *p; p++) {
+        hash ^= *p;
+        hash *= UINT64_C(1099511628211);
+    }
+    return (hash & 7) == 0;
+}
+
+static int compare_case_ids(const void *a, const void *b) {
+    return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
+static bool valid_case_id(const char *id) {
+    if (!id || !*id) return false;
+    for (const char *p = id; *p; p++) {
+        if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '-')) return false;
+    }
+    return true;
+}
+
+int numpy_compat_run_v2(yyjson_val *root, me_jit_mode mode, bool observe, bool compact) {
     yyjson_val *cases = yyjson_obj_get(root, "cases");
     if (!text(root, "generator_revision") || !text(yyjson_obj_get(root, "reference"), "numpy") ||
         !yyjson_is_obj(yyjson_obj_get(root, "provenance")) || !yyjson_is_arr(cases) || !yyjson_arr_size(cases)) return 1;
     int failed = 0;
     size_t count = yyjson_arr_size(cases);
+    const char **ids = malloc(count * sizeof(*ids));
+    if (!ids) return 1;
+    for (size_t i = 0; i < count; i++) {
+        ids[i] = text(yyjson_arr_get(cases, i), "id");
+        if (!valid_case_id(ids[i])) failed = 1;
+    }
+    if (!failed) {
+        qsort(ids,count,sizeof(*ids),compare_case_ids);
+        for (size_t i = 1; i < count; i++) {
+            if (!strcmp(ids[i-1],ids[i])) {
+                failed = 1;
+                break;
+            }
+        }
+    }
+    free(ids);
+    if (failed) return 1;
     v2_loaded *loaded = NULL;
     me_artifact **artifacts = NULL;
     void *batch_handle = NULL;
@@ -441,6 +481,7 @@ int numpy_compat_run_v2(yyjson_val *root, me_jit_mode mode, bool observe) {
             return 1;
         }
         for (size_t i = 0; i < count; i++) {
+            if (compact && !compact_case(yyjson_arr_get(cases,i))) continue;
             const char *json = text(yyjson_arr_get(cases,i),"artifact");
             loaded[i].status = me_artifact_load(json,json ? strlen(json) : 0,ME_JIT_OFF,
                                                &loaded[i].artifact,&loaded[i].error);
@@ -449,18 +490,15 @@ int numpy_compat_run_v2(yyjson_val *root, me_jit_mode mode, bool observe) {
         failed = numpy_compat_batch_compile(artifacts,count,&batch_handle);
         if (failed) goto cleanup_batch;
     }
+    size_t selected = 0;
     for (size_t i = 0; i < yyjson_arr_size(cases); i++) {
         yyjson_val *test = yyjson_arr_get(cases, i);
-        const char *id = text(test, "id");
-        for (size_t j = 0; id && j < i; j++) {
-            const char *previous = text(yyjson_arr_get(cases, j), "id");
-            if (previous && !strcmp(id, previous)) {
-                failed = 1;
-                goto cleanup_batch;
-            }
-        }
+        if (compact && !compact_case(test)) continue;
+        selected++;
         failed |= run_v2_case(test, mode, observe,loaded ? &loaded[i] : NULL);
     }
+    if (compact && (selected < 100 || selected > count / 4)) failed = 1;
+    if (compact) fprintf(stderr,"conformance compact: selected=%zu total=%zu\n",selected,count);
 cleanup_batch:
     if (artifacts) for (size_t i = 0; i < count; i++) me_artifact_free(artifacts[i]);
     numpy_compat_batch_close(batch_handle);

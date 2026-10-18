@@ -8,7 +8,7 @@
 #include <string.h>
 #include <time.h>
 
-int numpy_compat_run_v2(yyjson_val *root, me_jit_mode mode, bool observe);
+int numpy_compat_run_v2(yyjson_val *root, me_jit_mode mode, bool observe, bool compact);
 
 static int run_case(yyjson_val *test, me_jit_mode mode) {
     const char *id = text(test, "id"), *json = text(test, "artifact");
@@ -108,14 +108,20 @@ cleanup:
 }
 
 int main(int argc, char **argv) {
-    if (argc < 2 || argc > 4 || (argc == 4 && strcmp(argv[3], "observe"))) {
-        fprintf(stderr, "usage: %s vectors.json [off|on] [observe]\n", argv[0]);
+    if (argc < 2 || argc > 5) {
+        fprintf(stderr, "usage: %s vectors.json [off|on] [observe] [compact]\n", argv[0]);
         return 2;
     }
     me_jit_mode mode = ME_JIT_OFF;
     if (argc >= 3) {
         if (!strcmp(argv[2], "on")) mode = ME_JIT_ON;
         else if (strcmp(argv[2], "off")) return 2;
+    }
+    bool observe = false, compact = false;
+    for (int i = 3; i < argc; i++) {
+        if (!strcmp(argv[i], "observe")) observe = true;
+        else if (!strcmp(argv[i], "compact")) compact = true;
+        else return 2;
     }
     FILE *file = fopen(argv[1], "rb");
     if (!file) return 2;
@@ -136,7 +142,7 @@ int main(int argc, char **argv) {
     const char *version = text(root, "schema_version");
     yyjson_val *cases = yyjson_obj_get(root, "cases");
     if (version && !strcmp(version, "menudet-numpy-vectors-2")) {
-        failed = numpy_compat_run_v2(root, mode, argc == 4);
+        failed = numpy_compat_run_v2(root, mode, observe, compact);
     }
     else if (!version || strcmp(version, "menudet-numpy-vectors-1") ||
         !yyjson_is_arr(cases) || !yyjson_arr_size(cases)) failed = 1;
