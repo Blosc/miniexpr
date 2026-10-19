@@ -1,4 +1,4 @@
-/* Portable 1.1 scalar C lowering, revision 29. Never translate source
+/* Portable 1.1 scalar C lowering, revision 30. Never translate source
  * text: the typed tree includes promotion and final output conversions. The
  * private kernel ABI appends a participating mask and host comparison/math bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
@@ -80,6 +80,10 @@ static const char *pj_unsigned_type(me_dtype dtype) {
         case ME_INT64: case ME_UINT64: return "uint64_t";
         default: return NULL;
     }
+}
+
+static const char *pj_arithmetic_carrier(me_dtype dtype) {
+    return dtype_size(dtype) <= 2 ? "uint32_t" : "uint64_t";
 }
 
 static bool pj_literal_integer_bits(const me_expr *n, me_dtype dtype, uint64_t *out) {
@@ -898,8 +902,11 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
             }
         }
         else if (integer_arithmetic) {
-            if (arity == 1) snprintf(out,capacity,"pj_%s(0ULL-(uint64_t)(%s))",type,args[0]);
-            else snprintf(out,capacity,"pj_%s((uint64_t)(%s) %s (uint64_t)(%s))",type,args[0],op,args[1]);
+            const char *carrier = pj_arithmetic_carrier(n->dtype);
+            if (arity == 1) snprintf(out,capacity,"pj_%s((%s)0-(%s)(%s))",
+                type,carrier,carrier,args[0]);
+            else snprintf(out,capacity,"pj_%s((%s)(%s) %s (%s)(%s))",
+                type,carrier,args[0],op,carrier,args[1]);
         }
         else if (comparison_bridge) {
             if (p->portable_jit_ncomparisons == ME_DSL_PORTABLE_JIT_BRIDGE_LIMIT) { free(out); out = NULL; }
@@ -1566,7 +1573,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     loop_close = "pj_lane_done: i++; } }";
 #endif
     int used = snprintf(source,capacity,
-        "/* portable-1.1 lowering-r29 integral-math abi-r11 */\n"
+        "/* portable-1.1 lowering-r30 integral-math abi-r11 */\n"
         "#include <stdint.h>\n"
         "#include <limits.h>\n"
         "#include <string.h>\n"

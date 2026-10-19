@@ -20,6 +20,8 @@
 #include <emscripten.h>
 #endif
 
+static void compare_outputs(me_dtype type, const void *a, const void *b, size_t n);
+
 #if defined(__EMSCRIPTEN__)
 EM_JS(double, portable_bench_now_ms, (void), { return performance.now(); });
 #if ME_WASM32_SIDE_MODULE
@@ -137,6 +139,55 @@ static me_artifact *load_nd(const char *source, const char *dtype,
         abort();
     }
     return artifact;
+}
+
+static me_artifact *load_mixed_four(me_jit_mode mode) {
+    const char json[] =
+        "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+        "\"requires\":[\"numeric\"],\"source\":\"def k(a1, a2, a3, a4):\\n    return a1 + a2 - a3 * a4\\n\","
+        "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"a1\",\"dtype\":\"int8\"},"
+        "{\"name\":\"a2\",\"dtype\":\"int16\"},{\"name\":\"a3\",\"dtype\":\"int8\"},"
+        "{\"name\":\"a4\",\"dtype\":\"int16\"}],\"constants\":[],"
+        "\"output\":{\"dtype\":\"int16\",\"contract\":\"elementwise\"},"
+        "\"context\":{\"ndim\":0},\"semantics\":{\"fp\":\"strict\","
+        "\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"metadata\":{}}";
+    me_artifact *artifact = NULL;
+    me_artifact_error error = {0};
+    if (me_artifact_load(json, sizeof(json) - 1, mode, &artifact, &error) != 0) {
+        fprintf(stderr, "mixed load failed: %s\n", error.message);
+        abort();
+    }
+    return artifact;
+}
+
+static void check_mixed_four(void) {
+    int8_t a1[] = {0, 1, 2, 3, INT8_MIN, INT8_MAX, -1, 17};
+    int16_t a2[] = {10, 11, 12, 13, INT16_MAX, INT16_MIN, -30000, 23456};
+    int8_t a3[] = {0, 1, 2, 3, INT8_MAX, INT8_MIN, -1, 101};
+    int16_t a4[] = {10, 11, 12, 13, INT16_MIN, INT16_MAX, -32767, 30000};
+    int16_t actual[8] = {0}, expected[8] = {0};
+    me_artifact_buffer inputs[] = {
+        {"a1", ME_INT8, sizeof(int8_t), a1, sizeof(a1)},
+        {"a2", ME_INT16, sizeof(int16_t), a2, sizeof(a2)},
+        {"a3", ME_INT8, sizeof(int8_t), a3, sizeof(a3)},
+        {"a4", ME_INT16, sizeof(int16_t), a4, sizeof(a4)},
+    };
+    me_artifact_eval_descriptor descriptor = {
+        .struct_size = sizeof(descriptor), .version = 1, .nitems = 8,
+        .output_capacity = sizeof(actual),
+    };
+    me_artifact_error error = {0};
+    me_artifact *jit = load_mixed_four(ME_JIT_ON);
+    me_artifact *interp = load_mixed_four(ME_JIT_OFF);
+#if defined(__EMSCRIPTEN__)
+    assert(me_artifact_has_jit(jit));
+#endif
+    assert(me_artifact_eval_ex(jit, inputs, 4, actual, &descriptor, &error) == ME_ARTIFACT_SUCCESS);
+    descriptor.output_capacity = sizeof(expected);
+    assert(me_artifact_eval_ex(interp, inputs, 4, expected, &descriptor, &error) == ME_ARTIFACT_SUCCESS);
+    compare_outputs(ME_INT16, actual, expected, 8);
+    me_artifact_free(jit);
+    me_artifact_free(interp);
 }
 
 static bool same_value(me_dtype type, const unsigned char *a, const unsigned char *b) {
@@ -816,6 +867,7 @@ int main(void) {
     check_sizes();
     check_fallbacks();
     check_binding_limits();
+    check_mixed_four();
     check_cache_cycles();
     check_forced_invalid();
     check_side_helper_failure();
