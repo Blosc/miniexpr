@@ -1887,6 +1887,9 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     program->jit_lowering_mode[0] = '\0';
     program->jit_vector_ops[0] = '\0';
     program->jit_lowering_reason[0] = '\0';
+    program->portable_jit_has_arith_bridge = false;
+    program->portable_jit_arith_ntemps = 0;
+    program->portable_jit_arith_nnodes = 0;
 
     if (parsed->nparams < 0) {
         snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",

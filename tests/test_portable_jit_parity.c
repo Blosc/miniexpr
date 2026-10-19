@@ -1472,6 +1472,172 @@ static void scalar_loop_cap(void) {
     me_artifact_free(jit); me_artifact_free(reference);
 }
 
+static void arithmetic_bridge_regressions(void) {
+    parity_case basic = {"arithmetic bridge admission","return x + (y - 1)",
+        "float64","float64",true};
+    me_artifact *enabled = load(&basic,ME_JIT_ON);
+    if (!me_artifact_has_jit(enabled)) {
+        me_artifact_free(enabled);
+        return;
+    }
+    me_dsl_compiled_program *enabled_program = dsl_artifact_program_for_tests(enabled);
+    if (enabled_program && enabled_program->compiler != ME_DSL_COMPILER_LIBTCC) {
+        me_artifact_free(enabled);
+        return;
+    }
+    CHECK(enabled_program && enabled_program->portable_jit_has_arith_bridge);
+    CHECK(enabled_program->portable_jit_arith_nnodes == 5);
+    CHECK(enabled_program->portable_jit_arith_ntemps == 1);
+    uint64_t enabled_key = dsl_jit_runtime_cache_key(enabled_program);
+
+    parity_case conversion = {"arithmetic bridge conversion rejection","return float64(x)",
+        "float64","float64",true};
+    me_artifact *converted = load(&conversion,ME_JIT_ON);
+    me_dsl_compiled_program *converted_program = dsl_artifact_program_for_tests(converted);
+    CHECK(converted_program && !converted_program->portable_jit_has_arith_bridge);
+    me_artifact_free(converted);
+
+    const char *old_toggle = getenv("ME_DSL_JIT_ARITH_BRIDGE");
+    char *saved_toggle = old_toggle ? strdup(old_toggle) : NULL;
+#ifdef _WIN32
+    _putenv_s("ME_DSL_JIT_ARITH_BRIDGE","0");
+#else
+    setenv("ME_DSL_JIT_ARITH_BRIDGE","0",1);
+#endif
+    me_artifact *disabled = load(&basic,ME_JIT_ON);
+    me_dsl_compiled_program *disabled_program = dsl_artifact_program_for_tests(disabled);
+    CHECK(disabled_program && !disabled_program->portable_jit_has_arith_bridge);
+    uint64_t disabled_key = dsl_jit_runtime_cache_key(disabled_program);
+    CHECK(enabled_key && disabled_key && enabled_key != disabled_key);
+#ifdef _WIN32
+    _putenv_s("ME_DSL_JIT_ARITH_BRIDGE",saved_toggle ? saved_toggle : "");
+#else
+    if (saved_toggle) setenv("ME_DSL_JIT_ARITH_BRIDGE",saved_toggle,1);
+    else unsetenv("ME_DSL_JIT_ARITH_BRIDGE");
+#endif
+    free(saved_toggle);
+    me_artifact_free(disabled);
+
+    parity_case four_temps = {"arithmetic bridge four temporaries",
+        "return (x + y) * (x - y) + (x * y + x / y)","float64","float64",true};
+    me_artifact *four = load(&four_temps,ME_JIT_ON);
+    me_dsl_compiled_program *four_program = dsl_artifact_program_for_tests(four);
+    CHECK(four_program && four_program->portable_jit_has_arith_bridge &&
+        four_program->portable_jit_arith_ntemps == 4);
+    me_artifact_free(four);
+    parity_case over_temps = {"arithmetic bridge temporary rejection",
+        "return ((x + y) * (x - y) + (x * y + x / y)) * (((-x) + y) * ((-x) - y) + ((-x) * y + (-x) / y))",
+        "float64","float64",true};
+    me_artifact *over = load(&over_temps,ME_JIT_ON);
+    me_dsl_compiled_program *over_program = dsl_artifact_program_for_tests(over);
+    CHECK(over_program && !over_program->portable_jit_has_arith_bridge);
+    me_artifact_free(over);
+
+    /* Uniform signed arithmetic must use unsigned carriers, including overflow. */
+    parity_case uniform = {"uniform modular arithmetic","return x + (z + z)",
+        "int64","int64",true};
+    const char *second = "{\"name\":\"y\",\"dtype\":\"int64\"}";
+    const char *constant = "{\"name\":\"z\",\"dtype\":\"int64\",\"category\":\"typed_scalar\","
+        "\"encoding\":\"decimal\",\"value\":\"9223372036854775807\"}";
+    me_artifact *uniform_jit = load_contract(&uniform,ME_JIT_ON,second,constant,"elementwise");
+    me_artifact *uniform_ref = load_contract(&uniform,ME_JIT_OFF,second,constant,"elementwise");
+    me_dsl_compiled_program *uniform_program = dsl_artifact_program_for_tests(uniform_jit);
+    CHECK(uniform_program && uniform_program->portable_jit_has_arith_bridge);
+    CHECK(strstr(uniform_program->jit_c_source,
+        "pj_int64_t((uint64_t)(pj_input_2[0]) + (uint64_t)(pj_input_2[0]))"));
+    int64_t ix[] = {0,1,INT64_MIN,INT64_MAX}, iy[] = {0,0,0,0};
+    int64_t actual_i[4], expected_i[4];
+    me_artifact_buffer ibuffers[] = {{"x",ME_INT64,8,ix,sizeof(ix)},
+        {"y",ME_INT64,8,iy,sizeof(iy)}};
+    me_artifact_eval_descriptor idesc = {.struct_size=sizeof(idesc),.version=1,
+        .nitems=4,.output_capacity=sizeof(actual_i)};
+    me_artifact_error error, ref_error;
+    CHECK(!me_artifact_eval_ex(uniform_jit,ibuffers,2,actual_i,&idesc,&error));
+    CHECK(!me_artifact_eval_ex(uniform_ref,ibuffers,2,expected_i,&idesc,&ref_error));
+    CHECK(!memcmp(actual_i,expected_i,sizeof(actual_i)) && actual_i[0] == -2);
+    me_artifact_free(uniform_jit); me_artifact_free(uniform_ref);
+
+    /* Audit both missing and spurious exceptions around strip boundaries. */
+    parity_case division = {"arithmetic bridge tail status","return x / y",
+        "float64","float64",true};
+    me_artifact *division_jit = load(&division,ME_JIT_ON);
+    me_artifact *division_ref = load(&division,ME_JIT_OFF);
+    me_dsl_compiled_program *division_program = dsl_artifact_program_for_tests(division_jit);
+    CHECK(division_program && division_program->portable_jit_has_arith_bridge);
+    const int lengths[] = {1,3,4,5,511,512,513};
+    double x[514], y[514], actual[513], expected[513];
+    for (int i=0; i<514; i++) { x[i]=1.0; y[i]=1.0; }
+    for (size_t li=0; li<sizeof(lengths)/sizeof(lengths[0]); li++) {
+        int n=lengths[li];
+        me_artifact_buffer buffers[] = {{"x",ME_FLOAT64,8,x,(size_t)(n+1)*8},
+            {"y",ME_FLOAT64,8,y,(size_t)(n+1)*8}};
+        me_artifact_eval_descriptor desc = {.struct_size=sizeof(desc),.version=1,
+            .nitems=n,.output_capacity=(size_t)n*8};
+        me_artifact_fp_status status, reference_status;
+        y[n]=0.0; /* Exceptional padding must not participate. */
+        CHECK(!me_artifact_eval_status(division_jit,buffers,2,actual,&desc,0,&status,&error));
+        CHECK(status.flags == 0);
+        y[n-1]=0.0; /* The final active lane must participate. */
+        CHECK(!me_artifact_eval_status(division_jit,buffers,2,actual,&desc,0,&status,&error));
+        CHECK(!me_artifact_eval_status(division_ref,buffers,2,expected,&desc,0,
+            &reference_status,&ref_error));
+        CHECK(status.flags == reference_status.flags && (status.flags & ME_FP_DIVIDE));
+        y[n-1]=1.0; y[n]=1.0;
+        /* Exact-size allocations let ASan detect a physical tail over-read. */
+        double *exact_x=malloc((size_t)n*8), *exact_y=malloc((size_t)n*8);
+        CHECK(exact_x && exact_y);
+        for (int i=0; i<n; i++) { exact_x[i]=1.0; exact_y[i]=1.0; }
+        me_artifact_buffer exact_buffers[]={{"x",ME_FLOAT64,8,exact_x,(size_t)n*8},
+            {"y",ME_FLOAT64,8,exact_y,(size_t)n*8}};
+        CHECK(!me_artifact_eval_status(division_jit,exact_buffers,2,actual,&desc,0,
+            &status,&error) && status.flags == 0);
+        free(exact_x); free(exact_y);
+    }
+    me_artifact_free(division_jit); me_artifact_free(division_ref);
+
+    /* Copy and unary negation preserve signaling NaNs without FE_INVALID. */
+    const char *snan_bodies[] = {"return x","return -x"};
+    for (int operation=0; operation<2; operation++) {
+        parity_case snan = {"arithmetic bridge signaling NaN",snan_bodies[operation],
+            "float64","float64",true};
+        me_artifact *jit=load(&snan,ME_JIT_ON), *reference=load(&snan,ME_JIT_OFF);
+        uint64_t input_bits[513], actual_bits[513], expected_bits[513];
+        for (int i=0; i<513; i++) input_bits[i]=UINT64_C(0x7ff0000000000001);
+        me_artifact_buffer buffers[]={{"x",ME_FLOAT64,8,input_bits,sizeof(input_bits)},
+            {"y",ME_FLOAT64,8,input_bits,sizeof(input_bits)}};
+        me_artifact_eval_descriptor desc={.struct_size=sizeof(desc),.version=1,
+            .nitems=513,.output_capacity=sizeof(actual_bits)};
+        me_artifact_fp_status status, reference_status;
+        CHECK(!me_artifact_eval_status(jit,buffers,2,actual_bits,&desc,0,&status,&error));
+        CHECK(!me_artifact_eval_status(reference,buffers,2,expected_bits,&desc,0,
+            &reference_status,&ref_error));
+        CHECK(status.flags == reference_status.flags && !(status.flags & ME_FP_INVALID));
+        CHECK(!memcmp(actual_bits,expected_bits,sizeof(actual_bits)));
+        me_artifact_free(jit); me_artifact_free(reference);
+    }
+
+    const char *fill_json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\","
+        "\"version\":\"1.0\"},\"requires\":[\"numeric\"],\"source\":\"def k(c):\\n    return c\\n\","
+        "\"entry_point\":\"k\",\"inputs\":[],\"constants\":[{\"name\":\"c\",\"dtype\":\"float64\","
+        "\"encoding\":\"ieee754-hex\",\"value\":\"7ff0000000000001\",\"category\":\"typed_scalar\"}],"
+        "\"output\":{\"dtype\":\"float64\",\"contract\":\"elementwise\"},\"semantics\":{\"fp\":\"strict\","
+        "\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":0}}";
+    me_artifact *fill_jit=NULL, *fill_ref=NULL;
+    CHECK(!me_artifact_load(fill_json,strlen(fill_json),ME_JIT_ON,&fill_jit,&error));
+    CHECK(!me_artifact_load(fill_json,strlen(fill_json),ME_JIT_OFF,&fill_ref,&ref_error));
+    uint64_t fill_actual[513], fill_expected[513];
+    me_artifact_eval_descriptor fill_desc={.struct_size=sizeof(fill_desc),.version=1,
+        .nitems=513,.output_capacity=sizeof(fill_actual)};
+    me_artifact_fp_status fill_status, fill_reference_status;
+    CHECK(!me_artifact_eval_status(fill_jit,NULL,0,fill_actual,&fill_desc,0,&fill_status,&error));
+    CHECK(!me_artifact_eval_status(fill_ref,NULL,0,fill_expected,&fill_desc,0,
+        &fill_reference_status,&ref_error));
+    CHECK(fill_status.flags == fill_reference_status.flags && !(fill_status.flags & ME_FP_INVALID));
+    CHECK(!memcmp(fill_actual,fill_expected,sizeof(fill_actual)));
+    me_artifact_free(fill_jit); me_artifact_free(fill_ref);
+    me_artifact_free(enabled);
+}
+
 int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i],"--compact")) {
@@ -1496,6 +1662,7 @@ int main(int argc, char **argv) {
     runtime_literal_parity();
     resolved_libm_parity();
     integer_tree_parity();
+    arithmetic_bridge_regressions();
     scalar_array_fallbacks();
     scalar_loop_cap();
     integer_scalar_reductions();

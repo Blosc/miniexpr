@@ -6,6 +6,7 @@
 #include "dsl_math_dispatch.h"
 #include "dsl_portable_expr.h"
 #include "dsl_portable_types.h"
+#include "dsl_portable_batch.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1372,6 +1373,546 @@ static bool pj_scalar_block(const me_dsl_compiled_block *block, int *count, int 
     return true;
 }
 
+#ifndef __EMSCRIPTEN__
+
+static bool pj_arith_bridge_enabled(void) {
+    const char *env = getenv("ME_DSL_JIT_ARITH_BRIDGE");
+    if (env && strcmp(env, "0") == 0) return false;
+    return true;
+}
+
+typedef enum {
+    PJ_ARITH_NODE_VAR,
+    PJ_ARITH_NODE_UNIFORM_VAR,
+    PJ_ARITH_NODE_LITERAL,
+    PJ_ARITH_NODE_UNARY,
+    PJ_ARITH_NODE_BINARY
+} pj_arith_node_kind;
+
+typedef struct {
+    const me_expr *expr;
+    pj_arith_node_kind kind;
+    int op;
+    int left;
+    int right;
+    bool uniform;
+    int uses;
+    int temp_slot;
+    int var_index;
+    int scalar_id;
+} pj_arith_node;
+
+typedef struct {
+    pj_arith_node nodes[64];
+    int count;
+    int root;
+    int ntemps;
+    int nnodes;
+    int uniform_ops;
+    me_dtype dtype;
+    const char *carrier;
+    const char *carrier_type;
+    const char *var_type;
+    int strip;
+} pj_arith_dag;
+
+static int pj_arith_find_or_add_node(pj_arith_dag *dag, const me_dsl_compiled_program *p,
+                                     const me_expr *n, const char **reason) {
+    if (!n) {
+        *reason = "unsupported-leaf";
+        return -1;
+    }
+    for (int i = 0; i < dag->count; i++) {
+        if (pj_cse_equal(p, dag->nodes[i].expr, n, 0)) {
+            dag->nodes[i].uses++;
+            return i;
+        }
+    }
+    if (dag->count >= 64) {
+        *reason = "too-many-temps";
+        return -1;
+    }
+    if (n->dtype != dag->dtype) {
+        *reason = "mixed-dtype";
+        return -1;
+    }
+
+
+    int kind = TYPE_MASK(n->type);
+    if (kind == ME_VARIABLE) {
+        if (!is_synthetic_address(n->bound)) {
+            *reason = "unsupported-leaf";
+            return -1;
+        }
+        int var_idx = (int)((const char *)n->bound - synthetic_var_addresses);
+        if (var_idx < 0 || var_idx >= p->vars.count) {
+            *reason = "unsupported-leaf";
+            return -1;
+        }
+        if (dag->count >= 64) {
+            *reason = "too-many-temps";
+            return -1;
+        }
+        int idx = dag->count++;
+        pj_arith_node *node = &dag->nodes[idx];
+        node->expr = n;
+        node->uses = 1;
+        node->temp_slot = -1;
+        node->left = -1;
+        node->right = -1;
+        node->scalar_id = -1;
+        node->var_index = var_idx;
+        if (p->vars.uniform[var_idx] || (n->flags & ME_EXPR_FLAG_UNIFORM_INPUT)) {
+            node->kind = PJ_ARITH_NODE_UNIFORM_VAR;
+            node->uniform = true;
+        } else {
+            node->kind = PJ_ARITH_NODE_VAR;
+            node->uniform = false;
+        }
+        return idx;
+    }
+
+    if (kind == ME_CONSTANT) {
+        if (pj_float(dag->dtype)) {
+            double val = (dag->dtype == ME_FLOAT32) ? (double)n->literal_f32 : n->value;
+            if (!isfinite(val)) {
+                *reason = "unsupported-leaf";
+                return -1;
+            }
+        } else if (pj_integer(dag->dtype)) {
+            if (!(n->flags & ME_EXPR_FLAG_INTEGER_LITERAL)) {
+                *reason = "unsupported-leaf";
+                return -1;
+            }
+        } else {
+            *reason = "unsupported-leaf";
+            return -1;
+        }
+        if (dag->count >= 64) {
+            *reason = "too-many-temps";
+            return -1;
+        }
+        int idx = dag->count++;
+        pj_arith_node *node = &dag->nodes[idx];
+        node->expr = n;
+        node->uses = 1;
+        node->temp_slot = -1;
+        node->left = -1;
+        node->right = -1;
+        node->scalar_id = -1;
+        node->kind = PJ_ARITH_NODE_LITERAL;
+        node->uniform = true;
+        return idx;
+    }
+
+    if (IS_FUNCTION(n->type)) {
+        if (!n->function) {
+            *reason = "conversion";
+            return -1;
+        }
+        if (is_reduction_node(n)) {
+            *reason = "unsupported-op";
+            return -1;
+        }
+        if (n->flags & ME_EXPR_FLAG_WEAK_SCALAR) {
+            *reason = "conversion";
+            return -1;
+        }
+
+        const char *op = me_portable_operator(n);
+        if (!op) {
+            *reason = "unsupported-op";
+            return -1;
+        }
+        int arity = ARITY(n->type);
+        if (arity == 1) {
+            if (strcmp(op, "-") != 0) {
+                *reason = "unsupported-op";
+                return -1;
+            }
+            int left_idx = pj_arith_find_or_add_node(dag, p, (const me_expr *)n->parameters[0], reason);
+            if (left_idx < 0) return -1;
+            if (dag->count >= 64) {
+                *reason = "too-many-temps";
+                return -1;
+            }
+            int idx = dag->count++;
+            pj_arith_node *node = &dag->nodes[idx];
+            node->expr = n;
+            node->uses = 1;
+            node->temp_slot = -1;
+            node->right = -1;
+            node->scalar_id = -1;
+            node->kind = PJ_ARITH_NODE_UNARY;
+            node->op = 0; /* neg */
+            node->left = left_idx;
+            node->uniform = dag->nodes[left_idx].uniform;
+            return idx;
+        }
+        if (arity == 2) {
+            int op_code;
+            if (strcmp(op, "+") == 0) op_code = 0;
+            else if (strcmp(op, "-") == 0) op_code = 1;
+            else if (strcmp(op, "*") == 0) op_code = 2;
+            else if (strcmp(op, "/") == 0) {
+                if (pj_integer(dag->dtype)) {
+                    *reason = "unsupported-op";
+                    return -1;
+                }
+                op_code = 3;
+            } else {
+                *reason = "unsupported-op";
+                return -1;
+            }
+            int left_idx = pj_arith_find_or_add_node(dag, p, (const me_expr *)n->parameters[0], reason);
+            if (left_idx < 0) return -1;
+            int right_idx = pj_arith_find_or_add_node(dag, p, (const me_expr *)n->parameters[1], reason);
+            if (right_idx < 0) return -1;
+            if (dag->count >= 64) {
+                *reason = "too-many-temps";
+                return -1;
+            }
+            int idx = dag->count++;
+            pj_arith_node *node = &dag->nodes[idx];
+            node->expr = n;
+            node->uses = 1;
+            node->temp_slot = -1;
+            node->scalar_id = -1;
+            node->kind = PJ_ARITH_NODE_BINARY;
+            node->op = op_code;
+            node->left = left_idx;
+            node->right = right_idx;
+            node->uniform = dag->nodes[left_idx].uniform && dag->nodes[right_idx].uniform;
+            return idx;
+        }
+    }
+
+    *reason = "unsupported-leaf";
+    return -1;
+}
+
+static bool pj_match_arith_tree(pj_arith_dag *dag, const me_dsl_compiled_program *p,
+                                const me_expr *root, const char **reason) {
+    if (!p || !root) {
+        *reason = "unsupported-leaf";
+        return false;
+    }
+    memset(dag, 0, sizeof(*dag));
+    dag->dtype = root->dtype;
+    if (dag->dtype == ME_FLOAT64) {
+        dag->carrier = "f64";
+        dag->carrier_type = "double";
+        dag->var_type = "double";
+        dag->strip = 512;
+    } else if (dag->dtype == ME_FLOAT32) {
+        dag->carrier = "f32";
+        dag->carrier_type = "float";
+        dag->var_type = "float";
+        dag->strip = 1024;
+    } else if (dag->dtype == ME_INT64 || dag->dtype == ME_UINT64) {
+        dag->carrier = "u64";
+        dag->carrier_type = "uint64_t";
+        dag->var_type = pj_type(dag->dtype);
+        dag->strip = 512;
+    } else if (dag->dtype == ME_INT32 || dag->dtype == ME_UINT32) {
+        dag->carrier = "u32";
+        dag->carrier_type = "uint32_t";
+        dag->var_type = pj_type(dag->dtype);
+        dag->strip = 1024;
+    } else if (dag->dtype == ME_INT16 || dag->dtype == ME_UINT16) {
+        dag->carrier = "u16";
+        dag->carrier_type = "uint16_t";
+        dag->var_type = pj_type(dag->dtype);
+        dag->strip = 2048;
+    } else if (dag->dtype == ME_INT8 || dag->dtype == ME_UINT8) {
+        dag->carrier = "u8";
+        dag->carrier_type = "uint8_t";
+        dag->var_type = pj_type(dag->dtype);
+        dag->strip = 4096;
+    } else {
+        *reason = "mixed-dtype";
+        return false;
+    }
+
+    if (p->output_dtype != dag->dtype) {
+        *reason = "mixed-dtype";
+        return false;
+    }
+
+    int root_idx = pj_arith_find_or_add_node(dag, p, root, reason);
+    if (root_idx < 0) {
+        return false;
+    }
+    dag->root = root_idx;
+    dag->nnodes = dag->count;
+
+    int n_literals = 0;
+    int n_uniform_subs = 0;
+    for (int i = 0; i < dag->count; i++) {
+        pj_arith_node *node = &dag->nodes[i];
+        if (node->kind == PJ_ARITH_NODE_LITERAL) {
+            node->scalar_id = n_literals++;
+        } else if (node->uniform && (node->kind == PJ_ARITH_NODE_UNARY || node->kind == PJ_ARITH_NODE_BINARY)) {
+            node->scalar_id = n_uniform_subs++;
+        }
+    }
+    dag->uniform_ops = n_uniform_subs;
+
+    /* Temporary slot allocation */
+    int free_mask = 0x0F;
+    int peak_temps = 0;
+    int rem_uses[64];
+    for (int i = 0; i < dag->count; i++) {
+        rem_uses[i] = dag->nodes[i].uses;
+    }
+
+    for (int i = 0; i < dag->count; i++) {
+        pj_arith_node *node = &dag->nodes[i];
+        if (node->uniform || node->kind == PJ_ARITH_NODE_VAR) {
+            continue;
+        }
+        if (i == dag->root) {
+            node->temp_slot = -1;
+        } else {
+            int slot = -1;
+            for (int s = 0; s < 4; s++) {
+                if (free_mask & (1 << s)) {
+                    slot = s;
+                    break;
+                }
+            }
+            if (slot < 0) {
+                *reason = "too-many-temps";
+                return false;
+            }
+            node->temp_slot = slot;
+            free_mask &= ~(1 << slot);
+            if (slot + 1 > peak_temps) peak_temps = slot + 1;
+        }
+
+        if (node->left >= 0) {
+            pj_arith_node *child = &dag->nodes[node->left];
+            if (!child->uniform && child->temp_slot >= 0) {
+                rem_uses[node->left]--;
+                if (rem_uses[node->left] <= 0) {
+                    free_mask |= (1 << child->temp_slot);
+                }
+            }
+        }
+        if (node->right >= 0) {
+            pj_arith_node *child = &dag->nodes[node->right];
+            if (!child->uniform && child->temp_slot >= 0) {
+                rem_uses[node->right]--;
+                if (rem_uses[node->right] <= 0) {
+                    free_mask |= (1 << child->temp_slot);
+                }
+            }
+        }
+    }
+    dag->ntemps = peak_temps;
+    return true;
+}
+
+static void pj_arith_node_scalar_name(const pj_arith_dag *dag, int idx, char *buf, size_t cap) {
+    const pj_arith_node *node = &dag->nodes[idx];
+    if (node->kind == PJ_ARITH_NODE_LITERAL) {
+        snprintf(buf, cap, "pj_c%d", node->scalar_id);
+    } else if (node->kind == PJ_ARITH_NODE_UNIFORM_VAR) {
+        snprintf(buf, cap, "pj_input_%d[0]", node->var_index);
+    } else if (node->scalar_id >= 0) {
+        snprintf(buf, cap, "pj_u%d", node->scalar_id);
+    } else {
+        snprintf(buf, cap, "0");
+    }
+}
+
+static void pj_arith_emit_uniform_expr(const pj_arith_dag *dag, int idx, char *buf, size_t cap) {
+    const pj_arith_node *node = &dag->nodes[idx];
+    bool integer = pj_integer(dag->dtype);
+    if (node->kind == PJ_ARITH_NODE_UNARY) {
+        char child_name[64];
+        pj_arith_node_scalar_name(dag, node->left, child_name, sizeof(child_name));
+        if (integer) {
+            snprintf(buf, cap, "pj_%s(0ULL-(uint64_t)(%s))", dag->var_type, child_name);
+        } else {
+            snprintf(buf, cap, "-%s", child_name);
+        }
+    } else if (node->kind == PJ_ARITH_NODE_BINARY) {
+        char left_name[64], right_name[64];
+        pj_arith_node_scalar_name(dag, node->left, left_name, sizeof(left_name));
+        pj_arith_node_scalar_name(dag, node->right, right_name, sizeof(right_name));
+        const char *op_sym = (node->op == 0) ? "+" : (node->op == 1) ? "-" : (node->op == 2) ? "*" : "/";
+        if (integer) {
+            snprintf(buf, cap, "pj_%s((uint64_t)(%s) %s (uint64_t)(%s))",
+                dag->var_type, left_name, op_sym, right_name);
+        } else {
+            snprintf(buf, cap, "%s %s %s", left_name, op_sym, right_name);
+        }
+    } else {
+        pj_arith_node_scalar_name(dag, idx, buf, cap);
+    }
+}
+
+static bool pj_emit_arith_bridge(const pj_arith_dag *dag, const me_dsl_compiled_program *p, pj_text *out) {
+    if (!pj_append(out, "static int pj_unmasked(const void *const *inputs, void *restrict output, int64_t count) {\n"))
+        return false;
+    if (!pj_append(out, "    if (count <= 0) return 0;\n"))
+        return false;
+    if (!pj_append(out, "    const me_pj_arith_table *pj_t = (const me_pj_arith_table *)inputs[%d];\n",
+                   p->n_inputs + ME_DSL_PORTABLE_JIT_ARITH_OFF))
+        return false;
+    for (int i = 0; i < p->n_inputs; i++) {
+        const char *type = pj_type(p->vars.dtypes[i]);
+        if (!pj_append(out, "    const %s *pj_input_%d = (const %s *)inputs[%d];\n", type, i, type, i))
+            return false;
+    }
+    if (!pj_append(out, "    %s *out = (%s *)output;\n", dag->var_type, dag->var_type))
+        return false;
+
+    /* Literals */
+    for (int i = 0; i < dag->count; i++) {
+        const pj_arith_node *node = &dag->nodes[i];
+        if (node->kind == PJ_ARITH_NODE_LITERAL) {
+            char val_str[128];
+            const me_expr *n = node->expr;
+            if (pj_float(dag->dtype)) {
+                double val = (dag->dtype == ME_FLOAT32) ? (double)n->literal_f32 : n->value;
+                snprintf(val_str, sizeof(val_str), "((%s)%a)", dag->var_type, val);
+            } else {
+                if (n->flags & ME_EXPR_FLAG_NEGATIVE_LITERAL) {
+                    snprintf(val_str, sizeof(val_str), "pj_%s(0ULL-%lluULL)", dag->var_type, (unsigned long long)n->integer_magnitude);
+                } else {
+                    snprintf(val_str, sizeof(val_str), "pj_%s(%lluULL)", dag->var_type, (unsigned long long)n->integer_magnitude);
+                }
+            }
+            if (!pj_append(out, "    const %s pj_c%d = %s;\n", dag->var_type, node->scalar_id, val_str))
+                return false;
+        }
+    }
+
+    /* Uniform subtrees */
+    for (int i = 0; i < dag->count; i++) {
+        const pj_arith_node *node = &dag->nodes[i];
+        if (node->uniform && (node->kind == PJ_ARITH_NODE_UNARY || node->kind == PJ_ARITH_NODE_BINARY)) {
+            char expr_str[256];
+            pj_arith_emit_uniform_expr(dag, i, expr_str, sizeof(expr_str));
+            if (!pj_append(out, "    const %s pj_u%d = ((volatile %s){ %s });\n",
+                           dag->var_type, node->scalar_id, dag->var_type, expr_str))
+                return false;
+        }
+    }
+
+    /* Temporaries */
+    for (int t = 0; t < dag->ntemps; t++) {
+        if (!pj_append(out, "    %s pj_tmp%d[%d];\n", dag->carrier_type, t, dag->strip))
+            return false;
+    }
+
+    /* Strip loop */
+    if (!pj_append(out, "    for (int64_t s = 0; s < count; s += %d) {\n", dag->strip))
+        return false;
+    if (!pj_append(out, "        int n = (int)(count - s < %d ? count - s : %d);\n", dag->strip, dag->strip))
+        return false;
+
+    /* Inside strip loop */
+    if (dag->nodes[dag->root].uniform) {
+        char scalar_name[64];
+        pj_arith_node_scalar_name(dag, dag->root, scalar_name, sizeof(scalar_name));
+        if (!pj_append(out, "        pj_t->%s_fill((%s)(%s), (%s *)(out + s), n);\n",
+                       dag->carrier, dag->carrier_type, scalar_name, dag->carrier_type))
+            return false;
+    } else {
+        for (int i = 0; i < dag->count; i++) {
+            const pj_arith_node *node = &dag->nodes[i];
+            if (node->uniform) continue;
+
+            if (node->kind == PJ_ARITH_NODE_VAR) {
+                if (i == dag->root) {
+                    if (!pj_append(out, "        memcpy(out + s, pj_input_%d + s, (size_t)n * sizeof(%s));\n",
+                                   node->var_index, dag->var_type))
+                        return false;
+                }
+                continue;
+            }
+
+            char dst[64];
+            if (i == dag->root) {
+                snprintf(dst, sizeof(dst), "(%s *)(out + s)", dag->carrier_type);
+            } else {
+                snprintf(dst, sizeof(dst), "pj_tmp%d", node->temp_slot);
+            }
+
+            if (node->kind == PJ_ARITH_NODE_UNARY) {
+                char src[64];
+                const pj_arith_node *child = &dag->nodes[node->left];
+                if (child->kind == PJ_ARITH_NODE_VAR) {
+                    snprintf(src, sizeof(src), "(const %s *)(pj_input_%d + s)", dag->carrier_type, child->var_index);
+                } else {
+                    snprintf(src, sizeof(src), "pj_tmp%d", child->temp_slot);
+                }
+                if (!pj_append(out, "        pj_t->%s_neg(%s, %s, n);\n", dag->carrier, src, dst))
+                    return false;
+            } else if (node->kind == PJ_ARITH_NODE_BINARY) {
+                const char *op_name;
+                switch (node->op) {
+                    case 0: op_name = "PJ_ARITH_ADD"; break;
+                    case 1: op_name = "PJ_ARITH_SUB"; break;
+                    case 2: op_name = "PJ_ARITH_MUL"; break;
+                    case 3: op_name = "PJ_ARITH_DIV"; break;
+                    default: return false;
+                }
+                const pj_arith_node *l = &dag->nodes[node->left];
+                const pj_arith_node *r = &dag->nodes[node->right];
+
+                if (!l->uniform && !r->uniform) {
+                    char left_src[64], right_src[64];
+                    if (l->kind == PJ_ARITH_NODE_VAR) {
+                        snprintf(left_src, sizeof(left_src), "(const %s *)(pj_input_%d + s)", dag->carrier_type, l->var_index);
+                    } else {
+                        snprintf(left_src, sizeof(left_src), "pj_tmp%d", l->temp_slot);
+                    }
+                    if (r->kind == PJ_ARITH_NODE_VAR) {
+                        snprintf(right_src, sizeof(right_src), "(const %s *)(pj_input_%d + s)", dag->carrier_type, r->var_index);
+                    } else {
+                        snprintf(right_src, sizeof(right_src), "pj_tmp%d", r->temp_slot);
+                    }
+                    if (!pj_append(out, "        pj_t->%s_vv[%s](%s, %s, %s, n);\n",
+                                   dag->carrier, op_name, left_src, right_src, dst))
+                        return false;
+                } else if (!l->uniform && r->uniform) {
+                    char left_src[64], right_scalar[64];
+                    if (l->kind == PJ_ARITH_NODE_VAR) {
+                        snprintf(left_src, sizeof(left_src), "(const %s *)(pj_input_%d + s)", dag->carrier_type, l->var_index);
+                    } else {
+                        snprintf(left_src, sizeof(left_src), "pj_tmp%d", l->temp_slot);
+                    }
+                    pj_arith_node_scalar_name(dag, node->right, right_scalar, sizeof(right_scalar));
+                    if (!pj_append(out, "        pj_t->%s_vs[%s](%s, (%s)(%s), %s, n);\n",
+                                   dag->carrier, op_name, left_src, dag->carrier_type, right_scalar, dst))
+                        return false;
+                } else if (l->uniform && !r->uniform) {
+                    char left_scalar[64], right_src[64];
+                    pj_arith_node_scalar_name(dag, node->left, left_scalar, sizeof(left_scalar));
+                    if (r->kind == PJ_ARITH_NODE_VAR) {
+                        snprintf(right_src, sizeof(right_src), "(const %s *)(pj_input_%d + s)", dag->carrier_type, r->var_index);
+                    } else {
+                        snprintf(right_src, sizeof(right_src), "pj_tmp%d", r->temp_slot);
+                    }
+                    if (!pj_append(out, "        pj_t->%s_sv[%s]((%s)(%s), %s, %s, n);\n",
+                                   dag->carrier, op_name, dag->carrier_type, left_scalar, right_src, dst))
+                        return false;
+                }
+            }
+        }
+    }
+
+    if (!pj_append(out, "    }\n    return 0;\n}\n"))
+        return false;
+    return true;
+}
+
+#endif
+
 static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *constants) {
     if (p) dsl_tracef("portable jit prepare: request=%d profile=%d",p->jit_request_mode,p->semantic_profile);
     /* Elementwise statements, lane-local loops, and audited float reductions. ND logical
@@ -1534,7 +2075,41 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         free(input_declarations.text); free(unmasked_body.text); free(body.text); free(preamble.text);
         return;
     }
-    size_t capacity = 2*(body.used + preamble.used + input_declarations.used) + 16384;
+    pj_arith_dag arith_dag = {0};
+    bool use_arith_bridge = false;
+    pj_text unmasked_bridge = {0};
+    const char *arith_rejection_reason = NULL;
+
+#ifndef __EMSCRIPTEN__
+    if (p->compiler == ME_DSL_COMPILER_LIBTCC && !scalar &&
+        p->block.nstmts == 1 && p->block.stmts[0]->kind == ME_DSL_STMT_RETURN &&
+        p->n_locals == 0 && !p->uses_ndim && !p->uses_flat_idx &&
+        !p->uses_i_mask && !p->uses_n_mask) {
+        if (!pj_arith_bridge_enabled()) {
+            arith_rejection_reason = "disabled";
+        } else if (p->fp_mode != ME_DSL_FP_STRICT) {
+            arith_rejection_reason = "non-strict-fp";
+        } else {
+            const me_expr *ret_expr = p->block.stmts[0]->as.return_stmt.expr.expr;
+            if (pj_match_arith_tree(&arith_dag, p, ret_expr, &arith_rejection_reason)) {
+                if (pj_emit_arith_bridge(&arith_dag, p, &unmasked_bridge)) {
+                    use_arith_bridge = true;
+                }
+            }
+        }
+        if (use_arith_bridge) {
+            dsl_tracef("portable jit arithmetic bridge: dtype=%s nodes=%d temps=%d uniform_ops=%d compiler=tcc",
+                pj_type(arith_dag.dtype), arith_dag.nnodes, arith_dag.ntemps, arith_dag.uniform_ops);
+        } else if (arith_rejection_reason) {
+            dsl_tracef("portable jit arithmetic bridge rejected: reason=%s", arith_rejection_reason);
+        }
+    }
+#endif
+    p->portable_jit_has_arith_bridge = use_arith_bridge;
+    p->portable_jit_arith_ntemps = use_arith_bridge ? (uint8_t)arith_dag.ntemps : 0;
+    p->portable_jit_arith_nnodes = use_arith_bridge ? (uint16_t)arith_dag.nnodes : 0;
+
+    size_t capacity = 2*(body.used + preamble.used + input_declarations.used + unmasked_bridge.used) + 32768;
     char *source = malloc(capacity);
     me_dsl_jit_ir_program *ir = calloc(1,sizeof(*ir));
     if (!source || !ir) {
@@ -1544,6 +2119,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         free(ir);
         free(input_declarations.text);
         free(unmasked_body.text);
+        free(unmasked_bridge.text);
         return;
     }
     ir->nparams = p->n_inputs;
@@ -1556,6 +2132,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         me_dsl_jit_ir_free(ir);
         free(input_declarations.text);
         free(unmasked_body.text);
+        free(unmasked_bridge.text);
         return;
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
@@ -1572,8 +2149,38 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     masked_loop = "{ int i=0; while (i<count) { if (mask && !mask[i]) goto pj_lane_done;\n";
     loop_close = "pj_lane_done: i++; } }";
 #endif
+
+    const char *status_macro = (p->portable_jit_nchecked || p->portable_jit_niops || p->portable_jit_ncomparisons ||
+        p->portable_jit_npreds || p->portable_jit_nmath || p->portable_jit_nmath2 ||
+        p->portable_jit_nmath3) ?
+        "#undef PJ_STATUS_CHECK\n#define PJ_STATUS_CHECK() do { if (pj_status) return pj_status; } while (0)\n" :
+        "#undef PJ_STATUS_CHECK\n#define PJ_STATUS_CHECK() ((void)0)\n";
+
+    pj_text unmasked_func = {0};
+    if (use_arith_bridge) {
+        pj_append(&unmasked_func, "%s", unmasked_bridge.text);
+    } else {
+        pj_append(&unmasked_func,
+            "static int pj_unmasked(const void *const *inputs, void *restrict output, %s count) {\n"
+            "const unsigned char *mask = 0;\n"
+            "const int64_t pj_cap = *(const int64_t *)inputs[%d];\n"
+            "int pj_status = 0;\n"
+            "%s"
+            "%s"
+            "%s"
+            "%s"
+            "%s"
+            "%s %s return 0; }\n",
+            entry_count_type, p->n_inputs + ME_DSL_PORTABLE_JIT_CAP_OFF,
+            status_macro,
+            input_declarations.text ? input_declarations.text : "", nd_decl,
+            scalar ? "" : unmasked_loop,
+            scalar ? "" : (preamble.text ? preamble.text : ""), unmasked_body.text,
+            scalar ? "" : loop_close);
+    }
+
     int used = snprintf(source,capacity,
-        "/* portable-1.1 lowering-r30 integral-math abi-r11 */\n"
+        "/* portable-1.1 lowering-r31 integral-math arith-bridge abi-r12 */\n"
         "#include <stdint.h>\n"
         "#include <limits.h>\n"
         "#include <string.h>\n"
@@ -1593,9 +2200,42 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "typedef _Bool (*pj_pred)(const void *,double);\n"
         "typedef uint64_t (*pj_iop)(const void *,uint64_t,uint64_t,int *);\n"
         "typedef uint64_t (*pj_checked)(const void *,uint64_t,uint64_t,uint64_t,int *);\n"
-        /* C99 union representation access implements bit-exact packing and
-         * modular signed arithmetic on exact-width two's-complement types
-         * without overflowing signed C arithmetic or helper/memcpy calls. */
+        "typedef struct me_pj_arith_table {\n"
+        "    void (*f64_vv[4])(const double *, const double *, double *restrict, int);\n"
+        "    void (*f64_vs[4])(const double *, double, double *restrict, int);\n"
+        "    void (*f64_sv[4])(double, const double *, double *restrict, int);\n"
+        "    void (*f64_neg)(const double *, double *restrict, int);\n"
+        "    void (*f64_fill)(double, double *restrict, int);\n"
+        "    void (*f32_vv[4])(const float *, const float *, float *restrict, int);\n"
+        "    void (*f32_vs[4])(const float *, float, float *restrict, int);\n"
+        "    void (*f32_sv[4])(float, const float *, float *restrict, int);\n"
+        "    void (*f32_neg)(const float *, float *restrict, int);\n"
+        "    void (*f32_fill)(float, float *restrict, int);\n"
+        "    void (*u8_vv[3])(const uint8_t *, const uint8_t *, uint8_t *restrict, int);\n"
+        "    void (*u8_vs[3])(const uint8_t *, uint8_t, uint8_t *restrict, int);\n"
+        "    void (*u8_sv[3])(uint8_t, const uint8_t *, uint8_t *restrict, int);\n"
+        "    void (*u8_neg)(const uint8_t *, uint8_t *restrict, int);\n"
+        "    void (*u8_fill)(uint8_t, uint8_t *restrict, int);\n"
+        "    void (*u16_vv[3])(const uint16_t *, const uint16_t *, uint16_t *restrict, int);\n"
+        "    void (*u16_vs[3])(const uint16_t *, uint16_t, uint16_t *restrict, int);\n"
+        "    void (*u16_sv[3])(uint16_t, const uint16_t *, uint16_t *restrict, int);\n"
+        "    void (*u16_neg)(const uint16_t *, uint16_t *restrict, int);\n"
+        "    void (*u16_fill)(uint16_t, uint16_t *restrict, int);\n"
+        "    void (*u32_vv[3])(const uint32_t *, const uint32_t *, uint32_t *restrict, int);\n"
+        "    void (*u32_vs[3])(const uint32_t *, uint32_t, uint32_t *restrict, int);\n"
+        "    void (*u32_sv[3])(uint32_t, const uint32_t *, uint32_t *restrict, int);\n"
+        "    void (*u32_neg)(const uint32_t *, uint32_t *restrict, int);\n"
+        "    void (*u32_fill)(uint32_t, uint32_t *restrict, int);\n"
+        "    void (*u64_vv[3])(const uint64_t *, const uint64_t *, uint64_t *restrict, int);\n"
+        "    void (*u64_vs[3])(const uint64_t *, uint64_t, uint64_t *restrict, int);\n"
+        "    void (*u64_sv[3])(uint64_t, const uint64_t *, uint64_t *restrict, int);\n"
+        "    void (*u64_neg)(const uint64_t *, uint64_t *restrict, int);\n"
+        "    void (*u64_fill)(uint64_t, uint64_t *restrict, int);\n"
+        "} me_pj_arith_table;\n"
+        "#define PJ_ARITH_ADD 0\n"
+        "#define PJ_ARITH_SUB 1\n"
+        "#define PJ_ARITH_MUL 2\n"
+        "#define PJ_ARITH_DIV 3\n"
         "#define pj_pack_f32(x) ((uint64_t)((union { float f; uint32_t u; }){ .f = (x) }).u)\n"
         "#define pj_pack_f64(x) (((union { double f; uint64_t u; }){ .f = (x) }).u)\n"
         "#define pj_unpack_f32(x) (((union { uint32_t u; float f; }){ .u = (uint32_t)(x) }).f)\n"
@@ -1609,46 +2249,24 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "#define pj_uint16_t(x) ((uint16_t)(x))\n"
         "#define pj_uint32_t(x) ((uint32_t)(x))\n"
         "#define pj_uint64_t(x) ((uint64_t)(x))\n"
-        "static int %s(const void *const *inputs, void *restrict output, %s count) {\n"
-        "const unsigned char *mask = 0;\n"
-        "const int64_t pj_cap = *(const int64_t *)inputs[%d];\n"
-        "int pj_status = 0;\n"
         "%s"
+        "static int pj_masked(const void *const *inputs, void *restrict output, %s count) {\n"
+        "const unsigned char *mask = inputs[%d];\n"
+        "const int64_t pj_cap = *(const int64_t *)inputs[%d];\nint pj_status = 0;\n"
         "%s"
-        "%s"
-        "%s"
-        "%s"
-        "%s %s return 0; }\n",
-        "pj_unmasked",entry_count_type,p->n_inputs+ME_DSL_PORTABLE_JIT_CAP_OFF,
-        p->portable_jit_nchecked || p->portable_jit_niops || p->portable_jit_ncomparisons ||
-            p->portable_jit_npreds || p->portable_jit_nmath || p->portable_jit_nmath2 ||
-            p->portable_jit_nmath3 ?
-            "#undef PJ_STATUS_CHECK\n#define PJ_STATUS_CHECK() do { if (pj_status) return pj_status; } while (0)\n" :
-            "#undef PJ_STATUS_CHECK\n#define PJ_STATUS_CHECK() ((void)0)\n",
+        "%s%s%s%s%s %s return 0; }\n"
+        "int %s(const void *const *inputs, void *output, %s count) {\n"
+        "if (count < 0) return -1;\n"
+        "return inputs[%d] ? pj_masked(inputs,output,count) : pj_unmasked(inputs,output,count); }\n",
+        unmasked_func.text ? unmasked_func.text : "",
+        entry_count_type,p->n_inputs,p->n_inputs+ME_DSL_PORTABLE_JIT_CAP_OFF,
+        status_macro,
         input_declarations.text ? input_declarations.text : "",nd_decl,
-        scalar ? "" : unmasked_loop,
-        scalar ? "" : (preamble.text ? preamble.text : ""),unmasked_body.text,
-        scalar ? "" : loop_close);
-    if (used >= 0 && (size_t)used < capacity) {
-        int appended = snprintf(source+used,capacity-(size_t)used,
-            "static int pj_masked(const void *const *inputs, void *restrict output, %s count) {\n"
-            "const unsigned char *mask = inputs[%d];\n"
-            "const int64_t pj_cap = *(const int64_t *)inputs[%d];\nint pj_status = 0;\n"
-            "%s%s%s%s%s %s return 0; }\n"
-             "int %s(const void *const *inputs, void *output, %s count) {\n"
-             "if (count < 0) return -1;\n"
-             "return inputs[%d] ? pj_masked(inputs,output,count) : pj_unmasked(inputs,output,count); }\n",
-             entry_count_type,p->n_inputs,p->n_inputs+ME_DSL_PORTABLE_JIT_CAP_OFF,
-             input_declarations.text ? input_declarations.text : "",nd_decl,
-             scalar ? "" : masked_loop,
-             scalar ? "" : (preamble.text ? preamble.text : ""),body.text,
-             scalar ? "" : loop_close,ME_DSL_JIT_SYMBOL_NAME,entry_count_type,p->n_inputs);
-        if (appended < 0 || (size_t)appended >= capacity-(size_t)used) used = -1;
-    } else used = -1;
-    free(input_declarations.text);
-    free(unmasked_body.text);
-    free(preamble.text);
-    free(body.text);
+        scalar ? "" : masked_loop,
+        scalar ? "" : (preamble.text ? preamble.text : ""),body.text,
+        scalar ? "" : loop_close,ME_DSL_JIT_SYMBOL_NAME,entry_count_type,p->n_inputs);
+    free(unmasked_func.text);
+    free(unmasked_bridge.text);
     if (used < 0) {
         dsl_tracef("portable jit ineligible: generated source exceeds capacity");
         free(source); me_dsl_jit_ir_free(ir); return;

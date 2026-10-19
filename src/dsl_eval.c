@@ -13,6 +13,7 @@
 #include "dsl_math_dispatch.h"
 #include "dsl_portable_fp.h"
 #include "dsl_portable_expr.h"
+#include "dsl_portable_batch.h"
 #include "functions-simd.h"
 
 #include "functions.h"
@@ -1309,13 +1310,12 @@ static void dsl_wasm32_finalize_jit_output(const me_dsl_compiled_program *progra
 }
 #endif
 
-/* Single scalar returns have no statement-level participation or local state.
- * Reuse the same expression evaluator as the general return path, without its
- * per-lane flow masks. Keep masks/empty groups on that path for now. */
-static const me_expr *dsl_simple_scalar_return(const me_dsl_compiled_program *program,
+/* Single-return programs have no statement-level flow control or local state.
+ * Reuse the expression evaluator directly, without allocating statement flow masks. */
+static const me_expr *dsl_simple_single_return(const me_dsl_compiled_program *program,
     const me_dsl_portable_eval_descriptor *descriptor) {
     if (program->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_1 ||
-        !descriptor || !program->output_is_scalar || descriptor->nitems <= 0 ||
+        !descriptor || descriptor->nitems <= 0 ||
         descriptor->valid_mask || program->n_locals ||
         program->vars.count != program->n_inputs ||
         program->uses_i_mask || program->uses_n_mask ||
@@ -1403,6 +1403,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
         for (int i = 0; i < program->portable_jit_nchecked; i++) {
             inputs[n_vars+ME_DSL_PORTABLE_JIT_CHECKED_OFF+1+i] = program->portable_jit_checked[i];
         }
+        inputs[n_vars+ME_DSL_PORTABLE_JIT_ARITH_OFF] = (const void *)dsl_portable_batch_arith_table();
         /* ND logical context for reserved index variables. The kernel recomputes
          * each lane's coordinates and validates them, so the interpreter's index
          * buffers are not built on this path. */
@@ -1568,10 +1569,15 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
 
     /* JIT retains precedence. All descriptor/binding validation remains outside
      * this dispatch, and numerical errors are returned, never retried. */
-    const me_expr *scalar_return = dsl_simple_scalar_return(program, descriptor);
-    if (scalar_return) {
-        return dsl_portable_eval_expr(scalar_return, (const void *const *)vars_block,
-            n_vars, NULL, 0, group_nitems, NULL, output_block);
+    const me_expr *single_return = dsl_simple_single_return(program, descriptor);
+    if (single_return) {
+        if (program->output_is_scalar) {
+            return dsl_portable_eval_expr(single_return, (const void *const *)vars_block,
+                n_vars, NULL, 0, group_nitems, NULL, output_block);
+        } else {
+            return dsl_portable_eval_expr_masked(single_return, (const void *const *)vars_block,
+                n_vars, NULL, nitems, NULL, (size_t)program->output_itemsize, output_block);
+        }
     }
     void **var_buffers = calloc(program->vars.count ? (size_t)program->vars.count : 1, sizeof(*var_buffers));
     void **local_buffers = calloc(program->n_locals ? (size_t)program->n_locals : 1, sizeof(*local_buffers));

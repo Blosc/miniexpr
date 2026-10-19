@@ -134,7 +134,7 @@ static int scalar_dispatches(void) {
         scalar_dispatch("return block_sum(x) / 3", "float64", "block_scalar", 3, NULL, true, 2) ||
         scalar_dispatch("return block_sum(x)", "float32", "block_scalar", 3, NULL, true, 6) ||
         scalar_dispatch("s = block_sum(x)\\n    return s", "float64", "block_scalar", 3, NULL, false, 6) ||
-        scalar_dispatch("return x * 2", "float64", "elementwise", 3, NULL, false, 2) ||
+        scalar_dispatch("return x * 2", "float64", "elementwise", 3, NULL, true, 2) ||
         /* Validated all-active masks normalize to the allocation-free path. */
         scalar_dispatch("return block_sum(x)", "float64", "block_scalar", 3, full, true, 6) ||
         scalar_dispatch("return block_sum(x)", "float64", "block_scalar", 3, partial, false, 5) ||

@@ -9,6 +9,7 @@
 **********************************************************************/
 
 #include "dsl_jit_runtime_internal.h"
+#include "dsl_portable_batch.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -124,6 +125,8 @@ uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program) {
     h = dsl_jit_hash_i32(h, (int)sizeof(void *));
     h = dsl_jit_hash_i32(h, ME_DSL_JIT_CGEN_VERSION);
     h = dsl_jit_hash_i32(h, ME_DSL_JIT_BRIDGE_ABI_VERSION);
+    h = dsl_jit_hash_i32(h, ME_DSL_PORTABLE_JIT_ARITH_ABI_VERSION);
+    h = dsl_jit_hash_i32(h, program->portable_jit_has_arith_bridge ? 1 : 0);
     h = dsl_jit_hash_i32(h, dsl_jit_target_tag());
     h = dsl_jit_hash_i32(h, dsl_jit_backend_tag(program));
     h = dsl_jit_hash_i32(h, program->jit_use_runtime_math_bridge ? 1 : 0);
@@ -154,8 +157,10 @@ static uint64_t dsl_jit_toolchain_hash(const me_dsl_compiled_program *program) {
     }
     if (program->compiler == ME_DSL_COMPILER_LIBTCC) {
         const char *tcc_opts = getenv("ME_DSL_JIT_TCC_OPTIONS");
+        const char *arith_bridge = getenv("ME_DSL_JIT_ARITH_BRIDGE");
         uint64_t h = dsl_jit_hash_cstr(1469598103934665603ULL, "tcc");
-        return dsl_jit_hash_cstr(h, tcc_opts ? tcc_opts : "");
+        h = dsl_jit_hash_cstr(h, tcc_opts ? tcc_opts : "");
+        return dsl_jit_hash_cstr(h, arith_bridge ? arith_bridge : "");
     }
     const char *cc = me_jit_option_value("CC");
     const char *cflags = me_jit_option_value("CFLAGS");

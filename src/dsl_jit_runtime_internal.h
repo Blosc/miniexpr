@@ -30,7 +30,7 @@
 #endif
 
 #ifndef ME_DSL_JIT_CGEN_VERSION
-#define ME_DSL_JIT_CGEN_VERSION 23
+#define ME_DSL_JIT_CGEN_VERSION 24
 #endif
 
 #ifndef ME_DSL_JIT_BRIDGE_ABI_VERSION
@@ -62,7 +62,16 @@
 #define ME_DSL_PORTABLE_JIT_MATH2_FN_OFF 906
 #define ME_DSL_PORTABLE_JIT_MATH3_FN_OFF 1034
 #define ME_DSL_PORTABLE_JIT_PRED_FN_OFF 1162
-#define ME_DSL_PORTABLE_JIT_EXTRA 1290
+#define ME_DSL_PORTABLE_JIT_ARITH_OFF 1290
+#define ME_DSL_PORTABLE_JIT_EXTRA 1291
+
+#if ME_DSL_PORTABLE_JIT_MATH2_FN_OFF != ME_DSL_PORTABLE_JIT_MATH1_FN_OFF + ME_DSL_PORTABLE_JIT_BRIDGE_LIMIT || \
+    ME_DSL_PORTABLE_JIT_MATH3_FN_OFF != ME_DSL_PORTABLE_JIT_MATH2_FN_OFF + ME_DSL_PORTABLE_JIT_BRIDGE_LIMIT || \
+    ME_DSL_PORTABLE_JIT_PRED_FN_OFF != ME_DSL_PORTABLE_JIT_MATH3_FN_OFF + ME_DSL_PORTABLE_JIT_BRIDGE_LIMIT || \
+    ME_DSL_PORTABLE_JIT_ARITH_OFF != ME_DSL_PORTABLE_JIT_PRED_FN_OFF + ME_DSL_PORTABLE_JIT_BRIDGE_LIMIT || \
+    ME_DSL_PORTABLE_JIT_EXTRA != ME_DSL_PORTABLE_JIT_ARITH_OFF + 1
+#error "portable JIT callback slot ranges overlap or contain a gap"
+#endif
 
 #if ME_USE_WASM32_JIT
 typedef int (*me_dsl_jit_kernel_fn)(const void **inputs, void *output, int nitems);
@@ -239,6 +248,9 @@ typedef struct {
     void *jit_tcc_state;
     uint64_t jit_runtime_key;
     bool jit_dl_handle_cached;
+    bool portable_jit_has_arith_bridge;
+    uint8_t portable_jit_arith_ntemps;
+    uint16_t portable_jit_arith_nnodes;
 } me_dsl_compiled_program;
 
 size_t dtype_size(me_dtype dtype);  /* functions.h; declared here to avoid the include cycle */

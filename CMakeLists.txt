@@ -49,6 +49,14 @@ set(MINIEXPR_SOURCES
   src/functions-simd.c
 )
 
+if(MSVC)
+  set_source_files_properties(src/dsl_portable_batch.c PROPERTIES
+    COMPILE_OPTIONS "/fp:precise")
+else()
+  set_source_files_properties(src/dsl_portable_batch.c PROPERTIES
+    COMPILE_OPTIONS "-fno-fast-math;-ffp-contract=off")
+endif()
+
 include(cmake/MiniexprFetchDeps.cmake)
 include(cmake/MiniexprTinyccTargets.cmake)
 

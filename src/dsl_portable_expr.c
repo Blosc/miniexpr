@@ -2117,14 +2117,15 @@ static bool p_batch_eval(const me_expr *expr, p_eval_context *ctx, int nitems,
         for (int op=0; op<program.count; op++) {
             const p_batch_instruction *instruction=&program.instructions[op];
             const me_expr *n=instruction->expr;
+            const unsigned char *left=instruction->left < 0 ? NULL : values[instruction->left];
+            const unsigned char *right=instruction->right < 0 ? NULL : values[instruction->right];
             unsigned char *destination=storage+(size_t)op*slot_bytes;
             if (op == root && instruction->op >= P_BATCH_NEG && !instruction->uniform &&
+                out_tile != left && out_tile != right &&
                 !(instruction->op == P_BATCH_MATH && instruction->math_dispatch && (count & 7))) {
                 destination=out_tile;
             }
             values[op]=destination;
-            const unsigned char *left=instruction->left < 0 ? NULL : values[instruction->left];
-            const unsigned char *right=instruction->right < 0 ? NULL : values[instruction->right];
             size_t width=dtype_size(n->dtype);
             if (instruction->op == P_BATCH_LEAF) {
                 if (TYPE_MASK(n->type) == ME_VARIABLE && !(n->flags & ME_EXPR_FLAG_UNIFORM_INPUT)) {
@@ -2145,30 +2146,50 @@ static bool p_batch_eval(const me_expr *expr, p_eval_context *ctx, int nitems,
                 if (instruction->uniform) p_batch_splat(destination,destination,width,count);
                 continue;
             }
+            bool left_u = instruction->left >= 0 && program.instructions[instruction->left].uniform;
+            bool right_u = instruction->right >= 0 && program.instructions[instruction->right].uniform;
 #define P_BATCH_EXECUTE(T,S) do { \
     const T *a=(const T *)left,*b=(const T *)right; T *d=(T *)destination; \
-    switch (instruction->op) { \
-        case P_BATCH_ADD: dsl_portable_batch_add_##S(a,b,d,count); break; \
-        case P_BATCH_SUB: dsl_portable_batch_sub_##S(a,b,d,count); break; \
-        case P_BATCH_MUL: dsl_portable_batch_mul_##S(a,b,d,count); break; \
-        case P_BATCH_DIV: dsl_portable_batch_div_##S(a,b,d,count); break; \
-        case P_BATCH_NEG: dsl_portable_batch_neg_##S(a,b,d,count); break; \
-        case P_BATCH_MATH: { \
-            if (instruction->math_dispatch) { \
-                int width = (int)(sizeof(T) == 4 ? 8 : 4); \
-                int pad = (count + width - 1) & ~(width - 1); \
-                if (pad != count) { \
-                    memmove(d, a, (size_t)count * sizeof(T)); \
-                    for (int i = count; i < pad; i++) d[i] = d[count - 1]; \
-                    a = d; \
+    if (left_u && !right_u) { \
+        switch (instruction->op) { \
+            case P_BATCH_ADD: dsl_portable_batch_add_sv_##S(*a,b,d,count); break; \
+            case P_BATCH_SUB: dsl_portable_batch_sub_sv_##S(*a,b,d,count); break; \
+            case P_BATCH_MUL: dsl_portable_batch_mul_sv_##S(*a,b,d,count); break; \
+            case P_BATCH_DIV: dsl_portable_batch_div_sv_##S(*a,b,d,count); break; \
+            default: break; \
+        } \
+    } else if (!left_u && right_u) { \
+        switch (instruction->op) { \
+            case P_BATCH_ADD: dsl_portable_batch_add_vs_##S(a,*b,d,count); break; \
+            case P_BATCH_SUB: dsl_portable_batch_sub_vs_##S(a,*b,d,count); break; \
+            case P_BATCH_MUL: dsl_portable_batch_mul_vs_##S(a,*b,d,count); break; \
+            case P_BATCH_DIV: dsl_portable_batch_div_vs_##S(a,*b,d,count); break; \
+            default: break; \
+        } \
+    } else { \
+        switch (instruction->op) { \
+            case P_BATCH_ADD: dsl_portable_batch_add_##S(a,b,d,count); break; \
+            case P_BATCH_SUB: dsl_portable_batch_sub_##S(a,b,d,count); break; \
+            case P_BATCH_MUL: dsl_portable_batch_mul_##S(a,b,d,count); break; \
+            case P_BATCH_DIV: dsl_portable_batch_div_##S(a,b,d,count); break; \
+            case P_BATCH_NEG: dsl_portable_batch_neg_##S(a,d,count); break; \
+            case P_BATCH_MATH: { \
+                if (instruction->math_dispatch) { \
+                    int width = (int)(sizeof(T) == 4 ? 8 : 4); \
+                    int pad = (count + width - 1) & ~(width - 1); \
+                    if (pad != count) { \
+                        memmove(d, a, (size_t)count * sizeof(T)); \
+                        for (int i = count; i < pad; i++) d[i] = d[count - 1]; \
+                        a = d; \
+                    } \
+                    instruction->math_dispatch->unary_##S[instruction->math_op](a, d, pad); \
+                } else { \
+                    T (*volatile fn)(T)=(T (*)(T))instruction->math; \
+                    for (int i=0; i<count; i++) d[i]=fn(a[i]); \
                 } \
-                instruction->math_dispatch->unary_##S[instruction->math_op](a, d, pad); \
-            } else { \
-                T (*volatile fn)(T)=(T (*)(T))instruction->math; \
-                for (int i=0; i<count; i++) d[i]=fn(a[i]); \
-            } \
-            break; } \
-        default: break; \
+                break; } \
+            default: break; \
+        } \
     } \
 } while (0)
             if (n->dtype == ME_FLOAT32) P_BATCH_EXECUTE(float,f32);
@@ -2176,12 +2197,28 @@ static bool p_batch_eval(const me_expr *expr, p_eval_context *ctx, int nitems,
 #undef P_BATCH_EXECUTE
 #define P_BATCH_INTEGER(T,S) do { \
     const T *a=(const T *)left,*b=(const T *)right; T *d=(T *)destination; \
-    switch (instruction->op) { \
-        case P_BATCH_ADD: dsl_portable_batch_add_##S(a,b,d,count); break; \
-        case P_BATCH_SUB: dsl_portable_batch_sub_##S(a,b,d,count); break; \
-        case P_BATCH_MUL: dsl_portable_batch_mul_##S(a,b,d,count); break; \
-        case P_BATCH_NEG: dsl_portable_batch_neg_##S(a,b,d,count); break; \
-        default: break; \
+    if (left_u && !right_u) { \
+        switch (instruction->op) { \
+            case P_BATCH_ADD: dsl_portable_batch_add_sv_##S(*a,b,d,count); break; \
+            case P_BATCH_SUB: dsl_portable_batch_sub_sv_##S(*a,b,d,count); break; \
+            case P_BATCH_MUL: dsl_portable_batch_mul_sv_##S(*a,b,d,count); break; \
+            default: break; \
+        } \
+    } else if (!left_u && right_u) { \
+        switch (instruction->op) { \
+            case P_BATCH_ADD: dsl_portable_batch_add_vs_##S(a,*b,d,count); break; \
+            case P_BATCH_SUB: dsl_portable_batch_sub_vs_##S(a,*b,d,count); break; \
+            case P_BATCH_MUL: dsl_portable_batch_mul_vs_##S(a,*b,d,count); break; \
+            default: break; \
+        } \
+    } else { \
+        switch (instruction->op) { \
+            case P_BATCH_ADD: dsl_portable_batch_add_##S(a,b,d,count); break; \
+            case P_BATCH_SUB: dsl_portable_batch_sub_##S(a,b,d,count); break; \
+            case P_BATCH_MUL: dsl_portable_batch_mul_##S(a,b,d,count); break; \
+            case P_BATCH_NEG: dsl_portable_batch_neg_##S(a,d,count); break; \
+            default: break; \
+        } \
     } \
 } while (0)
             else if (width == 1) P_BATCH_INTEGER(uint8_t,u8);
