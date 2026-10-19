@@ -2075,12 +2075,12 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         free(input_declarations.text); free(unmasked_body.text); free(body.text); free(preamble.text);
         return;
     }
-    pj_arith_dag arith_dag = {0};
     bool use_arith_bridge = false;
     pj_text unmasked_bridge = {0};
     const char *arith_rejection_reason = NULL;
 
 #ifndef __EMSCRIPTEN__
+    pj_arith_dag arith_dag = {0};
     if (p->compiler == ME_DSL_COMPILER_LIBTCC && !scalar &&
         p->block.nstmts == 1 && p->block.stmts[0]->kind == ME_DSL_STMT_RETURN &&
         p->n_locals == 0 && !p->uses_ndim && !p->uses_flat_idx &&
@@ -2104,10 +2104,14 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
             dsl_tracef("portable jit arithmetic bridge rejected: reason=%s", arith_rejection_reason);
         }
     }
-#endif
     p->portable_jit_has_arith_bridge = use_arith_bridge;
     p->portable_jit_arith_ntemps = use_arith_bridge ? (uint8_t)arith_dag.ntemps : 0;
     p->portable_jit_arith_nnodes = use_arith_bridge ? (uint16_t)arith_dag.nnodes : 0;
+#else
+    p->portable_jit_has_arith_bridge = false;
+    p->portable_jit_arith_ntemps = 0;
+    p->portable_jit_arith_nnodes = 0;
+#endif
 
     size_t capacity = 2*(body.used + preamble.used + input_declarations.used + unmasked_bridge.used) + 32768;
     char *source = malloc(capacity);
