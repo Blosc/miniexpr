@@ -1981,10 +1981,11 @@ static bool pj_match_ramp(const me_dsl_compiled_program *p, const me_expr *root,
             (base->dtype != ME_FLOAT64 && base->dtype != ME_INT64) ||
             (stride->dtype != ME_FLOAT64 && stride->dtype != ME_INT64)) return false;
     } else if (p->output_dtype == ME_FLOAT32) {
-        if ((root->dtype != ME_FLOAT32 && root->dtype != ME_FLOAT64) ||
-            (product->dtype != ME_FLOAT32 && product->dtype != ME_FLOAT64) ||
-            (base->dtype != ME_FLOAT32 && base->dtype != ME_FLOAT64 && base->dtype != ME_INT64) ||
-            (stride->dtype != ME_FLOAT32 && stride->dtype != ME_FLOAT64 && stride->dtype != ME_INT64)) return false;
+        /* The f32 AOT routine rounds intermediates to float. A final f32 cast
+         * of an f64 expression must retain its f64 arithmetic in generic JIT. */
+        if (root->dtype != ME_FLOAT32 || product->dtype != ME_FLOAT32 ||
+            (base->dtype != ME_FLOAT32 && base->dtype != ME_INT64) ||
+            (stride->dtype != ME_FLOAT32 && stride->dtype != ME_INT64)) return false;
     } else return false;
     *start = base;
     *step = stride;

@@ -1683,6 +1683,32 @@ static void flat_index_1d_lowering(void) {
     me_artifact_free(reference);
     me_artifact_free(artifact);
 
+    /* A float32 output cast must not narrow float64 ramp intermediates. */
+    const char *mixed_json =
+        "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+        "\"requires\":[\"numeric\",\"nd-context\"],"
+        "\"source\":\"def ramp():\\n    return 0.0 + _flat_idx * 0.7777777777777778\\n\","
+        "\"entry_point\":\"ramp\",\"inputs\":[],\"constants\":[],"
+        "\"output\":{\"dtype\":\"float32\",\"contract\":\"elementwise\"},"
+        "\"context\":{\"ndim\":1},\"semantics\":{\"fp\":\"strict\","
+        "\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}";
+    artifact = NULL;
+    reference = NULL;
+    CHECK(!me_artifact_load(mixed_json, strlen(mixed_json), ME_JIT_ON, &artifact, &error));
+    CHECK(!me_artifact_load(mixed_json, strlen(mixed_json), ME_JIT_OFF, &reference, &error));
+    float mixed_actual[10], mixed_expected[10];
+    const int64_t mixed_shape = 10, mixed_origin = 0, mixed_extent = 10;
+    me_artifact_eval_descriptor mixed_desc = {
+        .struct_size=sizeof(mixed_desc), .version=ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,
+        .nitems=10, .output_capacity=sizeof(mixed_actual), .ndim=1,
+        .logical_shape=&mixed_shape, .block_origin=&mixed_origin, .block_extent=&mixed_extent
+    };
+    CHECK(!me_artifact_eval_ex(artifact, NULL, 0, mixed_actual, &mixed_desc, &error));
+    CHECK(!me_artifact_eval_ex(reference, NULL, 0, mixed_expected, &mixed_desc, &error));
+    CHECK(!memcmp(mixed_actual, mixed_expected, sizeof(mixed_actual)));
+    me_artifact_free(reference);
+    me_artifact_free(artifact);
+
     char integer_json[2048];
     const int64_t start = INT64_MAX-3, step = 3;
     int json_size = snprintf(integer_json, sizeof(integer_json),
