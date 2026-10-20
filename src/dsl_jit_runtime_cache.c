@@ -127,6 +127,7 @@ uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program) {
     h = dsl_jit_hash_i32(h, ME_DSL_JIT_BRIDGE_ABI_VERSION);
     h = dsl_jit_hash_i32(h, ME_DSL_PORTABLE_JIT_ARITH_ABI_VERSION);
     h = dsl_jit_hash_i32(h, program->portable_jit_has_arith_bridge ? 1 : 0);
+    h = dsl_jit_hash_i32(h, program->portable_jit_has_ramp_bridge ? 1 : 0);
     h = dsl_jit_hash_i32(h, dsl_jit_target_tag());
     h = dsl_jit_hash_i32(h, dsl_jit_backend_tag(program));
     h = dsl_jit_hash_i32(h, program->jit_use_runtime_math_bridge ? 1 : 0);

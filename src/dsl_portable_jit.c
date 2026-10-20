@@ -1911,6 +1911,172 @@ static bool pj_emit_arith_bridge(const pj_arith_dag *dag, const me_dsl_compiled_
     return true;
 }
 
+static bool pj_uniform_tree(const me_dsl_compiled_program *p, const me_expr *n, int depth) {
+    if (!n || depth > 128) return false;
+    int kind = TYPE_MASK(n->type);
+    if (kind == ME_CONSTANT) return true;
+    if (kind == ME_VARIABLE && is_synthetic_address(n->bound)) {
+        int index = (int)((const char *)n->bound - synthetic_var_addresses);
+        return index >= 0 && index < p->vars.count &&
+            (p->vars.uniform[index] || (n->flags & ME_EXPR_FLAG_UNIFORM_INPUT));
+    }
+    if (!IS_FUNCTION(n->type) || is_reduction_node(n)) return false;
+    for (int i=0; i<ARITY(n->type); i++) {
+        if (!pj_uniform_tree(p, n->parameters[i], depth+1)) return false;
+    }
+    return true;
+}
+
+static bool pj_flat_index_node(const me_dsl_compiled_program *p, const me_expr *n) {
+    if (!n || TYPE_MASK(n->type) != ME_VARIABLE || !is_synthetic_address(n->bound)) return false;
+    return (int)((const char *)n->bound - synthetic_var_addresses) == p->idx_flat_idx;
+}
+
+static bool pj_flat_index_expr(const me_dsl_compiled_program *p, const me_expr *n, int depth) {
+    if (pj_flat_index_node(p, n)) return true;
+    if (!n || depth > 8 || !IS_FUNCTION(n->type) || ARITY(n->type) != 1 ||
+        me_portable_operator(n) != NULL) return false;
+    return pj_flat_index_expr(p, n->parameters[0], depth+1);
+}
+
+/* Match only the affine form used by the ramp constructors. Restricting the
+ * initial bridge to unmasked strict kernels keeps global-index semantics
+ * and fallback behavior straightforward. */
+static bool pj_match_ramp(const me_dsl_compiled_program *p, const me_expr *root,
+                          const me_expr **start, const me_expr **step) {
+    if (!root || p->output_is_scalar || !p->uses_flat_idx || p->compile_ndims < 1 ||
+        p->uses_i_mask || p->uses_n_mask || p->uses_ndim || p->fp_mode != ME_DSL_FP_STRICT ||
+        p->block.nstmts != 1 || p->block.stmts[0]->kind != ME_DSL_STMT_RETURN) return false;
+    /* Unwrap outer conversion to output_dtype if present (e.g. float32 conversion from float64 promotion). */
+    if (!root->function && ARITY(root->type) == 1 && root->dtype == p->output_dtype) {
+        root = (const me_expr *)root->parameters[0];
+        if (!root) return false;
+    }
+    const char *root_op = me_portable_operator(root);
+    if (!root_op || strcmp(root_op, "+") || ARITY(root->type) != 2) return false;
+    const me_expr *base = root->parameters[0];
+    const me_expr *product = root->parameters[1];
+    const char *product_op = me_portable_operator(product);
+    if (!product_op || strcmp(product_op, "*") || ARITY(product->type) != 2) {
+        base = root->parameters[1];
+        product = root->parameters[0];
+        product_op = me_portable_operator(product);
+        if (!product_op || strcmp(product_op, "*") || ARITY(product->type) != 2) return false;
+    }
+    const me_expr *index = product->parameters[0];
+    const me_expr *stride = product->parameters[1];
+    if (!pj_flat_index_expr(p, index, 0)) {
+        index = product->parameters[1];
+        stride = product->parameters[0];
+    }
+    bool flat_index = pj_flat_index_expr(p, index, 0);
+    bool uniform_base = pj_uniform_tree(p, base, 0);
+    bool uniform_stride = pj_uniform_tree(p, stride, 0);
+    if (!flat_index || !uniform_base || !uniform_stride) return false;
+    if (p->output_dtype == ME_INT64) {
+        if (root->dtype != ME_INT64 || product->dtype != ME_INT64 ||
+            base->dtype != ME_INT64 || stride->dtype != ME_INT64) return false;
+    } else if (p->output_dtype == ME_FLOAT64) {
+        if (root->dtype != ME_FLOAT64 || product->dtype != ME_FLOAT64 ||
+            (base->dtype != ME_FLOAT64 && base->dtype != ME_INT64) ||
+            (stride->dtype != ME_FLOAT64 && stride->dtype != ME_INT64)) return false;
+    } else if (p->output_dtype == ME_FLOAT32) {
+        if ((root->dtype != ME_FLOAT32 && root->dtype != ME_FLOAT64) ||
+            (product->dtype != ME_FLOAT32 && product->dtype != ME_FLOAT64) ||
+            (base->dtype != ME_FLOAT32 && base->dtype != ME_FLOAT64 && base->dtype != ME_INT64) ||
+            (stride->dtype != ME_FLOAT32 && stride->dtype != ME_FLOAT64 && stride->dtype != ME_INT64)) return false;
+    } else return false;
+    *start = base;
+    *step = stride;
+    return true;
+}
+
+static bool pj_emit_ramp_bridge(const me_dsl_compiled_program *p, const char *start,
+                                const char *step, const char *setup, pj_text *out) {
+    const char *fn, *type;
+    if (p->output_dtype == ME_INT64) {
+        fn = "ramp_i64";
+        type = "int64_t";
+    } else if (p->output_dtype == ME_FLOAT32) {
+        fn = "ramp_f32";
+        type = "float";
+    } else if (p->output_dtype == ME_FLOAT64) {
+        fn = "ramp_f64";
+        type = "double";
+    } else return false;
+    bool ok = pj_append(out,
+        "static int pj_unmasked(const void *const *inputs, void *restrict output, int64_t count) {\n"
+        "if (count <= 0) return 0;\n"
+        "const me_pj_arith_table *pj_t = (const me_pj_arith_table *)inputs[%d];\n"
+        "const int64_t *nd = (const int64_t *)inputs[%d];\n",
+        p->n_inputs + ME_DSL_PORTABLE_JIT_ARITH_OFF,
+        p->n_inputs + ME_DSL_PORTABLE_JIT_ND_OFF);
+    if (!ok) return false;
+    /* Scalar constructor arguments are represented as uniform input slots. */
+    for (int i=0; i<p->n_inputs; i++) {
+        const char *input_type = pj_type(p->vars.dtypes[i]);
+        if (!input_type || !pj_append(out,
+            "const %s *pj_input_%d = (const %s *)inputs[%d];\n",
+            input_type, i, input_type, i)) return false;
+    }
+    if (setup && *setup) {
+        ok = ok && pj_append(out,
+            "#ifndef PJ_STATUS_CHECK\n"
+            "#define PJ_STATUS_CHECK() do { if (pj_status) return pj_status; } while (0)\n"
+            "#endif\n"
+            "int pj_status = 0;\n%s", setup);
+        if (!ok) return false;
+    }
+    if (p->compile_ndims <= 1) {
+        return pj_append(out,
+            "int64_t pj_origin = nd ? nd[2] : 0;\n"
+            "%s *out = (%s *)output;\n"
+            "for (int64_t s=0; s<count; s+=256) {\n"
+            "int n = (int)(count-s < 256 ? count-s : 256);\n"
+            "if (nd && (s > nd[1]-pj_origin || n > nd[1]-pj_origin-s)) return -2;\n"
+            "pj_t->%s(pj_origin+s, (%s)(%s), (%s)(%s), out+s, n);\n"
+            "}\nreturn 0;\n}\n",
+            type, type, fn, type, start, type, step);
+    }
+    return pj_append(out,
+        "int64_t pj_origin = 0, pj_stride = 1;\n"
+        "_Bool pj_contig = 1;\n"
+        "if (nd) {\n"
+        "int64_t pj_nd = nd[0];\n"
+        "for (int64_t d = pj_nd - 1; d >= 0; d--) {\n"
+        "pj_origin += nd[1 + pj_nd + d] * pj_stride;\n"
+        "pj_stride *= nd[1 + d];\n"
+        "if (d > 0 && nd[1 + 2 * pj_nd + d] != nd[1 + d]) pj_contig = 0;\n"
+        "}\n"
+        "if (count > pj_stride - pj_origin) return -2;\n"
+        "}\n"
+        "%s *out = (%s *)output;\n"
+        "if (pj_contig) {\n"
+        "for (int64_t s=0; s<count; s+=256) {\n"
+        "int n = (int)(count-s < 256 ? count-s : 256);\n"
+        "pj_t->%s(pj_origin+s, (%s)(%s), (%s)(%s), out+s, n);\n"
+        "}\nreturn 0;\n}\n"
+        /* Traverse compact output one innermost row at a time. Decode outer
+         * coordinates once per row, not once per lane, for every logical rank. */
+        "if (nd && nd[0] >= 2) {\n"
+        "int64_t rank = nd[0], cols = nd[1 + 3*rank - 1], rows = count / cols;\n"
+        "for (int64_t r = 0; r < rows; r++) {\n"
+        "int64_t row_origin = pj_origin, offset = r, stride = nd[rank];\n"
+        "for (int64_t d = rank - 2; d >= 0; d--) {\n"
+        "int64_t extent = nd[1 + 2*rank + d];\n"
+        "row_origin += (offset %% extent) * stride;\n"
+        "offset /= extent; stride *= nd[1 + d];\n"
+        "}\n"
+        "%s *row_out = out + r * cols;\n"
+        "for (int64_t s = 0; s < cols; s += 256) {\n"
+        "int n = (int)(cols - s < 256 ? cols - s : 256);\n"
+        "pj_t->%s(row_origin + s, (%s)(%s), (%s)(%s), row_out + s, n);\n"
+        "}\n}\nreturn 0;\n}\n"
+        "return -1;\n}\n",
+        type, type, fn, type, start, type, step,
+        type, fn, type, start, type, step);
+}
+
 #endif
 
 static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *constants) {
@@ -2016,24 +2182,36 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
             if (p->uses_i_mask & (1 << d)) ok = ok && pj_append(&preamble, "int64_t coord_%d = 0;\n", d);
         }
         if (p->uses_flat_idx) ok = ok && pj_append(&preamble, "int64_t flat = 0;\n");
-        ok = ok && pj_append(&preamble,
-            "if (nd) { int64_t jit_off = i, jit_stride = 1; int jit_nd = (int)nd[0];\n"
-            "for (int jit_d = jit_nd - 1; jit_d >= 0; jit_d--) {\n"
-            "int64_t jit_ext = nd[1+2*jit_nd+jit_d];\n"
-            "int64_t jit_rem = nd[1+jit_d]-nd[1+jit_nd+jit_d];\n"
-            "int64_t jit_rel = jit_ext > 0 ? jit_off %% jit_ext : 0;\n"
-            "jit_off = jit_ext > 0 ? jit_off / jit_ext : 0;\n"
-            "int64_t jit_coord = nd[1+jit_nd+jit_d] + jit_rel;\n"
-            "if (jit_rel >= jit_rem) jit_bad = 1;\n");
-        for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
-            if (p->uses_i_mask & (1 << d)) {
-                ok = ok && pj_append(&preamble, "if (jit_d == %d) coord_%d = jit_coord;\n", d, d);
+        /* A one-dimensional flat index is just origin + lane. Avoid the
+         * general mixed-radix coordinate loop (including division/modulo)
+         * for the common ramp kernel. Keep the generic checked path for
+         * every other reserved-index combination and rank. */
+        bool flat_1d = p->uses_flat_idx && p->compile_ndims == 1 &&
+            !p->uses_i_mask && !p->uses_n_mask && !p->uses_ndim;
+        if (flat_1d) {
+            ok = ok && pj_append(&preamble,
+                "if (nd) { flat = nd[2] + i; if (i >= nd[1] - nd[2]) jit_bad = 1; } else flat = 0;\n"
+                "if (jit_bad) return -2;\n");
+        } else {
+            ok = ok && pj_append(&preamble,
+                "if (nd) { int64_t jit_off = i, jit_stride = 1; int jit_nd = (int)nd[0];\n"
+                "for (int jit_d = jit_nd - 1; jit_d >= 0; jit_d--) {\n"
+                "int64_t jit_ext = nd[1+2*jit_nd+jit_d];\n"
+                "int64_t jit_rem = nd[1+jit_d]-nd[1+jit_nd+jit_d];\n"
+                "int64_t jit_rel = jit_ext > 0 ? jit_off %% jit_ext : 0;\n"
+                "jit_off = jit_ext > 0 ? jit_off / jit_ext : 0;\n"
+                "int64_t jit_coord = nd[1+jit_nd+jit_d] + jit_rel;\n"
+                "if (jit_rel >= jit_rem) jit_bad = 1;\n");
+            for (int d = 0; d < ME_DSL_MAX_NDIM; d++) {
+                if (p->uses_i_mask & (1 << d)) {
+                    ok = ok && pj_append(&preamble, "if (jit_d == %d) coord_%d = jit_coord;\n", d, d);
+                }
             }
+            if (p->uses_flat_idx) {
+                ok = ok && pj_append(&preamble, "flat += jit_coord * jit_stride; jit_stride *= nd[1+jit_d];\n");
+            }
+            ok = ok && pj_append(&preamble, "}\n}\nif (jit_bad) return -2;\n");
         }
-        if (p->uses_flat_idx) {
-            ok = ok && pj_append(&preamble, "flat += jit_coord * jit_stride; jit_stride *= nd[1+jit_d];\n");
-        }
-        ok = ok && pj_append(&preamble, "}\n}\nif (jit_bad) return -2;\n");
         if (!ok) {
             dsl_tracef("portable jit ineligible: ND preamble");
             free(preamble.text);
@@ -2076,10 +2254,31 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         return;
     }
     bool use_arith_bridge = false;
+    bool use_ramp_bridge = false;
     pj_text unmasked_bridge = {0};
     const char *arith_rejection_reason = NULL;
 
 #ifndef __EMSCRIPTEN__
+    if ((p->compiler == ME_DSL_COMPILER_LIBTCC || p->compiler == ME_DSL_COMPILER_CC) && !scalar &&
+        p->block.nstmts == 1 && p->block.stmts[0]->kind == ME_DSL_STMT_RETURN) {
+        const me_expr *ramp_start = NULL, *ramp_step = NULL;
+        const me_expr *root = p->block.stmts[0]->as.return_stmt.expr.expr;
+        if (pj_match_ramp(p, root, &ramp_start, &ramp_step)) {
+            pj_text scalar_setup = {0};
+            int scalar_temp = 0;
+            char *start_expr = pj_expr(p, ramp_start, defined, 0, constants, &scalar_setup, &scalar_temp);
+            char *step_expr = pj_expr(p, ramp_step, defined, 0, constants, &scalar_setup, &scalar_temp);
+            if (start_expr && step_expr &&
+                pj_emit_ramp_bridge(p, start_expr, step_expr, scalar_setup.text, &unmasked_bridge)) {
+                use_ramp_bridge = true;
+                dsl_tracef("portable jit affine ramp bridge: dtype=%s compiler=host",
+                    pj_type(p->output_dtype));
+            }
+            free(start_expr);
+            free(step_expr);
+            free(scalar_setup.text);
+        }
+    }
     pj_arith_dag arith_dag = {0};
     if (p->compiler == ME_DSL_COMPILER_LIBTCC && !scalar &&
         p->block.nstmts == 1 && p->block.stmts[0]->kind == ME_DSL_STMT_RETURN &&
@@ -2105,10 +2304,12 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         }
     }
     p->portable_jit_has_arith_bridge = use_arith_bridge;
+    p->portable_jit_has_ramp_bridge = use_ramp_bridge;
     p->portable_jit_arith_ntemps = use_arith_bridge ? (uint8_t)arith_dag.ntemps : 0;
     p->portable_jit_arith_nnodes = use_arith_bridge ? (uint16_t)arith_dag.nnodes : 0;
 #else
     p->portable_jit_has_arith_bridge = false;
+    p->portable_jit_has_ramp_bridge = false;
     p->portable_jit_arith_ntemps = 0;
     p->portable_jit_arith_nnodes = 0;
 #endif
@@ -2161,7 +2362,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "#undef PJ_STATUS_CHECK\n#define PJ_STATUS_CHECK() ((void)0)\n";
 
     pj_text unmasked_func = {0};
-    if (use_arith_bridge) {
+    if (use_arith_bridge || use_ramp_bridge) {
         pj_append(&unmasked_func, "%s", unmasked_bridge.text);
     } else {
         pj_append(&unmasked_func,
@@ -2235,6 +2436,9 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "    void (*u64_sv[3])(uint64_t, const uint64_t *, uint64_t *restrict, int);\n"
         "    void (*u64_neg)(const uint64_t *, uint64_t *restrict, int);\n"
         "    void (*u64_fill)(uint64_t, uint64_t *restrict, int);\n"
+        "    void (*ramp_i64)(int64_t, int64_t, int64_t, int64_t *restrict, int);\n"
+        "    void (*ramp_f32)(int64_t, float, float, float *restrict, int);\n"
+        "    void (*ramp_f64)(int64_t, double, double, double *restrict, int);\n"
         "} me_pj_arith_table;\n"
         "#define PJ_ARITH_ADD 0\n"
         "#define PJ_ARITH_SUB 1\n"

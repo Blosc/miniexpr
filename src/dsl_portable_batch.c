@@ -36,6 +36,22 @@ ME_BATCH_NOINLINE void dsl_portable_batch_fill_##S(T a, T *restrict out, int cou
     for (int i=0; i<count; i++) out[i]=a; \
 }
 
+/* The compiler for this translation unit vectorizes these contiguous ramps;
+ * TCC only emits the strip loop and calls the selected AOT kernel. */
+ME_BATCH_NOINLINE void dsl_portable_batch_ramp_i64(int64_t base, int64_t start, int64_t step,
+                                                    int64_t *restrict out, int count) {
+    uint64_t ustart = (uint64_t)start, ustep = (uint64_t)step;
+    for (int i=0; i<count; i++) out[i] = (int64_t)(ustart + (uint64_t)(base + i) * ustep);
+}
+ME_BATCH_NOINLINE void dsl_portable_batch_ramp_f32(int64_t base, float start, float step,
+                                                    float *restrict out, int count) {
+    for (int i=0; i<count; i++) out[i] = start + (float)(base + i) * step;
+}
+ME_BATCH_NOINLINE void dsl_portable_batch_ramp_f64(int64_t base, double start, double step,
+                                                    double *restrict out, int count) {
+    for (int i=0; i<count; i++) out[i] = start + (double)(base + i) * step;
+}
+
 #define ME_BATCH_FLOAT_OPS(T,S) \
     ME_BATCH_KERNEL_VV(add,T,S,a[i]+b[i]) \
     ME_BATCH_KERNEL_VS(add,T,S,a[i]+b) \
@@ -128,6 +144,10 @@ static const me_pj_arith_table s_arith_table = {
     .u64_sv = { dsl_portable_batch_add_sv_u64, dsl_portable_batch_sub_sv_u64, dsl_portable_batch_mul_sv_u64 },
     .u64_neg = dsl_portable_batch_neg_u64,
     .u64_fill = dsl_portable_batch_fill_u64,
+
+    .ramp_i64 = dsl_portable_batch_ramp_i64,
+    .ramp_f32 = dsl_portable_batch_ramp_f32,
+    .ramp_f64 = dsl_portable_batch_ramp_f64,
 };
 
 const me_pj_arith_table *dsl_portable_batch_arith_table(void) {

@@ -44,6 +44,10 @@ typedef struct me_pj_arith_table {
     void (*u64_sv[3])(uint64_t, const uint64_t *, uint64_t *restrict, int);
     void (*u64_neg)(const uint64_t *, uint64_t *restrict, int);
     void (*u64_fill)(uint64_t, uint64_t *restrict, int);
+
+    void (*ramp_i64)(int64_t, int64_t, int64_t, int64_t *restrict, int);
+    void (*ramp_f32)(int64_t, float, float, float *restrict, int);
+    void (*ramp_f64)(int64_t, double, double, double *restrict, int);
 } me_pj_arith_table;
 
 const me_pj_arith_table *dsl_portable_batch_arith_table(void);

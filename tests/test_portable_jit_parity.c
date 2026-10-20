@@ -1638,6 +1638,175 @@ static void arithmetic_bridge_regressions(void) {
     me_artifact_free(enabled);
 }
 
+static void flat_index_1d_lowering(void) {
+    const char *json =
+        "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+        "\"requires\":[\"numeric\",\"control-flow\",\"block-reductions\",\"nd-context\"],"
+        "\"source\":\"def ramp():\\n    return 1.5 + _flat_idx * 0.25\\n\","
+        "\"entry_point\":\"ramp\",\"inputs\":[],\"constants\":[],"
+        "\"output\":{\"dtype\":\"float64\",\"contract\":\"elementwise\"},"
+        "\"context\":{\"ndim\":1},\"semantics\":{\"fp\":\"strict\","
+        "\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}";
+    me_artifact *artifact = NULL;
+    me_artifact_error error;
+    CHECK(!me_artifact_load(json, strlen(json), ME_JIT_ON, &artifact, &error));
+    CHECK(artifact);
+    if (!me_artifact_has_jit(artifact)) {
+        me_artifact_free(artifact);
+        return;
+    }
+    me_dsl_compiled_program *program = dsl_artifact_program_for_tests(artifact);
+    CHECK(program && program->portable_jit_has_ramp_bridge);
+    CHECK(strstr(program->jit_c_source, "pj_t->ramp_f64"));
+    CHECK(!strstr(program->jit_c_source, "jit_off / jit_ext"));
+    me_artifact *reference = NULL;
+    CHECK(!me_artifact_load(json, strlen(json), ME_JIT_OFF, &reference, &error));
+    double actual[7], expected[7];
+    const int64_t shape[] = {20};
+    const int64_t origins[] = {0, 5, 16};
+    const int64_t extents[] = {7, 6, 4};
+    const int counts[] = {7, 6, 4};
+    for (int block=0; block<3; block++) {
+        me_artifact_eval_descriptor descriptor = {
+            .struct_size=sizeof(descriptor), .version=ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,
+            .nitems=(size_t)counts[block], .output_capacity=(size_t)counts[block]*sizeof(double),
+            .ndim=1, .logical_shape=shape, .block_origin=&origins[block],
+            .block_extent=&extents[block]
+        };
+        CHECK(!me_artifact_eval_ex(artifact, NULL, 0, actual, &descriptor, &error));
+        CHECK(!me_artifact_eval_ex(reference, NULL, 0, expected, &descriptor, &error));
+        CHECK(!memcmp(actual, expected, (size_t)counts[block]*sizeof(double)));
+        for (int i=0; i<counts[block]; i++) {
+            CHECK(actual[i] == 1.5 + (double)(origins[block]+i) * 0.25);
+        }
+    }
+    me_artifact_free(reference);
+    me_artifact_free(artifact);
+
+    char integer_json[2048];
+    const int64_t start = INT64_MAX-3, step = 3;
+    int json_size = snprintf(integer_json, sizeof(integer_json),
+        "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+        "\"requires\":[\"numeric\",\"control-flow\",\"block-reductions\",\"nd-context\"],"
+        "\"source\":\"def ramp(start, step):\\n    return start + _flat_idx * step\\n\","
+        "\"entry_point\":\"ramp\",\"inputs\":[],\"constants\":["
+        "{\"name\":\"start\",\"dtype\":\"int64\",\"category\":\"typed_scalar\",\"encoding\":\"decimal\",\"value\":\"%lld\"},"
+        "{\"name\":\"step\",\"dtype\":\"int64\",\"category\":\"typed_scalar\",\"encoding\":\"decimal\",\"value\":\"%lld\"}],"
+        "\"output\":{\"dtype\":\"int64\",\"contract\":\"elementwise\"},"
+        "\"context\":{\"ndim\":1},\"semantics\":{\"fp\":\"strict\","
+        "\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}",
+        (long long)start, (long long)step);
+    CHECK(json_size > 0 && (size_t)json_size < sizeof(integer_json));
+    artifact = NULL;
+    CHECK(!me_artifact_load(integer_json, (size_t)json_size, ME_JIT_ON, &artifact, &error));
+    CHECK(artifact && me_artifact_has_jit(artifact));
+    program = dsl_artifact_program_for_tests(artifact);
+    CHECK(program && program->portable_jit_has_ramp_bridge);
+    CHECK(strstr(program->jit_c_source, "pj_t->ramp_i64"));
+    reference = NULL;
+    CHECK(!me_artifact_load(integer_json, (size_t)json_size, ME_JIT_OFF, &reference, &error));
+    int64_t iactual[4], iexpected[4];
+    const int64_t iorigin = 5, iextent = 4, ishape = 20;
+    me_artifact_eval_descriptor idesc = {
+        .struct_size=sizeof(idesc), .version=ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,
+        .nitems=4, .output_capacity=sizeof(iactual), .ndim=1,
+        .logical_shape=&ishape, .block_origin=&iorigin, .block_extent=&iextent
+    };
+    CHECK(!me_artifact_eval_ex(artifact, NULL, 0, iactual, &idesc, &error));
+    CHECK(!me_artifact_eval_ex(reference, NULL, 0, iexpected, &idesc, &error));
+    CHECK(!memcmp(iactual, iexpected, sizeof(iactual)));
+    for (int i=0; i<4; i++) {
+        uint64_t bits = (uint64_t)start + (uint64_t)(iorigin+i)*(uint64_t)step;
+        int64_t expected;
+        memcpy(&expected, &bits, sizeof(expected));
+        CHECK(iactual[i] == expected);
+    }
+    me_artifact_free(reference);
+    me_artifact_free(artifact);
+
+    /* 2D float64 ramp */
+    const char *nd_json =
+        "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+        "\"requires\":[\"numeric\",\"control-flow\",\"block-reductions\",\"nd-context\"],"
+        "\"source\":\"def ramp():\\n    return 1.5 + _flat_idx * 0.25\\n\","
+        "\"entry_point\":\"ramp\",\"inputs\":[],\"constants\":[],"
+        "\"output\":{\"dtype\":\"float64\",\"contract\":\"elementwise\"},"
+        "\"context\":{\"ndim\":2},\"semantics\":{\"fp\":\"strict\","
+        "\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}";
+    artifact = NULL;
+    CHECK(!me_artifact_load(nd_json, strlen(nd_json), ME_JIT_ON, &artifact, &error));
+    CHECK(artifact && me_artifact_has_jit(artifact));
+    program = dsl_artifact_program_for_tests(artifact);
+    CHECK(program && program->portable_jit_has_ramp_bridge);
+    CHECK(strstr(program->jit_c_source, "pj_t->ramp_f64"));
+    reference = NULL;
+    CHECK(!me_artifact_load(nd_json, strlen(nd_json), ME_JIT_OFF, &reference, &error));
+    double nd_actual[12], nd_expected[12];
+    const int64_t nd_shape[] = {4, 3};
+    const int64_t nd_origins[] = {1, 0};
+    const int64_t nd_extents[] = {2, 3};
+    me_artifact_eval_descriptor nd_desc = {
+        .struct_size=sizeof(nd_desc), .version=ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,
+        .nitems=6, .output_capacity=sizeof(nd_actual), .ndim=2,
+        .logical_shape=nd_shape, .block_origin=nd_origins, .block_extent=nd_extents
+    };
+    CHECK(!me_artifact_eval_ex(artifact, NULL, 0, nd_actual, &nd_desc, &error));
+    CHECK(!me_artifact_eval_ex(reference, NULL, 0, nd_expected, &nd_desc, &error));
+    CHECK(!memcmp(nd_actual, nd_expected, 6 * sizeof(double)));
+    for (int i=0; i<6; i++) {
+        CHECK(nd_actual[i] == 1.5 + (double)(3 + i) * 0.25);
+    }
+
+    /* 2D non-contiguous tile */
+    const int64_t tile_origins[] = {1, 1};
+    const int64_t tile_extents[] = {2, 2};
+    double tile_actual[4], tile_expected[4];
+    me_artifact_eval_descriptor tile_desc = {
+        .struct_size=sizeof(tile_desc), .version=ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,
+        .nitems=4, .output_capacity=sizeof(tile_actual), .ndim=2,
+        .logical_shape=nd_shape, .block_origin=tile_origins, .block_extent=tile_extents
+    };
+    CHECK(!me_artifact_eval_ex(artifact, NULL, 0, tile_actual, &tile_desc, &error));
+    CHECK(!me_artifact_eval_ex(reference, NULL, 0, tile_expected, &tile_desc, &error));
+    CHECK(!memcmp(tile_actual, tile_expected, 4 * sizeof(double)));
+    CHECK(tile_actual[0] == 1.5 + 4 * 0.25);
+    CHECK(tile_actual[1] == 1.5 + 5 * 0.25);
+    CHECK(tile_actual[2] == 1.5 + 7 * 0.25);
+    CHECK(tile_actual[3] == 1.5 + 8 * 0.25);
+    me_artifact_free(reference);
+    me_artifact_free(artifact);
+
+    /* Non-contiguous higher-rank tiles must use row-wise ramp synthesis too. */
+    for (int rank = 3; rank <= 4; rank++) {
+        char json[2048];
+        const char *rank_field = strstr(nd_json, "\"ndim\":2");
+        CHECK(rank_field != NULL);
+        int prefix = (int)(rank_field - nd_json);
+        snprintf(json, sizeof(json), "%.*s\"ndim\":%d%s", prefix, nd_json, rank,
+                 rank_field + strlen("\"ndim\":2"));
+        artifact = NULL;
+        reference = NULL;
+        CHECK(!me_artifact_load(json, strlen(json), ME_JIT_ON, &artifact, &error));
+        CHECK(!me_artifact_load(json, strlen(json), ME_JIT_OFF, &reference, &error));
+        program = dsl_artifact_program_for_tests(artifact);
+        CHECK(program && program->portable_jit_has_ramp_bridge);
+        const int64_t shape[] = {5, 6, 7, 8};
+        const int64_t origin[] = {1, 2, 3, 4};
+        const int64_t extent[] = {2, 2, 2, 2};
+        double actual[16], expected[16];
+        me_artifact_eval_descriptor desc = {
+            .struct_size=sizeof(desc), .version=ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,
+            .nitems=(size_t)1 << rank, .output_capacity=sizeof(actual), .ndim=rank,
+            .logical_shape=shape, .block_origin=origin, .block_extent=extent
+        };
+        CHECK(!me_artifact_eval_ex(artifact, NULL, 0, actual, &desc, &error));
+        CHECK(!me_artifact_eval_ex(reference, NULL, 0, expected, &desc, &error));
+        CHECK(!memcmp(actual, expected, desc.nitems * sizeof(double)));
+        me_artifact_free(reference);
+        me_artifact_free(artifact);
+    }
+}
+
 int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i],"--compact")) {
@@ -1663,6 +1832,7 @@ int main(int argc, char **argv) {
     resolved_libm_parity();
     integer_tree_parity();
     arithmetic_bridge_regressions();
+    flat_index_1d_lowering();
     scalar_array_fallbacks();
     scalar_loop_cap();
     integer_scalar_reductions();

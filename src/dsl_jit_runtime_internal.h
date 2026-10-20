@@ -30,12 +30,12 @@
 #endif
 
 #ifndef ME_DSL_JIT_CGEN_VERSION
-#define ME_DSL_JIT_CGEN_VERSION 24
+#define ME_DSL_JIT_CGEN_VERSION 25
 #endif
 
 #ifndef ME_DSL_JIT_BRIDGE_ABI_VERSION
-/* Runtime math bridge ABI for JIT-generated symbols (frozen list v1). */
-#define ME_DSL_JIT_BRIDGE_ABI_VERSION 1
+/* Runtime function-table bridge ABI used by generated TCC entry points. */
+#define ME_DSL_JIT_BRIDGE_ABI_VERSION 2
 #endif
 
 #define ME_DSL_JIT_META_MAGIC 0x4d454a49544d4554ULL
@@ -249,6 +249,7 @@ typedef struct {
     uint64_t jit_runtime_key;
     bool jit_dl_handle_cached;
     bool portable_jit_has_arith_bridge;
+    bool portable_jit_has_ramp_bridge;
     uint8_t portable_jit_arith_ntemps;
     uint16_t portable_jit_arith_nnodes;
 } me_dsl_compiled_program;
