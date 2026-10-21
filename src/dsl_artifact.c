@@ -14,6 +14,7 @@
 #include "yyjson.h"
 
 #include <ctype.h>
+#include <complex.h>
 #include <float.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -35,6 +36,8 @@ typedef union {
     uint64_t u64;
     float f32;
     double f64;
+    float _Complex c64;
+    double _Complex c128;
 } artifact_scalar;
 
 typedef struct {
@@ -208,6 +211,8 @@ static me_dtype artifact_dtype(yyjson_val *value) {
     if (artifact_equal(value, "int64")) return ME_INT64;
     if (artifact_equal(value, "float32")) return ME_FLOAT32;
     if (artifact_equal(value, "float64")) return ME_FLOAT64;
+    if (artifact_equal(value, "complex64")) return ME_COMPLEX64;
+    if (artifact_equal(value, "complex128")) return ME_COMPLEX128;
     return ME_AUTO;
 }
 
@@ -222,6 +227,9 @@ static size_t artifact_itemsize(me_dtype dtype) {
         case ME_INT64: return sizeof(int64_t);
         case ME_FLOAT32: return sizeof(float);
         case ME_FLOAT64: return sizeof(double);
+        /* Complex storage is two interleaved components of the real width. */
+        case ME_COMPLEX64: return 2 * sizeof(float);
+        case ME_COMPLEX128: return 2 * sizeof(double);
         default: return 0;
     }
 }
@@ -320,6 +328,31 @@ static bool artifact_float(const char *text, me_dtype dtype, artifact_scalar *va
     return true;
 }
 
+/* Complex constants use one ieee754-hex string: real component then imaginary
+ * component, each big-endian and exactly as wide as the declared component. */
+static bool artifact_complex(const char *text, me_dtype dtype, artifact_scalar *value) {
+    size_t component = dtype == ME_COMPLEX64 ? 8 : 16;
+    if (!text || strlen(text) != 2 * component) return false;
+    char real_text[17], imag_text[17];
+    memcpy(real_text, text, component);
+    real_text[component] = '\0';
+    memcpy(imag_text, text + component, component);
+    imag_text[component] = '\0';
+    artifact_scalar real = {0}, imag = {0};
+    me_dtype float_dtype = dtype == ME_COMPLEX64 ? ME_FLOAT32 : ME_FLOAT64;
+    if (!artifact_float(real_text, float_dtype, &real) ||
+        !artifact_float(imag_text, float_dtype, &imag)) return false;
+    if (dtype == ME_COMPLEX64) {
+        float parts[2] = {real.f32, imag.f32};
+        memcpy(&value->c64, parts, sizeof(parts));
+    }
+    else {
+        double parts[2] = {real.f64, imag.f64};
+        memcpy(&value->c128, parts, sizeof(parts));
+    }
+    return true;
+}
+
 static bool artifact_constant(yyjson_val *object, artifact_binding *binding) {
     yyjson_val *encoding = yyjson_obj_get(object, "encoding");
     yyjson_val *value = yyjson_obj_get(object, "value");
@@ -363,6 +396,10 @@ static bool artifact_constant(yyjson_val *object, artifact_binding *binding) {
         case ME_FLOAT64:
             return artifact_equal(encoding, "ieee754-hex") &&
                 artifact_float(artifact_string(value), binding->variable.dtype, &binding->value);
+        case ME_COMPLEX64:
+        case ME_COMPLEX128:
+            return artifact_equal(encoding, "ieee754-hex") &&
+                artifact_complex(artifact_string(value), binding->variable.dtype, &binding->value);
         default:
             return false;
     }
@@ -383,6 +420,7 @@ me_artifact_status dsl_graph_scalar(const char *json, size_t length, me_dtype *d
     artifact_binding binding = {0};
     binding.variable.dtype = artifact_dtype1(yyjson_obj_get(yyjson_doc_get_root(doc), "dtype"));
     bool ok = artifact_itemsize(binding.variable.dtype) &&
+        binding.variable.dtype != ME_COMPLEX64 && binding.variable.dtype != ME_COMPLEX128 &&
         artifact_constant(yyjson_doc_get_root(doc), &binding);
     if (ok) {
         *dtype = binding.variable.dtype;

@@ -294,6 +294,8 @@ if(WIN32)
   list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_threadsafe_chunk\\.c$")
   # MSVC/clang-cl complex literal handling breaks this test; skip on Windows.
   list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_regressions\\.c$")
+  # Complex portable execution is not supported on Windows.
+  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_portable_complex\\.c$")
 endif()
 if(EMSCRIPTEN)
   # These rely on host runtime features that are not available in plain wasm32 CI.
@@ -302,6 +304,10 @@ if(EMSCRIPTEN)
   if(NOT (MINIEXPR_USE_WASM32_JIT AND MINIEXPR_WASM32_SIDE_MODULE))
     list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_jit_runtime_cache\\.c$")
   endif()
+  # The broad complex matrix is native-only; wasm32 runs the focused runner below.
+  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_portable_complex\\.c$")
+else()
+  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_portable_complex_wasm\\.c$")
 endif()
 if(NOT (EMSCRIPTEN AND MINIEXPR_USE_WASM32_JIT AND MINIEXPR_WASM32_SIDE_MODULE))
   list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_jit_side_module\\.c$")
@@ -314,7 +320,8 @@ foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
   target_compile_definitions("${test_name}"
     PRIVATE ME_DSL_JIT_TEST_STUB_SO_PATH="$<TARGET_FILE:me_jit_test_stub>")
   target_link_libraries("${test_name}" PRIVATE ${MINIEXPR_DEFAULT_LIB} ${MINIEXPR_THREADS_LIB})
-  if(test_name STREQUAL "test_dsl_artifact" OR test_name STREQUAL "test_dsl_math_policy")
+  if(test_name STREQUAL "test_dsl_artifact" OR test_name STREQUAL "test_dsl_math_policy" OR
+     test_name STREQUAL "test_portable_complex" OR test_name STREQUAL "test_portable_complex_wasm")
     target_link_libraries("${test_name}" PRIVATE miniexpr_artifact)
     target_compile_definitions("${test_name}" PRIVATE
       MINIEXPR_ARTIFACT_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/portable-artifacts/affine.json")

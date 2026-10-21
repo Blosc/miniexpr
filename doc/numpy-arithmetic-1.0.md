@@ -8,8 +8,10 @@ but does not expose a public 1.1 version. Unknown/mixed versions and numerical
 policies reject. Old development artifacts must be re-exported.
 
 The semantic reference is NumPy **2.5.3**. The advertised M3 matrix covers bool,
-int8/16/32/64, uint8/16/32/64 and float32/64. Half, complex, extended floats,
-arbitrary-precision Python integers and array broadcasting are not implemented.
+int8/16/32/64, uint8/16/32/64, float32/64 and (as an interpreter-only extension
+on macOS, Linux and wasm32) complex64/128. Windows rejects complex explicitly.
+Half, extended floats, arbitrary-precision Python integers and array broadcasting
+are not implemented.
 This is an arithmetic profile, not a claim of full NumPy function or array parity.
 
 ## Artifact policy and scalar categories

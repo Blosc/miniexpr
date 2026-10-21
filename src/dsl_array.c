@@ -21,8 +21,14 @@ static size_t a_width(me_dtype d) {
         case ME_INT16: case ME_UINT16: return 2;
         case ME_INT32: case ME_UINT32: case ME_FLOAT32: return 4;
         case ME_INT64: case ME_UINT64: case ME_FLOAT64: return 8;
+        case ME_COMPLEX64: return 8;
+        case ME_COMPLEX128: return 16;
         default: return 0;
     }
+}
+static bool a_complex(me_dtype d) { return d == ME_COMPLEX64 || d == ME_COMPLEX128; }
+static me_dtype a_component(me_dtype d) {
+    return d == ME_COMPLEX64 ? ME_FLOAT32 : d == ME_COMPLEX128 ? ME_FLOAT64 : ME_AUTO;
 }
 static bool a_unsigned(me_dtype d) {
     return d == ME_BOOL || d == ME_UINT8 || d == ME_UINT16 || d == ME_UINT32 || d == ME_UINT64;
@@ -181,8 +187,16 @@ static bool a_axes(int rank, const me_array_options *o, bool *axes) {
 }
 static me_dtype a_dtype(me_dtype source, const me_array_options *o) {
     if (o->reduction == ME_ARRAY_ANY || o->reduction == ME_ARRAY_ALL) return o->accumulator == ME_AUTO ? ME_BOOL : ME_AUTO;
-    if (o->accumulator != ME_AUTO) return a_width(o->accumulator) && !(a_float(source) && !a_float(o->accumulator)) ? o->accumulator : ME_AUTO;
-    if ((o->reduction == ME_ARRAY_SUM || o->reduction == ME_ARRAY_PROD) && !a_float(source)) return a_unsigned(source) && source != ME_BOOL ? ME_UINT64 : ME_INT64;
+    if (o->accumulator != ME_AUTO) {
+        bool compatible = a_float(source) ? a_float(o->accumulator) :
+                          a_complex(source) ? (a_float(o->accumulator) || a_complex(o->accumulator)) :
+                          true;
+        return a_width(o->accumulator) && compatible ? o->accumulator : ME_AUTO;
+    }
+    if ((o->reduction == ME_ARRAY_SUM || o->reduction == ME_ARRAY_PROD) &&
+        !a_float(source) && !a_complex(source)) {
+        return a_unsigned(source) && source != ME_BOOL ? ME_UINT64 : ME_INT64;
+    }
     return source;
 }
 me_artifact_status me_array_result_shape(const me_artifact *a, int rank, const int64_t *shape,
@@ -234,21 +248,74 @@ me_artifact_status dsl_array_validate_domain(const me_artifact *a, int rank,
 static double a_real(me_dtype d, const void *p) {
     if (d == ME_FLOAT32) { float x; memcpy(&x,p,4); return x; }
     if (d == ME_FLOAT64) { double x; memcpy(&x,p,8); return x; }
+    if (a_complex(d)) {
+        /* Explicit real/int casts discard the imaginary component. */
+        if (d == ME_COMPLEX64) { float parts[2]; memcpy(parts,p,sizeof(parts)); return parts[0]; }
+        double parts[2]; memcpy(parts,p,sizeof(parts)); return parts[0];
+    }
     uint64_t raw = a_integer(d,p);
     if (a_unsigned(d)) return (double)raw;
     int64_t x; memcpy(&x,&raw,8); return (double)x;
 }
+static void a_complex_parts(me_dtype d, const void *p, double *real, double *imag) {
+    if (d == ME_COMPLEX64) {
+        float parts[2]; memcpy(parts,p,sizeof(parts));
+        *real = parts[0]; *imag = parts[1];
+    }
+    else {
+        double parts[2]; memcpy(parts,p,sizeof(parts));
+        *real = parts[0]; *imag = parts[1];
+    }
+}
+static void a_complex_store(me_dtype d, double real, double imag, void *out) {
+    if (d == ME_COMPLEX64) {
+        float parts[2] = {(float)real, (float)imag}; memcpy(out,parts,sizeof(parts));
+    }
+    else {
+        double parts[2] = {real, imag}; memcpy(out,parts,sizeof(parts));
+    }
+}
 static void a_cast(me_dtype source, const void *p, me_dtype target, void *out) {
     if (target == ME_FLOAT32) { float x = (float)a_real(source,p); memcpy(out,&x,4); }
     else if (target == ME_FLOAT64) { double x = a_real(source,p); memcpy(out,&x,8); }
+    else if (a_complex(target)) {
+        if (a_complex(source)) {
+            double real, imag; a_complex_parts(source,p,&real,&imag);
+            a_complex_store(target,real,imag,out);
+        }
+        else a_complex_store(target,a_real(source,p),0.0,out);
+    }
     else {
-        uint64_t raw = target == ME_BOOL ? a_real(source,p) != 0 : a_integer(source,p);
+        uint64_t raw;
+        if (target == ME_BOOL) {
+            if (a_complex(source)) {
+                double real, imag;
+                a_complex_parts(source, p, &real, &imag);
+                raw = real != 0.0 || imag != 0.0;
+            }
+            else raw = a_real(source, p) != 0;
+        }
+        else raw = a_integer(source,p);
         size_t width = a_width(target); uint16_t little = 1;
         if (*(uint8_t *)&little) memcpy(out,&raw,width);
         else memcpy(out,(uint8_t *)&raw + 8 - width,width);
     }
 }
 static void a_combine(me_dtype dtype, int op, void *acc, const void *value) {
+    if (a_complex(dtype)) {
+        double ar, ai, vr, vi;
+        a_complex_parts(dtype, acc, &ar, &ai);
+        a_complex_parts(dtype, value, &vr, &vi);
+        if (op == ME_ARRAY_SUM) a_complex_store(dtype, ar + vr, ai + vi, acc);
+        else if (op == ME_ARRAY_PROD) a_complex_store(dtype, ar * vr - ai * vi, ar * vi + ai * vr, acc);
+        else if (isnan(vr) || isnan(vi)) a_complex_store(dtype, vr, vi, acc);
+        else if (!(isnan(ar) || isnan(ai))) {
+            bool less = op == ME_ARRAY_MIN ? (vr < ar || (vr == ar && vi < ai)) :
+                                             (vr > ar || (vr == ar && vi > ai));
+            if (less) a_complex_store(dtype, vr, vi, acc);
+        }
+        return;
+    }
     if (a_float(dtype)) {
         double x = a_real(dtype,acc), y = a_real(dtype,value), z;
         if (op == ME_ARRAY_SUM) z = x + y;
@@ -409,6 +476,7 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
     for (int b = 0; b < ninputs; b++) gather |= !direct[b] && !(sources && sources[binding[b]].read);
     for (size_t g = 0; g < groups && !rc; g++) {
         uint64_t acc = 0; bool initialized = false;
+        unsigned char acc_complex[16] = {0};
         if (o->initial) { memcpy(&acc,o->initial,width); initialized = true; }
         else if (o->reduction != ME_ARRAY_MIN && o->reduction != ME_ARRAY_MAX) {
             uint64_t identity = o->reduction == ME_ARRAY_PROD || o->reduction == ME_ARRAY_ALL;
@@ -542,6 +610,15 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
                     dsl_portable_prod_integer(me_artifact_output_dtype(a), values, count, acc, false, &acc) :
                     dsl_portable_sum_integer(me_artifact_output_dtype(a), values, count, acc, false, &acc);
                 if (!ok) rc = ME_ARTIFACT_ERR_EVAL;
+            } else if (!rc && !handled && values && a_complex(dtype)) {
+                for (size_t lane = 0; lane < count; lane++) {
+                    if (mask && !mask[lane]) continue;
+                    unsigned char value[16] = {0};
+                    a_cast(me_artifact_output_dtype(a),(const uint8_t *)values + lane*source_width,
+                           dtype,value);
+                    if (!initialized) { memcpy(acc_complex,value,width); initialized = true; }
+                    else a_combine(dtype,o->reduction,acc_complex,value);
+                }
             } else if (!rc && !handled && values) for (size_t lane = 0; lane < count; lane++) {
                 if (mask && !mask[lane]) continue;
                 uint64_t value = 0; a_cast(me_artifact_output_dtype(a),(const uint8_t *)values + lane*source_width,dtype,&value);
@@ -557,7 +634,8 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
                 a_coordinates(out_rank,out_shape,axes,false,0,g,coordinates);
                 offset = a_offset(&destination,out_rank,coordinates);
             }
-            memcpy((uint8_t *)output + offset,&acc,width);
+            const void *acc_source = a_complex(dtype) ? (const void *)acc_complex : (const void *)&acc;
+            memcpy((uint8_t *)output + offset, acc_source, width);
         }
     }
     if (!dsl_portable_fp_end(&saved) && !rc) rc = a_error(error,ME_ARTIFACT_ERR_UNSUPPORTED,"cannot restore floating environment");

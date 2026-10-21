@@ -32,11 +32,39 @@ static me_dtype portable_integer_type(int bits, bool is_unsigned) {
     return ME_AUTO;
 }
 
+bool dsl_portable_is_complex(me_dtype dtype) {
+    return dtype == ME_COMPLEX64 || dtype == ME_COMPLEX128;
+}
+
+me_dtype dsl_portable_complex_component(me_dtype dtype) {
+    if (dtype == ME_COMPLEX64) return ME_FLOAT32;
+    if (dtype == ME_COMPLEX128) return ME_FLOAT64;
+    return ME_AUTO;
+}
+
+/* Component width that a value contributes to a complex promotion. C matches
+ * NumPy: 16-bit integers fit complex64's 24-bit significand, wider ones do not. */
+static me_dtype portable_complex_component(me_dtype dtype) {
+    if (dsl_portable_is_complex(dtype)) return dsl_portable_complex_component(dtype);
+    if (dtype == ME_BOOL) return ME_FLOAT32;
+    if (dtype == ME_FLOAT32 || dtype == ME_FLOAT64) return dtype;
+    if (portable_integer_bits(dtype) <= 16) return ME_FLOAT32;
+    return portable_integer_bits(dtype) ? ME_FLOAT64 : ME_AUTO;
+}
+
 me_dtype dsl_portable_numeric_promote(me_dtype left, me_dtype right) {
     /* Truth conversion is separate from arithmetic. Numeric Boolean values
      * are strong int64 zero/one operands, not Boolean temporaries. */
     if (left == ME_BOOL) left = ME_INT64;
     if (right == ME_BOOL) right = ME_INT64;
+    if (dsl_portable_is_complex(left) || dsl_portable_is_complex(right)) {
+        me_dtype left_component = portable_complex_component(left);
+        me_dtype right_component = portable_complex_component(right);
+        if (left_component == ME_AUTO || right_component == ME_AUTO) return ME_AUTO;
+        /* Complex arithmetic keeps the width needed for both real components. */
+        return left_component == ME_FLOAT64 || right_component == ME_FLOAT64 ?
+               ME_COMPLEX128 : ME_COMPLEX64;
+    }
     int left_bits = portable_integer_bits(left);
     int right_bits = portable_integer_bits(right);
     bool left_float = left == ME_FLOAT32 || left == ME_FLOAT64;
@@ -66,7 +94,8 @@ me_dtype dsl_portable_numeric_promote(me_dtype left, me_dtype right) {
 
 me_dtype dsl_portable_division_dtype(me_dtype left, me_dtype right) {
     me_dtype promoted = dsl_portable_numeric_promote(left, right);
-    if (promoted == ME_AUTO || promoted == ME_FLOAT32 || promoted == ME_FLOAT64) {
+    if (promoted == ME_AUTO || promoted == ME_FLOAT32 || promoted == ME_FLOAT64 ||
+        dsl_portable_is_complex(promoted)) {
         return promoted;
     }
     return ME_FLOAT64;
@@ -86,8 +115,10 @@ bool dsl_numpy_can_cast(me_dtype from, me_dtype to, const char *policy) {
     if (!policy || !strcmp(policy, "unsafe")) return dsl_numpy_numeric_promote(from, to) != ME_AUTO;
     if (!strcmp(policy, "safe")) return dsl_numpy_numeric_promote(from, to) == to;
     if (strcmp(policy, "same_kind")) return false;
-    int a = from == ME_BOOL ? 0 : portable_unsigned(from) ? 1 : portable_integer_bits(from) ? 2 : 3;
-    int b = to == ME_BOOL ? 0 : portable_unsigned(to) ? 1 : portable_integer_bits(to) ? 2 : 3;
+    int a = from == ME_BOOL ? 0 : portable_unsigned(from) ? 1 : portable_integer_bits(from) ? 2 :
+            dsl_portable_is_complex(from) ? 4 : 3;
+    int b = to == ME_BOOL ? 0 : portable_unsigned(to) ? 1 : portable_integer_bits(to) ? 2 :
+            dsl_portable_is_complex(to) ? 4 : 3;
     return dsl_numpy_numeric_promote(from, to) != ME_AUTO && a <= b;
 }
 

@@ -50,9 +50,14 @@ static bool portable_width1(me_dtype dtype, size_t width) {
     if (dtype == ME_STRING || dtype == ME_BYTES) {
         return width > 0 && width <= 1024 * 1024 && (dtype != ME_STRING || width % 4 == 0);
     }
+#if defined(_WIN32) || defined(_WIN64)
+    /* Windows has no stable C99 complex ABI here; reject rather than emulating. */
+    if (dtype == ME_COMPLEX64 || dtype == ME_COMPLEX128) return false;
+#endif
     bool numeric = dtype == ME_BOOL || dtype == ME_INT8 || dtype == ME_INT16 ||
         dtype == ME_INT32 || dtype == ME_INT64 || dtype == ME_UINT8 || dtype == ME_UINT16 ||
-        dtype == ME_UINT32 || dtype == ME_UINT64 || dtype == ME_FLOAT32 || dtype == ME_FLOAT64;
+        dtype == ME_UINT32 || dtype == ME_UINT64 || dtype == ME_FLOAT32 || dtype == ME_FLOAT64 ||
+        dtype == ME_COMPLEX64 || dtype == ME_COMPLEX128;
     return numeric && (!width || width == dtype_size(dtype));
 }
 

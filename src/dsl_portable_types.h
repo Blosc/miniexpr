@@ -12,6 +12,10 @@
  * ME_AUTO reports an unsupported pair; never means output-context typing. */
 me_dtype dsl_portable_numeric_promote(me_dtype left, me_dtype right);
 me_dtype dsl_portable_division_dtype(me_dtype left, me_dtype right);
+/* Interpreter-first complex contract. Windows builds keep C complex out of the
+ * public headers and reject these dtypes before evaluation. */
+bool dsl_portable_is_complex(me_dtype dtype);
+me_dtype dsl_portable_complex_component(me_dtype dtype);
 /* NumPy 2.x strong dtype promotion; independent of operand values/output. */
 me_dtype dsl_numpy_numeric_promote(me_dtype left, me_dtype right);
 bool dsl_numpy_can_cast(me_dtype from, me_dtype to, const char *policy);

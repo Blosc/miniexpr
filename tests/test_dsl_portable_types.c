@@ -49,7 +49,7 @@ int main(void) {
             }
         }
     }
-    const me_dtype excluded[] = {ME_AUTO, ME_STRING, ME_BYTES, ME_COMPLEX64, ME_COMPLEX128};
+    const me_dtype excluded[] = {ME_AUTO, ME_STRING, ME_BYTES};
     for (size_t i = 0; i < sizeof(excluded) / sizeof(excluded[0]); i++) {
         if (dsl_portable_numeric_promote(excluded[i], ME_INT64) != ME_AUTO ||
             dsl_portable_numeric_promote(ME_FLOAT32, excluded[i]) != ME_AUTO ||

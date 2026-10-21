@@ -293,7 +293,7 @@ int main(void) {
     assert(mixed_output == 5);
     me_artifact_free(mixed_artifact);
     free(mixed);
-    reject(json, "\"dtype\": \"float64\"", "\"dtype\": \"complex128\"", ME_ARTIFACT_ERR_UNSUPPORTED);
+    reject(json, "\"dtype\": \"float64\"", "\"dtype\": \"float16\"", ME_ARTIFACT_ERR_UNSUPPORTED);
     char *changed = replace(json, "2*x - 1", "snowman \\u2603");
     artifact = load(changed);
     me_artifact_free(artifact);

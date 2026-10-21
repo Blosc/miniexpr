@@ -12,6 +12,7 @@
 #include "miniexpr_internal.h"
 
 #include <math.h>
+#include <complex.h>
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
@@ -73,8 +74,76 @@ static bool p_float(me_dtype d) {
     return d == ME_FLOAT32 || d == ME_FLOAT64;
 }
 
+static bool p_complex(me_dtype d) {
+    return dsl_portable_is_complex(d);
+}
+
 static bool p_numeric(me_dtype d) {
     return dsl_portable_numeric_promote(d, d) != ME_AUTO;
+}
+
+/* Complex values are kept in the C99 complex types already used by me_scalar.
+ * Component access goes through the standard functions so a host that lays the
+ * two floats out differently still reads and writes the documented ABI. */
+static void p_complex_parts(me_dtype dtype, const me_scalar *value, double *real, double *imag) {
+    /* C guarantees complex representation as two adjacent real components. */
+    if (dtype == ME_COMPLEX64) {
+        float parts[2];
+        memcpy(parts, &value->c64, sizeof(parts));
+        *real = parts[0];
+        *imag = parts[1];
+    }
+    else {
+        double parts[2];
+        memcpy(parts, &value->c128, sizeof(parts));
+        *real = parts[0];
+        *imag = parts[1];
+    }
+}
+
+static void p_complex_set(me_dtype dtype, double real, double imag, me_scalar *value) {
+    if (dtype == ME_COMPLEX64) {
+        float parts[2] = {(float)real, (float)imag};
+        memcpy(&value->c64, parts, sizeof(parts));
+    }
+    else {
+        double parts[2] = {real, imag};
+        memcpy(&value->c128, parts, sizeof(parts));
+    }
+}
+
+static me_dtype p_complex_math_dtype(me_dtype dtype) {
+    /* NumPy keeps complex arithmetic in complex; real-valued results are
+     * explicit (abs/real/imag) and declare their real component width. */
+    if (dsl_portable_is_complex(dtype)) return dtype;
+    return ME_AUTO;
+}
+
+/* Declared complex unary contract. Anything outside this set is rejected at
+ * type time rather than approximated through the real math path. */
+static bool p_complex_unary_math(const char *name) {
+    static const char *const supported[] = {
+        "sqrt", "exp", "exp2", "expm1", "log", "log1p", "log2", "log10",
+        "sin", "cos", "tan", "asin", "acos", "atan",
+        "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
+        "conj", "real", "imag", "fabs", "floating_abs", "sign", "square", "rint"
+    };
+    if (!name) return false;
+    for (size_t i = 0; i < sizeof(supported) / sizeof(*supported); i++) {
+        if (!strcmp(name, supported[i])) return true;
+    }
+    return false;
+}
+
+static bool p_complex_binary_math(const char *name) {
+    return name && (!strcmp(name, "minimum") || !strcmp(name, "maximum") ||
+                    !strcmp(name, "fmin") || !strcmp(name, "fmax") ||
+                    !strcmp(name, "pow"));
+}
+
+static bool p_complex_real_result(const char *name) {
+    return name && (!strcmp(name, "real") || !strcmp(name, "imag") ||
+                    !strcmp(name, "fabs") || !strcmp(name, "floating_abs"));
 }
 
 static bool p_numpy(const me_expr *expr) {
@@ -116,6 +185,11 @@ static bool p_truth(me_dtype d, const me_scalar *v) {
     if (d == ME_BYTES) return v->string && *(const uint8_t *)v->string != 0;
     if (d == ME_STRING) return v->string && *(const uint32_t *)v->string != 0;
     if (d == ME_BOOL) return v->b;
+    if (p_complex(d)) {
+        double real, imag;
+        p_complex_parts(d, v, &real, &imag);
+        return real != 0.0 || imag != 0.0;
+    }
     if (d == ME_FLOAT32) return v->f32 != 0.0f;
     if (d == ME_FLOAT64) return v->f64 != 0.0;
     if (p_unsigned(d)) return v->u64 != 0;
@@ -147,6 +221,19 @@ static me_portable_numeric_status p_convert(me_dtype from, const me_scalar *v,
         out->b = p_truth(from, v);
         return ME_PORTABLE_NUMERIC_OK;
     }
+    if (p_complex(to)) {
+        if (p_complex(from)) {
+            double real, imag;
+            p_complex_parts(from, v, &real, &imag);
+            p_complex_set(to, real, imag, out);
+            return ME_PORTABLE_NUMERIC_OK;
+        }
+        p_complex_set(to, from == ME_BOOL ? (v->b ? 1.0 : 0.0) : p_double(from, v), 0.0, out);
+        return ME_PORTABLE_NUMERIC_OK;
+    }
+    /* Implicit real/integer conversion from complex is not meaningful; explicit
+     * output conversion may discard the imaginary part through p_numpy_convert. */
+    if (p_complex(from)) return ME_PORTABLE_NUMERIC_TYPE;
     if (p_float(to)) {
         /* Integer -> float32 rounds directly, not through float64. */
         if (to == ME_FLOAT32) {
@@ -172,7 +259,19 @@ static me_portable_numeric_status p_convert(me_dtype from, const me_scalar *v,
  * narrowing is modular, but unstable nonfinite/out-of-range float casts reject. */
 static me_portable_numeric_status p_numpy_convert(me_dtype from, const me_scalar *v,
                                                   me_dtype to, me_scalar *out) {
-    if (!p_float(from) && to != ME_BOOL && !p_float(to)) {
+    if (p_complex(from) && !p_complex(to) && to != ME_BOOL) {
+        /* NumPy astype discards the imaginary part for an allowed real/integer
+         * output policy. The manifest's casting gate decides whether this runs. */
+        double real, imag;
+        p_complex_parts(from, v, &real, &imag);
+        (void)imag;
+        from = from == ME_COMPLEX64 ? ME_FLOAT32 : ME_FLOAT64;
+        me_scalar value = {0};
+        if (from == ME_FLOAT32) value.f32 = (float)real;
+        else value.f64 = real;
+        v = &value;
+    }
+    if (!p_float(from) && !p_complex(from) && to != ME_BOOL && !p_float(to) && !p_complex(to)) {
         uint64_t raw = from == ME_BOOL ? (uint64_t)v->b : p_unsigned(from) ? v->u64 : (uint64_t)v->i64;
         if (p_unsigned(to)) out->u64 = dsl_numpy_unsigned_bits(to, raw);
         else out->i64 = dsl_numpy_signed_bits(to, raw);
@@ -330,6 +429,9 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
     }
     me_expr *a = n->parameters[0];
     if (numpy && p_predicate(math_name)) {
+        if (p_complex(a->dtype) && !strcmp(math_name, "signbit")) {
+            return p_fail(reason, cap, "signbit is not defined for complex operands");
+        }
         n->dtype = ME_BOOL;
         return true;
     }
@@ -345,8 +447,10 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
         if (contains_reduction(a)) return p_fail(reason, cap, "nested reductions are not supported");
         n->dtype = reduce == ME_REDUCE_ANY || reduce == ME_REDUCE_ALL ? ME_BOOL :
                    reduce == ME_REDUCE_MIN || reduce == ME_REDUCE_MAX ? a->dtype :
-                   reduce == ME_REDUCE_MEAN ? (a->dtype == ME_FLOAT32 ? ME_FLOAT32 : ME_FLOAT64) :
-                   p_float(a->dtype) ? a->dtype : p_unsigned(a->dtype) ? ME_UINT64 : ME_INT64;
+                   reduce == ME_REDUCE_MEAN ? (a->dtype == ME_FLOAT32 ? ME_FLOAT32 :
+                                               p_complex(a->dtype) ? a->dtype : ME_FLOAT64) :
+                   p_float(a->dtype) || p_complex(a->dtype) ? a->dtype :
+                   p_unsigned(a->dtype) ? ME_UINT64 : ME_INT64;
         return true;
     }
     /* Fold only a unary source-literal sign, exactly. This is not full-DSL
@@ -362,15 +466,27 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
     }
     if (cast != ME_AUTO) {
         if (is_string_dtype(a->dtype) && cast != ME_BOOL) return p_fail(reason, cap, "explicit string numeric casts are unsupported");
+        if (p_complex(a->dtype) && cast != ME_BOOL && !p_complex(cast)) {
+            return p_fail(reason, cap, "explicit complex to real or integer cast is unsupported");
+        }
         n->function = NULL;
         n->dtype = cast;
         n->input_dtype = a->dtype;
         return true;
     }
+    if (math_name && arity == 1 && p_complex(a->dtype)) {
+        if (!p_complex_unary_math(math_name)) {
+            return p_fail(reason, cap, "function is not supported for complex operands");
+        }
+        n->dtype = p_complex_real_result(math_name) ?
+            dsl_portable_complex_component(a->dtype) : a->dtype;
+        return p_wrap((me_expr **)&n->parameters[0], a->dtype);
+    }
     if (math_name && !strcmp(math_name, "fma")) {
         me_dtype common = ME_AUTO;
         for (int i = 0; i < 3; i++) {
             const me_expr *arg = n->parameters[i];
+            if (p_complex(arg->dtype)) return p_fail(reason, cap, "fma is not supported for complex operands");
             if (arg->flags & ME_EXPR_FLAG_WEAK_LITERAL) continue;
             common = common == ME_AUTO ? arg->dtype : p_promote(numpy, common, arg->dtype);
             if (common == ME_AUTO) return p_fail(reason, cap, "unsupported fma operand promotion");
@@ -387,6 +503,7 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
     }
     if (math_name && !strcmp(math_name, "ldexp")) {
         const me_expr *exponent = n->parameters[1];
+        if (p_complex(a->dtype)) return p_fail(reason, cap, "ldexp is not supported for complex operands");
         if (p_float(exponent->dtype)) return p_fail(reason, cap, "ldexp exponent must be integral");
         if (numpy && exponent->dtype == ME_UINT64) return p_fail(reason, cap, "ldexp uint64 exponent is unsupported");
         n->dtype = numpy ? p_numpy_math_dtype(a->dtype) : a->dtype == ME_FLOAT32 ? ME_FLOAT32 : ME_FLOAT64;
@@ -432,7 +549,7 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
         if (numpy && p_weak(a)) n->flags |= ME_EXPR_FLAG_WEAK_SCALAR;
         if (numpy && a->dtype == ME_BOOL && !strcmp(op, "-")) return p_fail(reason, cap, "Boolean negation is unsupported; use logical not");
         n->dtype = a->dtype == ME_BOOL && strcmp(op, "~") ? ME_INT64 : a->dtype;
-        if (!strcmp(op, "~") && p_float(n->dtype)) return p_fail(reason, cap, "bitwise operand must be integral");
+        if (!strcmp(op, "~") && (p_float(n->dtype) || p_complex(n->dtype))) return p_fail(reason, cap, "bitwise operand must be integral");
         return p_wrap((me_expr **)&n->parameters[0], n->dtype);
     }
     int left_index = op && !strcmp(op, "where") ? 1 : 0;
@@ -470,7 +587,8 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
     if (!literal_ok) {
         return p_fail(reason, cap, "source literal is out of range for its operand context");
     }
-    if (is_comparison_node(n) && !p_float(a->dtype) && !p_float(b->dtype)) {
+    if (is_comparison_node(n) && !p_float(a->dtype) && !p_float(b->dtype) &&
+        !p_complex(a->dtype) && !p_complex(b->dtype)) {
         n->dtype = ME_BOOL; /* Mixed int64/uint64 comparison stays exact. */
         return true;
     }
@@ -488,7 +606,18 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
         }
     }
     if (numpy && weak_a && weak_b) n->flags |= ME_EXPR_FLAG_WEAK_SCALAR;
-    if (numpy && math_name && (strcmp(math_name, "minimum") && strcmp(math_name, "maximum") &&
+    bool complex_operands = p_complex(a->dtype) || p_complex(b->dtype);
+    if (complex_operands) {
+        if (math_name && !p_complex_binary_math(math_name)) {
+            return p_fail(reason, cap, "function is not supported for complex operands");
+        }
+        if (!strcmp(op, "//") || !strcmp(op, "%") || !strcmp(op, "<<") || !strcmp(op, ">>") ||
+            !strcmp(op, "&") || !strcmp(op, "|") || !strcmp(op, "^")) {
+            return p_fail(reason, cap, "operation is not supported for complex operands");
+        }
+    }
+    if (numpy && math_name && !complex_operands &&
+        (strcmp(math_name, "minimum") && strcmp(math_name, "maximum") &&
         strcmp(math_name, "fmin") && strcmp(math_name, "fmax") && strcmp(math_name, "fmod") && strcmp(math_name, "ncr") && strcmp(math_name, "npr"))) {
         common = p_numpy_math_dtype(common);
         if (common == ME_AUTO) return p_fail(reason, cap, "NumPy function loop requires unsupported float16");
@@ -499,12 +628,15 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
     bool ordered = math_name && (!strcmp(math_name, "minimum") || !strcmp(math_name, "maximum") ||
                                   !strcmp(math_name, "fmin") || !strcmp(math_name, "fmax") || !strcmp(math_name, "fmod"));
     if (numpy && math_name && !strcmp(math_name, "fmod") && common == ME_BOOL) common = ME_INT8;
-    if (math_name && !combinatoric && common != ME_AUTO && !(numpy && ordered)) common = common == ME_FLOAT32 ? ME_FLOAT32 : ME_FLOAT64;
+    if (math_name && !combinatoric && common != ME_AUTO && !(numpy && ordered)) {
+        if (p_complex(common)) common = p_complex_math_dtype(common);
+        else common = common == ME_FLOAT32 ? ME_FLOAT32 : ME_FLOAT64;
+    }
     if (!strcmp(op, "&") || !strcmp(op, "|") || !strcmp(op, "^")) {
         if (a->dtype == ME_BOOL && b->dtype == ME_BOOL) common = ME_BOOL;
-        if (p_float(common)) return p_fail(reason, cap, "bitwise operands must be integral");
+        if (p_float(common) || p_complex(common)) return p_fail(reason, cap, "bitwise operands must be integral");
     }
-    if (numpy && (!strcmp(op, "<<") || !strcmp(op, ">>")) && (p_float(common) || common == ME_BOOL)) {
+    if (numpy && (!strcmp(op, "<<") || !strcmp(op, ">>")) && (p_float(common) || p_complex(common) || common == ME_BOOL)) {
         if (common == ME_BOOL) common = ME_INT8;
         else return p_fail(reason, cap, "shift operands require an integral common dtype");
     }
@@ -512,7 +644,11 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
         if (!strcmp(op, "-")) return p_fail(reason, cap, "Boolean subtraction is unsupported");
         if (!strcmp(op, "//") || !strcmp(op, "%") || !strcmp(op, "**")) common = ME_INT8;
     }
-    if (!strcmp(op, "/")) common = numpy ? (p_float(common) ? common : ME_FLOAT64) : dsl_portable_division_dtype(a->dtype, b->dtype);
+    if (!strcmp(op, "/")) {
+        if (p_complex(common)) common = dsl_portable_division_dtype(a->dtype, b->dtype);
+        else common = numpy ? (p_float(common) ? common : ME_FLOAT64) :
+                     dsl_portable_division_dtype(a->dtype, b->dtype);
+    }
     if (common == ME_AUTO) return p_fail(reason, cap, "unsupported implicit numeric promotion; use an explicit cast");
     n->input_dtype = common;
     n->dtype = is_comparison_node(n) ? ME_BOOL : common;
@@ -648,6 +784,122 @@ static double p_sincospi(me_dtype dtype, bool cosine, double x) {
         }
     }
     return result;
+}
+
+/* Complex math is interpreter-only. Every operation listed here has an explicit
+ * NumPy counterpart; names outside the declared set were rejected at type time. */
+static int p_complex_math(me_dtype input_dtype, const me_expr *n, const char *name,
+                          const me_scalar *a, const me_scalar *b, me_scalar *out) {
+    if (!strcmp(name, "real") || !strcmp(name, "imag")) {
+        double real, imag;
+        p_complex_parts(input_dtype, a, &real, &imag);
+        double value = !strcmp(name, "real") ? real : imag;
+        if (n->dtype == ME_FLOAT32) out->f32 = (float)value;
+        else out->f64 = value;
+        return 0;
+    }
+    if (!strcmp(name, "fabs") || !strcmp(name, "floating_abs")) {
+        double real, imag;
+        p_complex_parts(input_dtype, a, &real, &imag);
+        double value = hypot(real, imag);
+        if (n->dtype == ME_FLOAT32) out->f32 = (float)value;
+        else out->f64 = value;
+        return 0;
+    }
+    if (!strcmp(name, "minimum") || !strcmp(name, "maximum") ||
+        !strcmp(name, "fmin") || !strcmp(name, "fmax")) {
+        bool minimum = !strcmp(name, "minimum") || !strcmp(name, "fmin");
+        double ar, ai, br, bi;
+        p_complex_parts(n->dtype, a, &ar, &ai);
+        p_complex_parts(n->dtype, b, &br, &bi);
+        /* NumPy propagates a NaN operand; otherwise compare lexicographically. */
+        if (isnan(ar) || isnan(ai)) { *out = *a; return 0; }
+        if (isnan(br) || isnan(bi)) { *out = *b; return 0; }
+        bool take_a = minimum ? (ar < br || (ar == br && ai <= bi)) :
+                                (ar > br || (ar == br && ai >= bi));
+        *out = take_a ? *a : *b;
+        return 0;
+    }
+    if (!strcmp(name, "sign")) {
+        double real, imag;
+        p_complex_parts(n->dtype, a, &real, &imag);
+        double magnitude = hypot(real, imag);
+        p_complex_set(n->dtype, magnitude == 0.0 ? real : real / magnitude,
+                             magnitude == 0.0 ? imag : imag / magnitude, out);
+        return 0;
+    }
+    if (!strcmp(name, "square")) {
+        double real, imag;
+        p_complex_parts(n->dtype, a, &real, &imag);
+        p_complex_set(n->dtype, real * real - imag * imag, 2.0 * real * imag, out);
+        return 0;
+    }
+    if (!strcmp(name, "conj")) {
+        double real, imag;
+        p_complex_parts(n->dtype, a, &real, &imag);
+        p_complex_set(n->dtype, real, -imag, out);
+        return 0;
+    }
+    if (!strcmp(name, "rint")) {
+        double real, imag;
+        p_complex_parts(n->dtype, a, &real, &imag);
+        p_complex_set(n->dtype, rint(real), rint(imag), out);
+        return 0;
+    }
+#if defined(_WIN32) || defined(_WIN64)
+    (void)a; (void)b; (void)out;
+    return ME_EVAL_ERR_INVALID_ARG;  /* complex is rejected at compile time on Windows */
+#else
+    if (input_dtype == ME_COMPLEX64) {
+        float _Complex z = a->c64;
+        if (!strcmp(name, "sqrt")) out->c64 = csqrtf(z);
+        else if (!strcmp(name, "exp")) out->c64 = cexpf(z);
+        else if (!strcmp(name, "exp2")) out->c64 = cexpf(z * (float)M_LN2);
+        else if (!strcmp(name, "expm1")) out->c64 = cexpf(z) - 1.0f;
+        else if (!strcmp(name, "log")) out->c64 = clogf(z);
+        else if (!strcmp(name, "log2")) out->c64 = clogf(z) / (float)M_LN2;
+        else if (!strcmp(name, "log10")) out->c64 = clogf(z) / (float)M_LN10;
+        else if (!strcmp(name, "log1p")) out->c64 = clogf(1.0f + z);
+        else if (!strcmp(name, "sin")) out->c64 = csinf(z);
+        else if (!strcmp(name, "cos")) out->c64 = ccosf(z);
+        else if (!strcmp(name, "tan")) out->c64 = ctanf(z);
+        else if (!strcmp(name, "asin")) out->c64 = casinf(z);
+        else if (!strcmp(name, "acos")) out->c64 = cacosf(z);
+        else if (!strcmp(name, "atan")) out->c64 = catanf(z);
+        else if (!strcmp(name, "sinh")) out->c64 = csinhf(z);
+        else if (!strcmp(name, "cosh")) out->c64 = ccoshf(z);
+        else if (!strcmp(name, "tanh")) out->c64 = ctanhf(z);
+        else if (!strcmp(name, "asinh")) out->c64 = casinhf(z);
+        else if (!strcmp(name, "acosh")) out->c64 = cacoshf(z);
+        else if (!strcmp(name, "atanh")) out->c64 = catanhf(z);
+        else if (!strcmp(name, "pow")) out->c64 = cpowf(z, b->c64);
+        else return ME_EVAL_ERR_INVALID_ARG;
+        return 0;
+    }
+    if (!strcmp(name, "sqrt")) out->c128 = csqrt(a->c128);
+    else if (!strcmp(name, "exp")) out->c128 = cexp(a->c128);
+    else if (!strcmp(name, "exp2")) out->c128 = cexp(a->c128 * M_LN2);
+    else if (!strcmp(name, "expm1")) out->c128 = cexp(a->c128) - 1.0;
+    else if (!strcmp(name, "log")) out->c128 = clog(a->c128);
+    else if (!strcmp(name, "log2")) out->c128 = clog(a->c128) / M_LN2;
+    else if (!strcmp(name, "log10")) out->c128 = clog(a->c128) / M_LN10;
+    else if (!strcmp(name, "log1p")) out->c128 = clog(1.0 + a->c128);
+    else if (!strcmp(name, "sin")) out->c128 = csin(a->c128);
+    else if (!strcmp(name, "cos")) out->c128 = ccos(a->c128);
+    else if (!strcmp(name, "tan")) out->c128 = ctan(a->c128);
+    else if (!strcmp(name, "asin")) out->c128 = casin(a->c128);
+    else if (!strcmp(name, "acos")) out->c128 = cacos(a->c128);
+    else if (!strcmp(name, "atan")) out->c128 = catan(a->c128);
+    else if (!strcmp(name, "sinh")) out->c128 = csinh(a->c128);
+    else if (!strcmp(name, "cosh")) out->c128 = ccosh(a->c128);
+    else if (!strcmp(name, "tanh")) out->c128 = ctanh(a->c128);
+    else if (!strcmp(name, "asinh")) out->c128 = casinh(a->c128);
+    else if (!strcmp(name, "acosh")) out->c128 = cacosh(a->c128);
+    else if (!strcmp(name, "atanh")) out->c128 = catanh(a->c128);
+    else if (!strcmp(name, "pow")) out->c128 = cpow(a->c128, b->c128);
+    else return ME_EVAL_ERR_INVALID_ARG;
+    return 0;
+#endif
 }
 
 static int p_math(const me_expr *n, const char *name, const me_scalar *a,
@@ -979,6 +1231,17 @@ static bool p_all_lanes(const uint8_t *lanes, int count) {
 static void p_extrema_step(me_dtype dtype, me_scalar *acc, const me_scalar *value,
     bool initialized, bool minimum) {
     if (!initialized) *acc = *value;
+    else if (p_complex(dtype)) {
+        double ar, ai, vr, vi;
+        p_complex_parts(dtype, acc, &ar, &ai);
+        p_complex_parts(dtype, value, &vr, &vi);
+        if (isnan(vr) || isnan(vi)) *acc = *value;
+        else if (!(isnan(ar) || isnan(ai))) {
+            bool replace = minimum ? (vr < ar || (vr == ar && vi < ai)) :
+                                     (vr > ar || (vr == ar && vi > ai));
+            if (replace) *acc = *value;
+        }
+    }
     else if (p_float(dtype)) {
         double x = p_double(dtype, acc), y = p_double(dtype, value);
         if (isnan(y) || (!isnan(x) && (minimum ? y < x : y > x)) ||
@@ -995,7 +1258,8 @@ static int p_reduce(const me_expr *n, p_eval_context *ctx, me_scalar *out) {
     const me_expr *arg = n->parameters[0];
     me_dtype acc_dtype = n->dtype;
     if (kind == ME_REDUCE_MEAN) {
-        acc_dtype = p_float(arg->dtype) ? arg->dtype : p_unsigned(arg->dtype) ? ME_UINT64 : ME_INT64;
+        acc_dtype = p_float(arg->dtype) || p_complex(arg->dtype) ? arg->dtype :
+                    p_unsigned(arg->dtype) ? ME_UINT64 : ME_INT64;
     }
     /* Plain, fully initialized fully participating inputs need neither expression
      * dispatch nor scalar conversion for every lane. The DSL may supply all-one
@@ -1062,6 +1326,7 @@ static int p_reduce(const me_expr *n, p_eval_context *ctx, me_scalar *out) {
     if (kind == ME_REDUCE_PROD) {
         if (acc_dtype == ME_FLOAT32) acc.f32 = 1.0f;
         else if (acc_dtype == ME_FLOAT64) acc.f64 = 1.0;
+        else if (p_complex(acc_dtype)) p_complex_set(acc_dtype, 1.0, 0.0, &acc);
         else if (p_unsigned(acc_dtype)) acc.u64 = 1;
         else acc.i64 = 1;
     }
@@ -1086,6 +1351,13 @@ static int p_reduce(const me_expr *n, p_eval_context *ctx, me_scalar *out) {
         else if (acc_dtype == ME_FLOAT64) {
             acc.f64 = kind == ME_REDUCE_PROD ? acc.f64 * converted.f64 : acc.f64 + converted.f64;
         }
+        else if (p_complex(acc_dtype)) {
+            double ar, ai, cr, ci;
+            p_complex_parts(acc_dtype, &acc, &ar, &ai);
+            p_complex_parts(acc_dtype, &converted, &cr, &ci);
+            if (kind == ME_REDUCE_PROD) p_complex_set(acc_dtype, ar * cr - ai * ci, ar * ci + ai * cr, &acc);
+            else p_complex_set(acc_dtype, ar + cr, ai + ci, &acc);
+        }
         else {
             me_portable_integer_op op = kind == ME_REDUCE_PROD ? ME_PORTABLE_MUL : ME_PORTABLE_ADD;
             me_portable_numeric_status status = p_unsigned(acc_dtype) ?
@@ -1098,6 +1370,12 @@ static int p_reduce(const me_expr *n, p_eval_context *ctx, me_scalar *out) {
     if (kind == ME_REDUCE_ANY || kind == ME_REDUCE_ALL) out->b = truth;
     else if (kind == ME_REDUCE_MEAN) {
         if (n->dtype == ME_FLOAT32) out->f32 = count ? acc.f32 / (float)count : NAN;
+        else if (p_complex(n->dtype)) {
+            double real, imag;
+            p_complex_parts(acc_dtype, &acc, &real, &imag);
+            p_complex_set(n->dtype, count ? real / (double)count : NAN,
+                                  count ? imag / (double)count : NAN, out);
+        }
         else out->f64 = count ? p_double(acc_dtype, &acc) / (double)count : NAN;
     }
     else if (!count && (kind == ME_REDUCE_MIN || kind == ME_REDUCE_MAX)) return ME_EVAL_ERR_INVALID_ARG;
@@ -1177,11 +1455,22 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
     const char *op, *math_name;
     p_operation(ctx,n,&op,&math_name);
     if (p_predicate(math_name)) {
+        if (p_complex(a_node->dtype)) {
+            double real, imag;
+            p_complex_parts(a_node->dtype, &a, &real, &imag);
+            out->b = !strcmp(math_name, "isfinite") ? isfinite(real) && isfinite(imag) :
+                     !strcmp(math_name, "isnan") ? isnan(real) || isnan(imag) :
+                     isinf(real) || isinf(imag);
+            return 0;
+        }
         double x = p_float(a_node->dtype) ? p_double(a_node->dtype, &a) : 0;
         out->b = !strcmp(math_name, "isfinite") ? !p_float(a_node->dtype) || isfinite(x) :
                  !strcmp(math_name, "isnan") ? isnan(x) : !strcmp(math_name, "isinf") ? isinf(x) :
                  p_float(a_node->dtype) ? signbit(x) != 0 : a_node->dtype != ME_BOOL && !p_unsigned(a_node->dtype) && a.i64 < 0;
         return 0;
+    }
+    if (p_complex(a_node->dtype) && math_name && ARITY(n->type) == 1) {
+        return p_complex_math(a_node->dtype, n, math_name, &a, NULL, out);
     }
     if (math_name && ARITY(n->type) == 1) return p_math(n, math_name, &a, NULL, out);
     if (math_name && !strcmp(math_name, "fma")) {
@@ -1220,6 +1509,11 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
         return 0;
     }
     if (ARITY(n->type) == 1) {
+        if (p_complex(n->dtype)) {
+            if (n->dtype == ME_COMPLEX64) out->c64 = -a.c64;
+            else out->c128 = -a.c128;
+            return 0;
+        }
         if (p_float(n->dtype)) {
             if (n->dtype == ME_FLOAT32) out->f32 = -a.f32;
             else out->f64 = -a.f64;
@@ -1242,7 +1536,10 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
     const me_expr *b_node = n->parameters[1];
     rc = logical ? p_eval_branch(n, 1, !strcmp(op, "and"), ctx, item, &b) : p_eval(b_node, ctx, item, &b);
     if (rc) return rc;
-    if (math_name) return p_math(n, math_name, &a, &b, out);
+    if (math_name) {
+        if (p_complex(a_node->dtype)) return p_complex_math(a_node->dtype, n, math_name, &a, &b, out);
+        return p_math(n, math_name, &a, &b, out);
+    }
     if (logical) {
         out->b = p_truth(b_node->dtype, &b);
         return 0;
@@ -1250,6 +1547,27 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
     if (is_comparison_node(n)) {
         int cmp = 0;
         bool unordered = false;
+        if (p_complex(a_node->dtype)) {
+            double ar, ai, br, bi;
+            p_complex_parts(a_node->dtype, &a, &ar, &ai);
+            p_complex_parts(b_node->dtype, &b, &br, &bi);
+            me_cmp_kind kind = comparison_kind(n->function);
+            if (kind == ME_CMP_EQ || kind == ME_CMP_NE) {
+                /* NumPy complex equality is component-wise, so a NaN component
+                 * never compares equal. */
+                bool equal = ar == br && ai == bi;
+                out->b = kind == ME_CMP_EQ ? equal : !equal;
+                return 0;
+            }
+            /* Ordering is lexicographic on (real, imag); any NaN is unordered. */
+            unordered = isnan(ar) || isnan(ai) || isnan(br) || isnan(bi);
+            if (!unordered) {
+                cmp = ar < br ? -1 : ar > br ? 1 : ai < bi ? -1 : ai > bi ? 1 : 0;
+            }
+            out->b = !unordered && (kind == ME_CMP_LT ? cmp < 0 : kind == ME_CMP_LE ? cmp <= 0 :
+                     kind == ME_CMP_GT ? cmp > 0 : cmp >= 0);
+            return 0;
+        }
         if (p_float(a_node->dtype)) {
             double x = p_double(a_node->dtype, &a), y = p_double(b_node->dtype, &b);
             unordered = isnan(x) || isnan(y);
@@ -1271,6 +1589,40 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
         out->b = kind == ME_CMP_NE ? (unordered || cmp != 0) :
                  !unordered && (kind == ME_CMP_EQ ? cmp == 0 : kind == ME_CMP_LT ? cmp < 0 :
                  kind == ME_CMP_LE ? cmp <= 0 : kind == ME_CMP_GT ? cmp > 0 : cmp >= 0);
+        return 0;
+    }
+    if (p_complex(n->dtype)) {
+        double ar, ai, br, bi;
+        p_complex_parts(n->dtype, &a, &ar, &ai);
+        p_complex_parts(n->dtype, &b, &br, &bi);
+        double rr = 0.0, ri = 0.0;
+        if (!strcmp(op, "+")) { rr = ar + br; ri = ai + bi; }
+        else if (!strcmp(op, "-")) { rr = ar - br; ri = ai - bi; }
+        else if (!strcmp(op, "*")) { rr = ar * br - ai * bi; ri = ar * bi + ai * br; }
+        else if (!strcmp(op, "/")) {
+            /* Smith's algorithm avoids avoidable overflow in |b|^2. */
+            if (fabs(br) >= fabs(bi)) {
+                double ratio = bi / br, denom = br + bi * ratio;
+                rr = (ar + ai * ratio) / denom;
+                ri = (ai - ar * ratio) / denom;
+            }
+            else {
+                double ratio = br / bi, denom = br * ratio + bi;
+                rr = (ar * ratio + ai) / denom;
+                ri = (ai * ratio - ar) / denom;
+            }
+        }
+        else if (!strcmp(op, "**")) {
+            if (n->dtype == ME_COMPLEX64) {
+                float _Complex value = cpowf(a.c64, b.c64);
+                out->c64 = value;
+                return 0;
+            }
+            out->c128 = cpow(a.c128, b.c128);
+            return 0;
+        }
+        else return ME_EVAL_ERR_INVALID_ARG;
+        p_complex_set(n->dtype, rr, ri, out);
         return 0;
     }
     if (p_float(n->dtype)) {

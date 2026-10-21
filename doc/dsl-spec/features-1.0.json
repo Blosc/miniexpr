@@ -4,8 +4,10 @@
   "status": "normative-draft-local-implementation-tested-not-release-certified",
   "types": {
     "numeric": ["bool", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float32", "float64"],
+    "complex": ["complex64", "complex128"],
     "fixed_width": ["unicode32", "bytes"],
-    "excluded": ["complex", "float16", "object", "datetime", "structured", "dynamic_width"]
+    "complex_platforms": ["macos", "linux", "wasm32"],
+    "excluded": ["float16", "extended-precision", "object", "datetime", "structured", "dynamic_width"]
   },
   "numeric_semantics": "numpy-2.5",
   "numeric_signature_tables": ["../numpy-arithmetic-1.0.md", "../numpy-functions-1.0.md"],
