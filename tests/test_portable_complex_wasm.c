@@ -52,6 +52,20 @@ int main(void) {
     for (int i = 0; i < 4; i++) assert(cabs(out[i] - z[i] * z[i]) < 1e-12);
     me_artifact_free(artifact);
 
+    artifact = load("    return real(z)\\n", "float64", "elementwise");
+    double real_out[4] = {0};
+    assert(!eval(artifact, z, 4, real_out, sizeof(real_out)));
+    for (int i = 0; i < 4; i++) assert(real_out[i] == creal(z[i]));
+    me_artifact_free(artifact);
+
+    artifact = load("    return conj(z)\\n", "complex128", "elementwise");
+    assert(!eval(artifact, z, 4, out, sizeof(out)));
+    for (int i = 0; i < 4; i++) {
+        assert(creal(out[i]) == creal(z[i]));
+        assert(cimag(out[i]) == -cimag(z[i]));
+    }
+    me_artifact_free(artifact);
+
     artifact = load("    v = z\\n    for i in range(2):\\n        v = v * z\\n"
                     "    if imag(v) < 0:\\n        return v + 1\\n    return v\\n",
                     "complex128", "elementwise");
@@ -64,7 +78,6 @@ int main(void) {
     me_artifact_free(artifact);
 
     artifact = load("    return abs(z) + real(z) - imag(z)\\n", "float64", "elementwise");
-    double real_out[4] = {0};
     assert(!eval(artifact, z, 4, real_out, sizeof(real_out)));
     for (int i = 0; i < 4; i++) {
         assert(fabs(real_out[i] - (cabs(z[i]) + creal(z[i]) - cimag(z[i]))) < 1e-12);

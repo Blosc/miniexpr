@@ -135,12 +135,32 @@ static inline _Dcomplex div_c128(_Dcomplex a, _Dcomplex b) {
 #define add_c64(a, b) ((a) + (b))
 #define sub_c64(a, b) ((a) - (b))
 #define neg_c64(a) (-(a))
-#define mul_c64(a, b) ((a) * (b))
+/* NumPy multiplies components without C99's infinity-recovery step. Build the
+ * result by copying components: real + I * imag can itself introduce NaNs. */
+static inline float _Complex mul_c64(float _Complex a, float _Complex b) {
+    float av[2], bv[2], parts[2];
+    float _Complex result;
+    memcpy(av, &a, sizeof(av));
+    memcpy(bv, &b, sizeof(bv));
+    parts[0] = av[0] * bv[0] - av[1] * bv[1];
+    parts[1] = av[0] * bv[1] + av[1] * bv[0];
+    memcpy(&result, parts, sizeof(result));
+    return result;
+}
 #define div_c64(a, b) ((a) / (b))
 #define add_c128(a, b) ((a) + (b))
 #define sub_c128(a, b) ((a) - (b))
 #define neg_c128(a) (-(a))
-#define mul_c128(a, b) ((a) * (b))
+static inline double _Complex mul_c128(double _Complex a, double _Complex b) {
+    double av[2], bv[2], parts[2];
+    double _Complex result;
+    memcpy(av, &a, sizeof(av));
+    memcpy(bv, &b, sizeof(bv));
+    parts[0] = av[0] * bv[0] - av[1] * bv[1];
+    parts[1] = av[0] * bv[1] + av[1] * bv[0];
+    memcpy(&result, parts, sizeof(result));
+    return result;
+}
 #define div_c128(a, b) ((a) / (b))
 #endif
 
@@ -562,7 +582,12 @@ static double logaddexp(double a, double b) {
 
 /* Wrapper functions for complex operations (for function pointer compatibility) */
 /* These are placeholders - actual implementation is in vector functions */
-static double conj_wrapper(double x) { return x; }
+/* These callbacks identify distinct typed operations by address. Keep their
+ * bodies distinct even under wasm-opt identical-function folding, without
+ * arithmetic that would change signed zeros or NaN payloads. */
+static volatile int conj_identity;
+static volatile int real_identity;
+static double conj_wrapper(double x) { (void)conj_identity; return x; }
 
 double imag_wrapper(double x) {
     (void)x;
@@ -622,7 +647,7 @@ double where_scalar(double c, double x, double y) {
     return (c != 0.0) ? x : y;
 }
 
-double real_wrapper(double x) { return x; }
+double real_wrapper(double x) { (void)real_identity; return x; }
 
 static double str_startswith(double a, double b);
 static double str_endswith(double a, double b);
@@ -6674,11 +6699,11 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #else
 #define vec_add_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
 #define vec_sub_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
+#define vec_mul_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c64((a)[_i], (b)[_i]); } while(0)
 #define vec_div_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
 #define vec_pow_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cpowf((a)[_i], (b)[_i]); } while(0)
 #define vec_add_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
+#define vec_mul_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c64((a)[_i], (b)); } while(0)
 #define vec_pow_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cpowf((a)[_i], (b)); } while(0)
 #define vec_sqrt_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_csqrtf((a)[_i]); } while(0)
 #define vec_negame_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
@@ -6689,11 +6714,11 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 
 #define vec_add_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
 #define vec_sub_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
+#define vec_mul_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c128((a)[_i], (b)[_i]); } while(0)
 #define vec_div_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
 #define vec_pow_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cpow((a)[_i], (b)[_i]); } while(0)
 #define vec_add_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
+#define vec_mul_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c128((a)[_i], (b)); } while(0)
 #define vec_pow_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cpow((a)[_i], (b)); } while(0)
 #define vec_sqrt_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_csqrt((a)[_i]); } while(0)
 #define vec_negame_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)

@@ -480,6 +480,66 @@ void test_scalar_complex_divide() {
     printf("  PASS\n");
 }
 
+/* Unlike C99 complex multiplication, NumPy does not repair NaN components
+ * after multiplying infinities. Cover vector and scalar operand paths. */
+static void test_multiply_nonfinite(void) {
+    TEST("complex multiplication nonfinite components");
+    const double parts[][2] = {
+        {INFINITY, -INFINITY}, {INFINITY, 1}, {1, INFINITY},
+        {NAN, 1}, {1, NAN}, {0, -0.0}, {-0.0, 0}, {2, -3}
+    };
+    const char *sources[] = {"z * w", "z * 2", "2 * z"};
+    for (int precision = 0; precision < 2; precision++) {
+        me_dtype dtype = precision ? ME_COMPLEX128 : ME_COMPLEX64;
+        size_t width = precision ? sizeof(double) : sizeof(float);
+        double z128[64][2], w128[64][2], out128[64][2];
+        float z64[64][2], w64[64][2], out64[64][2];
+        for (int i = 0; i < 64; i++) {
+            for (int c = 0; c < 2; c++) {
+                z128[i][c] = parts[i / 8][c];
+                w128[i][c] = parts[i % 8][c];
+                z64[i][c] = (float)z128[i][c];
+                w64[i][c] = (float)w128[i][c];
+            }
+        }
+        me_variable vars[] = {{"z", dtype}, {"w", dtype}};
+        const void *inputs[] = {precision ? (void *)z128 : (void *)z64,
+                                precision ? (void *)w128 : (void *)w64};
+        void *output = precision ? (void *)out128 : (void *)out64;
+        for (int s = 0; s < 3; s++) {
+            int err;
+            me_expr *expr = NULL;
+            int nvars = s ? 1 : 2;
+            if (me_compile(sources[s], vars, nvars, dtype, &err, &expr) != ME_COMPILE_SUCCESS) {
+                tests_failed++;
+                return;
+            }
+            ME_EVAL_CHECK(expr, inputs, nvars, output, 64);
+            me_free(expr);
+            for (int i = 0; i < 64; i++) {
+                double ar = z128[i][0], ai = z128[i][1];
+                double br = s ? 2.0 : w128[i][0], bi = s ? 0.0 : w128[i][1];
+                /* Separate products also prevent contraction in the reference. */
+                volatile double ac = ar * br, bd = ai * bi;
+                volatile double ad = ar * bi, bc = ai * br;
+                double expected[] = {ac - bd, ad + bc};
+                for (int c = 0; c < 2; c++) {
+                    double actual = width == sizeof(double) ? out128[i][c] : out64[i][c];
+                    double value = expected[c];
+                    if (!((isnan(value) && isnan(actual)) ||
+                          (value == actual && (value != 0 || !!signbit(value) == !!signbit(actual))))) {
+                        printf("  FAIL: %s dtype=%d lane=%d component=%d expected=%g actual=%g\n",
+                               sources[s], dtype, i, c, value, actual);
+                        tests_failed++;
+                        return;
+                    }
+                }
+            }
+        }
+    }
+    printf("  PASS\n");
+}
+
 int main() {
     printf("=== Testing Complex Functions (conj, imag, real) ===\n\n");
 
@@ -498,6 +558,7 @@ int main() {
     test_imag_auto_dtype();
     test_real_auto_dtype();
     test_scalar_complex_divide();
+    test_multiply_nonfinite();
 
     printf("\n=== Test Summary ===\n");
     printf("Tests run: %d\n", tests_run);
