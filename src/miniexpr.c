@@ -126,6 +126,12 @@ For log = base 10 log comment the next line. */
 static ME_THREAD_LOCAL char g_me_last_error_msg[ME_LAST_ERROR_MSG_CAP];
 static ME_THREAD_LOCAL const me_jit_options *g_me_jit_options;
 
+const me_jit_options *dsl_jit_exchange_options(const me_jit_options *options) {
+    const me_jit_options *previous = g_me_jit_options;
+    g_me_jit_options = options;
+    return previous;
+}
+
 /* Options live on the compiling thread, never in process-wide environment
  * variables. Save/restore in the entry point also supports nested compilation. */
 const char *me_jit_option_value(const char *name) {

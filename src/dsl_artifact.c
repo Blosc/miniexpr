@@ -834,6 +834,14 @@ me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode
     return artifact_load(json, length, jit_mode, out, error, false);
 }
 
+me_artifact_status me_artifact_load_options(const char *json, size_t length, me_jit_mode jit_mode,
+    const me_jit_options *options, me_artifact **out, me_artifact_error *error) {
+    const me_jit_options *previous = dsl_jit_exchange_options(options);
+    me_artifact_status rc = artifact_load(json, length, jit_mode, out, error, false);
+    dsl_jit_exchange_options(previous);
+    return rc;
+}
+
 me_artifact_status dsl_graph_load_map(const char *json, size_t length, me_jit_mode jit_mode,
     me_artifact **out, me_artifact_error *error) {
     return artifact_load(json, length, jit_mode, out, error, true);

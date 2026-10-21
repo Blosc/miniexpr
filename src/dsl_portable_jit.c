@@ -2112,7 +2112,9 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     /* User compiler switches can override strict flags, so fail closed rather
      * than claim qualification under arbitrary host toolchain configuration. */
     const char *flags = me_jit_option_value("CFLAGS"), *tcc = getenv("ME_DSL_JIT_TCC_OPTIONS");
-    if ((flags && *flags) || (tcc && *tcc)) {
+    bool optimization_only = flags && (!strcmp(flags, "-O0") || !strcmp(flags, "-O1") ||
+        !strcmp(flags, "-O2") || !strcmp(flags, "-O3") || !strcmp(flags, "-Os") || !strcmp(flags, "-Og"));
+    if ((flags && *flags && !optimization_only) || (tcc && *tcc)) {
         dsl_tracef("portable jit ineligible: explicit compiler flags");
         return;
     }
@@ -2272,8 +2274,8 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
             if (start_expr && step_expr &&
                 pj_emit_ramp_bridge(p, start_expr, step_expr, scalar_setup.text, &unmasked_bridge)) {
                 use_ramp_bridge = true;
-                dsl_tracef("portable jit affine ramp bridge: dtype=%s compiler=host",
-                    pj_type(p->output_dtype));
+                dsl_tracef("portable jit affine ramp bridge: dtype=%s compiler=%s",
+                    pj_type(p->output_dtype), p->compiler == ME_DSL_COMPILER_LIBTCC ? "tcc" : "cc");
             }
             free(start_expr);
             free(step_expr);

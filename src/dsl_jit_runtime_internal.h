@@ -39,6 +39,7 @@
 #endif
 
 #define ME_DSL_JIT_META_MAGIC 0x4d454a49544d4554ULL
+const me_jit_options *dsl_jit_exchange_options(const me_jit_options *options);
 #define ME_DSL_JIT_META_VERSION 8
 
 /* Portable 1.1 private kernel bridge layout. The kernel receives the mask, then

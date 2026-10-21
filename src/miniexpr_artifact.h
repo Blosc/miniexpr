@@ -87,6 +87,9 @@ typedef struct {
  * is a host preference, not an artifact requirement. No sandbox is provided.
  * Only Menudet schema/language pair 1.0/1.0 is accepted, with NumPy numerical semantics.
  * On any failure *out is NULL. error may be NULL. */
+#define ME_ARTIFACT_LOAD_OPTIONS_VERSION 1
+me_artifact_status me_artifact_load_options(const char *json, size_t length, me_jit_mode jit_mode,
+    const me_jit_options *options, me_artifact **out, me_artifact_error *error);
 me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode jit_mode,
                                   me_artifact **out, me_artifact_error *error);
 
