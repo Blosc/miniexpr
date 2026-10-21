@@ -921,6 +921,13 @@ static bool artifact_range_valid(const void *data, size_t length, size_t alignme
     return data && address % alignment == 0 && length <= UINTPTR_MAX - address;
 }
 
+/* C complex requires component alignment, not the total two-component width. */
+static size_t artifact_alignment(me_dtype dtype) {
+    if (dtype == ME_COMPLEX64) return sizeof(float);
+    if (dtype == ME_COMPLEX128) return sizeof(double);
+    return dtype_size(dtype);
+}
+
 static bool artifact_ranges_overlap(const void *a, size_t a_length, const void *b, size_t b_length) {
     if (!a_length || !b_length) return false;
     uintptr_t x = (uintptr_t)a, y = (uintptr_t)b;
@@ -967,14 +974,14 @@ me_artifact_status me_artifact_eval_ex(const me_artifact *artifact,
     size_t output_count = artifact->cardinality == ME_ARTIFACT_BLOCK_SCALAR ? 1 : nitems;
     if (!output_width || output_count > SIZE_MAX / output_width ||
         descriptor->output_capacity < output_count * output_width ||
-        !artifact_range_valid(output, output_count * output_width, is_string_dtype(artifact->output_dtype) ? dtype_code_unit(artifact->output_dtype) : output_width)) {
+        !artifact_range_valid(output, output_count * output_width, is_string_dtype(artifact->output_dtype) ? dtype_code_unit(artifact->output_dtype) : artifact_alignment(artifact->output_dtype))) {
         return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "output capacity, alignment, or byte extent is invalid");
     }
     for (int i = 0; i < ninputs; i++) {
         size_t width = is_string_dtype(inputs[i].dtype) ? inputs[i].itemsize : artifact_itemsize(inputs[i].dtype);
         if (!width || width != inputs[i].itemsize || nitems > SIZE_MAX / width ||
             inputs[i].capacity < nitems * width ||
-            !artifact_range_valid(inputs[i].data, nitems * width, is_string_dtype(inputs[i].dtype) ? dtype_code_unit(inputs[i].dtype) : width)) {
+            !artifact_range_valid(inputs[i].data, nitems * width, is_string_dtype(inputs[i].dtype) ? dtype_code_unit(inputs[i].dtype) : artifact_alignment(inputs[i].dtype))) {
             return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "input itemsize, capacity, alignment, or byte extent is invalid");
         }
         if (artifact_ranges_overlap(inputs[i].data, nitems * width, output, output_count * output_width)) {

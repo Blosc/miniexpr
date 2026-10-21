@@ -1613,13 +1613,7 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
             }
         }
         else if (!strcmp(op, "**")) {
-            if (n->dtype == ME_COMPLEX64) {
-                float _Complex value = cpowf(a.c64, b.c64);
-                out->c64 = value;
-                return 0;
-            }
-            out->c128 = cpow(a.c128, b.c128);
-            return 0;
+            return p_complex_math(n->dtype, n, "pow", &a, &b, out);
         }
         else return ME_EVAL_ERR_INVALID_ARG;
         p_complex_set(n->dtype, rr, ri, out);
