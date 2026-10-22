@@ -199,6 +199,7 @@ typedef struct {
     bool portable_reduced_vars[ME_MAX_VARS];
     me_dsl_compiler compiler;
     me_jit_mode jit_request_mode;
+    bool expression_only;
     bool guaranteed_return;
     bool output_is_scalar;
     me_dtype output_dtype;

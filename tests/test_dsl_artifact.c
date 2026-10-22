@@ -190,7 +190,30 @@ static void runtime_order(void) {
     free(changed);
 }
 
+static void automatic_execution_fixture(void) {
+    const char *json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+        "\"requires\":[\"numeric\"],\"source\":\"def k(x):\\n    return x + 1\\n\","
+        "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"}],\"constants\":[],"
+        "\"output\":{\"dtype\":\"float64\",\"contract\":\"elementwise\"},"
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},"
+        "\"context\":{\"ndim\":0},\"metadata\":{}}";
+    me_artifact *artifact = NULL;
+    me_artifact_error error;
+    assert(me_artifact_load(json, strlen(json), ME_JIT_AUTO, &artifact, &error) == 0);
+    assert(!strcmp(me_artifact_execution_kind(artifact), "expression"));
+    /* Explicit environment policy may enable compilation in this test process. */
+    if (!getenv("ME_DSL_JIT")) assert(!me_artifact_has_jit(artifact));
+    me_artifact_free(artifact);
+    char *program = replace(json, "return x + 1", "y = x + 1\\n    return y");
+    assert(me_artifact_load(program, strlen(program), ME_JIT_OFF, &artifact, &error) == 0);
+    assert(!strcmp(me_artifact_execution_kind(artifact), "program"));
+    assert(!me_artifact_has_jit(artifact));
+    me_artifact_free(artifact);
+    free(program);
+}
+
 int main(void) {
+    automatic_execution_fixture();
     schema1_fixture();
     schema1_strings_nd_fixture();
     char *json = read_fixture();

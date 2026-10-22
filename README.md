@@ -58,6 +58,17 @@ Variables are matched by position in the arrays. Unspecified fields default to N
 - `jit_mode = 0` (`ME_JIT_DEFAULT`): default behavior.
 - `jit_mode = 1` (`ME_JIT_ON`): prefer runtime JIT preparation.
 - `jit_mode = 2` (`ME_JIT_OFF`): skip runtime JIT preparation at compile time.
+- `jit_mode = 3` (`ME_JIT_AUTO`): opt into structural policy: interpret a parsed
+  single-return expression and prefer JIT for a multi-statement program. Explicit
+  source compiler pragmas and `ME_DSL_JIT` take priority over this heuristic.
+  Explicit `ME_JIT_OFF` still disables compilation, including for source pragmas.
+  Existing `ME_JIT_DEFAULT` consumers keep their previous behavior.
+
+Portable artifact consumers can inspect `me_artifact_execution_kind()` after
+validation (`"expression"` or `"program"`). The classification is structural,
+not based on physical source line count, and does not depend on whether JIT was
+requested or successfully compiled. `ME_ARTIFACT_EXECUTION_KIND_VERSION` advertises
+availability of this metadata and the opt-in automatic policy.
 
 `me_compile_nd_jit_options(...)` accepts fine-grained compile options (compiler binary, custom CFLAGS, cache directory, and diagnostic verbosity) for that call without modifying environment variables.
 

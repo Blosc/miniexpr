@@ -472,7 +472,7 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
     if (!out || !json || !length || length > ME_ARTIFACT_MAX_BYTES || memchr(json, 0, length)) {
         return artifact_error(error, ME_ARTIFACT_ERR_FORMAT, "invalid JSON buffer or artifact size");
     }
-    if (jit_mode != ME_JIT_DEFAULT && jit_mode != ME_JIT_ON && jit_mode != ME_JIT_OFF) {
+    if (jit_mode != ME_JIT_DEFAULT && jit_mode != ME_JIT_AUTO && jit_mode != ME_JIT_ON && jit_mode != ME_JIT_OFF) {
         return artifact_error(error, ME_ARTIFACT_ERR_BINDING, "invalid host JIT mode");
     }
     if (FLT_RADIX != 2 || FLT_MANT_DIG != 24 || DBL_MANT_DIG != 53 ||
@@ -1131,6 +1131,10 @@ me_dtype me_artifact_output_dtype(const me_artifact *artifact) {
 }
 bool me_artifact_has_jit(const me_artifact *artifact) {
     return artifact && artifact->program && artifact->program->jit_kernel_fn != NULL;
+}
+const char *me_artifact_execution_kind(const me_artifact *artifact) {
+    if (!artifact || !artifact->program) return NULL;
+    return artifact->program->expression_only ? "expression" : "program";
 }
 void me_artifact_free(me_artifact *artifact) {
     if (!artifact) return;

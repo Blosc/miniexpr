@@ -322,7 +322,8 @@ typedef enum {
 
 /* JIT policy for a single evaluation call. */
 typedef enum {
-    ME_JIT_DEFAULT = 0,  /* auto policy (environment/default behavior) */
+    ME_JIT_DEFAULT = 0,  /* environment/default behavior */
+    ME_JIT_AUTO = 3,     /* interpret single-return expressions; JIT programs */
     ME_JIT_ON = 1,       /* prefer JIT when available */
     ME_JIT_OFF = 2       /* disable JIT for this call */
 } me_jit_mode;

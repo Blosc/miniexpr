@@ -2903,6 +2903,17 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
         return NULL;
     }
     program->semantic_profile = profile;
+    /* Classify the parsed structure, never physical source lines. Consumers may
+     * opt into this policy without changing legacy ME_JIT_DEFAULT behavior. */
+    program->expression_only = parsed->block.nstmts == 1 &&
+        parsed->block.stmts[0]->kind == ME_DSL_STMT_RETURN;
+    if (jit_mode == ME_JIT_AUTO) {
+        const char *requested = getenv("ME_DSL_JIT");
+        bool explicit_compiler = parsed->compiler_explicit;
+        jit_mode = requested && requested[0] ?
+            (strcmp(requested, "0") ? ME_JIT_ON : ME_JIT_OFF) :
+            (program->expression_only && !explicit_compiler ? ME_JIT_OFF : ME_JIT_ON);
+    }
     {
         /* Resolve one immutable policy before any typed preparation or JIT
          * eligibility decision. Source pragmas override artifact declarations,

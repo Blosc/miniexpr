@@ -396,7 +396,8 @@ static me_graph_status g_prepare_json(const char *json, size_t length,
     if (!out || !json || !length || length > ME_GRAPH_MAX_BYTES || memchr(json, 0, length))
         return g_error(error, -1, ME_GRAPH_ERR_FORMAT, "invalid graph buffer or byte limit");
     if (options && (options->struct_size != sizeof(*options) || options->version != ME_GRAPH_VERSION ||
-        (options->jit != ME_JIT_OFF && options->jit != ME_JIT_ON && options->jit != ME_JIT_DEFAULT)))
+        (options->jit != ME_JIT_OFF && options->jit != ME_JIT_ON &&
+         options->jit != ME_JIT_AUTO && options->jit != ME_JIT_DEFAULT)))
         return g_error(error, -1, ME_GRAPH_ERR_FORMAT, "invalid preparation options");
     yyjson_read_err decode_error;
     yyjson_doc *doc = yyjson_read_opts((char *)json, length, 0, NULL, &decode_error);

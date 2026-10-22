@@ -256,6 +256,9 @@ me_dtype me_artifact_output_dtype(const me_artifact *artifact);
  * Returns ME_AUTO for legacy artifacts and NULL handles. */
 me_dtype me_artifact_inferred_dtype(const me_artifact *artifact);
 bool me_artifact_has_jit(const me_artifact *artifact);
+#define ME_ARTIFACT_EXECUTION_KIND_VERSION 1
+/* Validated program structure, independent of explicit execution policy. */
+const char *me_artifact_execution_kind(const me_artifact *artifact);
 void me_artifact_free(me_artifact *artifact); /* NULL-safe. */
 
 #ifdef __cplusplus
