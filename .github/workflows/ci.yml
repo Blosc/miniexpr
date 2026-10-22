@@ -24,7 +24,7 @@ jobs:
     outputs:
       relevant: ${{ steps.paths.outputs.relevant }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2
       - id: paths
@@ -57,7 +57,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     
     - name: Set up MSVC (Windows)
       if: runner.os == 'Windows'
@@ -147,7 +147,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Configure (JIT enabled)
       shell: bash
@@ -171,7 +171,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Configure (interpreter only)
       shell: bash
@@ -198,7 +198,7 @@ jobs:
     runs-on: windows-11-arm
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Set up MSVC (Windows/ARM64)
       uses: ilammy/msvc-dev-cmd@v1
@@ -235,10 +235,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       with:
         node-version: '24'
 
@@ -315,7 +315,7 @@ jobs:
     if: github.event_name == 'schedule' || inputs.full_qualification == true
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build checked native helpers with sanitizers
         run: |
           CC=clang cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug \
