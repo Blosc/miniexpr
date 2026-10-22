@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include <complex.h>
+#include "complex_compat.h"
 #include <stdint.h>
 #include <string.h>
 #include "../src/me_complex.h"

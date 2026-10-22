@@ -11,7 +11,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
-#include <complex.h>
+#include "complex_compat.h"
 #include "../src/miniexpr.h"
 #include "minctest.h"
 

@@ -1,7 +1,7 @@
-/* Interpreter-first complex contract for Menudet 1.0. Windows rejects it. */
+/* Interpreter-first complex contract for Menudet 1.0, including Windows. */
 #undef NDEBUG
 #include <assert.h>
-#include <complex.h>
+#include "complex_compat.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>

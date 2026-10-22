@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include <complex.h>
+#include "complex_compat.h"
 #include <string.h>
 #include <stdint.h>
 #include "miniexpr.h"
