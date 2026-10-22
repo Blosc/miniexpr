@@ -11,6 +11,7 @@
 #include <complex.h>
 #include <stdint.h>
 #include <string.h>
+#include "../src/me_complex.h"
 
 
 
@@ -527,6 +528,101 @@ static int abi_close(double expected, double actual, double tol) {
     return fabs(expected - actual) <= tol * (1.0 + fabs(expected));
 }
 
+/* Call the wrappers directly: abs(z) uses hypot on clang-cl, and exp/log
+ * expression support depends on the optional artifact adapter. memcpy avoids
+ * changing signed zeros or nonfinite components while constructing values. */
+static void test_direct_libm_abi(void) {
+    TEST("direct complex libm ABI, both precisions and signed zeros");
+    static const double values[][2] = {
+        {1.0, 2.0}, {-0.5, 1.5}, {-3.0, -4.0},
+        {4.0, -0.0}, {2.0, 0.0},
+        {INFINITY, 0.0}, {-INFINITY, 0.0}, {NAN, 0.0}
+    };
+    const char *names[] = {"exp", "sqrt", "log", "pow", "abs"};
+    for (int precision = 0; precision < 2; precision++) {
+        for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); i++) {
+            double x = values[i][0], y = values[i][1];
+            double magnitude = hypot(x, y);
+            double expected[5][2] = {{0}};
+            if (i < 5) {
+                expected[0][0] = exp(x) * cos(y);
+                expected[0][1] = exp(x) * sin(y);
+                expected[1][0] = sqrt((magnitude + x) / 2.0);
+                expected[1][1] = copysign(sqrt((magnitude - x) / 2.0), y);
+                expected[2][0] = log(magnitude);
+                expected[2][1] = atan2(y, x);
+                expected[3][0] = exp(3.0 * log(magnitude)) * cos(3.0 * atan2(y, x));
+                expected[3][1] = exp(3.0 * log(magnitude)) * sin(3.0 * atan2(y, x));
+            }
+            else if (i == 5) {
+                expected[0][0] = expected[1][0] = expected[2][0] = INFINITY;
+            }
+            else if (i == 6) {
+                expected[1][1] = INFINITY;
+                expected[2][0] = INFINITY;
+                expected[2][1] = atan2(0.0, -1.0);
+            }
+            else {
+                expected[0][0] = expected[1][0] = expected[2][0] = NAN;
+                expected[1][1] = expected[2][1] = NAN;
+            }
+            expected[4][0] = magnitude;
+            for (int p = 0; p < 5; p++) {
+                /* Nonfinite complex powers have platform-specific semantics. */
+                if (i >= 5 && p == 3) continue;
+                /* Apple libm differs from Annex G for sqrt(-inf + i0). */
+                if (i == 6 && p == 1) continue;
+                double actual[2] = {0};
+                if (precision) {
+                    double _Complex z, w, result;
+                    double exponent[2] = {3.0, 0.0};
+                    memcpy(&z, values[i], sizeof(z));
+                    memcpy(&w, exponent, sizeof(w));
+                    if (p == 4) {
+                        actual[0] = me_cabs(z);
+                    }
+                    else {
+                        result = p == 0 ? me_cexp(z) : p == 1 ? me_csqrt(z) :
+                                 p == 2 ? me_clog(z) : me_cpow(z, w);
+                        memcpy(actual, &result, sizeof(result));
+                    }
+                }
+                else {
+                    float parts[2] = {(float)x, (float)y}, exponent[2] = {3.0f, 0.0f};
+                    float _Complex z, w, result;
+                    memcpy(&z, parts, sizeof(z));
+                    memcpy(&w, exponent, sizeof(w));
+                    if (p == 4) {
+                        actual[0] = me_cabsf(z);
+                    }
+                    else {
+                        result = p == 0 ? me_cexpf(z) : p == 1 ? me_csqrtf(z) :
+                                 p == 2 ? me_clogf(z) : me_cpowf(z, w);
+                        memcpy(parts, &result, sizeof(result));
+                        actual[0] = parts[0];
+                        actual[1] = parts[1];
+                    }
+                }
+                for (int c = 0; c < (p == 4 ? 1 : 2); c++) {
+                    double reference = expected[p][c];
+                    /* Check zero signs for sqrt/log branch cuts and abs.
+                     * Apple cexpf loses the imaginary -0; polar power is also
+                     * only an approximate reference. */
+                    int zero_ok = p == 0 || p == 3 || reference != 0.0 ||
+                        (actual[c] == 0.0 && !!signbit(reference) == !!signbit(actual[c]));
+                    if (!abi_close(reference, actual[c], precision ? 1e-9 : 5e-6) || !zero_ok) {
+                        printf("  FAIL: %s precision=%d case=%zu component=%d expected=%.17g actual=%.17g\n",
+                               names[p], precision, i, c, reference, actual[c]);
+                        tests_failed++;
+                        return;
+                    }
+                }
+            }
+        }
+    }
+    printf("  PASS\n");
+}
+
 static void test_libm_abi(void) {
     TEST("complex libm ABI: wrapper results vs component-only libm");
     static const double cases[][2] = {
@@ -557,13 +653,12 @@ static void test_libm_abi(void) {
          * magnitude of the same components on every platform. */
         double lr[3] = {hypot(z[0][0], z[0][1]), hypot(z[1][0], z[1][1]), hypot(z[2][0], z[2][1])};
         double li[3] = {0.0, 0.0, 0.0};
-        const char *exprs[3] = {"abs(z)"};
         me_variable vars[] = {{"z", ME_COMPLEX128}};
         for (int i = 0; i < 3; i++) {
             const void *inputs[] = {z[i]};
             me_expr *expr = NULL;
-            if (me_compile(exprs[0], vars, 1, ME_AUTO, 0, &expr) != ME_COMPILE_SUCCESS) {
-                printf("  FAIL: %s compile error\n", exprs[0]);
+            if (me_compile("abs(z)", vars, 1, ME_AUTO, 0, &expr) != ME_COMPILE_SUCCESS) {
+                printf("  FAIL: abs(z) compile error\n");
                 tests_failed++;
                 return;
             }
@@ -573,7 +668,7 @@ static void test_libm_abi(void) {
             /* abs() is real-valued: only the magnitude lane is written. */
             if (!abi_close(lr[i], out[0], 1e-9)) {
                 printf("  FAIL: %s nonfinite case %d: expected (%.17g, %.17g), got (%.17g, %.17g)\n",
-                       exprs[i], i, lr[i], li[i], out[0], out[1]);
+                       "abs(z)", i, lr[i], li[i], out[0], out[1]);
                 tests_failed++;
                 return;
             }
@@ -643,9 +738,9 @@ static void test_libm_abi(void) {
         }
     }
 
-        /* Nonfinite specials (double precision). exp/log of complex live in the
-         * portable interpreter; reach their wrappers through the artifact JSON
-         * loader when the artifact adapter is linked. */
+    /* Nonfinite specials (double precision). exp/log of complex live in the
+     * portable interpreter; reach their wrappers through the artifact JSON
+     * loader when the artifact adapter is linked. */
 #ifdef ME_TEST_HAS_ARTIFACT
     {
         static const double values[][2] = {
@@ -739,6 +834,7 @@ int main() {
     test_scalar_complex_divide();
     test_multiply_nonfinite();
     test_libm_abi();
+    test_direct_libm_abi();
 
     printf("\n=== Test Summary ===\n");
     printf("Tests run: %d\n", tests_run);
