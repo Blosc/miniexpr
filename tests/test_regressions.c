@@ -1403,7 +1403,6 @@ static int test_sign_nan_propagation(void) {
     return passed;
 }
 
-#if !defined(_WIN32)
 static int test_abs_complex_output(void) {
     printf("\nTest: abs(complex) returns real magnitude\n");
     printf("======================================================================\n");
@@ -1531,7 +1530,6 @@ static int test_complex_negation_via_sub(void) {
     me_free(expr);
     return passed;
 }
-#endif
 
 // ============================================================================
 // MAIN TEST RUNNER
@@ -1556,11 +1554,9 @@ int main() {
     printf("  - invalid dtype returns explicit error\n");
     printf("  - ceil(int) preserves values\n");
     printf("  - sign propagates NaN\n");
-#if !defined(_WIN32)
     printf("  - abs(complex) returns magnitude\n");
     printf("  - complex unsupported functions rejected\n");
     printf("  - complex negation via subtraction\n");
-#endif
     printf("========================================================================\n");
 
     int total = 0;
@@ -1627,7 +1623,6 @@ int main() {
     total++;
     if (test_sign_nan_propagation()) passed++;
 
-#if !defined(_WIN32)
     total++;
     if (test_abs_complex_output()) passed++;
 
@@ -1636,7 +1631,6 @@ int main() {
 
     total++;
     if (test_complex_negation_via_sub()) passed++;
-#endif
 
     // ========================================================================
     // ARCTAN2 BUG TESTS

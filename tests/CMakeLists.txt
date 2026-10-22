@@ -292,10 +292,6 @@ if(NOT WIN32)
 endif()
 if(WIN32)
   list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_threadsafe_chunk\\.c$")
-  # MSVC/clang-cl complex literal handling breaks this test; skip on Windows.
-  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_regressions\\.c$")
-  # Complex portable execution is not supported on Windows.
-  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_portable_complex\\.c$")
 endif()
 if(EMSCRIPTEN)
   # These rely on host runtime features that are not available in plain wasm32 CI.
@@ -330,6 +326,12 @@ foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
       target_link_options("${test_name}" PRIVATE
         "SHELL:--embed-file ${CMAKE_CURRENT_SOURCE_DIR}/portable-artifacts/affine.json@${CMAKE_CURRENT_SOURCE_DIR}/portable-artifacts/affine.json")
     endif()
+  endif()
+  if(MINIEXPR_BUILD_ARTIFACT AND test_name STREQUAL "test_complex_functions")
+    # The ABI test reaches the complex exp/log wrappers through the portable
+    # interpreter, whose public entry is the artifact JSON loader.
+    target_link_libraries("${test_name}" PRIVATE miniexpr_artifact)
+    target_compile_definitions("${test_name}" PRIVATE ME_TEST_HAS_ARTIFACT=1)
   endif()
   if(test_name STREQUAL "test_dsl_jit_portable_wasm32")
     target_link_libraries(${test_name} PRIVATE miniexpr_artifact)
