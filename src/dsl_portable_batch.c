@@ -1,5 +1,6 @@
 #include "dsl_portable_batch.h"
 #include <float.h>
+#include <string.h>
 
 #if !defined(FLT_EVAL_METHOD) || FLT_EVAL_METHOD != 0
 #error "portable batch arithmetic bridges require FLT_EVAL_METHOD == 0"
@@ -90,6 +91,60 @@ ME_BATCH_INT_OPS(uint16_t,u16)
 ME_BATCH_INT_OPS(uint32_t,u32)
 ME_BATCH_INT_OPS(uint64_t,u64)
 #undef ME_BATCH_INT_OPS
+
+/* Real -> complex follows p_convert's double intermediate (including integer
+ * -> complex64 double rounding); never construct values with real + I*imag. */
+#define ME_BATCH_COMPLEX_CAST(T,S) \
+ME_BATCH_NOINLINE void dsl_portable_batch_cast_##S##_c64(const T *a, float _Complex *restrict out, int count) { \
+    for (int i=0; i<count; i++) { \
+        double real=(double)a[i]; float parts[2]={(float)real,0.0f}; \
+        memcpy(out+i,parts,sizeof(parts)); \
+    } \
+} \
+ME_BATCH_NOINLINE void dsl_portable_batch_cast_##S##_c128(const T *a, double _Complex *restrict out, int count) { \
+    for (int i=0; i<count; i++) { \
+        double parts[2]={(double)a[i],0.0}; memcpy(out+i,parts,sizeof(parts)); \
+    } \
+}
+ME_BATCH_COMPLEX_CAST(int8_t,i8) ME_BATCH_COMPLEX_CAST(uint8_t,u8)
+ME_BATCH_COMPLEX_CAST(int16_t,i16) ME_BATCH_COMPLEX_CAST(uint16_t,u16)
+ME_BATCH_COMPLEX_CAST(int32_t,i32) ME_BATCH_COMPLEX_CAST(uint32_t,u32)
+ME_BATCH_COMPLEX_CAST(int64_t,i64) ME_BATCH_COMPLEX_CAST(uint64_t,u64)
+ME_BATCH_COMPLEX_CAST(double,f64)
+#undef ME_BATCH_COMPLEX_CAST
+
+ME_BATCH_NOINLINE void dsl_portable_batch_cast_f32_c64(const float *a, float _Complex *restrict out, int count) {
+    for (int i=0; i<count; i++) {
+        /* p_convert widens before narrowing; retain its sNaN quieting/status
+         * rather than letting the compiler replace the round trip by a copy. */
+        volatile double real=(double)a[i];
+        float parts[2]={(float)real,0.0f};
+        memcpy(out+i,parts,sizeof(parts));
+    }
+}
+ME_BATCH_NOINLINE void dsl_portable_batch_cast_f32_c128(const float *a, double _Complex *restrict out, int count) {
+    for (int i=0; i<count; i++) {
+        double parts[2]={(double)a[i],0.0};
+        memcpy(out+i,parts,sizeof(parts));
+    }
+}
+
+ME_BATCH_NOINLINE void dsl_portable_batch_cast_c64_c128(const float _Complex *a, double _Complex *restrict out, int count) {
+    for (int i=0; i<count; i++) {
+        float source[2]; double parts[2];
+        memcpy(source,a+i,sizeof(source));
+        parts[0]=(double)source[0]; parts[1]=(double)source[1];
+        memcpy(out+i,parts,sizeof(parts));
+    }
+}
+ME_BATCH_NOINLINE void dsl_portable_batch_cast_c128_c64(const double _Complex *a, float _Complex *restrict out, int count) {
+    for (int i=0; i<count; i++) {
+        double source[2]; float parts[2];
+        memcpy(source,a+i,sizeof(source));
+        parts[0]=(float)source[0]; parts[1]=(float)source[1];
+        memcpy(out+i,parts,sizeof(parts));
+    }
+}
 
 #define ME_BATCH_CAST(T,S) \
 ME_BATCH_NOINLINE void dsl_portable_batch_cast_##S##_f32(const T *a, float *restrict out, int count) { \

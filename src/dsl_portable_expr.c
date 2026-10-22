@@ -2305,7 +2305,7 @@ static bool p_batch_same_instruction(const p_batch_instruction *a, const p_batch
 }
 static int p_batch_build(p_batch_program *program, const me_expr *n,
     p_eval_context *ctx, int depth) {
-    if (!n || depth > 32 || program->count == P_BATCH_NODES || dtype_size(n->dtype) > sizeof(double)) return -1;
+    if (!n || depth > 32 || program->count == P_BATCH_NODES || dtype_size(n->dtype) > sizeof(double _Complex)) return -1;
     p_batch_instruction instruction = {.expr=n,.op=P_BATCH_LEAF,.left=-1,.right=-1};
     int kind=TYPE_MASK(n->type);
     if (kind == ME_VARIABLE) {
@@ -2319,7 +2319,13 @@ static int p_batch_build(p_batch_program *program, const me_expr *n,
         instruction.uniform=true;
         /* Typed floating literals cannot fail construction. Inspect exponent
          * bits without changing FP status during admission. */
-        if (!p_float(n->dtype)) {
+        if (p_complex(n->dtype)) {
+            /* Complex numeric literals are contextual real integer literals;
+             * captured complex values arrive as uniform variables instead. */
+            if (!(n->flags & ME_EXPR_FLAG_INTEGER_LITERAL) ||
+                ((n->flags & ME_EXPR_FLAG_NEGATIVE_LITERAL) &&
+                 n->integer_magnitude > UINT64_C(9223372036854775808))) return -1;
+        } else if (!p_float(n->dtype)) {
             if (!p_numeric(n->dtype) || n->dtype == ME_BOOL || !(n->flags & ME_EXPR_FLAG_INTEGER_LITERAL)) return -1;
             unsigned bits=(unsigned)dtype_size(n->dtype)*8;
             bool negative=(n->flags & ME_EXPR_FLAG_NEGATIVE_LITERAL) != 0;
@@ -2333,11 +2339,13 @@ static int p_batch_build(p_batch_program *program, const me_expr *n,
     } else {
         if (!IS_FUNCTION(n->type) || !p_numeric(n->dtype) || n->dtype == ME_BOOL || is_reduction_node(n)) return -1;
         bool floating=p_float(n->dtype);
-        if (!floating && (!p_numpy(n) || p_weak(n))) return -1;
+        bool is_complex=p_complex(n->dtype);
+        if (!floating && !is_complex && (!p_numpy(n) || p_weak(n))) return -1;
         int arity=ARITY(n->type);
         if (arity < 1 || arity > 2) return -1;
         const me_expr *left=n->parameters[0];
-        if (!n->function && arity == 1 && floating && p_numeric(left->dtype)) instruction.op=P_BATCH_CAST;
+        if (!n->function && arity == 1 && p_numeric(left->dtype) &&
+            (is_complex || (floating && !p_complex(left->dtype)))) instruction.op=P_BATCH_CAST;
         else {
             const char *op=me_portable_operator(n);
             if (op && arity == 1 && !strcmp(op,"-") && left->dtype == n->dtype)
@@ -2390,10 +2398,31 @@ static void p_batch_splat(unsigned char *out, const void *value, size_t width, i
         case 2: for (int i=0; i<count; i++) memcpy(out+(size_t)i*2,value,2); break;
         case 4: for (int i=0; i<count; i++) memcpy(out+(size_t)i*4,value,4); break;
         case 8: for (int i=0; i<count; i++) memcpy(out+(size_t)i*8,value,8); break;
+        case 16: for (int i=0; i<count; i++) memcpy(out+(size_t)i*16,value,16); break;
         default: break;
     }
 }
 static bool p_batch_cast(me_dtype from, me_dtype to, const void *source, void *out, int count) {
+    if (p_complex(to)) {
+#define P_BATCH_COMPLEX_CAST_CASE(D,T,S) \
+        case D: if (to == ME_COMPLEX64) dsl_portable_batch_cast_##S##_c64((const T *)source,out,count); \
+            else dsl_portable_batch_cast_##S##_c128((const T *)source,out,count); return true;
+        switch (from) {
+            P_BATCH_COMPLEX_CAST_CASE(ME_INT8,int8_t,i8) P_BATCH_COMPLEX_CAST_CASE(ME_UINT8,uint8_t,u8)
+            P_BATCH_COMPLEX_CAST_CASE(ME_INT16,int16_t,i16) P_BATCH_COMPLEX_CAST_CASE(ME_UINT16,uint16_t,u16)
+            P_BATCH_COMPLEX_CAST_CASE(ME_INT32,int32_t,i32) P_BATCH_COMPLEX_CAST_CASE(ME_UINT32,uint32_t,u32)
+            P_BATCH_COMPLEX_CAST_CASE(ME_INT64,int64_t,i64) P_BATCH_COMPLEX_CAST_CASE(ME_UINT64,uint64_t,u64)
+            P_BATCH_COMPLEX_CAST_CASE(ME_FLOAT32,float,f32) P_BATCH_COMPLEX_CAST_CASE(ME_FLOAT64,double,f64)
+            case ME_COMPLEX64:
+                if (to == ME_COMPLEX128) { dsl_portable_batch_cast_c64_c128(source,out,count); return true; }
+                return false;
+            case ME_COMPLEX128:
+                if (to == ME_COMPLEX64) { dsl_portable_batch_cast_c128_c64(source,out,count); return true; }
+                return false;
+            default: return false;
+        }
+#undef P_BATCH_COMPLEX_CAST_CASE
+    }
 #define P_BATCH_CAST_CASE(D,T,S) \
     case D: if (to == ME_FLOAT32) dsl_portable_batch_cast_##S##_f32((const T *)source,(float *)out,count); \
         else dsl_portable_batch_cast_##S##_f64((const T *)source,(double *)out,count); return true;
@@ -2437,10 +2466,17 @@ static bool p_batch_eval(const me_expr *expr, p_eval_context *ctx, int nitems,
      * been touched and the authoritative scalar path remains available. */
     /* Cache-sized vectors keep the total private workspace below 128 KiB,
      * including the maximum permitted straight-line program. */
-    int tile_lanes=P_BATCH_LANES;
-    size_t slot_bytes=(size_t)tile_lanes*sizeof(double);
-    unsigned char stack_storage[8 * P_BATCH_LANES * sizeof(double)];
-    unsigned char *storage=program.count <= 8 ? stack_storage : malloc((size_t)program.count*slot_bytes);
+    size_t max_width=sizeof(double);
+    for (int op=0; op<program.count; op++) {
+        size_t width=dtype_size(program.instructions[op].expr->dtype);
+        if (width > max_width) max_width=width;
+    }
+    /* Halve the lanes for complex128 to preserve the existing workspace bound.
+     * The union also aligns stack slots for every scalar representation. */
+    int tile_lanes=(int)(P_BATCH_LANES*sizeof(double)/max_width);
+    size_t slot_bytes=(size_t)tile_lanes*max_width;
+    union { me_scalar align; unsigned char bytes[8 * P_BATCH_LANES * sizeof(double)]; } stack_storage;
+    unsigned char *storage=program.count <= 8 ? stack_storage.bytes : malloc((size_t)program.count*slot_bytes);
     if (!storage) return false;
     p_batch_calls++;
     int prefill_lanes = nitems < tile_lanes ? nitems : tile_lanes;
@@ -2498,6 +2534,43 @@ static bool p_batch_eval(const me_expr *expr, p_eval_context *ctx, int nitems,
             }
             bool left_u = instruction->left >= 0 && program.instructions[instruction->left].uniform;
             bool right_u = instruction->right >= 0 && program.instructions[instruction->right].uniform;
+#define P_BATCH_COMPLEX_EXECUTE(T,S) do { \
+    const T *a=(const T *)left,*b=(const T *)right; T *d=(T *)destination; \
+    if (instruction->op == P_BATCH_NEG) { \
+        dsl_portable_batch_neg_##S(a,d,count); \
+    } else if (left_u && !right_u) { \
+        switch (instruction->op) { \
+            case P_BATCH_ADD: dsl_portable_batch_add_sv_##S(*a,b,d,count); break; \
+            case P_BATCH_SUB: dsl_portable_batch_sub_sv_##S(*a,b,d,count); break; \
+            case P_BATCH_MUL: dsl_portable_batch_mul_sv_##S(*a,b,d,count); break; \
+            default: break; \
+        } \
+    } else if (!left_u && right_u) { \
+        switch (instruction->op) { \
+            case P_BATCH_ADD: dsl_portable_batch_add_vs_##S(a,*b,d,count); break; \
+            case P_BATCH_SUB: dsl_portable_batch_sub_vs_##S(a,*b,d,count); break; \
+            case P_BATCH_MUL: dsl_portable_batch_mul_vs_##S(a,*b,d,count); break; \
+            default: break; \
+        } \
+    } else { \
+        switch (instruction->op) { \
+            case P_BATCH_ADD: dsl_portable_batch_add_##S(a,b,d,count); break; \
+            case P_BATCH_SUB: dsl_portable_batch_sub_##S(a,b,d,count); break; \
+            case P_BATCH_MUL: dsl_portable_batch_mul_##S(a,b,d,count); break; \
+            case P_BATCH_NEG: dsl_portable_batch_neg_##S(a,d,count); break; \
+            default: break; \
+        } \
+    } \
+} while (0)
+            if (n->dtype == ME_COMPLEX64) {
+                P_BATCH_COMPLEX_EXECUTE(float _Complex,c64);
+                continue;
+            }
+            if (n->dtype == ME_COMPLEX128) {
+                P_BATCH_COMPLEX_EXECUTE(double _Complex,c128);
+                continue;
+            }
+#undef P_BATCH_COMPLEX_EXECUTE
 #define P_BATCH_EXECUTE(T,S) do { \
     const T *a=(const T *)left,*b=(const T *)right; T *d=(T *)destination; \
     if (left_u && !right_u) { \
@@ -2582,7 +2655,7 @@ static bool p_batch_eval(const me_expr *expr, p_eval_context *ctx, int nitems,
         }
         begin+=count;
     }
-    if (storage != stack_storage) free(storage);
+    if (storage != stack_storage.bytes) free(storage);
     return true;
 }
 

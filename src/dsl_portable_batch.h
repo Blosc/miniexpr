@@ -79,6 +79,9 @@ ME_BATCH_INTEGER(uint8_t,u8)
 ME_BATCH_INTEGER(uint16_t,u16)
 ME_BATCH_INTEGER(uint32_t,u32)
 ME_BATCH_INTEGER(uint64_t,u64)
+/* Internal complex kernels are not part of the portable JIT arithmetic ABI. */
+ME_BATCH_INTEGER(float _Complex,c64)
+ME_BATCH_INTEGER(double _Complex,c128)
 #undef ME_BATCH_INTEGER
 #undef ME_BATCH_UNARY_DECL
 #undef ME_BATCH_DECL
@@ -93,5 +96,17 @@ ME_BATCH_CAST(int64_t,i64) ME_BATCH_CAST(uint64_t,u64)
 ME_BATCH_CAST(double,f64)
 void dsl_portable_batch_cast_f32_f64(const float *a, double *restrict out, int count);
 #undef ME_BATCH_CAST
+
+#define ME_BATCH_COMPLEX_CAST(T,S) \
+    void dsl_portable_batch_cast_##S##_c64(const T *a, float _Complex *restrict out, int count); \
+    void dsl_portable_batch_cast_##S##_c128(const T *a, double _Complex *restrict out, int count);
+ME_BATCH_COMPLEX_CAST(int8_t,i8) ME_BATCH_COMPLEX_CAST(uint8_t,u8)
+ME_BATCH_COMPLEX_CAST(int16_t,i16) ME_BATCH_COMPLEX_CAST(uint16_t,u16)
+ME_BATCH_COMPLEX_CAST(int32_t,i32) ME_BATCH_COMPLEX_CAST(uint32_t,u32)
+ME_BATCH_COMPLEX_CAST(int64_t,i64) ME_BATCH_COMPLEX_CAST(uint64_t,u64)
+ME_BATCH_COMPLEX_CAST(float,f32) ME_BATCH_COMPLEX_CAST(double,f64)
+#undef ME_BATCH_COMPLEX_CAST
+void dsl_portable_batch_cast_c64_c128(const float _Complex *a, double _Complex *restrict out, int count);
+void dsl_portable_batch_cast_c128_c64(const double _Complex *a, float _Complex *restrict out, int count);
 
 #endif

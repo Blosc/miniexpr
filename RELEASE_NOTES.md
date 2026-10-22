@@ -4,6 +4,15 @@ Release notes for miniexpr
 Changes from 0.2.0 to 0.2.1
 ===========================
 
+* Portable interpretation batches complex64/128 addition, subtraction,
+  multiplication, negation and conversions to complex over bounded vectors.
+  Uniform captures are supported; complex division, other unsupported operations
+  and partially masked expressions retain scalar evaluation. Scalar numerical
+  semantics and aggregate IEEE status are preserved; no complex JIT is added.
+  Input-free complex kernels with an immutable final-index return override
+  handle the endpoint once per unmasked block, avoiding per-element condition
+  interpretation while preserving skipped-lane errors and IEEE status.
+
 * Windows (clang-cl) now supports complex64 and complex128 expressions and
   portable interpretation, using ABI-safe UCRT complex math wrappers.
   Complex DSL JIT kernels remain unsupported on all platforms.

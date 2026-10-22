@@ -35,6 +35,7 @@ typedef struct {
     bool scalar_output;
     bool empty_group;
     uint8_t **initialized;
+    const me_dsl_portable_eval_descriptor *descriptor;
 } dsl_eval_ctx;
 
 static int dsl_eval_expr_nitems(dsl_eval_ctx *ctx, const me_dsl_compiled_expr *expr,
@@ -1174,6 +1175,82 @@ cleanup:
     return rc;
 }
 
+/* Recognize an immutable input-free endpoint override in the typed program:
+ *     if _flat_idx == last: return stop
+ *     return expression
+ * The descriptor proves whether this block contains the final logical lane.
+ * Evaluate the ordinary return only over its prefix, never speculatively at
+ * the overridden lane (which could change errors or IEEE status). The artifact
+ * itself stays unchanged, so sliced/persisted/rechunked evaluation is identical.
+ * Masks, vector inputs, aliases and more general control flow retain the
+ * authoritative statement evaluator. */
+static bool dsl_eval_endpoint_return(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
+                                     int *status) {
+    const me_dsl_compiled_program *program=ctx->program;
+    const me_dsl_portable_eval_descriptor *descriptor=ctx->descriptor;
+    if (!dsl_portable_typed_profile(program->semantic_profile) || !descriptor ||
+        ctx->valid_mask || ctx->scalar_output || ctx->empty_group || ctx->nitems<=0 ||
+        program->n_locals || !program->uses_flat_idx || program->idx_flat_idx<0 ||
+        descriptor->ndim<=0 || block!=&program->block || block->nstmts!=2 ||
+        (program->output_dtype!=ME_COMPLEX64 && program->output_dtype!=ME_COMPLEX128)) return false;
+    const me_dsl_compiled_stmt *guard=block->stmts[0], *tail=block->stmts[1];
+    if (guard->kind!=ME_DSL_STMT_IF || tail->kind!=ME_DSL_STMT_RETURN ||
+        guard->as.if_stmt.has_else || guard->as.if_stmt.n_elifs ||
+        guard->as.if_stmt.then_block.nstmts!=1 ||
+        guard->as.if_stmt.then_block.stmts[0]->kind!=ME_DSL_STMT_RETURN) return false;
+    const me_expr *condition=guard->as.if_stmt.cond.expr;
+    if (!condition || !IS_FUNCTION(condition->type) || ARITY(condition->type)!=2 ||
+        comparison_kind(condition->function)!=ME_CMP_EQ) return false;
+    const me_expr *index=condition->parameters[0], *last=condition->parameters[1];
+    if (!index || !last || TYPE_MASK(index->type)!=ME_VARIABLE ||
+        index->bound!=synthetic_var_addresses+program->idx_flat_idx || index->dtype!=ME_INT64 ||
+        TYPE_MASK(last->type)!=ME_VARIABLE || last->dtype!=ME_INT64) return false;
+    const me_dsl_compiled_expr *endpoint=&guard->as.if_stmt.then_block.stmts[0]->as.return_stmt.expr;
+    const me_expr *ordinary=tail->as.return_stmt.expr.expr;
+    if (!endpoint->expr || !ordinary || contains_reduction(endpoint->expr) || contains_reduction(ordinary) ||
+        endpoint->expr->dtype!=program->output_dtype || ordinary->dtype!=program->output_dtype ||
+        !dsl_compiled_expr_uniform(endpoint->expr,program->vars.uniform,program->vars.count)) return false;
+
+    size_t width=program->output_itemsize;
+    uintptr_t output=(uintptr_t)ctx->output_block;
+    if (!width || (size_t)ctx->nitems>(UINTPTR_MAX-output)/width) return false;
+    uintptr_t output_end=output+(size_t)ctx->nitems*width;
+    int last_input=-1;
+    for (int i=0; i<program->n_inputs; i++) {
+        if (!program->vars.uniform || !program->vars.uniform[i] || !ctx->var_buffers[i]) return false;
+        uintptr_t input=(uintptr_t)ctx->var_buffers[i];
+        size_t input_width=dsl_var_item_size(program,i);
+        if (input_width>UINTPTR_MAX-input || (input<output_end && output<input+input_width)) return false;
+        if (last->bound==synthetic_var_addresses+i) last_input=i;
+    }
+    if (last_input<0) return false;
+    int64_t domain=1, target;
+    bool contains_endpoint=true;
+    for (int d=0; d<descriptor->ndim; d++) {
+        int64_t size=descriptor->logical_shape[d];
+        int64_t remaining=size-descriptor->block_origin[d], extent=descriptor->block_extent[d];
+        if (size<=0 || domain>INT64_MAX/size || extent<=0 || extent>remaining) return false;
+        domain*=size;
+        contains_endpoint &= extent==remaining;
+    }
+    memcpy(&target,ctx->var_buffers[last_input],sizeof(target));
+    if (target!=domain-1) return false;
+
+    int prefix=ctx->nitems-(contains_endpoint ? 1 : 0);
+    *status=ME_EVAL_SUCCESS;
+    if (contains_endpoint) {
+        /* The original conditional return executes before the ordinary return;
+         * retain that ordering if the ordinary expression subsequently fails. */
+        *status=dsl_eval_expr_item(ctx,endpoint,ctx->nitems-1,
+            (unsigned char *)ctx->output_block+(size_t)(ctx->nitems-1)*width);
+    }
+    if (*status==ME_EVAL_SUCCESS && prefix>0) {
+        *status=dsl_portable_eval_expr_masked(ordinary,(const void *const *)ctx->var_buffers,
+            program->vars.count,(const uint8_t *const *)ctx->initialized,prefix,NULL,width,ctx->output_block);
+    }
+    return true;
+}
+
 static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
                           bool *did_break, bool *did_continue, bool *did_return) {
     if (!ctx || !block) {
@@ -1190,6 +1267,14 @@ static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
             *did_return = true;
         }
         return ME_EVAL_SUCCESS;
+    }
+
+    int endpoint_status;
+    if (dsl_eval_endpoint_return(ctx,block,&endpoint_status)) {
+        if (did_break) *did_break=false;
+        if (did_continue) *did_continue=false;
+        if (did_return) *did_return=endpoint_status==ME_EVAL_SUCCESS;
+        return endpoint_status;
     }
 
     uint8_t *run_mask = malloc((size_t)ctx->nitems);
@@ -1869,6 +1954,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
     ctx.empty_group = empty_group;
     if (empty_group) ctx.nitems = 1;
     ctx.initialized = NULL;
+    ctx.descriptor = descriptor;
     uint8_t *defined_storage = NULL;
     int rc = ME_EVAL_SUCCESS;
     if (dsl_portable_typed_profile(program->semantic_profile)) {

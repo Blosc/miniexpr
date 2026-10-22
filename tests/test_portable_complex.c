@@ -7,6 +7,7 @@
 #include <string.h>
 #include "miniexpr.h"
 #include "miniexpr_artifact.h"
+#include "dsl_jit_test.h"
 #include "complex_compat.h"
 
 #define ITEMS 4
@@ -282,6 +283,92 @@ static void test_reductions(void) {
     }
 }
 
+static void test_endpoint_blocks(void) {
+    const char *constants=
+        "[{\"name\":\"start\",\"dtype\":\"complex128\",\"category\":\"typed_scalar\","
+        "\"encoding\":\"ieee754-hex\",\"value\":\"40000000000000004008000000000000\"},"
+        "{\"name\":\"step\",\"dtype\":\"complex128\",\"category\":\"typed_scalar\","
+        "\"encoding\":\"ieee754-hex\",\"value\":\"3fc0000000000000bfd0000000000000\"},"
+        "{\"name\":\"stop\",\"dtype\":\"complex128\",\"category\":\"typed_scalar\","
+        "\"encoding\":\"ieee754-hex\",\"value\":\"40220000000000004026000000000000\"},"
+        "{\"name\":\"last\",\"dtype\":\"int64\",\"category\":\"typed_scalar\","
+        "\"encoding\":\"decimal\",\"value\":\"%d\"}]";
+    for (int precision=0; precision<2; precision++) {
+        size_t component=precision ? 8 : 4, width=2*component;
+        const char *dtype=precision ? "complex128" : "complex64";
+        for (int recipe=0; recipe<2; recipe++) for (int target_case=0; target_case<2; target_case++) {
+            const char *ordinary=recipe ? "return stop + 1 / (last - _flat_idx)\n" :
+                "return start + _flat_idx * step\n";
+            char source[256];
+            snprintf(source,sizeof(source),
+                "def k(start, step, stop, last):\n"
+                "    if _flat_idx == last:\n"
+                "        return stop\n    %s",ordinary);
+            char bindings[2048];
+            snprintf(bindings,sizeof(bindings),constants,target_case ? 17 : 512);
+            me_artifact *artifact=load(source,"",bindings,dtype,"elementwise",2,ME_JIT_OFF);
+            assert(artifact);
+            int64_t shape[]={3,171};
+            for (int block=0; block<4; block++) {
+                int64_t origin[]={block==2 ? 2 : 0,block>=2 ? 170 : 0};
+                int64_t extent[]={block==0 || block==3 ? 3 : block==1 ? 2 : 1,block>=2 ? 1 : 171};
+                int count=(int)(extent[0]*extent[1]);
+                uint64_t actual[1026],expected[1026];
+                uint8_t mask[513]; memset(mask,1,sizeof(mask));
+                me_artifact_eval_descriptor descriptor={
+                    .struct_size=sizeof(descriptor),.version=1,.nitems=(size_t)count,
+                    .output_capacity=(size_t)count*width,.ndim=2,
+                    .logical_shape=shape,.block_origin=origin,.block_extent=extent,
+                    .valid_mask=mask,.valid_mask_capacity=(size_t)count};
+                me_artifact_error error;
+                me_artifact_fp_status a,b;
+                /* An explicit mask retains the general statement evaluator,
+                 * providing a reference for the unmasked block specialization. */
+                assert(!me_artifact_eval_status(artifact,NULL,0,expected,&descriptor,0,&a,&error));
+                descriptor.valid_mask=NULL; descriptor.valid_mask_capacity=0;
+                size_t before=dsl_portable_batch_calls_for_tests();
+                assert(!me_artifact_eval_status(artifact,NULL,0,actual,&descriptor,0,&b,&error));
+                if (!recipe) assert(dsl_portable_batch_calls_for_tests()==before+(!target_case && block<2 ? 1 : 0));
+                assert(a.flags==b.flags);
+                assert(!(b.flags & ME_FP_DIVIDE));
+                assert(!memcmp(actual,expected,(size_t)count*width));
+                if (!target_case && block!=1) {
+                    double real=0,imag=0;
+                    if (precision) {
+                        memcpy(&real,(char *)actual+(size_t)(count-1)*width,component);
+                        memcpy(&imag,(char *)actual+(size_t)(count-1)*width+component,component);
+                    }
+                    else {
+                        float parts[2]; memcpy(parts,(char *)actual+(size_t)(count-1)*width,width);
+                        real=parts[0]; imag=parts[1];
+                    }
+                    assert(real==9 && imag==11);
+                }
+            }
+            /* Padded blocks may place the endpoint before physical padding;
+             * these retain the mask-aware general path. */
+            int64_t origin[]={0,0},extent[]={4,172};
+            uint8_t mask[688];
+            for (int i=0; i<688; i++) mask[i]=i/172<3 && i%172<171;
+            uint64_t output[1376]; memset(output,0xaa,sizeof(output));
+            me_artifact_eval_descriptor descriptor={
+                .struct_size=sizeof(descriptor),.version=1,.nitems=688,.output_capacity=688*width,
+                .ndim=2,.logical_shape=shape,.block_origin=origin,.block_extent=extent,
+                .valid_mask=mask,.valid_mask_capacity=688};
+            me_artifact_error error;
+            size_t before=dsl_portable_batch_calls_for_tests();
+            assert(!me_artifact_eval_ex(artifact,NULL,0,output,&descriptor,&error));
+            assert(dsl_portable_batch_calls_for_tests()==before);
+            for (int i=0; i<688; i++) {
+                if (!mask[i]) {
+                    for (size_t byte=0; byte<width; byte++) assert(((unsigned char *)output)[(size_t)i*width+byte]==0xaa);
+                }
+            }
+            me_artifact_free(artifact);
+        }
+    }
+}
+
 static void test_rejections(void) {
     check_rejected("def k(z):\n    return z // 2\n", "complex128");
     check_rejected("def k(z):\n    return ceil(z)\n", "complex128");
@@ -296,6 +383,7 @@ int main(void) {
     test_constants();
     test_reductions();
     test_rejections();
+    test_endpoint_blocks();
     if (failures) {
         fprintf(stderr, "%d complex portable checks failed\n", failures);
         return 1;

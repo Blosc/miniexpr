@@ -35,6 +35,7 @@ set(MINIEXPR_SOURCES
   src/dsl_portable_types.c
   src/dsl_portable_expr.c
   src/dsl_portable_batch.c
+  src/dsl_portable_batch_complex.c
   src/dsl_portable_jit.c
   src/dsl_compare.c
   src/dsl_jit_ir.c
