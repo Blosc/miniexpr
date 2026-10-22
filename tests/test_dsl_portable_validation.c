@@ -138,11 +138,7 @@ int main(void) {
     check("def k(x):\n    return x\n", x, 1, ME_FLOAT64, ME_PORTABLE_ERR_SIGNATURE);
     x[0].address = NULL;
     x[0].dtype = ME_COMPLEX128;
-#if defined(_WIN32) || defined(_WIN64)
-    check("def k(x):\n    return x\n", x, 1, ME_FLOAT64, ME_PORTABLE_ERR_UNSUPPORTED);
-#else
     check("def k(x):\n    return x\n", x, 1, ME_FLOAT64, ME_PORTABLE_SUCCESS);
-#endif
     x[0].dtype = ME_FLOAT64;
     check("def k(x):\n    return x\n", x, 1, ME_AUTO, ME_PORTABLE_ERR_UNSUPPORTED);
     reversed[0].name = "y";
