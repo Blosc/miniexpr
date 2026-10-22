@@ -9,9 +9,8 @@
 #endif
 
 #if defined(_MSC_VER) && defined(__clang__)
-#ifndef complex
+#undef complex
 #define complex _Complex
-#endif
 #undef I
 #define I (1.0fi)
 #define creal me_creal
