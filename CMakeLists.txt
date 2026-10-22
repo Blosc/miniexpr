@@ -148,8 +148,8 @@ function(miniexpr_setup_target target_name)
       if(_miniexpr_builtins_lib)
         target_link_libraries(${target_name} PUBLIC "${_miniexpr_builtins_lib}")
       else()
-        message(STATUS
-          "MiniExpr: clang_rt builtins library not found for ${CMAKE_VS_PLATFORM_NAME}; using default toolchain runtime.")
+        message(WARNING
+          "MiniExpr: clang_rt builtins library not found for ${CMAKE_VS_PLATFORM_NAME}; using default toolchain runtime. Complex arithmetic may fail to link without the compiler runtime helpers.")
       endif()
       unset(_miniexpr_builtins_lib CACHE)
       unset(_miniexpr_builtins_name)

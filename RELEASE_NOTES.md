@@ -4,6 +4,13 @@ Release notes for miniexpr
 Changes from 0.2.0 to 0.2.1
 ===========================
 
+* Windows (clang-cl) now supports complex64 and complex128 expressions and
+  portable interpretation, using ABI-safe UCRT complex math wrappers.
+  Complex DSL JIT kernels remain unsupported on all platforms.
+  - API change: `ME_COMPILE_ERR_COMPLEX_UNSUPPORTED` has been removed; its
+    numeric value (-4) remains unused. Consumers referencing the enum name
+    must remove that reference when updating miniexpr.
+
 * Flexible math libraries and floating-point modes for Menudet kernels.
   - New source pragmas `me:math=auto|system|sleef|accelerate` and
     `me:ulp=u10|u35`; `me:fp=strict|contract|fast` now reaches portable kernels.

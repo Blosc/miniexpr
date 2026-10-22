@@ -13,7 +13,7 @@ miniexpr is designed to be embedded directly into larger projects, not distribut
 - Thread-safe operations for parallel processing
 
 **Note**: This is a beta project.
-**Windows note**: Complex types are not supported on Windows because the C99 complex ABI is not stable across MSVC/clang-cl. `me_compile()` will reject expressions that involve complex variables or outputs.
+**Windows**: Building requires clang-cl; complex64 and complex128 are supported, including portable interpretation. DSL JIT complex kernels remain unsupported on all platforms.
 
 ## Usage
 
