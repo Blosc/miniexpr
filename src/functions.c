@@ -9077,26 +9077,6 @@ void optimize(me_expr* n) {
     }
 }
 
-bool has_complex_node(const me_expr* n) {
-    if (!n) return false;
-    if (n->dtype == ME_COMPLEX64 || n->dtype == ME_COMPLEX128) return true;
-    const int arity = ARITY(n->type);
-    for (int i = 0; i < arity; i++) {
-        if (has_complex_node((const me_expr*)n->parameters[i])) return true;
-    }
-    return false;
-}
-
-bool has_complex_input(const me_expr* n) {
-    if (!n) return false;
-    if (n->input_dtype == ME_COMPLEX64 || n->input_dtype == ME_COMPLEX128) return true;
-    const int arity = ARITY(n->type);
-    for (int i = 0; i < arity; i++) {
-        if (has_complex_input((const me_expr*)n->parameters[i])) return true;
-    }
-    return false;
-}
-
 bool has_complex_input_types(const me_expr* n) {
     if (!n) return false;
     if (n->dtype == ME_COMPLEX64 || n->dtype == ME_COMPLEX128 ||

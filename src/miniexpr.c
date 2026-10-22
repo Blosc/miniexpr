@@ -1689,33 +1689,6 @@ int private_compile_profile_ex(const char* expression, const me_variable* variab
         return ME_COMPILE_ERR_INVALID_ARG_TYPE;
     }
 
-#if defined(_WIN32) || defined(_WIN64)
-    {
-        const me_variable* vars_check = vars_copy ? vars_copy : variables;
-        bool complex_vars = false;
-        if (vars_check) {
-            for (int i = 0; i < var_count; i++) {
-                if (!is_variable_entry(&vars_check[i])) {
-                    continue;
-                }
-                if (vars_check[i].dtype == ME_COMPLEX64 || vars_check[i].dtype == ME_COMPLEX128) {
-                    complex_vars = true;
-                    break;
-                }
-            }
-        }
-        if (complex_vars ||
-            dtype == ME_COMPLEX64 || dtype == ME_COMPLEX128 ||
-            has_complex_node(root) || has_complex_input(root)) {
-            fprintf(stderr, "Error: Complex expressions are not supported on Windows (no C99 complex ABI)\n");
-            me_free(root);
-            if (error) *error = -1;
-            if (vars_copy) free(vars_copy);
-            return ME_COMPILE_ERR_COMPLEX_UNSUPPORTED;
-        }
-    }
-#endif
-
     if (s.type != TOK_END) {
         me_free(root);
         if (error) {

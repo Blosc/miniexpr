@@ -194,10 +194,5 @@ int me_eval_dsl_program(const me_expr* expr, const void** vars_block,
                         int n_vars, void* output_block, int block_nitems,
                         const me_eval_params* params);
 
-#if defined(_WIN32) || defined(_WIN64)
-bool has_complex_node(const me_expr* n);
-bool has_complex_input(const me_expr* n);
-#endif
-
 #endif
 me_cmp_kind comparison_kind(const void* func);

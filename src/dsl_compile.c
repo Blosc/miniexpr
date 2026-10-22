@@ -3176,26 +3176,6 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
     }
     program->n_inputs = input_count;
 
-#if defined(_WIN32) || defined(_WIN64)
-    if (dsl_portable_typed_profile(profile)) {
-        bool complex = dtype == ME_COMPLEX64 || dtype == ME_COMPLEX128;
-        for (int i = 0; !complex && i < program->vars.count; i++) {
-            complex = program->vars.dtypes[i] == ME_COMPLEX64 ||
-                      program->vars.dtypes[i] == ME_COMPLEX128;
-        }
-        if (complex) {
-            if (error_reason && error_reason_cap > 0) {
-                snprintf(error_reason, error_reason_cap,
-                         "complex expressions are not supported on Windows");
-            }
-            if (error_pos) *error_pos = -1;
-            free(funcs);
-            dsl_compiled_program_free(program);
-            return NULL;
-        }
-    }
-#endif
-
     if (dtype == ME_AUTO) {
         for (int i = 0; i < program->vars.count; i++) {
             if (program->vars.dtypes[i] == ME_AUTO) {
