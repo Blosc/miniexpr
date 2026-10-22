@@ -18,6 +18,44 @@
 #define ME_COMPLEX_H
 
 #include <complex.h>
+#include <string.h>
+
+typedef float _Complex float_complex;
+typedef double _Complex double_complex;
+
+/* Arithmetic stays native under clang-cl. Multiplication deliberately follows
+ * NumPy's component-wise semantics, without C99 infinity recovery. Copying
+ * components avoids introducing NaNs through real + I * imag construction. */
+#define add_c64(a, b) ((a) + (b))
+#define sub_c64(a, b) ((a) - (b))
+#define neg_c64(a) (-(a))
+#define div_c64(a, b) ((a) / (b))
+#define add_c128(a, b) ((a) + (b))
+#define sub_c128(a, b) ((a) - (b))
+#define neg_c128(a) (-(a))
+#define div_c128(a, b) ((a) / (b))
+
+static inline float _Complex mul_c64(float _Complex a, float _Complex b) {
+    float av[2], bv[2], parts[2];
+    float _Complex result;
+    memcpy(av, &a, sizeof(av));
+    memcpy(bv, &b, sizeof(bv));
+    parts[0] = av[0] * bv[0] - av[1] * bv[1];
+    parts[1] = av[0] * bv[1] + av[1] * bv[0];
+    memcpy(&result, parts, sizeof(result));
+    return result;
+}
+
+static inline double _Complex mul_c128(double _Complex a, double _Complex b) {
+    double av[2], bv[2], parts[2];
+    double _Complex result;
+    memcpy(av, &a, sizeof(av));
+    memcpy(bv, &b, sizeof(bv));
+    parts[0] = av[0] * bv[0] - av[1] * bv[1];
+    parts[1] = av[0] * bv[1] + av[1] * bv[0];
+    memcpy(&result, parts, sizeof(result));
+    return result;
+}
 
 #if defined(_MSC_VER)
 /* clang-cl (_MSC_VER + __clang__): accessors and conjugation need no libcall
@@ -118,6 +156,8 @@ ME_COMPLEX_CALL_D(ctanh)
 ME_COMPLEX_CALL_D(casinh)
 ME_COMPLEX_CALL_D(cacosh)
 ME_COMPLEX_CALL_D(catanh)
+#undef ME_COMPLEX_CALL_F
+#undef ME_COMPLEX_CALL_D
 #else
 #define me_cpowf cpowf
 #define me_cpow cpow

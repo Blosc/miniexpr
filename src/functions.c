@@ -75,99 +75,10 @@ For log = base 10 log comment the next line. */
 
 #include <complex.h>
 
-#if defined(_MSC_VER) && !defined(__clang__)
-#define float_complex _Fcomplex
-#define double_complex _Dcomplex
-// And it doesn't support standard operators for them in C
-static inline _Fcomplex add_c64(_Fcomplex a, _Fcomplex b) {
-    return _FCbuild(crealf(a) + crealf(b), cimagf(a) + cimagf(b));
-}
-static inline _Fcomplex sub_c64(_Fcomplex a, _Fcomplex b) {
-    return _FCbuild(crealf(a) - crealf(b), cimagf(a) - cimagf(b));
-}
-static inline _Fcomplex neg_c64(_Fcomplex a) { return _FCbuild(-crealf(a), -cimagf(a)); }
-static inline _Fcomplex mul_c64(_Fcomplex a, _Fcomplex b) {
-    return _FCbuild(crealf(a) * crealf(b) - cimagf(a) * cimagf(b), crealf(a) * cimagf(b) + cimagf(a) * crealf(b));
-}
-/* Smith's algorithm, matching NumPy's nc_quot (and what C's native `/` does on
-   the non-MSVC path below): the naive (ac+bd)/(c^2+d^2) form overflows early and
-   returns nan+nanj for x/0 where NumPy returns inf+nanj. */
-static inline _Fcomplex div_c64(_Fcomplex a, _Fcomplex b) {
-    float ar = crealf(a), ai = cimagf(a), br = crealf(b), bi = cimagf(b);
-    float abs_br = fabsf(br), abs_bi = fabsf(bi);
-    if (abs_br >= abs_bi) {
-        if (abs_br == 0.0f && abs_bi == 0.0f) {
-            return _FCbuild(ar / abs_br, ai / abs_bi);
-        }
-        float rat = bi / br;
-        float scl = 1.0f / (br + bi * rat);
-        return _FCbuild((ar + ai * rat) * scl, (ai - ar * rat) * scl);
-    }
-    float rat = br / bi;
-    float scl = 1.0f / (bi + br * rat);
-    return _FCbuild((ar * rat + ai) * scl, (ai * rat - ar) * scl);
-}
-static inline _Dcomplex add_c128(_Dcomplex a, _Dcomplex b) { return _Cbuild(creal(a) + creal(b), cimag(a) + cimag(b)); }
-static inline _Dcomplex sub_c128(_Dcomplex a, _Dcomplex b) { return _Cbuild(creal(a) - creal(b), cimag(a) - cimag(b)); }
-static inline _Dcomplex neg_c128(_Dcomplex a) { return _Cbuild(-creal(a), -cimag(a)); }
-static inline _Dcomplex mul_c128(_Dcomplex a, _Dcomplex b) {
-    return _Cbuild(creal(a) * creal(b) - cimag(a) * cimag(b), creal(a) * cimag(b) + cimag(a) * creal(b));
-}
-/* Smith's algorithm; see div_c64 above. */
-static inline _Dcomplex div_c128(_Dcomplex a, _Dcomplex b) {
-    double ar = creal(a), ai = cimag(a), br = creal(b), bi = cimag(b);
-    double abs_br = fabs(br), abs_bi = fabs(bi);
-    if (abs_br >= abs_bi) {
-        if (abs_br == 0.0 && abs_bi == 0.0) {
-            return _Cbuild(ar / abs_br, ai / abs_bi);
-        }
-        double rat = bi / br;
-        double scl = 1.0 / (br + bi * rat);
-        return _Cbuild((ar + ai * rat) * scl, (ai - ar * rat) * scl);
-    }
-    double rat = br / bi;
-    double scl = 1.0 / (bi + br * rat);
-    return _Cbuild((ar * rat + ai) * scl, (ai * rat - ar) * scl);
-}
-#else
-#define float_complex float _Complex
-#define double_complex double _Complex
-#define add_c64(a, b) ((a) + (b))
-#define sub_c64(a, b) ((a) - (b))
-#define neg_c64(a) (-(a))
-/* NumPy multiplies components without C99's infinity-recovery step. Build the
- * result by copying components: real + I * imag can itself introduce NaNs. */
-static inline float _Complex mul_c64(float _Complex a, float _Complex b) {
-    float av[2], bv[2], parts[2];
-    float _Complex result;
-    memcpy(av, &a, sizeof(av));
-    memcpy(bv, &b, sizeof(bv));
-    parts[0] = av[0] * bv[0] - av[1] * bv[1];
-    parts[1] = av[0] * bv[1] + av[1] * bv[0];
-    memcpy(&result, parts, sizeof(result));
-    return result;
-}
-#define div_c64(a, b) ((a) / (b))
-#define add_c128(a, b) ((a) + (b))
-#define sub_c128(a, b) ((a) - (b))
-#define neg_c128(a) (-(a))
-static inline double _Complex mul_c128(double _Complex a, double _Complex b) {
-    double av[2], bv[2], parts[2];
-    double _Complex result;
-    memcpy(av, &a, sizeof(av));
-    memcpy(bv, &b, sizeof(bv));
-    parts[0] = av[0] * bv[0] - av[1] * bv[1];
-    parts[1] = av[0] * bv[1] + av[1] * bv[0];
-    memcpy(&result, parts, sizeof(result));
-    return result;
-}
-#define div_c128(a, b) ((a) / (b))
-#endif
-
 /* ABI-safe complex function set */
 #include "me_complex.h"
 
-/* Type-specific cast and comparison macros to handle MSVC complex structs */
+/* Type-specific cast and comparison macros. */
 #define TO_TYPE_bool(x) (bool)(x)
 #define TO_TYPE_i8(x) (int8_t)(x)
 #define TO_TYPE_i16(x) (int16_t)(x)
@@ -204,18 +115,6 @@ static inline double _Complex mul_c128(double _Complex a, double _Complex b) {
 #define IS_NONZERO_f32(x) ((x) != 0.0f)
 #define IS_NONZERO_f64(x) ((x) != 0.0)
 
-#if defined(_MSC_VER) && !defined(__clang__)
-#define TO_TYPE_c64(x) _FCbuild((float)(x), 0.0f)
-#define TO_TYPE_c128(x) _Cbuild((double)(x), 0.0)
-#define FROM_TYPE_c64(x) (double)crealf(x)
-#define FROM_TYPE_c128(x) (double)creal(x)
-#define IS_NONZERO_c64(x) (crealf(x) != 0.0f || cimagf(x) != 0.0f)
-#define IS_NONZERO_c128(x) (creal(x) != 0.0 || cimag(x) != 0.0)
-
-/* Helper macros for complex-to-complex conversions */
-#define CONV_c64_to_c128(x) _Cbuild((double)crealf(x), (double)cimagf(x))
-#define TO_TYPE_c128_from_c64(x) CONV_c64_to_c128(x)
-#else
 #define TO_TYPE_c64(x) (float_complex)(x)
 #define TO_TYPE_c128(x) (double_complex)(x)
 #define FROM_TYPE_c64(x) (double)me_crealf(x)
@@ -223,7 +122,6 @@ static inline double _Complex mul_c128(double _Complex a, double _Complex b) {
 #define IS_NONZERO_c64(x) (me_crealf(x) != 0.0f || me_cimagf(x) != 0.0f)
 #define IS_NONZERO_c128(x) (me_creal(x) != 0.0 || me_cimag(x) != 0.0)
 #define TO_TYPE_c128_from_c64(x) (double_complex)(x)
-#endif
 
 #include <assert.h>
 
@@ -6490,36 +6388,6 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sqrt_u64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint64_t)sqrt((a)[_i]); } while(0)
 #define vec_negame_u64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
-#if defined(_MSC_VER) && !defined(__clang__)
-#define vec_add_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = add_c64((a)[_i], (b)[_i]); } while(0)
-#define vec_sub_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = sub_c64((a)[_i], (b)[_i]); } while(0)
-#define vec_mul_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c64((a)[_i], (b)[_i]); } while(0)
-#define vec_div_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = div_c64((a)[_i], (b)[_i]); } while(0)
-#define vec_pow_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpowf((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = add_c64((a)[_i], (b)); } while(0)
-#define vec_mul_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c64((a)[_i], (b)); } while(0)
-#define vec_pow_scalar_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpowf((a)[_i], (b)); } while(0)
-#define vec_sqrt_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = csqrtf((a)[_i]); } while(0)
-#define vec_negame_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = neg_c64((a)[_i]); } while(0)
-#define vec_conj_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = conjf((a)[_i]); } while(0)
-#define vec_imag_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cimagf((a)[_i]); } while(0)
-#define vec_real_c64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_crealf((a)[_i]); } while(0)
-#define vec_conj_noop(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i]; } while(0)
-
-#define vec_add_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = add_c128((a)[_i], (b)[_i]); } while(0)
-#define vec_sub_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = sub_c128((a)[_i], (b)[_i]); } while(0)
-#define vec_mul_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c128((a)[_i], (b)[_i]); } while(0)
-#define vec_div_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = div_c128((a)[_i], (b)[_i]); } while(0)
-#define vec_pow_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = add_c128((a)[_i], (b)); } while(0)
-#define vec_mul_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c128((a)[_i], (b)); } while(0)
-#define vec_pow_scalar_c128(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = cpow((a)[_i], (b)); } while(0)
-#define vec_sqrt_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = csqrt((a)[_i]); } while(0)
-#define vec_negame_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = neg_c128((a)[_i]); } while(0)
-#define vec_conj_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = conj((a)[_i]); } while(0)
-#define vec_imag_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cimag((a)[_i]); } while(0)
-#define vec_real_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_creal((a)[_i]); } while(0)
-#else
 #define vec_add_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
 #define vec_sub_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
 #define vec_mul_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = mul_c64((a)[_i], (b)[_i]); } while(0)
@@ -6548,7 +6416,6 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_conj_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_conj((a)[_i]); } while(0)
 #define vec_imag_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_cimag((a)[_i]); } while(0)
 #define vec_real_c128(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = me_creal((a)[_i]); } while(0)
-#endif
 
 /* Generate float32 evaluator */
 DEFINE_ME_EVAL(f32, float,
@@ -8199,7 +8066,7 @@ static void private_eval(const me_expr* n) {
                     float im = __builtin_cimagf(cdata[i]);
                     output[i] = hypotf(re, im);
 #else
-                    output[i] = cabsf(cdata[i]);
+                    output[i] = me_cabsf(cdata[i]);
 #endif
                 }
                 return;
@@ -8220,7 +8087,7 @@ static void private_eval(const me_expr* n) {
                     double im = __builtin_cimag(cdata[i]);
                     output[i] = hypot(re, im);
 #else
-                    output[i] = cabs(cdata[i]);
+                    output[i] = me_cabs(cdata[i]);
 #endif
                 }
                 return;
