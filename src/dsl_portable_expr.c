@@ -13,6 +13,7 @@
 
 #include <math.h>
 #include <complex.h>
+#include "me_complex.h"
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
@@ -846,60 +847,55 @@ static int p_complex_math(me_dtype input_dtype, const me_expr *n, const char *na
         p_complex_set(n->dtype, rint(real), rint(imag), out);
         return 0;
     }
-#if defined(_WIN32) || defined(_WIN64)
-    (void)a; (void)b; (void)out;
-    return ME_EVAL_ERR_INVALID_ARG;  /* complex is rejected at compile time on Windows */
-#else
     if (input_dtype == ME_COMPLEX64) {
         float _Complex z = a->c64;
-        if (!strcmp(name, "sqrt")) out->c64 = csqrtf(z);
-        else if (!strcmp(name, "exp")) out->c64 = cexpf(z);
-        else if (!strcmp(name, "exp2")) out->c64 = cexpf(z * (float)M_LN2);
-        else if (!strcmp(name, "expm1")) out->c64 = cexpf(z) - 1.0f;
-        else if (!strcmp(name, "log")) out->c64 = clogf(z);
-        else if (!strcmp(name, "log2")) out->c64 = clogf(z) / (float)M_LN2;
-        else if (!strcmp(name, "log10")) out->c64 = clogf(z) / (float)M_LN10;
-        else if (!strcmp(name, "log1p")) out->c64 = clogf(1.0f + z);
-        else if (!strcmp(name, "sin")) out->c64 = csinf(z);
-        else if (!strcmp(name, "cos")) out->c64 = ccosf(z);
-        else if (!strcmp(name, "tan")) out->c64 = ctanf(z);
-        else if (!strcmp(name, "asin")) out->c64 = casinf(z);
-        else if (!strcmp(name, "acos")) out->c64 = cacosf(z);
-        else if (!strcmp(name, "atan")) out->c64 = catanf(z);
-        else if (!strcmp(name, "sinh")) out->c64 = csinhf(z);
-        else if (!strcmp(name, "cosh")) out->c64 = ccoshf(z);
-        else if (!strcmp(name, "tanh")) out->c64 = ctanhf(z);
-        else if (!strcmp(name, "asinh")) out->c64 = casinhf(z);
-        else if (!strcmp(name, "acosh")) out->c64 = cacoshf(z);
-        else if (!strcmp(name, "atanh")) out->c64 = catanhf(z);
-        else if (!strcmp(name, "pow")) out->c64 = cpowf(z, b->c64);
+        if (!strcmp(name, "sqrt")) out->c64 = me_csqrtf(z);
+        else if (!strcmp(name, "exp")) out->c64 = me_cexpf(z);
+        else if (!strcmp(name, "exp2")) out->c64 = me_cexpf(z * (float)M_LN2);
+        else if (!strcmp(name, "expm1")) out->c64 = me_cexpf(z) - 1.0f;
+        else if (!strcmp(name, "log")) out->c64 = me_clogf(z);
+        else if (!strcmp(name, "log2")) out->c64 = me_clogf(z) / (float)M_LN2;
+        else if (!strcmp(name, "log10")) out->c64 = me_clogf(z) / (float)M_LN10;
+        else if (!strcmp(name, "log1p")) out->c64 = me_clogf(1.0f + z);
+        else if (!strcmp(name, "sin")) out->c64 = me_csinf(z);
+        else if (!strcmp(name, "cos")) out->c64 = me_ccosf(z);
+        else if (!strcmp(name, "tan")) out->c64 = me_ctanf(z);
+        else if (!strcmp(name, "asin")) out->c64 = me_casinf(z);
+        else if (!strcmp(name, "acos")) out->c64 = me_cacosf(z);
+        else if (!strcmp(name, "atan")) out->c64 = me_catanf(z);
+        else if (!strcmp(name, "sinh")) out->c64 = me_csinhf(z);
+        else if (!strcmp(name, "cosh")) out->c64 = me_ccoshf(z);
+        else if (!strcmp(name, "tanh")) out->c64 = me_ctanhf(z);
+        else if (!strcmp(name, "asinh")) out->c64 = me_casinhf(z);
+        else if (!strcmp(name, "acosh")) out->c64 = me_cacoshf(z);
+        else if (!strcmp(name, "atanh")) out->c64 = me_catanhf(z);
+        else if (!strcmp(name, "pow")) out->c64 = me_cpowf(z, b->c64);
         else return ME_EVAL_ERR_INVALID_ARG;
         return 0;
     }
-    if (!strcmp(name, "sqrt")) out->c128 = csqrt(a->c128);
-    else if (!strcmp(name, "exp")) out->c128 = cexp(a->c128);
-    else if (!strcmp(name, "exp2")) out->c128 = cexp(a->c128 * M_LN2);
-    else if (!strcmp(name, "expm1")) out->c128 = cexp(a->c128) - 1.0;
-    else if (!strcmp(name, "log")) out->c128 = clog(a->c128);
-    else if (!strcmp(name, "log2")) out->c128 = clog(a->c128) / M_LN2;
-    else if (!strcmp(name, "log10")) out->c128 = clog(a->c128) / M_LN10;
-    else if (!strcmp(name, "log1p")) out->c128 = clog(1.0 + a->c128);
-    else if (!strcmp(name, "sin")) out->c128 = csin(a->c128);
-    else if (!strcmp(name, "cos")) out->c128 = ccos(a->c128);
-    else if (!strcmp(name, "tan")) out->c128 = ctan(a->c128);
-    else if (!strcmp(name, "asin")) out->c128 = casin(a->c128);
-    else if (!strcmp(name, "acos")) out->c128 = cacos(a->c128);
-    else if (!strcmp(name, "atan")) out->c128 = catan(a->c128);
-    else if (!strcmp(name, "sinh")) out->c128 = csinh(a->c128);
-    else if (!strcmp(name, "cosh")) out->c128 = ccosh(a->c128);
-    else if (!strcmp(name, "tanh")) out->c128 = ctanh(a->c128);
-    else if (!strcmp(name, "asinh")) out->c128 = casinh(a->c128);
-    else if (!strcmp(name, "acosh")) out->c128 = cacosh(a->c128);
-    else if (!strcmp(name, "atanh")) out->c128 = catanh(a->c128);
-    else if (!strcmp(name, "pow")) out->c128 = cpow(a->c128, b->c128);
+    if (!strcmp(name, "sqrt")) out->c128 = me_csqrt(a->c128);
+    else if (!strcmp(name, "exp")) out->c128 = me_cexp(a->c128);
+    else if (!strcmp(name, "exp2")) out->c128 = me_cexp(a->c128 * M_LN2);
+    else if (!strcmp(name, "expm1")) out->c128 = me_cexp(a->c128) - 1.0;
+    else if (!strcmp(name, "log")) out->c128 = me_clog(a->c128);
+    else if (!strcmp(name, "log2")) out->c128 = me_clog(a->c128) / M_LN2;
+    else if (!strcmp(name, "log10")) out->c128 = me_clog(a->c128) / M_LN10;
+    else if (!strcmp(name, "log1p")) out->c128 = me_clog(1.0 + a->c128);
+    else if (!strcmp(name, "sin")) out->c128 = me_csin(a->c128);
+    else if (!strcmp(name, "cos")) out->c128 = me_ccos(a->c128);
+    else if (!strcmp(name, "tan")) out->c128 = me_ctan(a->c128);
+    else if (!strcmp(name, "asin")) out->c128 = me_casin(a->c128);
+    else if (!strcmp(name, "acos")) out->c128 = me_cacos(a->c128);
+    else if (!strcmp(name, "atan")) out->c128 = me_catan(a->c128);
+    else if (!strcmp(name, "sinh")) out->c128 = me_csinh(a->c128);
+    else if (!strcmp(name, "cosh")) out->c128 = me_ccosh(a->c128);
+    else if (!strcmp(name, "tanh")) out->c128 = me_ctanh(a->c128);
+    else if (!strcmp(name, "asinh")) out->c128 = me_casinh(a->c128);
+    else if (!strcmp(name, "acosh")) out->c128 = me_cacosh(a->c128);
+    else if (!strcmp(name, "atanh")) out->c128 = me_catanh(a->c128);
+    else if (!strcmp(name, "pow")) out->c128 = me_cpow(a->c128, b->c128);
     else return ME_EVAL_ERR_INVALID_ARG;
     return 0;
-#endif
 }
 
 static int p_math(const me_expr *n, const char *name, const me_scalar *a,
