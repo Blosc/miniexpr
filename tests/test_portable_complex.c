@@ -1,13 +1,13 @@
 /* Interpreter-first complex contract for Menudet 1.0, including Windows. */
 #undef NDEBUG
 #include <assert.h>
-#include "complex_compat.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "miniexpr.h"
 #include "miniexpr_artifact.h"
+#include "complex_compat.h"
 
 #define ITEMS 4
 #define CLOSE(a, b) (((a) == (b)) || cabs((a) - (b)) <= 1e-12 + 1e-12 * cabs(b))
