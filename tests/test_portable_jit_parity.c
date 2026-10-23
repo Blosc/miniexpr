@@ -970,6 +970,61 @@ static void batch_cast_parity(void) {
     }
 }
 
+static void batch_uniform_cast_parity(void) {
+    const char *constants[] = {
+        "{\"name\":\"y\",\"dtype\":\"int64\",\"category\":\"weak\",\"encoding\":\"decimal\",\"value\":\"9007199254740993\"}",
+        "{\"name\":\"y\",\"dtype\":\"int64\",\"category\":\"weak\",\"encoding\":\"decimal\",\"value\":\"16777217\"}",
+        "{\"name\":\"y\",\"dtype\":\"float64\",\"category\":\"typed_scalar\",\"encoding\":\"ieee754-hex\",\"value\":\"7ff0000000000001\"}",
+        "{\"name\":\"y\",\"dtype\":\"float64\",\"category\":\"typed_scalar\",\"encoding\":\"ieee754-hex\",\"value\":\"7fefffffffffffff\"}",
+        "{\"name\":\"y\",\"dtype\":\"float64\",\"category\":\"typed_scalar\",\"encoding\":\"ieee754-hex\",\"value\":\"8000000000000000\"}"
+    };
+    enum { lanes = 513 };
+    for (int capture = 0; capture < 5; capture++) {
+        bool wide = capture == 0 || capture == 4;
+        me_dtype dtype = wide ? ME_FLOAT64 : ME_FLOAT32;
+        size_t width = wide ? 8 : 4;
+        parity_case test = {"uniform cast across batch tiles",
+            capture == 4 ? "return x * float64(y)" : capture < 2 ? "return x + y" : "return x + float32(y)",
+            wide ? "float64" : "float32", wide ? "float64" : "float32", false};
+        me_artifact *artifact = load_contract(&test, ME_JIT_OFF, NULL, constants[capture], "elementwise");
+        uint64_t x[lanes], actual[lanes], expected[lanes];
+        for (int lane = 0; lane < lanes; lane++) {
+            double d = lane % 7 - 3;
+            float f = (float)d;
+            memcpy((char *)x + (size_t)lane * width, wide ? (void *)&d : (void *)&f, width);
+        }
+        uint8_t mask[lanes];
+        for (int masked = 0; masked < 2; masked++) {
+            for (int lane = 0; lane < lanes; lane++) mask[lane] = !masked || lane % 3 != 0;
+            memset(actual, 0xaa, sizeof(actual));
+            memset(expected, 0xaa, sizeof(expected));
+            me_artifact_error error;
+            me_artifact_fp_status status;
+            unsigned flags = 0;
+            for (int lane = 0; lane < lanes; lane++) {
+                me_artifact_buffer input = {"x", dtype, width, (char *)x + (size_t)lane * width, width};
+                me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor), .version = 1,
+                    .nitems = 1, .output_capacity = width, .valid_mask = mask + lane, .valid_mask_capacity = 1};
+                CHECK(!me_artifact_eval_status(artifact, &input, 1,
+                    (char *)expected + (size_t)lane * width, &descriptor, 0, &status, &error));
+                flags |= status.flags;
+            }
+            me_artifact_buffer input = {"x", dtype, width, x, lanes * width};
+            me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor), .version = 1,
+                .nitems = lanes, .output_capacity = lanes * width, .valid_mask = mask, .valid_mask_capacity = lanes};
+            size_t before = dsl_portable_batch_calls_for_tests();
+            CHECK(!me_artifact_eval_status(artifact, &input, 1, actual, &descriptor, 0, &status, &error));
+            CHECK(dsl_portable_batch_calls_for_tests() == before + (masked ? 0 : 1));
+            CHECK(status.flags == flags);
+            for (int lane = 0; lane < lanes; lane++) {
+                CHECK(batch_lane_equal((char *)actual + (size_t)lane * width,
+                    (char *)expected + (size_t)lane * width, width));
+            }
+        }
+        me_artifact_free(artifact);
+    }
+}
+
 static void batch_checked_and_alias_fallbacks(void) {
     parity_case test={"batch alias fallback","return x + y","float64","float64",false};
     me_artifact *artifact=load_contract(&test,ME_JIT_OFF,"{\"name\":\"y\",\"dtype\":\"float64\"}",NULL,"elementwise");
@@ -2036,6 +2091,7 @@ int main(int argc, char **argv) {
     batch_integer_parity();
     batch_checked_and_alias_fallbacks();
     batch_cast_parity();
+    batch_uniform_cast_parity();
     range_bound_matrix();
     weak_capture_matrix();
     captured_integer_trees();

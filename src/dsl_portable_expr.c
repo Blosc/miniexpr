@@ -2521,6 +2521,8 @@ static bool p_batch_eval(const me_expr *expr, p_eval_context *ctx, int nitems,
                 continue;
             }
             if (instruction->op == P_BATCH_CAST) {
+                /* Uniform values and their converted slots persist across vector tiles. */
+                if (instruction->uniform && begin) continue;
                 const me_expr *arg=n->parameters[0];
                 if (!instruction->uniform && p_batch_cast(arg->dtype,n->dtype,left,destination,count)) continue;
                 for (int i=0; i<(instruction->uniform ? 1 : count); i++) {
