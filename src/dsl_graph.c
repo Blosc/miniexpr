@@ -1071,7 +1071,7 @@ unsigned me_graph_execution_capabilities(const me_graph_plan *p) {
 }
 typedef struct {
     me_graph_schedule *schedule;
-    me_array_view inputs[ME_MAX_VARS];
+    me_array_view *inputs;
     me_array_output output;
     me_graph_execute_options options;
     me_graph_report report;
@@ -1185,10 +1185,17 @@ me_graph_status me_graph_execute_parallel_into(const me_graph_schedule *s,
     }
     graph_task *tasks = calloc(count,sizeof(*tasks));
     if (!tasks) return g_error(error,-1,ME_GRAPH_ERR_OOM,"task metadata allocation failed");
+    me_array_view *bindings = malloc(count*(size_t)ninputs*sizeof(*bindings));
+    if (!bindings && ninputs) {
+        free(tasks);
+        return g_error(error,-1,ME_GRAPH_ERR_OOM,"task binding allocation failed");
+    }
+    me_graph_schedule *schedules[2] = {NULL,NULL};
+    size_t q = (size_t)s->shape[axis]/count, r = (size_t)s->shape[axis]%count;
     for (size_t t = 0; t < count; t++) {
         graph_task *task = &tasks[t];
+        task->inputs = ninputs ? bindings + t*(size_t)ninputs : NULL;
         atomic_init(&task->visited,0);
-        size_t q = (size_t)s->shape[axis]/count, r = (size_t)s->shape[axis]%count;
         size_t begin = q*t + (t < r ? t : r), extent = q + (t < r);
         me_graph_input_metadata metadata[ME_MAX_VARS];
         for (int i = 0; i < ninputs; i++) {
@@ -1209,8 +1216,13 @@ me_graph_status me_graph_execute_parallel_into(const me_graph_schedule *s,
             rc = g_error(error,-1,ME_GRAPH_ERR_BINDING,"task output offset overflow"); goto cleanup_tasks;
         }
         me_graph_specialize_options specialization = {sizeof(specialization),ME_GRAPH_VERSION,tile,0};
-        rc = me_graph_specialize(s->plan,metadata,ninputs,&specialization,&task->schedule,error);
-        if (rc) goto cleanup_tasks;
+        /* Regions have at most two shapes; their schedules own no invocation buffers. */
+        size_t kind = t < r;
+        if (!schedules[kind]) {
+            rc = me_graph_specialize(s->plan,metadata,ninputs,&specialization,&schedules[kind],error);
+            if (rc) goto cleanup_tasks;
+        }
+        task->schedule = schedules[kind];
         task->ninputs = ninputs;
         task->options = options ? *options : (me_graph_execute_options){sizeof(task->options),ME_GRAPH_VERSION,0};
         task->status = ME_GRAPH_ERR_EXECUTION;
@@ -1244,7 +1256,9 @@ me_graph_status me_graph_execute_parallel_into(const me_graph_schedule *s,
         }
     }
 cleanup_tasks:
-    for (size_t t = 0; t < count; t++) me_graph_schedule_free(tasks[t].schedule);
+    me_graph_schedule_free(schedules[0]);
+    me_graph_schedule_free(schedules[1]);
+    free(bindings);
     free(tasks);
     return rc;
 }

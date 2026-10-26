@@ -245,9 +245,55 @@ static int mapped_sum_allocations(void) {
     return artifact_allocations(json,mapped_sum_result,"mapped-sum");
 }
 
+static int reverse_parallel(void *host, size_t count, me_graph_task_fn task, void *invocation) {
+    (void)host;
+    for (size_t i = count; i-- > 0;) task(invocation, i);
+    return 0;
+}
+static int parallel_allocations(void) {
+    me_graph_input_metadata metadata[] = {{"x", ME_FLOAT32, 1, {19}}, {"y", ME_FLOAT32, 1, {1}}};
+    me_graph_prepare_options prepare = {sizeof(prepare), ME_GRAPH_VERSION, ME_JIT_OFF, false, true};
+    me_graph_plan *plan = NULL;
+    const char *text = "x * 2 + y";
+    if (me_graph_prepare_expression(text, strlen(text), metadata, 2, &prepare, &plan, &error)) return 1;
+    me_graph_schedule *schedule = NULL;
+    if (me_graph_specialize(plan, metadata, 2, NULL, &schedule, &error)) {
+        me_graph_plan_free(plan); return 1;
+    }
+    float x[19], y = 3, output[19];
+    for (int i = 0; i < 19; i++) x[i] = (float)i;
+    me_array_view inputs[2] = {0};
+    for (int i = 0; i < 2; i++) {
+        inputs[i].name = metadata[i].name; inputs[i].dtype = ME_FLOAT32; inputs[i].rank = 1;
+        inputs[i].shape[0] = metadata[i].shape[0]; inputs[i].strides[0] = sizeof(float);
+        inputs[i].base = i ? &y : x; inputs[i].capacity = i ? sizeof(y) : sizeof(x);
+    }
+    me_array_output destination = {.struct_size=sizeof(destination), .version=ME_ARRAY_OUTPUT_VERSION,
+        .dtype=ME_FLOAT32, .base=output, .capacity=sizeof(output), .rank=1, .shape={19}, .strides={4}};
+    me_graph_executor executor = {sizeof(executor), ME_GRAPH_EXECUTOR_VERSION, 7, 0,
+        reverse_parallel, NULL, 1, 0};
+    me_graph_parallel_report report;
+    calls = 0;
+    int rc = me_graph_execute_parallel_into(schedule, inputs, 2, &destination, NULL, &executor, &report, &error);
+    long checkpoints = calls;
+    int failed = rc || report.tasks != 7;
+    for (long i = 0; !failed && i < checkpoints; i++) {
+        calls = 0; fail_at = i;
+        rc = me_graph_execute_parallel_into(schedule, inputs, 2, &destination, NULL, &executor, &report, &error);
+        fail_at = -1;
+        if (rc && !error.native.message[0]) { failed = 1; break; }
+        /* The same immutable schedules must remain usable after any failed invocation. */
+        rc = me_graph_execute_parallel_into(schedule, inputs, 2, &destination, NULL, &executor, &report, &error);
+        failed = rc || report.tasks != 7;
+        for (int j = 0; j < 19; j++) failed |= output[j] != 2*x[j] + y;
+    }
+    printf("parallel graph allocation checkpoints=%ld; recovery %s\n", checkpoints, failed ? "failed" : "passed");
+    me_graph_schedule_free(schedule); me_graph_plan_free(plan);
+    return failed || !checkpoints;
+}
 int main(void) {
     const float affine[] = {3, 10, 21}, staged[] = {7, 8, 9}, initial[] = {9, 15, 25};
-    return scalar_dispatches() || weak_conversion_allocations() || loop_allocations() || mapped_sum_allocations() || check("x * 2 + y", affine, ME_JIT_OFF) ||
+    return parallel_allocations() || scalar_dispatches() || weak_conversion_allocations() || loop_allocations() || mapped_sum_allocations() || check("x * 2 + y", affine, ME_JIT_OFF) ||
         check("sqrt(x) + sum(y)", staged, ME_JIT_OFF) ||
         check("x * 2 + sum(y, axis=0, initial=1)", initial, ME_JIT_OFF) ||
         check("x * 2 + y", affine, ME_JIT_ON);
