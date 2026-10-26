@@ -620,6 +620,39 @@ static void output_aliases(bool jit) {
     CHECK(x[0] == 0 && x[1] == 1 && x[2] == 2 && x[3] == 3);
     me_graph_schedule_free(s); me_graph_plan_free(p);
 }
+static void in_memory_roundtrip(void) {
+    const char *expressions[] = {"x + (y - 1)", "x + -0.0 + y", "x + .5 + y", "where(x != 0, y / x, y)",
+        "float32(x) + y", "x < y", "x ** -2 + y", "x - sum(x) + y", "sum(x + y, axis=0, initial=-2.5)"};
+    me_graph_input_metadata metadata[] = {{"x", ME_FLOAT64, 1, {3}}, {"y", ME_FLOAT64, 1, {3}}};
+    double x[] = {1, 2, 4}, y[] = {3, 2, 1};
+    me_array_view inputs[] = {view("x", ME_FLOAT64, x, sizeof(x), 1, 3, 0),
+        view("y", ME_FLOAT64, y, sizeof(y), 1, 3, 0)};
+    for (size_t i = 0; i < sizeof(expressions)/sizeof(*expressions); i++) {
+        me_graph_plan *direct = prepare(expressions[i], metadata, 2, false), *imported = NULL;
+        size_t length;
+        const char *json = me_graph_export_json(direct, &length);
+        CHECK(!me_graph_prepare_json(json, length, NULL, &imported, &error));
+        CHECK(!strcmp(json, me_graph_export_json(imported, NULL)));
+        CHECK(me_graph_inferred_dtype(direct) == me_graph_inferred_dtype(imported));
+        CHECK(me_graph_execution_capabilities(direct) == me_graph_execution_capabilities(imported));
+        const char *map = me_graph_export_map_json(direct), *copy = me_graph_export_map_json(imported);
+        CHECK((!map && !copy) || (map && copy && !strcmp(map, copy)));
+        me_graph_schedule *a = NULL, *b = NULL;
+        CHECK(!me_graph_specialize(direct, metadata, 2, NULL, &a, &error));
+        CHECK(!me_graph_specialize(imported, metadata, 2, NULL, &b, &error));
+        me_graph_plan_free(direct); me_graph_plan_free(imported);
+        size_t bytes = me_graph_output_bytes(a);
+        CHECK(bytes == me_graph_output_bytes(b));
+        void *actual = malloc(bytes), *expected = malloc(bytes);
+        CHECK(actual && expected);
+        me_graph_report actual_report, expected_report;
+        CHECK(!me_graph_execute(a, inputs, 2, actual, bytes, NULL, &actual_report, &error));
+        CHECK(!me_graph_execute(b, inputs, 2, expected, bytes, NULL, &expected_report, &error));
+        CHECK(!memcmp(actual, expected, bytes));
+        CHECK(actual_report.array.fp_flags == expected_report.array.fp_flags);
+        free(actual); free(expected); me_graph_schedule_free(a); me_graph_schedule_free(b);
+    }
+}
 int main(void) {
 #define RUN_CASE(call) do { fprintf(stderr, "graph preparation: %s\n", #call); fflush(stderr); call; } while (0)
     RUN_CASE(maps(false)); RUN_CASE(lazy(false)); RUN_CASE(reductions(false));
@@ -636,6 +669,7 @@ int main(void) {
     RUN_CASE(trusted(false)); RUN_CASE(trusted(true));
     RUN_CASE(storage_readers(false)); RUN_CASE(storage_readers(true));
     RUN_CASE(output_aliases(false)); RUN_CASE(output_aliases(true));
+    RUN_CASE(in_memory_roundtrip());
 #undef RUN_CASE
     puts("native graph preparation/execution passed"); return 0;
 }

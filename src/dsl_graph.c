@@ -389,29 +389,79 @@ static bool g_partitionable(graph_node *nodes, int count) {
     }
     return count && runtime[count-1];
 }
-static me_graph_status g_prepare_json(const char *json, size_t length,
+static yyjson_doc *g_map_root(const char *source, graph_node *nodes,
+    const int *input_nodes, int ni, const int *constant_nodes, int nc, int mask_node) {
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    if (!doc) return NULL;
+    yyjson_mut_val *root = yyjson_mut_obj(doc), *language = yyjson_mut_obj(doc);
+    yyjson_mut_val *requires = yyjson_mut_arr(doc), *inputs = yyjson_mut_arr(doc);
+    yyjson_mut_val *constants = yyjson_mut_arr(doc), *output = yyjson_mut_obj(doc);
+    yyjson_mut_val *semantics = yyjson_mut_obj(doc), *context = yyjson_mut_obj(doc);
+    bool ok = yyjson_mut_obj_add_str(doc, root, "schema_version", "1.0");
+    ok &= yyjson_mut_obj_add_str(doc, language, "name", "miniexpr");
+    ok &= yyjson_mut_obj_add_str(doc, language, "version", "1.0");
+    ok &= yyjson_mut_obj_add_val(doc, root, "language", language);
+    ok &= yyjson_mut_arr_add_str(doc, requires, "numeric");
+    ok &= yyjson_mut_obj_add_val(doc, root, "requires", requires);
+    ok &= yyjson_mut_obj_add_str(doc, root, "entry_point", "graph_map");
+    ok &= yyjson_mut_obj_add_str(doc, root, "source", source);
+    for (int j = 0; j < ni; j++) {
+        int id = input_nodes[j];
+        if (id == mask_node && nodes[id].uses == 1) continue;
+        yyjson_mut_val *input = yyjson_mut_obj(doc);
+        ok &= yyjson_mut_obj_add_str(doc, input, "name", g_str(yyjson_obj_get(nodes[id].value, "name")));
+        ok &= yyjson_mut_obj_add_str(doc, input, "dtype", g_str(yyjson_obj_get(nodes[id].value, "dtype")));
+        ok &= yyjson_mut_arr_append(inputs, input);
+    }
+    ok &= yyjson_mut_obj_add_val(doc, root, "inputs", inputs);
+    for (int j = 0; j < nc; j++) {
+        int id = constant_nodes[j];
+        yyjson_mut_val *constant = yyjson_val_mut_copy(doc, nodes[id].value);
+        yyjson_mut_obj_remove_key(constant, "id");
+        yyjson_mut_obj_remove_key(constant, "op");
+        char name[32]; snprintf(name, sizeof(name), "_me_capture_%d", id);
+        ok &= yyjson_mut_obj_add_strcpy(doc, constant, "name", name);
+        ok &= yyjson_mut_arr_append(constants, constant);
+    }
+    ok &= yyjson_mut_obj_add_val(doc, root, "constants", constants);
+    ok &= yyjson_mut_obj_add_str(doc, output, "dtype", "auto");
+    ok &= yyjson_mut_obj_add_str(doc, output, "contract", "elementwise");
+    ok &= yyjson_mut_obj_add_val(doc, root, "output", output);
+    ok &= yyjson_mut_obj_add_str(doc, semantics, "fp", "strict");
+    ok &= yyjson_mut_obj_add_str(doc, semantics, "numeric", "numpy-2.5");
+    ok &= yyjson_mut_obj_add_str(doc, semantics, "casting", "unsafe");
+    ok &= yyjson_mut_obj_add_val(doc, root, "semantics", semantics);
+    ok &= yyjson_mut_obj_add_uint(doc, context, "ndim", 0);
+    ok &= yyjson_mut_obj_add_val(doc, root, "context", context);
+    yyjson_mut_doc_set_root(doc, root);
+    yyjson_doc *result = ok ? yyjson_mut_doc_imut_copy(doc, NULL) : NULL;
+    yyjson_mut_doc_free(doc);
+    return result;
+}
+static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_val *root,
     const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error) {
     if (out) *out = NULL;
     g_error(error, -1, ME_GRAPH_SUCCESS, "");
-    if (!out || !json || !length || length > ME_GRAPH_MAX_BYTES || memchr(json, 0, length))
+    if (!out || (!root && (!json || !length || length > ME_GRAPH_MAX_BYTES || memchr(json, 0, length))))
         return g_error(error, -1, ME_GRAPH_ERR_FORMAT, "invalid graph buffer or byte limit");
     if (options && (options->struct_size != sizeof(*options) || options->version != ME_GRAPH_VERSION ||
         (options->jit != ME_JIT_OFF && options->jit != ME_JIT_ON &&
          options->jit != ME_JIT_AUTO && options->jit != ME_JIT_DEFAULT)))
         return g_error(error, -1, ME_GRAPH_ERR_FORMAT, "invalid preparation options");
     yyjson_read_err decode_error;
-    yyjson_doc *doc = yyjson_read_opts((char *)json, length, 0, NULL, &decode_error);
-    if (!doc) return g_error(error, -1,
+    yyjson_doc *doc = root ? NULL : yyjson_read_opts((char *)json, length, 0, NULL, &decode_error);
+    if (!root && !doc) return g_error(error, -1,
         decode_error.code == YYJSON_READ_ERROR_MEMORY_ALLOCATION ? ME_GRAPH_ERR_OOM : ME_GRAPH_ERR_FORMAT,
         "graph JSON decode failed");
     me_graph_status rc = ME_GRAPH_ERR_FORMAT;
     me_graph_plan *p = NULL;
+    yyjson_doc *map_doc = NULL;
     graph_buffer source = {0}, manifest = {0}, canonical = {0};
     graph_node nodes[ME_GRAPH_MAX_NODES] = {0};
     int input_nodes[ME_MAX_VARS], constant_nodes[ME_MAX_VARS], ni = 0, nc = 0;
     int current = -1, mask_node = -1;
     const char *message = "invalid graph schema, fields, keys or nesting";
-    yyjson_val *root = yyjson_doc_get_root(doc);
+    if (!root) root = yyjson_doc_get_root(doc);
     if (g_tree(root, 0) && g_equal(yyjson_obj_get(root, "format"), ME_GRAPH_STAGED_FORMAT)) {
         rc = g_prepare_staged(root, options, out, error);
         yyjson_doc_free(doc);
@@ -608,14 +658,6 @@ static me_graph_status g_prepare_json(const char *json, size_t length,
         else { char name[32]; snprintf(name, sizeof(name), "_me_capture_%d", id); g_add(&source, name); }
     }
     g_add(&source, "):\n    return "); g_expr(&source, nodes, map_root); g_add(&source, "\n");
-    g_add(&manifest, "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},\"requires\":[\"numeric\"],\"entry_point\":\"graph_map\",\"source\":");
-    /* Source contains only generated ASCII names/operators; JSON-escape it. */
-    g_add(&manifest, "\"");
-    if (!source.failed) for (size_t i = 0; i < source.size; i++) {
-        char c[2] = {source.data[i], 0};
-        g_add(&manifest, source.data[i] == '\n' ? "\\n" : c);
-    }
-    g_add(&manifest, "\",\"inputs\":[");
     int map_index = 0;
     for (int j = 0; j < ni; j++) {
         int id = input_nodes[j]; yyjson_val *v = nodes[id].value;
@@ -625,41 +667,25 @@ static me_graph_status g_prepare_json(const char *json, size_t length,
         if (!p->names[j]) { rc = ME_GRAPH_ERR_OOM; message = "binding allocation failed"; goto done; }
         if (id == mask_node) p->mask = j;
         if (id == mask_node && nodes[id].uses == 1) continue;
-        p->map_indices[j] = map_index;
-        if (map_index++) g_add(&manifest, ",");
-        g_add(&manifest, "{\"name\":"); g_json(&manifest, yyjson_obj_get(v, "name")); g_add(&manifest, ",\"dtype\":");
-        g_json(&manifest, yyjson_obj_get(v, "dtype")); g_add(&manifest, "}");
+        p->map_indices[j] = map_index++;
     }
-    g_add(&manifest, "],\"constants\":[");
-    for (int j = 0; j < nc; j++) {
-        if (j) g_add(&manifest, ",");
-        int id = constant_nodes[j]; char text[64];
-        snprintf(text, sizeof(text), "{\"name\":\"_me_capture_%d\"", id); g_add(&manifest, text);
-        const char *fields[] = {"dtype", "category", "encoding", "value"};
-        for (int k = 0; k < 4; k++) {
-            g_add(&manifest, ",\""); g_add(&manifest, fields[k]); g_add(&manifest, "\":");
-            g_json(&manifest, yyjson_obj_get(nodes[id].value, fields[k]));
-        }
-        g_add(&manifest, "}");
-    }
-    g_add(&manifest, "],\"output\":{\"dtype\":\"auto\",\"contract\":\"elementwise\"},\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":0}}");
     g_json(&canonical, root);
-    if (source.failed || manifest.failed || canonical.failed) {
-        rc = source.oom || manifest.oom || canonical.oom ? ME_GRAPH_ERR_OOM : ME_GRAPH_ERR_FORMAT;
+    if (source.failed || canonical.failed) {
+        rc = source.oom || canonical.oom ? ME_GRAPH_ERR_OOM : ME_GRAPH_ERR_FORMAT;
         message = "lowering allocation or byte limit exceeded"; goto done;
     }
+    map_doc = g_map_root(source.data, nodes, input_nodes, ni, constant_nodes, nc, mask_node);
+    if (!map_doc) { rc = ME_GRAPH_ERR_OOM; message = "map allocation failed"; goto done; }
     me_artifact_error native;
-    int status = dsl_graph_load_map(manifest.data, manifest.size, options ? options->jit : ME_JIT_OFF, &p->map, &native);
+    yyjson_val *map = yyjson_doc_get_root(map_doc);
+    int status = dsl_graph_load_map_root(map, options ? options->jit : ME_JIT_OFF, &p->map, &native);
     if (status) { rc = g_native(error, map_root, status, &native); message = NULL; goto done; }
     p->inferred = me_artifact_inferred_dtype(p->map);
     if (!reduction && final_dtype == ME_AUTO) {
-        graph_buffer exported = {0};
-        char *marker = strstr(manifest.data, "\"output\":{\"dtype\":\"auto\"");
-        char *type = marker + strlen("\"output\":{\"dtype\":\"");
-        *type = 0;
-        g_add(&exported, manifest.data); g_add(&exported, g_dtype_name(p->inferred)); g_add(&exported, type + 4);
-        if (exported.failed) { free(exported.data); rc = exported.oom ? ME_GRAPH_ERR_OOM : ME_GRAPH_ERR_FORMAT; message = "map export allocation or byte limit exceeded"; goto done; }
-        p->map_json = exported.data;
+        yyjson_set_str(yyjson_obj_get(yyjson_obj_get(map, "output"), "dtype"), g_dtype_name(p->inferred));
+        g_json(&manifest, map);
+        if (manifest.failed) { rc = manifest.oom ? ME_GRAPH_ERR_OOM : ME_GRAPH_ERR_FORMAT; message = "map export allocation or byte limit exceeded"; goto done; }
+        p->map_json = manifest.data; manifest.data = NULL;
     }
     /* Validate accumulator/initial using a rank that covers all legal axes. */
     if (reduction) {
@@ -699,10 +725,10 @@ static me_graph_status g_prepare_json(const char *json, size_t length,
 done:
     if (rc && message) g_error(error, current, rc, message);
     me_graph_plan_free(p);
-    free(source.data); free(manifest.data); free(canonical.data); yyjson_doc_free(doc);
+    free(source.data); free(manifest.data); free(canonical.data); yyjson_doc_free(map_doc); yyjson_doc_free(doc);
     return rc;
 }
-me_graph_status me_graph_prepare_json(const char *json, size_t length,
+static me_graph_status g_prepare(const char *json, size_t length, yyjson_val *root,
     const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error) {
     if (out) *out = NULL;
     /* Even malformed JSON can contain exceptional real tokens. Decoding and
@@ -713,12 +739,20 @@ me_graph_status me_graph_prepare_json(const char *json, size_t length,
         fesetenv(&saved);
         return g_error(error, -1, ME_GRAPH_ERR_CAPABILITY, "cannot establish preparation rounding");
     }
-    me_graph_status rc = g_prepare_json(json, length, options, out, error);
+    me_graph_status rc = g_prepare_json(json, length, root, options, out, error);
     if (fesetenv(&saved)) {
         if (out) { me_graph_plan_free(*out); *out = NULL; }
         return g_error(error, -1, ME_GRAPH_ERR_CAPABILITY, "cannot restore preparation floating environment");
     }
     return rc;
+}
+me_graph_status me_graph_prepare_json(const char *json, size_t length,
+    const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error) {
+    return g_prepare(json, length, NULL, options, out, error);
+}
+me_graph_status dsl_graph_prepare_root(yyjson_val *root,
+    const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error) {
+    return g_prepare(NULL, 0, root, options, out, error);
 }
 static int g_find(const me_graph_plan *p, const char *name) {
     if (name) for (int i = 0; i < p->ninputs; i++) if (!strcmp(name, p->names[i])) return i;

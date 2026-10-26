@@ -246,8 +246,9 @@ static int mapped_sum_allocations(void) {
 }
 
 int main(void) {
-    const float affine[] = {3, 10, 21}, staged[] = {7, 8, 9};
+    const float affine[] = {3, 10, 21}, staged[] = {7, 8, 9}, initial[] = {9, 15, 25};
     return scalar_dispatches() || weak_conversion_allocations() || loop_allocations() || mapped_sum_allocations() || check("x * 2 + y", affine, ME_JIT_OFF) ||
         check("sqrt(x) + sum(y)", staged, ME_JIT_OFF) ||
+        check("x * 2 + sum(y, axis=0, initial=1)", initial, ME_JIT_OFF) ||
         check("x * 2 + y", affine, ME_JIT_ON);
 }

@@ -466,10 +466,10 @@ static unsigned artifact_block_capabilities(const me_dsl_compiled_block *block) 
 }
 
 static me_artifact_status artifact_load(const char *json, size_t length, me_jit_mode jit_mode,
-                                   me_artifact **out, me_artifact_error *error, bool graph_infer) {
+                                   me_artifact **out, me_artifact_error *error, bool graph_infer, yyjson_val *root) {
     artifact_clear_error(error);
     if (out) *out = NULL;
-    if (!out || !json || !length || length > ME_ARTIFACT_MAX_BYTES || memchr(json, 0, length)) {
+    if (!out || (!root && (!json || !length || length > ME_ARTIFACT_MAX_BYTES || memchr(json, 0, length)))) {
         return artifact_error(error, ME_ARTIFACT_ERR_FORMAT, "invalid JSON buffer or artifact size");
     }
     if (jit_mode != ME_JIT_DEFAULT && jit_mode != ME_JIT_AUTO && jit_mode != ME_JIT_ON && jit_mode != ME_JIT_OFF) {
@@ -480,8 +480,8 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
         return artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "IEEE-754 host floats are required");
     }
     yyjson_read_err json_error;
-    yyjson_doc *doc = yyjson_read_opts((char *)json, length, 0, NULL, &json_error);
-    if (!doc) {
+    yyjson_doc *doc = root ? NULL : yyjson_read_opts((char *)json, length, 0, NULL, &json_error);
+    if (!root && !doc) {
         return artifact_error(error, json_error.code == YYJSON_READ_ERROR_MEMORY_ALLOCATION
                               ? ME_ARTIFACT_ERR_OOM : ME_ARTIFACT_ERR_FORMAT,
                               json_error.msg ? json_error.msg : "invalid JSON");
@@ -489,7 +489,7 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
     me_artifact_status status = ME_ARTIFACT_ERR_FORMAT;
     me_artifact *artifact = NULL;
     me_dsl_program *parsed = NULL;
-    yyjson_val *root = yyjson_doc_get_root(doc);
+    if (!root) root = yyjson_doc_get_root(doc);
     if (!artifact_tree(root, 0) || !yyjson_is_obj(root)) {
         artifact_error(error, status, "invalid fields, duplicate keys, NUL strings, or nesting limits");
         goto cleanup;
@@ -869,20 +869,25 @@ cleanup:
 
 me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode jit_mode,
     me_artifact **out, me_artifact_error *error) {
-    return artifact_load(json, length, jit_mode, out, error, false);
+    return artifact_load(json, length, jit_mode, out, error, false, NULL);
 }
 
 me_artifact_status me_artifact_load_options(const char *json, size_t length, me_jit_mode jit_mode,
     const me_jit_options *options, me_artifact **out, me_artifact_error *error) {
     const me_jit_options *previous = dsl_jit_exchange_options(options);
-    me_artifact_status rc = artifact_load(json, length, jit_mode, out, error, false);
+    me_artifact_status rc = artifact_load(json, length, jit_mode, out, error, false, NULL);
     dsl_jit_exchange_options(previous);
     return rc;
 }
 
 me_artifact_status dsl_graph_load_map(const char *json, size_t length, me_jit_mode jit_mode,
     me_artifact **out, me_artifact_error *error) {
-    return artifact_load(json, length, jit_mode, out, error, true);
+    return artifact_load(json, length, jit_mode, out, error, true, NULL);
+}
+
+me_artifact_status dsl_graph_load_map_root(yyjson_val *root, me_jit_mode jit_mode,
+    me_artifact **out, me_artifact_error *error) {
+    return artifact_load(NULL, 0, jit_mode, out, error, true, root);
 }
 
 me_artifact_status me_artifact_eval(const me_artifact *artifact,

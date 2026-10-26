@@ -1,5 +1,6 @@
-/* Syntax-only restricted expression frontend, terminating in the JSON validator. */
+/* Syntax-only frontend sharing graph validation through an in-memory tree. */
 #include "miniexpr_graph.h"
+#include "dsl_graph_internal.h"
 #include "yyjson.h"
 #include <ctype.h>
 #include <fenv.h>
@@ -10,7 +11,10 @@
 typedef struct {
     const char *text;
     size_t length, pos;
-    char token[80], nodes[ME_GRAPH_MAX_NODES][2048], names[ME_MAX_VARS][64];
+    char token[80], names[ME_MAX_VARS][64];
+    yyjson_mut_doc *doc;
+    yyjson_mut_val *nodes[ME_GRAPH_MAX_NODES];
+    bool oom;
     int kind, ninputs, count, depth;
     bool reductions[ME_GRAPH_MAX_NODES];
     const char *error;
@@ -69,24 +73,55 @@ static bool t_take(text_parser *p, const char *s) {
 static void t_expect(text_parser *p, const char *s) {
     if (!t_take(p, s)) p->error = "unexpected expression token";
 }
-static int t_node(text_parser *p, const char *body) {
+static void t_add(text_parser *p, yyjson_mut_val *object, const char *key, yyjson_mut_val *value) {
+    if (!yyjson_mut_obj_add_val(p->doc, object, key, value)) {
+        p->oom = true; p->error = "expression allocation failed";
+    }
+}
+static void t_string(text_parser *p, yyjson_mut_val *object, const char *key, const char *value) {
+    t_add(p, object, key, yyjson_mut_strcpy(p->doc, value));
+}
+static void t_append(text_parser *p, yyjson_mut_val *array, yyjson_mut_val *value) {
+    if (!yyjson_mut_arr_append(array, value)) {
+        p->oom = true; p->error = "expression allocation failed";
+    }
+}
+static int t_node(text_parser *p, const char *op) {
+    if (p->error) return -1;
     if (p->count == ME_GRAPH_MAX_NODES) { p->error = "expression node limit exceeded"; return -1; }
     int id = p->count++;
     p->reductions[id] = false;
-    int n = snprintf(p->nodes[id], sizeof(p->nodes[id]), "{\"id\":%d,%s}", id, body);
-    if (n < 0 || (size_t)n >= sizeof(p->nodes[id])) p->error = "node encoding limit exceeded";
+    p->nodes[id] = yyjson_mut_obj(p->doc);
+    t_add(p, p->nodes[id], "id", yyjson_mut_uint(p->doc, (uint64_t)id));
+    t_string(p, p->nodes[id], "op", op);
+    return id;
+}
+static int t_arguments(text_parser *p, const char *op, const int *args, int count) {
+    int id = t_node(p, op);
+    if (id < 0) return id;
+    yyjson_mut_val *array = yyjson_mut_arr(p->doc);
+    t_add(p, p->nodes[id], "args", array);
+    for (int i = 0; i < count; i++) t_append(p, array, yyjson_mut_uint(p->doc, (uint64_t)args[i]));
     return id;
 }
 static int t_op(text_parser *p, const char *op, int a, int b) {
-    char body[256];
-    if (b < 0) snprintf(body, sizeof(body), "\"op\":\"%s\",\"args\":[%d]", op, a);
-    else snprintf(body, sizeof(body), "\"op\":\"%s\",\"args\":[%d,%d]", op, a, b);
-    return t_node(p, body);
+    int args[] = {a, b};
+    return t_arguments(p, op, args, b < 0 ? 1 : 2);
+}
+static int t_constant(text_parser *p, const char *dtype, const char *encoding, yyjson_mut_val *value) {
+    int id = t_node(p, "constant");
+    if (id < 0) return id;
+    t_string(p, p->nodes[id], "dtype", dtype);
+    t_string(p, p->nodes[id], "category", "weak");
+    t_string(p, p->nodes[id], "encoding", encoding);
+    t_add(p, p->nodes[id], "value", value);
+    return id;
 }
 static int t_expr(text_parser *p, int minimum);
 static int t_primary(text_parser *p);
 static int t_literal(text_parser *p, bool negative) {
-    char body[320], text[84];
+    char text[84];
+    int id;
     snprintf(text, sizeof(text), "%s%s", negative ? "-" : "", p->token);
     if (strchr(text, '.') || strchr(text, 'e') || strchr(text, 'E')) {
         fenv_t saved;
@@ -106,23 +141,24 @@ static int t_literal(text_parser *p, bool negative) {
         uint64_t bits; memcpy(&bits, &value, sizeof(bits)); fesetenv(&saved);
         yyjson_doc_free(literal);
         if (!valid) { p->error = "invalid or nonfinite weak real literal"; return -1; }
-        snprintf(body, sizeof(body), "\"op\":\"constant\",\"dtype\":\"float64\",\"category\":\"weak\",\"encoding\":\"ieee754-hex\",\"value\":\"%016llx\"", (unsigned long long)bits);
+        char hex[17]; snprintf(hex, sizeof(hex), "%016llx", (unsigned long long)bits);
+        id = t_constant(p, "float64", "ieee754-hex", yyjson_mut_strcpy(p->doc, hex));
     } else {
         const char *digits = text + negative;
         if (digits[0] == '0' && digits[1]) { p->error = "noncanonical integer literal"; return -1; }
         if (negative && !strcmp(digits, "0")) strcpy(text, "0");
-        snprintf(body, sizeof(body), "\"op\":\"constant\",\"dtype\":\"int64\",\"category\":\"weak\",\"encoding\":\"decimal\",\"value\":\"%s\"", text);
+        id = t_constant(p, "int64", "decimal", yyjson_mut_strcpy(p->doc, text));
     }
-    t_next(p); return t_node(p, body);
+    t_next(p); return id;
 }
 static bool t_reduction(const char *s) {
     return !strcmp(s, "sum") || !strcmp(s, "prod") || !strcmp(s, "min") || !strcmp(s, "max") || !strcmp(s, "any") || !strcmp(s, "all");
 }
 static int t_call(text_parser *p, const char *name) {
-    char body[1800];
     if (t_reduction(name)) {
         int map = t_expr(p, 0), where = -1;
-        char axes[256] = "null", dtype[64] = "auto", initial[768] = "null";
+        yyjson_mut_val *axes = yyjson_mut_null(p->doc), *initial = yyjson_mut_null(p->doc);
+        char dtype[64] = "auto";
         bool keepdims = false; unsigned keywords = 0;
         while (t_take(p, ",") && !p->error) {
             char keyword[80]; strcpy(keyword, p->token); t_next(p); t_expect(p, "=");
@@ -130,20 +166,19 @@ static int t_call(text_parser *p, const char *name) {
             if (!bit || (keywords & bit)) { p->error = "unknown or duplicate reduction keyword"; break; }
             keywords |= bit;
             if (bit == 1) {
-                if (t_take(p, "None") || t_take(p, "null")) strcpy(axes, "null");
+                if (t_take(p, "None") || t_take(p, "null")) axes = yyjson_mut_null(p->doc);
                 else {
                     char close = 0;
                     if (!strcmp(p->token, "[") || !strcmp(p->token, "(")) { close = p->token[0] == '[' ? ']' : ')'; t_next(p); }
-                    size_t offset = 1; axes[0] = '['; axes[1] = 0; int count = 0;
+                    axes = yyjson_mut_arr(p->doc); int count = 0;
                     while (!p->error && !(close && p->token[0] == close && !p->token[1])) {
                         bool neg = t_take(p, "-");
                         if (p->kind != 2 || strspn(p->token, "0123456789") != strlen(p->token) || strlen(p->token) > 2 || count == ME_ARRAY_MAX_RANK) { p->error = "invalid reduction axis"; break; }
                         int axis = atoi(p->token) * (neg ? -1 : 1);
                         if (axis < -ME_ARRAY_MAX_RANK || axis >= ME_ARRAY_MAX_RANK) { p->error = "axis exceeds maximum rank"; break; }
-                        offset += (size_t)snprintf(axes + offset, sizeof(axes) - offset, "%s%d", count++ ? "," : "", axis);
+                        t_append(p, axes, yyjson_mut_sint(p->doc, axis)); count++;
                         t_next(p); if (!close || !t_take(p, ",")) break;
                     }
-                    strcpy(axes + offset, "]");
                     if (close) { char end[2] = {close, 0}; t_expect(p, end); }
                 }
             } else if (bit == 2) {
@@ -158,27 +193,29 @@ static int t_call(text_parser *p, const char *name) {
                  * initial expressions; nested reduction keywords must not
                  * bypass the expression recursion bound. */
                 int before = p->count, id = t_expr(p, 0);
-                yyjson_doc *doc = id >= before && p->count == before + 1 ? yyjson_read(p->nodes[id], strlen(p->nodes[id]), 0) : NULL;
-                yyjson_val *v = doc ? yyjson_doc_get_root(doc) : NULL;
-                const char *op = yyjson_get_str(yyjson_obj_get(v, "op"));
+                yyjson_mut_val *v = id >= before && p->count == before + 1 ? p->nodes[id] : NULL;
+                const char *op = yyjson_mut_get_str(yyjson_mut_obj_get(v, "op"));
                 if (!op || strcmp(op, "constant")) p->error = "initial requires a scalar literal";
                 else {
-                    const char *fields[] = {"dtype", "category", "encoding", "value"};
-                    size_t used = 0; initial[used++] = '{'; initial[used] = 0;
-                    for (int i = 0; i < 4; i++) {
-                        char *encoded = yyjson_val_write(yyjson_obj_get(v, fields[i]), 0, NULL);
-                        if (!encoded) { p->error = "literal encoding allocation failed"; break; }
-                        used += (size_t)snprintf(initial + used, sizeof(initial) - used, "%s\"%s\":%s", i ? "," : "", fields[i], encoded);
-                        free(encoded);
-                    }
-                    strcat(initial, "}");
+                    initial = yyjson_mut_val_mut_copy(p->doc, v);
+                    if (!initial) { p->oom = true; p->error = "literal allocation failed"; }
+                    yyjson_mut_obj_remove_key(initial, "id");
+                    yyjson_mut_obj_remove_key(initial, "op");
                 }
-                p->count = before; yyjson_doc_free(doc);
+                p->count = before;
             }
         }
         t_expect(p, ")");
-        char mask[32] = "null"; if (where >= 0) snprintf(mask, sizeof(mask), "%d", where);
-        snprintf(body, sizeof(body), "\"op\":\"%s\",\"args\":[%d],\"axes\":%s,\"keepdims\":%s,\"dtype\":\"%s\",\"initial\":%s,\"where\":%s", name, map, axes, keepdims ? "true" : "false", dtype, initial, mask);
+        int id = t_arguments(p, name, &map, 1);
+        if (id < 0) return id;
+        yyjson_mut_val *node = p->nodes[id];
+        t_add(p, node, "axes", axes);
+        t_add(p, node, "keepdims", yyjson_mut_bool(p->doc, keepdims));
+        t_string(p, node, "dtype", dtype);
+        t_add(p, node, "initial", initial);
+        t_add(p, node, "where", where < 0 ? yyjson_mut_null(p->doc) : yyjson_mut_uint(p->doc, (uint64_t)where));
+        p->reductions[id] = true;
+        return id;
     } else {
         int args[3], n = 0;
         if (strcmp(p->token, ")")) do {
@@ -189,16 +226,12 @@ static int t_call(text_parser *p, const char *name) {
         bool cast = false;
         me_dtype types[] = {ME_BOOL, ME_INT8, ME_INT16, ME_INT32, ME_INT64, ME_UINT8, ME_UINT16, ME_UINT32, ME_UINT64, ME_FLOAT32, ME_FLOAT64};
         for (int i = 0; i < 11; i++) if (!strcmp(name, t_dtype(types[i]))) cast = true;
-        size_t used = (size_t)snprintf(body, sizeof(body), "\"op\":\"%s\"", cast ? "cast" : !strcmp(name, "where") ? "select" : "function");
-        if (cast || strcmp(name, "where")) used += (size_t)snprintf(body + used, sizeof(body) - used, ",\"%s\":\"%s\"", cast ? "dtype" : "name", name);
-        used += (size_t)snprintf(body + used, sizeof(body) - used, ",\"args\":[");
-        for (int i = 0; i < n; i++) used += (size_t)snprintf(body + used, sizeof(body) - used, "%s%d", i ? "," : "", args[i]);
-        snprintf(body + used, sizeof(body) - used, "]");
+        int id = t_arguments(p, cast ? "cast" : !strcmp(name, "where") ? "select" : "function", args, n);
+        if (id >= 0 && (cast || strcmp(name, "where"))) t_string(p, p->nodes[id], cast ? "dtype" : "name", name);
+        return id;
     }
-    int id = p->error ? -1 : t_node(p, body);
-    if (id >= 0) p->reductions[id] = t_reduction(name);
-    return id;
 }
+
 static int t_primary(text_parser *p) {
     if (t_take(p, "(")) { int id = t_expr(p, 0); t_expect(p, ")"); return id; }
     if (!strcmp(p->token, "-") || !strcmp(p->token, "+") || !strcmp(p->token, "~") || !strcmp(p->token, "not")) {
@@ -218,8 +251,7 @@ static int t_primary(text_parser *p) {
         char name[80]; strcpy(name, p->token); t_next(p);
         if (t_take(p, "(")) return t_call(p, name);
         if (!strcmp(name, "True") || !strcmp(name, "False") || !strcmp(name, "true") || !strcmp(name, "false")) {
-            char body[256]; snprintf(body, sizeof(body), "\"op\":\"constant\",\"dtype\":\"bool\",\"category\":\"weak\",\"encoding\":\"boolean\",\"value\":%s", name[0] == 'T' || name[0] == 't' ? "true" : "false");
-            return t_node(p, body);
+            return t_constant(p, "bool", "boolean", yyjson_mut_bool(p->doc, name[0] == 'T' || name[0] == 't'));
         }
         for (int i = 0; i < p->ninputs; i++) if (!strcmp(name, p->names[i])) return i;
         p->error = "unbound expression name"; return -1;
@@ -261,34 +293,53 @@ me_graph_status me_graph_prepare_expression(const char *expression, size_t lengt
         if (error) snprintf(error->native.message, sizeof(error->native.message), "expression parser allocation failed");
         return ME_GRAPH_ERR_OOM;
     }
+    p->doc = yyjson_mut_doc_new(NULL);
+    if (!p->doc) {
+        free(p);
+        if (error) snprintf(error->native.message, sizeof(error->native.message), "expression allocation failed");
+        return ME_GRAPH_ERR_OOM;
+    }
     p->text = expression; p->length = length; p->ninputs = ninputs;
     for (int i = 0; i < ninputs; i++) {
         const char *dtype = t_dtype(inputs[i].dtype);
         if (!dtype || !t_name(inputs[i].name)) { p->error = "invalid text input signature"; break; }
         strcpy(p->names[i], inputs[i].name);
-        char body[256]; snprintf(body, sizeof(body), "\"op\":\"input\",\"name\":\"%s\",\"dtype\":\"%s\"", inputs[i].name, dtype); t_node(p, body);
+        int id = t_node(p, "input");
+        if (id < 0) break;
+        t_string(p, p->nodes[id], "name", inputs[i].name);
+        t_string(p, p->nodes[id], "dtype", dtype);
     }
     t_next(p); int root = p->error ? -1 : t_expr(p, 0);
     if (p->kind) p->error = "unsupported or trailing expression syntax";
     me_graph_status rc = ME_GRAPH_ERR_FORMAT;
-    if (p->error) {
-        if (error) { error->native.column = (int)p->pos; snprintf(error->native.message, sizeof(error->native.message), "%s", p->error); }
-    } else {
-        size_t capacity = 512;
-        for (int i = 0; i < p->count; i++) capacity += strlen(p->nodes[i]) + 1;
-        char *json = malloc(capacity);
-        if (!json) {
-            rc = ME_GRAPH_ERR_OOM;
-            if (error) snprintf(error->native.message, sizeof(error->native.message), "expression graph allocation failed");
-        }
+    if (!p->error) {
+        bool staged = false;
+        for (int i = 0; i < p->count; i++) if (i != root && p->reductions[i]) staged = true;
+        yyjson_mut_val *graph = yyjson_mut_obj(p->doc), *nodes = yyjson_mut_arr(p->doc);
+        yyjson_mut_val *requires = yyjson_mut_arr(p->doc), *output = yyjson_mut_obj(p->doc);
+        t_string(p, graph, "format", ME_GRAPH_FORMAT);
+        t_string(p, graph, "semantics", ME_GRAPH_SEMANTICS);
+        t_append(p, requires, yyjson_mut_str(p->doc, "numeric"));
+        if (staged) t_append(p, requires, yyjson_mut_str(p->doc, "staged"));
+        t_add(p, graph, "requires", requires);
+        for (int i = 0; i < p->count; i++) t_append(p, nodes, p->nodes[i]);
+        t_add(p, graph, "nodes", nodes);
+        t_add(p, graph, "root", yyjson_mut_uint(p->doc, (uint64_t)root));
+        t_string(p, output, "dtype", "auto");
+        t_string(p, output, "casting", "unsafe");
+        t_add(p, graph, "output", output);
+        yyjson_mut_doc_set_root(p->doc, graph);
+        yyjson_doc *doc = p->error ? NULL : yyjson_mut_doc_imut_copy(p->doc, NULL);
+        if (!doc) { p->oom = true; p->error = "expression allocation failed"; }
         else {
-            bool staged = false;
-            for (int i = 0; i < p->count; i++) if (i != root && p->reductions[i]) staged = true;
-            size_t used = (size_t)snprintf(json, capacity, "{\"format\":\"%s\",\"semantics\":\"%s\",\"requires\":[\"numeric\"%s],\"nodes\":[", ME_GRAPH_FORMAT, ME_GRAPH_SEMANTICS, staged ? ",\"staged\"" : "");
-            for (int i = 0; i < p->count; i++) used += (size_t)snprintf(json + used, capacity - used, "%s%s", i ? "," : "", p->nodes[i]);
-            used += (size_t)snprintf(json + used, capacity - used, "],\"root\":%d,\"output\":{\"dtype\":\"auto\",\"casting\":\"unsafe\"}}", root);
-            rc = me_graph_prepare_json(json, used, options, out, error); free(json);
+            rc = dsl_graph_prepare_root(yyjson_doc_get_root(doc), options, out, error);
+            yyjson_doc_free(doc);
         }
     }
+    if (p->error) {
+        rc = p->oom ? ME_GRAPH_ERR_OOM : ME_GRAPH_ERR_FORMAT;
+        if (error) { error->native.column = (int)p->pos; snprintf(error->native.message, sizeof(error->native.message), "%s", p->error); }
+    }
+    yyjson_mut_doc_free(p->doc);
     free(p); return rc;
 }

@@ -243,7 +243,10 @@ OOM never falls back to another planner or backend.
 ## Restricted expression convenience grammar
 
 `me_graph_prepare_expression` takes expression text plus named dtype signatures
-(their shapes are ignored until specialization). It builds the identical graph.
+(their shapes are ignored until specialization). It builds the identical graph
+in memory and shares validation with the JSON importer. Graph lowering likewise
+passes an in-memory manifest to artifact validation, avoiding intermediate JSON
+encoding and reparsing. JSON exports remain available in the same formats.
 Supported syntax: identifiers; weak decimal integer/finite real/Boolean literals;
 parentheses; the operators above with Python-like precedence; canonical function
 calls; dtype casts such as `float32(x)`; lazy `where(c,a,b)`; a root reduction with
