@@ -202,7 +202,7 @@ ME_BENCH_COMPILER=cc ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
 ### benchmark_dsl_interpreter_vs_jit.c
 Portable 1.1 interpreter vs JIT lowering, warm per-evaluation. One reduced
 reproducer per family originally outside the portable JIT
-(`src/dsl_portable_jit.c`). Math calls, integer arithmetic, locals and simple
+(`src/dsl_menudet_jit.c`). Math calls, integer arithmetic, locals and simple
 control flow now compile; floating floor division, block reductions and ND context
 still fall back. A final eligible control kernel checks compiled execution.
 

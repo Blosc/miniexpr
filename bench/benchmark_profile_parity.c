@@ -128,8 +128,8 @@ int main(int argc, char **argv) {
     me_artifact_error error;
     double start=now();
     int rc=me_artifact_load(json,strlen(json),mode,&portable,&error);
-    double portable_compile=now()-start;
-    if (rc) { failure("portable_compile",error.message); free(json); free(source); return 0; }
+    double menudet_compile=now()-start;
+    if (rc) { failure("menudet_compile",error.message); free(json); free(source); return 0; }
     rc=me_artifact_load(json,strlen(json),ME_JIT_OFF,&oracle,&error);
     if (rc) { failure("oracle_compile",error.message); me_artifact_free(portable); free(json); free(source); return 0; }
     int ninputs=me_artifact_ninputs(portable), ndim=me_artifact_context_ndim(portable);
@@ -179,15 +179,15 @@ int main(int argc, char **argv) {
     dump_source(argv[8],"legacy.c",old_program ? old_program->jit_c_source : NULL);
     int direct=0, direct2=0;
     if (program) {
-        for (int i=0; i<program->portable_jit_nmath; i++) direct+=program->portable_jit_math_fn[i]!=NULL;
-        for (int i=0; i<program->portable_jit_nmath2; i++) direct2+=program->portable_jit_math2_fn[i]!=NULL;
+        for (int i=0; i<program->menudet_jit_nmath; i++) direct+=program->menudet_jit_math_fn[i]!=NULL;
+        for (int i=0; i<program->menudet_jit_nmath2; i++) direct2+=program->menudet_jit_math2_fn[i]!=NULL;
     }
     for (int size_index=0; size_index<nsizes; size_index++) {
         int n=sizes[size_index];
         if (ndim && n!=maximum) continue;
         if (n>65536 && (legacy_compile_rc || !me_artifact_has_jit(portable) ||
             !me_expr_has_jit_kernel(legacy))) {
-            printf("{\"status\":\"large_fallback_skipped\",\"nitems\":%d,\"portable_jit\":%s,\"legacy_jit\":%s}\n",
+            printf("{\"status\":\"large_fallback_skipped\",\"nitems\":%d,\"menudet_jit\":%s,\"legacy_jit\":%s}\n",
                 n,me_artifact_has_jit(portable) ? "true" : "false",
                 legacy && me_expr_has_jit_kernel(legacy) ? "true" : "false");
             continue;
@@ -262,22 +262,22 @@ int main(int argc, char **argv) {
                 if (!equal_value((char *)modern+(size_t)lane*width,(char *)old+(size_t)lane*width,output_dtype,false)) differences++;
             }
         }
-        printf("{\"status\":\"%s\",\"nitems\":%d,\"portable_jit\":%s,\"legacy_jit\":%s,",
+        printf("{\"status\":\"%s\",\"nitems\":%d,\"menudet_jit\":%s,\"legacy_jit\":%s,",
             verified ? "ok" : "validation_error",n,me_artifact_has_jit(portable) ? "true" : "false",
             legacy && me_expr_has_jit_kernel(legacy) ? "true" : "false");
-        printf("\"portable_rc\":%d,\"legacy_rc\":%d,\"oracle_rc\":%d,\"oracle_items\":%d,",modern_rc,old_rc,oracle_rc,verify_n);
-        printf("\"portable_compile_s\":%.9g,\"legacy_compile_s\":%.9g,\"portable_first_s\":%.9g,\"legacy_first_s\":%.9g,",
-            portable_compile,legacy_compile,first_modern,first_old);
+        printf("\"menudet_rc\":%d,\"legacy_rc\":%d,\"oracle_rc\":%d,\"oracle_items\":%d,",modern_rc,old_rc,oracle_rc,verify_n);
+        printf("\"menudet_compile_s\":%.9g,\"legacy_compile_s\":%.9g,\"menudet_first_s\":%.9g,\"legacy_first_s\":%.9g,",
+            menudet_compile,legacy_compile,first_modern,first_old);
         printf("\"compared\":%d,\"differences\":%d,\"output_bytes\":%zu,\"fp_flags\":%u,\"fp_supported\":%s,",
             compared,differences,output_bytes,actual_status.flags,actual_status.supported ? "true" : "false");
         printf("\"direct_math\":%d,\"direct_math2\":%d,\"generic_math\":%d,\"generic_math2\":%d,\"checked_bridges\":%d,\"integer_bridges\":%d,\"predicate_bridges\":%d,\"comparison_bridges\":%d,\"legacy_error\":",
-            direct,direct2,program ? program->portable_jit_nmath-direct : 0,
-            program ? program->portable_jit_nmath2-direct2 : 0,program ? program->portable_jit_nchecked : 0,
-            program ? program->portable_jit_niops : 0,program ? program->portable_jit_npreds : 0,
-            program ? program->portable_jit_ncomparisons : 0);
+            direct,direct2,program ? program->menudet_jit_nmath-direct : 0,
+            program ? program->menudet_jit_nmath2-direct2 : 0,program ? program->menudet_jit_nchecked : 0,
+            program ? program->menudet_jit_niops : 0,program ? program->menudet_jit_npreds : 0,
+            program ? program->menudet_jit_ncomparisons : 0);
         json_string(legacy_error);
-        samples("portable_s",modern_times,repeats); samples("legacy_s",old_times,repeats);
-        samples("portable_alloc_s",modern_alloc,repeats); samples("legacy_alloc_s",old_alloc,repeats);
+        samples("menudet_s",modern_times,repeats); samples("legacy_s",old_times,repeats);
+        samples("menudet_alloc_s",modern_alloc,repeats); samples("legacy_alloc_s",old_alloc,repeats);
         puts("}"); fflush(stdout);
     }
     me_free(legacy); me_artifact_free(oracle); me_artifact_free(portable);

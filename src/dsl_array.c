@@ -2,8 +2,8 @@
  * not: each reduction visits C logical coordinates in a fixed serial order. */
 #include "miniexpr_artifact.h"
 #include "dsl_graph_internal.h"
-#include "dsl_portable_fp.h"
-#include "dsl_portable_reduce.h"
+#include "dsl_menudet_fp.h"
+#include "dsl_menudet_reduce.h"
 #include <limits.h>
 #include <math.h>
 #include <stdint.h>
@@ -204,8 +204,8 @@ me_artifact_status me_array_result_shape(const me_artifact *a, int rank, const i
     if (error) memset(error,0,sizeof(*error));
     bool axes[ME_ARRAY_MAX_RANK]; size_t n;
     if (!a || !out_rank || !out_shape || !dtype || !a_product(rank, shape, &n) || !a_axes(rank, o, axes)) return a_error(error, ME_ARTIFACT_ERR_BINDING, "invalid logical shape, axes or options");
-    if (strcmp(me_artifact_schema_version(a), "1.0") || me_artifact_context_ndim(a) ||
-        me_artifact_result_cardinality(a) != ME_ARTIFACT_ELEMENTWISE || !a_width(me_artifact_output_dtype(a))) return a_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "logical arrays require numeric elementwise rank-zero Menudet 1.0");
+    if (strcmp(me_artifact_schema_version(a), "0.1") || me_artifact_context_ndim(a) ||
+        me_artifact_result_cardinality(a) != ME_ARTIFACT_ELEMENTWISE || !a_width(me_artifact_output_dtype(a))) return a_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "logical arrays require numeric elementwise rank-zero Menudet 0.1 beta");
     *dtype = a_dtype(me_artifact_output_dtype(a), o);
     if (*dtype == ME_AUTO) return a_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported accumulator signature");
     *out_rank = 0;
@@ -465,8 +465,8 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
         buffers[b] = (me_artifact_buffer){v->name,v->dtype,w,NULL,0};
     }
     fenv_t saved;
-    if (!dsl_portable_fp_begin(&saved)) { rc = ME_ARTIFACT_ERR_UNSUPPORTED; goto cleanup; }
-    unsigned *previous = dsl_portable_status_begin(&report->fp_flags);
+    if (!dsl_menudet_fp_begin(&saved)) { rc = ME_ARTIFACT_ERR_UNSUPPORTED; goto cleanup; }
+    unsigned *previous = dsl_menudet_status_begin(&report->fp_flags);
 #ifndef __EMSCRIPTEN__
     report->fp_supported = 1;
 #endif
@@ -517,9 +517,9 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
                     break;
                 }
                 unsigned reader_flags = 0;
-                unsigned *reader_previous = dsl_portable_status_begin(&reader_flags);
+                unsigned *reader_previous = dsl_menudet_status_begin(&reader_flags);
                 int read_status = source->read(source->owner,indices,participating,owned[b],participating*buffers[b].itemsize);
-                dsl_portable_status_end(reader_previous);
+                dsl_menudet_status_end(reader_previous);
                 int restore_status = fesetenv(&reader_environment);
                 if (restore_status) rc = a_error(error,ME_ARTIFACT_ERR_UNSUPPORTED,"cannot restore reader floating environment");
                 else if (read_status) rc = a_error(error,ME_ARTIFACT_ERR_EVAL,"storage reader failed");
@@ -569,7 +569,7 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
                 dtype == me_artifact_output_dtype(a)) {
                 uint64_t normalized = acc, result;
                 if (!a_float(dtype)) normalized = a_integer(dtype, &acc);
-                handled = dsl_portable_extrema(dtype, values, count, normalized,
+                handled = dsl_menudet_extrema(dtype, values, count, normalized,
                     initialized, o->reduction == ME_ARRAY_MIN, &result);
                 if (handled) {
                     if (a_float(dtype)) acc = result;
@@ -579,7 +579,7 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
             } else if (!rc && !mask && values && dtype == ME_BOOL &&
                 (o->reduction == ME_ARRAY_ANY || o->reduction == ME_ARRAY_ALL)) {
                 bool truth;
-                handled = dsl_portable_truth_reduce(me_artifact_output_dtype(a), values,
+                handled = dsl_menudet_truth_reduce(me_artifact_output_dtype(a), values,
                     count, a_integer(dtype, &acc) != 0, o->reduction == ME_ARRAY_ALL, &truth);
                 if (handled) { uint64_t result = truth; a_cast(ME_UINT64, &result, dtype, &acc); }
             }
@@ -590,13 +590,13 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
                  * No reassociation, vector reduction or tile partial sums. */
                 if (dtype == ME_FLOAT64) {
                     double sum; memcpy(&sum, &acc, sizeof(sum));
-                    sum = o->reduction == ME_ARRAY_PROD ? dsl_portable_prod_f64(sum, values, count) :
-                        dsl_portable_sum_f64(sum, values, count);
+                    sum = o->reduction == ME_ARRAY_PROD ? dsl_menudet_prod_f64(sum, values, count) :
+                        dsl_menudet_sum_f64(sum, values, count);
                     memcpy(&acc, &sum, sizeof(sum));
                 } else {
                     float sum; memcpy(&sum, &acc, sizeof(sum));
-                    sum = o->reduction == ME_ARRAY_PROD ? dsl_portable_prod_f32(sum, values, count) :
-                        dsl_portable_sum_f32(sum, values, count);
+                    sum = o->reduction == ME_ARRAY_PROD ? dsl_menudet_prod_f32(sum, values, count) :
+                        dsl_menudet_sum_f32(sum, values, count);
                     memcpy(&acc, &sum, sizeof(sum));
                 }
             } else if (!rc && !handled && !mask && values &&
@@ -607,8 +607,8 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
                  (dtype == ME_INT64 && (!a_unsigned(me_artifact_output_dtype(a)) ||
                   me_artifact_output_dtype(a) == ME_BOOL)))) {
                 bool ok = o->reduction == ME_ARRAY_PROD ?
-                    dsl_portable_prod_integer(me_artifact_output_dtype(a), values, count, acc, false, &acc) :
-                    dsl_portable_sum_integer(me_artifact_output_dtype(a), values, count, acc, false, &acc);
+                    dsl_menudet_prod_integer(me_artifact_output_dtype(a), values, count, acc, false, &acc) :
+                    dsl_menudet_sum_integer(me_artifact_output_dtype(a), values, count, acc, false, &acc);
                 if (!ok) rc = ME_ARTIFACT_ERR_EVAL;
             } else if (!rc && !handled && values && a_complex(dtype)) {
                 for (size_t lane = 0; lane < count; lane++) {
@@ -638,8 +638,8 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
             memcpy((uint8_t *)output + offset, acc_source, width);
         }
     }
-    if (!dsl_portable_fp_end(&saved) && !rc) rc = a_error(error,ME_ARTIFACT_ERR_UNSUPPORTED,"cannot restore floating environment");
-    dsl_portable_status_end(previous);
+    if (!dsl_menudet_fp_end(&saved) && !rc) rc = a_error(error,ME_ARTIFACT_ERR_UNSUPPORTED,"cannot restore floating environment");
+    dsl_menudet_status_end(previous);
 cleanup:
     for (int b = 0; b < ninputs; b++) free(owned[b]);
     free(indices); free(mask); free(scratch);

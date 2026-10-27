@@ -21,11 +21,11 @@
     {
       "id": "int8-add-boundary",
       "operation": "add",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
       "inputs": [
         {
           "dtype": "int8",
@@ -85,11 +85,11 @@
     {
       "id": "int16-add-boundary",
       "operation": "add",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int16\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int16\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int16\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int16\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
       "inputs": [
         {
           "dtype": "int16",
@@ -149,11 +149,11 @@
     {
       "id": "int32-add-boundary",
       "operation": "add",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int32\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
       "inputs": [
         {
           "dtype": "int32",
@@ -213,11 +213,11 @@
     {
       "id": "int64-add-boundary",
       "operation": "add",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
       "inputs": [
         {
           "dtype": "int64",
@@ -277,11 +277,11 @@
     {
       "id": "uint8-add-boundary",
       "operation": "add",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"uint8\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"uint8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"uint8\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"uint8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
       "inputs": [
         {
           "dtype": "uint8",
@@ -341,11 +341,11 @@
     {
       "id": "uint16-add-boundary",
       "operation": "add",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"uint16\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"uint16\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"uint16\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"uint16\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
       "inputs": [
         {
           "dtype": "uint16",
@@ -405,11 +405,11 @@
     {
       "id": "uint32-add-boundary",
       "operation": "add",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"uint32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"uint32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"uint32\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"uint32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
       "inputs": [
         {
           "dtype": "uint32",
@@ -469,11 +469,11 @@
     {
       "id": "uint64-add-boundary",
       "operation": "add",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"uint64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"uint64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"uint64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"uint64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
       "inputs": [
         {
           "dtype": "uint64",
@@ -533,11 +533,11 @@
     {
       "id": "int64-exact-subtract",
       "operation": "subtract",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x - 9007199254740993\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x - 9007199254740993\\n\"}",
       "inputs": [
         {
           "dtype": "int64",
@@ -597,11 +597,11 @@
     {
       "id": "int8-multiply-boundary",
       "operation": "multiply",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x * 2\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x * 2\\n\"}",
       "inputs": [
         {
           "dtype": "int8",
@@ -661,11 +661,11 @@
     {
       "id": "int8-negate-min",
       "operation": "negative",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return -x\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return -x\\n\"}",
       "inputs": [
         {
           "dtype": "int8",
@@ -721,11 +721,11 @@
     {
       "id": "int64-absolute-min",
       "operation": "absolute",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return abs(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return abs(x)\\n\"}",
       "inputs": [
         {
           "dtype": "int64",
@@ -781,11 +781,11 @@
     {
       "id": "float32-weak-literal",
       "operation": "cancel",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return (x + 1.0) - x\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return (x + 1.0) - x\\n\"}",
       "inputs": [
         {
           "dtype": "float32",
@@ -853,11 +853,11 @@
     {
       "id": "float32-typed-float64-capture",
       "operation": "add",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [{\"category\": \"typed_scalar\", \"dtype\": \"float64\", \"encoding\": \"ieee754-hex\", \"name\": \"y\", \"value\": \"3ff0000000000000\"}], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
+      "artifact": "{\"constants\": [{\"category\": \"typed_scalar\", \"dtype\": \"float64\", \"encoding\": \"ieee754-hex\", \"name\": \"y\", \"value\": \"3ff0000000000000\"}], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
       "inputs": [
         {
           "dtype": "float32",
@@ -930,11 +930,11 @@
     {
       "id": "int8-typed-int64-capture",
       "operation": "add",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [{\"category\": \"typed_scalar\", \"dtype\": \"int64\", \"encoding\": \"decimal\", \"name\": \"y\", \"value\": \"1\"}], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
+      "artifact": "{\"constants\": [{\"category\": \"typed_scalar\", \"dtype\": \"int64\", \"encoding\": \"decimal\", \"name\": \"y\", \"value\": \"1\"}], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
       "inputs": [
         {
           "dtype": "int8",
@@ -999,11 +999,11 @@
     {
       "id": "float32-zero-dimensional",
       "operation": "add",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1.0\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1.0\\n\"}",
       "inputs": [
         {
           "dtype": "float32",
@@ -1063,11 +1063,11 @@
     {
       "id": "int8-float-literal",
       "operation": "add",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1.0\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1.0\\n\"}",
       "inputs": [
         {
           "dtype": "int8",
@@ -1131,11 +1131,11 @@
     {
       "id": "int8-uint8-promote",
       "operation": "add",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}, {\"dtype\": \"uint8\", \"name\": \"y\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int16\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}, {\"dtype\": \"uint8\", \"name\": \"y\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int16\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
       "inputs": [
         {
           "dtype": "int8",
@@ -1207,11 +1207,11 @@
     {
       "id": "int64-uint64-promote",
       "operation": "add",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}, {\"dtype\": \"uint64\", \"name\": \"y\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}, {\"dtype\": \"uint64\", \"name\": \"y\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
       "inputs": [
         {
           "dtype": "int64",
@@ -1287,11 +1287,11 @@
     {
       "id": "int64-uint64-compare",
       "operation": "less",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}, {\"dtype\": \"uint64\", \"name\": \"y\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"bool\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x, y):\\n    return x < y\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}, {\"dtype\": \"uint64\", \"name\": \"y\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"bool\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x, y):\\n    return x < y\\n\"}",
       "inputs": [
         {
           "dtype": "int64",
@@ -1363,11 +1363,11 @@
     {
       "id": "int64-uint64-compare-rounding",
       "operation": "less",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}, {\"dtype\": \"uint64\", \"name\": \"y\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"bool\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x, y):\\n    return x < y\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}, {\"dtype\": \"uint64\", \"name\": \"y\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"bool\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x, y):\\n    return x < y\\n\"}",
       "inputs": [
         {
           "dtype": "int64",
@@ -1439,11 +1439,11 @@
     {
       "id": "bool-add",
       "operation": "add",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"bool\", \"name\": \"x\"}, {\"dtype\": \"bool\", \"name\": \"y\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"bool\", \"name\": \"x\"}, {\"dtype\": \"bool\", \"name\": \"y\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
       "inputs": [
         {
           "dtype": "bool",
@@ -1515,11 +1515,11 @@
     {
       "id": "int64-true-divide",
       "operation": "divide",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x / 3\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x / 3\\n\"}",
       "inputs": [
         {
           "dtype": "int64",
@@ -1583,11 +1583,11 @@
     {
       "id": "int64-floor-divide",
       "operation": "floor_divide",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x // -3\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x // -3\\n\"}",
       "inputs": [
         {
           "dtype": "int64",
@@ -1647,11 +1647,11 @@
     {
       "id": "int64-remainder",
       "operation": "remainder",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x % -3\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x % -3\\n\"}",
       "inputs": [
         {
           "dtype": "int64",
@@ -1711,11 +1711,11 @@
     {
       "id": "int64-zero-divide",
       "operation": "floor_divide",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x // 0\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x // 0\\n\"}",
       "inputs": [
         {
           "dtype": "int64",
@@ -1775,11 +1775,11 @@
     {
       "id": "int64-min-divide",
       "operation": "floor_divide",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x // -1\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x // -1\\n\"}",
       "inputs": [
         {
           "dtype": "int64",
@@ -1839,11 +1839,11 @@
     {
       "id": "int8-large-shift",
       "operation": "left_shift",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x << 8\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x << 8\\n\"}",
       "inputs": [
         {
           "dtype": "int8",
@@ -1903,11 +1903,11 @@
     {
       "id": "float64-cast-int",
       "operation": "cast_int64",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return int(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return int(x)\\n\"}",
       "inputs": [
         {
           "dtype": "float64",
@@ -1968,11 +1968,11 @@
     {
       "id": "float64-cast-infinity",
       "operation": "cast_int64",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return int(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return int(x)\\n\"}",
       "inputs": [
         {
           "dtype": "float64",
@@ -2046,11 +2046,11 @@
     {
       "id": "int64-narrow-output",
       "operation": "cast_int8",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
       "inputs": [
         {
           "dtype": "int64",
@@ -2106,11 +2106,11 @@
     {
       "id": "float32-cast-float",
       "operation": "cast_float64",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return float(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return float(x)\\n\"}",
       "inputs": [
         {
           "dtype": "float32",
@@ -2174,11 +2174,11 @@
     {
       "id": "float32-sin",
       "operation": "sin",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return sin(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return sin(x)\\n\"}",
       "inputs": [
         {
           "dtype": "float32",
@@ -2242,11 +2242,11 @@
     {
       "id": "float32-sin-finite-ulp",
       "operation": "sin",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return sin(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return sin(x)\\n\"}",
       "inputs": [
         {
           "dtype": "float32",
@@ -2316,11 +2316,11 @@
     {
       "id": "float32-cos-finite-ulp",
       "operation": "cos",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return cos(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return cos(x)\\n\"}",
       "inputs": [
         {
           "dtype": "float32",
@@ -2390,11 +2390,11 @@
     {
       "id": "float32-log-finite-ulp",
       "operation": "log",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return log(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return log(x)\\n\"}",
       "inputs": [
         {
           "dtype": "float32",
@@ -2464,11 +2464,11 @@
     {
       "id": "float32-sqrt-finite-ulp",
       "operation": "sqrt",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return sqrt(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return sqrt(x)\\n\"}",
       "inputs": [
         {
           "dtype": "float32",
@@ -2538,11 +2538,11 @@
     {
       "id": "float32-exp-finite-ulp",
       "operation": "exp",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return exp(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return exp(x)\\n\"}",
       "inputs": [
         {
           "dtype": "float32",
@@ -2612,11 +2612,11 @@
     {
       "id": "float32-identity-special",
       "operation": "identity",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
       "inputs": [
         {
           "dtype": "float32",
@@ -2688,11 +2688,11 @@
     {
       "id": "float32-sqrt-domain",
       "operation": "sqrt",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return sqrt(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return sqrt(x)\\n\"}",
       "inputs": [
         {
           "dtype": "float32",
@@ -2762,11 +2762,11 @@
     {
       "id": "float32-nan-payload-identity",
       "operation": "identity",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
       "inputs": [
         {
           "dtype": "float32",
@@ -2830,11 +2830,11 @@
     {
       "id": "float64-sin-finite-ulp",
       "operation": "sin",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return sin(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return sin(x)\\n\"}",
       "inputs": [
         {
           "dtype": "float64",
@@ -2904,11 +2904,11 @@
     {
       "id": "float64-cos-finite-ulp",
       "operation": "cos",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return cos(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return cos(x)\\n\"}",
       "inputs": [
         {
           "dtype": "float64",
@@ -2978,11 +2978,11 @@
     {
       "id": "float64-log-finite-ulp",
       "operation": "log",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return log(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return log(x)\\n\"}",
       "inputs": [
         {
           "dtype": "float64",
@@ -3052,11 +3052,11 @@
     {
       "id": "float64-sqrt-finite-ulp",
       "operation": "sqrt",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return sqrt(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return sqrt(x)\\n\"}",
       "inputs": [
         {
           "dtype": "float64",
@@ -3126,11 +3126,11 @@
     {
       "id": "float64-exp-finite-ulp",
       "operation": "exp",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return exp(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return exp(x)\\n\"}",
       "inputs": [
         {
           "dtype": "float64",
@@ -3200,11 +3200,11 @@
     {
       "id": "float64-identity-special",
       "operation": "identity",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
       "inputs": [
         {
           "dtype": "float64",
@@ -3276,11 +3276,11 @@
     {
       "id": "float64-sqrt-domain",
       "operation": "sqrt",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return sqrt(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return sqrt(x)\\n\"}",
       "inputs": [
         {
           "dtype": "float64",
@@ -3350,11 +3350,11 @@
     {
       "id": "float64-nan-payload-identity",
       "operation": "identity",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
       "inputs": [
         {
           "dtype": "float64",
@@ -3418,11 +3418,11 @@
     {
       "id": "float64-exp-tolerance",
       "operation": "exp",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return exp(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return exp(x)\\n\"}",
       "inputs": [
         {
           "dtype": "float64",
@@ -3488,11 +3488,11 @@
     {
       "id": "layout-fortran",
       "operation": "identity",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
       "inputs": [
         {
           "dtype": "float32",
@@ -3567,11 +3567,11 @@
     {
       "id": "layout-negative-stride",
       "operation": "identity",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
       "inputs": [
         {
           "dtype": "float32",
@@ -3646,11 +3646,11 @@
     {
       "id": "layout-stepped-big-endian",
       "operation": "identity",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
       "inputs": [
         {
           "dtype": "float32",
@@ -3725,11 +3725,11 @@
     {
       "id": "layout-little-endian",
       "operation": "identity",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
       "inputs": [
         {
           "dtype": "float32",
@@ -3804,11 +3804,11 @@
     {
       "id": "empty-elementwise",
       "operation": "identity",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
       "inputs": [
         {
           "dtype": "int64",
@@ -3867,11 +3867,11 @@
     {
       "id": "weak-scalar-out-of-range",
       "operation": "add",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 128\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 128\\n\"}",
       "inputs": [
         {
           "dtype": "int8",
@@ -3921,11 +3921,11 @@
     {
       "id": "diagnostic-future-artifact",
       "operation": "identity",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"9.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"9.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
       "inputs": [
         {
           "dtype": "int64",
@@ -3970,11 +3970,11 @@
     {
       "id": "diagnostic-invalid-source",
       "operation": "identity",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return missing_name\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return missing_name\\n\"}",
       "inputs": [
         {
           "dtype": "int64",
@@ -4019,11 +4019,11 @@
     {
       "id": "diagnostic-wrong-binding",
       "operation": "identity",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
       "inputs": [
         {
           "dtype": "int64",
@@ -4068,11 +4068,11 @@
     {
       "id": "failure-then-success-same-handle",
       "operation": "add",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x + 1\\n\"}",
       "inputs": [
         {
           "dtype": "int8",
@@ -4160,12 +4160,12 @@
     {
       "id": "block-sum-explicit-int64",
       "operation": "sum",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric",
         "block-reductions"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"block_scalar\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\", \"block-reductions\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return block_sum(x)\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"block_scalar\", \"dtype\": \"int64\"}, \"requires\": [\"numeric\", \"block-reductions\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return block_sum(x)\\n\"}",
       "inputs": [
         {
           "dtype": "int64",
@@ -4218,11 +4218,11 @@
     {
       "id": "capability-complex-skipped",
       "operation": "identity",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numpy-complex"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"complex64\", \"name\": \"x\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"complex64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"complex64\", \"name\": \"x\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"complex64\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x):\\n    return x\\n\"}",
       "inputs": [
         {
           "dtype": "complex64",
@@ -4266,12 +4266,12 @@
     {
       "id": "capability-broadcast-skipped",
       "operation": "add",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric",
         "array-broadcasting"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}, {\"dtype\": \"float32\", \"name\": \"y\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"float32\", \"name\": \"x\"}, {\"dtype\": \"float32\", \"name\": \"y\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"float32\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
       "inputs": [
         {
           "dtype": "float32",
@@ -4351,11 +4351,11 @@
     {
       "id": "seed-1729-minimized-int8-overflow",
       "operation": "add",
-      "semantic_revision": "menudet-numpy-1.0",
+      "semantic_revision": "menudet-numpy-0.1",
       "requires": [
         "numeric"
       ],
-      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}, {\"dtype\": \"int8\", \"name\": \"y\"}], \"language\": {\"name\": \"miniexpr\", \"version\": \"1.0\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"1.0\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
+      "artifact": "{\"constants\": [], \"context\": {\"ndim\": 0}, \"entry_point\": \"k\", \"inputs\": [{\"dtype\": \"int8\", \"name\": \"x\"}, {\"dtype\": \"int8\", \"name\": \"y\"}], \"language\": {\"name\": \"menudet\", \"version\": \"0.1\"}, \"metadata\": {}, \"output\": {\"contract\": \"elementwise\", \"dtype\": \"int8\"}, \"requires\": [\"numeric\"], \"schema_version\": \"0.1\", \"semantics\": {\"casting\": \"unsafe\", \"fp\": \"strict\", \"numeric\": \"numpy-2.5\"}, \"source\": \"def k(x, y):\\n    return x + y\\n\"}",
       "inputs": [
         {
           "dtype": "int8",

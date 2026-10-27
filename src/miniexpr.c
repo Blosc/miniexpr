@@ -1272,12 +1272,12 @@ static me_expr* create_conversion_node(me_expr* source, me_dtype target_dtype) {
 void apply_type_promotion(me_expr* node) {
     if (!node || ARITY(node->type) < 2) return;
 
-    /* The portable typed pass must see the original operands, not full-DSL
+    /* The menudet typed pass must see the original operands, not full-DSL
      * conversion nodes or output-context promotions. */
     for (int i = 0; i < ARITY(node->type); i++) {
         const me_expr *child = node->parameters[i];
-        if (child && (child->flags & ME_EXPR_FLAG_PORTABLE_1)) {
-            node->flags |= ME_EXPR_FLAG_PORTABLE_1;
+        if (child && (child->flags & ME_EXPR_FLAG_MENUDET_1)) {
+            node->flags |= ME_EXPR_FLAG_MENUDET_1;
             return;
         }
     }
@@ -1620,7 +1620,7 @@ int private_compile_profile_ex(const char* expression, const me_variable* variab
         s.target_dtype = ME_AUTO;
     }
 
-    if (dsl_portable_typed_profile(profile)) {
+    if (dsl_menudet_typed_profile(profile)) {
         s.target_dtype = ME_AUTO;
     }
     next_token(&s);
@@ -1638,7 +1638,7 @@ int private_compile_profile_ex(const char* expression, const me_variable* variab
     /* Internal raw-tree entry point: the profile-aware DSL compiler performs
      * typed validation before this tree can be executed. No folding, bytecode,
      * output retyping or callback dispatch is safe before that gate. */
-    if (dsl_portable_typed_profile(profile)) {
+    if (dsl_menudet_typed_profile(profile)) {
         if (vars_copy) free(vars_copy);
         if (s.str_data) free((void *)s.str_data);
         if (s.type != TOK_END) {

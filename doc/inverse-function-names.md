@@ -15,7 +15,7 @@ function names. NumPy names remain Python frontend syntax, not native aliases.
 
 This is a deliberate source compatibility change. Full-expression and DSL
 compilation rejects the removed builtin calls. Menudet artifact loading also
-rejects them for the legacy/full DSL and Menudet 1.0. Artifact import does
+rejects them for the legacy/full DSL and Menudet 0.1 beta. Artifact import does
 not rewrite source, change the saved artifact, or switch profiles. Syntax removal
 does not change the values/promotion/diagnostics of the retained functions.
 

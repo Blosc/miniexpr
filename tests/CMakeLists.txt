@@ -1,13 +1,13 @@
 if(NOT EMSCRIPTEN)
   # The first portable runner uses host files; wasm corpus adapters are follow-up work.
-  add_executable(portable_dsl_runner portable-dsl/runner.c)
-  target_link_libraries(portable_dsl_runner PRIVATE ${MINIEXPR_DEFAULT_LIB})
-  target_compile_features(portable_dsl_runner PRIVATE c_std_99)
+  add_executable(menudet_dsl_runner menudet-dsl/runner.c)
+  target_link_libraries(menudet_dsl_runner PRIVATE ${MINIEXPR_DEFAULT_LIB})
+  target_compile_features(menudet_dsl_runner PRIVATE c_std_99)
   if(NOT WIN32)
-    target_link_libraries(portable_dsl_runner PRIVATE m)
-    find_program(MINIEXPR_PORTABLE_CC NAMES cc clang gcc)
+    target_link_libraries(menudet_dsl_runner PRIVATE m)
+    find_program(MINIEXPR_MENUDET_CC NAMES cc clang gcc)
   endif()
-  set(MINIEXPR_PORTABLE_CASES affine chains loops int32 int64 float32 bool compare special_floats flow
+  set(MINIEXPR_MENUDET_CASES affine chains loops int32 int64 float32 bool compare special_floats flow
                      boolean_results cast_int math
                      division_int division_bool division_literals division_locals division_loop division_float32
                      division_condition
@@ -30,93 +30,93 @@ if(NOT EMSCRIPTEN)
                      missing_return_hybrid missing_return_hybrid_ok)
   foreach(input_type bool int32 int64 float32 float64)
     foreach(output_type bool int32 int64 float32 float64)
-      list(APPEND MINIEXPR_PORTABLE_CASES convert_${input_type}_${output_type})
+      list(APPEND MINIEXPR_MENUDET_CASES convert_${input_type}_${output_type})
     endforeach()
   endforeach()
-  foreach(case_name IN LISTS MINIEXPR_PORTABLE_CASES)
+  foreach(case_name IN LISTS MINIEXPR_MENUDET_CASES)
     if(case_name MATCHES "^convert_")
-      set(source_path "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/identity.dsl")
+      set(source_path "${CMAKE_CURRENT_SOURCE_DIR}/menudet-dsl/identity.dsl")
     else()
-      set(source_path "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.dsl")
+      set(source_path "${CMAKE_CURRENT_SOURCE_DIR}/menudet-dsl/${case_name}.dsl")
     endif()
     set(profile_mode "")
-    set(test_prefix portable_dsl)
+    set(test_prefix menudet_dsl)
     foreach(policy off default)
       add_test(NAME ${test_prefix}_${case_name}_${policy}
-        COMMAND portable_dsl_runner
+        COMMAND menudet_dsl_runner
           "${source_path}"
-          "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.txt" "${policy}" ${profile_mode})
+          "${CMAKE_CURRENT_SOURCE_DIR}/menudet-dsl/${case_name}.txt" "${policy}" ${profile_mode})
       set_tests_properties(${test_prefix}_${case_name}_${policy} PROPERTIES TIMEOUT 30
-        ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/portable-jit-cache")
+        ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/menudet-jit-cache")
     endforeach()
     # Optional JIT preference must still use the draft typed interpreter.
     if(MINIEXPR_ENABLE_TCC_JIT)
       add_test(NAME ${test_prefix}_${case_name}_on
-        COMMAND portable_dsl_runner
+        COMMAND menudet_dsl_runner
           "${source_path}"
-          "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.txt" on ${profile_mode})
+          "${CMAKE_CURRENT_SOURCE_DIR}/menudet-dsl/${case_name}.txt" on ${profile_mode})
       set_tests_properties(${test_prefix}_${case_name}_on PROPERTIES TIMEOUT 30
-        ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/portable-jit-cache")
+        ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/menudet-jit-cache")
     endif()
-    if(MINIEXPR_PORTABLE_CC)
+    if(MINIEXPR_MENUDET_CC)
       # Same language fixture, with only the execution preference changed.
       file(READ "${source_path}" cc_source)
       string(REPLACE "# me:compiler=tcc\n" "" cc_source "${cc_source}")
-      set(cc_path "${CMAKE_CURRENT_BINARY_DIR}/portable-dsl/${case_name}.cc.dsl")
-      file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/portable-dsl")
+      set(cc_path "${CMAKE_CURRENT_BINARY_DIR}/menudet-dsl/${case_name}.cc.dsl")
+      file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/menudet-dsl")
       file(WRITE "${cc_path}" "# me:compiler=cc\n${cc_source}")
       add_test(NAME ${test_prefix}_${case_name}_cc
-        COMMAND portable_dsl_runner "${cc_path}"
-          "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/${case_name}.txt" on ${profile_mode})
+        COMMAND menudet_dsl_runner "${cc_path}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/menudet-dsl/${case_name}.txt" on ${profile_mode})
       set_tests_properties(${test_prefix}_${case_name}_cc PROPERTIES TIMEOUT 30
-        ENVIRONMENT "CC=${MINIEXPR_PORTABLE_CC};ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/portable-jit-cache")
+        ENVIRONMENT "CC=${MINIEXPR_MENUDET_CC};ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/menudet-jit-cache")
     endif()
   endforeach()
   # Full-language audit regressions below intentionally retain different semantics.
-  get_property(portable_tests DIRECTORY PROPERTY TESTS)
-  foreach(test_name IN LISTS portable_tests)
-    if(test_name MATCHES "^(portable|native)_dsl_while_cap_")
+  get_property(menudet_tests DIRECTORY PROPERTY TESTS)
+  foreach(test_name IN LISTS menudet_tests)
+    if(test_name MATCHES "^(menudet|native)_dsl_while_cap_")
       set_property(TEST ${test_name} APPEND PROPERTY ENVIRONMENT "ME_DSL_WHILE_MAX_ITERS=3")
     endif()
   endforeach()
 
   foreach(case_name nested_cast cast_argument_division)
-    add_test(NAME native_audit_${case_name}_off COMMAND portable_dsl_runner
-      "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/audit/${case_name}.dsl"
-      "${CMAKE_CURRENT_SOURCE_DIR}/portable-dsl/audit/${case_name}.txt" off native)
+    add_test(NAME native_audit_${case_name}_off COMMAND menudet_dsl_runner
+      "${CMAKE_CURRENT_SOURCE_DIR}/menudet-dsl/audit/${case_name}.dsl"
+      "${CMAKE_CURRENT_SOURCE_DIR}/menudet-dsl/audit/${case_name}.txt" off native)
     set_tests_properties(native_audit_${case_name}_off PROPERTIES TIMEOUT 30)
   endforeach()
 endif()
 
 if(MINIEXPR_BUILD_ARTIFACT)
-  add_executable(portable_jit_parity test_portable_jit_parity.c)
-  target_link_libraries(portable_jit_parity PRIVATE miniexpr_artifact)
+  add_executable(menudet_jit_parity test_menudet_jit_parity.c)
+  target_link_libraries(menudet_jit_parity PRIVATE miniexpr_artifact)
   if(EMSCRIPTEN)
-    target_link_options(portable_jit_parity PRIVATE "-sALLOW_MEMORY_GROWTH=1" "-sSTACK_SIZE=1048576")
-    add_test(NAME portable_jit_parity COMMAND portable_jit_parity --require-interpreter)
-    set_tests_properties(portable_jit_parity PROPERTIES TIMEOUT 600)
-  elseif(NOT MINIEXPR_ENABLE_TCC_JIT AND NOT MINIEXPR_PORTABLE_CC)
-    add_test(NAME portable_jit_parity COMMAND portable_jit_parity --compact)
-    set_tests_properties(portable_jit_parity PROPERTIES TIMEOUT 600)
+    target_link_options(menudet_jit_parity PRIVATE "-sALLOW_MEMORY_GROWTH=1" "-sSTACK_SIZE=1048576")
+    add_test(NAME menudet_jit_parity COMMAND menudet_jit_parity --require-interpreter)
+    set_tests_properties(menudet_jit_parity PROPERTIES TIMEOUT 600)
+  elseif(NOT MINIEXPR_ENABLE_TCC_JIT AND NOT MINIEXPR_MENUDET_CC)
+    add_test(NAME menudet_jit_parity COMMAND menudet_jit_parity --compact)
+    set_tests_properties(menudet_jit_parity PROPERTIES TIMEOUT 600)
   endif()
   if(NOT EMSCRIPTEN)
     if(MINIEXPR_ENABLE_TCC_JIT AND MINIEXPR_BUILD_BUNDLED_LIBTCC AND NOT WIN32)
-      add_test(NAME portable_jit_parity_tcc COMMAND portable_jit_parity --require-jit)
-      set_tests_properties(portable_jit_parity_tcc PROPERTIES TIMEOUT 120
+      add_test(NAME menudet_jit_parity_tcc COMMAND menudet_jit_parity --require-jit)
+      set_tests_properties(menudet_jit_parity_tcc PROPERTIES TIMEOUT 120
         ENVIRONMENT "ME_DSL_JIT_COMPILER=tcc")
     endif()
-    if(MINIEXPR_PORTABLE_CC)
+    if(MINIEXPR_MENUDET_CC)
       if(MINIEXPR_FULL_CONFORMANCE)
-        add_test(NAME portable_jit_parity_cc COMMAND portable_jit_parity --require-jit)
-        set_tests_properties(portable_jit_parity_cc PROPERTIES TIMEOUT 600 LABELS "jit-full"
-          ENVIRONMENT "ME_DSL_JIT_COMPILER=cc;CC=${MINIEXPR_PORTABLE_CC};ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/jit-cache-cc-full")
+        add_test(NAME menudet_jit_parity_cc COMMAND menudet_jit_parity --require-jit)
+        set_tests_properties(menudet_jit_parity_cc PROPERTIES TIMEOUT 600 LABELS "jit-full"
+          ENVIRONMENT "ME_DSL_JIT_COMPILER=cc;CC=${MINIEXPR_MENUDET_CC};ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/jit-cache-cc-full")
       endif()
-      add_test(NAME portable_jit_parity_cc_gate COMMAND portable_jit_parity --require-jit --compact)
-      set_tests_properties(portable_jit_parity_cc_gate PROPERTIES TIMEOUT 180 LABELS "jit-gate"
-        ENVIRONMENT "ME_DSL_JIT_COMPILER=cc;CC=${MINIEXPR_PORTABLE_CC};ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/jit-cache-cc-gate")
+      add_test(NAME menudet_jit_parity_cc_gate COMMAND menudet_jit_parity --require-jit --compact)
+      set_tests_properties(menudet_jit_parity_cc_gate PROPERTIES TIMEOUT 180 LABELS "jit-gate"
+        ENVIRONMENT "ME_DSL_JIT_COMPILER=cc;CC=${MINIEXPR_MENUDET_CC};ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/jit-cache-cc-gate")
     endif()
-    add_test(NAME portable_jit_parity_custom_flags COMMAND portable_jit_parity --require-interpreter)
-    set_tests_properties(portable_jit_parity_custom_flags PROPERTIES TIMEOUT 120
+    add_test(NAME menudet_jit_parity_custom_flags COMMAND menudet_jit_parity --require-interpreter)
+    set_tests_properties(menudet_jit_parity_custom_flags PROPERTIES TIMEOUT 120
       ENVIRONMENT "CFLAGS=-ffast-math")
   endif()
   add_executable(graph_preparation graph/preparation.c)
@@ -188,9 +188,9 @@ if(MINIEXPR_BUILD_ARTIFACT)
   add_executable(numpy_compat_arrays numpy-compat/arrays.c)
   target_link_libraries(numpy_compat_arrays PRIVATE miniexpr_artifact)
   add_test(NAME numpy_compat_native_arrays COMMAND numpy_compat_arrays)
-  add_executable(numpy_compat_portable_jit numpy-compat/portable-jit.c)
-  target_link_libraries(numpy_compat_portable_jit PRIVATE miniexpr_artifact)
-  add_test(NAME numpy_compat_portable_jit COMMAND numpy_compat_portable_jit)
+  add_executable(numpy_compat_menudet_jit numpy-compat/menudet-jit.c)
+  target_link_libraries(numpy_compat_menudet_jit PRIVATE miniexpr_artifact)
+  add_test(NAME numpy_compat_menudet_jit COMMAND numpy_compat_menudet_jit)
   add_executable(numpy_compat_runner numpy-compat/runner.c numpy-compat/conformance.c
     numpy-compat/batch-jit.c)
   target_link_libraries(numpy_compat_runner PRIVATE miniexpr_artifact)
@@ -224,7 +224,7 @@ if(MINIEXPR_BUILD_ARTIFACT)
       "${CMAKE_CURRENT_SOURCE_DIR}/numpy-compat/functions-v1.0.json" "${policy}")
     set_tests_properties(numpy_compat_functions_${policy} PROPERTIES TIMEOUT 60)
   endforeach()
-  if(MINIEXPR_PORTABLE_CC AND NOT WIN32 AND NOT EMSCRIPTEN)
+  if(MINIEXPR_MENUDET_CC AND NOT WIN32 AND NOT EMSCRIPTEN)
     foreach(corpus arithmetic functions)
       set(cc_corpus_args "")
       if(corpus STREQUAL "arithmetic" AND NOT MINIEXPR_FULL_CONFORMANCE)
@@ -233,7 +233,7 @@ if(MINIEXPR_BUILD_ARTIFACT)
       add_test(NAME numpy_compat_${corpus}_cc COMMAND numpy_compat_runner
         "${CMAKE_CURRENT_SOURCE_DIR}/numpy-compat/${corpus}-v1.0.json" on ${cc_corpus_args})
       set_tests_properties(numpy_compat_${corpus}_cc PROPERTIES TIMEOUT 60
-        ENVIRONMENT "ME_DSL_JIT_COMPILER=cc;CC=${MINIEXPR_PORTABLE_CC};ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/conformance-batch-cache;MENUDET_REQUIRE_JIT=1")
+        ENVIRONMENT "ME_DSL_JIT_COMPILER=cc;CC=${MINIEXPR_MENUDET_CC};ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/conformance-batch-cache;MENUDET_REQUIRE_JIT=1")
       if(corpus STREQUAL "arithmetic")
         set_tests_properties(numpy_compat_${corpus}_cc PROPERTIES TIMEOUT 180)
       endif()
@@ -241,41 +241,43 @@ if(MINIEXPR_BUILD_ARTIFACT)
   endif()
 endif()
 if(MINIEXPR_BUILD_ARTIFACT AND NOT EMSCRIPTEN)
-  add_executable(portable_artifact_runner portable-artifacts/runner.c)
-  target_link_libraries(portable_artifact_runner PRIVATE miniexpr_artifact)
+  add_executable(menudet_artifact_runner menudet-artifacts/runner.c)
+  target_link_libraries(menudet_artifact_runner PRIVATE miniexpr_artifact)
   foreach(policy off default)
-    add_test(NAME portable_artifact_affine_${policy} COMMAND portable_artifact_runner
-      "${CMAKE_CURRENT_SOURCE_DIR}/portable-artifacts/affine.json" "${policy}")
-    set_tests_properties(portable_artifact_affine_${policy} PROPERTIES TIMEOUT 30
+    add_test(NAME menudet_artifact_affine_${policy} COMMAND menudet_artifact_runner
+      "${CMAKE_CURRENT_SOURCE_DIR}/menudet-artifacts/affine.json" "${policy}")
+    set_tests_properties(menudet_artifact_affine_${policy} PROPERTIES TIMEOUT 30
       ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/artifact-jit-cache")
   endforeach()
   if(MINIEXPR_ENABLE_TCC_JIT AND NOT WIN32)
-    add_test(NAME portable_artifact_affine_on COMMAND portable_artifact_runner
-      "${CMAKE_CURRENT_SOURCE_DIR}/portable-artifacts/affine.json" on)
-    set_tests_properties(portable_artifact_affine_on PROPERTIES TIMEOUT 30
+    add_test(NAME menudet_artifact_affine_on COMMAND menudet_artifact_runner
+      "${CMAKE_CURRENT_SOURCE_DIR}/menudet-artifacts/affine.json" on)
+    set_tests_properties(menudet_artifact_affine_on PROPERTIES TIMEOUT 30
       ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/artifact-jit-cache")
   endif()
-  if(MINIEXPR_PORTABLE_CC)
-    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/portable-artifacts/affine.json" cc_artifact)
+  if(MINIEXPR_MENUDET_CC)
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/menudet-artifacts/affine.json" cc_artifact)
     string(REPLACE "# me:compiler=tcc" "# me:compiler=cc" cc_artifact "${cc_artifact}")
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/affine.cc.json" "${cc_artifact}")
-    add_test(NAME portable_artifact_affine_cc COMMAND portable_artifact_runner
+    add_test(NAME menudet_artifact_affine_cc COMMAND menudet_artifact_runner
       "${CMAKE_CURRENT_BINARY_DIR}/affine.cc.json" on)
-    set_tests_properties(portable_artifact_affine_cc PROPERTIES TIMEOUT 30
-      ENVIRONMENT "CC=${MINIEXPR_PORTABLE_CC};ME_DSL_FP_MODE=fast;ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/artifact-jit-cache")
+    set_tests_properties(menudet_artifact_affine_cc PROPERTIES TIMEOUT 30
+      ENVIRONMENT "CC=${MINIEXPR_MENUDET_CC};ME_DSL_FP_MODE=fast;ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/artifact-jit-cache")
   endif()
-  add_test(NAME portable_artifact_affine_fallback COMMAND portable_artifact_runner
-    "${CMAKE_CURRENT_SOURCE_DIR}/portable-artifacts/affine.json" default)
-  set_tests_properties(portable_artifact_affine_fallback PROPERTIES TIMEOUT 30
+  add_test(NAME menudet_artifact_affine_fallback COMMAND menudet_artifact_runner
+    "${CMAKE_CURRENT_SOURCE_DIR}/menudet-artifacts/affine.json" default)
+  set_tests_properties(menudet_artifact_affine_fallback PROPERTIES TIMEOUT 30
     ENVIRONMENT "ME_DSL_JIT=0;ME_DSL_FP_MODE=fast;ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/artifact-jit-cache")
 endif()
 
 file(GLOB MINIEXPR_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
-list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_portable_jit_parity\\.c$")
+list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_menudet_jit_parity\\.c$")
 if(NOT MINIEXPR_BUILD_ARTIFACT)
   list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_artifact\\.c$")
   list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_math_policy\\.c$")
-  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_jit_portable_wasm32\\.c$")
+  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_jit_menudet_wasm32\\.c$")
+  # These exercise the artifact loader, not just the core complex type system.
+  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_menudet_complex(_wasm)?\\.c$")
 endif()
 if(NOT MINIEXPR_ENABLE_TCC_JIT OR EMSCRIPTEN)
   list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_jit_libtcc\\.c$")
@@ -301,9 +303,9 @@ if(EMSCRIPTEN)
     list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_jit_runtime_cache\\.c$")
   endif()
   # The broad complex matrix is native-only; wasm32 runs the focused runner below.
-  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_portable_complex\\.c$")
+  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_menudet_complex\\.c$")
 else()
-  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_portable_complex_wasm\\.c$")
+  list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_menudet_complex_wasm\\.c$")
 endif()
 if(NOT (EMSCRIPTEN AND MINIEXPR_USE_WASM32_JIT AND MINIEXPR_WASM32_SIDE_MODULE))
   list(FILTER MINIEXPR_TEST_SOURCES EXCLUDE REGEX "test_dsl_jit_side_module\\.c$")
@@ -317,14 +319,14 @@ foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
     PRIVATE ME_DSL_JIT_TEST_STUB_SO_PATH="$<TARGET_FILE:me_jit_test_stub>")
   target_link_libraries("${test_name}" PRIVATE ${MINIEXPR_DEFAULT_LIB} ${MINIEXPR_THREADS_LIB})
   if(test_name STREQUAL "test_dsl_artifact" OR test_name STREQUAL "test_dsl_math_policy" OR
-     test_name STREQUAL "test_portable_complex" OR test_name STREQUAL "test_portable_complex_wasm")
+     test_name STREQUAL "test_menudet_complex" OR test_name STREQUAL "test_menudet_complex_wasm")
     target_link_libraries("${test_name}" PRIVATE miniexpr_artifact)
     target_compile_definitions("${test_name}" PRIVATE
-      MINIEXPR_ARTIFACT_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/portable-artifacts/affine.json")
+      MINIEXPR_ARTIFACT_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/menudet-artifacts/affine.json")
     if(EMSCRIPTEN)
       # fopen uses the virtual filesystem; preserve the compiled-in fixture path.
       target_link_options("${test_name}" PRIVATE
-        "SHELL:--embed-file ${CMAKE_CURRENT_SOURCE_DIR}/portable-artifacts/affine.json@${CMAKE_CURRENT_SOURCE_DIR}/portable-artifacts/affine.json")
+        "SHELL:--embed-file ${CMAKE_CURRENT_SOURCE_DIR}/menudet-artifacts/affine.json@${CMAKE_CURRENT_SOURCE_DIR}/menudet-artifacts/affine.json")
     endif()
   endif()
   if(MINIEXPR_BUILD_ARTIFACT AND test_name STREQUAL "test_complex_functions")
@@ -333,7 +335,7 @@ foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
     target_link_libraries("${test_name}" PRIVATE miniexpr_artifact)
     target_compile_definitions("${test_name}" PRIVATE ME_TEST_HAS_ARTIFACT=1)
   endif()
-  if(test_name STREQUAL "test_dsl_jit_portable_wasm32")
+  if(test_name STREQUAL "test_dsl_jit_menudet_wasm32")
     target_link_libraries(${test_name} PRIVATE miniexpr_artifact)
     if(EMSCRIPTEN)
       target_link_options(${test_name} PRIVATE "-sNODERAWFS=1" "-sEXIT_RUNTIME=1"
@@ -346,27 +348,27 @@ foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
       # Same differential test without Node's raw filesystem. SINGLE_FILE keeps
       # the wasm payload in the JS so a static page can exercise the browser
       # runtime directly; Node runs this target too as a portability check.
-      add_executable(test_dsl_jit_portable_wasm32_browser
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_dsl_jit_portable_wasm32.c")
-      target_link_libraries(test_dsl_jit_portable_wasm32_browser PRIVATE miniexpr_artifact)
-      target_compile_definitions(test_dsl_jit_portable_wasm32_browser PRIVATE
+      add_executable(test_dsl_jit_menudet_wasm32_browser
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_dsl_jit_menudet_wasm32.c")
+      target_link_libraries(test_dsl_jit_menudet_wasm32_browser PRIVATE miniexpr_artifact)
+      target_compile_definitions(test_dsl_jit_menudet_wasm32_browser PRIVATE
         ME_USE_WASM32_JIT=1)
       if(MINIEXPR_WASM32_SIDE_MODULE)
-        target_compile_definitions(test_dsl_jit_portable_wasm32_browser PRIVATE
+        target_compile_definitions(test_dsl_jit_menudet_wasm32_browser PRIVATE
           ME_WASM32_SIDE_MODULE=1)
-        target_link_options(test_dsl_jit_portable_wasm32_browser PRIVATE
+        target_link_options(test_dsl_jit_menudet_wasm32_browser PRIVATE
           "SHELL:--pre-js ${PROJECT_SOURCE_DIR}/src/me_jit_glue.js")
       else()
-        target_compile_definitions(test_dsl_jit_portable_wasm32_browser PRIVATE
+        target_compile_definitions(test_dsl_jit_menudet_wasm32_browser PRIVATE
           ME_WASM32_SIDE_MODULE=0)
       endif()
-      target_link_options(test_dsl_jit_portable_wasm32_browser PRIVATE
+      target_link_options(test_dsl_jit_menudet_wasm32_browser PRIVATE
         "-sSINGLE_FILE=1" "-sALLOW_MEMORY_GROWTH=1" "-sINITIAL_MEMORY=134217728"
         "-sEXIT_RUNTIME=1" "-sALLOW_TABLE_GROWTH=1"
         "-sEXPORTED_RUNTIME_METHODS=addFunction,removeFunction,stackSave,stackAlloc,stackRestore,lengthBytesUTF8,stringToUTF8")
-      add_test(NAME test_dsl_jit_portable_wasm32_browser
-        COMMAND test_dsl_jit_portable_wasm32_browser)
-      set_tests_properties(test_dsl_jit_portable_wasm32_browser PROPERTIES TIMEOUT 180)
+      add_test(NAME test_dsl_jit_menudet_wasm32_browser
+        COMMAND test_dsl_jit_menudet_wasm32_browser)
+      set_tests_properties(test_dsl_jit_menudet_wasm32_browser PROPERTIES TIMEOUT 180)
     endif()
   endif()
   if(EMSCRIPTEN)
@@ -408,10 +410,10 @@ foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
     add_dependencies("${test_name}" me_jit_test_stub)
   endif()
   # This target doubles as a manual native benchmark, but its correctness role
-  # belongs to Emscripten. Native parity is covered by portable_jit_parity.
-  if(NOT test_name STREQUAL "test_dsl_jit_portable_wasm32" OR EMSCRIPTEN)
+  # belongs to Emscripten. Native parity is covered by menudet_jit_parity.
+  if(NOT test_name STREQUAL "test_dsl_jit_menudet_wasm32" OR EMSCRIPTEN)
     add_test(NAME "${test_name}" COMMAND "${test_name}")
-    if(test_name STREQUAL "test_dsl_jit_portable_wasm32")
+    if(test_name STREQUAL "test_dsl_jit_menudet_wasm32")
       set_tests_properties(${test_name} PROPERTIES TIMEOUT 120)
     endif()
   endif()

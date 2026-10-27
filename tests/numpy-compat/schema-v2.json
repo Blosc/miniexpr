@@ -174,7 +174,7 @@
           "type": "string"
         },
         "semantic_revision": {
-          "enum": ["menudet-numpy-1.0"]
+          "enum": ["menudet-numpy-0.1"]
         },
         "requires": {
           "type": "array",

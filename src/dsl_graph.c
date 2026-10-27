@@ -1,10 +1,10 @@
 /* Bounded graph frontend. Numerical rules, traversal and accumulation belong to
- * the portable compiler and logical-array adapter, not to this decoder. The
+ * the menudet compiler and logical-array adapter, not to this decoder. The
  * temporary textual lowering is deliberately tree-only for effectful nodes. */
 #include "miniexpr_graph.h"
 #include "dsl_graph_internal.h"
-#include "dsl_portable_types.h"
-#include "dsl_portable_fp.h"
+#include "dsl_menudet_types.h"
+#include "dsl_menudet_fp.h"
 #include "yyjson.h"
 #include <limits.h>
 #include <stdatomic.h>
@@ -42,7 +42,7 @@ struct me_graph_plan {
     me_graph_plan *stages[ME_GRAPH_MAX_STAGES];
     int sources[ME_GRAPH_MAX_STAGES][ME_MAX_VARS]; /* >=0 stage; -1-input index. */
     int last_consumer[ME_GRAPH_MAX_STAGES];
-    bool portable_stage;
+    bool menudet_stage;
     bool declared_staged;
     bool direct_reduction;
     bool partitionable;
@@ -206,7 +206,7 @@ static int g_conversion(me_dtype source, me_dtype target, const char *casting,
     me_artifact **out, me_artifact_error *error) {
     char json[1024];
     int n = snprintf(json, sizeof(json),
-        "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+        "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
         "\"requires\":[\"numeric\"],\"source\":\"def convert(value):\\n    return value\\n\","
         "\"entry_point\":\"convert\",\"inputs\":[{\"name\":\"value\",\"dtype\":\"%s\"}],\"constants\":[],"
         "\"output\":{\"dtype\":\"%s\",\"contract\":\"elementwise\"},\"context\":{\"ndim\":0},"
@@ -217,7 +217,7 @@ static int g_conversion(me_dtype source, me_dtype target, const char *casting,
 static int g_initial_conversion(yyjson_val *initial, me_dtype target,
     me_artifact **out, me_artifact_error *error) {
     graph_buffer json = {0};
-    g_add(&json, "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+    g_add(&json, "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
         "\"requires\":[\"numeric\"],\"source\":\"def convert(initial):\\n    return initial\\n\","
         "\"entry_point\":\"convert\",\"inputs\":[],\"constants\":[{\"name\":\"initial\"");
     const char *fields[] = {"dtype", "category", "encoding", "value"};
@@ -397,9 +397,9 @@ static yyjson_doc *g_map_root(const char *source, graph_node *nodes,
     yyjson_mut_val *requires = yyjson_mut_arr(doc), *inputs = yyjson_mut_arr(doc);
     yyjson_mut_val *constants = yyjson_mut_arr(doc), *output = yyjson_mut_obj(doc);
     yyjson_mut_val *semantics = yyjson_mut_obj(doc), *context = yyjson_mut_obj(doc);
-    bool ok = yyjson_mut_obj_add_str(doc, root, "schema_version", "1.0");
-    ok &= yyjson_mut_obj_add_str(doc, language, "name", "miniexpr");
-    ok &= yyjson_mut_obj_add_str(doc, language, "version", "1.0");
+    bool ok = yyjson_mut_obj_add_str(doc, root, "schema_version", ME_ARTIFACT_SCHEMA_VERSION);
+    ok &= yyjson_mut_obj_add_str(doc, language, "name", "menudet");
+    ok &= yyjson_mut_obj_add_str(doc, language, "version", ME_MENUDET_DSL_VERSION);
     ok &= yyjson_mut_obj_add_val(doc, root, "language", language);
     ok &= yyjson_mut_arr_add_str(doc, requires, "numeric");
     ok &= yyjson_mut_obj_add_val(doc, root, "requires", requires);
@@ -1508,7 +1508,7 @@ static int g_source(const me_graph_plan *p, yyjson_val *binding, int stage) {
 static me_dtype g_source_dtype(const me_graph_plan *p, int source) {
     return source < 0 ? p->types[-1 - source] : g_result_dtype(p->stages[source]);
 }
-static me_graph_status g_prepare_portable(yyjson_val *stage, const me_graph_prepare_options *options,
+static me_graph_status g_prepare_menudet(yyjson_val *stage, const me_graph_prepare_options *options,
     me_graph_plan **out, me_graph_error *error) {
     const char *const fields[] = {"cardinality", "context", "effects", "mask"};
     yyjson_val *contract = yyjson_obj_get(stage, "contract"), *artifact = yyjson_obj_get(stage, "artifact");
@@ -1517,14 +1517,14 @@ static me_graph_status g_prepare_portable(yyjson_val *stage, const me_graph_prep
         !g_equal(yyjson_obj_get(contract, "context"), "none") ||
         !g_equal(yyjson_obj_get(contract, "effects"), "ordered-lazy") ||
         !g_equal(yyjson_obj_get(contract, "mask"), "none") ||
-        !g_equal(yyjson_obj_get(artifact, "schema_version"), "1.0") ||
-        !g_equal(yyjson_obj_get(yyjson_obj_get(artifact, "language"), "version"), "1.0"))
-        return g_error(error, -1, ME_GRAPH_ERR_UNSUPPORTED, "trusted stages require Menudet 1.0 elementwise/context-free/ordered-lazy/unmasked contracts");
+        !g_equal(yyjson_obj_get(artifact, "schema_version"), ME_ARTIFACT_SCHEMA_VERSION) ||
+        !g_equal(yyjson_obj_get(yyjson_obj_get(artifact, "language"), "version"), ME_MENUDET_DSL_VERSION))
+        return g_error(error, -1, ME_GRAPH_ERR_UNSUPPORTED, "trusted stages require Menudet 0.1 beta elementwise/context-free/ordered-lazy/unmasked contracts");
     me_graph_plan *p = calloc(1, sizeof(*p));
-    if (!p) return g_error(error, -1, ME_GRAPH_ERR_OOM, "portable stage allocation failed");
+    if (!p) return g_error(error, -1, ME_GRAPH_ERR_OOM, "menudet stage allocation failed");
     atomic_init(&p->references, 1);
     p->mask = -1;
-    p->portable_stage = true;
+    p->menudet_stage = true;
     p->reduction.version = ME_ARTIFACT_ARRAY_VERSION;
     graph_buffer json = {0};
     g_json(&json, artifact);
@@ -1592,18 +1592,18 @@ static me_graph_status g_prepare_staged(yyjson_val *root, const me_graph_prepare
         yyjson_val *stage = yyjson_arr_get(stages, (size_t)i), *id = yyjson_obj_get(stage, "id");
         yyjson_val *bindings = yyjson_obj_get(stage, "inputs");
         const char *const graph_fields[] = {"id", "kind", "inputs", "graph"};
-        const char *const portable_fields[] = {"id", "kind", "inputs", "artifact", "contract"};
-        bool portable = g_equal(yyjson_obj_get(stage, "kind"), "portable");
-        if (!(portable || g_equal(yyjson_obj_get(stage, "kind"), "graph")) ||
-            !g_fields(stage, portable ? portable_fields : graph_fields, portable ? 5 : 4, portable ? 5 : 4) ||
+        const char *const menudet_fields[] = {"id", "kind", "inputs", "artifact", "contract"};
+        bool menudet = g_equal(yyjson_obj_get(stage, "kind"), "menudet");
+        if (!(menudet || g_equal(yyjson_obj_get(stage, "kind"), "graph")) ||
+            !g_fields(stage, menudet ? menudet_fields : graph_fields, menudet ? 5 : 4, menudet ? 5 : 4) ||
             !yyjson_is_uint(id) || yyjson_get_uint(id) != (uint64_t)i || !yyjson_is_obj(bindings) ||
             yyjson_obj_size(bindings) > ME_MAX_VARS) goto failure;
         size_t j, count; yyjson_val *key, *binding;
         yyjson_obj_foreach(bindings, j, count, key, binding) {
             if (!g_name(g_str(key)) || g_source(p, binding, i) == INT_MIN) goto failure;
         }
-        if (portable) {
-            rc = g_prepare_portable(stage, options, &p->stages[i], error);
+        if (menudet) {
+            rc = g_prepare_menudet(stage, options, &p->stages[i], error);
         } else {
             yyjson_val *graph = yyjson_obj_get(stage, "graph");
             if (!g_equal(yyjson_obj_get(graph, "format"), ME_GRAPH_FORMAT)) goto failure;
@@ -1828,8 +1828,8 @@ cleanup:
 }
 const char *me_graph_stage_kind(const me_graph_plan *p, int stage) {
     if (!p || stage < 0 || (size_t)stage >= me_graph_stage_count(p)) return NULL;
-    if (p->nstages) return p->stages[stage]->portable_stage ? "portable" : "graph";
-    return stage ? "conversion" : p->portable_stage ? "portable" : "graph";
+    if (p->nstages) return p->stages[stage]->menudet_stage ? "menudet" : "graph";
+    return stage ? "conversion" : p->menudet_stage ? "menudet" : "graph";
 }
 int me_graph_stage_last_consumer(const me_graph_plan *p, int stage) {
     if (!p || stage < 0 || (size_t)stage >= me_graph_stage_count(p)) return -1;

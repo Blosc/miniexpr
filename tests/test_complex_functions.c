@@ -777,7 +777,7 @@ static void test_libm_abi(void) {
         for (int i = 0; i < nspecials; i++) {
             char json[4096];
             int n = snprintf(json, sizeof(json),
-                "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+                "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
                 "\"requires\":[\"numeric\",\"nd-context\"],"
                 "\"source\":\"%s\",\"entry_point\":\"k\","
                 "\"inputs\":[{\"name\":\"z\",\"dtype\":\"complex128\"}],\"constants\":[],"

@@ -10,9 +10,9 @@
 
 #include "dsl_compile_internal.h"
 #include "dsl_math_policy.h"
-#include "dsl_portable_expr.h"
-#include "dsl_portable_types.h"
-#include "dsl_portable_fp.h"
+#include "dsl_menudet_expr.h"
+#include "dsl_menudet_types.h"
+#include "dsl_menudet_fp.h"
 
 #include "dsl_jit_cgen.h"
 #include "functions.h"
@@ -38,14 +38,14 @@ typedef struct {
     bool output_dtype_auto;
     int loop_depth;
     int control_depth;   /* nesting inside if/while/for bodies */
-    int varying_control_depth; /* portable lane-dependent participation */
+    int varying_control_depth; /* menudet lane-dependent participation */
     bool varying_loop_flow;
     int in_condition;    /* compiling an if/while condition */
     bool allow_new_locals;
-    bool infer_portable_joins;
-    bool portable_types_changed;
-    bool portable_seen_bindings[ME_MAX_VARS];
-    bool portable_synthetic_expr;
+    bool infer_menudet_joins;
+    bool menudet_types_changed;
+    bool menudet_seen_bindings[ME_MAX_VARS];
+    bool menudet_synthetic_expr;
     int *error_pos;
     me_dsl_compiled_expr *output_expr;
     bool has_return;
@@ -58,9 +58,9 @@ typedef struct {
     size_t error_reason_cap;
 } dsl_compile_ctx;
 
-static me_dtype dsl_portable_join(me_dtype a, me_dtype b, me_dsl_semantic_profile profile) {
-    return a == b ? a : profile == ME_DSL_PROFILE_PORTABLE_1_1 ?
-        dsl_numpy_numeric_promote(a, b) : dsl_portable_numeric_promote(a, b);
+static me_dtype dsl_menudet_join(me_dtype a, me_dtype b, me_dsl_semantic_profile profile) {
+    return a == b ? a : profile == ME_DSL_PROFILE_MENUDET_0_1 ?
+        dsl_numpy_numeric_promote(a, b) : dsl_menudet_numeric_promote(a, b);
 }
 
 static bool is_function_entry(const me_variable *var) {
@@ -475,26 +475,26 @@ bool dsl_compiled_expr_uniform(const me_expr *n, const bool *uniform, int nvars)
     }
 }
 
-static bool dsl_portable_reduced_value(const me_expr *n, const me_dsl_compiled_program *program) {
+static bool dsl_menudet_reduced_value(const me_expr *n, const me_dsl_compiled_program *program) {
     if (is_reduction_node(n)) return true;
     if (TYPE_MASK(n->type) == ME_VARIABLE && is_synthetic_address(n->bound)) {
         int index = (int)((const char *)n->bound - synthetic_var_addresses);
-        return index >= 0 && index < program->vars.count && program->portable_reduced_vars[index];
+        return index >= 0 && index < program->vars.count && program->menudet_reduced_vars[index];
     }
     for (int i = 0; i < ARITY(n->type); i++) {
-        if (dsl_portable_reduced_value(n->parameters[i], program)) return true;
+        if (dsl_menudet_reduced_value(n->parameters[i], program)) return true;
     }
     return false;
 }
 
-static bool dsl_portable_scalar_value(const me_expr *n, const me_dsl_compiled_program *program) {
-    return dsl_portable_reduced_value(n, program) &&
+static bool dsl_menudet_scalar_value(const me_expr *n, const me_dsl_compiled_program *program) {
+    return dsl_menudet_reduced_value(n, program) &&
            dsl_compiled_expr_uniform(n, program->vars.uniform, program->vars.count);
 }
 
 /* Break/continue in this loop can leave different lanes at different return
  * sites. Nested loops rejoin locally, so their flow does not split this loop. */
-static bool dsl_portable_split_flow(const me_dsl_compiled_block *block,
+static bool dsl_menudet_split_flow(const me_dsl_compiled_block *block,
                                   const me_dsl_compiled_program *program, bool varying) {
     for (int i = 0; i < block->nstmts; i++) {
         const me_dsl_compiled_stmt *stmt = block->stmts[i];
@@ -504,13 +504,13 @@ static bool dsl_portable_split_flow(const me_dsl_compiled_block *block,
         }
         else if (stmt->kind == ME_DSL_STMT_IF) {
             bool split = varying || !dsl_compiled_expr_uniform(stmt->as.if_stmt.cond.expr, program->vars.uniform, program->vars.count);
-            if (dsl_portable_split_flow(&stmt->as.if_stmt.then_block, program, split)) return true;
+            if (dsl_menudet_split_flow(&stmt->as.if_stmt.then_block, program, split)) return true;
             for (int j = 0; j < stmt->as.if_stmt.n_elifs; j++) {
                 const me_dsl_compiled_if_branch *branch = &stmt->as.if_stmt.elif_branches[j];
                 split |= !dsl_compiled_expr_uniform(branch->cond.expr, program->vars.uniform, program->vars.count);
-                if (dsl_portable_split_flow(&branch->block, program, split)) return true;
+                if (dsl_menudet_split_flow(&branch->block, program, split)) return true;
             }
-            if (stmt->as.if_stmt.has_else && dsl_portable_split_flow(&stmt->as.if_stmt.else_block, program, split)) return true;
+            if (stmt->as.if_stmt.has_else && dsl_menudet_split_flow(&stmt->as.if_stmt.else_block, program, split)) return true;
         }
     }
     return false;
@@ -518,7 +518,7 @@ static bool dsl_portable_split_flow(const me_dsl_compiled_block *block,
 
 /* Validate after static joins converge. A scalar expression is not a scalar
  * block result if varying control can send lanes to distinct return sites. */
-static bool dsl_portable_coherent_returns(dsl_compile_ctx *ctx,
+static bool dsl_menudet_coherent_returns(dsl_compile_ctx *ctx,
                                          const me_dsl_compiled_block *block, bool varying) {
     const me_dsl_compiled_program *program = ctx->program;
     for (int i = 0; i < block->nstmts; i++) {
@@ -530,13 +530,13 @@ static bool dsl_portable_coherent_returns(dsl_compile_ctx *ctx,
         }
         if (stmt->kind == ME_DSL_STMT_IF) {
             bool split = varying || !dsl_compiled_expr_uniform(stmt->as.if_stmt.cond.expr, program->vars.uniform, program->vars.count);
-            if (!dsl_portable_coherent_returns(ctx, &stmt->as.if_stmt.then_block, split)) return false;
+            if (!dsl_menudet_coherent_returns(ctx, &stmt->as.if_stmt.then_block, split)) return false;
             for (int j = 0; j < stmt->as.if_stmt.n_elifs; j++) {
                 const me_dsl_compiled_if_branch *branch = &stmt->as.if_stmt.elif_branches[j];
                 split |= !dsl_compiled_expr_uniform(branch->cond.expr, program->vars.uniform, program->vars.count);
-                if (!dsl_portable_coherent_returns(ctx, &branch->block, split)) return false;
+                if (!dsl_menudet_coherent_returns(ctx, &branch->block, split)) return false;
             }
-            if (stmt->as.if_stmt.has_else && !dsl_portable_coherent_returns(ctx, &stmt->as.if_stmt.else_block, split)) return false;
+            if (stmt->as.if_stmt.has_else && !dsl_menudet_coherent_returns(ctx, &stmt->as.if_stmt.else_block, split)) return false;
         }
         else if (stmt->kind == ME_DSL_STMT_WHILE || stmt->kind == ME_DSL_STMT_FOR) {
             const me_dsl_compiled_block *body;
@@ -551,14 +551,14 @@ static bool dsl_portable_coherent_returns(dsl_compile_ctx *ctx,
                          !dsl_compiled_expr_uniform(stmt->as.for_loop.stop.expr, program->vars.uniform, program->vars.count) ||
                          !dsl_compiled_expr_uniform(stmt->as.for_loop.step.expr, program->vars.uniform, program->vars.count);
             }
-            split |= dsl_portable_split_flow(body, program, split);
-            if (!dsl_portable_coherent_returns(ctx, body, split)) return false;
+            split |= dsl_menudet_split_flow(body, program, split);
+            if (!dsl_menudet_coherent_returns(ctx, body, split)) return false;
         }
     }
     return true;
 }
 
-static void dsl_portable_demote_loop_locals(dsl_compile_ctx *ctx, const me_dsl_compiled_block *block) {
+static void dsl_menudet_demote_loop_locals(dsl_compile_ctx *ctx, const me_dsl_compiled_block *block) {
     for (int i = 0; i < block->nstmts; i++) {
         const me_dsl_compiled_stmt *stmt = block->stmts[i];
         if (stmt->kind == ME_DSL_STMT_ASSIGN || stmt->kind == ME_DSL_STMT_FOR) {
@@ -566,16 +566,16 @@ static void dsl_portable_demote_loop_locals(dsl_compile_ctx *ctx, const me_dsl_c
             int index = ctx->program->local_var_indices[slot];
             if (ctx->program->vars.uniform[index]) {
                 ctx->program->vars.uniform[index] = false;
-                if (ctx->infer_portable_joins) ctx->portable_types_changed = true;
+                if (ctx->infer_menudet_joins) ctx->menudet_types_changed = true;
             }
         }
         if (stmt->kind == ME_DSL_STMT_IF) {
-            dsl_portable_demote_loop_locals(ctx, &stmt->as.if_stmt.then_block);
-            for (int j = 0; j < stmt->as.if_stmt.n_elifs; j++) dsl_portable_demote_loop_locals(ctx, &stmt->as.if_stmt.elif_branches[j].block);
-            if (stmt->as.if_stmt.has_else) dsl_portable_demote_loop_locals(ctx, &stmt->as.if_stmt.else_block);
+            dsl_menudet_demote_loop_locals(ctx, &stmt->as.if_stmt.then_block);
+            for (int j = 0; j < stmt->as.if_stmt.n_elifs; j++) dsl_menudet_demote_loop_locals(ctx, &stmt->as.if_stmt.elif_branches[j].block);
+            if (stmt->as.if_stmt.has_else) dsl_menudet_demote_loop_locals(ctx, &stmt->as.if_stmt.else_block);
         }
-        else if (stmt->kind == ME_DSL_STMT_FOR) dsl_portable_demote_loop_locals(ctx, &stmt->as.for_loop.body);
-        else if (stmt->kind == ME_DSL_STMT_WHILE) dsl_portable_demote_loop_locals(ctx, &stmt->as.while_loop.body);
+        else if (stmt->kind == ME_DSL_STMT_FOR) dsl_menudet_demote_loop_locals(ctx, &stmt->as.for_loop.body);
+        else if (stmt->kind == ME_DSL_STMT_WHILE) dsl_menudet_demote_loop_locals(ctx, &stmt->as.while_loop.body);
     }
 }
 
@@ -997,7 +997,7 @@ static void dsl_mark_scalar_inputs(me_expr *expr, const me_dsl_compiled_program 
     if (TYPE_MASK(expr->type) == ME_VARIABLE && is_synthetic_address(expr->bound)) {
         int index = (int)((const char *)expr->bound - synthetic_var_addresses);
         if (index >= 0 && index < ME_MAX_VARS &&
-            program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_1 && program->numpy_weak_vars[index]) {
+            program->semantic_profile == ME_DSL_PROFILE_MENUDET_0_1 && program->numpy_weak_vars[index]) {
             expr->flags |= ME_EXPR_FLAG_WEAK_SCALAR;
         }
         if (index >= 0 && index < program->n_inputs && program->vars.uniform[index]) {
@@ -1007,7 +1007,7 @@ static void dsl_mark_scalar_inputs(me_expr *expr, const me_dsl_compiled_program 
     for (int i = 0; i < ARITY(expr->type); i++) dsl_mark_scalar_inputs(expr->parameters[i], program);
 }
 
-me_dtype dsl_portable_cast_dtype(const me_expr *expr) {
+me_dtype dsl_menudet_cast_dtype(const me_expr *expr) {
     if (!expr || !IS_FUNCTION(expr->type) || ARITY(expr->type) != 1) return ME_AUTO;
     if ((expr->flags & ME_EXPR_FLAG_NUMPY_1_1) && (expr->flags & ME_EXPR_FLAG_EXPLICIT_DTYPE) &&
         (expr->function == (const void *)dsl_cast_int_intrinsic ||
@@ -1094,7 +1094,7 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
     int cast_count = 0;
     cast_funcs[cast_count++] = (me_variable){
         .name = "int",
-        .dtype = ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_1 ? ME_INT64 : dsl_cast_int_target_dtype(expr_dtype),
+        .dtype = ctx->program->semantic_profile == ME_DSL_PROFILE_MENUDET_0_1 ? ME_INT64 : dsl_cast_int_target_dtype(expr_dtype),
         .address = (const void *)dsl_cast_int_intrinsic,
         .type = ME_FUNCTION1 | ME_FLAG_PURE,
         .context = NULL,
@@ -1102,7 +1102,7 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
     };
     cast_funcs[cast_count++] = (me_variable){
         .name = "float",
-        .dtype = ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_1 ? ME_FLOAT64 : dsl_cast_float_target_dtype(expr_dtype),
+        .dtype = ctx->program->semantic_profile == ME_DSL_PROFILE_MENUDET_0_1 ? ME_FLOAT64 : dsl_cast_float_target_dtype(expr_dtype),
         .address = (const void *)dsl_cast_float_intrinsic,
         .type = ME_FUNCTION1 | ME_FLAG_PURE,
         .context = NULL,
@@ -1117,7 +1117,7 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
         .itemsize = 0
     };
 
-    if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_1) {
+    if (ctx->program->semantic_profile == ME_DSL_PROFILE_MENUDET_0_1) {
         static const char *names[] = {"int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float32", "float64"};
         static const me_dtype types[] = {ME_INT8, ME_INT16, ME_INT32, ME_INT64, ME_UINT8, ME_UINT16, ME_UINT32, ME_UINT64, ME_FLOAT32, ME_FLOAT64};
         for (int i = 0; i < 10; i++) {
@@ -1172,10 +1172,10 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
         return false;
     }
     int *indices = NULL;
-    if (dsl_portable_typed_profile(ctx->program->semantic_profile)) {
+    if (dsl_menudet_typed_profile(ctx->program->semantic_profile)) {
         char reason[256];
         dsl_mark_scalar_inputs(compiled, ctx->program);
-        if (!dsl_portable_type_expr_profile(&compiled, expr_dtype, ctx->program->semantic_profile, reason, sizeof(reason))) {
+        if (!dsl_menudet_type_expr_profile(&compiled, expr_dtype, ctx->program->semantic_profile, reason, sizeof(reason))) {
             dsl_set_error_reason(ctx, reason);
             if (ctx->error_pos) *ctx->error_pos = dsl_offset_from_linecol(ctx->source, expr_node->line, expr_node->column);
             me_free(compiled);
@@ -1195,11 +1195,11 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
      * results past element 0 (the reduction collapses the whole block while the
      * surrounding mask is per-element).  Reject it rather than mislead.
      * Conditions are exempt: any()/all() collapsing to a scalar is the
-     * documented idiom there. Portable 1.1 uniform conditionals are safe: all
+     * documented idiom there. Menudet 1.1 uniform conditionals are safe: all
      * participating lanes select the same branch. Loops remain excluded. */
     if (ctx->control_depth > 0 && ctx->in_condition == 0 &&
-        !ctx->portable_synthetic_expr && contains_reduction(compiled) &&
-        !(ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_1 &&
+        !ctx->menudet_synthetic_expr && contains_reduction(compiled) &&
+        !(ctx->program->semantic_profile == ME_DSL_PROFILE_MENUDET_0_1 &&
           ctx->loop_depth == 0 && ctx->varying_control_depth == 0)) {
         dsl_set_error_reason(ctx,
             "reductions (sum/mean/prod/min/max/any/all) are not supported inside "
@@ -1873,7 +1873,7 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     program->jit_dl_handle_cached = false;
     free(program->jit_c_source);
     program->jit_c_source = NULL;
-    program->jit_portable_wasm_source = false;
+    program->jit_menudet_wasm_source = false;
     program->jit_use_runtime_math_bridge = false;
     program->jit_scalar_math_bridge_enabled = false;
     program->jit_synth_reserved_non_nd = false;
@@ -1887,10 +1887,10 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     program->jit_lowering_mode[0] = '\0';
     program->jit_vector_ops[0] = '\0';
     program->jit_lowering_reason[0] = '\0';
-    program->portable_jit_has_arith_bridge = false;
-    program->portable_jit_has_ramp_bridge = false;
-    program->portable_jit_arith_ntemps = 0;
-    program->portable_jit_arith_nnodes = 0;
+    program->menudet_jit_has_arith_bridge = false;
+    program->menudet_jit_has_ramp_bridge = false;
+    program->menudet_jit_arith_ntemps = 0;
+    program->menudet_jit_arith_nnodes = 0;
 
     if (parsed->nparams < 0) {
         snprintf(program->jit_ir_error, sizeof(program->jit_ir_error), "%s",
@@ -2213,7 +2213,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
 
         switch (stmt->kind) {
         case ME_DSL_STMT_ASSIGN: {
-            ctx->portable_synthetic_expr = dsl_portable_typed_profile(ctx->program->semantic_profile) &&
+            ctx->menudet_synthetic_expr = dsl_menudet_typed_profile(ctx->program->semantic_profile) &&
                                            stmt->as.assign.synthetic;
             const char *name = stmt->as.assign.name;
             if (!name) {
@@ -2240,7 +2240,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             bool rhs_compiled = false;
 
             if (var_index >= 0 && var_index < ctx->program->vars.count) {
-                me_dtype expr_dtype = dsl_portable_typed_profile(ctx->program->semantic_profile) ?
+                me_dtype expr_dtype = dsl_menudet_typed_profile(ctx->program->semantic_profile) ?
                                       ME_AUTO : ctx->program->vars.dtypes[var_index];
                 if (!dsl_compile_expr(ctx, stmt->as.assign.value, expr_dtype, &compiled->as.assign.value)) {
                     dsl_compiled_stmt_free(compiled);
@@ -2249,7 +2249,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 assigned_dtype = me_get_dtype(compiled->as.assign.value.expr);
                 rhs_compiled = true;
             }
-            else if (!dsl_portable_typed_profile(ctx->program->semantic_profile) &&
+            else if (!dsl_menudet_typed_profile(ctx->program->semantic_profile) &&
                      !ctx->output_dtype_auto && dsl_dtype_is_integer(ctx->output_dtype)) {
                 me_dsl_compiled_expr probe_expr;
                 memset(&probe_expr, 0, sizeof(probe_expr));
@@ -2276,7 +2276,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             if (!rhs_compiled) {
                 /* A Boolean result does not make intermediate numeric operands
                  * Boolean. Infer new locals before casting only the return. */
-                me_dtype expr_dtype = (dsl_portable_typed_profile(ctx->program->semantic_profile) ||
+                me_dtype expr_dtype = (dsl_menudet_typed_profile(ctx->program->semantic_profile) ||
                                       stmt->as.assign.synthetic || ctx->output_dtype_auto ||
                                       ctx->output_dtype == ME_BOOL)
                                       ? ME_AUTO : ctx->output_dtype;
@@ -2290,7 +2290,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             bool is_uniform = dsl_compiled_expr_uniform(compiled->as.assign.value.expr,
                                                        ctx->program->vars.uniform,
                                                        ctx->program->vars.count);
-            if (dsl_portable_typed_profile(ctx->program->semantic_profile) &&
+            if (dsl_menudet_typed_profile(ctx->program->semantic_profile) &&
                 ctx->varying_control_depth) is_uniform = false;
             /* Guarded chain temporaries are per-lane values, even if an RHS
              * is constant. Inactive lane zero may never have been assigned. */
@@ -2330,20 +2330,20 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
-                if (ctx->infer_portable_joins) ctx->portable_types_changed = true;
+                if (ctx->infer_menudet_joins) ctx->menudet_types_changed = true;
             }
             else if (is_string_dtype(assigned_dtype) &&
                      ctx->program->vars.dtypes[var_index] == assigned_dtype &&
                      ctx->program->vars.itemsizes &&
                      me_get_itemsize(compiled->as.assign.value.expr) >
                          ctx->program->vars.itemsizes[var_index]) {
-                if (ctx->infer_portable_joins) {
+                if (ctx->infer_menudet_joins) {
                     ctx->program->vars.itemsizes[var_index] = me_get_itemsize(compiled->as.assign.value.expr);
-                    ctx->portable_types_changed = true;
+                    ctx->menudet_types_changed = true;
                 }
                 else {
                     /* Full DSL retains its single-pass width restriction;
-                     * portable discovery already joined widths before execution. */
+                     * menudet discovery already joined widths before execution. */
                     dsl_set_error_reason(ctx,
                         "reassigning a string variable to a wider value is not supported yet; "
                         "use a separate variable for the longer result");
@@ -2355,15 +2355,15 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 }
             }
             else if (ctx->program->vars.dtypes[var_index] != assigned_dtype) {
-                if (dsl_portable_typed_profile(ctx->program->semantic_profile)) {
+                if (dsl_menudet_typed_profile(ctx->program->semantic_profile)) {
                     me_dtype previous = ctx->program->vars.dtypes[var_index];
-                    me_dtype joined = dsl_portable_join(previous, assigned_dtype, ctx->program->semantic_profile);
-                    if (joined != ME_AUTO && ctx->infer_portable_joins) {
+                    me_dtype joined = dsl_menudet_join(previous, assigned_dtype, ctx->program->semantic_profile);
+                    if (joined != ME_AUTO && ctx->infer_menudet_joins) {
                         ctx->program->vars.dtypes[var_index] = joined;
-                        ctx->portable_types_changed |= joined != previous;
+                        ctx->menudet_types_changed |= joined != previous;
                     }
-                    else if (joined == previous && !ctx->infer_portable_joins &&
-                             dsl_portable_convert_expr(&compiled->as.assign.value.expr, previous)) {
+                    else if (joined == previous && !ctx->infer_menudet_joins &&
+                             dsl_menudet_convert_expr(&compiled->as.assign.value.expr, previous)) {
                         /* Convert storage only after evaluating the RHS in its
                          * own operand dtype; the stable local has one type. */
                     }
@@ -2383,18 +2383,18 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 }
             }
             else {
-                if (!dsl_portable_typed_profile(ctx->program->semantic_profile)) ctx->program->vars.uniform[var_index] = is_uniform;
+                if (!dsl_menudet_typed_profile(ctx->program->semantic_profile)) ctx->program->vars.uniform[var_index] = is_uniform;
             }
 
-            if (dsl_portable_typed_profile(ctx->program->semantic_profile)) {
+            if (dsl_menudet_typed_profile(ctx->program->semantic_profile)) {
                 if (ctx->program->vars.uniform[var_index] && !is_uniform) {
                     ctx->program->vars.uniform[var_index] = false;
-                    if (ctx->infer_portable_joins) ctx->portable_types_changed = true;
+                    if (ctx->infer_menudet_joins) ctx->menudet_types_changed = true;
                 }
-                bool reduced = dsl_portable_reduced_value(compiled->as.assign.value.expr, ctx->program);
-                if (reduced && !ctx->program->portable_reduced_vars[var_index]) {
-                    ctx->program->portable_reduced_vars[var_index] = true;
-                    if (ctx->infer_portable_joins) ctx->portable_types_changed = true;
+                bool reduced = dsl_menudet_reduced_value(compiled->as.assign.value.expr, ctx->program);
+                if (reduced && !ctx->program->menudet_reduced_vars[var_index]) {
+                    ctx->program->menudet_reduced_vars[var_index] = true;
+                    if (ctx->infer_menudet_joins) ctx->menudet_types_changed = true;
                 }
             }
 
@@ -2403,13 +2403,13 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 return false;
             }
             compiled->as.assign.local_slot = ctx->program->local_slots[var_index];
-            if (ctx->program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_1) {
+            if (ctx->program->semantic_profile == ME_DSL_PROFILE_MENUDET_0_1) {
                 bool weak = (compiled->as.assign.value.expr->flags & (ME_EXPR_FLAG_WEAK_LITERAL | ME_EXPR_FLAG_WEAK_SCALAR)) != 0;
-                ctx->program->numpy_weak_vars[var_index] = ctx->portable_seen_bindings[var_index] ?
+                ctx->program->numpy_weak_vars[var_index] = ctx->menudet_seen_bindings[var_index] ?
                     ctx->program->numpy_weak_vars[var_index] && weak : weak;
             }
-            if (dsl_portable_typed_profile(ctx->program->semantic_profile)) ctx->portable_seen_bindings[var_index] = true;
-            ctx->portable_synthetic_expr = false;
+            if (dsl_menudet_typed_profile(ctx->program->semantic_profile)) ctx->menudet_seen_bindings[var_index] = true;
+            ctx->menudet_synthetic_expr = false;
             break;
         }
         case ME_DSL_STMT_EXPR: {
@@ -2421,7 +2421,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             break;
         }
         case ME_DSL_STMT_RETURN: {
-            me_dtype expr_dtype = ctx->infer_portable_joins || ctx->output_dtype_auto ? ME_AUTO : ctx->output_dtype;
+            me_dtype expr_dtype = ctx->infer_menudet_joins || ctx->output_dtype_auto ? ME_AUTO : ctx->output_dtype;
             if (!dsl_compile_expr(ctx, stmt->as.return_stmt.expr, expr_dtype, &compiled->as.return_stmt.expr)) {
                 dsl_compiled_stmt_free(compiled);
                 return false;
@@ -2437,8 +2437,8 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 ctx->output_expr = &compiled->as.return_stmt.expr;
             }
             else if (ctx->return_dtype != return_dtype) {
-                if (ctx->infer_portable_joins) {
-                    me_dtype joined = dsl_portable_join(ctx->return_dtype, return_dtype, ctx->program->semantic_profile);
+                if (ctx->infer_menudet_joins) {
+                    me_dtype joined = dsl_menudet_join(ctx->return_dtype, return_dtype, ctx->program->semantic_profile);
                     if (joined != ME_AUTO) {
                         ctx->return_dtype = joined;
                         break;
@@ -2451,10 +2451,10 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
-            else if (dsl_portable_typed_profile(ctx->program->semantic_profile) &&
-                     dsl_portable_scalar_value(ctx->output_expr->expr, ctx->program) !=
-                     dsl_portable_scalar_value(compiled->as.return_stmt.expr.expr, ctx->program)) {
-                dsl_set_error_reason(ctx, "portable return paths have inconsistent result cardinality");
+            else if (dsl_menudet_typed_profile(ctx->program->semantic_profile) &&
+                     dsl_menudet_scalar_value(ctx->output_expr->expr, ctx->program) !=
+                     dsl_menudet_scalar_value(compiled->as.return_stmt.expr.expr, ctx->program)) {
+                dsl_set_error_reason(ctx, "menudet return paths have inconsistent result cardinality");
                 if (ctx->error_pos) *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
                 dsl_compiled_stmt_free(compiled);
                 return false;
@@ -2462,8 +2462,8 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             break;
         }
         case ME_DSL_STMT_PRINT: {
-            if (dsl_portable_typed_profile(ctx->program->semantic_profile)) {
-                dsl_set_error_reason(ctx, "print is not allowed in portable 1.0");
+            if (dsl_menudet_typed_profile(ctx->program->semantic_profile)) {
+                dsl_set_error_reason(ctx, "print is not allowed in Menudet 0.1 beta");
                 if (ctx->error_pos) *ctx->error_pos = dsl_offset_from_linecol(ctx->source, stmt->line, stmt->column);
                 dsl_compiled_stmt_free(compiled);
                 return false;
@@ -2641,7 +2641,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 return false;
             }
 
-            bool varying = dsl_portable_typed_profile(ctx->program->semantic_profile) &&
+            bool varying = dsl_menudet_typed_profile(ctx->program->semantic_profile) &&
                            !dsl_compiled_expr_uniform(compiled->as.if_stmt.cond.expr,
                                                       ctx->program->vars.uniform, ctx->program->vars.count);
             ctx->varying_control_depth += varying;
@@ -2671,7 +2671,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
-                if (!varying && dsl_portable_typed_profile(ctx->program->semantic_profile) &&
+                if (!varying && dsl_menudet_typed_profile(ctx->program->semantic_profile) &&
                     !dsl_compiled_expr_uniform(out_branch->cond.expr, ctx->program->vars.uniform, ctx->program->vars.count)) {
                     varying = true;
                     ctx->varying_control_depth++;
@@ -2705,7 +2705,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
-            bool varying = dsl_portable_typed_profile(ctx->program->semantic_profile) &&
+            bool varying = dsl_menudet_typed_profile(ctx->program->semantic_profile) &&
                            !dsl_compiled_expr_uniform(compiled->as.while_loop.cond.expr,
                                                       ctx->program->vars.uniform, ctx->program->vars.count);
             ctx->varying_control_depth += varying;
@@ -2722,7 +2722,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             ctx->loop_depth--;
             ctx->control_depth--;
             ctx->varying_control_depth -= varying;
-            if (ctx->varying_loop_flow) dsl_portable_demote_loop_locals(ctx, &compiled->as.while_loop.body);
+            if (ctx->varying_loop_flow) dsl_menudet_demote_loop_locals(ctx, &compiled->as.while_loop.body);
             ctx->varying_loop_flow |= enclosing_flow;
             break;
         }
@@ -2743,9 +2743,9 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 return false;
             }
             int var_index = dsl_var_table_find(&ctx->program->vars, var);
-            bool reusable = dsl_portable_typed_profile(ctx->program->semantic_profile) &&
+            bool reusable = dsl_menudet_typed_profile(ctx->program->semantic_profile) &&
                             var_index >= ctx->program->n_inputs && var_index >= 0 &&
-                            !ctx->portable_seen_bindings[var_index] &&
+                            !ctx->menudet_seen_bindings[var_index] &&
                             ctx->program->vars.dtypes[var_index] == ME_INT64;
             if (var_index >= 0 && !reusable) {
                 if (ctx->error_pos) {
@@ -2756,7 +2756,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             }
             if (var_index < 0) {
                 var_index = dsl_var_table_add_with_uniform(&ctx->program->vars, var, ME_INT64, 0, true);
-                if (ctx->infer_portable_joins) ctx->portable_types_changed = true;
+                if (ctx->infer_menudet_joins) ctx->menudet_types_changed = true;
             }
             if (var_index < 0) {
                 dsl_compiled_stmt_free(compiled);
@@ -2767,27 +2767,27 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 return false;
             }
             compiled->as.for_loop.loop_var_slot = ctx->program->local_slots[var_index];
-            if (dsl_portable_typed_profile(ctx->program->semantic_profile)) ctx->portable_seen_bindings[var_index] = true;
+            if (dsl_menudet_typed_profile(ctx->program->semantic_profile)) ctx->menudet_seen_bindings[var_index] = true;
 
             if (!dsl_compile_for_range_args(ctx, stmt, compiled)) {
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
-            if (dsl_portable_typed_profile(ctx->program->semantic_profile) &&
-                (!dsl_portable_convert_range_expr(&compiled->as.for_loop.start.expr) ||
-                 !dsl_portable_convert_range_expr(&compiled->as.for_loop.stop.expr) ||
-                 !dsl_portable_convert_range_expr(&compiled->as.for_loop.step.expr))) {
+            if (dsl_menudet_typed_profile(ctx->program->semantic_profile) &&
+                (!dsl_menudet_convert_range_expr(&compiled->as.for_loop.start.expr) ||
+                 !dsl_menudet_convert_range_expr(&compiled->as.for_loop.stop.expr) ||
+                 !dsl_menudet_convert_range_expr(&compiled->as.for_loop.step.expr))) {
                 dsl_set_error_reason(ctx, "range arguments require checked int64 conversion");
                 dsl_compiled_stmt_free(compiled);
                 return false;
             }
-            bool varying = dsl_portable_typed_profile(ctx->program->semantic_profile) &&
+            bool varying = dsl_menudet_typed_profile(ctx->program->semantic_profile) &&
                            (!dsl_compiled_expr_uniform(compiled->as.for_loop.start.expr, ctx->program->vars.uniform, ctx->program->vars.count) ||
                             !dsl_compiled_expr_uniform(compiled->as.for_loop.stop.expr, ctx->program->vars.uniform, ctx->program->vars.count) ||
                             !dsl_compiled_expr_uniform(compiled->as.for_loop.step.expr, ctx->program->vars.uniform, ctx->program->vars.count));
             if (varying && ctx->program->vars.uniform[var_index]) {
                 ctx->program->vars.uniform[var_index] = false;
-                if (ctx->infer_portable_joins) ctx->portable_types_changed = true;
+                if (ctx->infer_menudet_joins) ctx->menudet_types_changed = true;
             }
             ctx->varying_control_depth += varying;
             bool enclosing_flow = ctx->varying_loop_flow;
@@ -2803,7 +2803,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             ctx->loop_depth--;
             ctx->control_depth--;
             ctx->varying_control_depth -= varying;
-            if (ctx->varying_loop_flow) dsl_portable_demote_loop_locals(ctx, &compiled->as.for_loop.body);
+            if (ctx->varying_loop_flow) dsl_menudet_demote_loop_locals(ctx, &compiled->as.for_loop.body);
             ctx->varying_loop_flow |= enclosing_flow;
             break;
         }
@@ -2825,7 +2825,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             else {
                 memset(&compiled->as.flow.cond, 0, sizeof(compiled->as.flow.cond));
             }
-            if (dsl_portable_typed_profile(ctx->program->semantic_profile) &&
+            if (dsl_menudet_typed_profile(ctx->program->semantic_profile) &&
                 (ctx->varying_control_depth ||
                  (compiled->as.flow.cond.expr && !dsl_compiled_expr_uniform(compiled->as.flow.cond.expr,
                      ctx->program->vars.uniform, ctx->program->vars.count)))) ctx->varying_loop_flow = true;
@@ -2920,10 +2920,10 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
          * which override the environment. */
         char policy_error[256];
         if (parsed->math_explicit || parsed->ulp_explicit) {
-            if (!dsl_portable_typed_profile(profile)) {
+            if (!dsl_menudet_typed_profile(profile)) {
                 if (error_reason && error_reason_cap) {
                     snprintf(error_reason, error_reason_cap,
-                             "me:math and me:ulp are supported only by Menudet portable kernels");
+                             "me:math and me:ulp are supported only by Menudet menudet kernels");
                 }
                 dsl_compiled_program_free(program);
                 me_dsl_program_free(parsed);
@@ -2943,9 +2943,9 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
             if (error_pos) *error_pos = -1;
             return NULL;
         }
-        if (dsl_portable_typed_profile(profile)) {
+        if (dsl_menudet_typed_profile(profile)) {
             /* Optional acceleration falls back before building any uncertified IR. */
-            if (profile != ME_DSL_PROFILE_PORTABLE_1_1) jit_mode = ME_JIT_OFF;
+            if (profile != ME_DSL_PROFILE_MENUDET_0_1) jit_mode = ME_JIT_OFF;
         }
     }
     if (jit_mode == ME_JIT_ON || jit_mode == ME_JIT_OFF) {
@@ -2988,9 +2988,9 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
             return NULL;
         }
         if (is_function_entry(entry)) {
-            if (dsl_portable_typed_profile(profile)) {
+            if (dsl_menudet_typed_profile(profile)) {
                 if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap,
-                                                              "external callbacks are not allowed in portable 1.0");
+                                                              "external callbacks are not allowed in Menudet 0.1 beta");
                 if (error_pos) *error_pos = -1;
                 free(funcs);
                 dsl_compiled_program_free(program);
@@ -3139,8 +3139,8 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
             itemsize = entry->itemsize;
         }
         int idx = dsl_var_table_add_with_uniform(&program->vars, name, vtype, itemsize,
-            dsl_portable_typed_profile(profile) && (entry->type & ME_DSL_UNIFORM_INPUT));
-        if (idx >= 0 && profile == ME_DSL_PROFILE_PORTABLE_1_1) program->numpy_weak_vars[idx] = (entry->type & ME_DSL_WEAK_INPUT) != 0;
+            dsl_menudet_typed_profile(profile) && (entry->type & ME_DSL_UNIFORM_INPUT));
+        if (idx >= 0 && profile == ME_DSL_PROFILE_MENUDET_0_1) program->numpy_weak_vars[idx] = (entry->type & ME_DSL_WEAK_INPUT) != 0;
         if (idx < 0) {
             if (error_reason && error_reason_cap > 0) {
                 snprintf(error_reason, error_reason_cap,
@@ -3217,12 +3217,12 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
     program->uses_n_mask = uses_n_mask;
     program->uses_ndim = uses_ndim;
     program->uses_flat_idx = uses_flat_idx;
-    if (dsl_portable_typed_profile(profile) &&
+    if (dsl_menudet_typed_profile(profile) &&
         (uses_i_mask || uses_n_mask || uses_ndim || uses_flat_idx) &&
         (compile_ndims <= 0 || compile_ndims > ME_DSL_MAX_NDIM ||
          ((unsigned)(uses_i_mask | uses_n_mask) >> compile_ndims))) {
         if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap,
-                                                       "portable ND context descriptors require a covering logical rank");
+                                                       "menudet ND context descriptors require a covering logical rank");
         if (error_pos) *error_pos = -1;
         free(funcs);
         dsl_compiled_program_free(program);
@@ -3323,28 +3323,28 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
     ctx.error_reason = error_reason;
     ctx.error_reason_cap = error_reason_cap;
 
-    if (dsl_portable_typed_profile(profile)) {
+    if (dsl_menudet_typed_profile(profile)) {
         /* Discovery trees are never evaluated. Each widening causes a rebuild,
          * so no earlier variable/conversion node keeps an obsolete local dtype.
          * The numeric lattice is finite; cap iterations by its size and vars. */
         bool stable = false;
         for (int pass = 0; pass < 12 * ME_MAX_VARS; pass++) {
-            ctx.infer_portable_joins = true;
-            ctx.portable_types_changed = false;
-            memset(ctx.portable_seen_bindings, 0, sizeof(ctx.portable_seen_bindings));
+            ctx.infer_menudet_joins = true;
+            ctx.menudet_types_changed = false;
+            memset(ctx.menudet_seen_bindings, 0, sizeof(ctx.menudet_seen_bindings));
             ctx.has_return = false;
             ctx.output_expr = NULL;
             ctx.return_dtype = ME_AUTO;
             if (!dsl_compile_block(&ctx, &parsed->block, &program->block)) {
                 if (error_reason && error_reason_cap > 0 && !error_reason[0]) {
-                    snprintf(error_reason, error_reason_cap, "failed to compile portable inference block");
+                    snprintf(error_reason, error_reason_cap, "failed to compile menudet inference block");
                 }
                 free(funcs);
                 dsl_compiled_program_free(program);
                 me_dsl_program_free(parsed);
                 return NULL;
             }
-            stable = !ctx.portable_types_changed;
+            stable = !ctx.menudet_types_changed;
             me_dtype inferred_output = ctx.return_dtype;
             dsl_compiled_block_free(&program->block);
             ctx.output_expr = NULL;
@@ -3359,14 +3359,14 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
             }
         }
         if (!stable) {
-            dsl_set_error_reason(&ctx, "portable local type inference did not converge");
+            dsl_set_error_reason(&ctx, "menudet local type inference did not converge");
             free(funcs);
             dsl_compiled_program_free(program);
             me_dsl_program_free(parsed);
             return NULL;
         }
-        ctx.infer_portable_joins = false;
-        memset(ctx.portable_seen_bindings, 0, sizeof(ctx.portable_seen_bindings));
+        ctx.infer_menudet_joins = false;
+        memset(ctx.menudet_seen_bindings, 0, sizeof(ctx.menudet_seen_bindings));
     }
 
     if (!dsl_compile_block(&ctx, &parsed->block, &program->block)) {
@@ -3397,7 +3397,7 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
     /* A string-valued kernel needs its width bound published too, or callers
      * cannot size the output container. */
     program->output_itemsize = 0;
-    if (dsl_portable_typed_profile(profile) && !is_string_dtype(program->output_dtype)) program->output_itemsize = dtype_size(program->output_dtype);
+    if (dsl_menudet_typed_profile(profile) && !is_string_dtype(program->output_dtype)) program->output_itemsize = dtype_size(program->output_dtype);
     if (is_string_dtype(ctx.return_dtype)) {
         /* The widest branch wins: narrower returns are NUL-padded on the way out. */
         program->output_itemsize = ctx.return_itemsize;
@@ -3405,19 +3405,19 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
     program->guaranteed_return = dsl_compiled_block_guarantees_return(&program->block);
     program->output_is_scalar = contains_reduction(ctx.output_expr->expr) &&
                                 output_is_scalar(ctx.output_expr->expr);
-    if (dsl_portable_typed_profile(profile)) program->output_is_scalar = dsl_portable_scalar_value(ctx.output_expr->expr, program);
-    if (dsl_portable_typed_profile(profile) && program->output_is_scalar &&
-        !dsl_portable_coherent_returns(&ctx, &program->block, false)) {
+    if (dsl_menudet_typed_profile(profile)) program->output_is_scalar = dsl_menudet_scalar_value(ctx.output_expr->expr, program);
+    if (dsl_menudet_typed_profile(profile) && program->output_is_scalar &&
+        !dsl_menudet_coherent_returns(&ctx, &program->block, false)) {
         me_dsl_program_free(parsed);
         free(funcs);
         dsl_compiled_program_free(program);
         return NULL;
     }
-    if (!dsl_portable_typed_profile(profile)) {
+    if (!dsl_menudet_typed_profile(profile)) {
         dsl_try_build_jit_ir(&ctx, parsed, program, jit_mode != ME_JIT_OFF);
     }
     else {
-        dsl_portable_prepare_jit(program);
+        dsl_menudet_prepare_jit(program);
     }
 
     me_dsl_program_free(parsed);
@@ -3445,16 +3445,16 @@ me_dsl_compiled_program *dsl_compile_program_profile_declared(const char *source
                                                      int *error_pos, bool *is_dsl,
                                                      char *error_reason, size_t error_reason_cap) {
     fenv_t saved;
-    bool strict = dsl_portable_typed_profile(profile);
-    if (strict && !dsl_portable_fp_begin(&saved)) {
-        if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap, "cannot establish portable nearest rounding");
+    bool strict = dsl_menudet_typed_profile(profile);
+    if (strict && !dsl_menudet_fp_begin(&saved)) {
+        if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap, "cannot establish menudet nearest rounding");
         if (error_pos) *error_pos = -1;
         if (is_dsl) *is_dsl = true;
         return NULL;
     }
     me_dsl_compiled_program *program = dsl_compile_program_profile_impl(source, variables, var_count,
         dtype, compile_ndims, jit_mode, profile, declared, error_pos, is_dsl, error_reason, error_reason_cap);
-    if (strict && !dsl_portable_fp_end(&saved)) {
+    if (strict && !dsl_menudet_fp_end(&saved)) {
         dsl_compiled_program_free(program);
         if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap, "cannot restore caller floating environment");
         return NULL;

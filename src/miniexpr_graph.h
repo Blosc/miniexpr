@@ -1,4 +1,4 @@
-/* Opt-in numerical graphs; independent of portable artifact schema versions. */
+/* Opt-in numerical graphs; independent of menudet artifact schema versions. */
 #ifndef MINIEXPR_GRAPH_H
 #define MINIEXPR_GRAPH_H
 #include "miniexpr_artifact.h"
@@ -7,7 +7,7 @@ extern "C" {
 #endif
 #define ME_GRAPH_VERSION 1
 #define ME_GRAPH_FORMAT "menudet-graph-1"
-#define ME_GRAPH_SEMANTICS "menudet-numpy-1.0"
+#define ME_GRAPH_SEMANTICS "menudet-numpy-0.1"
 #define ME_GRAPH_STAGED_FORMAT "menudet-staged-graph-1"
 #define ME_GRAPH_MAX_STAGES 32
 #define ME_GRAPH_CAP_STAGED 64u

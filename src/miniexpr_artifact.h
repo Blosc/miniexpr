@@ -11,12 +11,12 @@
 extern "C" {
 #endif
 
-#define ME_ARTIFACT_SCHEMA_VERSION "1.0"
+#define ME_ARTIFACT_SCHEMA_VERSION "0.1"
 #define ME_ARTIFACT_MATH_POLICY_VERSION 1
 #define ME_ARTIFACT_NUMPY_SCHEMA_VERSION ME_ARTIFACT_SCHEMA_VERSION
 #define ME_ARTIFACT_MAX_BYTES (1024 * 1024)
 #define ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION 1
-#define ME_ARTIFACT_DRAFT_SCHEMA_VERSION "1.0"
+#define ME_ARTIFACT_MENUDET_SCHEMA_VERSION "0.1"
 
 enum {
     ME_ARTIFACT_CAP_NUMERIC = 1,
@@ -85,7 +85,7 @@ typedef struct {
 /* Decode, validate, and compile without executing. The handle owns a copy of
  * source, names, and constants; JSON storage can be released on return. jit_mode
  * is a host preference, not an artifact requirement. No sandbox is provided.
- * Only Menudet schema/language pair 1.0/1.0 is accepted, with NumPy numerical semantics.
+ * Only Menudet schema/language pair 0.1/0.1 is accepted, with NumPy numerical semantics.
  * On any failure *out is NULL. error may be NULL. */
 #define ME_ARTIFACT_LOAD_OPTIONS_VERSION 1
 #define ME_ARTIFACT_INFER_OUTPUT_VERSION 1
@@ -114,7 +114,7 @@ me_artifact_status me_artifact_eval(const me_artifact *artifact,
     const me_artifact_input *inputs, int ninputs, void *output, size_t nitems,
     me_artifact_error *error);
 
-/* Checked capacities/alignment/overlap before execution. Draft 1.0 validates
+/* Checked capacities/alignment/overlap before execution. Menudet 0.1 beta validates
  * signatures/capabilities on load and uses the typed interpreter, never full-DSL JIT. */
 me_artifact_status me_artifact_eval_ex(const me_artifact *artifact,
     const me_artifact_buffer *inputs, int ninputs, void *output,
@@ -261,7 +261,7 @@ int me_artifact_ninputs(const me_artifact *artifact);
 const char *me_artifact_input_name(const me_artifact *artifact, int index);
 me_dtype me_artifact_input_dtype(const me_artifact *artifact, int index);
 me_dtype me_artifact_output_dtype(const me_artifact *artifact);
-/* Metadata-only result dtype before final output conversion (Menudet 1.0 artifacts).
+/* Metadata-only result dtype before final output conversion (Menudet 0.1 beta artifacts).
  * Returns ME_AUTO for legacy artifacts and NULL handles. */
 me_dtype me_artifact_inferred_dtype(const me_artifact *artifact);
 bool me_artifact_has_jit(const me_artifact *artifact);

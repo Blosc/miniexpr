@@ -8,8 +8,8 @@
 #include "dsl_eval_internal.h"
 #include "dsl_jit_test.h"
 #include "dsl_math_policy.h"
-#include "dsl_portable_types.h"
-#include "dsl_portable_fp.h"
+#include "dsl_menudet_types.h"
+#include "dsl_menudet_fp.h"
 #include "functions.h"
 #include "yyjson.h"
 
@@ -497,11 +497,11 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
     yyjson_val *schema = yyjson_obj_get(root, "schema_version");
     yyjson_val *language_version = yyjson_obj_get(yyjson_obj_get(root, "language"), "version");
     bool numpy_profile = artifact_equal(schema, ME_ARTIFACT_SCHEMA_VERSION) &&
-        artifact_equal(language_version, ME_PORTABLE_DSL_VERSION);
+        artifact_equal(language_version, ME_MENUDET_DSL_VERSION);
     if (!numpy_profile && ((artifact_string(schema) && !artifact_equal(schema, ME_ARTIFACT_SCHEMA_VERSION)) ||
-        (artifact_string(language_version) && !artifact_equal(language_version, ME_PORTABLE_DSL_VERSION)))) {
+        (artifact_string(language_version) && !artifact_equal(language_version, ME_MENUDET_DSL_VERSION)))) {
         status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED,
-                                "unsupported portable artifact version pair; expected Menudet 1.0/1.0");
+                                "unsupported menudet artifact version pair; expected Menudet 0.1/0.1");
         goto cleanup;
     }
     const char *const language_fields[] = {"name", "version"};
@@ -560,8 +560,8 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
         goto cleanup;
     }
     if ((!numpy_profile && !artifact_equal(yyjson_obj_get(root, "schema_version"), ME_ARTIFACT_SCHEMA_VERSION)) ||
-        !artifact_equal(yyjson_obj_get(language, "name"), "miniexpr") ||
-        (!numpy_profile && !artifact_equal(yyjson_obj_get(language, "version"), ME_PORTABLE_DSL_VERSION)) ||
+        !artifact_equal(yyjson_obj_get(language, "name"), "menudet") ||
+        (!numpy_profile && !artifact_equal(yyjson_obj_get(language, "version"), ME_MENUDET_DSL_VERSION)) ||
         !(artifact_equal(yyjson_obj_get(output, "contract"), "elementwise") ||
           artifact_equal(yyjson_obj_get(output, "contract"), "block_scalar")) ||
         (has_fp_field && !(artifact_equal(yyjson_obj_get(semantics, "fp"), "strict") ||
@@ -581,7 +581,7 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
         !(artifact_equal(yyjson_obj_get(semantics, "casting"), "unsafe") ||
           artifact_equal(yyjson_obj_get(semantics, "casting"), "same_kind") ||
           artifact_equal(yyjson_obj_get(semantics, "casting"), "safe")))) {
-        status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported Menudet 1.0 numerical or casting policy");
+        status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported Menudet 0.1 beta numerical or casting policy");
         goto cleanup;
     }
     bool core = false;
@@ -627,7 +627,7 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
         goto cleanup;
     }
     artifact->capabilities = capabilities;
-    artifact->profile = ME_DSL_PROFILE_PORTABLE_1_1;
+    artifact->profile = ME_DSL_PROFILE_MENUDET_0_1;
     {
         const char *const context_fields[] = {"ndim"};
         yyjson_val *context = yyjson_obj_get(root, "context");
@@ -853,7 +853,7 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
                 else continue;
                 known[b] = true; any = true;
             }
-            if (any) dsl_portable_prepare_jit_constants(artifact->program, values, known);
+            if (any) dsl_menudet_prepare_jit_constants(artifact->program, values, known);
         }
         *out = artifact;
         artifact = NULL;
@@ -964,11 +964,11 @@ me_artifact_status me_artifact_eval_status(const me_artifact *artifact,
 #else
     status->supported = 1;
 #endif
-    if (!artifact || artifact->profile != ME_DSL_PROFILE_PORTABLE_1_1 || (raise_mask & ~15u) ||
+    if (!artifact || artifact->profile != ME_DSL_PROFILE_MENUDET_0_1 || (raise_mask & ~15u) ||
         (raise_mask && !status->supported)) return artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported floating-status profile or policy");
-    unsigned *previous = dsl_portable_status_begin(&status->flags);
+    unsigned *previous = dsl_menudet_status_begin(&status->flags);
     me_artifact_status result = me_artifact_eval_ex(artifact, inputs, ninputs, output, descriptor, error);
-    dsl_portable_status_end(previous);
+    dsl_menudet_status_end(previous);
     if (result == ME_ARTIFACT_SUCCESS && (status->flags & raise_mask)) {
         return artifact_error(error, ME_ARTIFACT_ERR_EVAL, "floating exception selected by raise policy");
     }
@@ -1062,12 +1062,12 @@ me_artifact_status me_artifact_eval_ex(const me_artifact *artifact,
     if (result == ME_ARTIFACT_SUCCESS) {
         /* An all-active mask has identical participation to no mask. Validate
          * it once, then use the unmasked JIT path rather than inhibit SIMD. */
-        me_dsl_portable_eval_descriptor native = {(int)nitems, all_active ? NULL : descriptor->valid_mask, descriptor->output_capacity,
+        me_dsl_menudet_eval_descriptor native = {(int)nitems, all_active ? NULL : descriptor->valid_mask, descriptor->output_capacity,
             descriptor->ndim, descriptor->logical_shape, descriptor->block_origin, descriptor->block_extent};
-        int rc = dsl_eval_program_portable(artifact->program, data, artifact->nbindings, output, &native);
+        int rc = dsl_eval_program_menudet(artifact->program, data, artifact->nbindings, output, &native);
         if (rc) {
             if (error) error->native_status = rc;
-            result = artifact_error(error, ME_ARTIFACT_ERR_EVAL, "portable interpreter evaluation failed");
+            result = artifact_error(error, ME_ARTIFACT_ERR_EVAL, "menudet interpreter evaluation failed");
         }
     }
     return result;
@@ -1129,7 +1129,7 @@ int me_artifact_math_covers(const me_artifact *artifact, const char *operation) 
 }
 
 me_dtype me_artifact_inferred_dtype(const me_artifact *artifact) {
-    return artifact && artifact->profile == ME_DSL_PROFILE_PORTABLE_1_1 ? artifact->inferred_dtype : ME_AUTO;
+    return artifact && artifact->profile == ME_DSL_PROFILE_MENUDET_0_1 ? artifact->inferred_dtype : ME_AUTO;
 }
 
 const char *me_artifact_entry_point(const me_artifact *artifact) {

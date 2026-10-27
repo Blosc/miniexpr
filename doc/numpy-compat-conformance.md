@@ -1,4 +1,4 @@
-> Historical qualification checkpoint. Current public Menudet 1.0 uses
+> Historical qualification checkpoint. Current public Menudet 0.1 beta uses
 > NumPy numerical semantics and optional JIT; see [the specification](dsl-spec/1.0.md).
 
 # NumPy conformance harness (M2)

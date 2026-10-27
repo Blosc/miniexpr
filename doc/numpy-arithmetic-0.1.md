@@ -1,0 +1,115 @@
+# NumPy arithmetic Menudet 0.1 beta
+
+Menudet 0.1 beta uses the NumPy-style numerical implementation for both interpretation
+and optional JIT. It is the sole public language/schema pair `1.0` / `1.0`.
+The earlier checked-arithmetic profile remains only as private regression code;
+the historical internal enum `ME_DSL_PROFILE_PORTABLE_1_1` names this implementation
+but does not expose a public 1.1 version. Unknown/mixed versions and numerical
+policies reject. Old development artifacts must be re-exported.
+
+The semantic reference is NumPy **2.5.3**. The advertised M3 matrix covers bool,
+int8/16/32/64, uint8/16/32/64, float32/64 and (as an interpreter-only extension
+on macOS, Linux, Windows with clang-cl, and wasm32) complex64/128.
+Half, extended floats, arbitrary-precision Python integers and array broadcasting
+are not implemented.
+This is an arithmetic profile, not a claim of full NumPy function or array parity.
+
+## Artifact policy and scalar categories
+
+```json
+"schema_version": "0.1",
+"language": {"name": "menudet", "version": "0.1"},
+"semantics": {"fp": "strict", "numeric": "numpy-2.5", "casting": "unsafe"}
+```
+
+Numeric constants additionally require `category: "weak"` or `"typed_scalar"`.
+Weak constants use bool/int64/float64 transport, but integer/float **kind**, not
+transport width, determines promotion when paired with a strong array operand.
+Integers outside the transport range reject. Strong typed scalar constants retain
+their dtype. Runtime input descriptors are strong typed arrays; a host scalar or
+0-D array input is a strong 0-D array, never implicitly a weak constant. Scalar
+strength survives JSON serialization and is independent of the originating host.
+String snapshots retain their 1.0 encoding and have no numeric scalar category.
+
+Source numeric literals are weak. Integral literals cannot silently wrap during
+operand construction; `uint8(x) + -1` is not rewritten into subtraction.
+Weak out-of-range arithmetic literals reject source validation. Weak captured
+integers and explicit weak scalar constructors reject at evaluation if they do
+not fit the selected dtype. Comparisons can compare out-of-range weak integers
+exactly without first narrowing them. Weak float + integer promotes to float64;
+weak float + float32 remains float32, including overflow to infinity. Typed
+scalars/0-D arrays participate in strong promotion, not value-dependent coercion.
+Local weak scalar bindings retain strength; mixed static branch types join to a
+strong common storage dtype. Weak-only integral expressions are checked within
+their transport width rather than silently becoming arbitrary-precision arithmetic.
+
+## Operators and dtype resolution
+
+`arithmetic-v1.0.json` contains the enumerated strong promotion/casting tables and
+executable cases. Promotion is metadata-only: it reads no input buffers and runs
+no kernel. `me_artifact_inferred_dtype()` reports the result before final output
+conversion; no requested output dtype controls arithmetic intermediates.
+
+- Add/subtract/multiply/power and unsigned negation wrap at the **computation**
+  width. Signed negation/absolute value of a signed minimum returns that minimum.
+  Operations use unsigned bits and explicit two's-complement reconstruction;
+  no C signed overflow or implementation-defined unsigned-to-signed narrowing.
+- Bool addition/multiplication and bitwise operations retain bool (OR/AND as
+  appropriate). Bool subtraction and unary plus/negation reject. Bool floor
+  division/remainder/power and shifts use int8. Mixed Boolean/number operands
+  promote to the numerical operand's dtype.
+- Mixed signed/unsigned promotion uses a signed width that can hold both ranges;
+  when none exists (including int64/uint64), arithmetic promotes to float64.
+  Integer comparisons instead use exact sign/magnitude comparison. All six
+  comparisons return bool and preserve unordered-NaN comparison rules.
+- True division of integral/bool operands returns float64; float32 division
+  remains float32. Floating operations use round-to-nearest/ties-even and restore
+  the caller's environment. Expressions do not contract multiply/add into FMA.
+- Integer floor division rounds toward negative infinity; remainder has the
+  divisor's sign. Zero divisors return zero for integer floor division/remainder.
+  Signed minimum divided by minus one returns the minimum; its remainder is zero.
+  Negative integer power rejects. Floating division/remainder follow IEEE values;
+  floor division applies NumPy's fmod-based quotient correction, not floor(x/y).
+- Bitwise and shifts require an integral common dtype. Shift operands undergo
+  normal promotion. Negative or oversized counts produce zero for left shifts,
+  and zero/sign extension for right shifts. No invalid C shift is executed.
+
+NumPy-like aggregated floating status/warnings are milestone 4 work. The profile
+does not claim Python `seterr` callback/warning behavior. WASM has fixed nearest
+rounding and no observable IEEE exception flags: alternate-rounding/flag probes
+are native-host-only; value tests still execute on WASM.
+
+## Conversion
+
+Fixed-width unary casts `int8(x)` through `uint64(x)`, `float32(x)`, `float64(x)`
+and `bool(x)` are native syntax. `int`/`float` use explicit int64/float64 widths.
+Array integer narrowing is modular; Boolean conversion uses truth, including
+NaNs and infinities. Float changes and integer-to-float conversions round directly
+to the destination width. Weak scalar construction is checked, distinct from
+array conversion and array arithmetic.
+
+Final output conversion declares `safe`, `same_kind` or `unsafe`. The enumerated
+dtype matrix agrees with `np.can_cast` for supported types. Disallowed policies
+reject at import before any input data is inspected. Explicit unary casts are
+unsafe array conversions (checked for weak scalar construction), not policy-bearing
+calls. Neither a permitted policy nor unsafe conversion bypasses resource checks.
+
+**Defined divergence:** floating-to-integer conversion truncates toward zero but
+rejects nonfinite or truncated out-of-range results, including negative unsigned
+results. NumPy's unstable host/compiler-dependent sentinels are not a universal
+Menudet contract. This divergence is recorded and diagnostic-tested, not hidden
+behind a widened tolerance or a machine-specific golden integer.
+
+## Backend and validation
+
+Menudet 0.1 beta has optional typed-tree JIT with shared native compiler/cache backends.
+Eligibility depends on the program and target; unsupported kernels fall back
+before execution. Full-DSL JIT remains a separate semantic profile. Explicit
+on/off tests must report the actual backend and never count fallback as acceleration.
+See [native arrays and JIT](native-arrays-0.1.md) for current capabilities.
+
+Python authoring uses `DSLKernel.export(..., version="1.0", casting="safe")`;
+version 1.0 is also the default. Ordinary Python scalar captures are weak;
+NumPy scalars and explicit `capture_dtypes` are strong. `PortableKernel` is the
+existing public API name for a Menudet kernel, and its inferred dtype is native
+metadata. API spelling does not define a separate Portable language.

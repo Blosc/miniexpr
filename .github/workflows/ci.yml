@@ -111,7 +111,7 @@ jobs:
         for compiler in "$gcc" "$clang"; do
           backend=$(basename "$compiler")
           ME_DSL_JIT_COMPILER=cc CC="$compiler" ME_DSL_JIT_CACHE_DIR="$PWD/build/jit-cache-$backend" \
-            build/tests/portable_jit_parity --require-jit $mode
+            build/tests/menudet_jit_parity --require-jit $mode
         done
 
     - name: Trace DSL JIT backend activity
@@ -326,9 +326,9 @@ jobs:
             '-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address,undefined'
           # Only this executable is exercised below; do not build unrelated
           # legacy tests under the sanitizer job's Clang configuration.
-          cmake --build build-asan --target portable_jit_parity --parallel 4
+          cmake --build build-asan --target menudet_jit_parity --parallel 4
       - name: Qualify sanitized bridges and interpretation
-        run: ctest --test-dir build-asan -R portable_jit_parity --output-on-failure
+        run: ctest --test-dir build-asan -R menudet_jit_parity --output-on-failure
 
   qualification-evidence:
     name: Publish full native qualification

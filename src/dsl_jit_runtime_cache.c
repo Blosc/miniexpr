@@ -9,7 +9,7 @@
 **********************************************************************/
 
 #include "dsl_jit_runtime_internal.h"
-#include "dsl_portable_batch.h"
+#include "dsl_menudet_batch.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -86,8 +86,8 @@ uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program) {
     h = dsl_jit_hash_u64(h, program->jit_ir_fingerprint);
     h = dsl_jit_hash_i32(h, (int)program->semantic_profile);
 #if ME_USE_WASM32_JIT
-    h = dsl_jit_hash_i32(h, program->jit_portable_wasm_source ? 2 : 1);
-    h = dsl_jit_hash_i32(h, program->jit_portable_wasm_source ? 1 : 0); /* portable wasm ABI revision */
+    h = dsl_jit_hash_i32(h, program->jit_menudet_wasm_source ? 2 : 1);
+    h = dsl_jit_hash_i32(h, program->jit_menudet_wasm_source ? 1 : 0); /* menudet wasm ABI revision */
 #endif
     h = dsl_jit_hash_i32(h, (int)program->output_dtype);
     h = dsl_jit_hash_i32(h, (int)program->fp_mode);
@@ -125,9 +125,9 @@ uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program) {
     h = dsl_jit_hash_i32(h, (int)sizeof(void *));
     h = dsl_jit_hash_i32(h, ME_DSL_JIT_CGEN_VERSION);
     h = dsl_jit_hash_i32(h, ME_DSL_JIT_BRIDGE_ABI_VERSION);
-    h = dsl_jit_hash_i32(h, ME_DSL_PORTABLE_JIT_ARITH_ABI_VERSION);
-    h = dsl_jit_hash_i32(h, program->portable_jit_has_arith_bridge ? 1 : 0);
-    h = dsl_jit_hash_i32(h, program->portable_jit_has_ramp_bridge ? 1 : 0);
+    h = dsl_jit_hash_i32(h, ME_DSL_MENUDET_JIT_ARITH_ABI_VERSION);
+    h = dsl_jit_hash_i32(h, program->menudet_jit_has_arith_bridge ? 1 : 0);
+    h = dsl_jit_hash_i32(h, program->menudet_jit_has_ramp_bridge ? 1 : 0);
     h = dsl_jit_hash_i32(h, dsl_jit_target_tag());
     h = dsl_jit_hash_i32(h, dsl_jit_backend_tag(program));
     h = dsl_jit_hash_i32(h, program->jit_use_runtime_math_bridge ? 1 : 0);

@@ -25,12 +25,12 @@ typedef struct {
     const int64_t *logical_shape;
     const int64_t *block_origin;
     const int64_t *block_extent;
-} me_dsl_portable_eval_descriptor;
+} me_dsl_menudet_eval_descriptor;
 
 /* Internal capacity-aware 1.0 evaluation; legacy nitems-output ABI is unchanged. */
-int dsl_eval_program_portable(const me_dsl_compiled_program *program,
+int dsl_eval_program_menudet(const me_dsl_compiled_program *program,
                                const void **inputs, int ninputs, void *output,
-                               const me_dsl_portable_eval_descriptor *descriptor);
+                               const me_dsl_menudet_eval_descriptor *descriptor);
 
 #ifndef ME_DSL_JIT_SYNTH_ND_CTX_V2_VERSION
 #define ME_DSL_JIT_SYNTH_ND_CTX_V2_VERSION 2

@@ -4,7 +4,7 @@
 #include <string.h>
 
 int main(void) {
-    const char *json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+    const char *json = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
         "\"requires\":[\"numeric\"],\"source\":\"def k(x):\\n    return x * 2 + 1\\n\",\"entry_point\":\"k\","
         "\"inputs\":[{\"name\":\"x\",\"dtype\":\"int64\"}],\"constants\":[],\"output\":{\"dtype\":\"int64\","
         "\"contract\":\"elementwise\"},\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":0},\"metadata\":{}}";

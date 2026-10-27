@@ -133,7 +133,7 @@ For log = base 10 log comment the next line. */
 #define INFINITY (1.0/0.0)
 #endif
 
-/* Portable complex number construction for MSVC compatibility */
+/* Menudet complex number construction for MSVC compatibility */
 static double _Complex me_cmplx(double re, double im) {
 #if defined(_MSC_VER)
     double _Complex v;
@@ -423,7 +423,7 @@ static double npr(double n, double r) { return ncr(n, r) * fac(r); }
 #pragma function (floor)
 #endif
 
-/* Distinct identities for portable 1.1 operations; typed evaluation never
+/* Distinct identities for Menudet 0.1 beta operations; typed evaluation never
  * dispatches through these double callbacks. */
 static double numpy_minimum(double x, double y) { return isnan(x) || x <= y ? x : y; }
 static double numpy_maximum(double x, double y) { return isnan(x) || x >= y ? x : y; }
@@ -586,10 +586,10 @@ static double add(double a, double b) { return a + b; }
 static double sub(double a, double b) { return a - b; }
 static double mul(double a, double b) { return a * b; }
 static double divide(double a, double b) { return a / b; }
-/* Token identity only in the portable parser. Checked interpretation never
+/* Token identity only in the menudet parser. Checked interpretation never
  * calls this floating implementation for integer operands. */
-static double portable_floordiv(double a, double b) { return floor(a / b); }
-static double portable_modulo(double a, double b) { return fmod(a, b); }
+static double menudet_floordiv(double a, double b) { return floor(a / b); }
+static double menudet_modulo(double a, double b) { return fmod(a, b); }
 static double negate(double a) { return -a; }
 const char* me_arithmetic_operator(const me_expr* n) {
     if (!n || !IS_FUNCTION(n->type)) {
@@ -2704,7 +2704,7 @@ static void vec_xor_bool(const bool* a, const bool* b, bool* out, int n);
 static void vec_not_bool(const bool* a, bool* out, int n);
 
 static void promote_logical_bool(me_expr* node) {
-    if (node && (node->flags & ME_EXPR_FLAG_PORTABLE_1)) return;
+    if (node && (node->flags & ME_EXPR_FLAG_MENUDET_1)) return;
     if (!node || node->dtype != ME_BOOL) return;
 
     if (node->function == bit_and) {
@@ -2721,9 +2721,9 @@ static void promote_logical_bool(me_expr* node) {
     }
 }
 
-/* Stable operation identity for the portable typed pass. Do not dispatch
+/* Stable operation identity for the menudet typed pass. Do not dispatch
  * checked integers through these double-valued full-DSL callbacks. */
-const char* me_portable_operator(const me_expr* n) {
+const char* me_menudet_operator(const me_expr* n) {
     /* Ordinary operators must not search the builtin registry on every lane.
      * Only the CRT remainder alias needs the slower registration-address check. */
     if (n && IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == (void *)add) return "+";
@@ -2743,8 +2743,8 @@ const char* me_portable_operator(const me_expr* n) {
     if (n->function == (void *)bit_shl) return "<<";
     if (n->function == (void *)bit_shr) return ">>";
     if (n->function == (void *)pow) return "**";
-    if (n->function == (void *)portable_modulo) return "%";
-    if (n->function == (void *)portable_floordiv) return "//";
+    if (n->function == (void *)menudet_modulo) return "%";
+    if (n->function == (void *)menudet_floordiv) return "//";
     if (n->function == (void *)logical_and) return "and";
     if (n->function == (void *)logical_or) return "or";
     if (n->function == (void *)logical_not) return "not";
@@ -2752,7 +2752,7 @@ const char* me_portable_operator(const me_expr* n) {
     return me_comparison_operator(n);
 }
 
-const char* me_portable_math_name(const me_expr* n) {
+const char* me_menudet_math_name(const me_expr* n) {
     if (n && n->function == (void *)numpy_fabs) return "floating_abs";
     if (n && n->function == (void *)numpy_minimum) return "minimum";
     if (n && n->function == (void *)numpy_maximum) return "maximum";
@@ -2761,19 +2761,19 @@ const char* me_portable_math_name(const me_expr* n) {
     if (n && n->function == (void *)numpy_isnan) return "isnan";
     if (n && n->function == (void *)numpy_signbit) return "signbit";
     if (!n || !IS_FUNCTION(n->type)) return NULL;
-#define PORTABLE_MATH(fn) if (n->function == (void *)fn) return #fn
-    PORTABLE_MATH(acos); PORTABLE_MATH(acosh); PORTABLE_MATH(asin); PORTABLE_MATH(asinh);
-    PORTABLE_MATH(atan); PORTABLE_MATH(atanh); PORTABLE_MATH(cbrt);
-    PORTABLE_MATH(cos); PORTABLE_MATH(cosh); PORTABLE_MATH(erf); PORTABLE_MATH(erfc);
-    PORTABLE_MATH(exp); PORTABLE_MATH(exp2); PORTABLE_MATH(expm1); PORTABLE_MATH(lgamma);
-    PORTABLE_MATH(log); PORTABLE_MATH(log10); PORTABLE_MATH(log1p); PORTABLE_MATH(log2);
-    PORTABLE_MATH(sin); PORTABLE_MATH(sinh); PORTABLE_MATH(sqrt); PORTABLE_MATH(tan);
-    PORTABLE_MATH(tanh); PORTABLE_MATH(tgamma); PORTABLE_MATH(fabs);
-    PORTABLE_MATH(ceil); PORTABLE_MATH(floor); PORTABLE_MATH(rint); PORTABLE_MATH(round);
-    PORTABLE_MATH(trunc); PORTABLE_MATH(atan2); PORTABLE_MATH(copysign); PORTABLE_MATH(fdim);
-    PORTABLE_MATH(fmax); PORTABLE_MATH(fmin); PORTABLE_MATH(hypot); PORTABLE_MATH(nextafter);
-    PORTABLE_MATH(remainder); PORTABLE_MATH(fmod); PORTABLE_MATH(fma);
-#undef PORTABLE_MATH
+#define MENUDET_MATH(fn) if (n->function == (void *)fn) return #fn
+    MENUDET_MATH(acos); MENUDET_MATH(acosh); MENUDET_MATH(asin); MENUDET_MATH(asinh);
+    MENUDET_MATH(atan); MENUDET_MATH(atanh); MENUDET_MATH(cbrt);
+    MENUDET_MATH(cos); MENUDET_MATH(cosh); MENUDET_MATH(erf); MENUDET_MATH(erfc);
+    MENUDET_MATH(exp); MENUDET_MATH(exp2); MENUDET_MATH(expm1); MENUDET_MATH(lgamma);
+    MENUDET_MATH(log); MENUDET_MATH(log10); MENUDET_MATH(log1p); MENUDET_MATH(log2);
+    MENUDET_MATH(sin); MENUDET_MATH(sinh); MENUDET_MATH(sqrt); MENUDET_MATH(tan);
+    MENUDET_MATH(tanh); MENUDET_MATH(tgamma); MENUDET_MATH(fabs);
+    MENUDET_MATH(ceil); MENUDET_MATH(floor); MENUDET_MATH(rint); MENUDET_MATH(round);
+    MENUDET_MATH(trunc); MENUDET_MATH(atan2); MENUDET_MATH(copysign); MENUDET_MATH(fdim);
+    MENUDET_MATH(fmax); MENUDET_MATH(fmin); MENUDET_MATH(hypot); MENUDET_MATH(nextafter);
+    MENUDET_MATH(remainder); MENUDET_MATH(fmod); MENUDET_MATH(fma);
+#undef MENUDET_MATH
     /* Some CRT headers expose libm names through inline/import aliases (notably
      * hypot on Windows). Match the registration address used by tokenization as
      * well as the direct symbol above; a valid builtin must not depend on which
@@ -3110,7 +3110,7 @@ static bool eval_string_expr(const me_expr* n) {
     return true;
 }
 
-bool me_portable_string_operation(const me_expr *n) {
+bool me_menudet_string_operation(const me_expr *n) {
     if (!n || !IS_FUNCTION(n->type)) return false;
     if (is_string_returning_function(n->function) || is_string_function(n->function)) return true;
     return is_comparison_node(n) && is_string_dtype(((const me_expr *)n->parameters[0])->dtype);
@@ -3118,8 +3118,8 @@ bool me_portable_string_operation(const me_expr *n) {
 
 /* Reuse the full-DSL string validator/kernels on per-call materialized operands.
  * These stack nodes never mutate a compiled handle or invoke the full numeric
- * evaluator; numeric indices have already been checked by portable typing. */
-static void portable_string_nodes(const me_expr *n, me_expr *root, me_expr *children,
+ * evaluator; numeric indices have already been checked by menudet typing. */
+static void menudet_string_nodes(const me_expr *n, me_expr *root, me_expr *children,
                                  const void *const *values) {
     memset(root, 0, sizeof(*root));
     memcpy(root, n, offsetof(me_expr, parameters));
@@ -3145,10 +3145,10 @@ static void portable_string_nodes(const me_expr *n, me_expr *root, me_expr *chil
     }
 }
 
-bool me_portable_string_validate(me_expr *n) {
+bool me_menudet_string_validate(me_expr *n) {
     struct { me_expr node; void *tail[6]; } storage;
     me_expr children[7];
-    portable_string_nodes(n, &storage.node, children, NULL);
+    menudet_string_nodes(n, &storage.node, children, NULL);
     for (int i = 0; i < ARITY(n->type); i++) {
         const me_expr *arg = n->parameters[i];
         if (!is_string_dtype(arg->dtype) &&
@@ -3246,10 +3246,10 @@ static bool eval_string_predicate(const me_expr* n, bool* out, int nitems) {
     return true;
 }
 
-bool me_portable_string_execute(const me_expr *n, const void *const *values, void *output) {
+bool me_menudet_string_execute(const me_expr *n, const void *const *values, void *output) {
     struct { me_expr node; void *tail[6]; } storage;
     me_expr children[7];
-    portable_string_nodes(n, &storage.node, children, values);
+    menudet_string_nodes(n, &storage.node, children, values);
     if (n->function == (void *)str_replace) {
         sview needle;
         if (!string_view_at(&children[1], 0, &needle) || !needle.len) return false;
@@ -3416,7 +3416,7 @@ static void read_number_token(state* s) {
         }
     }
 
-    if (dsl_portable_typed_profile(s->semantic_profile)) {
+    if (dsl_menudet_typed_profile(s->semantic_profile)) {
         s->dtype = is_float ? ME_FLOAT64 : ME_INT64;
         s->literal_f32 = strtof(start, NULL);
         s->integer_magnitude = 0;
@@ -3638,11 +3638,11 @@ static void read_identifier_token(state* s) {
     if (!var) {
         var = find_builtin(start, s->next - start);
     }
-    /* Portable reductions explicitly name their evaluation block. Legacy
+    /* Menudet reductions explicitly name their evaluation block. Legacy
      * expressions retain bare names; neither profile accepts the other's names. */
     if (builtin_binding && var && reduction_kind(var->address)) {
         bool block_name = len > 6 && !strncmp(start, "block_", 6);
-        if (block_name != dsl_portable_typed_profile(s->semantic_profile)) {
+        if (block_name != dsl_menudet_typed_profile(s->semantic_profile)) {
             s->type = TOK_ERROR;
             return;
         }
@@ -3650,7 +3650,7 @@ static void read_identifier_token(state* s) {
     /* New numerical spellings belong only to opt-in 1.1. Exposing them to
      * the full evaluator would change host routing/fallback and its legacy
      * double-callback/SIMD typing (notably nullable-table predicates). */
-    if (builtin_binding && var && s->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_1 &&
+    if (builtin_binding && var && s->semantic_profile != ME_DSL_PROFILE_MENUDET_0_1 &&
         (var->address == (void *)numpy_minimum || var->address == (void *)numpy_maximum ||
          var->address == (void *)numpy_isfinite || var->address == (void *)numpy_isinf ||
          var->address == (void *)numpy_isnan || var->address == (void *)numpy_signbit ||
@@ -3664,9 +3664,9 @@ static void read_identifier_token(state* s) {
         return;
     }
 
-    /* The full language's log spelling is build-configurable. Portable log
+    /* The full language's log spelling is build-configurable. Menudet log
      * explicitly names natural logarithm, independent of ME_NAT_LOG. */
-    if (builtin_binding && dsl_portable_typed_profile(s->semantic_profile) &&
+    if (builtin_binding && dsl_menudet_typed_profile(s->semantic_profile) &&
         len == 3 && !strncmp(start, "log", 3)) {
         s->type = ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH;
         s->function = (void *)log;
@@ -3703,9 +3703,9 @@ static void read_identifier_token(state* s) {
     case ME_FUNCTION7:
         s->type = var->type;
         /* The legacy token enum aliases pure FUNCTION0 (40) with logical-not.
-         * Portable constants retain function identity without that token flag;
+         * Menudet constants retain function identity without that token flag;
          * full-DSL parsing is intentionally unchanged. */
-        if (dsl_portable_typed_profile(s->semantic_profile) &&
+        if (dsl_menudet_typed_profile(s->semantic_profile) &&
             TYPE_MASK(var->type) == ME_FUNCTION0) s->type = ME_FUNCTION0;
         s->function = var->address;
         s->dtype = var->dtype;
@@ -3760,13 +3760,13 @@ static void handle_single_char_operator(state* s, char c) {
         break;
     case '/': s->type = TOK_INFIX;
         s->function = divide;
-        if (dsl_portable_typed_profile(s->semantic_profile) && *s->next == '/') {
+        if (dsl_menudet_typed_profile(s->semantic_profile) && *s->next == '/') {
             s->next++;
-            s->function = portable_floordiv;
+            s->function = menudet_floordiv;
         }
         break;
     case '%': s->type = TOK_INFIX;
-        s->function = dsl_portable_typed_profile(s->semantic_profile) ? portable_modulo : fmod;
+        s->function = dsl_menudet_typed_profile(s->semantic_profile) ? menudet_modulo : fmod;
         break;
     case '&': s->type = TOK_BITWISE;
         s->function = bit_and;
@@ -3883,8 +3883,8 @@ static me_expr* base(state* s) {
         CHECK_NULL(ret);
 
         ret->value = s->value;
-        if (dsl_portable_typed_profile(s->semantic_profile)) {
-            ret->flags |= ME_EXPR_FLAG_PORTABLE_1 | ME_EXPR_FLAG_WEAK_LITERAL;
+        if (dsl_menudet_typed_profile(s->semantic_profile)) {
+            ret->flags |= ME_EXPR_FLAG_MENUDET_1 | ME_EXPR_FLAG_WEAK_LITERAL;
             if (s->dtype == ME_INT64) ret->flags |= ME_EXPR_FLAG_INTEGER_LITERAL;
             ret->integer_magnitude = s->integer_magnitude;
             ret->literal_f32 = s->literal_f32;
@@ -3940,8 +3940,8 @@ static me_expr* base(state* s) {
         ret->dtype = s->dtype; // Set the variable's type
         ret->input_dtype = s->dtype;
         ret->itemsize = s->itemsize;
-        if (dsl_portable_typed_profile(s->semantic_profile)) {
-            ret->flags |= ME_EXPR_FLAG_PORTABLE_1;
+        if (dsl_menudet_typed_profile(s->semantic_profile)) {
+            ret->flags |= ME_EXPR_FLAG_MENUDET_1;
         }
         next_token(s);
         break;
@@ -3964,8 +3964,8 @@ static me_expr* base(state* s) {
     }
 
     if (ret) {
-        if (dsl_portable_typed_profile(s->semantic_profile)) {
-            ret->flags |= ME_EXPR_FLAG_PORTABLE_1;
+        if (dsl_menudet_typed_profile(s->semantic_profile)) {
+            ret->flags |= ME_EXPR_FLAG_MENUDET_1;
         }
         return ret;
     }
@@ -4077,8 +4077,8 @@ static me_expr* base(state* s) {
             ret->value = NAN;
             break;
         }
-        if (dsl_portable_typed_profile(s->semantic_profile)) {
-            ret->flags |= ME_EXPR_FLAG_PORTABLE_1;
+        if (dsl_menudet_typed_profile(s->semantic_profile)) {
+            ret->flags |= ME_EXPR_FLAG_MENUDET_1;
         }
         return ret;
     }
@@ -4101,11 +4101,11 @@ static me_expr* power(state* s) {
         CHECK_NULL(inner);
 
         if (t == add) {
-            if (s->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_1) {
+            if (s->semantic_profile == ME_DSL_PROFILE_MENUDET_0_1) {
                 me_expr *positive = NEW_EXPR(ME_FUNCTION1 | ME_FLAG_PURE, inner);
                 CHECK_NULL(positive, me_free(inner));
                 positive->function = (void *)add;
-                positive->flags |= ME_EXPR_FLAG_PORTABLE_1;
+                positive->flags |= ME_EXPR_FLAG_MENUDET_1;
                 return positive;
             }
             return inner;
@@ -4115,8 +4115,8 @@ static me_expr* power(state* s) {
         CHECK_NULL(ret, me_free(inner));
 
         ret->function = negate;
-        if (dsl_portable_typed_profile(s->semantic_profile)) {
-            ret->flags |= ME_EXPR_FLAG_PORTABLE_1;
+        if (dsl_menudet_typed_profile(s->semantic_profile)) {
+            ret->flags |= ME_EXPR_FLAG_MENUDET_1;
         }
         return ret;
     }
@@ -4131,8 +4131,8 @@ static me_expr* power(state* s) {
 
         ret->function = bit_not;
         ret->dtype = inner->dtype;
-        if (dsl_portable_typed_profile(s->semantic_profile)) {
-            ret->flags |= ME_EXPR_FLAG_PORTABLE_1;
+        if (dsl_menudet_typed_profile(s->semantic_profile)) {
+            ret->flags |= ME_EXPR_FLAG_MENUDET_1;
         }
         promote_logical_bool(ret);
         return ret;
@@ -4194,8 +4194,8 @@ static me_expr* term(state* s) {
     CHECK_NULL(ret);
 
     while (s->type == TOK_INFIX && (s->function == mul || s->function == divide ||
-                                  s->function == fmod || s->function == portable_modulo ||
-                                  s->function == portable_floordiv)) {
+                                  s->function == fmod || s->function == menudet_modulo ||
+                                  s->function == menudet_floordiv)) {
         me_fun2 t = (me_fun2)s->function;
         next_token(s);
         me_expr* f = factor(s);
@@ -4233,7 +4233,7 @@ static me_expr* expr(state* s) {
 
         /* Rewriting x + (-literal) as x - literal loses weak-scalar range
          * validation. Preserve source operations in the NumPy profile. */
-        if (t == add && s->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_1) {
+        if (t == add && s->semantic_profile != ME_DSL_PROFILE_MENUDET_0_1) {
             me_expr *left = (me_expr*)ret->parameters[0];
             me_expr *right = (me_expr*)ret->parameters[1];
 
@@ -4396,8 +4396,8 @@ static me_expr* logical_not_expr(state* s) {
 
         ret->function = logical_not;
         ret->dtype = ME_BOOL;
-        if (dsl_portable_typed_profile(s->semantic_profile)) {
-            ret->flags |= ME_EXPR_FLAG_PORTABLE_1;
+        if (dsl_menudet_typed_profile(s->semantic_profile)) {
+            ret->flags |= ME_EXPR_FLAG_MENUDET_1;
         }
         return ret;
     }

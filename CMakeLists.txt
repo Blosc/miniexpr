@@ -31,12 +31,12 @@ set(MINIEXPR_SOURCES
   src/dsl_eval.c
   src/dsl_parser.c
   src/dsl_math_policy.c
-  src/dsl_portable.c
-  src/dsl_portable_types.c
-  src/dsl_portable_expr.c
-  src/dsl_portable_batch.c
-  src/dsl_portable_batch_complex.c
-  src/dsl_portable_jit.c
+  src/dsl_menudet.c
+  src/dsl_menudet_types.c
+  src/dsl_menudet_expr.c
+  src/dsl_menudet_batch.c
+  src/dsl_menudet_batch_complex.c
+  src/dsl_menudet_jit.c
   src/dsl_compare.c
   src/dsl_jit_ir.c
   src/dsl_jit_cgen.c
@@ -51,10 +51,10 @@ set(MINIEXPR_SOURCES
 )
 
 if(MSVC)
-  set_source_files_properties(src/dsl_portable_batch.c PROPERTIES
+  set_source_files_properties(src/dsl_menudet_batch.c PROPERTIES
     COMPILE_OPTIONS "/fp:precise")
 else()
-  set_source_files_properties(src/dsl_portable_batch.c PROPERTIES
+  set_source_files_properties(src/dsl_menudet_batch.c PROPERTIES
     COMPILE_OPTIONS "-fno-fast-math;-ffp-contract=off")
 endif()
 

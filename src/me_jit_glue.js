@@ -460,7 +460,7 @@
                 var allowedMemory = imp.module === "env" && imp.name === "memory" && imp.kind === "memory";
                 var allowedMemset = imp.module === "env" && imp.name === "memset" && imp.kind === "function";
                 if (!allowedMemory && !allowedMemset) {
-                    throw new Error("portable wasm kernel has unexpected import " + imp.module + "." + imp.name);
+                    throw new Error("menudet wasm kernel has unexpected import " + imp.module + "." + imp.name);
                 }
             }
         }

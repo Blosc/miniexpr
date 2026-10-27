@@ -219,14 +219,14 @@ static bool dsl_jit_pos_cache_store_program(me_dsl_compiled_program *program, ui
 }
 
 void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
-    if (program && dsl_portable_typed_profile(program->semantic_profile) &&
-        program->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_1) return;
+    if (program && dsl_menudet_typed_profile(program->semantic_profile) &&
+        program->semantic_profile != ME_DSL_PROFILE_MENUDET_0_1) return;
     if (!program || !program->jit_ir || !program->jit_c_source) {
         return;
     }
-    /* Portable source preparation audits its supported scalar reductions. The
+    /* Menudet source preparation audits its supported scalar reductions. The
      * legacy/full lowerer still has an exclusively elementwise kernel contract. */
-    if (program->output_is_scalar && program->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_1) {
+    if (program->output_is_scalar && program->semantic_profile != ME_DSL_PROFILE_MENUDET_0_1) {
         dsl_tracef("jit runtime skip: fp=%s reason=scalar output",
                    dsl_fp_mode_name(program->fp_mode));
         return;

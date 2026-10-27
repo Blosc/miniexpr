@@ -45,7 +45,7 @@ int numpy_compat_batch_compile(me_artifact **artifacts, size_t count, void **han
         me_dsl_compiled_program *p = dsl_artifact_program_for_tests(artifacts[i]);
         if (!p) continue;
         p->jit_request_mode = ME_JIT_ON;
-        dsl_portable_prepare_jit_source(p);
+        dsl_menudet_prepare_jit_source(p);
         if (!p->jit_c_source) continue; /* identical production eligibility */
         /* Masked/unmasked entry bodies are per-kernel, not a shared header.
          * Give their static names the same isolation as the exported entry. */

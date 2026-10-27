@@ -20,15 +20,15 @@ static void set_env(const char *name, const char *value) {
 #endif
 }
 
-static me_portable_status validate(const char *source, char *reason_out,
+static me_menudet_status validate(const char *source, char *reason_out,
                                    size_t reason_cap) {
     me_variable input = {"x", ME_FLOAT64, 0};
-    me_portable_error error = {0};
-    me_portable_validation_descriptor descriptor = {
+    me_menudet_error error = {0};
+    me_menudet_validation_descriptor descriptor = {
         .struct_size = sizeof(descriptor), .version = 1,
         .output_itemsize = sizeof(double), .ndim = 0,
-        .cardinality = ME_PORTABLE_ELEMENTWISE};
-    me_portable_status rc = me_validate_portable_dsl_ex(source, "1.0", &input, 1, ME_FLOAT64,
+        .cardinality = ME_MENUDET_ELEMENTWISE};
+    me_menudet_status rc = me_validate_menudet_ex(source, "1.0", &input, 1, ME_FLOAT64,
                                                         &descriptor, &error);
     if (reason_out && reason_cap) snprintf(reason_out, reason_cap, "%s", error.message);
     return rc;
@@ -36,7 +36,7 @@ static me_portable_status validate(const char *source, char *reason_out,
 
 static char *manifest(const char *requires, const char *semantics, const char *source) {
     const char *format =
-        "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+        "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
         "\"requires\":[%s],\"source\":\"%s\",\"entry_point\":\"k\","
         "\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"}],\"constants\":[],"
         "\"output\":{\"dtype\":\"float64\",\"contract\":\"elementwise\"},"
@@ -80,41 +80,41 @@ static void parser_and_validation(void) {
     const char *valid[] = {"auto", "system"};
     for (size_t i = 0; i < sizeof(valid)/sizeof(valid[0]); i++) {
         snprintf(source, sizeof(source), header, valid[i]);
-        assert(validate(source, NULL, 0) == ME_PORTABLE_SUCCESS);
+        assert(validate(source, NULL, 0) == ME_MENUDET_SUCCESS);
     }
 
     snprintf(source, sizeof(source), header, "meta");
-    assert(validate(source, NULL, 0) != ME_PORTABLE_SUCCESS);
+    assert(validate(source, NULL, 0) != ME_MENUDET_SUCCESS);
     snprintf(source, sizeof(source),
              "# me:math=sleef\n# me:ulp=u40\n# me:compiler=cc\ndef k(x):\n    return sin(x)\n");
-    assert(validate(source, NULL, 0) != ME_PORTABLE_SUCCESS);
+    assert(validate(source, NULL, 0) != ME_MENUDET_SUCCESS);
     snprintf(source, sizeof(source),
              "# me:math=sleef\n# me:math=sleef\ndef k(x):\n    return sin(x)\n");
-    assert(validate(source, NULL, 0) != ME_PORTABLE_SUCCESS);
+    assert(validate(source, NULL, 0) != ME_MENUDET_SUCCESS);
     snprintf(source, sizeof(source),
              "# me:ulp=u35\n# me:compiler=cc\ndef k(x):\n    return sin(x)\n");
-    assert(validate(source, NULL, 0) != ME_PORTABLE_SUCCESS);
+    assert(validate(source, NULL, 0) != ME_MENUDET_SUCCESS);
     snprintf(source, sizeof(source),
              "# me:fp=fast\ndef k(x):\n    return sin(x)\n");
-    assert(validate(source, NULL, 0) != ME_PORTABLE_SUCCESS);
+    assert(validate(source, NULL, 0) != ME_MENUDET_SUCCESS);
     snprintf(source, sizeof(source),
              "# me:fp=fast\n# me:compiler=cc\ndef k(x):\n    return sin(x)\n");
-    assert(validate(source, NULL, 0) == ME_PORTABLE_SUCCESS);
+    assert(validate(source, NULL, 0) == ME_MENUDET_SUCCESS);
 }
 
 static void environment_precedence(void) {
     const char *plain = "def k(x):\n    return sin(x)\n";
     set_env("ME_SIMD_MATH_BACKEND", "bogus");
-    assert(validate(plain, NULL, 0) != ME_PORTABLE_SUCCESS);
+    assert(validate(plain, NULL, 0) != ME_MENUDET_SUCCESS);
     set_env("ME_DSL_FP_MODE", "bogus");
-    assert(validate(plain, NULL, 0) != ME_PORTABLE_SUCCESS);
+    assert(validate(plain, NULL, 0) != ME_MENUDET_SUCCESS);
     set_env("ME_DSL_FP_MODE", NULL);
 
     set_env("ME_SIMD_MATH_BACKEND", "sleef");
     const char *system = "# me:math=system\ndef k(x):\n    return sin(x)\n";
-    assert(validate(system, NULL, 0) == ME_PORTABLE_SUCCESS);
+    assert(validate(system, NULL, 0) == ME_MENUDET_SUCCESS);
     const char *auto_source = "# me:math=auto\ndef k(x):\n    return sin(x)\n";
-    assert(validate(auto_source, NULL, 0) == ME_PORTABLE_SUCCESS);
+    assert(validate(auto_source, NULL, 0) == ME_MENUDET_SUCCESS);
     set_env("ME_SIMD_MATH_BACKEND", NULL);
 }
 
@@ -323,13 +323,13 @@ static void compiler_environment_policy(void) {
     set_env("ME_DSL_JIT_COMPILER", "cc");
     for (size_t i = 0; i < 2; i++) {
         snprintf(source, sizeof(source), "# me:fp=%s\ndef k(x):\n    return x * 2 + 1\n", modes[i]);
-        assert(validate(source, NULL, 0) == ME_PORTABLE_SUCCESS);
+        assert(validate(source, NULL, 0) == ME_MENUDET_SUCCESS);
     }
     assert(validate("# me:compiler=tcc\n# me:fp=fast\ndef k(x):\n    return x\n", NULL, 0)
-           != ME_PORTABLE_SUCCESS);
+           != ME_MENUDET_SUCCESS);
     set_env("ME_DSL_JIT_COMPILER", "tcc");
     assert(validate("# me:compiler=cc\n# me:fp=fast\ndef k(x):\n    return x\n", NULL, 0)
-           == ME_PORTABLE_SUCCESS);
+           == ME_MENUDET_SUCCESS);
     set_env("ME_DSL_JIT_COMPILER", NULL);
 }
 

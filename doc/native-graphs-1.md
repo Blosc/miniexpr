@@ -98,7 +98,7 @@ result allocation before execution. This allocation is separate from iterator
 scratch reports and its size is `me_graph_output_bytes(schedule)`. Strided output
 scatter and storage-backed output publication remain host responsibilities.
 
-For Menudet 1.0 JIT maps, immutable weak int64/Boolean captures can specialize
+For Menudet 0.1 beta JIT maps, immutable weak int64/Boolean captures can specialize
 integer conversions after the same checked range validation used by the
 interpreter. In-range values are emitted as typed integer bit patterns in the
 generated source, allowing expressions such as `x % 7`, `x << 2` and
@@ -123,7 +123,7 @@ once; partial masks, potentially uninitialized variables and computed operands
 retain generic expression reduction. This is a block-reduction optimization, not
 conversion of DSL programs into graphs, and it does not imply JIT execution.
 
-Menudet 1.0 programs containing a single numeric/Boolean scalar `return`, with
+Menudet 0.1 beta programs containing a single numeric/Boolean scalar `return`, with
 no locals or reserved/context variables, can bypass statement bookkeeping on
 nonempty unmasked blocks. The same scalar expression evaluator executes the
 return, including computed operands, multiple reductions, output conversions
@@ -156,7 +156,7 @@ keys and preserved node/operand order. Import is preparation and revalidation,
 never deserialization of executable machine code or cached inference. Captures
 retain categories and value bytes. No global native graph/result cache exists.
 `me_graph_export_map_json` additionally exports eligible elementwise graphs as
-ordinary typed Menudet 1.0 artifacts; reductions and final conversions are not silently
+ordinary typed Menudet 0.1 beta artifacts; reductions and final conversions are not silently
 changed into block-scalar recipes.
 
 Plans expose borrowed root-reduction metadata (`me_graph_reduction_op`,
@@ -171,7 +171,7 @@ See `native-graph-1.schema.json` and executable fixtures in `tests/graph/fixture
 All root fields are required:
 
 ```json
-{"format":"menudet-graph-1","semantics":"menudet-numpy-1.0",
+{"format":"menudet-graph-1","semantics":"menudet-numpy-0.1",
  "requires":["numeric"],"nodes":[],"root":0,
  "output":{"dtype":"auto","casting":"unsafe"}}
 ```
@@ -197,7 +197,7 @@ names colliding with generated `_me_capture_<node-id>` bindings reject.
 Numerical types are bool, signed/unsigned 8/16/32/64-bit integers and float32/64.
 Function arities/signatures/promotions are validated by the existing portable
 compiler, not a graph-owned promotion/function table. See
-`numpy-arithmetic-1.0.md` and `numpy-functions-1.0.md` for exact numerical policies.
+`numpy-arithmetic-0.1.md` and `numpy-functions-0.1.md` for exact numerical policies.
 
 Weak constants use bool/int64/float64 transport; typed scalars retain their declared
 dtype. Integers are canonical decimal **strings** (including full uint64 values).
@@ -215,7 +215,7 @@ preparation. Any/all forbid initial/dtype overrides. `where:null` selects all
 coordinates, otherwise it references a strong Boolean input. A participation-only
 input may broadcast **to** the map shape but cannot expand it. Computed participation
 masks are not yet admitted. Initial/masked extrema and empty identities follow
-`native-arrays-1.0.md`. Each group accumulates in serial logical C order;
+`native-arrays-0.1.md`. Each group accumulates in serial logical C order;
 tile size never changes grouping.
 
 `output.dtype:"auto"` preserves the inferred result. A numeric final dtype with
@@ -299,7 +299,7 @@ pin has not been changed to an unpublished native revision.
 The first slice is map plus an optional root logical reduction, with a distinct
 optional final conversion. G5 now has a separate opt-in materialized subset for
 intermediate reductions, shared strong stage values, broadcast consumers and
-trusted validated Menudet 1.0 regions. See `native-stages-1.md` for its explicit
+trusted validated Menudet 0.1 beta regions. See `native-stages-1.md` for its explicit
 participation, lifetime and resource contracts; it does not broaden the first slice.
 Current platform CI already runs graph hosts/corpus tests wherever artifact tests
 run, including interpreter-only and Node/WASM configurations. Actual publication

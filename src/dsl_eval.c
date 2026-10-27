@@ -11,9 +11,9 @@
 #include "dsl_eval_internal.h"
 #include "dsl_jit_cgen.h"
 #include "dsl_math_dispatch.h"
-#include "dsl_portable_fp.h"
-#include "dsl_portable_expr.h"
-#include "dsl_portable_batch.h"
+#include "dsl_menudet_fp.h"
+#include "dsl_menudet_expr.h"
+#include "dsl_menudet_batch.h"
 #include "functions-simd.h"
 
 #include "functions.h"
@@ -35,7 +35,7 @@ typedef struct {
     bool scalar_output;
     bool empty_group;
     uint8_t **initialized;
-    const me_dsl_portable_eval_descriptor *descriptor;
+    const me_dsl_menudet_eval_descriptor *descriptor;
 } dsl_eval_ctx;
 
 static int dsl_eval_expr_nitems(dsl_eval_ctx *ctx, const me_dsl_compiled_expr *expr,
@@ -43,8 +43,8 @@ static int dsl_eval_expr_nitems(dsl_eval_ctx *ctx, const me_dsl_compiled_expr *e
     if (!expr || !expr->expr) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
-    if (dsl_portable_typed_profile(ctx->program->semantic_profile)) {
-        return dsl_portable_eval_expr_masked(expr->expr, (const void *const *)ctx->var_buffers,
+    if (dsl_menudet_typed_profile(ctx->program->semantic_profile)) {
+        return dsl_menudet_eval_expr_masked(expr->expr, (const void *const *)ctx->var_buffers,
                                              ctx->program->vars.count, (const uint8_t *const *)ctx->initialized, nitems, NULL,
                                              dtype_size(expr->expr->dtype), out);
     }
@@ -60,8 +60,8 @@ static int dsl_eval_expr_item(dsl_eval_ctx *ctx, const me_dsl_compiled_expr *exp
     if (!ctx || !ctx->program || !expr || !expr->expr || !out || item < 0 || item >= ctx->nitems) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
-    if (dsl_portable_typed_profile(ctx->program->semantic_profile)) {
-        return dsl_portable_eval_expr(expr->expr, (const void *const *)ctx->var_buffers,
+    if (dsl_menudet_typed_profile(ctx->program->semantic_profile)) {
+        return dsl_menudet_eval_expr(expr->expr, (const void *const *)ctx->var_buffers,
                                       ctx->program->vars.count, (const uint8_t *const *)ctx->initialized, item, ctx->nitems, NULL, out);
     }
     const void *vars[ME_MAX_VARS];
@@ -203,11 +203,11 @@ static int dsl_eval_expr_masked_copy(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
     }
     if (ctx->empty_group) {
         if (!dsl_compiled_expr_uniform(expr->expr, ctx->program->vars.uniform, ctx->program->vars.count)) return ME_EVAL_SUCCESS;
-        return dsl_portable_eval_expr(expr->expr, (const void *const *)ctx->var_buffers,
+        return dsl_menudet_eval_expr(expr->expr, (const void *const *)ctx->var_buffers,
                                       ctx->program->vars.count, (const uint8_t *const *)ctx->initialized, 0, ctx->group_nitems, ctx->valid_mask, dst);
     }
-    if (dsl_portable_typed_profile(ctx->program->semantic_profile)) {
-        return dsl_portable_eval_expr_masked(expr->expr, (const void *const *)ctx->var_buffers,
+    if (dsl_menudet_typed_profile(ctx->program->semantic_profile)) {
+        return dsl_menudet_eval_expr_masked(expr->expr, (const void *const *)ctx->var_buffers,
                                              ctx->program->vars.count, (const uint8_t *const *)ctx->initialized, nitems, mask, dst_item_size, dst);
     }
     /* me_eval writes one result for a root reduction. DSL destinations are
@@ -235,7 +235,7 @@ static int dsl_eval_expr_masked_copy(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
         return rc;
     }
 
-    if (active_only || dsl_portable_typed_profile(ctx->program->semantic_profile)) {
+    if (active_only || dsl_menudet_typed_profile(ctx->program->semantic_profile)) {
         /* Masking the copy after full-vector evaluation is not short-circuit
          * evaluation: skipped callbacks and invalid arithmetic still run.
          * Chain operand captures must evaluate only the active lanes. */
@@ -313,10 +313,10 @@ static int dsl_eval_condition_masked(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
         return ME_EVAL_ERR_OOM;
     }
     int rc;
-    if (dsl_portable_typed_profile(ctx->program->semantic_profile)) {
+    if (dsl_menudet_typed_profile(ctx->program->semantic_profile)) {
         memset(cond_buf, 0, (size_t)cond_nitems * cond_size);
         if (*is_reduction) {
-            rc = dsl_portable_eval_expr(cond->expr, (const void *const *)ctx->var_buffers,
+            rc = dsl_menudet_eval_expr(cond->expr, (const void *const *)ctx->var_buffers,
                                         ctx->program->vars.count, (const uint8_t *const *)ctx->initialized, 0, ctx->nitems, input_mask, cond_buf);
         }
         else rc = dsl_eval_expr_masked_copy(ctx, cond, cond_buf, input_mask, ctx->nitems, 0, true);
@@ -557,7 +557,7 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
             if (ctx->scalar_output) {
                 int lane = 0;
                 while (lane < ctx->nitems && !run_mask[lane]) lane++;
-                rc = dsl_portable_eval_expr(stmt->as.return_stmt.expr.expr,
+                rc = dsl_menudet_eval_expr(stmt->as.return_stmt.expr.expr,
                     (const void *const *)ctx->var_buffers, ctx->program->vars.count,
                     (const uint8_t *const *)ctx->initialized, lane, ctx->group_nitems,
                     ctx->empty_group ? ctx->valid_mask : run_mask, ctx->output_block);
@@ -1079,7 +1079,7 @@ static int dsl_eval_for_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_st
     }
 
     bool initialized_marked = false;
-    bool typed_profile = dsl_portable_typed_profile(ctx->program->semantic_profile);
+    bool typed_profile = dsl_menudet_typed_profile(ctx->program->semantic_profile);
 
     while (dsl_mask_any(active_mask, ctx->nitems)) {
         if (!initialized_marked && ctx->initialized) {
@@ -1187,8 +1187,8 @@ cleanup:
 static bool dsl_eval_endpoint_return(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
                                      int *status) {
     const me_dsl_compiled_program *program=ctx->program;
-    const me_dsl_portable_eval_descriptor *descriptor=ctx->descriptor;
-    if (!dsl_portable_typed_profile(program->semantic_profile) || !descriptor ||
+    const me_dsl_menudet_eval_descriptor *descriptor=ctx->descriptor;
+    if (!dsl_menudet_typed_profile(program->semantic_profile) || !descriptor ||
         ctx->valid_mask || ctx->scalar_output || ctx->empty_group || ctx->nitems<=0 ||
         program->n_locals || !program->uses_flat_idx || program->idx_flat_idx<0 ||
         descriptor->ndim<=0 || block!=&program->block || block->nstmts!=2 ||
@@ -1245,7 +1245,7 @@ static bool dsl_eval_endpoint_return(dsl_eval_ctx *ctx, const me_dsl_compiled_bl
             (unsigned char *)ctx->output_block+(size_t)(ctx->nitems-1)*width);
     }
     if (*status==ME_EVAL_SUCCESS && prefix>0) {
-        *status=dsl_portable_eval_expr_masked(ordinary,(const void *const *)ctx->var_buffers,
+        *status=dsl_menudet_eval_expr_masked(ordinary,(const void *const *)ctx->var_buffers,
             program->vars.count,(const uint8_t *const *)ctx->initialized,prefix,NULL,width,ctx->output_block);
     }
     return true;
@@ -1398,8 +1398,8 @@ static void dsl_wasm32_finalize_jit_output(const me_dsl_compiled_program *progra
 /* Single-return programs have no statement-level flow control or local state.
  * Reuse the expression evaluator directly, without allocating statement flow masks. */
 static const me_expr *dsl_simple_single_return(const me_dsl_compiled_program *program,
-    const me_dsl_portable_eval_descriptor *descriptor) {
-    if (program->semantic_profile != ME_DSL_PROFILE_PORTABLE_1_1 ||
+    const me_dsl_menudet_eval_descriptor *descriptor) {
+    if (program->semantic_profile != ME_DSL_PROFILE_MENUDET_0_1 ||
         !descriptor || descriptor->nitems <= 0 ||
         descriptor->valid_mask || program->n_locals ||
         program->vars.count != program->n_inputs ||
@@ -1422,7 +1422,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
                      int64_t **idx_buffers,
                      const int64_t *global_linear_idx_buffer,
                       const int64_t *nd_synth_ctx_buffer,
-                      const me_dsl_portable_eval_descriptor *descriptor) {
+                      const me_dsl_menudet_eval_descriptor *descriptor) {
     if (!program || !output_block || nitems < 0) {
         return ME_EVAL_ERR_INVALID_ARG;
     }
@@ -1446,49 +1446,49 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
                 kind == ME_DSL_STMT_WHILE;
         }
     }
-    if (program->semantic_profile == ME_DSL_PROFILE_PORTABLE_1_1 &&
+    if (program->semantic_profile == ME_DSL_PROFILE_MENUDET_0_1 &&
         program->jit_kernel_fn && !empty_scalar_flow && !me_eval_jit_disabled(params)) {
         /* Scalar storage needs one slot even for an empty group, but a compiled
          * reduction must traverse the original group, not that synthetic slot. */
         int jit_nitems = program->output_is_scalar ? group_nitems : nitems;
         if (n_vars && !vars_block) return ME_EVAL_ERR_VAR_MISMATCH;
-        const void *inputs[ME_MAX_VARS + ME_DSL_PORTABLE_JIT_EXTRA];
+        const void *inputs[ME_MAX_VARS + ME_DSL_MENUDET_JIT_EXTRA];
         for (int i = 0; i < n_vars; i++) {
             if (jit_nitems && !vars_block[i]) return ME_EVAL_ERR_VAR_MISMATCH;
             inputs[i] = vars_block[i];
         }
         inputs[n_vars] = descriptor ? descriptor->valid_mask : NULL;
-        inputs[n_vars+ME_DSL_PORTABLE_JIT_CMP_OFF] = (const void *)dsl_portable_float_compare;
-        for (int i = 0; i < program->portable_jit_ncomparisons; i++) {
-            inputs[n_vars+ME_DSL_PORTABLE_JIT_CMP_OFF+1+i] = program->portable_jit_comparisons[i];
+        inputs[n_vars+ME_DSL_MENUDET_JIT_CMP_OFF] = (const void *)dsl_menudet_float_compare;
+        for (int i = 0; i < program->menudet_jit_ncomparisons; i++) {
+            inputs[n_vars+ME_DSL_MENUDET_JIT_CMP_OFF+1+i] = program->menudet_jit_comparisons[i];
         }
-        inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH1_OFF] = (const void *)dsl_portable_jit_unary_math;
-        for (int i = 0; i < program->portable_jit_nmath; i++) {
-            inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH1_OFF+1+i] = program->portable_jit_math[i];
-            inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH1_FN_OFF+i] = (const void *)program->portable_jit_math_fn[i];
+        inputs[n_vars+ME_DSL_MENUDET_JIT_MATH1_OFF] = (const void *)dsl_menudet_jit_unary_math;
+        for (int i = 0; i < program->menudet_jit_nmath; i++) {
+            inputs[n_vars+ME_DSL_MENUDET_JIT_MATH1_OFF+1+i] = program->menudet_jit_math[i];
+            inputs[n_vars+ME_DSL_MENUDET_JIT_MATH1_FN_OFF+i] = (const void *)program->menudet_jit_math_fn[i];
         }
-        inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH2_OFF] = (const void *)dsl_portable_jit_binary_math;
-        for (int i = 0; i < program->portable_jit_nmath2; i++) {
-            inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH2_OFF+1+i] = program->portable_jit_math2[i];
-            inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH2_FN_OFF+i] = (const void *)program->portable_jit_math2_fn[i];
+        inputs[n_vars+ME_DSL_MENUDET_JIT_MATH2_OFF] = (const void *)dsl_menudet_jit_binary_math;
+        for (int i = 0; i < program->menudet_jit_nmath2; i++) {
+            inputs[n_vars+ME_DSL_MENUDET_JIT_MATH2_OFF+1+i] = program->menudet_jit_math2[i];
+            inputs[n_vars+ME_DSL_MENUDET_JIT_MATH2_FN_OFF+i] = (const void *)program->menudet_jit_math2_fn[i];
         }
-        for (int i = 0; i < program->portable_jit_nmath3; i++) {
-            inputs[n_vars+ME_DSL_PORTABLE_JIT_MATH3_FN_OFF+i] = program->portable_jit_math3_fn[i];
+        for (int i = 0; i < program->menudet_jit_nmath3; i++) {
+            inputs[n_vars+ME_DSL_MENUDET_JIT_MATH3_FN_OFF+i] = program->menudet_jit_math3_fn[i];
         }
-        inputs[n_vars+ME_DSL_PORTABLE_JIT_PRED_OFF] = (const void *)dsl_portable_jit_predicate;
-        for (int i = 0; i < program->portable_jit_npreds; i++) {
-            inputs[n_vars+ME_DSL_PORTABLE_JIT_PRED_OFF+1+i] = program->portable_jit_preds[i];
-            inputs[n_vars+ME_DSL_PORTABLE_JIT_PRED_FN_OFF+i] = program->portable_jit_pred_fn[i];
+        inputs[n_vars+ME_DSL_MENUDET_JIT_PRED_OFF] = (const void *)dsl_menudet_jit_predicate;
+        for (int i = 0; i < program->menudet_jit_npreds; i++) {
+            inputs[n_vars+ME_DSL_MENUDET_JIT_PRED_OFF+1+i] = program->menudet_jit_preds[i];
+            inputs[n_vars+ME_DSL_MENUDET_JIT_PRED_FN_OFF+i] = program->menudet_jit_pred_fn[i];
         }
-        inputs[n_vars+ME_DSL_PORTABLE_JIT_IOP_OFF] = (const void *)dsl_portable_jit_int_op;
-        for (int i = 0; i < program->portable_jit_niops; i++) {
-            inputs[n_vars+ME_DSL_PORTABLE_JIT_IOP_OFF+1+i] = program->portable_jit_iops[i];
+        inputs[n_vars+ME_DSL_MENUDET_JIT_IOP_OFF] = (const void *)dsl_menudet_jit_int_op;
+        for (int i = 0; i < program->menudet_jit_niops; i++) {
+            inputs[n_vars+ME_DSL_MENUDET_JIT_IOP_OFF+1+i] = program->menudet_jit_iops[i];
         }
-        inputs[n_vars+ME_DSL_PORTABLE_JIT_CHECKED_OFF] = (const void *)dsl_portable_jit_checked;
-        for (int i = 0; i < program->portable_jit_nchecked; i++) {
-            inputs[n_vars+ME_DSL_PORTABLE_JIT_CHECKED_OFF+1+i] = program->portable_jit_checked[i];
+        inputs[n_vars+ME_DSL_MENUDET_JIT_CHECKED_OFF] = (const void *)dsl_menudet_jit_checked;
+        for (int i = 0; i < program->menudet_jit_nchecked; i++) {
+            inputs[n_vars+ME_DSL_MENUDET_JIT_CHECKED_OFF+1+i] = program->menudet_jit_checked[i];
         }
-        inputs[n_vars+ME_DSL_PORTABLE_JIT_ARITH_OFF] = (const void *)dsl_portable_batch_arith_table();
+        inputs[n_vars+ME_DSL_MENUDET_JIT_ARITH_OFF] = (const void *)dsl_menudet_batch_arith_table();
         /* ND logical context for reserved index variables. The kernel recomputes
          * each lane's coordinates and validates them, so the interpreter's index
          * buffers are not built on this path. */
@@ -1503,14 +1503,14 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
                 nd_ctx[1 + ndim + d] = nd_origin ? nd_origin[d] : 0;
                 nd_ctx[1 + 2 * ndim + d] = nd_extent ? nd_extent[d] : 0;
             }
-            inputs[n_vars+ME_DSL_PORTABLE_JIT_ND_OFF] = nd_ctx;
+            inputs[n_vars+ME_DSL_MENUDET_JIT_ND_OFF] = nd_ctx;
         }
         else {
-            inputs[n_vars+ME_DSL_PORTABLE_JIT_ND_OFF] = NULL;
+            inputs[n_vars+ME_DSL_MENUDET_JIT_ND_OFF] = NULL;
         }
         int64_t while_cap = dsl_while_max_iters();
         if (while_cap < 0) while_cap = 0;
-        inputs[n_vars+ME_DSL_PORTABLE_JIT_CAP_OFF] = &while_cap;
+        inputs[n_vars+ME_DSL_MENUDET_JIT_CAP_OFF] = &while_cap;
         /* Scratch ownership stays in the invocation, so every generated early
          * return/error releases array locals without interpreter replay. */
         void *jit_locals[ME_MAX_VARS] = {0};
@@ -1530,12 +1530,12 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
                 }
             }
         }
-        inputs[n_vars+ME_DSL_PORTABLE_JIT_LOCALS_OFF] = jit_locals;
+        inputs[n_vars+ME_DSL_MENUDET_JIT_LOCALS_OFF] = jit_locals;
         fenv_t saved;
         int rc = ME_EVAL_ERR_INVALID_ARG;
-        if (dsl_portable_fp_begin(&saved)) {
+        if (dsl_menudet_fp_begin(&saved)) {
             rc = program->jit_kernel_fn(inputs,output_block,(int64_t)jit_nitems);
-            if (!dsl_portable_fp_end(&saved)) rc = ME_EVAL_ERR_INVALID_ARG;
+            if (!dsl_menudet_fp_end(&saved)) rc = ME_EVAL_ERR_INVALID_ARG;
         }
         for (int i = 0; i < program->n_locals; i++) free(jit_locals[i]);
         return rc == ME_EVAL_SUCCESS || rc == ME_EVAL_ERR_OOM ? rc : ME_EVAL_ERR_INVALID_ARG;
@@ -1545,7 +1545,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
     bool jit_cap_matches = !program->jit_ir || !program->jit_ir->has_while ||
         program->jit_ir->while_max_iters == current_cap;
     /* JIT is best-effort for backend failures, not semantic execution errors. */
-    if (!dsl_portable_typed_profile(program->semantic_profile) &&
+    if (!dsl_menudet_typed_profile(program->semantic_profile) &&
         jit_cap_matches && !me_eval_jit_disabled(params) &&
         program->jit_kernel_fn &&
         program->jit_nparams >= 0 &&
@@ -1657,10 +1657,10 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
     const me_expr *single_return = dsl_simple_single_return(program, descriptor);
     if (single_return) {
         if (program->output_is_scalar) {
-            return dsl_portable_eval_expr(single_return, (const void *const *)vars_block,
+            return dsl_menudet_eval_expr(single_return, (const void *const *)vars_block,
                 n_vars, NULL, 0, group_nitems, NULL, output_block);
         } else {
-            return dsl_portable_eval_expr_masked(single_return, (const void *const *)vars_block,
+            return dsl_menudet_eval_expr_masked(single_return, (const void *const *)vars_block,
                 n_vars, NULL, nitems, NULL, (size_t)program->output_itemsize, output_block);
         }
     }
@@ -1808,7 +1808,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
         return reserved_ctx_error ? ME_EVAL_ERR_INVALID_ARG : ME_EVAL_ERR_OOM;
     }
 
-    if (!dsl_portable_typed_profile(program->semantic_profile) &&
+    if (!dsl_menudet_typed_profile(program->semantic_profile) &&
         jit_cap_matches && !jit_attempted &&
         !me_eval_jit_disabled(params) &&
         program->jit_kernel_fn &&
@@ -1957,7 +1957,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
     ctx.descriptor = descriptor;
     uint8_t *defined_storage = NULL;
     int rc = ME_EVAL_SUCCESS;
-    if (dsl_portable_typed_profile(program->semantic_profile)) {
+    if (dsl_menudet_typed_profile(program->semantic_profile)) {
         size_t storage_count = program->n_locals ? (size_t)program->n_locals : 1;
         size_t lane_count = nitems ? (size_t)nitems : 1;
         ctx.initialized = calloc(program->vars.count ? (size_t)program->vars.count : 1, sizeof(*ctx.initialized));
@@ -2019,10 +2019,10 @@ int dsl_eval_program(const me_dsl_compiled_program *program,
     return rc;
 }
 
-static int dsl_eval_program_portable_body(const me_dsl_compiled_program *program,
+static int dsl_eval_program_menudet_body(const me_dsl_compiled_program *program,
                                const void **inputs, int ninputs, void *output,
-                               const me_dsl_portable_eval_descriptor *descriptor) {
-    if (!program || !dsl_portable_typed_profile(program->semantic_profile) || !descriptor ||
+                               const me_dsl_menudet_eval_descriptor *descriptor) {
+    if (!program || !dsl_menudet_typed_profile(program->semantic_profile) || !descriptor ||
         descriptor->nitems < 0 || ninputs != program->n_inputs || (ninputs && !inputs)) return ME_EVAL_ERR_INVALID_ARG;
     size_t count = program->output_is_scalar ? 1 : (size_t)descriptor->nitems;
     size_t itemsize = program->output_itemsize;
@@ -2103,14 +2103,14 @@ static int dsl_eval_program_portable_body(const me_dsl_compiled_program *program
     return rc;
 }
 
-int dsl_eval_program_portable(const me_dsl_compiled_program *program,
+int dsl_eval_program_menudet(const me_dsl_compiled_program *program,
                                const void **inputs, int ninputs, void *output,
-                               const me_dsl_portable_eval_descriptor *descriptor) {
+                               const me_dsl_menudet_eval_descriptor *descriptor) {
     const me_math_dispatch *previous = me_math_dispatch_set(
         program ? &program->math_dispatch : NULL);
     me_simd_accuracy_state accuracy;
     me_simd_accuracy_push(program ? program->sleef_ulp : ME_DSL_ULP_OMIT, &accuracy);
-    int rc = dsl_eval_program_portable_body(program, inputs, ninputs, output, descriptor);
+    int rc = dsl_eval_program_menudet_body(program, inputs, ninputs, output, descriptor);
     me_simd_accuracy_pop(&accuracy);
     me_math_dispatch_set(previous);
     return rc;

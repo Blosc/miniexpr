@@ -33,7 +33,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "usage: %s portable|interpreter|tcc|cc float32|float64|int64 count repeats\n", argv[0]);
         return 2;
     }
-    bool portable = !strcmp(argv[1], "portable"), off = !strcmp(argv[1], "interpreter");
+    bool portable = !strcmp(argv[1], "menudet"), off = !strcmp(argv[1], "interpreter");
     if (!portable && !off && strcmp(argv[1], "tcc") && strcmp(argv[1], "cc")) return 2;
     me_dtype dtype = !strcmp(argv[2], "float32") ? ME_FLOAT32 :
                      !strcmp(argv[2], "float64") ? ME_FLOAT64 :
@@ -59,7 +59,7 @@ int main(int argc, char **argv) {
     snprintf(source, sizeof(source), "# me:compiler=%s\n# me:fp=strict\ndef k(x):\n    return x * 2 + 1\n",
              !strcmp(argv[1], "cc") ? "cc" : "tcc");
     snprintf(json, sizeof(json),
-        "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+        "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
         "\"requires\":[\"numeric\"],\"source\":\"def k(x):\\n    return x * 2 + 1\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"%s\"}],\"constants\":[],"
         "\"output\":{\"dtype\":\"%s\",\"contract\":\"elementwise\"},\"semantics\":{\"fp\":\"strict\"},"

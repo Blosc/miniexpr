@@ -446,7 +446,7 @@ EM_JS(int, me_wasm_jit_instantiate,
                 var allowedMemory = imp.module === "env" && imp.name === "memory" && imp.kind === "memory";
                 var allowedMemset = imp.module === "env" && imp.name === "memset" && imp.kind === "function";
                 if (!allowedMemory && !allowedMemset) {
-                    throw new Error("portable wasm kernel has unexpected import " + imp.module + "." + imp.name);
+                    throw new Error("menudet wasm kernel has unexpected import " + imp.module + "." + imp.name);
                 }
             }
         }
@@ -719,10 +719,10 @@ static char *dsl_wasm32_patch_source(const char *src) {
     return patched;
 }
 
-/* MiniCC's wasm target is intentionally invoked with -nostdinc. Portable
+/* MiniCC's wasm target is intentionally invoked with -nostdinc. Menudet
  * Menudet source uses standard fixed-width names, so provide the precise wasm32
  * typedefs locally rather than applying the lossy legacy type substitutions. */
-static char *dsl_wasm32_prepare_portable_source(const char *src) {
+static char *dsl_wasm32_prepare_menudet_source(const char *src) {
     static const char preamble[] =
         "typedef signed char int8_t; typedef unsigned char uint8_t;\n"
         "typedef signed short int16_t; typedef unsigned short uint16_t;\n"
@@ -879,16 +879,16 @@ bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
         return false;
     }
 #endif
-    /* Portable Menudet source already has an explicit wasm32 entry ABI and
+    /* Menudet Menudet source already has an explicit wasm32 entry ABI and
      * exact-width scalar types. Never run the legacy 64-to-32-bit rewrite on it. */
-    char *patched_src = program->jit_portable_wasm_source ?
-        dsl_wasm32_prepare_portable_source(program->jit_c_source) :
+    char *patched_src = program->jit_menudet_wasm_source ?
+        dsl_wasm32_prepare_menudet_source(program->jit_c_source) :
         dsl_wasm32_patch_source(program->jit_c_source);
     if (!patched_src) {
         return false;
     }
     dsl_tracef("jit wasm32: %s source prepared (%zu bytes)",
-               program->jit_portable_wasm_source ? "portable" : "legacy",
+               program->jit_menudet_wasm_source ? "menudet" : "legacy",
                strlen(patched_src));
 
     TCCState *state = tcc_new();
@@ -916,7 +916,7 @@ bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
     unsigned int jit_base = ((unsigned int)(uintptr_t)jit_scratch + 0xFFFFu) & ~0xFFFFu;
     tcc_set_wasm_data_base(state, jit_base);
 
-    if (!program->jit_portable_wasm_source &&
+    if (!program->jit_menudet_wasm_source &&
         !dsl_wasm32_register_required_symbols(state, patched_src)) {
         tcc_delete(state);
         free(patched_src);
@@ -982,7 +982,7 @@ bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
 
     int force_invalid = dsl_env_flag_enabled("ME_WASM_JIT_TEST_FORCE_INVALID", false) ? 1 : 0;
     int fn_idx = me_wasm_jit_instantiate_dispatch(wasm_bytes, (int)wasm_len,
-                                                  program->jit_portable_wasm_source ? 0 :
+                                                  program->jit_menudet_wasm_source ? 0 :
                                                       (int)(uintptr_t)&dsl_wasm32_lookup_bridge_symbol,
                                                   dsl_wasm_jit_emit_warnings(program) ? 1 : 0,
                                                   force_invalid);

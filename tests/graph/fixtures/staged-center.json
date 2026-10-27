@@ -1,6 +1,6 @@
 {
   "format": "menudet-graph-1",
-  "semantics": "menudet-numpy-1.0",
+  "semantics": "menudet-numpy-0.1",
   "requires": ["numeric", "staged"],
   "nodes": [
     {"id": 0, "op": "input", "name": "x", "dtype": "float32"},

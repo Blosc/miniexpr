@@ -11,7 +11,7 @@ static me_dsl_compiled_program *compile(const char *source, me_variable *vars, i
     bool is_dsl;
     int error;
     me_dsl_compiled_program *program = dsl_compile_program_profile(source, vars, nvars, ME_AUTO, 0,
-        ME_JIT_OFF, ME_DSL_PROFILE_PORTABLE_1_1, &error, &is_dsl, reason, sizeof(reason));
+        ME_JIT_OFF, ME_DSL_PROFILE_MENUDET_0_1, &error, &is_dsl, reason, sizeof(reason));
     if (!program) fprintf(stderr, "compile failure: %s\n%s", reason, source);
     assert(program && is_dsl);
     return program;

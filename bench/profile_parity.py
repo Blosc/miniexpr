@@ -47,7 +47,7 @@ class Recipe:
             {"name": "c", "dtype": "int64", "category": self.capture, "encoding": "decimal", "value": "2"}
         ]
         return {
-            "schema_version": "1.0", "language": {"name": "miniexpr", "version": "1.0"},
+            "schema_version": "0.1", "language": {"name": "menudet", "version": "0.1"},
             "requires": ["numeric", "control-flow", "block-reductions"],
             "source": f"def k({parameters}):\n    {self.body}\n", "entry_point": "k",
             "inputs": [{"name": "x", "dtype": self.x}, {"name": "y", "dtype": self.y}],
@@ -153,7 +153,7 @@ def matrix():  # noqa: C901 -- declarative recipe coverage
 
 
 def summarize(row):
-    if row.get("status") != "ok" or row.get("portable_rc") or row.get("legacy_rc"):
+    if row.get("status") != "ok" or row.get("menudet_rc") or row.get("legacy_rc"):
         row["classification"] = "validation_error" if row.get("status") == "validation_error" else "unsupported_or_error"
         return
     for profile in ("portable", "legacy"):
@@ -161,16 +161,16 @@ def summarize(row):
         row[f"{profile}_median_s"] = statistics.median(values)
         row[f"{profile}_spread"] = (max(values) - min(values)) / max(statistics.median(values), 1e-12)
         row[f"{profile}_alloc_median_s"] = statistics.median(row[f"{profile}_alloc_s"])
-    row["ratio"] = row["portable_median_s"] / max(row["legacy_median_s"], 1e-12)
+    row["ratio"] = row["menudet_median_s"] / max(row["legacy_median_s"], 1e-12)
     row["classification"] = (
         "different_participation" if row["mask"] != "none" else
         "different_results" if row["differences"] else
-        "different_backend" if row["portable_jit"] != row["legacy_jit"] else
+        "different_backend" if row["menudet_jit"] != row["legacy_jit"] else
         "exceptional" if row["distribution"] in ("exceptional", "boundary") else
         "different_scalar_policy" if row["capture"] else "comparable_on_domain"
     )
     row["actionable_gap"] = row["classification"] == "comparable_on_domain" and row["ratio"] > 1.25 and (
-        row["portable_median_s"] - row["legacy_median_s"] > 5e-6
+        row["menudet_median_s"] - row["legacy_median_s"] > 5e-6
     )
 
 
@@ -179,13 +179,13 @@ def report(path):
     counts = {}
     for row in rows:
         counts[row.get("classification", row.get("status"))] = counts.get(row.get("classification", row.get("status")), 0) + 1
-    gaps = sorted((r for r in rows if r.get("actionable_gap")), key=lambda r: r["portable_median_s"]-r["legacy_median_s"], reverse=True)
+    gaps = sorted((r for r in rows if r.get("actionable_gap")), key=lambda r: r["menudet_median_s"]-r["legacy_median_s"], reverse=True)
     summary = {"rows": len(rows), "classifications": counts, "gaps": gaps}
     path.with_suffix(".summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps({"rows": len(rows), "classifications": counts, "gaps": len(gaps)}, indent=2))
     for row in gaps[:35]:
         print(f"{row['backend']:11} {row['family']:12} {row['name']:20} {row['x']:8} {row['y']:8} n={row['nitems']:8} "
-              f"{row['ratio']:8.2f}x {row['portable_median_s']*1000:10.3f}/{row['legacy_median_s']*1000:10.3f} ms {row['job']}")
+              f"{row['ratio']:8.2f}x {row['menudet_median_s']*1000:10.3f}/{row['legacy_median_s']*1000:10.3f} ms {row['job']}")
     return rows
 
 

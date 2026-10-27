@@ -38,7 +38,7 @@ re-evaluating its producer. This differs intentionally from implicit masked shar
 
 ## Trusted portable regions
 
-A stage with `kind:"portable"` contains a Menudet artifact object under `artifact`
+A stage with `kind:"menudet"` contains a Menudet artifact object under `artifact`
 and requires the exact contract:
 
 ```json

@@ -3,7 +3,7 @@
 This guide focuses on practical usage of miniexpr DSL kernels.
 The versioned portable language is **Menudet**, a little language for portable
 computation on arrays and tables. Its [1.0 language draft](dsl-spec/1.0.md) and
-[artifact draft](dsl-spec/artifact-1.0.md) define the Menudet contract; this guide
+[artifact draft](dsl-spec/artifact-0.1.md) define the Menudet contract; this guide
 also covers ordinary full-DSL features that need not be portable.
 Canonical syntax, accepted statements, and exact error behavior are documented in `doc/dsl-syntax.md`.
 
@@ -55,8 +55,8 @@ The experimental versioned profile is smaller than the full DSL:
 me_variable signature[] = {
     {"x", ME_FLOAT64, NULL, ME_VARIABLE, NULL, 0},
 };
-me_portable_error diagnostic;
-me_portable_status status = me_validate_portable_dsl(
+me_menudet_error diagnostic;
+me_menudet_status status = me_validate_menudet(
     src, "1.0", signature, 1, ME_FLOAT64, &diagnostic);
 ```
 
@@ -73,8 +73,8 @@ the separate `miniexpr_artifact` target. This optional adapter decodes typed sca
 constants, validates exact name coverage, and provides `me_artifact_load()` /
 `me_artifact_eval_ex()` / `me_artifact_free()` in `miniexpr_artifact.h`. It neither
 requires Python nor adds JSON support to the raw language compiler. See
-[the draft artifact contract](dsl-spec/artifact-1.0.md) and the
-[standalone example](../tests/portable-artifacts/README.md).
+[the draft artifact contract](dsl-spec/artifact-0.1.md) and the
+[standalone example](../tests/menudet-artifacts/README.md).
 
 ## Runtime JIT Controls
 

@@ -62,8 +62,8 @@ static void reject(const char *json, const char *old, const char *replacement, m
 }
 
 static char *scalar_manifest(const char *dtype, const char *encoding, const char *value) {
-    const char *format = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\","
-        "\"version\":\"1.0\"},\"requires\":[\"numeric\"],\"source\":\"def k(c):\\n    return c\\n\","
+    const char *format = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\","
+        "\"version\":\"0.1\"},\"requires\":[\"numeric\"],\"source\":\"def k(c):\\n    return c\\n\","
         "\"entry_point\":\"k\",\"inputs\":[],\"constants\":[{\"name\":\"c\",\"dtype\":\"%s\","
         "\"encoding\":\"%s\",\"value\":%s,\"category\":\"typed_scalar\"}],\"output\":{\"dtype\":\"%s\","
         "\"contract\":\"elementwise\"},\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":0}}";
@@ -146,8 +146,8 @@ static void scalars(void) {
 }
 
 static void runtime_order(void) {
-    const char *json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\","
-        "\"version\":\"1.0\"},\"requires\":[\"numeric\",\"control-flow\"],"
+    const char *json = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\","
+        "\"version\":\"0.1\"},\"requires\":[\"numeric\",\"control-flow\"],"
         "\"source\":\"# me:fp=strict\\ndef k(x, y):\\n    return x - y\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"},"
         "{\"name\":\"y\",\"dtype\":\"float64\"}],\"constants\":[],"
@@ -191,7 +191,7 @@ static void runtime_order(void) {
 }
 
 static void automatic_execution_fixture(void) {
-    const char *json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+    const char *json = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
         "\"requires\":[\"numeric\"],\"source\":\"def k(x):\\n    return x + 1\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"}],\"constants\":[],"
         "\"output\":{\"dtype\":\"float64\",\"contract\":\"elementwise\"},"
@@ -213,7 +213,7 @@ static void automatic_execution_fixture(void) {
 }
 
 static void inferred_output_fixture(void) {
-    const char *json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+    const char *json = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
         "\"requires\":[\"numeric\"],\"source\":\"def k(x):\\n    return x + 1\\n\",\"entry_point\":\"k\","
         "\"inputs\":[{\"name\":\"x\",\"dtype\":\"float32\"}],\"constants\":[],"
         "\"output\":{\"dtype\":\"auto\",\"contract\":\"elementwise\"},"
@@ -298,14 +298,14 @@ int main(void) {
     assert(me_artifact_eval(artifact, inputs, 1, NULL, 0, NULL) == ME_ARTIFACT_SUCCESS);
     me_artifact_free(artifact);
 
-    reject(json, "\"schema_version\": \"1.0\"", "\"schema_version\": \"99\"", ME_ARTIFACT_ERR_UNSUPPORTED);
-    reject(json, "\"schema_version\": \"1.0\"", "\"schema_version\": \"0.1\"", ME_ARTIFACT_ERR_UNSUPPORTED);
-    reject(json, "\"version\": \"1.0\"", "\"version\": \"0.1\"", ME_ARTIFACT_ERR_UNSUPPORTED);
-    reject(json, "\"schema_version\": \"1.0\"", "\"schema_version\": 1", ME_ARTIFACT_ERR_FORMAT);
+    reject(json, "\"schema_version\": \"0.1\"", "\"schema_version\": \"99\"", ME_ARTIFACT_ERR_UNSUPPORTED);
+    reject(json, "\"schema_version\": \"0.1\"", "\"schema_version\": \"0.1\"", ME_ARTIFACT_ERR_UNSUPPORTED);
+    reject(json, "\"version\": \"0.1\"", "\"version\": \"0.1\"", ME_ARTIFACT_ERR_UNSUPPORTED);
+    reject(json, "\"schema_version\": \"0.1\"", "\"schema_version\": 1", ME_ARTIFACT_ERR_FORMAT);
     reject(json, "\"dtype\": \"float64\"", "\"dtype\": null", ME_ARTIFACT_ERR_FORMAT);
     reject(json, "\"numeric\"", "null", ME_ARTIFACT_ERR_FORMAT);
-    reject(json, "\"name\": \"miniexpr\"", "\"name\": \"python\"", ME_ARTIFACT_ERR_UNSUPPORTED);
-    reject(json, "\"version\": \"1.0\"", "\"version\": \"99\"", ME_ARTIFACT_ERR_UNSUPPORTED);
+    reject(json, "\"name\": \"menudet\"", "\"name\": \"python\"", ME_ARTIFACT_ERR_UNSUPPORTED);
+    reject(json, "\"version\": \"0.1\"", "\"version\": \"99\"", ME_ARTIFACT_ERR_UNSUPPORTED);
     reject(json, "\"numeric\"", "\"future-feature\"", ME_ARTIFACT_ERR_UNSUPPORTED);
     reject(json, "\"numeric\"", "\"numeric\", \"numeric\"", ME_ARTIFACT_ERR_FORMAT);
     reject(json, "\"numeric\", ", "", ME_ARTIFACT_ERR_FORMAT);
@@ -391,7 +391,7 @@ int main(void) {
 }
 
 static void schema1_fixture(void) {
-    const char *json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+    const char *json = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
         "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x,c):\\n    a = block_sum(x)\\n    return a + c\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"int64\"}],"
         "\"constants\":[{\"name\":\"c\",\"dtype\":\"int64\",\"category\":\"typed_scalar\",\"encoding\":\"decimal\",\"value\":\"1\"}],"
@@ -446,7 +446,7 @@ static void schema1_fixture(void) {
 }
 
 static void schema1_strings_nd_fixture(void) {
-    const char *format = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+    const char *format = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
         "\"requires\":[\"numeric\",\"fixed-strings\"],\"source\":\"def k(x):\\n    return %s\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"bytes\",\"itemsize\":4}],\"constants\":[],"
         "\"output\":{\"dtype\":\"bytes\",\"itemsize\":%zu,\"contract\":\"elementwise\"},"
@@ -478,7 +478,7 @@ static void schema1_strings_nd_fixture(void) {
         assert(output[descriptor.output_capacity] == 0x7f);
         me_artifact_free(artifact);
     }
-    const char *nd_json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+    const char *nd_json = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
         "\"requires\":[\"numeric\",\"nd-context\"],\"source\":\"def k():\\n    return _flat_idx + _i0 + _i1 + _n0 + _n1 + _ndim\\n\","
         "\"entry_point\":\"k\",\"inputs\":[],\"constants\":[],\"output\":{\"dtype\":\"int64\",\"contract\":\"elementwise\"},"
         "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":2}}";
@@ -497,7 +497,7 @@ static void schema1_strings_nd_fixture(void) {
     assert(me_artifact_eval_ex(artifact, NULL, 0, output, &descriptor, NULL) == ME_ARTIFACT_ERR_BINDING);
     reject(nd_json, "_i1", "_i2", ME_ARTIFACT_ERR_SOURCE);
     me_artifact_free(artifact);
-    const char *unicode_json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+    const char *unicode_json = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
         "\"requires\":[\"numeric\",\"fixed-strings\"],\"source\":\"def k(x,c):\\n    return upper(x) + c\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"unicode32\",\"itemsize\":16}],"
         "\"constants\":[{\"name\":\"c\",\"dtype\":\"unicode32\",\"itemsize\":8,\"encoding\":\"unicode32be-hex\",\"value\":\"0000002100000000\"}],"
@@ -521,7 +521,7 @@ static void schema1_strings_nd_fixture(void) {
     reject(unicode_json, "\"itemsize\":24", "\"itemsize\":20", ME_ARTIFACT_ERR_BINDING);
     reject(unicode_json, ",\"fixed-strings\"", "", ME_ARTIFACT_ERR_BINDING);
     me_artifact_free(artifact);
-    const char *indexed_json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+    const char *indexed_json = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
         "\"requires\":[\"numeric\",\"fixed-strings\"],\"source\":\"def k(x,i,n,old,new):\\n    return replace(substr(x,i,n),old,new)\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"bytes\",\"itemsize\":4},"
         "{\"name\":\"i\",\"dtype\":\"int64\"},{\"name\":\"n\",\"dtype\":\"uint64\"}],"
