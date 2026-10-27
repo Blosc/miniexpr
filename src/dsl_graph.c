@@ -1304,6 +1304,29 @@ bool me_graph_has_jit(const me_graph_plan *p) {
 unsigned me_graph_capabilities(const me_graph_plan *p) {
     return p ? ME_ARTIFACT_CAP_NUMERIC | (p->nstages || p->declared_staged ? ME_GRAPH_CAP_STAGED : 0) : 0;
 }
+const char *me_graph_reduction_op(const me_graph_plan *p) {
+    static const char *const names[] = {"", "sum", "prod", "min", "max", "any", "all"};
+    if (!p || p->reduction.reduction <= ME_ARRAY_NONE || p->reduction.reduction > ME_ARRAY_ALL) return NULL;
+    return names[p->reduction.reduction];
+}
+int me_graph_reduction_axis_count(const me_graph_plan *p) {
+    if (!p || p->reduction.reduction == ME_ARRAY_NONE) return 0;
+    return p->reduction.naxes;
+}
+int me_graph_reduction_axis(const me_graph_plan *p, int index) {
+    if (!p || p->reduction.reduction == ME_ARRAY_NONE || p->reduction.naxes < 0 ||
+        index < 0 || index >= p->reduction.naxes) return 0;
+    return p->reduction.axes[index];
+}
+bool me_graph_reduction_keepdims(const me_graph_plan *p) {
+    return p && p->reduction.reduction != ME_ARRAY_NONE && p->reduction.keepdims;
+}
+bool me_graph_reduction_has_initial(const me_graph_plan *p) {
+    return p && p->reduction.reduction != ME_ARRAY_NONE && p->reduction.initial != NULL;
+}
+bool me_graph_reduction_has_where(const me_graph_plan *p) {
+    return p && p->reduction.reduction != ME_ARRAY_NONE && p->mask >= 0;
+}
 const char *me_graph_export_json(const me_graph_plan *p, size_t *n) {
     if (n) *n = p ? p->json_size : 0;
     return p ? p->json : NULL;

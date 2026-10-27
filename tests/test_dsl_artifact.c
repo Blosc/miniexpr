@@ -212,8 +212,26 @@ static void automatic_execution_fixture(void) {
     free(program);
 }
 
+static void inferred_output_fixture(void) {
+    const char *json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+        "\"requires\":[\"numeric\"],\"source\":\"def k(x):\\n    return x + 1\\n\",\"entry_point\":\"k\","
+        "\"inputs\":[{\"name\":\"x\",\"dtype\":\"float32\"}],\"constants\":[],"
+        "\"output\":{\"dtype\":\"auto\",\"contract\":\"elementwise\"},"
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},"
+        "\"context\":{\"ndim\":0}}";
+    me_artifact *artifact = NULL;
+    me_artifact_error error;
+    assert(me_artifact_load(json, strlen(json), ME_JIT_OFF, &artifact, &error) == ME_ARTIFACT_ERR_UNSUPPORTED);
+    assert(artifact == NULL);
+    assert(me_artifact_load_inferred(json, strlen(json), ME_JIT_OFF, &artifact, &error) == ME_ARTIFACT_SUCCESS);
+    assert(artifact && me_artifact_output_dtype(artifact) == ME_FLOAT32);
+    assert(me_artifact_inferred_dtype(artifact) == ME_FLOAT32);
+    me_artifact_free(artifact);
+}
+
 int main(void) {
     automatic_execution_fixture();
+    inferred_output_fixture();
     schema1_fixture();
     schema1_strings_nd_fixture();
     char *json = read_fixture();

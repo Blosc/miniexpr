@@ -159,6 +159,12 @@ retain categories and value bytes. No global native graph/result cache exists.
 ordinary typed Menudet 1.0 artifacts; reductions and final conversions are not silently
 changed into block-scalar recipes.
 
+Plans expose borrowed root-reduction metadata (`me_graph_reduction_op`,
+axis count/values, `keepdims`, and initial/where presence) so hosts can make
+scheduling decisions without exporting and reparsing canonical graph JSON.
+Axis count `-1` means every axis; non-reduction graphs report no reduction.
+This metadata carries no operand values or results.
+
 ## Format and supported subset
 
 See `native-graph-1.schema.json` and executable fixtures in `tests/graph/fixtures`.

@@ -40,6 +40,8 @@ static void maps(bool jit) {
     float x[] = {1, 2}, y[] = {3, 4, 5}, output[6] = {0};
     me_graph_plan *p = prepare("x * 2 + y", inputs, 2, jit), *copy = NULL;
     CHECK(me_graph_inferred_dtype(p) == ME_FLOAT32);
+    CHECK(!me_graph_reduction_op(p) && !me_graph_reduction_axis_count(p) &&
+          !me_graph_reduction_has_initial(p) && !me_graph_reduction_has_where(p));
     size_t length; const char *json = me_graph_export_json(p, &length);
     CHECK(!me_graph_prepare_json(json, length, NULL, &copy, &error));
     CHECK(!strcmp(json, me_graph_export_json(copy, NULL)));
@@ -167,6 +169,11 @@ static void reductions(bool jit) {
     me_graph_input_metadata inputs[] = {{"x", ME_FLOAT64, 2, {2, 3}}, {"mask", ME_BOOL, 1, {3}}};
     double x[] = {1, -1, 4, 9, -2, 16}, output[2]; bool mask[] = {true, false, true};
     me_graph_plan *p = prepare("sum(sqrt(x), axis=-1, keepdims=True, where=mask)", inputs, 2, jit);
+    CHECK(!strcmp(me_graph_reduction_op(p), "sum"));
+    CHECK(me_graph_reduction_axis_count(p) == 1 && me_graph_reduction_axis(p, 0) == -1);
+    CHECK(me_graph_reduction_keepdims(p));
+    CHECK(!me_graph_reduction_has_initial(p));
+    CHECK(me_graph_reduction_has_where(p));
     me_graph_schedule *s = NULL;
     me_graph_specialize_options options = {sizeof(options), ME_GRAPH_VERSION, 1, 0};
     CHECK(!me_graph_specialize(p, inputs, 2, &options, &s, &error));

@@ -88,10 +88,19 @@ typedef struct {
  * Only Menudet schema/language pair 1.0/1.0 is accepted, with NumPy numerical semantics.
  * On any failure *out is NULL. error may be NULL. */
 #define ME_ARTIFACT_LOAD_OPTIONS_VERSION 1
+#define ME_ARTIFACT_INFER_OUTPUT_VERSION 1
 me_artifact_status me_artifact_load_options(const char *json, size_t length, me_jit_mode jit_mode,
     const me_jit_options *options, me_artifact **out, me_artifact_error *error);
 me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode jit_mode,
                                   me_artifact **out, me_artifact_error *error);
+/* Metadata-only output inference: accepts output dtype "auto", infers the native
+ * result dtype under the declared signatures/casting policy, and returns a handle
+ * whose output dtype/itemsize are concrete. The input JSON is not retained, so an
+ * exporter must still emit the concrete output dtype when persisting the recipe. */
+me_artifact_status me_artifact_load_inferred(const char *json, size_t length, me_jit_mode jit_mode,
+    me_artifact **out, me_artifact_error *error);
+me_artifact_status me_artifact_load_inferred_options(const char *json, size_t length,
+    me_jit_mode jit_mode, const me_jit_options *options, me_artifact **out, me_artifact_error *error);
 
 /* Bind inputs by name, not caller order. All inputs and the output have nitems
  * elements. Host owns buffers and must allocate their declared lengths/dtypes;

@@ -111,6 +111,11 @@ nor write. No physical-tile or implicit global context is synthesized.
 Native queries expose schema, capabilities, context rank, cardinality and widths.
 `me_artifact_eval` accepts numeric rank-zero elementwise handles; use
 `me_artifact_eval_ex` for block scalars, strings and explicit ND context. Loading
-never executes source. Optional JIT falls back before execution. Full beta
-certification and host persistence remain open. Requirement `jit-required` reports an unavailable-required-JIT diagnostic when
+never executes source. Optional JIT falls back before execution.
+`me_artifact_load_inferred` (and its options variant) is the metadata-only
+output-inference entry point: it accepts `output.dtype:"auto"`, resolves the
+native result dtype under the declared input signatures and casting policy, and
+returns a handle with concrete output dtype/width. Exporters must still persist
+that concrete dtype; the auto spelling is an import request, not a new recipe.
+Full beta certification and host persistence remain open. Requirement `jit-required` reports an unavailable-required-JIT diagnostic when
 no eligible compiled backend is available.

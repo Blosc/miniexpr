@@ -138,6 +138,17 @@ me_dtype me_graph_input_dtype(const me_graph_plan *plan, int index);
 me_dtype me_graph_inferred_dtype(const me_graph_plan *plan);
 bool me_graph_has_jit(const me_graph_plan *plan);
 unsigned me_graph_capabilities(const me_graph_plan *plan);
+/* Root reduction metadata; NULL op and zero axes when the graph is not a root
+ * reduction. Axis count -1 selects every axis, 0 selects none. Axis values are
+ * as declared (negative axes are allowed); native specialization normalizes
+ * them for execution. Consumers must not infer broadcast rules elsewhere.
+ * All returns are borrowed and valid until plan free. */
+const char *me_graph_reduction_op(const me_graph_plan *plan);
+int me_graph_reduction_axis_count(const me_graph_plan *plan);
+int me_graph_reduction_axis(const me_graph_plan *plan, int index);
+bool me_graph_reduction_keepdims(const me_graph_plan *plan);
+bool me_graph_reduction_has_initial(const me_graph_plan *plan);
+bool me_graph_reduction_has_where(const me_graph_plan *plan);
 /* Borrowed canonical declarative JSON; valid until plan free. Import is prepare.
  * No machine resources, input arrays, pointers or cached results are exported. */
 const char *me_graph_export_json(const me_graph_plan *plan, size_t *length);
