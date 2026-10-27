@@ -28,7 +28,7 @@ static me_menudet_status validate(const char *source, char *reason_out,
         .struct_size = sizeof(descriptor), .version = 1,
         .output_itemsize = sizeof(double), .ndim = 0,
         .cardinality = ME_MENUDET_ELEMENTWISE};
-    me_menudet_status rc = me_validate_menudet_ex(source, "1.0", &input, 1, ME_FLOAT64,
+    me_menudet_status rc = me_validate_menudet_ex(source, ME_MENUDET_DSL_VERSION, &input, 1, ME_FLOAT64,
                                                         &descriptor, &error);
     if (reason_out && reason_cap) snprintf(reason_out, reason_cap, "%s", error.message);
     return rc;

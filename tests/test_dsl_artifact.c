@@ -299,8 +299,8 @@ int main(void) {
     me_artifact_free(artifact);
 
     reject(json, "\"schema_version\": \"0.1\"", "\"schema_version\": \"99\"", ME_ARTIFACT_ERR_UNSUPPORTED);
-    reject(json, "\"schema_version\": \"0.1\"", "\"schema_version\": \"0.1\"", ME_ARTIFACT_ERR_UNSUPPORTED);
-    reject(json, "\"version\": \"0.1\"", "\"version\": \"0.1\"", ME_ARTIFACT_ERR_UNSUPPORTED);
+    reject(json, "\"schema_version\": \"0.1\"", "\"schema_version\": \"1.0\"", ME_ARTIFACT_ERR_UNSUPPORTED);
+    reject(json, "\"version\": \"0.1\"", "\"version\": \"1.0\"", ME_ARTIFACT_ERR_UNSUPPORTED);
     reject(json, "\"schema_version\": \"0.1\"", "\"schema_version\": 1", ME_ARTIFACT_ERR_FORMAT);
     reject(json, "\"dtype\": \"float64\"", "\"dtype\": null", ME_ARTIFACT_ERR_FORMAT);
     reject(json, "\"numeric\"", "null", ME_ARTIFACT_ERR_FORMAT);
@@ -399,7 +399,7 @@ static void schema1_fixture(void) {
         "\"context\":{\"ndim\":0},\"metadata\":{\"status\":\"implementation-draft\"}}";
     me_artifact *artifact = load(json);
     assert(!me_artifact_has_jit(artifact) && me_artifact_result_cardinality(artifact) == ME_ARTIFACT_BLOCK_SCALAR);
-    assert(!strcmp(me_artifact_schema_version(artifact), "1.0"));
+    assert(!strcmp(me_artifact_schema_version(artifact), ME_ARTIFACT_SCHEMA_VERSION));
     assert(me_artifact_context_ndim(artifact) == 0);
     assert(me_artifact_capabilities(artifact) == (ME_ARTIFACT_CAP_NUMERIC | ME_ARTIFACT_CAP_BLOCK_REDUCTIONS));
     int64_t values[] = {INT64_MAX, 2, 3};
