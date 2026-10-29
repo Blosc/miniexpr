@@ -2274,7 +2274,7 @@ int dsl_menudet_eval_expr(const me_expr *expr, const void *const *vars, int nvar
 #define P_BATCH_NODES 64
 #define P_BATCH_LANES 256
 typedef enum { P_BATCH_LEAF, P_BATCH_CAST, P_BATCH_NEG, P_BATCH_ADD,
-    P_BATCH_SUB, P_BATCH_MUL, P_BATCH_DIV, P_BATCH_MATH } p_batch_op;
+    P_BATCH_SUB, P_BATCH_MUL, P_BATCH_DIV, P_BATCH_MATH, P_BATCH_COMPARE } p_batch_op;
 typedef struct {
     const me_expr *expr;
     p_batch_op op;
@@ -2303,6 +2303,7 @@ static bool p_batch_same_instruction(const p_batch_instruction *a, const p_batch
         return a->expr->integer_magnitude == b->expr->integer_magnitude;
     }
     return a->left == b->left && a->right == b->right &&
+        (a->op != P_BATCH_COMPARE || comparison_kind(a->expr->function) == comparison_kind(b->expr->function)) &&
         a->math == b->math && a->math_op == b->math_op &&
         a->math_dispatch == b->math_dispatch;
 }
@@ -2340,14 +2341,22 @@ static int p_batch_build(p_batch_program *program, const me_expr *n,
             if ((bits & UINT64_C(0x7ff0000000000000)) == UINT64_C(0x7ff0000000000000)) return -1;
         }
     } else {
-        if (!IS_FUNCTION(n->type) || !p_numeric(n->dtype) || n->dtype == ME_BOOL || is_reduction_node(n)) return -1;
+        if (!IS_FUNCTION(n->type) || !p_numeric(n->dtype) || is_reduction_node(n)) return -1;
         bool floating=p_float(n->dtype);
         bool is_complex=p_complex(n->dtype);
-        if (!floating && !is_complex && (!p_numpy(n) || p_weak(n))) return -1;
+        bool comparison=is_comparison_node(n);
+        if (!comparison && n->dtype == ME_BOOL) return -1;
+        if (!comparison && !floating && !is_complex && (!p_numpy(n) || p_weak(n))) return -1;
         int arity=ARITY(n->type);
         if (arity < 1 || arity > 2) return -1;
         const me_expr *left=n->parameters[0];
-        if (!n->function && arity == 1 && p_numeric(left->dtype) &&
+        if (comparison) {
+            /* Keep the arithmetic/math subtree batched for boolean outputs too.
+             * Mixed integer domains and complex ordering retain scalar semantics. */
+            if (arity != 2 || !p_float(left->dtype) ||
+                left->dtype != ((const me_expr *)n->parameters[1])->dtype) return -1;
+            instruction.op=P_BATCH_COMPARE;
+        } else if (!n->function && arity == 1 && p_numeric(left->dtype) &&
             (is_complex || (floating && !p_complex(left->dtype)))) instruction.op=P_BATCH_CAST;
         else {
             const char *op=me_menudet_operator(n);
@@ -2444,7 +2453,7 @@ static bool p_batch_cast(me_dtype from, me_dtype to, const void *source, void *o
 }
 static bool p_batch_eval(const me_expr *expr, p_eval_context *ctx, int nitems,
     size_t stride, void *out) {
-    if (nitems < 32 || !p_numeric(expr->dtype) || expr->dtype == ME_BOOL || stride != dtype_size(expr->dtype)) return false;
+    if (nitems < 32 || !p_numeric(expr->dtype) || stride != dtype_size(expr->dtype)) return false;
     if (ctx->mask) for (int i=0; i<nitems; i++) if (!ctx->mask[i]) return false;
     p_batch_program program={0};
     int root=p_batch_build(&program,expr,ctx,0);
@@ -2539,6 +2548,28 @@ static bool p_batch_eval(const me_expr *expr, p_eval_context *ctx, int nitems,
             }
             bool left_u = instruction->left >= 0 && program.instructions[instruction->left].uniform;
             bool right_u = instruction->right >= 0 && program.instructions[instruction->right].uniform;
+            if (instruction->op == P_BATCH_COMPARE) {
+                me_cmp_kind kind=comparison_kind(n->function);
+                /* Match p_eval, including float32 widening and unordered NaNs.
+                 * Do not replace this with a truth shortcut: both subtrees must
+                 * execute even when the predicate is mathematically constant. */
+#define P_BATCH_COMPARE_EXECUTE(T) do { \
+    const T *a=(const T *)left,*b=(const T *)right; \
+    bool *d=(bool *)destination; \
+    for (int i=0; i<count; i++) { \
+        double x=a[i],y=b[i]; \
+        bool unordered=isnan(x) || isnan(y); \
+        int cmp=(x > y)-(x < y); \
+        d[i]=kind == ME_CMP_NE ? (unordered || cmp != 0) : \
+            !unordered && (kind == ME_CMP_EQ ? cmp == 0 : kind == ME_CMP_LT ? cmp < 0 : \
+            kind == ME_CMP_LE ? cmp <= 0 : kind == ME_CMP_GT ? cmp > 0 : cmp >= 0); \
+    } \
+} while (0)
+                if (((const me_expr *)n->parameters[0])->dtype == ME_FLOAT32) P_BATCH_COMPARE_EXECUTE(float);
+                else P_BATCH_COMPARE_EXECUTE(double);
+#undef P_BATCH_COMPARE_EXECUTE
+                continue;
+            }
 #define P_BATCH_COMPLEX_EXECUTE(T,S) do { \
     const T *a=(const T *)left,*b=(const T *)right; T *d=(T *)destination; \
     if (instruction->op == P_BATCH_NEG) { \

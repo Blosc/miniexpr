@@ -17,7 +17,7 @@ until the release gates below are met.
 
 ## Baseline and evidence
 
-The current portable lowerer is `src/dsl_portable_jit.c`. It accepts numeric
+The current portable lowerer is `src/dsl_menudet_jit.c`. It accepts numeric
 elementwise assignments, returns, and conditional statements, but rejects loops
 and scalar-output programs. Its expression lowering includes modular integer
 arithmetic, strict floating-point bridges, and specialization of selected
@@ -132,7 +132,7 @@ and graph map expressions using the same lowerer.
 - First fail closed for the demonstrated unsafe case if a complete checked route
   is not ready. Add the regression before relaxing eligibility.
 - Audit the existing JIT invocation/status ABI in `src/dsl_eval.c` and bridge
-  functions in `src/dsl_portable_expr.c`. Specify a per-evaluation error mechanism
+  functions in `src/dsl_menudet_expr.c`. Specify a per-evaluation error mechanism
   that can represent conversion, arithmetic, and loop errors without global state.
 - If the existing ABI cannot carry all required diagnostics, choose explicitly
   between an invocation-local status bridge/context and a versioned internal
@@ -195,7 +195,7 @@ targeting and definite assignment after zero-iteration loops.
 
 Acceptance: the Python Mandelbrot workload executes portable JIT and matches
 portable interpretation and the established benchmark output. Equivalent native
-portable-artifact tests must prove execution under TCC and available system CCs.
+menudet-artifact tests must prove execution under TCC and available system CCs.
 Retain the legacy native Mandelbrot benchmark as a reference; do not silently
 change its API or interpretation baseline.
 
@@ -342,7 +342,7 @@ so downstream benchmarks cannot silently claim JIT performance while interpretin
 ## Implementation record
 
 - P0: added a production-artifact eligibility/value/FP-status matrix in
-  `tests/test_portable_jit_parity.c`, with backend availability established by an
+  `tests/test_menudet_jit_parity.c`, with backend availability established by an
   eligible oracle rather than assuming a compiler is installed.
 - P1 safety milestone: integral comparisons now use exact integer transport,
   including mixed signed/unsigned inputs. Checked weak integer function nodes
@@ -518,7 +518,7 @@ so downstream benchmarks cannot silently claim JIT performance while interpretin
   range-bound and weak-capture boundary matrices formerly duplicated by Python.
   Original Python reference tests remain opt-in, rather than being deleted;
   production bindings have a separate compact Python integration gate. Native
-  `portable_jit_parity --require-jit --compact` retains every recipe and known
+  `menudet_jit_parity --require-jit --compact` retains every recipe and known
   backend-sensitive checks, narrowing repeated dtype combinations. CTest labels
   distinguish `jit-gate` and `jit-full`, and per-test CC cache directories isolate
   concurrent runs. Ordinary CI runs full TCC plus compact GCC/Clang checks;
@@ -565,7 +565,7 @@ so downstream benchmarks cannot silently claim JIT performance while interpretin
   scalar for versus 14.257 ms, 0.011 ms for scalar while versus 43.122 ms and
   0.028 ms for reused array locals versus 8.633 ms. These are local small-block
   measurements, not cross-platform performance guarantees.
-- Parent-branch integration retains the single public Menudet 1.0 schema from
+- Parent-branch integration retains the single public Menudet 0.1 beta schema from
   `graph-preparation` and all lowering/qualification work. Newly added parity and
   allocation manifests now declare 1.0; the internal legacy profile identifiers
   remain implementation details. Combined native/Python revisions are qualified

@@ -34,11 +34,11 @@ separately designed layer.
 
 - `src/miniexpr_artifact.h`, `src/dsl_artifact.c`: versioned portable artifact
   loading, scalar captures, typed signatures, inferred dtype, status and ownership.
-- `src/dsl_portable.c`, `src/dsl_portable_expr.c`, `src/dsl_portable_types.c`:
+- `src/dsl_menudet.c`, `src/dsl_menudet_expr.c`, `src/dsl_menudet_types.c`:
   authoritative 1.1 validation, promotion, casts, functions and diagnostics.
 - `src/dsl_array.c`: checked logical-array views, broadcasting traversal, bounded
   gathers, shape operations and six logical reductions.
-- `src/dsl_compile.c`, `src/dsl_portable_jit.c` and runtime backends: existing typed
+- `src/dsl_compile.c`, `src/dsl_menudet_jit.c` and runtime backends: existing typed
   kernel compilation and actual-JIT reporting. Full-DSL semantics are not portable
   graph semantics and must not become an implicit alternate execution path.
 - `tests/numpy-compat/`: native-owned arithmetic/function corpora, standalone C

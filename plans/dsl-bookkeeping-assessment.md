@@ -37,7 +37,7 @@ tables in `dsl_eval_program_impl`, recognize:
 - Exactly one compiled statement, of kind `ME_DSL_STMT_RETURN`.
 - Numeric/Boolean return expression with dtype and itemsize matching the output.
 
-Then call `dsl_portable_eval_expr` with the original input pointers, item zero,
+Then call `dsl_menudet_eval_expr` with the original input pointers, item zero,
 original group size, and NULL initialization/mask pointers. This is already the
 function used by the scalar return interpreter. It retains strict FP environment
 handling, expression/reduction caches, typed loops, checked DSL integer overflow,
@@ -102,7 +102,7 @@ the same dimensions gave DSL/graph medians of 0.576/0.576 ms for sum,
 0.703/0.737 ms for min and 0.555/0.574 ms for any. No new compiler warnings were
 reported by the normal builds. Remote CI has not run for this change.
 
-Elementwise single returns could later reuse `dsl_portable_eval_expr_masked`, but
+Elementwise single returns could later reuse `dsl_menudet_eval_expr_masked`, but
 still have per-lane expression dispatch; their benefit needs separate measurement.
 Support for masks/empty scalar groups requires preserving participation and
 uniform-expression rules. Supporting assignments or statement control flow would

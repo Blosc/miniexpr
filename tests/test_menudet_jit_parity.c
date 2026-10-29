@@ -741,7 +741,11 @@ static bool batch_lane_equal(const void *actual, const void *expected, size_t wi
 static void batch_interpreter_parity(void) {
     const char *recipes[]={"x + y","x - y","x * y","x / y","-x",
         "(x + y) * (x - y)","x * 2 + y","sin(x) + cos(y)","sqrt(x*x + y*y)",
-        "((x+y)*(x-y)+x*y)/(x+y+1)"};
+        "((x+y)*(x-y)+x*y)/(x+y+1)",
+        "float64(x > y) + float64(x < y)",
+        "x == y", "x != y", "x < y", "x <= y", "x > y", "x >= y",
+        "sin(x + 1) * cos(x - 2) > 1", "sin(x + 1) * cos(x - 2) > 0",
+        "1 < x + y", "x + y <= 1"};
     enum { lanes=513 };
     const uint64_t f64[]={0,UINT64_C(0x8000000000000000),UINT64_C(0x3ff0000000000000),
         UINT64_C(0xbff0000000000000),UINT64_C(0x7ff0000000000000),UINT64_C(0xfff0000000000000),
@@ -762,7 +766,10 @@ static void batch_interpreter_parity(void) {
         snprintf(second,sizeof(second),"{\"name\":\"y\",\"dtype\":\"%s\"}",name);
         for (size_t recipe=0; recipe<sizeof(recipes)/sizeof(*recipes); recipe++) {
             char body[128]; snprintf(body,sizeof(body),"return %s",recipes[recipe]);
-            parity_case test={"batch interpreter parity",body,name,name,false};
+            bool comparison=recipe >= 11;
+            size_t output_width=comparison ? sizeof(bool) : recipe == 10 ? sizeof(double) : width;
+            const char *output=comparison ? "bool" : recipe == 10 ? "float64" : name;
+            parity_case test={"batch interpreter parity",body,name,output,false};
             me_artifact *artifact=load_contract(&test,ME_JIT_OFF,second,NULL,"elementwise");
             CHECK(!me_artifact_has_jit(artifact));
             uint8_t mask[lanes];
@@ -777,14 +784,14 @@ static void batch_interpreter_parity(void) {
                         {"x",dtype,width,(char *)x+(size_t)i*width,width},
                         {"y",dtype,width,(char *)y+(size_t)i*width,width}};
                     me_artifact_eval_descriptor descriptor={.struct_size=sizeof(descriptor),.version=1,
-                        .nitems=1,.output_capacity=width,.valid_mask=masked ? mask+i : NULL,.valid_mask_capacity=masked ? 1 : 0};
+                        .nitems=1,.output_capacity=output_width,.valid_mask=masked ? mask+i : NULL,.valid_mask_capacity=masked ? 1 : 0};
                     me_artifact_fp_status status;
-                    CHECK(!me_artifact_eval_status(artifact,inputs,2,(char *)expected+(size_t)i*width,&descriptor,0,&status,&error));
+                    CHECK(!me_artifact_eval_status(artifact,inputs,2,(char *)expected+(size_t)i*output_width,&descriptor,0,&status,&error));
                     flags |= status.flags;
                 }
                 me_artifact_buffer inputs[]={{"x",dtype,width,x,lanes*width},{"y",dtype,width,y,lanes*width}};
                 me_artifact_eval_descriptor descriptor={.struct_size=sizeof(descriptor),.version=1,
-                    .nitems=lanes,.output_capacity=lanes*width,.valid_mask=masked ? mask : NULL,.valid_mask_capacity=masked ? lanes : 0};
+                    .nitems=lanes,.output_capacity=lanes*output_width,.valid_mask=masked ? mask : NULL,.valid_mask_capacity=masked ? lanes : 0};
                 me_artifact_fp_status status;
                 size_t before=dsl_menudet_batch_calls_for_tests();
                 CHECK(!me_artifact_eval_status(artifact,inputs,2,actual,&descriptor,0,&status,&error));
@@ -792,7 +799,8 @@ static void batch_interpreter_parity(void) {
                 CHECK(status.flags==flags);
                 bool lanes_equal = true;
                 for (int lane = 0; lane < lanes; lane++) {
-                    if (!batch_lane_equal(actual + lane, expected + lane, width)) {
+                    if (!batch_lane_equal((char *)actual+(size_t)lane*output_width,
+                        (char *)expected+(size_t)lane*output_width, output_width)) {
                         lanes_equal = false;
                         break;
                     }
