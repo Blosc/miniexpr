@@ -151,7 +151,15 @@ static void dynamic_maps(void) {
     me_graph_execute_options options={sizeof(options),ME_GRAPH_VERSION,ME_FP_INVALID};
     executor.tile_items=1;
     me_graph_parallel_report parallel;
+#ifdef __EMSCRIPTEN__
+    output[0]=-777;
+    CHECK(me_graph_execute_parallel_into(schedule,inputs,1,&destination,&options,&executor,&parallel,&error)==ME_GRAPH_ERR_CAPABILITY);
+    CHECK(output[0]==-777);
+    options.raise_mask=0;
+    CHECK(!me_graph_execute_parallel_into(schedule,inputs,1,&destination,&options,&executor,&parallel,&error));
+#else
     CHECK(me_graph_execute_parallel_into(schedule,inputs,1,&destination,&options,&executor,&parallel,&error)==ME_GRAPH_ERR_EXECUTION);
+#endif
     CHECK(parallel.execution.array.evaluated_tiles==20);
     for (int i=0; i<20; i++) CHECK(x[i] < 0 ? isnan(output[i]) : output[i]==1);
     me_graph_schedule_free(schedule); me_graph_plan_free(plan);
