@@ -1070,6 +1070,15 @@ unsigned me_graph_execution_capabilities(const me_graph_plan *p) {
     return p && p->partitionable && !p->nstages && !p->conversion ? ME_GRAPH_EXEC_PARTITIONABLE : 0;
 }
 typedef struct {
+    const me_array_view *inputs;
+    const me_array_output *output;
+    me_graph_schedule *schedules[2];
+    size_t extent, grain, jobs, stripes;
+    int axis;
+    atomic_size_t next;
+} graph_work;
+typedef struct {
+    graph_work *work;
     me_graph_schedule *schedule;
     me_array_view *inputs;
     me_array_output output;
@@ -1078,14 +1087,69 @@ typedef struct {
     me_graph_error error;
     me_graph_status status;
     int ninputs;
+    size_t failed_job;
     atomic_int visited;
 } graph_task;
+static bool g_advance(size_t *offset, int64_t stride, size_t count);
 static void g_task(void *invocation, size_t index) {
     graph_task *tasks = invocation, *task = &tasks[index];
     int expected = 0;
     if (!atomic_compare_exchange_strong(&task->visited,&expected,1)) return;
-    task->status = me_graph_execute_into(task->schedule,task->inputs,task->ninputs,
-        &task->output,&task->options,&task->report,&task->error);
+    graph_work *work=task->work;
+    task->status=ME_GRAPH_SUCCESS;
+    for (;;) {
+        size_t job=atomic_fetch_add_explicit(&work->next,1,memory_order_relaxed);
+        if (job >= work->jobs) break;
+        /* Spread the first claims over the allocation. Adjacent first-touch
+         * faults otherwise serialize fresh large outputs on macOS. This is
+         * only a queue permutation: every worker may claim every stripe. */
+        size_t stripe=job%work->stripes, round=job/work->stripes;
+        size_t q=work->jobs/work->stripes, r=work->jobs%work->stripes;
+        job=stripe*q+(stripe < r ? stripe : r)+round;
+        size_t begin=job*work->grain, extent=work->extent-begin;
+        if (extent > work->grain) extent=work->grain;
+        me_graph_status status=ME_GRAPH_SUCCESS;
+        me_graph_error error={0};
+        task->schedule=work->schedules[extent != work->grain];
+        for (int i=0; i<task->ninputs; i++) {
+            task->inputs[i]=work->inputs[i];
+            int axis=work->axis-(work->output->rank-task->inputs[i].rank);
+            if (axis >= 0 && task->inputs[i].shape[axis] != 1) {
+                task->inputs[i].shape[axis]=(int64_t)extent;
+                if (!g_advance(&task->inputs[i].offset,task->inputs[i].strides[axis],begin)) {
+                    status=g_error(&error,-1,ME_GRAPH_ERR_BINDING,"task input offset overflow");
+                    break;
+                }
+            }
+        }
+        task->output=*work->output;
+        task->output.shape[work->axis]=(int64_t)extent;
+        if (!status && !g_advance(&task->output.offset,task->output.strides[work->axis],begin))
+            status=g_error(&error,-1,ME_GRAPH_ERR_BINDING,"task output offset overflow");
+        me_graph_report part={0};
+        if (!status) status=me_graph_execute_into(task->schedule,task->inputs,task->ninputs,
+            &task->output,&task->options,&part,&error);
+        if (part.array.temporary_bytes > task->report.array.temporary_bytes)
+            task->report.array.temporary_bytes=part.array.temporary_bytes;
+        task->report.array.fp_flags |= part.array.fp_flags;
+        task->report.array.fp_supported |= part.array.fp_supported;
+        task->report.array.gathered_bytes += part.array.gathered_bytes;
+        task->report.array.evaluated_tiles += part.array.evaluated_tiles;
+        task->report.array.zero_copy_tiles += part.array.zero_copy_tiles;
+        if (part.stages > task->report.stages) task->report.stages=part.stages;
+        if (part.jit_stages > task->report.jit_stages) task->report.jit_stages=part.jit_stages;
+        if (part.interpreter_stages > task->report.interpreter_stages)
+            task->report.interpreter_stages=part.interpreter_stages;
+        task->report.has_jit |= part.has_jit;
+        /* Claim order is deliberately not logical order. Drain independent jobs
+         * after a failure too, so an earlier logical error cannot be omitted.
+         * No job is replayed, and the partitionability proof excludes effects. */
+        if (status && job < task->failed_job) {
+            task->failed_job=job;
+            task->status=status;
+            task->error=error;
+        }
+    }
 }
 static bool g_advance(size_t *offset, int64_t stride, size_t count) {
     uint64_t magnitude = stride < 0 ? (uint64_t)(-(stride+1))+1 : (uint64_t)stride;
@@ -1163,7 +1227,7 @@ me_graph_status me_graph_execute_parallel_into(const me_graph_schedule *s,
         return rc;
     }
     if ((uint64_t)s->shape[axis] < count) count = (size_t)s->shape[axis];
-    size_t tile = executor->tile_items ? executor->tile_items : 64*1024;
+    size_t tile = executor->tile_items ? executor->tile_items : 32*1024;
     size_t items=s->bytes/g_width(s->dtype), task_items=items/count + (items%count != 0);
     if (tile > task_items) tile=task_items;
     size_t original_tile=s->reduction.tile_items ? s->reduction.tile_items : 1024;
@@ -1190,52 +1254,59 @@ me_graph_status me_graph_execute_parallel_into(const me_graph_schedule *s,
         free(tasks);
         return g_error(error,-1,ME_GRAPH_ERR_OOM,"task binding allocation failed");
     }
-    me_graph_schedule *schedules[2] = {NULL,NULL};
-    size_t q = (size_t)s->shape[axis]/count, r = (size_t)s->shape[axis]%count;
-    for (size_t t = 0; t < count; t++) {
-        graph_task *task = &tasks[t];
-        task->inputs = ninputs ? bindings + t*(size_t)ninputs : NULL;
-        atomic_init(&task->visited,0);
-        size_t begin = q*t + (t < r ? t : r), extent = q + (t < r);
+    /* Each host task is a worker, not a fixed region. Immutable schedules for
+     * full/tail jobs are shared; bindings and reports remain worker-local.
+     * Faster cores claim more jobs without multiplying the scratch budget. */
+    graph_work work={.inputs=inputs,.output=output,.axis=axis,.extent=(size_t)s->shape[axis],.stripes=count};
+    atomic_init(&work.next,0);
+    size_t row_items=items/work.extent;
+    work.grain=tile/row_items;
+    if (!work.grain) work.grain=1;
+    /* Bound dispatch/preflight overhead for bandwidth-sized domains while
+     * leaving multiple claims per worker for heterogeneous cores. */
+    size_t coarse=work.extent/(count*16);
+    if (work.grain < coarse) work.grain=coarse;
+    size_t maximum=work.extent/count;
+    if (work.grain > maximum) work.grain=maximum;
+    work.jobs=work.extent/work.grain+(work.extent%work.grain != 0);
+    for (size_t kind=0; kind<2; kind++) {
+        size_t extent=kind ? work.extent%work.grain : work.grain;
+        if (!extent) continue;
         me_graph_input_metadata metadata[ME_MAX_VARS];
         for (int i = 0; i < ninputs; i++) {
-            task->inputs[i] = inputs[i];
             int source_axis=axis-(s->rank-inputs[i].rank);
-            if (source_axis >= 0 && inputs[i].shape[source_axis] != 1) {
-                task->inputs[i].shape[source_axis] = (int64_t)extent;
-                if (!g_advance(&task->inputs[i].offset,inputs[i].strides[source_axis],begin)) {
-                    rc = g_error(error,-1,ME_GRAPH_ERR_BINDING,"task input offset overflow"); goto cleanup_tasks;
-                }
-            }
             metadata[i].name = inputs[i].name; metadata[i].dtype = inputs[i].dtype;
-            metadata[i].rank = task->inputs[i].rank;
-            memcpy(metadata[i].shape,task->inputs[i].shape,sizeof(metadata[i].shape));
-        }
-        task->output = *output; task->output.shape[axis] = (int64_t)extent;
-        if (!g_advance(&task->output.offset,output->strides[axis],begin)) {
-            rc = g_error(error,-1,ME_GRAPH_ERR_BINDING,"task output offset overflow"); goto cleanup_tasks;
+            metadata[i].rank = inputs[i].rank;
+            memcpy(metadata[i].shape,inputs[i].shape,sizeof(metadata[i].shape));
+            if (source_axis >= 0 && inputs[i].shape[source_axis] != 1)
+                metadata[i].shape[source_axis]=(int64_t)extent;
         }
         me_graph_specialize_options specialization = {sizeof(specialization),ME_GRAPH_VERSION,tile,0};
-        /* Regions have at most two shapes; their schedules own no invocation buffers. */
-        size_t kind = t < r;
-        if (!schedules[kind]) {
-            rc = me_graph_specialize(s->plan,metadata,ninputs,&specialization,&schedules[kind],error);
-            if (rc) goto cleanup_tasks;
-        }
-        task->schedule = schedules[kind];
+        rc=me_graph_specialize(s->plan,metadata,ninputs,&specialization,&work.schedules[kind],error);
+        if (rc) goto cleanup_tasks;
+    }
+    for (size_t t=0; t<count; t++) {
+        graph_task *task=&tasks[t];
+        task->work=&work;
+        task->inputs=ninputs ? bindings+t*(size_t)ninputs : NULL;
+        atomic_init(&task->visited,0);
         task->ninputs = ninputs;
         task->options = options ? *options : (me_graph_execute_options){sizeof(task->options),ME_GRAPH_VERSION,0};
         task->status = ME_GRAPH_ERR_EXECUTION;
-        rc = g_execute(task->schedule,task->inputs,ninputs,NULL,0,&task->options,NULL,error,NULL,&task->output,false);
-        if (rc) goto cleanup_tasks;
+        task->failed_job=SIZE_MAX;
     }
     {
         int submitted = executor->fork_join(executor->host,count,g_task,tasks);
+        size_t failed_job=SIZE_MAX;
         for (size_t t = 0; t < count; t++) {
             if (!atomic_load(&tasks[t].visited)) {
                 rc = g_error(error,-1,ME_GRAPH_ERR_EXECUTION,"executor did not complete every task"); break;
             }
-            if (tasks[t].status) { rc=tasks[t].status; if (error) *error=tasks[t].error; break; }
+            if (tasks[t].status && tasks[t].failed_job < failed_job) {
+                failed_job=tasks[t].failed_job;
+                rc=tasks[t].status;
+                if (error) *error=tasks[t].error;
+            }
         }
         if (!rc && submitted) rc=g_error(error,-1,ME_GRAPH_ERR_EXECUTION,"host executor submission failed");
         if (report) {
@@ -1256,8 +1327,8 @@ me_graph_status me_graph_execute_parallel_into(const me_graph_schedule *s,
         }
     }
 cleanup_tasks:
-    me_graph_schedule_free(schedules[0]);
-    me_graph_schedule_free(schedules[1]);
+    me_graph_schedule_free(work.schedules[0]);
+    me_graph_schedule_free(work.schedules[1]);
     free(bindings);
     free(tasks);
     return rc;

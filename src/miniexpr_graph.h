@@ -72,12 +72,12 @@ typedef int (*me_graph_fork_join_fn)(void *host, size_t tasks,
 typedef struct {
     size_t struct_size;
     unsigned version;
-    size_t max_tasks; /* 0/1 or NULL executor selects serial execution; max 64. */
+    size_t max_tasks; /* Maximum workers sharing a dynamic job queue; max 64. 0/1 selects serial. */
     size_t workspace_budget; /* Aggregate iterator scratch; 0 selects 64 MiB. */
     me_graph_fork_join_fn fork_join;
     void *host;
     size_t minimum_task_items; /* 0 = cost-aware automatic threshold; performance policy only. */
-    size_t tile_items; /* 0 = automatic, up to 64 Ki elements for proven maps. */
+    size_t tile_items; /* Iterator/job target; 0 = automatic (32 Ki elements for parallel maps). */
 } me_graph_executor;
 typedef struct {
     me_graph_report execution;

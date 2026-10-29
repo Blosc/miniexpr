@@ -124,6 +124,20 @@ make examples
 
 Tip: run a subset of tests with `ctest --test-dir build -R <pattern>`.
 
+## Parallel Graph Scheduling
+
+Proven lane-local graph maps use one invocation-local dynamic queue for both
+arithmetic and compute-heavy expressions. The host executor dispatches bounded
+workers, not one task per numerical tile; workers share immutable full/tail
+schedules and retain private bindings and status. Iterator tiles default to 32 Ki
+elements, with coarser jobs for large domains to amortize dispatch overhead.
+Initial claims are interleaved across the allocation to avoid nearby first-touch
+page faults serializing fresh large outputs on macOS. This does not pin a worker
+to a region: faster cores can claim work from every region. Reports count worker
+callbacks, scratch remains bounded by their concurrency, and failures are joined
+and reported in logical job order without replay. Reductions and kernels lacking
+the partitionability proof retain their numerical execution order.
+
 ## DSL Runtime JIT Internals
 
 The public/runtime-stable DSL JIT controls remain documented in [README.md](README.md). This section covers internal, test-oriented, or tuning-oriented knobs that are still useful during development, debugging, and benchmarking.

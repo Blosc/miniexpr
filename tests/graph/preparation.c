@@ -17,6 +17,10 @@ static int failed_executor(void *host, size_t count, me_graph_task_fn task, void
     if (count) task(invocation,0);
     return 1;
 }
+static int duplicate_executor(void *host, size_t count, me_graph_task_fn task, void *invocation) {
+    reverse_executor(host,count,task,invocation);
+    return reverse_executor(host,count,task,invocation);
+}
 static me_graph_plan *prepare(const char *source, me_graph_input_metadata *inputs, int n, bool jit) {
     fprintf(stderr, "  prepare jit=%d: %s\n", jit, source); fflush(stderr);
     me_graph_plan *p = NULL;
@@ -100,6 +104,57 @@ static void lazy(bool jit) {
     CHECK(!me_graph_execute(s, bindings, 2, output, sizeof(output), NULL, &report, &error));
     CHECK(output[0] == 8 && output[1] == 4 && output[2] == 2 && report.array.fp_flags == 0);
     me_graph_schedule_free(s); me_graph_plan_free(p);
+}
+static void dynamic_maps(void) {
+    enum { count=513 };
+    double x[count], y=2, expected[count], output[2*count];
+    for (int i=0; i<count; i++) x[i]=(double)i-256;
+    me_graph_input_metadata metadata[]={{"x",ME_FLOAT64,1,{count}},{"y",ME_FLOAT64,0,{0}}};
+    me_graph_plan *plan=prepare("where(x != 0, y / x, 0.0)",metadata,2,false);
+    me_graph_schedule *schedule=NULL;
+    CHECK(!me_graph_specialize(plan,metadata,2,NULL,&schedule,&error));
+    me_array_view inputs[]={view("x",ME_FLOAT64,x,sizeof(x),1,count,0),
+        view("y",ME_FLOAT64,&y,sizeof(y),0,0,0)};
+    inputs[0].strides[0]=-8; inputs[0].offset=(count-1)*8;
+    me_graph_report serial;
+    CHECK(!me_graph_execute(schedule,inputs,2,expected,sizeof(expected),NULL,&serial,&error));
+    size_t dispatched=0;
+    me_graph_executor executor={sizeof(executor),ME_GRAPH_EXECUTOR_VERSION,4,1024*1024,
+        duplicate_executor,&dispatched,1,31};
+    for (int reverse=0; reverse<2; reverse++) {
+        for (int i=0; i<2*count; i++) output[i]=-999;
+        me_array_output destination={.struct_size=sizeof(destination),.version=ME_ARRAY_OUTPUT_VERSION,
+            .dtype=ME_FLOAT64,.base=output,.capacity=sizeof(output),.rank=1,.shape={count},
+            .offset=reverse ? (count-1)*16 : 0,.strides={reverse ? -16 : 16}};
+        me_graph_parallel_report parallel;
+        CHECK(!me_graph_execute_parallel_into(schedule,inputs,2,&destination,NULL,&executor,&parallel,&error));
+        CHECK(dispatched==4 && parallel.tasks==4);
+        CHECK(parallel.execution.array.evaluated_tiles==17);
+        CHECK(parallel.execution.array.fp_flags==serial.array.fp_flags);
+        CHECK(parallel.execution.array.temporary_bytes <= parallel.iterator_workspace_bound);
+        for (int i=0; i<count; i++) {
+            CHECK(output[2*(reverse ? count-1-i : i)]==expected[i]);
+            CHECK(output[2*i+1]==-999);
+        }
+    }
+    me_graph_schedule_free(schedule); me_graph_plan_free(plan);
+    /* Interleaving must not let four failing workers abandon an unclaimed,
+     * earlier logical failure. Every independent job still executes once. */
+    metadata[0].shape[0]=20;
+    for (int i=0; i<20; i++) x[i]=1;
+    x[3]=x[6]=x[7]=x[11]=x[16]=-1;
+    plan=prepare("sqrt(x)",metadata,1,false);
+    CHECK(!me_graph_specialize(plan,metadata,1,NULL,&schedule,&error));
+    inputs[0]=view("x",ME_FLOAT64,x,sizeof(x),1,20,0);
+    me_array_output destination={.struct_size=sizeof(destination),.version=ME_ARRAY_OUTPUT_VERSION,
+        .dtype=ME_FLOAT64,.base=output,.capacity=sizeof(output),.rank=1,.shape={20},.strides={8}};
+    me_graph_execute_options options={sizeof(options),ME_GRAPH_VERSION,ME_FP_INVALID};
+    executor.tile_items=1;
+    me_graph_parallel_report parallel;
+    CHECK(me_graph_execute_parallel_into(schedule,inputs,1,&destination,&options,&executor,&parallel,&error)==ME_GRAPH_ERR_EXECUTION);
+    CHECK(parallel.execution.array.evaluated_tiles==20);
+    for (int i=0; i<20; i++) CHECK(x[i] < 0 ? isnan(output[i]) : output[i]==1);
+    me_graph_schedule_free(schedule); me_graph_plan_free(plan);
 }
 static void identity_destinations(bool jit) {
     me_graph_input_metadata metadata={"x",ME_FLOAT64,2,{2,3}};
@@ -665,6 +720,7 @@ int main(void) {
     RUN_CASE(maps(false)); RUN_CASE(lazy(false)); RUN_CASE(reductions(false));
     RUN_CASE(identity_destinations(false)); RUN_CASE(identity_destinations(true));
     RUN_CASE(partition_policies());
+    RUN_CASE(dynamic_maps());
     RUN_CASE(integer_extrema(false)); RUN_CASE(integer_extrema(true));
     RUN_CASE(validation()); RUN_CASE(limits());
     RUN_CASE(maps(true)); RUN_CASE(lazy(true)); RUN_CASE(reductions(true));
