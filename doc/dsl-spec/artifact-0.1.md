@@ -119,3 +119,11 @@ returns a handle with concrete output dtype/width. Exporters must still persist
 that concrete dtype; the auto spelling is an import request, not a new recipe.
 Full beta certification and host persistence remain open. Requirement `jit-required` reports an unavailable-required-JIT diagnostic when
 no eligible compiled backend is available.
+## Targeted integer-power policy
+
+NumPy-numeric artifacts may explicitly declare `semantics.integer_powers` as
+`"multiply"`. This enables bounded constant-integer power chains for real
+floating bases, independently of `semantics.fp`. Rounding and FP status may
+differ from general power. Omission retains the default power policy (constant
+squares use multiplication; other strict powers retain the math backend).
+This optional field is preserved on export; unsupported values fail validation.

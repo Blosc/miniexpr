@@ -65,6 +65,7 @@ typedef struct {
     me_dsl_math_backend math;
     bool has_ulp;
     me_dsl_sleef_ulp ulp;
+    bool integer_powers;
 } me_dsl_declared_policy;
 
 typedef struct me_dsl_expr {

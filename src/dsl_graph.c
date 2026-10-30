@@ -281,6 +281,19 @@ static const char *g_operator(const char *op, int *arity) {
     }
     return NULL;
 }
+static const char *g_power_literal(graph_node *node) {
+    const char *text=g_str(yyjson_obj_get(node->value,"value"));
+    if (strcmp(node->op,"constant") || !g_equal(yyjson_obj_get(node->value,"category"),"weak")) return NULL;
+    if (g_equal(yyjson_obj_get(node->value,"dtype"),"float64") &&
+        g_equal(yyjson_obj_get(node->value,"encoding"),"ieee754-hex") &&
+        g_equal(yyjson_obj_get(node->value,"value"),"4000000000000000")) return "2.0";
+    if (!g_equal(yyjson_obj_get(node->value,"dtype"),"int64") ||
+        !g_equal(yyjson_obj_get(node->value,"encoding"),"decimal") || !text || strlen(text)>11) return NULL;
+    const char *digits=text+(*text == '-');
+    if (!*digits || strspn(digits,"0123456789") != strlen(digits)) return NULL;
+    int64_t value=strtoll(text,NULL,10);
+    return value >= -INT32_MAX && value <= INT32_MAX ? text : NULL;
+}
 static void g_expr(graph_buffer *b, graph_node *nodes, int id) {
     graph_node *n = &nodes[id];
     if (!strcmp(n->op, "input") || !strcmp(n->op, "constant")) {
@@ -293,11 +306,26 @@ static void g_expr(graph_buffer *b, graph_node *nodes, int id) {
     if (symbol) {
         if (arity == 1) g_add(b, symbol);
         g_expr(b, nodes, n->args[0]);
-        if (arity == 2) { g_add(b, " "); g_add(b, symbol); g_add(b, " "); g_expr(b, nodes, n->args[1]); }
+        if (arity == 2) {
+            g_add(b, " "); g_add(b, symbol); g_add(b, " ");
+            const char *literal=!strcmp(n->op,"pow") ? g_power_literal(&nodes[n->args[1]]) : NULL;
+            /* Preserve weak source integer exponents as literals so typed power
+             * lowering can specialize them. Strong captures remain bindings. */
+            if (literal) {
+                g_add(b,"("); g_add(b,literal); g_add(b,")");
+            } else g_expr(b, nodes, n->args[1]);
+        }
     } else {
         const char *name = !strcmp(n->op, "select") ? "where" : g_str(yyjson_obj_get(n->value, !strcmp(n->op, "cast") ? "dtype" : "name"));
         g_add(b, name); g_add(b, "(");
-        for (int i = 0; i < n->nargs; i++) { if (i) g_add(b, ", "); g_expr(b, nodes, n->args[i]); }
+        for (int i = 0; i < n->nargs; i++) {
+            if (i) g_add(b, ", ");
+            const char *literal=i == 1 && name && !strcmp(name,"pow") ? g_power_literal(&nodes[n->args[i]]) : NULL;
+            if (literal) {
+                g_add(b,"("); g_add(b,literal); g_add(b,")");
+            }
+            else g_expr(b, nodes, n->args[i]);
+        }
         g_add(b, ")");
     }
     g_add(b, ")");
@@ -390,7 +418,7 @@ static bool g_partitionable(graph_node *nodes, int count) {
     return count && runtime[count-1];
 }
 static yyjson_doc *g_map_root(const char *source, graph_node *nodes,
-    const int *input_nodes, int ni, const int *constant_nodes, int nc, int mask_node) {
+    const int *input_nodes, int ni, const int *constant_nodes, int nc, int mask_node, bool integer_powers) {
     yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
     if (!doc) return NULL;
     yyjson_mut_val *root = yyjson_mut_obj(doc), *language = yyjson_mut_obj(doc);
@@ -430,6 +458,7 @@ static yyjson_doc *g_map_root(const char *source, graph_node *nodes,
     ok &= yyjson_mut_obj_add_str(doc, semantics, "fp", "strict");
     ok &= yyjson_mut_obj_add_str(doc, semantics, "numeric", "numpy-2.5");
     ok &= yyjson_mut_obj_add_str(doc, semantics, "casting", "unsafe");
+    if (integer_powers) ok &= yyjson_mut_obj_add_str(doc,semantics,"integer_powers","multiply");
     ok &= yyjson_mut_obj_add_val(doc, root, "semantics", semantics);
     ok &= yyjson_mut_obj_add_uint(doc, context, "ndim", 0);
     ok &= yyjson_mut_obj_add_val(doc, root, "context", context);
@@ -467,8 +496,10 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
         yyjson_doc_free(doc);
         return rc;
     }
-    const char *const root_fields[] = {"format", "semantics", "requires", "nodes", "root", "output"};
-    if (!g_tree(root, 0) || !g_fields(root, root_fields, 6, 6)) goto done;
+    const char *const root_fields[] = {"format", "semantics", "requires", "nodes", "root", "output", "optimization"};
+    if (!g_tree(root, 0) || !g_fields(root, root_fields, 6, 7)) goto done;
+    yyjson_val *optimization=yyjson_obj_get(root,"optimization");
+    if (optimization && !g_equal(optimization,"aggressive")) goto done;
     if (!g_equal(yyjson_obj_get(root, "format"), ME_GRAPH_FORMAT) || !g_equal(yyjson_obj_get(root, "semantics"), ME_GRAPH_SEMANTICS)) {
         rc = ME_GRAPH_ERR_UNSUPPORTED; message = "unsupported graph format or numerical semantics"; goto done;
     }
@@ -674,7 +705,7 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
         rc = source.oom || canonical.oom ? ME_GRAPH_ERR_OOM : ME_GRAPH_ERR_FORMAT;
         message = "lowering allocation or byte limit exceeded"; goto done;
     }
-    map_doc = g_map_root(source.data, nodes, input_nodes, ni, constant_nodes, nc, mask_node);
+    map_doc = g_map_root(source.data, nodes, input_nodes, ni, constant_nodes, nc, mask_node, optimization != NULL);
     if (!map_doc) { rc = ME_GRAPH_ERR_OOM; message = "map allocation failed"; goto done; }
     me_artifact_error native;
     yyjson_val *map = yyjson_doc_get_root(map_doc);
@@ -1529,8 +1560,10 @@ static me_graph_status g_split_graph(yyjson_val *root, graph_node *nodes, int co
                 g_json(&json, name); g_add(&json, ":{\"input\":"); g_json(&json, name); g_add(&json, "}");
             }
         }
-        g_add(&json, "},\"graph\":{\"format\":\"" ME_GRAPH_FORMAT "\",\"semantics\":\"" ME_GRAPH_SEMANTICS
-            "\",\"requires\":[\"numeric\"],\"nodes\":[");
+        g_add(&json, "},\"graph\":{\"format\":\"" ME_GRAPH_FORMAT "\",\"semantics\":\"" ME_GRAPH_SEMANTICS "\"");
+        if (g_equal(yyjson_obj_get(root,"optimization"),"aggressive"))
+            g_add(&json,",\"optimization\":\"aggressive\"");
+        g_add(&json,",\"requires\":[\"numeric\"],\"nodes\":[");
         int n = 0;
         for (int i = 0; i <= stage_root; i++) if (needed[i]) {
             mapped[i] = n++;

@@ -22,6 +22,7 @@ double dsl_menudet_jit_binary_math(const void *node, double x, double y);
  * the private JIT input ABI's function-pointer transport, never serialization. */
 const void *dsl_menudet_resolve_unary_math(const me_expr *node);
 const void *dsl_menudet_resolve_binary_math(const me_expr *node);
+bool dsl_menudet_integer_power(const me_expr *node, int64_t *exponent);
 const void *dsl_menudet_resolve_ternary_math(const me_expr *node);
 const void *dsl_menudet_resolve_predicate(const me_expr *node);
 bool dsl_menudet_jit_predicate(const void *node, double x);

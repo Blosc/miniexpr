@@ -1018,6 +1018,14 @@ me_dtype dsl_menudet_cast_dtype(const me_expr *expr) {
     return ME_AUTO;
 }
 
+static void dsl_mark_integer_powers(me_expr *expr) {
+    if (!expr) return;
+    expr->flags |= ME_EXPR_FLAG_INTEGER_POWERS;
+    if (IS_FUNCTION(expr->type)) {
+        for (int i=0; i<ARITY(expr->type); i++) dsl_mark_integer_powers(expr->parameters[i]);
+    }
+}
+
 static void dsl_mark_value_casts(me_expr *expr, me_dsl_fp_mode fp_mode, bool preserve_bool_output) {
     if (!expr || (!IS_FUNCTION(expr->type) && !IS_CLOSURE(expr->type))) {
         return;
@@ -1181,6 +1189,7 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
             me_free(compiled);
             return false;
         }
+        if (ctx->program->integer_powers) dsl_mark_integer_powers(compiled);
     }
     else {
         dsl_mark_value_casts(compiled, ctx->program->fp_mode, expr_dtype == ME_BOOL);
@@ -2948,6 +2957,7 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
             if (profile != ME_DSL_PROFILE_MENUDET_0_1) jit_mode = ME_JIT_OFF;
         }
     }
+    program->integer_powers=declared && declared->integer_powers;
     if (jit_mode == ME_JIT_ON || jit_mode == ME_JIT_OFF) {
         program->jit_request_mode = (me_jit_mode)jit_mode;
     }

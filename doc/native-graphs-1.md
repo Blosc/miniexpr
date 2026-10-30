@@ -376,3 +376,13 @@ excluded. Reduction grouping is unchanged. Metadata is roughly 59 KB per two-sta
 plan and 57 KB per specialization because this experimental API currently uses
 fixed bounded stage/input arrays. This overhead is visible and may matter more than
 materialization for tiny graphs; no memory-efficiency superiority is claimed.
+## Integer-power optimization
+
+The optional root field `"optimization": "aggressive"` enables multiplication
+chains for bounded constant integer exponents of real floating bases. Native
+typed lowering evaluates the base once; negative powers invert the base first.
+This policy can change rounding and FP status, but does not enable global
+fast-math, affect integer/complex bases, or rewrite nonconstant exponents.
+It survives serialization and automatic stage splitting. Generated map artifacts
+record it as `"semantics": {"integer_powers": "multiply", ...}`.
+Absent this field, only constant real squares are replaced with multiplication.

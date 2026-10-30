@@ -1,4 +1,5 @@
 #include "dsl_menudet_batch.h"
+#include "dsl_menudet_powi.h"
 #include <float.h>
 #include <string.h>
 
@@ -16,6 +17,19 @@
 ME_BATCH_NOINLINE void dsl_menudet_batch_##OP##_##S(const T *a, const T *b, T *restrict out, int count) { \
     for (int i=0; i<count; i++) out[i]=(EXPR); \
 }
+
+#define ME_BATCH_POWI(T,S) \
+ME_BATCH_NOINLINE void dsl_menudet_batch_powi_##S(const T *a, int64_t exponent, T *restrict out, int count) { \
+    /* Keep the common cube a straight-line, vectorizable loop. */ \
+    if (exponent == 3) { \
+        for (int i=0; i<count; i++) out[i]=(a[i]*a[i])*a[i]; \
+        return; \
+    } \
+    for (int i=0; i<count; i++) out[i]=dsl_menudet_powi_##S(a[i],exponent); \
+}
+ME_BATCH_POWI(float,f32)
+ME_BATCH_POWI(double,f64)
+#undef ME_BATCH_POWI
 
 #define ME_BATCH_KERNEL_VS(OP,T,S,EXPR) \
 ME_BATCH_NOINLINE void dsl_menudet_batch_##OP##_vs_##S(const T *a, T b, T *restrict out, int count) { \

@@ -508,7 +508,7 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
     const char *const output_fields[] = {"dtype", "contract"};
     const char *const semantics_fields[] = {"fp"};
     const char *const numpy_semantics_fields[] = {"numeric", "casting"};
-    const char *const flexible_semantics_fields[] = {"fp", "math", "ulp"};
+    const char *const flexible_semantics_fields[] = {"fp", "math", "ulp", "integer_powers"};
     const char *const input_fields[] = {"name", "dtype"};
     const char *const constant_fields[] = {"name", "dtype", "encoding", "value"};
     const char *const numpy_constant_fields[] = {"name", "dtype", "encoding", "value", "category"};
@@ -540,7 +540,7 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
         !artifact_fields(output, string_output ? string_output_fields : output_fields, string_output ? 3 : 2, false) ||
         !(numpy_profile ?
           artifact_fields_optional(semantics, numpy_semantics_fields, 2,
-                                   flexible_semantics_fields, 3, false) :
+                                   flexible_semantics_fields, 4, false) :
           artifact_fields(semantics, semantics_fields, 1, false)) ||
         !yyjson_is_arr(requires) || !yyjson_is_arr(inputs) || !yyjson_is_arr(constants) ||
         !source || !entry || !*entry) {
@@ -575,6 +575,11 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
         (has_ulp_field && !(artifact_equal(yyjson_obj_get(semantics, "ulp"), "u10") ||
                             artifact_equal(yyjson_obj_get(semantics, "ulp"), "u35")))) {
         status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported version or semantic requirement");
+        goto cleanup;
+    }
+    yyjson_val *integer_powers=yyjson_obj_get(semantics,"integer_powers");
+    if (integer_powers && !artifact_equal(integer_powers,"multiply")) {
+        status=artifact_error(error,ME_ARTIFACT_ERR_UNSUPPORTED,"unsupported integer_powers policy");
         goto cleanup;
     }
     if (numpy_profile && (!artifact_equal(yyjson_obj_get(semantics, "numeric"), "numpy-2.5") ||
@@ -735,6 +740,7 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
         goto cleanup;
     }
     me_dsl_declared_policy declared = {0};
+    declared.integer_powers=integer_powers != NULL;
     if (has_fp_field) {
         declared.has_fp = true;
         declared.fp = artifact_equal(yyjson_obj_get(semantics, "fp"), "contract") ? ME_DSL_FP_CONTRACT :

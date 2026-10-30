@@ -285,6 +285,26 @@ independent of floating-point mode: strict plus SLEEF/Accelerate is valid.
 Accelerated math uses bounded vector interpretation over tiles; optional JIT
 falls back to that path because the fused per-lane generated bridge would pay a
 lane-packing dispatch per element. System math retains generated-JIT support.
+
+Real floating-point powers (`x**y` and `pow(x, y)`) also use bounded vector
+interpretation when eligible, preserving the selected math backend and strict
+`pow` rounding rather than falling back to recursive per-element evaluation.
+Constant real floating squares (`x**2`, `pow(x, 2)`, including `2.0`) use one
+multiplication in every FP mode/backend, with no contraction across the square
+in strict mode. This follows square-ufunc semantics; libm `errno` and NaN payload
+identity are not promised. Integer and complex bases retain their existing rules.
+With system math, the CC JIT in `fast` mode additionally lowers constant integer
+powers to multiplication chains (exponentiation by squaring), evaluating the
+base once and taking its reciprocal first for negative exponents. This rewrite
+can change rounding and floating-point status, so `strict` and `contract` keep
+the selected backend's power operation for other exponents by default. Explicit
+graph `optimization: "aggressive"` (artifact `semantics.integer_powers: "multiply"`)
+enables only these integer-power chains in the interpreter and JIT, without
+enabling global fast-math. This policy is serialized with the graph/artifact.
+Integer literals up to magnitude 2^24
+for float32 and 2^31-1 for float64 qualify; larger or nonconstant exponents
+retain general power. Integer and complex base semantics are unchanged.
+
 - On Linux, the libtcc JIT automatically appends common multiarch library directories
   (for example `/usr/lib/x86_64-linux-gnu`) to help `-lm` resolve without extra flags.
 

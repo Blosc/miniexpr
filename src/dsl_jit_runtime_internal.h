@@ -194,6 +194,7 @@ typedef struct {
     bool math_explicit;
     bool ulp_explicit;
     me_dsl_semantic_profile semantic_profile;
+    bool integer_powers;
     me_math_dispatch math_dispatch;
     bool numpy_weak_vars[ME_MAX_VARS];
     bool menudet_reduced_vars[ME_MAX_VARS];

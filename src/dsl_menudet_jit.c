@@ -611,6 +611,12 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
     bool float_operator = op && arity == 2 && float_result && arg0 && arg1 &&
         (!strcmp(op,"//") || !strcmp(op,"%") || !strcmp(op,"**")) &&
         pj_float(arg0->dtype) && pj_float(arg1->dtype);
+    /* Except for squares, chains may round differently from libm. Fast mode or
+     * explicit integer-power policy permits this rewrite. Literal bounds guarantee exact exponent
+     * representation after float32/float64 promotion and bounded code size. */
+    int64_t power_exponent=0;
+    bool constant_power = dsl_menudet_integer_power(n,&power_exponent) &&
+        (power_exponent == 2 || p->fp_mode == ME_DSL_FP_FAST || (n->flags & ME_EXPR_FLAG_INTEGER_POWERS));
     bool integer_operator = op && pj_integer(n->dtype) &&
         ((arity == 2 && (!strcmp(op,"%") || !strcmp(op,"//") || !strcmp(op,"<<") ||
                          !strcmp(op,">>") || !strcmp(op,"&") || !strcmp(op,"|") || !strcmp(op,"^"))) ||
@@ -832,6 +838,34 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                     type,p->n_inputs+ME_DSL_MENUDET_JIT_MATH1_OFF,
                     p->n_inputs+ME_DSL_MENUDET_JIT_MATH1_OFF+1+id,args[0]);
             }
+        }
+        else if (constant_power) {
+            int id=(*next_temp)++;
+            uint64_t exponent=(uint64_t)(power_exponent < 0 ? -power_exponent : power_exponent);
+            bool negative=power_exponent < 0;
+            bool ok=pj_append(s,"%s pj_power_base_%d = (%s)(%s);\n%s pj_power_result_%d = (%s)1;\n",
+                type,id,type,args[0],type,id,type);
+            /* A zero exponent must not erase evaluation/status of a compound
+             * base under the targeted policy (global fast mode is separate). */
+            if (!exponent && p->fp_mode != ME_DSL_FP_FAST) ok=ok && pj_append(s,
+                "volatile %s pj_power_observed_%d = pj_power_base_%d; (void)pj_power_observed_%d;\n",
+                type,id,id,id);
+            /* Invert first for negative powers: forming x^abs(n) first can
+             * overflow even when the reciprocal result is representable. */
+            if (negative && exponent) ok=ok && pj_append(s,
+                "pj_power_base_%d = (%s)1 / pj_power_base_%d;\n",id,type,id);
+            bool first=true;
+            while (exponent && ok) {
+                if (exponent & 1) {
+                    ok=pj_append(s,first ? "pj_power_result_%d = pj_power_base_%d;\n" :
+                        "pj_power_result_%d *= pj_power_base_%d;\n",id,id);
+                    first=false;
+                }
+                exponent >>= 1;
+                if (exponent) ok=ok && pj_append(s,"pj_power_base_%d *= pj_power_base_%d;\n",id,id);
+            }
+            if (ok) snprintf(out,capacity,"pj_power_result_%d",id);
+            else { free(out); out=NULL; }
         }
         else if (binary_math || float_operator) {
             if (p->menudet_jit_nmath2 == ME_DSL_MENUDET_JIT_BRIDGE_LIMIT) { free(out); out = NULL; }
@@ -1520,6 +1554,9 @@ static int pj_arith_find_or_add_node(pj_arith_dag *dag, const me_dsl_compiled_pr
         }
 
         const char *op = me_menudet_operator(n);
+        int64_t exponent;
+        bool square=dsl_menudet_integer_power(n,&exponent) && exponent == 2;
+        if (square) op="*";
         if (!op) {
             *reason = "unsupported-op";
             return -1;
@@ -1566,7 +1603,7 @@ static int pj_arith_find_or_add_node(pj_arith_dag *dag, const me_dsl_compiled_pr
             }
             int left_idx = pj_arith_find_or_add_node(dag, p, (const me_expr *)n->parameters[0], reason);
             if (left_idx < 0) return -1;
-            int right_idx = pj_arith_find_or_add_node(dag, p, (const me_expr *)n->parameters[1], reason);
+            int right_idx = pj_arith_find_or_add_node(dag, p, (const me_expr *)n->parameters[square ? 0 : 1], reason);
             if (right_idx < 0) return -1;
             if (dag->count >= 64) {
                 *reason = "too-many-temps";

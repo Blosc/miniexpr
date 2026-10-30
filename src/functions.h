@@ -97,7 +97,8 @@ enum {
     ME_EXPR_FLAG_NUMPY_1_1 = 1u << 14,
     ME_EXPR_FLAG_WEAK_SCALAR = 1u << 15,
     /* Uniform external inputs have scalar storage; locals remain per-lane. */
-    ME_EXPR_FLAG_UNIFORM_INPUT = 1u << 16
+    ME_EXPR_FLAG_UNIFORM_INPUT = 1u << 16,
+    ME_EXPR_FLAG_INTEGER_POWERS = 1u << 17
 };
 
 /* Check if a pointer is a synthetic address (used internally for chunked evaluation).

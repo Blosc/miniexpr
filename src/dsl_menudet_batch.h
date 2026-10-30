@@ -51,6 +51,8 @@ typedef struct me_pj_arith_table {
 } me_pj_arith_table;
 
 const me_pj_arith_table *dsl_menudet_batch_arith_table(void);
+void dsl_menudet_batch_powi_f32(const float *a, int64_t exponent, float *restrict out, int count);
+void dsl_menudet_batch_powi_f64(const double *a, int64_t exponent, double *restrict out, int count);
 
 /* Internal, all-participating contiguous primitives. The caller establishes
  * nearest/ties-even, nontrapping IEEE execution and collects aggregate status. */

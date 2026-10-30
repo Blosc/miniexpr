@@ -7,6 +7,7 @@
 #include "dsl_menudet_fp.h"
 #include "dsl_menudet_reduce.h"
 #include "dsl_menudet_batch.h"
+#include "dsl_menudet_powi.h"
 #include "dsl_jit_test.h"
 #include "dsl_math_dispatch.h"
 #include "miniexpr_internal.h"
@@ -81,6 +82,37 @@ static bool p_unsigned(me_dtype d) {
 
 static bool p_float(me_dtype d) {
     return d == ME_FLOAT32 || d == ME_FLOAT64;
+}
+
+bool dsl_menudet_integer_power(const me_expr *node, int64_t *exponent) {
+    if (!node || !p_float(node->dtype) || !IS_FUNCTION(node->type) || ARITY(node->type) != 2) return false;
+    const char *op=me_menudet_operator(node);
+    const char *name=op ? NULL : me_menudet_math_name(node);
+    if (!(op && !strcmp(op,"**")) && !(name && !strcmp(name,"pow"))) return false;
+    const me_expr *base=node->parameters[0],*power=node->parameters[1];
+    if (base->dtype != node->dtype || power->dtype != node->dtype || TYPE_MASK(power->type) != ME_CONSTANT) return false;
+    if (power->flags & ME_EXPR_FLAG_INTEGER_LITERAL) {
+        uint64_t limit=node->dtype == ME_FLOAT32 ? UINT64_C(16777216) : UINT64_C(2147483647);
+        if (power->integer_magnitude > limit) return false;
+        *exponent=(int64_t)power->integer_magnitude;
+        if (power->flags & ME_EXPR_FLAG_NEGATIVE_LITERAL) *exponent=-*exponent;
+        return true;
+    }
+    /* Accept 2.0 too, without evaluating a potentially signaling NaN literal. */
+    if (power->dtype == ME_FLOAT32) {
+        uint32_t bits; memcpy(&bits,&power->literal_f32,sizeof(bits));
+        if (bits != UINT32_C(0x40000000)) return false;
+    } else {
+        uint64_t bits; memcpy(&bits,&power->value,sizeof(bits));
+        if (bits != UINT64_C(0x4000000000000000)) return false;
+    }
+    *exponent=2;
+    return true;
+}
+
+static bool p_power_chain(const me_expr *node, int64_t *exponent) {
+    return dsl_menudet_integer_power(node,exponent) &&
+        (*exponent == 2 || (node->flags & ME_EXPR_FLAG_INTEGER_POWERS));
 }
 
 static bool p_complex(me_dtype d) {
@@ -1543,6 +1575,13 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
     const me_expr *b_node = n->parameters[1];
     rc = logical ? p_eval_branch(n, 1, !strcmp(op, "and"), ctx, item, &b) : p_eval(b_node, ctx, item, &b);
     if (rc) return rc;
+    int64_t power_exponent;
+    if (((op[0] == '*' && op[1] == '*') || (math_name && !strcmp(math_name,"pow"))) &&
+        p_power_chain(n,&power_exponent)) {
+        if (n->dtype == ME_FLOAT32) out->f32=dsl_menudet_powi_f32(a.f32,power_exponent);
+        else out->f64=dsl_menudet_powi_f64(a.f64,power_exponent);
+        return 0;
+    }
     if (math_name) {
         if (p_complex(a_node->dtype)) return p_complex_math(a_node->dtype, n, math_name, &a, &b, out);
         return p_math(n, math_name, &a, &b, out);
@@ -1858,7 +1897,7 @@ const void *dsl_menudet_resolve_binary_math(const me_expr *node) {
             if (mapped) return NULL;
         }
     }
-    if (power) return node->dtype == ME_FLOAT32 ? (const void *)powf : (const void *)pow;
+    if (power || !strcmp(name,"pow")) return node->dtype == ME_FLOAT32 ? (const void *)powf : (const void *)pow;
     if (node->dtype == ME_FLOAT32 && !strcmp(name,"copysign")) return (const void *)p_libm_copysign_f32;
     if (!strcmp(name,"ldexp")) return node->dtype == ME_FLOAT32 ? (const void *)ldexpf : (const void *)ldexp;
     static const struct {
@@ -2274,7 +2313,8 @@ int dsl_menudet_eval_expr(const me_expr *expr, const void *const *vars, int nvar
 #define P_BATCH_NODES 64
 #define P_BATCH_LANES 256
 typedef enum { P_BATCH_LEAF, P_BATCH_CAST, P_BATCH_NEG, P_BATCH_ADD,
-    P_BATCH_SUB, P_BATCH_MUL, P_BATCH_DIV, P_BATCH_MATH, P_BATCH_COMPARE } p_batch_op;
+    P_BATCH_SUB, P_BATCH_MUL, P_BATCH_DIV, P_BATCH_MATH, P_BATCH_COMPARE,
+    P_BATCH_POWER, P_BATCH_POWER_CHAIN } p_batch_op;
 typedef struct {
     const me_expr *expr;
     p_batch_op op;
@@ -2283,6 +2323,7 @@ typedef struct {
     me_math_op math_op;
     const me_math_dispatch *math_dispatch;
     bool uniform;
+    int64_t exponent;
 } p_batch_instruction;
 typedef struct {
     p_batch_instruction instructions[P_BATCH_NODES];
@@ -2305,7 +2346,7 @@ static bool p_batch_same_instruction(const p_batch_instruction *a, const p_batch
     return a->left == b->left && a->right == b->right &&
         (a->op != P_BATCH_COMPARE || comparison_kind(a->expr->function) == comparison_kind(b->expr->function)) &&
         a->math == b->math && a->math_op == b->math_op &&
-        a->math_dispatch == b->math_dispatch;
+        a->math_dispatch == b->math_dispatch && a->exponent == b->exponent;
 }
 static int p_batch_build(p_batch_program *program, const me_expr *n,
     p_eval_context *ctx, int depth) {
@@ -2360,7 +2401,25 @@ static int p_batch_build(p_batch_program *program, const me_expr *n,
             (is_complex || (floating && !p_complex(left->dtype)))) instruction.op=P_BATCH_CAST;
         else {
             const char *op=me_menudet_operator(n);
-            if (op && arity == 1 && !strcmp(op,"-") && left->dtype == n->dtype)
+            const char *name=op ? NULL : me_menudet_math_name(n);
+            if (floating && arity == 2 && left->dtype == n->dtype &&
+                ((const me_expr *)n->parameters[1])->dtype == n->dtype &&
+                ((op && !strcmp(op,"**")) || (name && !strcmp(name,"pow")))) {
+                /* Keep strict/libm rounding, but bind power once per tile rather
+                 * than rejecting the entire expression to scalar interpretation. */
+                instruction.op=P_BATCH_POWER;
+                if (p_power_chain(n,&instruction.exponent)) instruction.op=P_BATCH_POWER_CHAIN;
+                instruction.math=dsl_menudet_resolve_binary_math(n);
+                if (instruction.op == P_BATCH_POWER && !instruction.math) {
+                    const me_math_dispatch *dispatch=me_math_dispatch_current();
+                    if (!dispatch || !(n->dtype == ME_FLOAT32 ?
+                        dispatch->binary_f32[ME_MATHOP_POW] != NULL :
+                        dispatch->binary_f64[ME_MATHOP_POW] != NULL)) return -1;
+                    instruction.math_dispatch=dispatch;
+                    instruction.math_op=ME_MATHOP_POW;
+                }
+            }
+            else if (op && arity == 1 && !strcmp(op,"-") && left->dtype == n->dtype)
                 instruction.op=P_BATCH_NEG;
             else if (op && arity == 2 && left->dtype == n->dtype &&
                      ((const me_expr *)n->parameters[1])->dtype == n->dtype) {
@@ -2386,9 +2445,11 @@ static int p_batch_build(p_batch_program *program, const me_expr *n,
         instruction.left=p_batch_build(program,left,ctx,depth+1);
         if (instruction.left < 0) return -1;
         if (arity == 2) {
-            instruction.right=p_batch_build(program,n->parameters[1],ctx,depth+1);
+            instruction.right=instruction.op == P_BATCH_POWER_CHAIN && instruction.exponent == 2 ?
+                instruction.left : p_batch_build(program,n->parameters[1],ctx,depth+1);
             if (instruction.right < 0) return -1;
         }
+        if (instruction.op == P_BATCH_POWER_CHAIN && instruction.exponent == 2) instruction.op=P_BATCH_MUL;
         instruction.uniform=program->instructions[instruction.left].uniform &&
             (instruction.right < 0 || program->instructions[instruction.right].uniform);
     }
@@ -2520,7 +2581,8 @@ static bool p_batch_eval(const me_expr *expr, p_eval_context *ctx, int nitems,
             unsigned char *destination=storage+(size_t)op*slot_bytes;
             if (op == root && instruction->op >= P_BATCH_NEG && !instruction->uniform &&
                 out_tile != left && out_tile != right &&
-                !(instruction->op == P_BATCH_MATH && instruction->math_dispatch && (count & 7))) {
+                !((instruction->op == P_BATCH_MATH || instruction->op == P_BATCH_POWER) &&
+                  instruction->math_dispatch && (count & 7))) {
                 destination=out_tile;
             }
             values[op]=destination;
@@ -2548,6 +2610,35 @@ static bool p_batch_eval(const me_expr *expr, p_eval_context *ctx, int nitems,
             }
             bool left_u = instruction->left >= 0 && program.instructions[instruction->left].uniform;
             bool right_u = instruction->right >= 0 && program.instructions[instruction->right].uniform;
+            if (instruction->op == P_BATCH_POWER_CHAIN) {
+                if (n->dtype == ME_FLOAT32) dsl_menudet_batch_powi_f32((const float *)left,instruction->exponent,(float *)destination,count);
+                else dsl_menudet_batch_powi_f64((const double *)left,instruction->exponent,(double *)destination,count);
+                continue;
+            }
+            if (instruction->op == P_BATCH_POWER) {
+#define P_BATCH_POWER_EXECUTE(T,S) do { \
+    const T *a=(const T *)left,*b=(const T *)right; T *d=(T *)destination; \
+    if (instruction->math_dispatch) { \
+        int lanes=(int)(sizeof(T) == 4 ? 8 : 4); \
+        int pad=(count+lanes-1) & ~(lanes-1); \
+        T packed_a[P_BATCH_LANES],packed_b[P_BATCH_LANES]; \
+        if (pad != count) { \
+            memcpy(packed_a,a,(size_t)count*sizeof(T)); \
+            memcpy(packed_b,b,(size_t)count*sizeof(T)); \
+            for (int i=count; i<pad; i++) { packed_a[i]=a[count-1]; packed_b[i]=b[count-1]; } \
+            a=packed_a; b=packed_b; \
+        } \
+        instruction->math_dispatch->binary_##S[instruction->math_op](a,b,d,pad); \
+    } else { \
+        T (*volatile fn)(T,T)=(T (*)(T,T))instruction->math; \
+        for (int i=0; i<count; i++) d[i]=fn(a[i],b[i]); \
+    } \
+} while (0)
+                if (n->dtype == ME_FLOAT32) P_BATCH_POWER_EXECUTE(float,f32);
+                else P_BATCH_POWER_EXECUTE(double,f64);
+#undef P_BATCH_POWER_EXECUTE
+                continue;
+            }
             if (instruction->op == P_BATCH_COMPARE) {
                 me_cmp_kind kind=comparison_kind(n->function);
                 /* Match p_eval, including float32 widening and unordered NaNs.
