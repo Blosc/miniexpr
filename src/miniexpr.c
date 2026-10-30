@@ -132,6 +132,14 @@ const me_jit_options *dsl_jit_exchange_options(const me_jit_options *options) {
     return previous;
 }
 
+/* Explicit call-local math policy is authoritative; the environment supplies
+ * only the default when no backend was requested for this compilation. */
+const char *me_jit_explicit_math_backend(void) {
+    const me_jit_options *options = g_me_jit_options;
+    const char *value = options ? options->math_backend : NULL;
+    return value && value[0] ? value : NULL;
+}
+
 /* Options live on the compiling thread, never in process-wide environment
  * variables. Save/restore in the entry point also supports nested compilation. */
 const char *me_jit_option_value(const char *name) {
@@ -152,7 +160,9 @@ const char *me_jit_option_value(const char *name) {
     if (strcmp(name, "ME_DSL_JIT_CACHE_DIR") == 0) {
         return options->cache_dir;
     }
-    if (strcmp(name, "ME_DSL_TRACE") == 0 && options->trace >= 0) {
+    if (strcmp(name, "ME_SIMD_MATH_BACKEND") == 0) {
+        return options->math_backend;
+    }    if (strcmp(name, "ME_DSL_TRACE") == 0 && options->trace >= 0) {
         return options->trace ? "1" : "0";
     }
     if (strcmp(name, "ME_DSL_JIT_DEBUG_CC") == 0 && options->compiler_output >= 0) {

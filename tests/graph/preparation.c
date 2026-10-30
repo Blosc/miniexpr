@@ -2,6 +2,7 @@
 #include <fenv.h>
 #include <float.h>
 #include <math.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -723,6 +724,28 @@ static void in_memory_roundtrip(void) {
         free(actual); free(expected); me_graph_schedule_free(a); me_graph_schedule_free(b);
     }
 }
+static void math_policy(void) {
+    me_graph_input_metadata inputs[] = {{"x", ME_FLOAT64, 1, {2}}};
+    const char *source = "sin(x)";
+    me_graph_prepare_options options = {sizeof(options), ME_GRAPH_VERSION, ME_JIT_OFF, false, true, "system"};
+    me_graph_plan *p = NULL;
+    CHECK(!me_graph_prepare_expression(source, strlen(source), inputs, 1, &options, &p, &error));
+    const char *map = me_graph_export_map_json(p);
+    CHECK(map && strstr(map, "\"math\":\"system\"") && strstr(map, "\"flexible-math\""));
+    me_graph_plan_free(p);
+    /* Callers compiled before the appended field keep their original size. */
+    options.struct_size = offsetof(me_graph_prepare_options, math_backend);
+    p = NULL;
+    CHECK(!me_graph_prepare_expression(source, strlen(source), inputs, 1, &options, &p, &error));
+    map = me_graph_export_map_json(p);
+    CHECK(map && !strstr(map, "\"math\":"));
+    me_graph_plan_free(p);
+    options.struct_size = sizeof(options);
+    options.math_backend = "bogus";
+    p = NULL;
+    CHECK(me_graph_prepare_expression(source, strlen(source), inputs, 1, &options, &p, &error) != ME_GRAPH_SUCCESS);
+    CHECK(p == NULL);
+}
 int main(void) {
 #define RUN_CASE(call) do { fprintf(stderr, "graph preparation: %s\n", #call); fflush(stderr); call; } while (0)
     RUN_CASE(maps(false)); RUN_CASE(lazy(false)); RUN_CASE(reductions(false));
@@ -741,6 +764,7 @@ int main(void) {
     RUN_CASE(storage_readers(false)); RUN_CASE(storage_readers(true));
     RUN_CASE(output_aliases(false)); RUN_CASE(output_aliases(true));
     RUN_CASE(in_memory_roundtrip());
+    RUN_CASE(math_policy());
 #undef RUN_CASE
     puts("native graph preparation/execution passed"); return 0;
 }

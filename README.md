@@ -232,9 +232,12 @@ See [doc/dsl-usage.md](doc/dsl-usage.md) and [doc/dsl-syntax.md](doc/dsl-syntax.
 
 Embedders can call `me_compile_nd_jit_options()` with a `me_jit_options` snapshot
 to select a CC compiler command, extra flags, an exact cache directory, tracing
-and compiler output for that compilation. Strings are borrowed only during the
-call; NULL strings and -1 booleans use environment/built-in settings. Nonempty
-environment overrides take precedence. Settings are thread-local during compilation
+and compiler output for that compilation. The appended `math_backend` field
+selects `system`, `sleef` or `accelerate` for that compilation without setting
+`ME_SIMD_MATH_BACKEND`; an explicit value overrides that environment variable
+for the call. Strings are borrowed only during the call; NULL strings
+and -1 booleans use environment/built-in settings. Nonempty environment
+overrides take precedence for the other string options. Settings are thread-local during compilation
 and restored on return, including errors; no process environment is modified.
 Toolchain settings and explicit cache directories participate in process-cache
 identity; diagnostic toggles do not. Compiler commands/flags are trusted shell

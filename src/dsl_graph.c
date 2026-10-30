@@ -418,7 +418,8 @@ static bool g_partitionable(graph_node *nodes, int count) {
     return count && runtime[count-1];
 }
 static yyjson_doc *g_map_root(const char *source, graph_node *nodes,
-    const int *input_nodes, int ni, const int *constant_nodes, int nc, int mask_node, bool integer_powers) {
+    const int *input_nodes, int ni, const int *constant_nodes, int nc, int mask_node, bool integer_powers,
+    const char *math_backend) {
     yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
     if (!doc) return NULL;
     yyjson_mut_val *root = yyjson_mut_obj(doc), *language = yyjson_mut_obj(doc);
@@ -430,6 +431,7 @@ static yyjson_doc *g_map_root(const char *source, graph_node *nodes,
     ok &= yyjson_mut_obj_add_str(doc, language, "version", ME_MENUDET_DSL_VERSION);
     ok &= yyjson_mut_obj_add_val(doc, root, "language", language);
     ok &= yyjson_mut_arr_add_str(doc, requires, "numeric");
+    if (math_backend) ok &= yyjson_mut_arr_add_str(doc, requires, "flexible-math");
     ok &= yyjson_mut_obj_add_val(doc, root, "requires", requires);
     ok &= yyjson_mut_obj_add_str(doc, root, "entry_point", "graph_map");
     ok &= yyjson_mut_obj_add_str(doc, root, "source", source);
@@ -458,6 +460,7 @@ static yyjson_doc *g_map_root(const char *source, graph_node *nodes,
     ok &= yyjson_mut_obj_add_str(doc, semantics, "fp", "strict");
     ok &= yyjson_mut_obj_add_str(doc, semantics, "numeric", "numpy-2.5");
     ok &= yyjson_mut_obj_add_str(doc, semantics, "casting", "unsafe");
+    if (math_backend) ok &= yyjson_mut_obj_add_strcpy(doc, semantics, "math", math_backend);
     if (integer_powers) ok &= yyjson_mut_obj_add_str(doc,semantics,"integer_powers","multiply");
     ok &= yyjson_mut_obj_add_val(doc, root, "semantics", semantics);
     ok &= yyjson_mut_obj_add_uint(doc, context, "ndim", 0);
@@ -473,7 +476,8 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
     g_error(error, -1, ME_GRAPH_SUCCESS, "");
     if (!out || (!root && (!json || !length || length > ME_GRAPH_MAX_BYTES || memchr(json, 0, length))))
         return g_error(error, -1, ME_GRAPH_ERR_FORMAT, "invalid graph buffer or byte limit");
-    if (options && (options->struct_size != sizeof(*options) || options->version != ME_GRAPH_VERSION ||
+    if (options && ((options->struct_size != sizeof(*options) &&
+        options->struct_size != offsetof(me_graph_prepare_options, math_backend)) || options->version != ME_GRAPH_VERSION ||
         (options->jit != ME_JIT_OFF && options->jit != ME_JIT_ON &&
          options->jit != ME_JIT_AUTO && options->jit != ME_JIT_DEFAULT)))
         return g_error(error, -1, ME_GRAPH_ERR_FORMAT, "invalid preparation options");
@@ -705,7 +709,9 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
         rc = source.oom || canonical.oom ? ME_GRAPH_ERR_OOM : ME_GRAPH_ERR_FORMAT;
         message = "lowering allocation or byte limit exceeded"; goto done;
     }
-    map_doc = g_map_root(source.data, nodes, input_nodes, ni, constant_nodes, nc, mask_node, optimization != NULL);
+    const char *math_backend = options && options->struct_size == sizeof(*options) ? options->math_backend : NULL;
+    map_doc = g_map_root(source.data, nodes, input_nodes, ni, constant_nodes, nc, mask_node,
+        optimization != NULL, math_backend);
     if (!map_doc) { rc = ME_GRAPH_ERR_OOM; message = "map allocation failed"; goto done; }
     me_artifact_error native;
     yyjson_val *map = yyjson_doc_get_root(map_doc);

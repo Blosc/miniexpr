@@ -3,6 +3,7 @@
   License: BSD 3-Clause (see LICENSE.txt)
 **********************************************************************/
 #include "dsl_math_policy.h"
+#include "dsl_config.h"
 #include "functions-simd.h"
 
 #include <stdio.h>
@@ -94,7 +95,8 @@ static bool env_fp_mode(me_dsl_fp_mode *out, bool *present, char *error, size_t 
 }
 
 static bool env_math_backend(me_dsl_math_backend *out, bool *present, char *error, size_t error_cap) {
-    const char *value = getenv("ME_SIMD_MATH_BACKEND");
+    const char *value = me_jit_explicit_math_backend();
+    if (!value) value = getenv("ME_SIMD_MATH_BACKEND");
     *present = value && value[0];
     if (!*present) return true;
     if (!parse_math_backend(value, out)) {

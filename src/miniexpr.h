@@ -216,6 +216,10 @@ typedef struct me_jit_options {
     const char *cache_dir;
     int trace;
     int compiler_output;
+    /* Appended optional math library: NULL inherits the environment/default.
+     * A nonempty value overrides ME_SIMD_MATH_BACKEND for this call. Borrowed
+     * for the duration of the call, like the other string options. */
+    const char *math_backend;
 } me_jit_options;
 
 int me_compile_nd_jit_options(const char *expression, const me_variable *variables,

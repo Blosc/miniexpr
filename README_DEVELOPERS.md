@@ -162,7 +162,7 @@ The public/runtime-stable DSL JIT controls remain documented in [README.md](READ
 - These knobs are meaningful for development and benchmarking, but they are not treated as regular user-facing interface.
 - Defaults are derived from the current implementation in `src/dsl_config.h`, `src/dsl_jit_backend_cc.c`, and `src/dsl_jit_runtime_host.c`.
 - **In-memory TCC execution**: The bundled TCC backend compiles completely in memory and does not write to a disk cache. On Linux, executable storage uses anonymous `memfd`-backed RW/RX mappings.
-- **Call-local JIT options**: Embedders can pass a `me_jit_options` struct to `me_compile_nd_jit_options()` to configure compiler command, flags, cache directory, and tracing per-call in a thread-local manner without modifying process environment variables.
+- **Call-local JIT options**: Embedders can pass a `me_jit_options` struct to `me_compile_nd_jit_options()` to configure compiler command, flags, cache directory, tracing and math backend per-call in a thread-local manner without modifying process environment variables.
 
 ### Build-Time Notes
 

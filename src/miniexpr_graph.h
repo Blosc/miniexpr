@@ -36,7 +36,11 @@ typedef struct {
     me_jit_mode jit;
     bool require_jit;
     bool disable_optimization; /* Currently all graph rewrites are disabled. */
+    /* Optional per-preparation math library; NULL inherits native defaults.
+     * Appended for compatibility with callers using the original struct size. */
+    const char *math_backend;
 } me_graph_prepare_options;
+#define ME_GRAPH_MATH_BACKEND_OPTIONS 1
 /* Pointer-free, strong inputs. Names/dtypes must exactly cover the plan. */
 typedef struct {
     const char *name;

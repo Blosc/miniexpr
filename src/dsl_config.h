@@ -40,6 +40,8 @@
 #endif
 
 const char *me_jit_option_value(const char *name);
+/* Call-local math backend, or NULL when the caller did not request one. */
+const char *me_jit_explicit_math_backend(void);
 
 static inline bool dsl_env_flag_enabled(const char *name, bool default_value) {
     const char *env = me_jit_option_value(name);
