@@ -34,6 +34,7 @@ static const parity_case cases[] = {
     {"arithmetic", "return x * 2 + y", "float64", "float64", true},
     {"conditional return", "if x > 0:\\n        return x\\n    return -x", "float64", "float64", true},
     {"live assignment join", "if x < 0:\\n        return x\\n    else:\\n        z = x + y\\n    return z", "float64", "float64", true},
+    {"unused checked local", "z = int64(x)\\n    return y", "float64", "float64", true},
     {"checked float range", "s = 0.0\\n    for i in range(x):\\n        s = s + i\\n    return s", "float64", "float64", true},
     {"checked unsigned range", "s = 0\\n    for i in range(x):\\n        s = s + i\\n    return s", "uint64", "int64", true},
     {"range", "s = 0.0\\n    for i in range(10):\\n        s = s + x\\n    return s", "float64", "float64", true},
@@ -117,6 +118,7 @@ static void matrix(void) {
         CHECK(me_artifact_has_jit(jit) == (available && test->eligible));
         CHECK(!me_artifact_has_jit(reference));
         double x[] = {-2, 0, 3}, y[] = {4, 2, 1};
+        if (!strcmp(test->name,"unused checked local")) x[0] = INFINITY;
         int32_t ix[] = {-2, 0, 3}, iy[] = {4, 2, 1};
         uint64_t ux[] = {0,1,3}, uy[] = {4,2,1};
         if (!strcmp(test->name,"factorial") || !strcmp(test->name,"ncr") || !strcmp(test->name,"npr")) {
@@ -1546,7 +1548,7 @@ static void integer_tree_parity(void) {
     const char *names[] = {"int8","uint8","int16","uint16","int32","uint32","int64","uint64","bool"};
     me_dtype types[] = {ME_INT8,ME_UINT8,ME_INT16,ME_UINT16,ME_INT32,ME_UINT32,ME_INT64,ME_UINT64,ME_BOOL};
     const char *expressions[] = {"x + y","(x + y) * (x - y) + x","((x + y) * 2 - y) * 3 + x * 2 - y",
-        "x & y","x | y","x ^ y","~x","-x","x << y","x >> y","x // y","x % y",
+        "x & y","x | y","x ^ y","~x","(x ^ y) & (~x | y)","-x","x << y","x >> y","x // y","x % y",
         "abs(x)","sign(x)","square(x)","real(x)","imag(x)","conj(x)","floor(x)","ceil(x)","trunc(x)","round(x)","x ** y"};
     const char *boolean[] = {"(x & y) ^ (~x | y)","(x + y) * (~y)"};
     for (int dtype=0; dtype<9; dtype++) {

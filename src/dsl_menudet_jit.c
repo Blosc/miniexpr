@@ -627,6 +627,12 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
          (arity == 1 && !strcmp(op,"~")));
     bool native_shift = integer_operator && !checked_weak && (n->flags & ME_EXPR_FLAG_NUMPY_1_1) &&
         arity == 2 && (!strcmp(op,"<<") || !strcmp(op,">>"));
+    /* Same-width typed bitwise operations cannot fail. Avoid replaying the
+     * interpreter scalar bridge for every XOR in integer hash kernels. */
+    bool native_bitwise = integer_operator && !checked_weak && arg0 && arg0->dtype == n->dtype &&
+        ((arity == 1 && !strcmp(op,"~")) ||
+         (arity == 2 && arg1 && arg1->dtype == n->dtype &&
+          (!strcmp(op,"&") || !strcmp(op,"|") || !strcmp(op,"^"))));
     bool native_divmod = integer_operator && !checked_weak && (n->flags & ME_EXPR_FLAG_NUMPY_1_1) &&
         arity == 2 && (!strcmp(op,"//") || !strcmp(op,"%"));
     if (checked_weak) {
@@ -881,6 +887,10 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                     type,p->n_inputs+ME_DSL_MENUDET_JIT_MATH2_OFF,
                     p->n_inputs+ME_DSL_MENUDET_JIT_MATH2_OFF+1+id,args[0],args[1]);
             }
+        }
+        else if (native_bitwise) {
+            if (arity == 1) snprintf(out,capacity,"pj_%s(~(uint64_t)(%s))",type,args[0]);
+            else snprintf(out,capacity,"pj_%s((uint64_t)(%s) %s (uint64_t)(%s))",type,args[0],op,args[1]);
         }
         else if (native_shift) {
             int bits = (int)(dtype_size(n->dtype)*8);
@@ -2178,7 +2188,11 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
 #ifdef __EMSCRIPTEN__
             !pj_append(&body,"%s local_%d;\n",pj_type(p->vars.dtypes[index]),index)) {
 #else
-            !pj_append(&body,"volatile %s local_%d;\n",pj_type(p->vars.dtypes[index]),index)) {
+            /* Typed integer locals need no rounding barrier. Volatile forces
+             * stack traffic per hash round and prevents SIMD in the CC JIT.
+             * Keep floating locals' existing observation/rounding policy. */
+            !pj_append(&body,"%s%s local_%d;\n",pj_integral(p->vars.dtypes[index]) ? "" : "volatile ",
+                pj_type(p->vars.dtypes[index]),index)) {
 #endif
             free(body.text);
             dsl_tracef("menudet jit ineligible: local declaration");

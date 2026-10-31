@@ -4,6 +4,11 @@ Release notes for miniexpr
 Changes from 0.2.0 to 0.2.1
 ===========================
 
+* Menudet JIT emits same-width typed integer bitwise operations directly instead
+  of calling scalar interpreter helpers. Scalar integer/Boolean local declarations no
+  longer use volatile rounding barriers, reducing stack traffic in hash kernels.
+  Floating-point local barriers and checked-operation error semantics are unchanged.
+
 * Portable interpretation batches complex64/128 addition, subtraction,
   multiplication, negation and conversions to complex over bounded vectors.
   Uniform captures are supported; complex division, other unsupported operations
