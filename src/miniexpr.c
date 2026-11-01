@@ -2540,6 +2540,13 @@ int is_synthetic_address(const void* ptr) {
     return (p >= synthetic_var_addresses && p < synthetic_var_addresses + ME_MAX_VARS);
 }
 
+/* Cross-library accessor: the synthetic address array is a data symbol, which
+ * Windows DLL builds do not export, so consumers must use this function. */
+int dsl_synthetic_var_index(const void *bound) {
+    if (!is_synthetic_address(bound)) return -1;
+    return (int)((const char *)bound - synthetic_var_addresses);
+}
+
 static int compile_with_jit(const char* expression, const me_variable* variables,
                                        int var_count, me_dtype dtype, int compile_ndims,
                                        int jit_mode,

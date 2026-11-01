@@ -29,6 +29,9 @@ int dsl_var_table_add_with_uniform(me_dsl_var_table *table, const char *name, me
 int dsl_var_table_add(me_dsl_var_table *table, const char *name, me_dtype dtype);
 
 extern char synthetic_var_addresses[ME_MAX_VARS];
+/* Function accessor for the synthetic address array: data symbols are not
+ * exported from Windows DLL builds. Returns -1 when bound is not synthetic. */
+int dsl_synthetic_var_index(const void *bound);
 void dsl_menudet_prepare_jit(me_dsl_compiled_program *program);
 void dsl_menudet_prepare_jit_source(me_dsl_compiled_program *program);
 void dsl_menudet_prepare_jit_constants(me_dsl_compiled_program *program,

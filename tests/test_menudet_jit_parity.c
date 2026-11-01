@@ -1875,12 +1875,20 @@ static void partitionability_proof(void) {
     parity_case captured={"nonfinite proof capture","return x + z","float64","float64",true};
     me_artifact *artifact=load_extra(&captured,ME_JIT_OFF,"{\"name\":\"y\",\"dtype\":\"float64\"}",
         "{\"name\":\"z\",\"dtype\":\"float64\",\"category\":\"typed_scalar\",\"encoding\":\"ieee754-hex\",\"value\":\"7ff0000000000001\"}");
+    /* The proof must classify nonfinite captures by bits and leave caller FP
+     * status untouched. Emscripten omits FE_DIVBYZERO/feraiseexcept support, so
+     * only the bit-classification result is portable there. */
+#ifdef FE_DIVBYZERO
     fenv_t saved;
-    CHECK(!feholdexcept(&saved));
-    CHECK(!feraiseexcept(FE_DIVBYZERO));
+    bool fp_state_available = !feholdexcept(&saved) && !feraiseexcept(FE_DIVBYZERO);
+#endif
     CHECK(!me_artifact_is_partitionable(artifact));
-    CHECK(fetestexcept(FE_ALL_EXCEPT) == FE_DIVBYZERO);
-    CHECK(!fesetenv(&saved));
+#ifdef FE_DIVBYZERO
+    if (fp_state_available) {
+        CHECK(fetestexcept(FE_ALL_EXCEPT) == FE_DIVBYZERO);
+        CHECK(!fesetenv(&saved));
+    }
+#endif
     me_artifact_free(artifact);
 }
 
@@ -1962,6 +1970,11 @@ static void comparison_bridge_regressions(void) {
                     CHECK(!me_artifact_eval_status(jit,buffers,2,actual,&desc,0,&status,&error));
                     CHECK(!me_artifact_eval_status(ref,buffers,2,expected,&desc,0,&reference_status,&error));
                     CHECK(!memcmp(actual,expected,(size_t)n));
+                    if (status.flags != reference_status.flags) {
+                        fprintf(stderr, "comparison flags f32=%d form=%d op=%s len=%d masked=%d "
+                            "exceptional=%d jit=%u interp=%u\n", f32, form, operators[op], n, masked,
+                            exceptional, status.flags, reference_status.flags);
+                    }
                     CHECK(status.flags == reference_status.flags);
                 }
             }

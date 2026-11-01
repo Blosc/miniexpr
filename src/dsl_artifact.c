@@ -1122,9 +1122,9 @@ static artifact_proof_value artifact_proof_expr(artifact_proof *proof, const me_
     artifact_proof_value unknown={.valid=true}, invalid={0}, args[3];
     if (!n || depth > 128 || --*proof->budget < 0 || is_reduction_node(n)) return invalid;
     int kind=TYPE_MASK(n->type);
-    if (kind == ME_VARIABLE && is_synthetic_address(n->bound)) {
-        int index=(int)((const char *)n->bound-synthetic_var_addresses);
-        return index >= 0 && index < proof->program->vars.count ? proof->values[index] : invalid;
+    if (kind == ME_VARIABLE) {
+        int index=dsl_synthetic_var_index(n->bound);
+        if (index >= 0) return index < proof->program->vars.count ? proof->values[index] : invalid;
     }
     if (kind == ME_CONSTANT) {
         if (n->dtype == ME_BOOL) return artifact_proof_integer(n->value != 0);
