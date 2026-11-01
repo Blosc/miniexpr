@@ -748,7 +748,17 @@ static void batch_interpreter_parity(void) {
         "float64(x > y) + float64(x < y)",
         "x == y", "x != y", "x < y", "x <= y", "x > y", "x >= y",
         "sin(x + 1) * cos(x - 2) > 1", "sin(x + 1) * cos(x - 2) > 0",
-        "1 < x + y", "x + y <= 1"};
+        "1 < x + y", "x + y <= 1",
+        "where(x < y, x + y, x - y)",
+        "where(x < 0, sqrt(-x), sqrt(x))",
+        "where(x < 0, 1 / x, y)",
+        "where(x < y, sin(x), cos(y))",
+        "where(x < 0, float32(y), x)",
+        "where(x < 0, where(y < 0, x * y, x / y), where(y > 0, x + y, x - y))",
+        "where(x < y, x + 1, y - 1) * where(x < y, x + 1, y - 1)",
+        "where(x < y, x + 1, y - 1) + where(y < 0, x + 1, y - 1)",
+        "where(x < y, where(x > 0, sqrt(x), sqrt(-x)), y)",
+        "where(x < y, x, where(x > 0, sqrt(x), sqrt(-x)))"};
     enum { lanes=513 };
     const uint64_t f64[]={0,UINT64_C(0x8000000000000000),UINT64_C(0x3ff0000000000000),
         UINT64_C(0xbff0000000000000),UINT64_C(0x7ff0000000000000),UINT64_C(0xfff0000000000000),
@@ -768,8 +778,8 @@ static void batch_interpreter_parity(void) {
         char second[128];
         snprintf(second,sizeof(second),"{\"name\":\"y\",\"dtype\":\"%s\"}",name);
         for (size_t recipe=0; recipe<sizeof(recipes)/sizeof(*recipes); recipe++) {
-            char body[128]; snprintf(body,sizeof(body),"return %s",recipes[recipe]);
-            bool comparison=recipe >= 11;
+            char body[512]; snprintf(body,sizeof(body),"return %s",recipes[recipe]);
+            bool comparison=recipe >= 11 && recipe < 21;
             size_t output_width=comparison ? sizeof(bool) : recipe == 10 ? sizeof(double) : width;
             const char *output=comparison ? "bool" : recipe == 10 ? "float64" : name;
             parity_case test={"batch interpreter parity",body,name,output,false};
@@ -812,6 +822,57 @@ static void batch_interpreter_parity(void) {
             }
             me_artifact_free(artifact);
         }
+    }
+}
+
+static void batch_guard_participation(void) {
+    const char *recipes[] = {
+        "return where(x > 0, x, where(y > 0, sqrt(y), sqrt(-y)))",
+        "return where(x > 0, x, float32(z))",
+        "return where(x > 0, x, sqrt(-1.0))",
+        "return where(x > 0, x, pow(y, 0.5))"
+    };
+    enum { lanes = 513 };
+    double x[lanes], y[lanes], actual[lanes], expected[lanes];
+    uint64_t snan = UINT64_C(0x7ff0000000000001);
+    for (int i = 0; i < lanes; i++) memcpy(y+i, &snan, sizeof(snan));
+    for (size_t recipe = 0; recipe < sizeof(recipes)/sizeof(*recipes); recipe++) {
+        parity_case test = {"guarded batch participation", recipes[recipe], "float64", "float64", false};
+        me_artifact *artifact = load_extra(&test, ME_JIT_OFF,
+            "{\"name\":\"y\",\"dtype\":\"float64\"}",
+            "{\"name\":\"z\",\"dtype\":\"float64\",\"category\":\"typed_scalar\","
+            "\"encoding\":\"ieee754-hex\",\"value\":\"7fefffffffffffff\"}");
+        for (int pattern = 0; pattern < 4; pattern++) {
+            for (int i = 0; i < lanes; i++) {
+                bool selected = pattern == 0 || (pattern == 1 ? i < 256 :
+                    pattern == 2 ? i != 255 : (i & 1) == 0);
+                x[i] = selected ? 1.0 : -1.0;
+            }
+            unsigned flags = 0;
+            me_artifact_error error;
+            for (int i = 0; i < lanes; i++) {
+                me_artifact_buffer inputs[] = {{"x",ME_FLOAT64,8,x+i,8},{"y",ME_FLOAT64,8,y+i,8}};
+                me_artifact_eval_descriptor descriptor = {.struct_size=sizeof(descriptor),.version=1,
+                    .nitems=1,.output_capacity=8};
+                me_artifact_fp_status status;
+                CHECK(!me_artifact_eval_status(artifact,inputs,2,expected+i,&descriptor,0,&status,&error));
+                flags |= status.flags;
+            }
+            if (!pattern) CHECK(!flags);
+            me_artifact_buffer inputs[] = {
+                {"x",ME_FLOAT64,8,x,sizeof(x)},{"y",ME_FLOAT64,8,y,sizeof(y)}};
+            me_artifact_eval_descriptor descriptor = {.struct_size=sizeof(descriptor),.version=1,
+                .nitems=lanes,.output_capacity=sizeof(actual)};
+            me_artifact_fp_status status;
+            size_t before = dsl_menudet_batch_calls_for_tests();
+            CHECK(!me_artifact_eval_status(artifact,inputs,2,actual,&descriptor,0,&status,&error));
+            CHECK(dsl_menudet_batch_calls_for_tests() == before+1);
+            if (status.flags != flags) fprintf(stderr, "guard recipe=%zu pattern=%d flags=%u expected=%u\n",
+                recipe, pattern, status.flags, flags);
+            CHECK(status.flags == flags);
+            for (int i = 0; i < lanes; i++) CHECK(batch_lane_equal(actual+i,expected+i,8));
+        }
+        me_artifact_free(artifact);
     }
 }
 
@@ -2306,6 +2367,7 @@ int main(int argc, char **argv) {
     numeric_dtype_matrix();
     integer_extrema_lowering();
     batch_interpreter_parity();
+    batch_guard_participation();
     batch_complex_parity();
     batch_complex_cast_parity();
     batch_complex_aliases();
