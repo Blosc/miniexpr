@@ -1,4 +1,4 @@
-/* Menudet 1.1 scalar C lowering, revision 30. Never translate source
+/* Menudet 1.1 scalar C lowering, revision 31. Never translate source
  * text: the typed tree includes promotion and final output conversions. The
  * private kernel ABI appends a participating mask and host comparison/math bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
@@ -1430,7 +1430,8 @@ typedef enum {
     PJ_ARITH_NODE_UNIFORM_VAR,
     PJ_ARITH_NODE_LITERAL,
     PJ_ARITH_NODE_UNARY,
-    PJ_ARITH_NODE_BINARY
+    PJ_ARITH_NODE_BINARY,
+    PJ_ARITH_NODE_COMPARE
 } pj_arith_node_kind;
 
 typedef struct {
@@ -1476,7 +1477,9 @@ static int pj_arith_find_or_add_node(pj_arith_dag *dag, const me_dsl_compiled_pr
         *reason = "too-many-temps";
         return -1;
     }
-    if (n->dtype != dag->dtype) {
+    bool comparison = is_comparison_node(n) && n->dtype == ME_BOOL &&
+        ARITY(n->type) == 2 && pj_float(dag->dtype);
+    if (n->dtype != dag->dtype && !comparison) {
         *reason = "mixed-dtype";
         return -1;
     }
@@ -1598,7 +1601,8 @@ static int pj_arith_find_or_add_node(pj_arith_dag *dag, const me_dsl_compiled_pr
         }
         if (arity == 2) {
             int op_code;
-            if (strcmp(op, "+") == 0) op_code = 0;
+            if (comparison) op_code = 0;
+            else if (strcmp(op, "+") == 0) op_code = 0;
             else if (strcmp(op, "-") == 0) op_code = 1;
             else if (strcmp(op, "*") == 0) op_code = 2;
             else if (strcmp(op, "/") == 0) {
@@ -1625,7 +1629,7 @@ static int pj_arith_find_or_add_node(pj_arith_dag *dag, const me_dsl_compiled_pr
             node->uses = 1;
             node->temp_slot = -1;
             node->scalar_id = -1;
-            node->kind = PJ_ARITH_NODE_BINARY;
+            node->kind = comparison ? PJ_ARITH_NODE_COMPARE : PJ_ARITH_NODE_BINARY;
             node->op = op_code;
             node->left = left_idx;
             node->right = right_idx;
@@ -1645,7 +1649,13 @@ static bool pj_match_arith_tree(pj_arith_dag *dag, const me_dsl_compiled_program
         return false;
     }
     memset(dag, 0, sizeof(*dag));
-    dag->dtype = root->dtype;
+    bool comparison = is_comparison_node(root) && root->dtype == ME_BOOL && ARITY(root->type) == 2;
+    dag->dtype = comparison ? ((const me_expr *)root->parameters[0])->dtype : root->dtype;
+    if (comparison && (!pj_float(dag->dtype) ||
+        ((const me_expr *)root->parameters[1])->dtype != dag->dtype)) {
+        *reason = "mixed-dtype";
+        return false;
+    }
     if (dag->dtype == ME_FLOAT64) {
         dag->carrier = "f64";
         dag->carrier_type = "double";
@@ -1681,7 +1691,7 @@ static bool pj_match_arith_tree(pj_arith_dag *dag, const me_dsl_compiled_program
         return false;
     }
 
-    if (p->output_dtype != dag->dtype) {
+    if (p->output_dtype != (comparison ? ME_BOOL : dag->dtype)) {
         *reason = "mixed-dtype";
         return false;
     }
@@ -1800,7 +1810,7 @@ static void pj_arith_emit_uniform_expr(const pj_arith_dag *dag, int idx, char *b
     }
 }
 
-static bool pj_emit_arith_bridge(const pj_arith_dag *dag, const me_dsl_compiled_program *p, pj_text *out) {
+static bool pj_emit_arith_bridge(const pj_arith_dag *dag, me_dsl_compiled_program *p, pj_text *out) {
     if (!pj_append(out, "static int pj_unmasked(const void *const *inputs, void *restrict output, int64_t count) {\n"))
         return false;
     if (!pj_append(out, "    if (count <= 0) return 0;\n"))
@@ -1813,7 +1823,15 @@ static bool pj_emit_arith_bridge(const pj_arith_dag *dag, const me_dsl_compiled_
         if (!pj_append(out, "    const %s *pj_input_%d = (const %s *)inputs[%d];\n", type, i, type, i))
             return false;
     }
-    if (!pj_append(out, "    %s *out = (%s *)output;\n", dag->var_type, dag->var_type))
+    bool comparison = dag->nodes[dag->root].kind == PJ_ARITH_NODE_COMPARE;
+    int comparison_id = -1;
+    if (comparison) {
+        if (p->menudet_jit_ncomparisons == ME_DSL_MENUDET_JIT_BRIDGE_LIMIT) return false;
+        comparison_id = p->menudet_jit_ncomparisons++;
+        p->menudet_jit_comparisons[comparison_id] = dag->nodes[dag->root].expr;
+    }
+    const char *output_type = comparison ? "uint8_t" : dag->var_type;
+    if (!pj_append(out, "    %s *out = (%s *)output;\n", output_type, output_type))
         return false;
 
     /* Literals */
@@ -1862,7 +1880,7 @@ static bool pj_emit_arith_bridge(const pj_arith_dag *dag, const me_dsl_compiled_
         return false;
 
     /* Inside strip loop */
-    if (dag->nodes[dag->root].uniform) {
+    if (dag->nodes[dag->root].uniform && !comparison) {
         char scalar_name[64];
         pj_arith_node_scalar_name(dag, dag->root, scalar_name, sizeof(scalar_name));
         if (!pj_append(out, "        pj_t->%s_fill((%s)(%s), (%s *)(out + s), n);\n",
@@ -1871,7 +1889,7 @@ static bool pj_emit_arith_bridge(const pj_arith_dag *dag, const me_dsl_compiled_
     } else {
         for (int i = 0; i < dag->count; i++) {
             const pj_arith_node *node = &dag->nodes[i];
-            if (node->uniform) continue;
+            if (node->uniform && node->kind != PJ_ARITH_NODE_COMPARE) continue;
 
             if (node->kind == PJ_ARITH_NODE_VAR) {
                 if (i == dag->root) {
@@ -1889,7 +1907,25 @@ static bool pj_emit_arith_bridge(const pj_arith_dag *dag, const me_dsl_compiled_
                 snprintf(dst, sizeof(dst), "pj_tmp%d", node->temp_slot);
             }
 
-            if (node->kind == PJ_ARITH_NODE_UNARY) {
+            if (node->kind == PJ_ARITH_NODE_COMPARE) {
+                char operands[2][96];
+                int strides[2];
+                for (int j=0; j<2; j++) {
+                    int child_idx = j ? node->right : node->left;
+                    const pj_arith_node *child = &dag->nodes[child_idx];
+                    strides[j] = !child->uniform;
+                    if (child->uniform) {
+                        char scalar_name[64];
+                        pj_arith_node_scalar_name(dag,child_idx,scalar_name,sizeof(scalar_name));
+                        snprintf(operands[j],sizeof(operands[j]),"&%s",scalar_name);
+                    } else if (child->kind == PJ_ARITH_NODE_VAR) {
+                        snprintf(operands[j],sizeof(operands[j]),"pj_input_%d + s",child->var_index);
+                    } else snprintf(operands[j],sizeof(operands[j]),"pj_tmp%d",child->temp_slot);
+                }
+                if (!pj_append(out,"        pj_t->%s_compare(inputs[%d], %s, %d, %s, %d, out+s, n);\n",
+                    dag->carrier,p->n_inputs+ME_DSL_MENUDET_JIT_CMP_OFF+1+comparison_id,
+                    operands[0],strides[0],operands[1],strides[1])) return false;
+            } else if (node->kind == PJ_ARITH_NODE_UNARY) {
                 char src[64];
                 const pj_arith_node *child = &dag->nodes[node->left];
                 if (child->kind == PJ_ARITH_NODE_VAR) {
@@ -2493,6 +2529,8 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "    void (*ramp_i64)(int64_t, int64_t, int64_t, int64_t *restrict, int);\n"
         "    void (*ramp_f32)(int64_t, float, float, float *restrict, int);\n"
         "    void (*ramp_f64)(int64_t, double, double, double *restrict, int);\n"
+        "    void (*f32_compare)(const void *, const float *, int, const float *, int, uint8_t *restrict, int);\n"
+        "    void (*f64_compare)(const void *, const double *, int, const double *, int, uint8_t *restrict, int);\n"
         "} me_pj_arith_table;\n"
         "#define PJ_ARITH_ADD 0\n"
         "#define PJ_ARITH_SUB 1\n"

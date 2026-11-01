@@ -2287,6 +2287,39 @@ static bool p_jit_nan_compare(const void *node, double x, double y) {
     return p_eval(&storage.expr,&ctx,0,&result) == 0 && result.b;
 }
 
+/* JIT arithmetic strips end in a typed comparison without a scalar bridge per
+ * lane. Classify NaNs by bits first, so the common vector loop cannot introduce
+ * different NaN exception instructions. Rare NaN strips replay the exact host
+ * comparison bridge, preserving both Boolean results and aggregate FP status. */
+#define P_COMPARE_LOOP(OP) \
+    for (int i=0; i<count; i++) out[i] = a[i*as] OP b[i*bs];
+#define P_COMPARE_BATCH(T,S,U,MASK,INF) \
+void dsl_menudet_batch_compare_##S(const void *node, const T *a, int as, \
+                                  const T *b, int bs, uint8_t *restrict out, int count) { \
+    U nan_bits = 0; \
+    for (int i=0; i<count; i++) { \
+        U x, y; memcpy(&x,a+i*as,sizeof(x)); memcpy(&y,b+i*bs,sizeof(y)); \
+        nan_bits |= ((x & MASK) > INF) | ((y & MASK) > INF); \
+    } \
+    if (nan_bits) { \
+        for (int i=0; i<count; i++) out[i] = dsl_menudet_float_compare(node,a[i*as],b[i*bs]); \
+        return; \
+    } \
+    switch (comparison_kind(((const me_expr *)node)->function)) { \
+        case ME_CMP_EQ: P_COMPARE_LOOP(==) break; \
+        case ME_CMP_NE: P_COMPARE_LOOP(!=) break; \
+        case ME_CMP_LT: P_COMPARE_LOOP(<) break; \
+        case ME_CMP_LE: P_COMPARE_LOOP(<=) break; \
+        case ME_CMP_GT: P_COMPARE_LOOP(>) break; \
+        case ME_CMP_GE: P_COMPARE_LOOP(>=) break; \
+        default: break; \
+    } \
+}
+P_COMPARE_BATCH(float,f32,uint32_t,UINT32_C(0x7fffffff),UINT32_C(0x7f800000))
+P_COMPARE_BATCH(double,f64,uint64_t,UINT64_C(0x7fffffffffffffff),UINT64_C(0x7ff0000000000000))
+#undef P_COMPARE_BATCH
+#undef P_COMPARE_LOOP
+
 int dsl_menudet_eval_expr(const me_expr *expr, const void *const *vars, int nvars,
                            const uint8_t *const *initialized,
                            int item, int nitems, const uint8_t *mask, void *out) {

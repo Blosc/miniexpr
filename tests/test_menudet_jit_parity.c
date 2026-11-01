@@ -1783,6 +1783,56 @@ static void scalar_loop_cap(void) {
     me_artifact_free(jit); me_artifact_free(reference);
 }
 
+static void comparison_bridge_regressions(void) {
+    const char *operators[] = {"==", "!=", "<", "<=", ">", ">="};
+    const int lengths[] = {1, 3, 511, 512, 513, 1023, 1024, 1025};
+    for (int f32=0; f32<2; f32++) for (int form=0; form<3; form++) {
+        for (int op=0; op<6; op++) {
+            char body[160];
+            snprintf(body,sizeof(body), form == 0 ? "return x %s y" :
+                form == 1 ? "return x %s 0.5" : "return (x**2 + y**2) %s (2*x*y + 1)", operators[op]);
+            parity_case test = {"comparison arithmetic strips",body,f32 ? "float32" : "float64","bool",true};
+            me_artifact *jit=load(&test,ME_JIT_ON), *ref=load(&test,ME_JIT_OFF);
+            me_dsl_compiled_program *program=dsl_artifact_program_for_tests(jit);
+            if (me_artifact_has_jit(jit) && program->compiler == ME_DSL_COMPILER_LIBTCC) {
+                CHECK(program->menudet_jit_has_arith_bridge);
+            }
+            double x[1026], y[1026]; float fx[1026], fy[1026];
+            uint8_t actual[1025], expected[1025], mask[1025];
+            for (int i=0; i<1026; i++) {
+                x[i]=(i-512)*0.003; y[i]=-x[i]; fx[i]=(float)x[i]; fy[i]=(float)y[i];
+                if (i<1025) mask[i]=(i%3)!=0;
+            }
+            x[3]=-0.0; fx[3]=-0.0f; y[3]=0.0; fy[3]=0.0f;
+            x[4]=-INFINITY; fx[4]=-INFINITY; y[4]=INFINITY; fy[4]=INFINITY;
+            for (int exceptional=0; exceptional<3; exceptional++) {
+                if (exceptional) {
+                    uint64_t dbits=exceptional == 1 ? UINT64_C(0x7ff8000000000001) : UINT64_C(0x7ff0000000000001);
+                    uint32_t fbits=exceptional == 1 ? UINT32_C(0x7fc00001) : UINT32_C(0x7f800001);
+                    memcpy(x,&dbits,8); memcpy(fx,&fbits,4);
+                    memcpy(y+1,&dbits,8); memcpy(fy+1,&fbits,4);
+                    y[2]=INFINITY; fy[2]=INFINITY; x[3]=-0.0; fx[3]=-0.0f;
+                }
+                for (size_t li=0; li<sizeof(lengths)/sizeof(lengths[0]); li++) for (int masked=0; masked<2; masked++) {
+                    int n=lengths[li];
+                    me_artifact_buffer buffers[] = {
+                        {"x",f32 ? ME_FLOAT32 : ME_FLOAT64,f32 ? 4 : 8,f32 ? (void *)fx : (void *)x,(size_t)n*(f32 ? 4 : 8)},
+                        {"y",f32 ? ME_FLOAT32 : ME_FLOAT64,f32 ? 4 : 8,f32 ? (void *)fy : (void *)y,(size_t)n*(f32 ? 4 : 8)}};
+                    me_artifact_eval_descriptor desc={.struct_size=sizeof(desc),.version=1,.nitems=n,
+                        .output_capacity=(size_t)n,.valid_mask=masked ? mask : NULL,.valid_mask_capacity=masked ? (size_t)n : 0};
+                    me_artifact_fp_status status, reference_status; me_artifact_error error;
+                    memset(actual,0,sizeof(actual)); memset(expected,0,sizeof(expected));
+                    CHECK(!me_artifact_eval_status(jit,buffers,2,actual,&desc,0,&status,&error));
+                    CHECK(!me_artifact_eval_status(ref,buffers,2,expected,&desc,0,&reference_status,&error));
+                    CHECK(!memcmp(actual,expected,(size_t)n));
+                    CHECK(status.flags == reference_status.flags);
+                }
+            }
+            me_artifact_free(jit); me_artifact_free(ref);
+        }
+    }
+}
+
 static void arithmetic_bridge_regressions(void) {
     parity_case basic = {"arithmetic bridge admission","return x + (y - 1)",
         "float64","float64",true};
@@ -2170,6 +2220,7 @@ int main(int argc, char **argv) {
     resolved_libm_parity();
     integer_tree_parity();
     arithmetic_bridge_regressions();
+    comparison_bridge_regressions();
     flat_index_1d_lowering();
     scalar_array_fallbacks();
     scalar_loop_cap();

@@ -217,6 +217,8 @@ static const me_pj_arith_table s_arith_table = {
     .ramp_i64 = dsl_menudet_batch_ramp_i64,
     .ramp_f32 = dsl_menudet_batch_ramp_f32,
     .ramp_f64 = dsl_menudet_batch_ramp_f64,
+    .f32_compare = dsl_menudet_batch_compare_f32,
+    .f64_compare = dsl_menudet_batch_compare_f64,
 };
 
 const me_pj_arith_table *dsl_menudet_batch_arith_table(void) {

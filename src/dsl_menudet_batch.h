@@ -6,7 +6,7 @@
 #define restrict __restrict
 #endif
 
-#define ME_DSL_MENUDET_JIT_ARITH_ABI_VERSION 1
+#define ME_DSL_MENUDET_JIT_ARITH_ABI_VERSION 2
 
 typedef struct me_pj_arith_table {
     void (*f64_vv[4])(const double *, const double *, double *restrict, int);
@@ -48,9 +48,13 @@ typedef struct me_pj_arith_table {
     void (*ramp_i64)(int64_t, int64_t, int64_t, int64_t *restrict, int);
     void (*ramp_f32)(int64_t, float, float, float *restrict, int);
     void (*ramp_f64)(int64_t, double, double, double *restrict, int);
+    void (*f32_compare)(const void *, const float *, int, const float *, int, uint8_t *restrict, int);
+    void (*f64_compare)(const void *, const double *, int, const double *, int, uint8_t *restrict, int);
 } me_pj_arith_table;
 
 const me_pj_arith_table *dsl_menudet_batch_arith_table(void);
+void dsl_menudet_batch_compare_f32(const void *, const float *, int, const float *, int, uint8_t *restrict, int);
+void dsl_menudet_batch_compare_f64(const void *, const double *, int, const double *, int, uint8_t *restrict, int);
 void dsl_menudet_batch_powi_f32(const float *a, int64_t exponent, float *restrict out, int count);
 void dsl_menudet_batch_powi_f64(const double *a, int64_t exponent, double *restrict out, int count);
 
