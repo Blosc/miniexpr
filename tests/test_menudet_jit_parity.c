@@ -7,6 +7,7 @@
 #include "dsl_menudet_expr.h"
 #include <math.h>
 #include <float.h>
+#include <fenv.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1783,6 +1784,81 @@ static void scalar_loop_cap(void) {
     me_artifact_free(jit); me_artifact_free(reference);
 }
 
+static void partitionability_proof(void) {
+    const struct { const char *body, *output; bool safe; } tests[] = {
+        {"return x + y","float32",true},
+        {"return x + (2 * 3)","float64",true},
+        {"s = 0.0\\n    for i in range(4):\\n        if i % 2 == 0:\\n            t = where(x < y, y + i, x - i)\\n        else:\\n            t = where(x > y, x + i, y - i)\\n        s = s + t * (i + 1)\\n    return s","float32",true},
+        {"s = 0.0\\n    for i in range(2):\\n        for j in range(2):\\n            s = s + x + i + j\\n    return s","float32",true},
+        {"return int64(x)","float64",false},
+        {"return x","int32",false},
+        {"return x + (1 // 0)","float64",false},
+        {"return x + (9223372036854775807 + 1)","float64",false},
+        {"s = x\\n    for i in range(x):\\n        s = s + y\\n    return s","float64",false},
+        {"s = x\\n    for i in range(0, 3, 0):\\n        s = s + y\\n    return s","float64",false},
+        {"s = x\\n    for i in range(3):\\n        i = i + 1\\n        s = s + y\\n    return s","float64",false},
+        {"s = x\\n    while s < y:\\n        s = s + 1\\n    return s","float64",false},
+        {"s = x\\n    for i in range(100000):\\n        s = s + y\\n    return s","float64",false},
+        {"s = block_sum(y)\\n    for i in range(3):\\n        s = s + x\\n    return s","float64",false},
+        {"s = x\\n    for i in range(2):\\n        if i == 1:\\n            s = s + (1 // 0)\\n    return s","float64",false},
+        {"s = x\\n    for i in range(2):\\n        if i < 0:\\n            s = s + (1 // 0)\\n        s = s + y\\n    return s","float64",true},
+    };
+    for (size_t i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+        parity_case test={"partitionability proof",tests[i].body,"float64",tests[i].output,true};
+        me_artifact *artifact=load(&test,ME_JIT_OFF);
+        bool result=me_artifact_is_partitionable(artifact);
+        if (result != tests[i].safe) fprintf(stderr,"partitionability case=%zu body=%s\n",i,tests[i].body);
+        CHECK(result == tests[i].safe);
+        me_artifact_free(artifact);
+    }
+    parity_case captured={"nonfinite proof capture","return x + z","float64","float64",true};
+    me_artifact *artifact=load_extra(&captured,ME_JIT_OFF,"{\"name\":\"y\",\"dtype\":\"float64\"}",
+        "{\"name\":\"z\",\"dtype\":\"float64\",\"category\":\"typed_scalar\",\"encoding\":\"ieee754-hex\",\"value\":\"7ff0000000000001\"}");
+    fenv_t saved;
+    CHECK(!feholdexcept(&saved));
+    CHECK(!feraiseexcept(FE_DIVBYZERO));
+    CHECK(!me_artifact_is_partitionable(artifact));
+    CHECK(fetestexcept(FE_ALL_EXCEPT) == FE_DIVBYZERO);
+    CHECK(!fesetenv(&saved));
+    me_artifact_free(artifact);
+}
+
+static void fixed_loop_unroll_parity(void) {
+    const char *bodies[] = {
+        "s = 0.0\\n    for i in range(4):\\n        if i % 2 == 0:\\n            t = where(x < y, y + i, x - i)\\n        else:\\n            t = where(x > y, x + i, y - i)\\n        s = s + t * (i + 1)\\n    return s",
+        "s = 0.0\\n    for i in range(2):\\n        for j in range(2):\\n            if (i + j) % 2 == 0:\\n                s = s + x * (i + j + 1)\\n            else:\\n                s = s + y * (i + j + 1)\\n    return s",
+        "s = x\\n    for i in range(-3, 4, 2):\\n        if i % 2 == 1:\\n            s = s + y * i\\n        else:\\n            s = s - y\\n    return s",
+        "s = x\\n    for i in range(3):\\n        i = i + 100\\n        s = s + i\\n    return s",
+        "for i in range(2):\\n        if i == 0:\\n            return x\\n    return y",
+    };
+    for (int f32=0; f32<2; f32++) for (size_t b=0; b<sizeof(bodies)/sizeof(bodies[0]); b++) {
+        char name[64]; snprintf(name,sizeof(name),"fixed loop unroll f32=%d body=%zu",f32,b);
+        parity_case test={name,bodies[b],f32 ? "float32" : "float64","float32",true};
+        me_artifact *jit=load(&test,ME_JIT_ON), *reference=load(&test,ME_JIT_OFF);
+        double x[]={0.0,-0.0,1.0,-2.0,INFINITY,-INFINITY,NAN,DBL_MAX};
+        double y[]={-0.0,0.0,2.0,3.0,INFINITY,-INFINITY,1.0,DBL_MAX};
+        float fx[8],fy[8];
+        for (int i=0; i<8; i++) { fx[i]=(float)x[i]; fy[i]=(float)y[i]; }
+        uint32_t snan32=UINT32_C(0x7f800001); uint64_t snan64=UINT64_C(0x7ff0000000000001);
+        memcpy(x+6,&snan64,8); memcpy(fx+6,&snan32,4);
+        me_artifact_buffer buffers[]={
+            {"x",f32 ? ME_FLOAT32 : ME_FLOAT64,f32 ? 4 : 8,f32 ? (void *)fx : (void *)x,f32 ? sizeof(fx) : sizeof(x)},
+            {"y",f32 ? ME_FLOAT32 : ME_FLOAT64,f32 ? 4 : 8,f32 ? (void *)fy : (void *)y,f32 ? sizeof(fy) : sizeof(y)}};
+        uint8_t mask[]={1,0,1,1,1,0,0,1};
+        for (int masked=0; masked<2; masked++) {
+            float actual[8]={0},expected[8]={0};
+            me_artifact_eval_descriptor desc={.struct_size=sizeof(desc),.version=1,.nitems=8,
+                .output_capacity=sizeof(actual),.valid_mask=masked ? mask : NULL,.valid_mask_capacity=masked ? 8 : 0};
+            me_artifact_error error; me_artifact_fp_status status, ref_status;
+            CHECK(!me_artifact_eval_status(jit,buffers,2,actual,&desc,0,&status,&error));
+            CHECK(!me_artifact_eval_status(reference,buffers,2,expected,&desc,0,&ref_status,&error));
+            for (int i=0; i<8; i++) CHECK((isnan(actual[i]) && isnan(expected[i])) || !memcmp(actual+i,expected+i,4));
+            CHECK(status.flags == ref_status.flags);
+        }
+        me_artifact_free(jit); me_artifact_free(reference);
+    }
+}
+
 static void comparison_bridge_regressions(void) {
     const char *operators[] = {"==", "!=", "<", "<=", ">", ">="};
     const int lengths[] = {1, 3, 511, 512, 513, 1023, 1024, 1025};
@@ -2221,6 +2297,8 @@ int main(int argc, char **argv) {
     integer_tree_parity();
     arithmetic_bridge_regressions();
     comparison_bridge_regressions();
+    partitionability_proof();
+    fixed_loop_unroll_parity();
     flat_index_1d_lowering();
     scalar_array_fallbacks();
     scalar_loop_cap();

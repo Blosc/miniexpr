@@ -13,6 +13,7 @@ extern "C" {
 
 #define ME_ARTIFACT_SCHEMA_VERSION "0.1"
 #define ME_ARTIFACT_MATH_POLICY_VERSION 1
+#define ME_ARTIFACT_PARTITIONABLE_VERSION 1
 #define ME_ARTIFACT_NUMPY_SCHEMA_VERSION ME_ARTIFACT_SCHEMA_VERSION
 #define ME_ARTIFACT_MAX_BYTES (1024 * 1024)
 #define ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION 1
@@ -28,6 +29,11 @@ enum {
 };
 
 typedef struct me_artifact me_artifact;
+
+/* Conservative metadata-only proof that a context-free elementwise program
+ * may run on independent lane groups. False means unproven, not invalid.
+ * The proof includes any final output conversion; it never executes a kernel. */
+bool me_artifact_is_partitionable(const me_artifact *artifact);
 
 typedef enum {
     ME_ARTIFACT_SUCCESS = 0,

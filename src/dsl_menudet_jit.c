@@ -1,4 +1,4 @@
-/* Menudet 1.1 scalar C lowering, revision 31. Never translate source
+/* Menudet 1.1 scalar C lowering, revision 32. Never translate source
  * text: the typed tree includes promotion and final output conversions. The
  * private kernel ABI appends a participating mask and host comparison/math bindings;
  * legacy/full kernels retain their unchanged three-argument ABI. */
@@ -52,6 +52,9 @@ typedef struct {
     int count;
     bool scalar_phase;
     const char *nd_preamble;
+    const int64_t *loop_values;
+    const bool *loop_known;
+    int *unroll_budget;
 } pj_constants;
 
 typedef struct {
@@ -96,6 +99,54 @@ static bool pj_literal_integer_bits(const me_expr *n, me_dtype dtype, uint64_t *
         negative ? UINT64_C(1) << (bits-1) : UINT64_MAX >> (65-bits);
     if (n->integer_magnitude > limit) return false;
     *out = negative ? 0ULL-n->integer_magnitude : n->integer_magnitude;
+    return true;
+}
+
+/* Only exact bounded integer bookkeeping is folded. Floating operations retain
+ * their original sequencing, rounding barriers and observable FP status. */
+static bool pj_loop_integer(const me_dsl_compiled_program *p, const me_expr *n,
+    const pj_constants *constants, int64_t *out, int depth) {
+    if (!n || !constants || !constants->loop_known || depth > 128 ||
+        (n->dtype != ME_INT64 && n->dtype != ME_BOOL)) return false;
+    uint64_t bits;
+    if (pj_literal_integer_bits(n,ME_INT64,&bits)) {
+        *out=(int64_t)bits;
+        return *out >= -1000000 && *out <= 1000000;
+    }
+    if (TYPE_MASK(n->type) == ME_CONSTANT && n->dtype == ME_BOOL) {
+        *out=n->value != 0;
+        return true;
+    }
+    if (TYPE_MASK(n->type) == ME_VARIABLE && is_synthetic_address(n->bound)) {
+        int index=(int)((const char *)n->bound-synthetic_var_addresses);
+        if (index < 0 || index >= p->vars.count || !constants->loop_known[index]) return false;
+        *out=constants->loop_values[index];
+        return true;
+    }
+    if (!IS_FUNCTION(n->type)) return false;
+    int arity=ARITY(n->type);
+    int64_t a, b=0, value;
+    if (arity < 1 || arity > 2 || !pj_loop_integer(p,n->parameters[0],constants,&a,depth+1) ||
+        (arity == 2 && !pj_loop_integer(p,n->parameters[1],constants,&b,depth+1))) return false;
+    if (!n->function) { *out=a; return true; }
+    const char *op=me_menudet_operator(n);
+    if (!op) return false;
+    if (!strcmp(op,"+")) value=arity == 1 ? a : a+b;
+    else if (!strcmp(op,"-")) value=arity == 1 ? -a : a-b;
+    else if (!strcmp(op,"*")) value=a*b;
+    else if (!strcmp(op,"==")) value=a == b;
+    else if (!strcmp(op,"!=")) value=a != b;
+    else if (!strcmp(op,"<")) value=a < b;
+    else if (!strcmp(op,"<=")) value=a <= b;
+    else if (!strcmp(op,">")) value=a > b;
+    else if (!strcmp(op,">=")) value=a >= b;
+    else if ((!strcmp(op,"%") || !strcmp(op,"//")) && b) {
+        int64_t remainder=a%b, quotient=a/b;
+        if (remainder && ((remainder < 0) != (b < 0))) { remainder+=b; quotient--; }
+        value=!strcmp(op,"%") ? remainder : quotient;
+    } else return false;
+    if (value < -1000000 || value > 1000000) return false;
+    *out=value;
     return true;
 }
 
@@ -346,6 +397,12 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
     const pj_constants *constants, pj_text *s, int *next_temp, bool plain_literal,
     pj_cse_context *cse) {
     if (!n || depth > 128 || !pj_type(n->dtype)) return NULL;
+    int64_t loop_constant;
+    if (pj_loop_integer(p,n,constants,&loop_constant,0)) {
+        char folded[96];
+        snprintf(folded,sizeof(folded),"((%s)%lldLL)",pj_type(n->dtype),(long long)loop_constant);
+        return strdup(folded);
+    }
     uint64_t cse_hash = 0;
     bool cse_eligible = !plain_literal && pj_cse_key(p,n,&cse_hash,0);
     pj_cse_entry *cse_slot = NULL;
@@ -1039,6 +1096,27 @@ typedef struct {
 
 /* Only paths reaching the join constrain definite assignment. Loops may execute
  * zero times; their exits never establish definitions after the loop. */
+static bool pj_loop_readonly(const me_dsl_compiled_program *p, const me_dsl_compiled_block *block,
+    int index, int depth) {
+    if (depth > 64) return false;
+    for (int i=0; i<block->nstmts; i++) {
+        const me_dsl_compiled_stmt *s=block->stmts[i];
+        if (s->kind == ME_DSL_STMT_ASSIGN && p->local_var_indices[s->as.assign.local_slot] == index) return false;
+        if (s->kind == ME_DSL_STMT_IF) {
+            if (!pj_loop_readonly(p,&s->as.if_stmt.then_block,index,depth+1) ||
+                !pj_loop_readonly(p,&s->as.if_stmt.else_block,index,depth+1)) return false;
+            for (int j=0; j<s->as.if_stmt.n_elifs; j++) {
+                if (!pj_loop_readonly(p,&s->as.if_stmt.elif_branches[j].block,index,depth+1)) return false;
+            }
+        } else if (s->kind == ME_DSL_STMT_FOR) {
+            if (p->local_var_indices[s->as.for_loop.loop_var_slot] == index ||
+                !pj_loop_readonly(p,&s->as.for_loop.body,index,depth+1)) return false;
+        } else if (s->kind == ME_DSL_STMT_WHILE || s->kind == ME_DSL_STMT_BREAK ||
+            s->kind == ME_DSL_STMT_CONTINUE) return false;
+    }
+    return true;
+}
+
 static bool pj_falls_through(const me_dsl_compiled_block *block, int depth) {
     if (depth > 64) return true;
     for (int i = 0; i < block->nstmts; i++) {
@@ -1143,6 +1221,13 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
             if (!assignment) return true;
         }
         else if (stmt->kind == ME_DSL_STMT_IF) {
+            int64_t condition;
+            if (!stmt->as.if_stmt.n_elifs && pj_loop_integer(p,stmt->as.if_stmt.cond.expr,constants,&condition,0)) {
+                const me_dsl_compiled_block *selected=condition ? &stmt->as.if_stmt.then_block : &stmt->as.if_stmt.else_block;
+                if (!pj_block(p,selected,defined,s,depth+1,constants,flow)) return false;
+                if (!pj_falls_through(selected,depth+1)) return true;
+                continue;
+            }
             bool merged[ME_MAX_VARS], branch[ME_MAX_VARS];
             memcpy(merged,defined,sizeof(merged));
             int alternatives = 1 + stmt->as.if_stmt.n_elifs;
@@ -1204,6 +1289,30 @@ static bool pj_block(me_dsl_compiled_program *p, const me_dsl_compiled_block *bl
                         iter += cstep;
                     }
                     if (trips == 0) continue;
+                    bool simple_assignment=stmt->as.for_loop.body.nstmts == 1 &&
+                        stmt->as.for_loop.body.stmts[0]->kind == ME_DSL_STMT_ASSIGN &&
+                        !pj_expr_uses_var(stmt->as.for_loop.body.stmts[0]->as.assign.value.expr,index,0);
+                    if (!simple_assignment && trips <= 16 && cstart >= -1000000 && cstart <= 1000000 &&
+                        cstop >= -1000000 && cstop <= 1000000 && cstep >= -1000000 && cstep <= 1000000 &&
+                        constants && !constants->scalar_phase && constants->unroll_budget &&
+                        *constants->unroll_budget >= trips && pj_loop_readonly(p,&stmt->as.for_loop.body,index,0)) {
+                        int64_t values[ME_MAX_VARS]={0}; bool known[ME_MAX_VARS]={0};
+                        if (constants->loop_known) {
+                            memcpy(values,constants->loop_values,sizeof(values));
+                            memcpy(known,constants->loop_known,sizeof(known));
+                        }
+                        pj_constants iteration=*constants;
+                        iteration.loop_values=values; iteration.loop_known=known;
+                        known[index]=true;
+                        for (int t=0; t<trips; t++) {
+                            --*constants->unroll_budget;
+                            values[index]=cstart+t*cstep;
+                            if (!pj_append(s,"local_%d = %lldLL;\n",index,(long long)values[index])) return false;
+                            defined[index]=true;
+                            if (!pj_block(p,&stmt->as.for_loop.body,defined,s,depth+1,&iteration,flow)) return false;
+                        }
+                        continue;
+                    }
                     if (trips <= 64 && !(constants && constants->scalar_phase) &&
                         stmt->as.for_loop.body.nstmts == 1 &&
                         stmt->as.for_loop.body.stmts[0] &&
@@ -2237,9 +2346,12 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     }
     int next_label = 0, next_temp = 0;
     pj_flow flow = {&next_label,&next_temp,-1};
+    int unroll_budget=256;
+    pj_constants bounded_constants=constants ? *constants : (pj_constants){0};
+    bounded_constants.unroll_budget=&unroll_budget;
     bool lowered;
     /* Scalar loops need the ND preamble; lower them after constructing it. */
-    lowered = scalar || pj_block(p,&p->block,defined,&body,0,constants,flow);
+    lowered = scalar || pj_block(p,&p->block,defined,&body,0,&bounded_constants,flow);
     if (!lowered) {
         free(body.text);
         dsl_tracef("menudet jit ineligible: unsupported typed statements");
