@@ -825,6 +825,43 @@ static void batch_interpreter_parity(void) {
     }
 }
 
+static void nan_comparison_flags(void) {
+#ifdef FE_INVALID
+    /* Comparison NaN handling must be identical for the scalar interpreter,
+     * the vector interpreter, and the JIT bridge that delegates NaN lanes. */
+    parity_case test={"nan comparison flags","return x == y","float64","bool",false};
+    me_artifact *artifact=load(&test,ME_JIT_OFF);
+    enum { lanes=64 };
+    double x[lanes],y[lanes];
+    uint8_t out[lanes];
+    for (int i=0; i<lanes; i++) { x[i]=1.0; y[i]=1.0; }
+    uint64_t qnan=UINT64_C(0x7ff8000000000001), snan=UINT64_C(0x7ff0000000000001);
+    memcpy(x,&qnan,8); memcpy(y+1,&qnan,8);
+    me_artifact_buffer inputs[]={{"x",ME_FLOAT64,8,x,sizeof(x)},{"y",ME_FLOAT64,8,y,sizeof(y)}};
+    me_artifact_error error;
+    me_artifact_fp_status status;
+    /* Whole vector (batched) and one NaN lane (scalar) must both stay quiet. */
+    me_artifact_eval_descriptor batch={.struct_size=sizeof(batch),.version=1,.nitems=lanes,
+        .output_capacity=sizeof(out)};
+    CHECK(!me_artifact_eval_status(artifact,inputs,2,out,&batch,0,&status,&error));
+    if (status.flags) fprintf(stderr,"quiet NaN vector comparison flags=%u\n",status.flags);
+    CHECK(status.flags == 0);
+    CHECK(!out[0] && !out[1] && out[2]);
+    me_artifact_eval_descriptor scalar={.struct_size=sizeof(scalar),.version=1,.nitems=1,
+        .output_capacity=1};
+    CHECK(!me_artifact_eval_status(artifact,inputs,2,out,&scalar,0,&status,&error));
+    if (status.flags) fprintf(stderr,"quiet NaN scalar comparison flags=%u\n",status.flags);
+    CHECK(status.flags == 0 && !out[0]);
+    /* Signaling NaNs still raise FE_INVALID through both paths. */
+    memcpy(x,&snan,8); memcpy(y+1,&snan,8);
+    CHECK(!me_artifact_eval_status(artifact,inputs,2,out,&batch,0,&status,&error));
+    CHECK(status.flags & FE_INVALID);
+    CHECK(!me_artifact_eval_status(artifact,inputs,2,out,&scalar,0,&status,&error));
+    CHECK(status.flags & FE_INVALID);
+    me_artifact_free(artifact);
+#endif
+}
+
 static void batch_guard_participation(void) {
     const char *recipes[] = {
         "return where(x > 0, x, where(y > 0, sqrt(y), sqrt(-y)))",
@@ -1969,6 +2006,14 @@ static void comparison_bridge_regressions(void) {
                     memset(actual,0,sizeof(actual)); memset(expected,0,sizeof(expected));
                     CHECK(!me_artifact_eval_status(jit,buffers,2,actual,&desc,0,&status,&error));
                     CHECK(!me_artifact_eval_status(ref,buffers,2,expected,&desc,0,&reference_status,&error));
+                    if (memcmp(actual,expected,(size_t)n)) {
+                        int bad = 0;
+                        while (bad < n && actual[bad] == expected[bad]) bad++;
+                        fprintf(stderr, "comparison value f32=%d form=%d op=%s len=%d masked=%d "
+                            "exceptional=%d index=%d jit=%d interp=%d\n", f32, form, operators[op],
+                            n, masked, exceptional, bad, bad < n ? actual[bad] : -1,
+                            bad < n ? expected[bad] : -1);
+                    }
                     CHECK(!memcmp(actual,expected,(size_t)n));
                     if (status.flags != reference_status.flags) {
                         fprintf(stderr, "comparison flags f32=%d form=%d op=%s len=%d masked=%d "
@@ -2380,6 +2425,7 @@ int main(int argc, char **argv) {
     numeric_dtype_matrix();
     integer_extrema_lowering();
     batch_interpreter_parity();
+    nan_comparison_flags();
     batch_guard_participation();
     batch_complex_parity();
     batch_complex_cast_parity();

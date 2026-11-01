@@ -1422,6 +1422,31 @@ static int p_reduce(const me_expr *n, p_eval_context *ctx, me_scalar *out) {
     return 0;
 }
 
+/* Classify NaN operands by representation instead of relying on relational
+ * operators. Compilers may select signaling compare instructions for `>`/`<`
+ * (gcc emits comisd on x86) while vectorized batch loops use quiet compares,
+ * which made FE_INVALID depend on code generation. Quiet NaNs never raise and
+ * signaling NaNs raise here, matching IEEE comparison semantics on every host. */
+static bool p_float_compare(me_cmp_kind kind, double x, double y) {
+    const uint64_t magnitude = UINT64_C(0x7fffffffffffffff);
+    const uint64_t infinity = UINT64_C(0x7ff0000000000000);
+    const uint64_t quiet = UINT64_C(0x0008000000000000);
+    uint64_t xb, yb;
+    memcpy(&xb, &x, sizeof(xb));
+    memcpy(&yb, &y, sizeof(yb));
+    bool xnan = (xb & magnitude) > infinity, ynan = (yb & magnitude) > infinity;
+    if (xnan || ynan) {
+#ifdef FE_INVALID
+        if ((xnan && !(xb & quiet)) || (ynan && !(yb & quiet))) (void)feraiseexcept(FE_INVALID);
+#endif
+        return kind == ME_CMP_NE;
+    }
+    int cmp = (x > y) - (x < y);
+    return kind == ME_CMP_NE ? cmp != 0 : kind == ME_CMP_EQ ? cmp == 0 :
+        kind == ME_CMP_LT ? cmp < 0 : kind == ME_CMP_LE ? cmp <= 0 :
+        kind == ME_CMP_GT ? cmp > 0 : cmp >= 0;
+}
+
 static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *out) {
     if (TYPE_MASK(n->type) == ME_STRING_CONSTANT) {
         void *value = p_string_alloc(ctx, n->itemsize);
@@ -1616,8 +1641,8 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
         }
         if (p_float(a_node->dtype)) {
             double x = p_double(a_node->dtype, &a), y = p_double(b_node->dtype, &b);
-            unordered = isnan(x) || isnan(y);
-            cmp = (x > y) - (x < y);
+            out->b = p_float_compare(comparison_kind(n->function), x, y);
+            return 0;
         }
         else if (p_unsigned(a_node->dtype) && !p_unsigned(b_node->dtype)) {
             cmp = -dsl_menudet_compare_signed_unsigned(b_node->dtype == ME_BOOL ? (int64_t)b.b : b.i64, a.u64);
@@ -2747,14 +2772,7 @@ static bool p_batch_eval(const me_expr *expr, p_eval_context *ctx, int nitems,
 #define P_BATCH_COMPARE_EXECUTE(T) do { \
     const T *a=(const T *)left,*b=(const T *)right; \
     bool *d=(bool *)destination; \
-    for (int i=0; i<count; i++) { \
-        double x=a[i],y=b[i]; \
-        bool unordered=isnan(x) || isnan(y); \
-        int cmp=(x > y)-(x < y); \
-        d[i]=kind == ME_CMP_NE ? (unordered || cmp != 0) : \
-            !unordered && (kind == ME_CMP_EQ ? cmp == 0 : kind == ME_CMP_LT ? cmp < 0 : \
-            kind == ME_CMP_LE ? cmp <= 0 : kind == ME_CMP_GT ? cmp > 0 : cmp >= 0); \
-    } \
+    for (int i=0; i<count; i++) d[i]=p_float_compare(kind,(double)a[i],(double)b[i]); \
 } while (0)
                     if (((const me_expr *)n->parameters[0])->dtype == ME_FLOAT32) P_BATCH_COMPARE_EXECUTE(float);
                     else P_BATCH_COMPARE_EXECUTE(double);
