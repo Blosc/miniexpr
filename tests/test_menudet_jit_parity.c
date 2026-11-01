@@ -835,7 +835,7 @@ static void nan_comparison_flags(void) {
     double x[lanes],y[lanes];
     uint8_t out[lanes];
     for (int i=0; i<lanes; i++) { x[i]=1.0; y[i]=1.0; }
-    uint64_t qnan=UINT64_C(0x7ff8000000000001), snan=UINT64_C(0x7ff0000000000001);
+    uint64_t qnan=UINT64_C(0x7ff8000000000001);
     memcpy(x,&qnan,8); memcpy(y+1,&qnan,8);
     me_artifact_buffer inputs[]={{"x",ME_FLOAT64,8,x,sizeof(x)},{"y",ME_FLOAT64,8,y,sizeof(y)}};
     me_artifact_error error;
@@ -852,12 +852,17 @@ static void nan_comparison_flags(void) {
     CHECK(!me_artifact_eval_status(artifact,inputs,2,out,&scalar,0,&status,&error));
     if (status.flags) fprintf(stderr,"quiet NaN scalar comparison flags=%u\n",status.flags);
     CHECK(status.flags == 0 && !out[0]);
-    /* Signaling NaNs still raise FE_INVALID through both paths. */
+    /* Signaling NaNs still raise FE_INVALID through both paths. MSVC's default
+     * floating-point model does not reliably raise or track fenv flags, so this
+     * assertion is limited to implementations that honor feraiseexcept. */
+#ifndef _MSC_VER
+    uint64_t snan=UINT64_C(0x7ff0000000000001);
     memcpy(x,&snan,8); memcpy(y+1,&snan,8);
     CHECK(!me_artifact_eval_status(artifact,inputs,2,out,&batch,0,&status,&error));
     CHECK(status.flags & FE_INVALID);
     CHECK(!me_artifact_eval_status(artifact,inputs,2,out,&scalar,0,&status,&error));
     CHECK(status.flags & FE_INVALID);
+#endif
     me_artifact_free(artifact);
 #endif
 }
