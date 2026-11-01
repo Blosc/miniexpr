@@ -167,6 +167,26 @@ static void power_base_status(void) {
     dsl_compiled_program_free(p);
 }
 
+static void accelerated_math_jit_eligibility(void) {
+    /* Control: a math call is JIT-eligible under the system math library. */
+    me_dsl_compiled_program *control=compile_power("sin(x) + y",ME_FLOAT64,"system","strict",ME_JIT_ON);
+    assert(control && control->jit_c_source);
+    dsl_compiled_program_free(control);
+    const char *backends[]={"accelerate","sleef"};
+    for (int b=0; b<2; b++) {
+        /* No math call: the accelerated library cannot change these results. */
+        me_dsl_compiled_program *p=compile_power("x * 2 + y - 1",ME_FLOAT64,backends[b],"strict",ME_JIT_ON);
+        if (!p) continue; /* Optional backend on this build/platform. */
+        assert(p->jit_c_source);
+        dsl_compiled_program_free(p);
+        /* Accelerated dispatch owns transcendental results; keep interpreting. */
+        p=compile_power("sin(x) + y",ME_FLOAT64,backends[b],"strict",ME_JIT_ON);
+        if (!p) continue;
+        assert(!p->jit_c_source);
+        dsl_compiled_program_free(p);
+    }
+}
+
 static void fast_power(void) {
     int exponents[]={0,1,2,3,4,7,16,31,-1,-2,-3,-7};
     for (int precision=0; precision<2; precision++) {
@@ -221,6 +241,7 @@ int main(void) {
     strict_power("x**2.0",ME_FLOAT64,"system");
     integer_power_policy();
 #ifndef __EMSCRIPTEN__
+    accelerated_math_jit_eligibility();
     fast_power();
     power_base_status();
 #endif
