@@ -184,6 +184,73 @@ static void accelerated_math_jit_eligibility(void) {
         if (!p) continue;
         assert(!p->jit_c_source);
         dsl_compiled_program_free(p);
+        /* Literal squares are arithmetic under strict semantics, including the
+         * named spelling. Recursing into the base still rejects math calls. */
+        const char *squares[]={"x**2 + y**2", "pow(x + y, 2.0)"};
+        for (int i=0; i<2; i++) {
+            p=compile_power(squares[i],ME_FLOAT64,backends[b],"strict",ME_JIT_ON);
+            assert(p && p->jit_c_source);
+            dsl_compiled_program_free(p);
+        }
+        const char *fallbacks[]={"x**3", "pow(x, -2)", "x**2.5", "pow(x, y)",
+            "x**2147483648", "sin(x)**2", "pow(cos(x), 2)", "(x**y)**2"};
+        for (int i=0; i<8; i++) {
+            p=compile_power(fallbacks[i],ME_FLOAT64,backends[b],"strict",ME_JIT_ON);
+            assert(p && !p->jit_c_source);
+            dsl_compiled_program_free(p);
+        }
+        p=compile_power("x**3 + y",ME_FLOAT64,backends[b],"fast",ME_JIT_ON);
+        assert(p && p->jit_c_source && strstr(p->jit_c_source,"pj_power_base_"));
+        dsl_compiled_program_free(p);
+    }
+}
+
+static void accelerated_constant_power_parity(void) {
+    const char *backends[]={"accelerate","sleef"};
+    const char *expressions[]={"x**2", "pow(x, 2.0)", "(x + y)**3", "pow(x, -2)"};
+    for (int b=0; b<2; b++) for (int precision=0; precision<2; precision++) {
+        me_dtype dtype=precision ? ME_FLOAT64 : ME_FLOAT32;
+        for (int e=0; e<4; e++) {
+            bool integer_powers=e >= 2;
+            me_dsl_compiled_program *jit=compile_power_policy(expressions[e],dtype,backends[b],
+                "strict",ME_JIT_ON,integer_powers);
+            if (!jit) continue;
+            assert(jit->jit_c_source);
+            me_dsl_compiled_program *reference=compile_power_policy(expressions[e],dtype,backends[b],
+                "strict",ME_JIT_OFF,integer_powers);
+            double seeds[]={-0.0,0.0,-2.0,2.0,0.5,-0.5,INFINITY,-INFINITY,NAN,DBL_MAX,DBL_MIN};
+            double x[33],y[33],actual[33],expected[33];
+            float xf[33],yf[33],actualf[33],expectedf[33];
+            uint8_t mask[33];
+            for (int i=0; i<33; i++) {
+                x[i]=seeds[i%11]; y[i]=0.25;
+                xf[i]=(float)x[i]; yf[i]=(float)y[i];
+                mask[i]=(i % 3) != 0;
+            }
+            const void *inputs[]={precision ? (void *)x : (void *)xf,
+                precision ? (void *)y : (void *)yf};
+            for (int masked=0; masked<2; masked++) {
+                unsigned jit_flags=0,reference_flags=0;
+                unsigned *previous=dsl_menudet_status_begin(&jit_flags);
+                assert(!evaluate(jit,inputs,precision ? (void *)actual : (void *)actualf,
+                    33,masked ? mask : NULL));
+                dsl_menudet_status_end(previous);
+                previous=dsl_menudet_status_begin(&reference_flags);
+                assert(!evaluate(reference,inputs,precision ? (void *)expected : (void *)expectedf,
+                    33,masked ? mask : NULL));
+                dsl_menudet_status_end(previous);
+                assert(jit_flags==reference_flags);
+                for (int i=0; i<33; i++) {
+                    if (masked && !mask[i]) continue;
+                    double a=precision ? actual[i] : actualf[i];
+                    double r=precision ? expected[i] : expectedf[i];
+                    if (isnan(r)) assert(isnan(a));
+                    else assert(a==r && signbit(a)==signbit(r));
+                }
+            }
+            dsl_compiled_program_free(jit);
+            dsl_compiled_program_free(reference);
+        }
     }
 }
 
@@ -242,6 +309,7 @@ int main(void) {
     integer_power_policy();
 #ifndef __EMSCRIPTEN__
     accelerated_math_jit_eligibility();
+    accelerated_constant_power_parity();
     fast_power();
     power_base_status();
 #endif

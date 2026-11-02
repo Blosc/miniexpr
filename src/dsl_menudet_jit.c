@@ -42,6 +42,14 @@ static bool pj_float(me_dtype d) {
     return d == ME_FLOAT32 || d == ME_FLOAT64;
 }
 
+/* Keep accelerated-backend admission identical to the multiplication-chain
+ * lowering. Strict squares are already arithmetic; other literal powers need
+ * fast mode or the explicit integer-power policy, never a backend substitution. */
+static bool pj_constant_power(const me_dsl_compiled_program *p, const me_expr *n, int64_t *exponent) {
+    return dsl_menudet_integer_power(n, exponent) &&
+        (*exponent == 2 || p->fp_mode == ME_DSL_FP_FAST || (n->flags & ME_EXPR_FLAG_INTEGER_POWERS));
+}
+
 static bool pj_integral(me_dtype d) {
     return d == ME_BOOL || pj_integer(d);
 }
@@ -672,8 +680,7 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
      * explicit integer-power policy permits this rewrite. Literal bounds guarantee exact exponent
      * representation after float32/float64 promotion and bounded code size. */
     int64_t power_exponent=0;
-    bool constant_power = dsl_menudet_integer_power(n,&power_exponent) &&
-        (power_exponent == 2 || p->fp_mode == ME_DSL_FP_FAST || (n->flags & ME_EXPR_FLAG_INTEGER_POWERS));
+    bool constant_power = pj_constant_power(p,n,&power_exponent);
     bool integer_operator = op && pj_integer(n->dtype) &&
         ((arity == 2 && (!strcmp(op,"%") || !strcmp(op,"//") || !strcmp(op,"<<") ||
                          !strcmp(op,">>") || !strcmp(op,"&") || !strcmp(op,"|") || !strcmp(op,"^"))) ||
@@ -2274,58 +2281,61 @@ static bool pj_emit_ramp_bridge(const me_dsl_compiled_program *p, const char *st
 
 /* Accelerated math backends own the numerical semantics of transcendental calls,
  * so a generated kernel that would bypass that dispatch must decline JIT. Programs
- * that never call a math function are unaffected by the math library and stay
- * eligible. Depth failures are treated as "uses math" to keep the safe path. */
-static bool pj_expr_uses_math(const me_expr *n, int depth) {
+ * that never call a math function, including constant powers already lowered to
+ * arithmetic, stay eligible. Their operands must still be checked recursively.
+ * Depth failures are treated as "uses math" to keep the safe path. */
+static bool pj_expr_uses_math(const me_dsl_compiled_program *p, const me_expr *n, int depth) {
     if (!n || depth > 128) return true;
     if (!IS_FUNCTION(n->type)) return false;
-    if (me_menudet_math_name(n)) return true;
+    int64_t exponent;
+    bool constant_power = pj_constant_power(p,n,&exponent);
+    if (me_menudet_math_name(n) && !constant_power) return true;
     const char *op = me_menudet_operator(n);
-    if (op && (!strcmp(op, "**") || !strcmp(op, "pow"))) return true;
+    if (op && (!strcmp(op, "**") || !strcmp(op, "pow")) && !constant_power) return true;
     int arity = ARITY(n->type);
     for (int i = 0; i < arity && i < 3; i++) {
-        if (pj_expr_uses_math(n->parameters[i], depth + 1)) return true;
+        if (pj_expr_uses_math(p, n->parameters[i], depth + 1)) return true;
     }
     return false;
 }
 
-static bool pj_block_uses_math(const me_dsl_compiled_block *block, int depth) {
+static bool pj_block_uses_math(const me_dsl_compiled_program *p, const me_dsl_compiled_block *block, int depth) {
     if (!block || depth > 64) return true;
     for (int i = 0; i < block->nstmts; i++) {
         const me_dsl_compiled_stmt *stmt = block->stmts[i];
         if (!stmt) continue;
         switch (stmt->kind) {
         case ME_DSL_STMT_ASSIGN:
-            if (pj_expr_uses_math(stmt->as.assign.value.expr, 0)) return true;
+            if (pj_expr_uses_math(p, stmt->as.assign.value.expr, 0)) return true;
             break;
         case ME_DSL_STMT_EXPR:
-            if (pj_expr_uses_math(stmt->as.expr_stmt.expr.expr, 0)) return true;
+            if (pj_expr_uses_math(p, stmt->as.expr_stmt.expr.expr, 0)) return true;
             break;
         case ME_DSL_STMT_RETURN:
-            if (pj_expr_uses_math(stmt->as.return_stmt.expr.expr, 0)) return true;
+            if (pj_expr_uses_math(p, stmt->as.return_stmt.expr.expr, 0)) return true;
             break;
         case ME_DSL_STMT_PRINT:
             for (int j = 0; j < stmt->as.print_stmt.nargs; j++) {
-                if (pj_expr_uses_math(stmt->as.print_stmt.args[j].expr, 0)) return true;
+                if (pj_expr_uses_math(p, stmt->as.print_stmt.args[j].expr, 0)) return true;
             }
             break;
         case ME_DSL_STMT_IF:
-            if (pj_expr_uses_math(stmt->as.if_stmt.cond.expr, 0) ||
-                pj_block_uses_math(&stmt->as.if_stmt.then_block, depth + 1) ||
-                pj_block_uses_math(&stmt->as.if_stmt.else_block, depth + 1)) return true;
+            if (pj_expr_uses_math(p, stmt->as.if_stmt.cond.expr, 0) ||
+                pj_block_uses_math(p, &stmt->as.if_stmt.then_block, depth + 1) ||
+                pj_block_uses_math(p, &stmt->as.if_stmt.else_block, depth + 1)) return true;
             for (int j = 0; j < stmt->as.if_stmt.n_elifs; j++) {
-                if (pj_block_uses_math(&stmt->as.if_stmt.elif_branches[j].block, depth + 1)) return true;
+                if (pj_block_uses_math(p, &stmt->as.if_stmt.elif_branches[j].block, depth + 1)) return true;
             }
             break;
         case ME_DSL_STMT_FOR:
-            if (pj_expr_uses_math(stmt->as.for_loop.start.expr, 0) ||
-                pj_expr_uses_math(stmt->as.for_loop.stop.expr, 0) ||
-                pj_expr_uses_math(stmt->as.for_loop.step.expr, 0) ||
-                pj_block_uses_math(&stmt->as.for_loop.body, depth + 1)) return true;
+            if (pj_expr_uses_math(p, stmt->as.for_loop.start.expr, 0) ||
+                pj_expr_uses_math(p, stmt->as.for_loop.stop.expr, 0) ||
+                pj_expr_uses_math(p, stmt->as.for_loop.step.expr, 0) ||
+                pj_block_uses_math(p, &stmt->as.for_loop.body, depth + 1)) return true;
             break;
         case ME_DSL_STMT_WHILE:
-            if (pj_expr_uses_math(stmt->as.while_loop.cond.expr, 0) ||
-                pj_block_uses_math(&stmt->as.while_loop.body, depth + 1)) return true;
+            if (pj_expr_uses_math(p, stmt->as.while_loop.cond.expr, 0) ||
+                pj_block_uses_math(p, &stmt->as.while_loop.body, depth + 1)) return true;
             break;
         default:
             break;
@@ -2347,7 +2357,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         return;
     }
     if ((p->math_backend == ME_DSL_MATH_SLEEF || p->math_backend == ME_DSL_MATH_ACCELERATE) &&
-        pj_block_uses_math(&p->block, 0)) {
+        pj_block_uses_math(p, &p->block, 0)) {
         /* Generated kernels are fused per lane; their scalar callback bridge
          * would pay one lane-packing dispatch per element. The bounded vector
          * interpreter already batches the same math policy over tiles and is the
