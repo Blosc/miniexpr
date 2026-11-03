@@ -463,6 +463,44 @@ static bool me_jit_collect_locals_block(me_jit_locals *locals, const me_dsl_jit_
     return true;
 }
 
+static int me_jit_integral_bits(me_dtype dtype) {
+    switch (dtype) {
+    case ME_BOOL:
+    case ME_INT8:
+    case ME_UINT8:
+        return 8;
+    case ME_INT16:
+    case ME_UINT16:
+        return 16;
+    case ME_INT32:
+    case ME_UINT32:
+        return 32;
+    default:
+        return 64;
+    }
+}
+
+/* C shifts are undefined for counts outside [0, bits), where the interpreter
+ * follows NumPy (0 for <<, the sign fill for >>). Only a shift by a decimal
+ * literal below the width, not followed by a tighter-binding operator, is
+ * emitted as a C shift; other shifts keep the kernel on the interpreter. */
+static bool me_jit_shift_count_is_safe_literal(const char *count, me_dtype dtype) {
+    while (isspace((unsigned char)*count)) count++;
+    if (!isdigit((unsigned char)*count)) return false;
+    long value = 0;
+    while (isdigit((unsigned char)*count)) {
+        value = value * 10 + (*count - '0');
+        if (value >= 64) return false;
+        count++;
+    }
+    while (isspace((unsigned char)*count)) count++;
+    if (*count && !strchr("),&|^<>=!]", *count)) return false;
+    /* The shifted operand can be narrower than the expression (an int32 in an
+     * int64 sum); C shifts it as an int, so counts of 32 and more stay on the
+     * interpreter too. */
+    return value < me_jit_integral_bits(dtype) && value < 32;
+}
+
 static bool me_jit_expr_contains_unsupported_tokens(const char *expr, me_dtype dtype) {
     bool in_string = false;
     char quote = '\0';
@@ -510,15 +548,8 @@ static bool me_jit_expr_contains_unsupported_tokens(const char *expr, me_dtype d
         if (c == '%') {
             return true;
         }
-        if (c == '<' && p[1] == '<') {
-            if (!me_jit_dtype_is_integral(dtype)) {
-                return true;
-            }
-            p++;
-            continue;
-        }
-        if (c == '>' && p[1] == '>') {
-            if (!me_jit_dtype_is_integral(dtype)) {
+        if ((c == '<' && p[1] == '<') || (c == '>' && p[1] == '>')) {
+            if (!me_jit_dtype_is_integral(dtype) || !me_jit_shift_count_is_safe_literal(p + 2, dtype)) {
                 return true;
             }
             p++;

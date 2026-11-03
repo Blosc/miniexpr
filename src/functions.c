@@ -5500,6 +5500,26 @@ static void vec_negame_f32(const float* a, float* out, int n) {
  * INTEGER VECTOR OPERATIONS (int8_t through uint64_t)
  * ============================================================================ */
 
+/* Integer power as NumPy computes it: exponentiation by squaring that wraps
+ * at the operand width (the caller narrows the uint64 result). A negative
+ * exponent, which NumPy rejects, gives trunc(1 / base**|e|). */
+static uint64_t me_ipow_unsigned(uint64_t base, uint64_t e) {
+    uint64_t r = 1;
+    while (e) {
+        if (e & 1) r *= base;
+        base *= base;
+        e >>= 1;
+    }
+    return r;
+}
+
+static int64_t me_ipow_signed(int64_t base, int64_t e) {
+    if (e < 0) {
+        return base == 1 ? 1 : base == -1 ? ((e & 1) ? -1 : 1) : 0;
+    }
+    return (int64_t)me_ipow_unsigned((uint64_t)base, (uint64_t)e);
+}
+
 /* Macros to generate integer vector operations */
 #define DEFINE_INT_VEC_OPS(SUFFIX, TYPE) \
 static void vec_add_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
@@ -6372,6 +6392,213 @@ static void eval_dsl_strict_f32_math(const me_expr *node, me_dtype output_dtype)
 #define ME_EVAL_DTYPE_c64 ME_COMPLEX64
 #define ME_EVAL_DTYPE_c128 ME_COMPLEX128
 
+/* True if a constant can be used in `dtype` for a comparison or a bitwise
+ * operation: integers must hold it exactly (checked before any cast, since
+ * converting an out-of-range double to an integer is undefined), floats
+ * round it, as NumPy rounds a Python float to float32 before comparing. */
+static bool me_constant_fits_dtype(double value, me_dtype dtype) {
+    switch (dtype) {
+    case ME_BOOL: return value == 0.0 || value == 1.0;
+    case ME_INT8: return value >= INT8_MIN && value <= INT8_MAX && value == (double)(int8_t)value;
+    case ME_INT16: return value >= INT16_MIN && value <= INT16_MAX && value == (double)(int16_t)value;
+    case ME_INT32: return value >= INT32_MIN && value <= INT32_MAX && value == (double)(int32_t)value;
+    case ME_INT64: return value >= -9223372036854775808.0 && value < 9223372036854775808.0 &&
+                          value == (double)(int64_t)value;
+    case ME_UINT8: return value >= 0 && value <= UINT8_MAX && value == (double)(uint8_t)value;
+    case ME_UINT16: return value >= 0 && value <= UINT16_MAX && value == (double)(uint16_t)value;
+    case ME_UINT32: return value >= 0 && value <= UINT32_MAX && value == (double)(uint32_t)value;
+    case ME_UINT64: return value >= 0 && value < 18446744073709551616.0 && value == (double)(uint64_t)value;
+    default: return true;
+    }
+}
+
+static bool me_dtype_is_signed_int(me_dtype dtype) {
+    return dtype == ME_INT8 || dtype == ME_INT16 || dtype == ME_INT32 || dtype == ME_INT64;
+}
+
+/* A binary operation in the node's own dtype (EXPR of a_ and b_). The
+ * generic binary path goes through doubles, which cannot tell 64-bit
+ * integers apart beyond 2**53. A constant operand that the dtype does not
+ * hold keeps the generic path (int32 < 2.5 must not become < 2). */
+#define ME_TYPED_BINARY(SUFFIX, TYPE, EXPR, LDATA, RDATA, LEFT, RIGHT, OUT, NITEMS, FALLBACK) \
+    do { \
+        const TYPE *l_ = (LDATA), *r_ = (RDATA); \
+        TYPE *out_ = (OUT); \
+        const int nitems_ = (NITEMS); \
+        if (l_ && r_) { \
+            for (int k_ = 0; k_ < nitems_; k_++) { \
+                const TYPE a_ = l_[k_], b_ = r_[k_]; \
+                out_[k_] = (EXPR); \
+            } \
+        } else if (l_ && (RIGHT)->type == ME_CONSTANT && \
+                   me_constant_fits_dtype((RIGHT)->value, ME_EVAL_DTYPE_##SUFFIX)) { \
+            const TYPE b_ = TO_TYPE_##SUFFIX((RIGHT)->value); \
+            for (int k_ = 0; k_ < nitems_; k_++) { \
+                const TYPE a_ = l_[k_]; \
+                out_[k_] = (EXPR); \
+            } \
+        } else if (r_ && (LEFT)->type == ME_CONSTANT && \
+                   me_constant_fits_dtype((LEFT)->value, ME_EVAL_DTYPE_##SUFFIX)) { \
+            const TYPE a_ = TO_TYPE_##SUFFIX((LEFT)->value); \
+            for (int k_ = 0; k_ < nitems_; k_++) { \
+                const TYPE b_ = r_[k_]; \
+                out_[k_] = (EXPR); \
+            } \
+        } else { \
+            goto FALLBACK; \
+        } \
+    } while (0)
+
+/* Comparison writing 0/1. */
+#define ME_TYPED_COMPARE(SUFFIX, TYPE, OP, LDATA, RDATA, LEFT, RIGHT, OUT, NITEMS, FALLBACK) \
+    ME_TYPED_BINARY(SUFFIX, TYPE, (a_ OP b_) ? TO_TYPE_##SUFFIX(1) : TO_TYPE_##SUFFIX(0), \
+                    LDATA, RDATA, LEFT, RIGHT, OUT, NITEMS, FALLBACK)
+
+/* Bitwise operators, shifts, abs(), square() and the rounding functions of
+ * integers. Shifts follow NumPy: a count outside [0, bits) gives 0 (left) or
+ * the sign fill (right), and a left shift does not overflow a signed type. */
+#define ME_UTYPE_i8 uint8_t
+#define ME_UTYPE_i16 uint16_t
+#define ME_UTYPE_i32 uint32_t
+#define ME_UTYPE_i64 uint64_t
+#define ME_UTYPE_u8 uint8_t
+#define ME_UTYPE_u16 uint16_t
+#define ME_UTYPE_u32 uint32_t
+#define ME_UTYPE_u64 uint64_t
+
+/* A negative count wraps to a huge unsigned one, so one comparison covers both. */
+#define ME_INT_SHIFT_OUT_OF_RANGE(TYPE, b_) \
+    ((uint64_t)(int64_t)(b_) >= 8 * sizeof(TYPE))
+/* 0 for non-negative, -1 for negative values of a signed type. */
+#define ME_INT_SIGN_FILL(SUFFIX, TYPE, a_) \
+    (me_dtype_is_signed_int(ME_EVAL_DTYPE_##SUFFIX) ? (TYPE)((a_) >> (8 * sizeof(TYPE) - 1)) : (TYPE)0)
+
+#define ME_INT_BITWISE(SUFFIX, TYPE, FUNC, LDATA, RDATA, LEFT, RIGHT, OUT, NITEMS, FALLBACK) \
+    do { \
+        if ((FUNC) == bit_and) { \
+            ME_TYPED_BINARY(SUFFIX, TYPE, a_ & b_, LDATA, RDATA, LEFT, RIGHT, OUT, NITEMS, FALLBACK); \
+        } else if ((FUNC) == bit_or) { \
+            ME_TYPED_BINARY(SUFFIX, TYPE, a_ | b_, LDATA, RDATA, LEFT, RIGHT, OUT, NITEMS, FALLBACK); \
+        } else if ((FUNC) == bit_xor) { \
+            ME_TYPED_BINARY(SUFFIX, TYPE, a_ ^ b_, LDATA, RDATA, LEFT, RIGHT, OUT, NITEMS, FALLBACK); \
+        } else if ((FUNC) == bit_shl) { \
+            ME_TYPED_BINARY(SUFFIX, TYPE, ME_INT_SHIFT_OUT_OF_RANGE(TYPE, b_) ? (TYPE)0 : \
+                            (TYPE)((ME_UTYPE_##SUFFIX)a_ << b_), \
+                            LDATA, RDATA, LEFT, RIGHT, OUT, NITEMS, FALLBACK); \
+        } else { \
+            ME_TYPED_BINARY(SUFFIX, TYPE, ME_INT_SHIFT_OUT_OF_RANGE(TYPE, b_) ? \
+                            ME_INT_SIGN_FILL(SUFFIX, TYPE, a_) : (TYPE)(a_ >> b_), \
+                            LDATA, RDATA, LEFT, RIGHT, OUT, NITEMS, FALLBACK); \
+        } \
+    } while (0)
+
+#define ME_INT_UNARY(SUFFIX, TYPE, FUNC, ADATA, OUT, NITEMS) \
+    do { \
+        const TYPE *a_ = (ADATA); \
+        TYPE *out_ = (OUT); \
+        if ((FUNC) == (void*)bit_not) { \
+            for (int k_ = 0; k_ < (NITEMS); k_++) out_[k_] = (TYPE)~a_[k_]; \
+        } else if ((FUNC) == (void*)square) { \
+            for (int k_ = 0; k_ < (NITEMS); k_++) { \
+                /* In uint64_t: 16-bit values would be multiplied as (signed) int. */ \
+                out_[k_] = (TYPE)((uint64_t)(ME_UTYPE_##SUFFIX)a_[k_] * (uint64_t)(ME_UTYPE_##SUFFIX)a_[k_]); \
+            } \
+        } else if ((FUNC) != (void*)fabs) { \
+            /* floor(), ceil(), trunc() and round() of an integer are the integer. */ \
+            memcpy(out_, a_, (size_t)(NITEMS) * sizeof(TYPE)); \
+        } else { \
+            /* abs(); the minimum of a signed type stays the minimum, as in NumPy. */ \
+            for (int k_ = 0; k_ < (NITEMS); k_++) { \
+                const ME_UTYPE_##SUFFIX m_ = (ME_UTYPE_##SUFFIX)ME_INT_SIGN_FILL(SUFFIX, TYPE, a_[k_]); \
+                out_[k_] = (TYPE)(((ME_UTYPE_##SUFFIX)a_[k_] ^ m_) - m_); \
+            } \
+        } \
+    } while (0)
+
+/* The macros above do not compile for every dtype (no bitwise operators on
+ * floats, no ordering of complex numbers); ME_DTYPE_KIND_<suffix> picks the
+ * variant for an evaluator's dtype at preprocessing time. */
+#define ME_INT_BITWISE_SKIP(SUFFIX, TYPE, FUNC, LDATA, RDATA, LEFT, RIGHT, OUT, NITEMS, FALLBACK) \
+    goto FALLBACK
+#define ME_TYPED_COMPARE_SKIP(SUFFIX, TYPE, OP, LDATA, RDATA, LEFT, RIGHT, OUT, NITEMS, FALLBACK) \
+    goto FALLBACK
+#define ME_INT_UNARY_SKIP(SUFFIX, TYPE, FUNC, ADATA, OUT, NITEMS) do { } while (0)
+#define ME_DTYPE_KIND_i8(INT, REAL, COMPLEX) INT
+#define ME_DTYPE_KIND_i16(INT, REAL, COMPLEX) INT
+#define ME_DTYPE_KIND_i32(INT, REAL, COMPLEX) INT
+#define ME_DTYPE_KIND_i64(INT, REAL, COMPLEX) INT
+#define ME_DTYPE_KIND_u8(INT, REAL, COMPLEX) INT
+#define ME_DTYPE_KIND_u16(INT, REAL, COMPLEX) INT
+#define ME_DTYPE_KIND_u32(INT, REAL, COMPLEX) INT
+#define ME_DTYPE_KIND_u64(INT, REAL, COMPLEX) INT
+#define ME_DTYPE_KIND_f32(INT, REAL, COMPLEX) REAL
+#define ME_DTYPE_KIND_f64(INT, REAL, COMPLEX) REAL
+#define ME_DTYPE_KIND_c64(INT, REAL, COMPLEX) COMPLEX
+#define ME_DTYPE_KIND_c128(INT, REAL, COMPLEX) COMPLEX
+
+/* The typed operations live outside the me_eval_<suffix>() templates: those
+ * are large, and code added inside them changed how the compiler vectorizes
+ * their existing loops (float32 `a + 1` ran 6x slower). */
+#if defined(_MSC_VER)
+#define ME_TYPED_OPS_NOINLINE __declspec(noinline)
+#else
+#define ME_TYPED_OPS_NOINLINE __attribute__((noinline))
+#endif
+
+#define DEFINE_ME_TYPED_OPS(SUFFIX, TYPE) \
+static ME_TYPED_OPS_NOINLINE bool me_typed_binary_##SUFFIX(const me_expr *n, me_fun2 func, \
+                                                           const TYPE *ldata, const TYPE *rdata, \
+                                                           const me_expr *left, const me_expr *right, \
+                                                           TYPE *output) { \
+    if (func == bit_and || func == bit_or || func == bit_xor || func == bit_shl || func == bit_shr) { \
+        if (!is_integer_dtype(ME_EVAL_DTYPE_##SUFFIX)) return false; \
+        ME_DTYPE_KIND_##SUFFIX(ME_INT_BITWISE, ME_INT_BITWISE_SKIP, ME_INT_BITWISE_SKIP)( \
+            SUFFIX, TYPE, func, ldata, rdata, left, right, output, n->nitems, fallback); \
+    } else if (func == cmp_eq) { \
+        ME_DTYPE_KIND_##SUFFIX(ME_TYPED_COMPARE, ME_TYPED_COMPARE, ME_TYPED_COMPARE_SKIP)( \
+            SUFFIX, TYPE, ==, ldata, rdata, left, right, output, n->nitems, fallback); \
+    } else if (func == cmp_ne) { \
+        ME_DTYPE_KIND_##SUFFIX(ME_TYPED_COMPARE, ME_TYPED_COMPARE, ME_TYPED_COMPARE_SKIP)( \
+            SUFFIX, TYPE, !=, ldata, rdata, left, right, output, n->nitems, fallback); \
+    } else if (func == cmp_lt) { \
+        ME_DTYPE_KIND_##SUFFIX(ME_TYPED_COMPARE, ME_TYPED_COMPARE, ME_TYPED_COMPARE_SKIP)( \
+            SUFFIX, TYPE, <, ldata, rdata, left, right, output, n->nitems, fallback); \
+    } else if (func == cmp_le) { \
+        ME_DTYPE_KIND_##SUFFIX(ME_TYPED_COMPARE, ME_TYPED_COMPARE, ME_TYPED_COMPARE_SKIP)( \
+            SUFFIX, TYPE, <=, ldata, rdata, left, right, output, n->nitems, fallback); \
+    } else if (func == cmp_gt) { \
+        ME_DTYPE_KIND_##SUFFIX(ME_TYPED_COMPARE, ME_TYPED_COMPARE, ME_TYPED_COMPARE_SKIP)( \
+            SUFFIX, TYPE, >, ldata, rdata, left, right, output, n->nitems, fallback); \
+    } else if (func == cmp_ge) { \
+        ME_DTYPE_KIND_##SUFFIX(ME_TYPED_COMPARE, ME_TYPED_COMPARE, ME_TYPED_COMPARE_SKIP)( \
+            SUFFIX, TYPE, >=, ldata, rdata, left, right, output, n->nitems, fallback); \
+    } else { \
+        return false; \
+    } \
+    return true; \
+fallback: \
+    return false; \
+} \
+static ME_TYPED_OPS_NOINLINE void me_typed_unary_##SUFFIX(const me_expr *n, const void *func, \
+                                                          const TYPE *adata, TYPE *output) { \
+    (void)n; \
+    ME_DTYPE_KIND_##SUFFIX(ME_INT_UNARY, ME_INT_UNARY_SKIP, ME_INT_UNARY_SKIP)( \
+        SUFFIX, TYPE, func, adata, output, n->nitems); \
+}
+
+DEFINE_ME_TYPED_OPS(f32, float)
+DEFINE_ME_TYPED_OPS(f64, double)
+DEFINE_ME_TYPED_OPS(i8, int8_t)
+DEFINE_ME_TYPED_OPS(i16, int16_t)
+DEFINE_ME_TYPED_OPS(i32, int32_t)
+DEFINE_ME_TYPED_OPS(i64, int64_t)
+DEFINE_ME_TYPED_OPS(u8, uint8_t)
+DEFINE_ME_TYPED_OPS(u16, uint16_t)
+DEFINE_ME_TYPED_OPS(u32, uint32_t)
+DEFINE_ME_TYPED_OPS(u64, uint64_t)
+DEFINE_ME_TYPED_OPS(c64, float _Complex)
+DEFINE_ME_TYPED_OPS(c128, double _Complex)
+
 #define DEFINE_ME_EVAL(SUFFIX, TYPE, VEC_ADD, VEC_SUB, VEC_MUL, VEC_DIV, VEC_POW, \
     VEC_ADD_SCALAR, VEC_MUL_SCALAR, VEC_POW_SCALAR, \
     VEC_SQRT, VEC_SIN, VEC_COS, VEC_TAN, \
@@ -6542,7 +6769,14 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                 \
                 me_fun2 func = (me_fun2)n->function; \
                 \
-                if (func == add) { \
+                if (is_comparison_function((void*)func) || \
+                    (is_integer_dtype(ME_EVAL_DTYPE_##SUFFIX) && \
+                     (func == bit_and || func == bit_or || func == bit_xor || \
+                      func == bit_shl || func == bit_shr))) { \
+                    if (!me_typed_binary_##SUFFIX(n, func, ldata, rdata, left, right, output)) { \
+                        goto general_case_binary_##SUFFIX; \
+                    } \
+                } else if (func == add) { \
                     if (ldata && rdata) { \
                         VEC_ADD(ldata, rdata, output, n->nitems); \
                     } else if (ldata && right->type == ME_CONSTANT) { \
@@ -6771,7 +7005,12 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                 \
                 const void *func_ptr = n->function; \
                 \
-                if (func_ptr == (void*)sqrt) { \
+                if (is_integer_dtype(ME_EVAL_DTYPE_##SUFFIX) && adata && \
+                    (func_ptr == (void*)bit_not || func_ptr == (void*)fabs || func_ptr == (void*)square || \
+                     func_ptr == (void*)floor || func_ptr == (void*)ceil || \
+                     func_ptr == (void*)trunc_wrapper || func_ptr == (void*)round_wrapper)) { \
+                    me_typed_unary_##SUFFIX(n, func_ptr, adata, output); \
+                } else if (func_ptr == (void*)sqrt) { \
                     if (adata) VEC_SQRT(adata, output, n->nitems); \
                 } else if (func_ptr == (void*)sin) { \
                     if (adata) VEC_SIN(adata, output, n->nitems); \
@@ -7075,10 +7314,10 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sub_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
 #define vec_mul_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
 #define vec_div_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int8_t)pow((a)[_i], (b)[_i]); } while(0)
+#define vec_pow_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int8_t)me_ipow_signed((a)[_i], (b)[_i]); } while(0)
 #define vec_add_scalar_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
 #define vec_mul_scalar_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int8_t)pow((a)[_i], (b)); } while(0)
+#define vec_pow_scalar_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int8_t)me_ipow_signed((a)[_i], (b)); } while(0)
 #define vec_sqrt_i8(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int8_t)sqrt((a)[_i]); } while(0)
 #define vec_negame_i8(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
@@ -7086,10 +7325,10 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sub_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
 #define vec_mul_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
 #define vec_div_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int16_t)pow((a)[_i], (b)[_i]); } while(0)
+#define vec_pow_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int16_t)me_ipow_signed((a)[_i], (b)[_i]); } while(0)
 #define vec_add_scalar_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
 #define vec_mul_scalar_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int16_t)pow((a)[_i], (b)); } while(0)
+#define vec_pow_scalar_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int16_t)me_ipow_signed((a)[_i], (b)); } while(0)
 #define vec_sqrt_i16(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int16_t)sqrt((a)[_i]); } while(0)
 #define vec_negame_i16(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
@@ -7097,10 +7336,10 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sub_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
 #define vec_mul_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
 #define vec_div_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int32_t)pow((a)[_i], (b)[_i]); } while(0)
+#define vec_pow_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int32_t)me_ipow_signed((a)[_i], (b)[_i]); } while(0)
 #define vec_add_scalar_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
 #define vec_mul_scalar_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int32_t)pow((a)[_i], (b)); } while(0)
+#define vec_pow_scalar_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int32_t)me_ipow_signed((a)[_i], (b)); } while(0)
 #define vec_sqrt_i32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int32_t)sqrt((a)[_i]); } while(0)
 #define vec_negame_i32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
@@ -7108,10 +7347,10 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sub_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
 #define vec_mul_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
 #define vec_div_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int64_t)pow((a)[_i], (b)[_i]); } while(0)
+#define vec_pow_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int64_t)me_ipow_signed((a)[_i], (b)[_i]); } while(0)
 #define vec_add_scalar_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
 #define vec_mul_scalar_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int64_t)pow((a)[_i], (b)); } while(0)
+#define vec_pow_scalar_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int64_t)me_ipow_signed((a)[_i], (b)); } while(0)
 #define vec_sqrt_i64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int64_t)sqrt((a)[_i]); } while(0)
 #define vec_negame_i64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
@@ -7119,10 +7358,10 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sub_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
 #define vec_mul_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
 #define vec_div_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint8_t)pow((a)[_i], (b)[_i]); } while(0)
+#define vec_pow_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint8_t)me_ipow_unsigned((a)[_i], (b)[_i]); } while(0)
 #define vec_add_scalar_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
 #define vec_mul_scalar_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint8_t)pow((a)[_i], (b)); } while(0)
+#define vec_pow_scalar_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint8_t)me_ipow_unsigned((a)[_i], (b)); } while(0)
 #define vec_sqrt_u8(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint8_t)sqrt((a)[_i]); } while(0)
 #define vec_negame_u8(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
@@ -7130,10 +7369,10 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sub_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
 #define vec_mul_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
 #define vec_div_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint16_t)pow((a)[_i], (b)[_i]); } while(0)
+#define vec_pow_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint16_t)me_ipow_unsigned((a)[_i], (b)[_i]); } while(0)
 #define vec_add_scalar_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
 #define vec_mul_scalar_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint16_t)pow((a)[_i], (b)); } while(0)
+#define vec_pow_scalar_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint16_t)me_ipow_unsigned((a)[_i], (b)); } while(0)
 #define vec_sqrt_u16(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint16_t)sqrt((a)[_i]); } while(0)
 #define vec_negame_u16(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
@@ -7141,10 +7380,10 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sub_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
 #define vec_mul_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
 #define vec_div_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint32_t)pow((a)[_i], (b)[_i]); } while(0)
+#define vec_pow_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint32_t)me_ipow_unsigned((a)[_i], (b)[_i]); } while(0)
 #define vec_add_scalar_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
 #define vec_mul_scalar_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint32_t)pow((a)[_i], (b)); } while(0)
+#define vec_pow_scalar_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint32_t)me_ipow_unsigned((a)[_i], (b)); } while(0)
 #define vec_sqrt_u32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint32_t)sqrt((a)[_i]); } while(0)
 #define vec_negame_u32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
@@ -7152,10 +7391,10 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_sub_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
 #define vec_mul_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
 #define vec_div_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
-#define vec_pow_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint64_t)pow((a)[_i], (b)[_i]); } while(0)
+#define vec_pow_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint64_t)me_ipow_unsigned((a)[_i], (b)[_i]); } while(0)
 #define vec_add_scalar_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
 #define vec_mul_scalar_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
-#define vec_pow_scalar_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint64_t)pow((a)[_i], (b)); } while(0)
+#define vec_pow_scalar_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint64_t)me_ipow_unsigned((a)[_i], (b)); } while(0)
 #define vec_sqrt_u64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint64_t)sqrt((a)[_i]); } while(0)
 #define vec_negame_u64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
