@@ -9668,7 +9668,8 @@ cleanup:
 }
 
 
-void optimize(me_expr* n) {
+/* rewrite_pow: also strength-reduce x**2 and x**3 to products. */
+static void optimize_node(me_expr* n, bool rewrite_pow) {
     /* Evaluates as much as possible. */
     if (!n) return;
     if (n->type == ME_CONSTANT) return;
@@ -9681,12 +9682,13 @@ void optimize(me_expr* n) {
         int known = 1;
         int i;
         for (i = 0; i < arity; ++i) {
-            optimize(n->parameters[i]);
+            optimize_node(n->parameters[i], rewrite_pow);
             if (((me_expr*)(n->parameters[i]))->type != ME_CONSTANT) {
                 known = 0;
             }
         }
-        if (IS_FUNCTION(n->type) && arity == 2 && n->function == (void*)pow) {
+        /* A constant base is folded below instead (3**2 becomes 9, not 3 * 3). */
+        if (rewrite_pow && !known && IS_FUNCTION(n->type) && arity == 2 && n->function == (void*)pow) {
             me_expr *right = (me_expr*)n->parameters[1];
             if (right && right->type == ME_CONSTANT && right->value == 2.0) {
                 /* Fast path: rewrite x**2 (or pow(x,2)) to x*x to avoid scalar pow in eval. */
@@ -9732,6 +9734,22 @@ void optimize(me_expr* n) {
             n->value = value;
         }
     }
+    else {
+        /* A non-pure node (a reduction such as sum(), or a user function) is
+         * kept, but constant subtrees of its operands are folded, so that e.g.
+         * the negate(2) of sum(x * -2) becomes the constant -2. The x**2 and
+         * x**3 product rewrites are not applied there: a conversion node
+         * duplicated as x * x is not evaluated correctly yet (sum((a + b) ** 2)
+         * with int8 a, b and an int64 result gives 0). */
+        const int arity = ARITY(n->type);
+        for (int i = 0; i < arity; ++i) {
+            optimize_node(n->parameters[i], false);
+        }
+    }
+}
+
+void optimize(me_expr* n) {
+    optimize_node(n, true);
 }
 
 bool has_complex_input_types(const me_expr* n) {
