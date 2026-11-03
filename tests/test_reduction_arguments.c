@@ -1,9 +1,9 @@
 /*
  * Reductions (sum, prod, mean, min, max, any, all) over every numeric dtype and
- * several kinds of argument: an argument with a constant subexpression
- * (sum(x * -2), max(x + sin(1.0)), sum(where(x > 0, -1, 1))), comparisons
- * including those of two bools (sum(p == q)), and a constant argument
- * (sum(-2)).
+ * several kinds of argument: a plain variable, an argument with a constant
+ * subexpression (sum(x * -2), max(x + sin(1.0)), sum(where(x > 0, -1, 1))),
+ * comparisons including those of two bools (sum(p == q)), and a constant
+ * argument (sum(-2)).
  *
  * Every case is evaluated three ways: me_eval over the whole array, and
  * me_eval_nd block by block (as python-blosc2 drives reductions) for a shape
@@ -121,6 +121,7 @@ static me_dtype reduction_dtype(red_kind r, me_dtype elem) {
 
 typedef double (*ref_fn)(double x, double y);
 
+static double f_x(double x, double y) { (void)y; return x; }
 static double f_mul_m2(double x, double y) { (void)y; return x * -2.0; }
 static double f_sub_m05(double x, double y) { (void)y; return x - -0.5; }
 static double f_sub_m1(double x, double y) { (void)y; return x - -1.0; }
@@ -154,6 +155,8 @@ typedef struct {
 } test_case;
 
 static const test_case cases[] = {
+    /* A plain variable: strided (padded-block) and contiguous paths. */
+    {"x", f_x, RES_SAME, ANY_DTYPE, 1},
     /* Constant subexpressions: negate(c), sin(c), sqrt(c), abs(negate(c)),
      * where() with constant branches. */
     {"x * -2", f_mul_m2, RES_SAME, SIGNED_OR_FLOAT, 1},
