@@ -148,7 +148,11 @@ static void test_arithmetic_and_math(void) {
         {"def k(z):\n    return sqrt(z)\n"},
         {"def k(z):\n    return exp(z)\n"},
         {"def k(z):\n    return log(z)\n"},
-        {"def k(z):\n    return sin(z) * sin(z) + cos(z) * cos(z)\n"}
+        {"def k(z):\n    return sin(z) * sin(z) + cos(z) * cos(z)\n"},
+        /* NumPy's complex power: 0 ** 0 is 1, integer exponents multiply. */
+        {"def k(z):\n    return z ** 0\n"},
+        {"def k(z):\n    return z ** 4\n"},
+        {"def k(z):\n    return 2 ** z\n"}
     };
     for (size_t c = 0; c < sizeof(cases) / sizeof(*cases); c++) {
         for (int jit = 0; jit < 2; jit++) {
@@ -171,6 +175,8 @@ static void test_arithmetic_and_math(void) {
                     case 6: expected[i] = csqrt(a); break;
                     case 7: expected[i] = cexp(a); break;
                     case 8: expected[i] = clog(a); break;
+                    case 11: expected[i] = (a * a) * (a * a); break;
+                    case 12: expected[i] = (a == 0) ? 1.0 : cpow(2.0, a); break;
                     default: expected[i] = 1.0; break;
                 }
             }

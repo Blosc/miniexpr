@@ -909,7 +909,7 @@ static int p_complex_math(me_dtype input_dtype, const me_expr *n, const char *na
         else if (!strcmp(name, "asinh")) out->c64 = me_casinhf(z);
         else if (!strcmp(name, "acosh")) out->c64 = me_cacoshf(z);
         else if (!strcmp(name, "atanh")) out->c64 = me_catanhf(z);
-        else if (!strcmp(name, "pow")) out->c64 = me_cpowf(z, b->c64);
+        else if (!strcmp(name, "pow")) out->c64 = me_npy_cpowf(z, b->c64);
         else return ME_EVAL_ERR_INVALID_ARG;
         return 0;
     }
@@ -933,7 +933,7 @@ static int p_complex_math(me_dtype input_dtype, const me_expr *n, const char *na
     else if (!strcmp(name, "asinh")) out->c128 = me_casinh(a->c128);
     else if (!strcmp(name, "acosh")) out->c128 = me_cacosh(a->c128);
     else if (!strcmp(name, "atanh")) out->c128 = me_catanh(a->c128);
-    else if (!strcmp(name, "pow")) out->c128 = me_cpow(a->c128, b->c128);
+    else if (!strcmp(name, "pow")) out->c128 = me_npy_cpow(a->c128, b->c128);
     else return ME_EVAL_ERR_INVALID_ARG;
     return 0;
 }

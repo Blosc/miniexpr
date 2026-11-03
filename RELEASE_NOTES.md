@@ -4,6 +4,14 @@ Release notes for miniexpr
 Changes from 0.2.0 to 0.2.1
 ===========================
 
+* Complex powers follow NumPy (`npy_cpow`) in expressions, full-profile DSL
+  kernels and Menudet kernels. A constant base (`2 ** z`) was computed with the
+  real `pow()` of the real parts, dropping the imaginary part. `x ** 0` is now
+  1 (also for `0 ** 0`, which was NaN), a zero base gives 0 for an exponent with
+  a positive real part and NaN otherwise, and integer exponents with `|n| < 100`
+  are computed by repeated multiplication, so `(1+1j) ** 4` is exactly -4.
+  Other exponents still use the C library's `cpow()`, as NumPy does.
+
 * Menudet JIT emits same-width typed integer bitwise operations directly instead
   of calling scalar interpreter helpers. Scalar integer/Boolean local declarations no
   longer use volatile rounding barriers, reducing stack traffic in hash kernels.
