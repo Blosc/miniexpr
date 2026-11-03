@@ -23,6 +23,22 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(_MSC_VER)
+#define ME_DSL_THREAD_LOCAL __declspec(thread)
+#else
+#define ME_DSL_THREAD_LOCAL __thread
+#endif
+
+#ifdef GRAPH_TEST_ALLOCATOR_H
+#define ME_DSL_ALLOW_STACK_ARENA 0
+#else
+#define ME_DSL_ALLOW_STACK_ARENA 1
+#endif
+
+static ME_DSL_THREAD_LOCAL uint8_t *dsl_tls_arena = NULL;
+static ME_DSL_THREAD_LOCAL size_t dsl_tls_arena_cap = 0;
+static ME_DSL_THREAD_LOCAL int dsl_tls_arena_in_use = 0;
+
 typedef struct {
     const me_dsl_compiled_program *program;
     void **var_buffers;
@@ -308,13 +324,24 @@ static int dsl_eval_condition_masked(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
         return ME_EVAL_SUCCESS;
     }
 
-    void *cond_buf = malloc((size_t)cond_nitems * cond_size);
+    if (!*is_reduction && cond_dtype == ME_BOOL && cond_size == 1 &&
+        dsl_menudet_typed_profile(ctx->program->semantic_profile)) {
+        if (!true_mask) {
+            return ME_EVAL_ERR_INVALID_ARG;
+        }
+        memset(true_mask, 0, (size_t)ctx->nitems);
+        return dsl_eval_expr_masked_copy(ctx, cond, true_mask, input_mask, ctx->nitems, 0, true);
+    }
+
+    uint64_t cond_stack[512];
+    size_t cond_bytes = (size_t)cond_nitems * cond_size;
+    void *cond_buf = (cond_bytes <= sizeof(cond_stack)) ? (void *)cond_stack : malloc(cond_bytes);
     if (!cond_buf) {
         return ME_EVAL_ERR_OOM;
     }
     int rc;
     if (dsl_menudet_typed_profile(ctx->program->semantic_profile)) {
-        memset(cond_buf, 0, (size_t)cond_nitems * cond_size);
+        memset(cond_buf, 0, cond_bytes);
         if (*is_reduction) {
             rc = dsl_menudet_eval_expr(cond->expr, (const void *const *)ctx->var_buffers,
                                         ctx->program->vars.count, (const uint8_t *const *)ctx->initialized, 0, ctx->nitems, input_mask, cond_buf);
@@ -323,7 +350,7 @@ static int dsl_eval_condition_masked(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
     }
     else rc = dsl_eval_expr_nitems(ctx, cond, cond_buf, ctx->nitems);
     if (rc != ME_EVAL_SUCCESS) {
-        free(cond_buf);
+        if (cond_buf != (void *)cond_stack) free(cond_buf);
         return rc;
     }
 
@@ -332,7 +359,7 @@ static int dsl_eval_condition_masked(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
     }
     else {
         if (!true_mask) {
-            free(cond_buf);
+            if (cond_buf != (void *)cond_stack) free(cond_buf);
             return ME_EVAL_ERR_INVALID_ARG;
         }
         for (int i = 0; i < ctx->nitems; i++) {
@@ -342,7 +369,7 @@ static int dsl_eval_condition_masked(dsl_eval_ctx *ctx, const me_dsl_compiled_ex
         }
     }
 
-    free(cond_buf);
+    if (cond_buf != (void *)cond_stack) free(cond_buf);
     return ME_EVAL_SUCCESS;
 }
 
@@ -361,44 +388,49 @@ static int dsl_eval_element_conditional_branch(dsl_eval_ctx *ctx,
         return ME_EVAL_SUCCESS;
     }
 
-    uint8_t *cond_mask = calloc((size_t)ctx->nitems, sizeof(*cond_mask));
+    uint8_t cond_stack[1024];
+    uint8_t branch_stack[1024];
+    uint8_t *cond_mask = (ctx->nitems <= 1024) ? cond_stack : calloc((size_t)ctx->nitems, sizeof(*cond_mask));
     if (!cond_mask) {
         return ME_EVAL_ERR_OOM;
+    }
+    if (cond_mask == cond_stack) {
+        memset(cond_mask, 0, (size_t)ctx->nitems);
     }
     bool cond_is_reduction = false;
     bool cond_scalar_true = false;
     int rc = dsl_eval_condition_masked(ctx, cond, remaining_mask, cond_mask,
                                        &cond_is_reduction, &cond_scalar_true);
     if (rc != ME_EVAL_SUCCESS) {
-        free(cond_mask);
+        if (cond_mask != cond_stack) free(cond_mask);
         return rc;
     }
 
     if (cond_is_reduction) {
         if (cond_scalar_true) {
-            uint8_t *branch_run = malloc((size_t)ctx->nitems);
+            uint8_t *branch_run = (ctx->nitems <= 1024) ? branch_stack : malloc((size_t)ctx->nitems);
             if (!branch_run) {
-                free(cond_mask);
+                if (cond_mask != cond_stack) free(cond_mask);
                 return ME_EVAL_ERR_OOM;
             }
             memcpy(branch_run, remaining_mask, (size_t)ctx->nitems);
             memset(remaining_mask, 0, (size_t)ctx->nitems);
             rc = dsl_eval_block_element_loop(ctx, branch_block, branch_run,
                                              break_mask, continue_mask, return_mask);
-            free(branch_run);
+            if (branch_run != branch_stack) free(branch_run);
         }
-        free(cond_mask);
+        if (cond_mask != cond_stack) free(cond_mask);
         return rc;
     }
 
     if (!dsl_mask_any(cond_mask, ctx->nitems)) {
-        free(cond_mask);
+        if (cond_mask != cond_stack) free(cond_mask);
         return ME_EVAL_SUCCESS;
     }
 
-    uint8_t *branch_run = malloc((size_t)ctx->nitems);
+    uint8_t *branch_run = (ctx->nitems <= 1024) ? branch_stack : malloc((size_t)ctx->nitems);
     if (!branch_run) {
-        free(cond_mask);
+        if (cond_mask != cond_stack) free(cond_mask);
         return ME_EVAL_ERR_OOM;
     }
     memcpy(branch_run, cond_mask, (size_t)ctx->nitems);
@@ -409,8 +441,8 @@ static int dsl_eval_element_conditional_branch(dsl_eval_ctx *ctx,
     }
     rc = dsl_eval_block_element_loop(ctx, branch_block, branch_run,
                                      break_mask, continue_mask, return_mask);
-    free(branch_run);
-    free(cond_mask);
+    if (branch_run != branch_stack) free(branch_run);
+    if (cond_mask != cond_stack) free(cond_mask);
     return rc;
 }
 
@@ -642,7 +674,9 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
         }
         case ME_DSL_STMT_IF: {
             if (ctx->empty_group) break; /* No lanes participate in control-flow bodies. */
-            uint8_t *remaining = malloc((size_t)ctx->nitems);
+            uint8_t rem_stack[1024];
+            uint8_t else_stack[1024];
+            uint8_t *remaining = (ctx->nitems <= 1024) ? rem_stack : malloc((size_t)ctx->nitems);
             if (!remaining) {
                 return ME_EVAL_ERR_OOM;
             }
@@ -653,7 +687,7 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
                                                          remaining, break_mask,
                                                          continue_mask, return_mask);
             if (rc != ME_EVAL_SUCCESS) {
-                free(remaining);
+                if (remaining != rem_stack) free(remaining);
                 return rc;
             }
 
@@ -666,29 +700,29 @@ static int dsl_eval_block_element_loop(dsl_eval_ctx *ctx, const me_dsl_compiled_
                                                          remaining, break_mask,
                                                          continue_mask, return_mask);
                 if (rc != ME_EVAL_SUCCESS) {
-                    free(remaining);
+                    if (remaining != rem_stack) free(remaining);
                     return rc;
                 }
             }
 
             if (stmt->as.if_stmt.has_else && dsl_mask_any(remaining, ctx->nitems)) {
-                uint8_t *else_run = malloc((size_t)ctx->nitems);
+                uint8_t *else_run = (ctx->nitems <= 1024) ? else_stack : malloc((size_t)ctx->nitems);
                 if (!else_run) {
-                    free(remaining);
+                    if (remaining != rem_stack) free(remaining);
                     return ME_EVAL_ERR_OOM;
                 }
                 memcpy(else_run, remaining, (size_t)ctx->nitems);
                 rc = dsl_eval_block_element_loop(ctx, &stmt->as.if_stmt.else_block,
                                                  else_run, break_mask,
                                                  continue_mask, return_mask);
-                free(else_run);
+                if (else_run != else_stack) free(else_run);
                 if (rc != ME_EVAL_SUCCESS) {
-                    free(remaining);
+                    if (remaining != rem_stack) free(remaining);
                     return rc;
                 }
             }
 
-            free(remaining);
+            if (remaining != rem_stack) free(remaining);
             dsl_mask_remove_flow(run_mask, break_mask, continue_mask, return_mask, ctx->nitems);
             break;
         }
@@ -1277,16 +1311,25 @@ static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
         return endpoint_status;
     }
 
-    uint8_t *run_mask = malloc((size_t)ctx->nitems);
-    uint8_t *break_mask = calloc((size_t)ctx->nitems, sizeof(*break_mask));
-    uint8_t *continue_mask = calloc((size_t)ctx->nitems, sizeof(*continue_mask));
-    uint8_t *return_mask = calloc((size_t)ctx->nitems, sizeof(*return_mask));
+    uint8_t run_stack[1024];
+    uint8_t break_stack[1024];
+    uint8_t cont_stack[1024];
+    uint8_t ret_stack[1024];
+    uint8_t *run_mask = (ctx->nitems <= 1024) ? run_stack : malloc((size_t)ctx->nitems);
+    uint8_t *break_mask = (ctx->nitems <= 1024) ? break_stack : calloc((size_t)ctx->nitems, sizeof(*break_mask));
+    uint8_t *continue_mask = (ctx->nitems <= 1024) ? cont_stack : calloc((size_t)ctx->nitems, sizeof(*continue_mask));
+    uint8_t *return_mask = (ctx->nitems <= 1024) ? ret_stack : calloc((size_t)ctx->nitems, sizeof(*return_mask));
     if (!run_mask || !break_mask || !continue_mask || !return_mask) {
-        free(run_mask);
-        free(break_mask);
-        free(continue_mask);
-        free(return_mask);
+        if (run_mask != run_stack) free(run_mask);
+        if (break_mask != break_stack) free(break_mask);
+        if (continue_mask != cont_stack) free(continue_mask);
+        if (return_mask != ret_stack) free(return_mask);
         return ME_EVAL_ERR_OOM;
+    }
+    if (ctx->nitems <= 1024) {
+        memset(break_mask, 0, (size_t)ctx->nitems);
+        memset(continue_mask, 0, (size_t)ctx->nitems);
+        memset(return_mask, 0, (size_t)ctx->nitems);
     }
     if (ctx->valid_mask && !ctx->empty_group) memcpy(run_mask, ctx->valid_mask, (size_t)ctx->nitems);
     else memset(run_mask, 1, (size_t)ctx->nitems);
@@ -1308,10 +1351,10 @@ static int dsl_eval_block(dsl_eval_ctx *ctx, const me_dsl_compiled_block *block,
         }
     }
 
-    free(run_mask);
-    free(break_mask);
-    free(continue_mask);
-    free(return_mask);
+    if (run_mask != run_stack) free(run_mask);
+    if (break_mask != break_stack) free(break_mask);
+    if (continue_mask != cont_stack) free(continue_mask);
+    if (return_mask != ret_stack) free(return_mask);
     return rc;
 }
 
@@ -1664,36 +1707,77 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
                 n_vars, NULL, nitems, NULL, (size_t)program->output_itemsize, output_block);
         }
     }
-    void **var_buffers = calloc(program->vars.count ? (size_t)program->vars.count : 1, sizeof(*var_buffers));
-    void **local_buffers = calloc(program->n_locals ? (size_t)program->n_locals : 1, sizeof(*local_buffers));
+    void *var_stack[ME_MAX_VARS * 2];
+    void *local_stack[ME_MAX_VARS * 2];
+    uint8_t *init_stack[ME_MAX_VARS * 2];
+    size_t vcount = program->vars.count ? (size_t)program->vars.count : 1;
+    size_t lcount = program->n_locals ? (size_t)program->n_locals : 1;
+    void **var_buffers = (ME_DSL_ALLOW_STACK_ARENA && vcount <= ME_MAX_VARS * 2) ? var_stack : calloc(vcount, sizeof(*var_buffers));
+    void **local_buffers = (ME_DSL_ALLOW_STACK_ARENA && lcount <= ME_MAX_VARS * 2) ? local_stack : calloc(lcount, sizeof(*local_buffers));
     if (!var_buffers || !local_buffers) {
-        free(var_buffers);
-        free(local_buffers);
+        if (var_buffers != var_stack) free(var_buffers);
+        if (local_buffers != local_stack) free(local_buffers);
         return ME_EVAL_ERR_OOM;
     }
+    if (var_buffers == var_stack) memset(var_buffers, 0, vcount * sizeof(*var_buffers));
+    if (local_buffers == local_stack) memset(local_buffers, 0, lcount * sizeof(*local_buffers));
 
     for (int i = 0; i < program->n_inputs; i++) {
         var_buffers[i] = (void *)vars_block[i];
     }
 
+    size_t total_local_bytes = 0;
     for (int i = 0; i < program->n_locals; i++) {
         int var_index = program->local_var_indices[i];
         size_t sz = dsl_var_item_size(program, var_index);
         if (sz == 0) {
-            free(var_buffers);
-            free(local_buffers);
+            if (var_buffers != var_stack) free(var_buffers);
+            if (local_buffers != local_stack) free(local_buffers);
             return ME_EVAL_ERR_INVALID_ARG;
         }
-        local_buffers[i] = malloc((size_t)nitems * sz);
-        if (!local_buffers[i]) {
-            for (int j = 0; j < i; j++) {
-                if (local_buffers[j]) {
-                    free(local_buffers[j]);
-                }
+        size_t bytes = (size_t)nitems * sz;
+        total_local_bytes += (bytes + 15u) & ~(size_t)15u;
+    }
+
+    size_t lane_count = nitems ? (size_t)nitems : 1;
+    size_t defined_bytes = dsl_menudet_typed_profile(program->semantic_profile) ? (lcount * lane_count) : 0;
+    size_t total_arena_bytes = total_local_bytes + ((defined_bytes + 15u) & ~(size_t)15u);
+    bool used_tls_arena = false;
+    if (ME_DSL_ALLOW_STACK_ARENA && !dsl_tls_arena_in_use && total_arena_bytes > 0 && total_arena_bytes <= 64u * 1024u * 1024u) {
+        if (dsl_tls_arena_cap < total_arena_bytes) {
+            uint8_t *new_arena = (uint8_t *)realloc(dsl_tls_arena, total_arena_bytes);
+            if (new_arena) {
+                dsl_tls_arena = new_arena;
+                dsl_tls_arena_cap = total_arena_bytes;
             }
-            free(var_buffers);
-            free(local_buffers);
-            return ME_EVAL_ERR_OOM;
+        }
+        if (dsl_tls_arena_cap >= total_arena_bytes) {
+            dsl_tls_arena_in_use = 1;
+            used_tls_arena = true;
+        }
+    }
+
+    size_t arena_offset = 0;
+    for (int i = 0; i < program->n_locals; i++) {
+        int var_index = program->local_var_indices[i];
+        size_t sz = dsl_var_item_size(program, var_index);
+        size_t bytes = (size_t)nitems * sz;
+        if (used_tls_arena) {
+            local_buffers[i] = dsl_tls_arena + arena_offset;
+            arena_offset += (bytes + 15u) & ~(size_t)15u;
+        }
+        else {
+            local_buffers[i] = malloc(bytes);
+            if (!local_buffers[i]) {
+                for (int j = 0; j < i; j++) {
+                    if (local_buffers[j]) {
+                        free(local_buffers[j]);
+                    }
+                }
+                if (var_buffers != var_stack) free(var_buffers);
+                if (local_buffers != local_stack) free(local_buffers);
+                return ME_EVAL_ERR_OOM;
+            }
         }
         var_buffers[var_index] = local_buffers[i];
     }
@@ -1798,13 +1882,18 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
         for (int i = 0; i < reserved_count; i++) {
             free(reserved_buffers[i]);
         }
-        for (int i = 0; i < program->n_locals; i++) {
-            if (local_buffers[i]) {
-                free(local_buffers[i]);
+        if (used_tls_arena) {
+            dsl_tls_arena_in_use = 0;
+        }
+        else {
+            for (int i = 0; i < program->n_locals; i++) {
+                if (local_buffers[i]) {
+                    free(local_buffers[i]);
+                }
             }
         }
-        free(var_buffers);
-        free(local_buffers);
+        if (var_buffers != var_stack) free(var_buffers);
+        if (local_buffers != local_stack) free(local_buffers);
         return reserved_ctx_error ? ME_EVAL_ERR_INVALID_ARG : ME_EVAL_ERR_OOM;
     }
 
@@ -1919,13 +2008,18 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
                     for (int i = 0; i < reserved_count; i++) {
                         free(reserved_buffers[i]);
                     }
-                    for (int i = 0; i < program->n_locals; i++) {
-                        if (local_buffers[i]) {
-                            free(local_buffers[i]);
+                    if (used_tls_arena) {
+                        dsl_tls_arena_in_use = 0;
+                    }
+                    else {
+                        for (int i = 0; i < program->n_locals; i++) {
+                            if (local_buffers[i]) {
+                                free(local_buffers[i]);
+                            }
                         }
                     }
-                    free(var_buffers);
-                    free(local_buffers);
+                    if (var_buffers != var_stack) free(var_buffers);
+                    if (local_buffers != local_stack) free(local_buffers);
                     return jit_success ? ME_EVAL_SUCCESS : ME_EVAL_ERR_INVALID_ARG;
                 }
             }
@@ -1958,10 +2052,14 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
     uint8_t *defined_storage = NULL;
     int rc = ME_EVAL_SUCCESS;
     if (dsl_menudet_typed_profile(program->semantic_profile)) {
-        size_t storage_count = program->n_locals ? (size_t)program->n_locals : 1;
-        size_t lane_count = nitems ? (size_t)nitems : 1;
-        ctx.initialized = calloc(program->vars.count ? (size_t)program->vars.count : 1, sizeof(*ctx.initialized));
+        size_t storage_count = lcount;
+        ctx.initialized = (ME_DSL_ALLOW_STACK_ARENA && vcount <= ME_MAX_VARS * 2) ? init_stack : calloc(vcount, sizeof(*ctx.initialized));
+        if (ctx.initialized == init_stack) memset(ctx.initialized, 0, vcount * sizeof(*ctx.initialized));
         if (storage_count > SIZE_MAX / lane_count) rc = ME_EVAL_ERR_OOM;
+        else if (used_tls_arena) {
+            defined_storage = dsl_tls_arena + arena_offset;
+            memset(defined_storage, 0, storage_count * lane_count);
+        }
         else defined_storage = calloc(storage_count * lane_count, 1);
         if (!ctx.initialized || !defined_storage) rc = ME_EVAL_ERR_OOM;
         if (rc == ME_EVAL_SUCCESS) {
@@ -1973,19 +2071,24 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
     bool did_continue = false;
     bool did_return = false;
     if (rc == ME_EVAL_SUCCESS) rc = dsl_eval_block(&ctx, &program->block, &did_break, &did_continue, &did_return);
-    free(defined_storage);
-    free(ctx.initialized);
+    if (!used_tls_arena) free(defined_storage);
+    if (ctx.initialized != init_stack) free(ctx.initialized);
 
     for (int i = 0; i < reserved_count; i++) {
         free(reserved_buffers[i]);
     }
-    for (int i = 0; i < program->n_locals; i++) {
-        if (local_buffers[i]) {
-            free(local_buffers[i]);
+    if (used_tls_arena) {
+        dsl_tls_arena_in_use = 0;
+    }
+    else {
+        for (int i = 0; i < program->n_locals; i++) {
+            if (local_buffers[i]) {
+                free(local_buffers[i]);
+            }
         }
     }
-    free(var_buffers);
-    free(local_buffers);
+    if (var_buffers != var_stack) free(var_buffers);
+    if (local_buffers != local_stack) free(local_buffers);
 
     if (rc == ME_EVAL_SUCCESS && !did_return) {
         return ME_EVAL_ERR_INVALID_ARG;

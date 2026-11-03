@@ -105,6 +105,7 @@ enum {
  * Returns non-zero if the pointer was assigned by me_compile for ordinal variable matching.
  */
 int is_synthetic_address(const void* ptr);
+extern char synthetic_var_addresses[ME_MAX_VARS];
 
 #define TYPE_MASK(TYPE) ((TYPE)&0x0000001F)
 #define IS_PURE(TYPE) (((TYPE) & ME_FLAG_PURE) != 0)
@@ -157,6 +158,9 @@ bool validate_string_usage(const me_expr* n);
 bool me_menudet_string_operation(const me_expr *n);
 bool me_menudet_string_validate(me_expr *n);
 bool me_menudet_string_execute(const me_expr *n, const void *const *values, void *output);
+int me_menudet_eval_string_expr_masked(const me_expr *expr, const void *const *vars, int nvars,
+                                       const uint8_t *const *initialized,
+                                       int nitems, const uint8_t *mask, size_t stride, void *out);
 bool me_is_builtin_function_name(const char* name, size_t len);
 
 typedef enum {

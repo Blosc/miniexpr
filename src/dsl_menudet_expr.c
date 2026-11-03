@@ -2931,6 +2931,8 @@ int dsl_menudet_eval_expr_masked(const me_expr *expr, const void *const *vars, i
                                   int nitems, const uint8_t *mask, size_t stride, void *out) {
     if (!expr || !out || nitems < 0 || nvars < 0 || (!vars && nvars) ||
         stride < dtype_size(expr->dtype)) return ME_EVAL_ERR_INVALID_ARG;
+    int str_rc = me_menudet_eval_string_expr_masked(expr, vars, nvars, initialized, nitems, mask, stride, out);
+    if (str_rc <= 0) return str_rc;
     p_eval_context ctx = {.vars = vars, .initialized = initialized, .nvars = nvars, .nitems = nitems, .mask = mask};
     fenv_t saved;
     if (!dsl_menudet_fp_begin(&saved)) return ME_EVAL_ERR_INVALID_ARG;

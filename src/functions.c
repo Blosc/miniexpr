@@ -2163,11 +2163,15 @@ static void sv_copy(void* dst, size_t dst_unit, size_t at, sview src, size_t n) 
     }
 }
 
-static size_t string_len_units(const void* s, size_t unit, size_t max_units) {
-    size_t len = 0;
+static inline size_t string_len_units(const void* s, size_t unit, size_t max_units) {
     if (!s) return 0;
-    sview v = {s, max_units, unit};
-    while (len < max_units && sv_at(v, len) != 0) {
+    if (unit == 1) {
+        const void* z = memchr(s, 0, max_units);
+        return z ? (size_t)((const char*)z - (const char*)s) : max_units;
+    }
+    const uint32_t* p = (const uint32_t*)s;
+    size_t len = 0;
+    while (len < max_units && p[len] != 0) {
         len++;
     }
     return len;
@@ -2260,6 +2264,24 @@ static const me_case_expansion* case_lookup_expand(const me_case_expansion* tabl
 static size_t string_case_map(sview s, void* out, size_t out_unit, size_t out_units,
                               bool to_upper) {
     if (out_unit == 1) {
+        size_t n = s.len < out_units ? s.len : out_units;
+        uint8_t* dst = (uint8_t*)out;
+        if (s.unit == 1) {
+            const uint8_t* src = (const uint8_t*)s.p;
+            if (to_upper) {
+                for (size_t i = 0; i < n; i++) {
+                    uint8_t c = src[i];
+                    dst[i] = (uint8_t)((c >= 'a' && c <= 'z') ? c - 32 : c);
+                }
+            }
+            else {
+                for (size_t i = 0; i < n; i++) {
+                    uint8_t c = src[i];
+                    dst[i] = (uint8_t)((c >= 'A' && c <= 'Z') ? c + 32 : c);
+                }
+            }
+            return n;
+        }
         size_t w = 0;
         for (size_t i = 0; i < s.len && w < out_units; i++) {
             uint32_t c = sv_at(s, i);
@@ -2269,9 +2291,33 @@ static size_t string_case_map(sview s, void* out, size_t out_unit, size_t out_un
             else if (c >= 'A' && c <= 'Z') {
                 c += 32;
             }
-            su_put(out, 1, w++, c);
+            dst[w++] = (uint8_t)c;
         }
         return w;
+    }
+
+    uint32_t* dst = (uint32_t*)out;
+    size_t w = 0;
+    size_t i = 0;
+    if (s.unit == 4) {
+        const uint32_t* src = (const uint32_t*)s.p;
+        const size_t n = s.len < out_units ? s.len : out_units;
+        if (to_upper) {
+            for (; i < n; i++) {
+                uint32_t cp = src[i];
+                if (cp >= 0x80) break;
+                dst[i] = (cp >= 'a' && cp <= 'z') ? cp - 32 : cp;
+            }
+        }
+        else {
+            for (; i < n; i++) {
+                uint32_t cp = src[i];
+                if (cp >= 0x80) break;
+                dst[i] = (cp >= 'A' && cp <= 'Z') ? cp + 32 : cp;
+            }
+        }
+        if (i == n) return n;
+        w = i;
     }
 
     const me_case_pair* simple = to_upper ? me_case_upper_simple : me_case_lower_simple;
@@ -2279,10 +2325,13 @@ static size_t string_case_map(sview s, void* out, size_t out_unit, size_t out_un
     const me_case_expansion* expand = to_upper ? me_case_upper_expand : me_case_lower_expand;
     const int expand_count = to_upper ? ME_CASE_UPPER_EXPAND_COUNT : ME_CASE_LOWER_EXPAND_COUNT;
 
-    uint32_t* dst = (uint32_t*)out;
-    size_t w = 0;
-    for (size_t i = 0; i < s.len && w < out_units; i++) {
+    for (; i < s.len && w < out_units; i++) {
         const uint32_t cp = sv_at(s, i);
+        if (cp < 0x80) {
+            if (to_upper) dst[w++] = (cp >= 'a' && cp <= 'z') ? cp - 32 : cp;
+            else dst[w++] = (cp >= 'A' && cp <= 'Z') ? cp + 32 : cp;
+            continue;
+        }
         const me_case_pair* hit = case_lookup_simple(simple, simple_count, cp);
         if (hit) {
             dst[w++] = hit->to;
@@ -2298,6 +2347,59 @@ static size_t string_case_map(sview s, void* out, size_t out_unit, size_t out_un
         dst[w++] = cp;
     }
     return w;
+}
+
+static size_t string_case_map_var(const void* src_ptr, size_t src_unit, size_t max_units,
+                                  void* out, size_t out_unit, size_t out_units, bool to_upper) {
+    if (src_unit == 4 && out_unit == 4) {
+        const uint32_t* src = (const uint32_t*)src_ptr;
+        uint32_t* dst = (uint32_t*)out;
+        const size_t n = max_units < out_units ? max_units : out_units;
+        size_t i = 0;
+        if (to_upper) {
+            for (; i < n; i++) {
+                uint32_t cp = src[i];
+                if (cp == 0) return i;
+                if (cp >= 0x80) break;
+                dst[i] = (cp >= 'a' && cp <= 'z') ? cp - 32 : cp;
+            }
+        }
+        else {
+            for (; i < n; i++) {
+                uint32_t cp = src[i];
+                if (cp == 0) return i;
+                if (cp >= 0x80) break;
+                dst[i] = (cp >= 'A' && cp <= 'Z') ? cp + 32 : cp;
+            }
+        }
+        if (i == n) return n;
+        size_t rem_len = string_len_units(src + i, 4, max_units - i);
+        sview rem = {src + i, rem_len, 4};
+        return i + string_case_map(rem, dst + i, 4, out_units - i, to_upper);
+    }
+    if (src_unit == 1 && out_unit == 1) {
+        const uint8_t* src = (const uint8_t*)src_ptr;
+        uint8_t* dst = (uint8_t*)out;
+        const size_t n = max_units < out_units ? max_units : out_units;
+        size_t i = 0;
+        if (to_upper) {
+            for (; i < n; i++) {
+                uint8_t c = src[i];
+                if (c == 0) return i;
+                dst[i] = (uint8_t)((c >= 'a' && c <= 'z') ? c - 32 : c);
+            }
+        }
+        else {
+            for (; i < n; i++) {
+                uint8_t c = src[i];
+                if (c == 0) return i;
+                dst[i] = (uint8_t)((c >= 'A' && c <= 'Z') ? c + 32 : c);
+            }
+        }
+        return i;
+    }
+    sview sv = {src_ptr, string_len_units(src_ptr, src_unit, max_units), src_unit};
+    return string_case_map(sv, out, out_unit, out_units, to_upper);
 }
 
 /* Python str.strip() with no argument: ASCII/Unicode whitespace.  For bytes the
@@ -2346,7 +2448,28 @@ static void string_strip_range(sview s, bool left, bool right, size_t* start, si
 static size_t string_find(sview s, sview needle) {
     if (needle.len == 0) return 0;
     if (needle.len > s.len) return (size_t)-1;
-    for (size_t i = 0; i + needle.len <= s.len; i++) {
+    const size_t limit = s.len - needle.len;
+    if (s.unit == 4 && needle.unit == 4) {
+        const uint32_t* hp = (const uint32_t*)s.p;
+        const uint32_t* np = (const uint32_t*)needle.p;
+        const uint32_t first = np[0];
+        if (needle.len == 1) {
+            for (size_t i = 0; i <= limit; i++) {
+                if (hp[i] == first) return i;
+            }
+            return (size_t)-1;
+        }
+        const uint32_t last = np[needle.len - 1];
+        const size_t nbytes = needle.len * sizeof(uint32_t);
+        for (size_t i = 0; i <= limit; i++) {
+            if (hp[i] == first && hp[i + needle.len - 1] == last &&
+                memcmp(hp + i, np, nbytes) == 0) {
+                return i;
+            }
+        }
+        return (size_t)-1;
+    }
+    for (size_t i = 0; i <= limit; i++) {
         if (sv_equal_range(s, i, needle, needle.len)) return i;
     }
     return (size_t)-1;
@@ -2362,7 +2485,11 @@ static bool string_contains(sview s, sview needle) {
 static bool string_const_number(const me_expr* n, double* out) {
     if (!n) return false;
     if (TYPE_MASK(n->type) == ME_CONSTANT) {
-        *out = n->value;
+        double v = n->value;
+        if (n->flags & ME_EXPR_FLAG_INTEGER_LITERAL) {
+            v = (n->flags & ME_EXPR_FLAG_NEGATIVE_LITERAL ? -1.0 : 1.0) * (double)n->integer_magnitude;
+        }
+        *out = v > 1048576.0 ? 1048576.0 : v < -1048576.0 ? -1048576.0 : v;
         return true;
     }
     if (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == (void*)negate) {
@@ -2950,6 +3077,285 @@ static void string_store(void* slot, size_t unit, size_t slot_units, sview src) 
     memset((char*)slot + n * unit, 0, (slot_units - n) * unit);
 }
 
+static inline const void* string_var_base(const me_expr* n, const void* const* vars) {
+    if (vars && is_synthetic_address(n->bound)) {
+        int index = (int)((const char*)n->bound - synthetic_var_addresses);
+        return vars[index];
+    }
+    return n->bound;
+}
+
+static bool literal_has_no_nul(const me_expr* n) {
+    if (!n || TYPE_MASK(n->type) != ME_STRING_CONSTANT) return false;
+    if (!n->bound && n->str_len > 0) return false;
+    const uint32_t* p = (const uint32_t*)n->bound;
+    for (size_t i = 0; i < n->str_len; i++) {
+        if (p[i] == 0) return false;
+    }
+    return true;
+}
+
+static bool can_stream_string_expr(const me_expr* n, size_t unit, size_t* scratch_needed) {
+    if (!n || !is_string_dtype(n->dtype)) return false;
+    if (TYPE_MASK(n->type) == ME_STRING_CONSTANT) {
+        return n->bound != NULL && literal_has_no_nul(n);
+    }
+    if (TYPE_MASK(n->type) == ME_VARIABLE) {
+        return n->itemsize > 0 && (n->itemsize % unit) == 0;
+    }
+    if (!IS_FUNCTION(n->type) || !is_string_returning_function(n->function)) {
+        return false;
+    }
+    const int arity = ARITY(n->type);
+    const me_expr* left = (const me_expr*)n->parameters[0];
+    const me_expr* right = (arity > 1) ? (const me_expr*)n->parameters[1] : NULL;
+    const me_expr* third = (arity > 2) ? (const me_expr*)n->parameters[2] : NULL;
+
+    if (n->function == (void*)str_concat) {
+        return can_stream_string_expr(left, unit, scratch_needed) &&
+               can_stream_string_expr(right, unit, scratch_needed);
+    }
+    if (n->function == (void*)str_split_part) {
+        double kv;
+        if (!string_const_number(third, &kv)) return false;
+    }
+    else if (n->function == (void*)str_substr) {
+        double sv, wv;
+        if (!string_const_number(right, &sv) || !string_const_number(third, &wv)) return false;
+    }
+
+    for (int a = 0; a < arity; a++) {
+        const me_expr* child = (const me_expr*)n->parameters[a];
+        if (!child || !is_string_producing_node(child)) continue;
+        if (!can_stream_string_expr(child, unit, scratch_needed)) return false;
+        if (IS_FUNCTION(child->type)) {
+            size_t cb = child->itemsize > 0 ? child->itemsize : infer_output_itemsize_u(child, unit);
+            if (cb == 0 || cb > 16384) return false;
+            *scratch_needed += (cb + 7u) & ~(size_t)7u;
+            if (*scratch_needed > 16384) return false;
+        }
+    }
+    return true;
+}
+
+static bool eval_string_node_into(const me_expr* n, const void* const* vars, int idx,
+                                  void* slot, size_t unit, size_t outer_cap, size_t* w_inout,
+                                  void* scratch, size_t scratch_cap, size_t* scratch_used);
+
+static bool eval_string_node_view(const me_expr* n, const void* const* vars, int idx,
+                                  size_t unit, sview* out,
+                                  void* scratch, size_t scratch_cap, size_t* scratch_used) {
+    if (!n || !out) return false;
+    if (TYPE_MASK(n->type) == ME_STRING_CONSTANT) {
+        out->p = n->bound;
+        out->len = n->str_len;
+        out->unit = sizeof(uint32_t);
+        return out->p != NULL;
+    }
+    if (TYPE_MASK(n->type) == ME_VARIABLE && is_string_dtype(n->dtype)) {
+        const void* base = string_var_base(n, vars);
+        if (!base || n->itemsize == 0 || (n->itemsize % unit) != 0) return false;
+        size_t lane = (vars && (n->flags & ME_EXPR_FLAG_UNIFORM_INPUT)) ? 0 : (size_t)idx;
+        out->p = (const char*)base + lane * n->itemsize;
+        out->unit = unit;
+        out->len = string_len_units(out->p, unit, n->itemsize / unit);
+        return true;
+    }
+    if (IS_FUNCTION(n->type) && is_string_returning_function(n->function)) {
+        size_t cb = n->itemsize > 0 ? n->itemsize : infer_output_itemsize_u(n, unit);
+        size_t aligned = (cb + 7u) & ~(size_t)7u;
+        if (cb == 0 || *scratch_used + aligned > scratch_cap) return false;
+        void* buf = (char*)scratch + *scratch_used;
+        *scratch_used += aligned;
+        size_t w = 0;
+        if (!eval_string_node_into(n, vars, idx, buf, unit, cb / unit, &w,
+                                   scratch, scratch_cap, scratch_used)) {
+            return false;
+        }
+        out->p = buf;
+        out->len = w;
+        out->unit = unit;
+        return true;
+    }
+    return false;
+}
+
+static bool eval_string_node_into(const me_expr* n, const void* const* vars, int idx,
+                                  void* slot, size_t unit, size_t outer_cap, size_t* w_inout,
+                                  void* scratch, size_t scratch_cap, size_t* scratch_used) {
+    size_t own_bytes = n->itemsize > 0 ? n->itemsize : infer_output_itemsize_u(n, unit);
+    size_t own_units = own_bytes / unit;
+    size_t cap = (*w_inout + own_units < outer_cap) ? (*w_inout + own_units) : outer_cap;
+
+    if (TYPE_MASK(n->type) == ME_STRING_CONSTANT) {
+        size_t avail = cap - *w_inout;
+        size_t take = n->str_len < avail ? n->str_len : avail;
+        sview sv = {n->bound, n->str_len, sizeof(uint32_t)};
+        sv_copy(slot, unit, *w_inout, sv, take);
+        *w_inout += take;
+        return true;
+    }
+    if (TYPE_MASK(n->type) == ME_VARIABLE) {
+        const void* base = string_var_base(n, vars);
+        if (!base) return false;
+        size_t lane = (vars && (n->flags & ME_EXPR_FLAG_UNIFORM_INPUT)) ? 0 : (size_t)idx;
+        const void* src_p = (const char*)base + lane * n->itemsize;
+        size_t max_units = n->itemsize / unit;
+        size_t avail = cap - *w_inout;
+        size_t limit = max_units < avail ? max_units : avail;
+        if (unit == 4) {
+            const uint32_t* src = (const uint32_t*)src_p;
+            uint32_t* dst = (uint32_t*)slot + *w_inout;
+            size_t k = 0;
+            while (k < limit && src[k] != 0) {
+                dst[k] = src[k];
+                k++;
+            }
+            *w_inout += k;
+        }
+        else {
+            const uint8_t* src = (const uint8_t*)src_p;
+            uint8_t* dst = (uint8_t*)slot + *w_inout;
+            size_t k = 0;
+            while (k < limit && src[k] != 0) {
+                dst[k] = src[k];
+                k++;
+            }
+            *w_inout += k;
+        }
+        return true;
+    }
+
+    const int arity = ARITY(n->type);
+    const me_expr* left = (const me_expr*)n->parameters[0];
+    const me_expr* right = (arity > 1) ? (const me_expr*)n->parameters[1] : NULL;
+    const me_expr* third = (arity > 2) ? (const me_expr*)n->parameters[2] : NULL;
+
+    if (n->function == (void*)str_concat) {
+        return eval_string_node_into(left, vars, idx, slot, unit, cap, w_inout,
+                                     scratch, scratch_cap, scratch_used) &&
+               eval_string_node_into(right, vars, idx, slot, unit, cap, w_inout,
+                                     scratch, scratch_cap, scratch_used);
+    }
+
+    const size_t avail = cap - *w_inout;
+    void* dst_p = (char*)slot + *w_inout * unit;
+
+    if (n->function == (void*)str_lower || n->function == (void*)str_upper) {
+        const bool to_upper = (n->function == (void*)str_upper);
+        if (TYPE_MASK(left->type) == ME_VARIABLE) {
+            const void* base = string_var_base(left, vars);
+            if (!base) return false;
+            size_t lane = (vars && (left->flags & ME_EXPR_FLAG_UNIFORM_INPUT)) ? 0 : (size_t)idx;
+            const void* src_p = (const char*)base + lane * left->itemsize;
+            *w_inout += string_case_map_var(src_p, unit, left->itemsize / unit,
+                                            dst_p, unit, avail, to_upper);
+            return true;
+        }
+        sview lv;
+        if (!eval_string_node_view(left, vars, idx, unit, &lv, scratch, scratch_cap, scratch_used)) {
+            return false;
+        }
+        *w_inout += string_case_map(lv, dst_p, unit, avail, to_upper);
+        return true;
+    }
+
+    sview lv = {NULL, 0, unit};
+    sview rv = {NULL, 0, unit};
+    if (!eval_string_node_view(left, vars, idx, unit, &lv, scratch, scratch_cap, scratch_used)) {
+        return false;
+    }
+    if (right && is_string_producing_node(right) &&
+        !eval_string_node_view(right, vars, idx, unit, &rv, scratch, scratch_cap, scratch_used)) {
+        return false;
+    }
+
+    size_t w = 0;
+    if (n->function == (void*)str_strip || n->function == (void*)str_lstrip ||
+        n->function == (void*)str_rstrip) {
+        size_t a, b;
+        string_strip_range(lv,
+                           n->function != (void*)str_rstrip,
+                           n->function != (void*)str_lstrip, &a, &b);
+        w = b - a;
+        if (w > avail) w = avail;
+        sv_copy(slot, unit, *w_inout, sv_slice(lv, a, w), w);
+    }
+    else if (n->function == (void*)str_removeprefix) {
+        size_t off = string_starts_with(lv, rv) ? rv.len : 0;
+        w = lv.len - off;
+        if (w > avail) w = avail;
+        sv_copy(slot, unit, *w_inout, sv_slice(lv, off, w), w);
+    }
+    else if (n->function == (void*)str_removesuffix) {
+        w = string_ends_with(lv, rv) ? lv.len - rv.len : lv.len;
+        if (w > avail) w = avail;
+        sv_copy(slot, unit, *w_inout, lv, w);
+    }
+    else if (n->function == (void*)str_split_part) {
+        double kv;
+        if (!string_const_number(third, &kv)) return false;
+        const long k = (long)kv;
+        const size_t at = string_find(lv, rv);
+        if (k <= 0) {
+            w = (at == (size_t)-1) ? lv.len : at;
+            if (w > avail) w = avail;
+            sv_copy(slot, unit, *w_inout, lv, w);
+        }
+        else if (at == (size_t)-1) {
+            w = 0;
+        }
+        else {
+            const size_t off = at + rv.len;
+            w = lv.len - off;
+            if (w > avail) w = avail;
+            sv_copy(slot, unit, *w_inout, sv_slice(lv, off, w), w);
+        }
+    }
+    else if (n->function == (void*)str_replace) {
+        if (vars && rv.len == 0) return false;
+        sview nv = {NULL, 0, unit};
+        if (!third || !eval_string_node_view(third, vars, idx, unit, &nv,
+                                             scratch, scratch_cap, scratch_used)) {
+            return false;
+        }
+        size_t pos = 0;
+        while (pos < lv.len && w < avail) {
+            if (rv.len > 0 && pos + rv.len <= lv.len && sv_equal_range(lv, pos, rv, rv.len)) {
+                const size_t take = (nv.len > avail - w) ? avail - w : nv.len;
+                sv_copy(slot, unit, *w_inout + w, nv, take);
+                w += take;
+                pos += rv.len;
+            }
+            else {
+                su_put(slot, unit, *w_inout + w, sv_at(lv, pos++));
+                w++;
+            }
+        }
+    }
+    else if (n->function == (void*)str_substr) {
+        double sv_start, wv;
+        if (!string_const_number(right, &sv_start) || !string_const_number(third, &wv)) return false;
+        long start = (long)sv_start;
+        long want = (long)wv;
+        if (start < 0) start += (long)lv.len;
+        if (start < 0) start = 0;
+        if (want < 0) want = 0;
+        if ((size_t)start < lv.len) {
+            w = lv.len - (size_t)start;
+            if (w > (size_t)want) w = (size_t)want;
+            if (w > avail) w = avail;
+            sv_copy(slot, unit, *w_inout, sv_slice(lv, (size_t)start, w), w);
+        }
+    }
+    else {
+        return false;
+    }
+
+    *w_inout += w;
+    return true;
+}
+
 /* Evaluate a string-valued node into its own output buffer, bottom-up.
  * Children get a scratch buffer allocated here and freed by me_free() with the
  * rest of the tree, mirroring how the numeric evaluator manages intermediates. */
@@ -2957,6 +3363,23 @@ static bool eval_string_expr(const me_expr* n) {
     if (!n || !n->output) return false;
     const size_t unit = dtype_code_unit(n->dtype);
     if (n->itemsize == 0 || (n->itemsize % unit) != 0) return false;
+
+    size_t scratch_needed = 0;
+    if (can_stream_string_expr(n, unit, &scratch_needed)) {
+        const size_t slot_units = n->itemsize / unit;
+        uint64_t scratch_buf[2048];
+        for (int i = 0; i < n->nitems; i++) {
+            void* slot = (char*)n->output + (size_t)i * n->itemsize;
+            size_t w = 0;
+            size_t scratch_used = 0;
+            if (!eval_string_node_into(n, NULL, i, slot, unit, slot_units, &w,
+                                       scratch_buf, sizeof(scratch_buf), &scratch_used)) {
+                return false;
+            }
+            memset((char*)slot + w * unit, 0, (slot_units - w) * unit);
+        }
+        return true;
+    }
 
     /* A bare variable or literal as the whole expression: copy it out. */
     if (!IS_FUNCTION(n->type)) {
@@ -3172,6 +3595,191 @@ bool me_menudet_string_validate(me_expr *n) {
     return n->itemsize > 0 && n->itemsize <= 1024 * 1024;
 }
 
+static bool eval_string_predicate_masked(const me_expr* n, const void* const* vars,
+                                         int nitems, const uint8_t* mask, bool* out) {
+    if (!n || !out) return false;
+    if (!IS_FUNCTION(n->type) || ARITY(n->type) != 2) return false;
+
+    const me_expr* left = (const me_expr*)n->parameters[0];
+    const me_expr* right = (const me_expr*)n->parameters[1];
+    if (!left || !right || !is_string_dtype(left->dtype) || !is_string_dtype(right->dtype)) {
+        return false;
+    }
+
+    const bool is_cmp = is_comparison_node(n);
+    const bool is_func = is_string_function(n->function);
+    if (!is_cmp && !is_func) return false;
+
+    const size_t unit = string_expr_unit(n);
+    const bool left_var = (TYPE_MASK(left->type) == ME_VARIABLE);
+    const bool right_const = (TYPE_MASK(right->type) == ME_STRING_CONSTANT);
+
+    if (unit == 4 && left_var && right_const && literal_has_no_nul(right)) {
+        const void* lbase = string_var_base(left, vars);
+        if (!lbase || left->itemsize == 0 || (left->itemsize % 4) != 0) return false;
+        const size_t lstride = left->itemsize;
+        const size_t max_units = lstride / 4;
+        const bool l_uniform = vars && ((left->flags & ME_EXPR_FLAG_UNIFORM_INPUT) != 0);
+        const uint32_t* np = (const uint32_t*)right->bound;
+        const size_t nlen = right->str_len;
+
+        if (n->function == (void*)cmp_eq || n->function == (void*)cmp_ne) {
+            const bool is_ne = (n->function == (void*)cmp_ne);
+            if (nlen > max_units) {
+                for (int i = 0; i < nitems; i++) {
+                    if (mask && !mask[i]) continue;
+                    out[i] = is_ne;
+                }
+                return true;
+            }
+            if (nlen == 0) {
+                for (int i = 0; i < nitems; i++) {
+                    if (mask && !mask[i]) continue;
+                    size_t lane = l_uniform ? 0 : (size_t)i;
+                    const uint32_t* hp = (const uint32_t*)((const char*)lbase + lane * lstride);
+                    bool eq = (hp[0] == 0);
+                    out[i] = is_ne ? !eq : eq;
+                }
+                return true;
+            }
+            const bool need_term = (nlen < max_units);
+            const uint32_t first = np[0];
+            const uint32_t last = np[nlen - 1];
+            const size_t mid_bytes = (nlen > 2) ? (nlen - 2) * sizeof(uint32_t) : 0;
+            for (int i = 0; i < nitems; i++) {
+                if (mask && !mask[i]) continue;
+                size_t lane = l_uniform ? 0 : (size_t)i;
+                const uint32_t* hp = (const uint32_t*)((const char*)lbase + lane * lstride);
+                bool eq = (!need_term || hp[nlen] == 0) &&
+                          hp[0] == first && hp[nlen - 1] == last &&
+                          (mid_bytes == 0 || memcmp(hp + 1, np + 1, mid_bytes) == 0);
+                out[i] = is_ne ? !eq : eq;
+            }
+            return true;
+        }
+        if (n->function == (void*)str_startswith) {
+            if (nlen == 0) {
+                for (int i = 0; i < nitems; i++) {
+                    if (mask && !mask[i]) continue;
+                    out[i] = true;
+                }
+                return true;
+            }
+            if (nlen > max_units) {
+                for (int i = 0; i < nitems; i++) {
+                    if (mask && !mask[i]) continue;
+                    out[i] = false;
+                }
+                return true;
+            }
+            const uint32_t first = np[0];
+            const uint32_t last = np[nlen - 1];
+            const size_t mid_bytes = (nlen > 2) ? (nlen - 2) * sizeof(uint32_t) : 0;
+            for (int i = 0; i < nitems; i++) {
+                if (mask && !mask[i]) continue;
+                size_t lane = l_uniform ? 0 : (size_t)i;
+                const uint32_t* hp = (const uint32_t*)((const char*)lbase + lane * lstride);
+                out[i] = (hp[0] == first && hp[nlen - 1] == last &&
+                          (mid_bytes == 0 || memcmp(hp + 1, np + 1, mid_bytes) == 0));
+            }
+            return true;
+        }
+        if (n->function == (void*)str_contains) {
+            if (nlen == 0) {
+                for (int i = 0; i < nitems; i++) {
+                    if (mask && !mask[i]) continue;
+                    out[i] = true;
+                }
+                return true;
+            }
+            if (nlen > max_units) {
+                for (int i = 0; i < nitems; i++) {
+                    if (mask && !mask[i]) continue;
+                    out[i] = false;
+                }
+                return true;
+            }
+            const uint32_t first = np[0];
+            if (nlen == 1) {
+                for (int i = 0; i < nitems; i++) {
+                    if (mask && !mask[i]) continue;
+                    size_t lane = l_uniform ? 0 : (size_t)i;
+                    const uint32_t* hp = (const uint32_t*)((const char*)lbase + lane * lstride);
+                    bool found = false;
+                    for (size_t k = 0; k < max_units; k++) {
+                        uint32_t c = hp[k];
+                        if (c == 0) break;
+                        if (c == first) { found = true; break; }
+                    }
+                    out[i] = found;
+                }
+                return true;
+            }
+            const size_t limit = max_units - nlen;
+            const uint32_t last = np[nlen - 1];
+            const size_t mid_bytes = (nlen - 2) * sizeof(uint32_t);
+            for (int i = 0; i < nitems; i++) {
+                if (mask && !mask[i]) continue;
+                size_t lane = l_uniform ? 0 : (size_t)i;
+                const uint32_t* hp = (const uint32_t*)((const char*)lbase + lane * lstride);
+                bool found = false;
+                for (size_t k = 0; k <= limit; k++) {
+                    uint32_t c = hp[k];
+                    if (c == 0) break;
+                    if (c == first && hp[k + nlen - 1] == last &&
+                        (mid_bytes == 0 || memcmp(hp + k + 1, np + 1, mid_bytes) == 0)) {
+                        found = true;
+                        break;
+                    }
+                }
+                out[i] = found;
+            }
+            return true;
+        }
+    }
+
+    size_t scratch_needed = 0;
+    if (!can_stream_string_expr(left, unit, &scratch_needed)) return false;
+    if (!can_stream_string_expr(right, unit, &scratch_needed)) return false;
+    if (IS_FUNCTION(left->type)) {
+        size_t cb = left->itemsize > 0 ? left->itemsize : infer_output_itemsize_u(left, unit);
+        if (cb == 0 || cb > 16384) return false;
+        scratch_needed += (cb + 7u) & ~(size_t)7u;
+    }
+    if (IS_FUNCTION(right->type)) {
+        size_t cb = right->itemsize > 0 ? right->itemsize : infer_output_itemsize_u(right, unit);
+        if (cb == 0 || cb > 16384) return false;
+        scratch_needed += (cb + 7u) & ~(size_t)7u;
+    }
+    if (scratch_needed > 16384) return false;
+
+    uint64_t scratch_buf[2048];
+    for (int i = 0; i < nitems; i++) {
+        if (mask && !mask[i]) continue;
+        size_t scratch_used = 0;
+        sview lv = {NULL, 0, unit};
+        sview rv = {NULL, 0, unit};
+        if (!eval_string_node_view(left, vars, i, unit, &lv, scratch_buf, sizeof(scratch_buf), &scratch_used) ||
+            !eval_string_node_view(right, vars, i, unit, &rv, scratch_buf, sizeof(scratch_buf), &scratch_used)) {
+            return false;
+        }
+        bool result = false;
+        if (is_cmp) {
+            if (n->function == (void*)cmp_eq) result = string_equals(lv, rv);
+            else if (n->function == (void*)cmp_ne) result = !string_equals(lv, rv);
+            else return false;
+        }
+        else {
+            if (n->function == (void*)str_startswith) result = string_starts_with(lv, rv);
+            else if (n->function == (void*)str_endswith) result = string_ends_with(lv, rv);
+            else if (n->function == (void*)str_contains) result = string_contains(lv, rv);
+            else return false;
+        }
+        out[i] = result;
+    }
+    return true;
+}
+
 static bool eval_string_predicate(const me_expr* n, bool* out, int nitems) {
     if (!n || !out) return false;
     if (!IS_FUNCTION(n->type) || ARITY(n->type) != 2) return false;
@@ -3180,6 +3788,9 @@ static bool eval_string_predicate(const me_expr* n, bool* out, int nitems) {
     const me_expr* right = (const me_expr*)n->parameters[1];
     if (!is_string_node(left) || !is_string_node(right)) {
         return false;
+    }
+    if (eval_string_predicate_masked(n, NULL, nitems, NULL, out)) {
+        return true;
     }
 
     bool is_cmp = is_comparison_node(n);
@@ -3244,6 +3855,166 @@ static bool eval_string_predicate(const me_expr* n, bool* out, int nitems) {
     }
 
     return true;
+}
+
+static int check_menudet_string_tree_vars(const me_expr* n, const void* const* vars, int nvars,
+                                          const uint8_t* const* initialized,
+                                          int nitems, const uint8_t* mask) {
+    if (!n) return ME_EVAL_ERR_INVALID_ARG;
+    if (TYPE_MASK(n->type) == ME_VARIABLE) {
+        if (!is_synthetic_address(n->bound)) return ME_EVAL_ERR_INVALID_ARG;
+        int index = (int)((const char*)n->bound - synthetic_var_addresses);
+        if (index < 0 || index >= nvars || !vars[index]) return ME_EVAL_ERR_VAR_MISMATCH;
+        if (initialized && initialized[index]) {
+            const uint8_t* init = initialized[index];
+            if (n->flags & ME_EXPR_FLAG_UNIFORM_INPUT) {
+                if (!init[0]) return 1;
+            }
+            else if (!mask) {
+                for (int i = 0; i < nitems; i++) {
+                    if (!init[i]) return 1;
+                }
+            }
+            else {
+                for (int i = 0; i < nitems; i++) {
+                    if (mask[i] && !init[i]) return 1;
+                }
+            }
+        }
+        return ME_EVAL_SUCCESS;
+    }
+    if (IS_FUNCTION(n->type)) {
+        const int arity = ARITY(n->type);
+        for (int a = 0; a < arity; a++) {
+            const me_expr* child = (const me_expr*)n->parameters[a];
+            if (!child) continue;
+            if (!is_string_dtype(child->dtype) &&
+                !(child->dtype == ME_BOOL && IS_FUNCTION(child->type)) &&
+                TYPE_MASK(child->type) != ME_CONSTANT) {
+                return 1;
+            }
+            int rc = check_menudet_string_tree_vars(child, vars, nvars, initialized, nitems, mask);
+            if (rc != ME_EVAL_SUCCESS) return rc;
+        }
+    }
+    return ME_EVAL_SUCCESS;
+}
+
+static bool eval_bool_string_tree_masked(const me_expr* n, const void* const* vars,
+                                         int nitems, const uint8_t* mask, bool* out) {
+    if (!n || !out || !IS_FUNCTION(n->type)) return false;
+    const int arity = ARITY(n->type);
+
+    if (arity == 2 && (is_comparison_node(n) || is_string_function(n->function))) {
+        const me_expr* left = (const me_expr*)n->parameters[0];
+        const me_expr* right = (const me_expr*)n->parameters[1];
+        if (!left || !right || !is_string_dtype(left->dtype) || !is_string_dtype(right->dtype)) {
+            return false;
+        }
+        return eval_string_predicate_masked(n, vars, nitems, mask, out);
+    }
+
+    if (is_logical_function(n->function)) {
+        if (arity == 1 && n->function == (void*)logical_not) {
+            const me_expr* arg = (const me_expr*)n->parameters[0];
+            if (!eval_bool_string_tree_masked(arg, vars, nitems, mask, out)) return false;
+            if (!mask) {
+                vec_not_bool(out, out, nitems);
+            }
+            else {
+                for (int i = 0; i < nitems; i++) {
+                    if (mask[i]) out[i] = !out[i];
+                }
+            }
+            return true;
+        }
+        if (arity == 2) {
+            const me_expr* left = (const me_expr*)n->parameters[0];
+            const me_expr* right = (const me_expr*)n->parameters[1];
+            if (!left || !right) return false;
+            if (n->function == (void*)logical_and && !mask &&
+                IS_FUNCTION(right->type) && ARITY(right->type) == 2 &&
+                (is_comparison_node(right) || is_string_function(right->function))) {
+                if (!eval_bool_string_tree_masked(left, vars, nitems, NULL, out)) return false;
+                return eval_bool_string_tree_masked(right, vars, nitems, (const uint8_t*)out, out);
+            }
+            bool rstack[4096];
+            bool* rbuf = (nitems <= 4096) ? rstack : (bool*)malloc((size_t)nitems * sizeof(bool));
+            if (!rbuf) return false;
+            bool ok = eval_bool_string_tree_masked(left, vars, nitems, mask, out) &&
+                      eval_bool_string_tree_masked(right, vars, nitems, mask, rbuf);
+            if (ok) {
+                if (!mask) {
+                    if (n->function == (void*)logical_and) vec_and_bool(out, rbuf, out, nitems);
+                    else if (n->function == (void*)logical_or) vec_or_bool(out, rbuf, out, nitems);
+                    else if (n->function == (void*)logical_xor) vec_xor_bool(out, rbuf, out, nitems);
+                    else ok = false;
+                }
+                else {
+                    for (int i = 0; i < nitems; i++) {
+                        if (!mask[i]) continue;
+                        if (n->function == (void*)logical_and) out[i] = out[i] && rbuf[i];
+                        else if (n->function == (void*)logical_or) out[i] = out[i] || rbuf[i];
+                        else if (n->function == (void*)logical_xor) out[i] = (out[i] != rbuf[i]);
+                        else { ok = false; break; }
+                    }
+                }
+            }
+            if (rbuf != rstack) free(rbuf);
+            return ok;
+        }
+    }
+    return false;
+}
+
+int me_menudet_eval_string_expr_masked(const me_expr *expr, const void *const *vars, int nvars,
+                                       const uint8_t *const *initialized,
+                                       int nitems, const uint8_t *mask, size_t stride, void *out) {
+    if (!expr || !out || nitems < 0) return 1;
+    if (nitems == 0) return ME_EVAL_SUCCESS;
+
+    bool has_active = !mask;
+    if (mask) {
+        for (int i = 0; i < nitems; i++) {
+            if (mask[i]) { has_active = true; break; }
+        }
+    }
+    if (!has_active) return ME_EVAL_SUCCESS;
+
+    if (is_string_dtype(expr->dtype)) {
+        if (stride < expr->itemsize) return ME_EVAL_ERR_INVALID_ARG;
+        const size_t unit = dtype_code_unit(expr->dtype);
+        if (expr->itemsize == 0 || (expr->itemsize % unit) != 0) return 1;
+        size_t scratch_needed = 0;
+        if (!can_stream_string_expr(expr, unit, &scratch_needed)) return 1;
+        int vrc = check_menudet_string_tree_vars(expr, vars, nvars, initialized, nitems, mask);
+        if (vrc != ME_EVAL_SUCCESS) return vrc;
+
+        const size_t slot_units = expr->itemsize / unit;
+        uint64_t scratch_buf[2048];
+        for (int i = 0; i < nitems; i++) {
+            if (mask && !mask[i]) continue;
+            void* slot = (unsigned char*)out + (size_t)i * stride;
+            size_t w = 0;
+            size_t scratch_used = 0;
+            if (!eval_string_node_into(expr, vars, i, slot, unit, slot_units, &w,
+                                       scratch_buf, sizeof(scratch_buf), &scratch_used)) {
+                return ME_EVAL_ERR_INVALID_ARG;
+            }
+            memset((char*)slot + w * unit, 0, stride - w * unit);
+        }
+        return ME_EVAL_SUCCESS;
+    }
+
+    if (expr->dtype == ME_BOOL && stride == sizeof(bool) && IS_FUNCTION(expr->type)) {
+        int vrc = check_menudet_string_tree_vars(expr, vars, nvars, initialized, nitems, mask);
+        if (vrc != ME_EVAL_SUCCESS) return vrc;
+        if (eval_bool_string_tree_masked(expr, vars, nitems, mask, (bool*)out)) {
+            return ME_EVAL_SUCCESS;
+        }
+    }
+
+    return 1;
 }
 
 bool me_menudet_string_execute(const me_expr *n, const void *const *values, void *output) {
@@ -8773,6 +9544,25 @@ int me_eval(const me_expr* expr, const void** vars_block,
                     size_t tmp_size = var_sizes[i];
                     var_sizes[i] = var_sizes[j];
                     var_sizes[j] = tmp_size;
+                }
+            }
+        }
+        if ((is_string_dtype(expr->dtype) || expr->dtype == ME_BOOL) && !contains_reduction(expr)) {
+            const void* mapped_vars[ME_MAX_VARS] = {0};
+            int max_synth = -1;
+            bool valid_synth = true;
+            for (int i = 0; i < actual_var_count; i++) {
+                int sidx = (int)((const char*)original_var_pointers[i] - synthetic_var_addresses);
+                if (sidx < 0 || sidx >= ME_MAX_VARS) { valid_synth = false; break; }
+                mapped_vars[sidx] = vars_block[i];
+                if (sidx > max_synth) max_synth = sidx;
+            }
+            if (valid_synth) {
+                int s_rc = me_menudet_eval_string_expr_masked(
+                    expr, mapped_vars, max_synth + 1, NULL,
+                    block_nitems, NULL, me_get_itemsize(expr), output_block);
+                if (s_rc == ME_EVAL_SUCCESS) {
+                    return ME_EVAL_SUCCESS;
                 }
             }
         }
