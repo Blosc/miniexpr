@@ -30,7 +30,7 @@
 #endif
 
 #ifndef ME_DSL_JIT_CGEN_VERSION
-#define ME_DSL_JIT_CGEN_VERSION 25
+#define ME_DSL_JIT_CGEN_VERSION 26
 #endif
 
 #ifndef ME_DSL_JIT_BRIDGE_ABI_VERSION

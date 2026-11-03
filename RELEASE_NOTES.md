@@ -4,6 +4,12 @@ Release notes for miniexpr
 Changes from 0.2.0 to 0.2.1
 ===========================
 
+* `nextafter()` of float32 operands steps by a float32 ulp, as `np.nextafter`
+  does. With a constant operand (`nextafter(a, 2)`) the interpreter stepped by a
+  float64 ulp, which rounding back to float32 undid, so the input came back
+  unchanged; DSL JIT kernels did the same for every float32 `nextafter()`, which
+  now runs on the interpreter. The JIT codegen cache version is bumped.
+
 * Menudet JIT emits same-width typed integer bitwise operations directly instead
   of calling scalar interpreter helpers. Scalar integer/Boolean local declarations no
   longer use volatile rounding barriers, reducing stack traffic in hash kernels.

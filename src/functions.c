@@ -6649,6 +6649,13 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                 } else if (func == (me_fun2)nextafter) { \
                     if (ldata && rdata && HAS_VEC_MATH) { \
                         VEC_NEXTAFTER(ldata, rdata, output, n->nitems); \
+                    } else if (ME_EVAL_DTYPE_##SUFFIX == ME_FLOAT32) { \
+                        /* The generic loop steps by a float64 ulp, which the cast to float32 undoes. */ \
+                        for (i = 0; i < n->nitems; i++) { \
+                            const float a = ldata ? (float)FROM_TYPE_##SUFFIX(ldata[i]) : (float)left->value; \
+                            const float b = rdata ? (float)FROM_TYPE_##SUFFIX(rdata[i]) : (float)right->value; \
+                            output[i] = TO_TYPE_##SUFFIX(nextafterf(a, b)); \
+                        } \
                     } else { \
                         goto general_case_binary_##SUFFIX; \
                     } \
