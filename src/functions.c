@@ -7513,6 +7513,10 @@ static void save_variable_bindings(const me_expr* node,
             if (node->flags & (ME_EXPR_FLAG_DSL_VALUE_CAST | ME_EXPR_FLAG_DSL_STRICT_F32_MATH)) {
                 break;
             }
+            /* A reduction evaluates its argument in its own dtype. */
+            if (is_reduction_node(node)) {
+                break;
+            }
             if (IS_FUNCTION(node->type) && ARITY(node->type) == 1 && node->function == NULL) {
                 break;
             }
@@ -7585,6 +7589,10 @@ static void promote_variables_in_tree(me_expr* n, me_dtype target_type,
                 (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == NULL)) {
                 break;
             }
+            /* A reduction evaluates its argument in its own dtype. */
+            if (is_reduction_node(n)) {
+                break;
+            }
             const int arity = ARITY(n->type);
             for (int i = 0; i < arity; i++) {
                 promote_variables_in_tree((me_expr*)n->parameters[i], target_type,
@@ -7631,6 +7639,10 @@ static void restore_variables_in_tree(me_expr* n, const void** original_bounds,
                 (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == NULL)) {
                 break;
             }
+            /* A reduction evaluates its argument in its own dtype. */
+            if (is_reduction_node(n)) {
+                break;
+            }
             const int arity = ARITY(n->type);
             for (int i = 0; i < arity; i++) {
                 restore_variables_in_tree((me_expr*)n->parameters[i], original_bounds, original_types, restore_idx);
@@ -7671,6 +7683,10 @@ static bool all_variables_match_type(const me_expr* n, me_dtype target_type) {
             // Skip conversion nodes - they handle their own type conversion
             if ((n->flags & (ME_EXPR_FLAG_DSL_VALUE_CAST | ME_EXPR_FLAG_DSL_STRICT_F32_MATH)) ||
                 (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == NULL)) {
+                return true;
+            }
+            /* A reduction evaluates its argument in its own dtype. */
+            if (is_reduction_node(n)) {
                 return true;
             }
             const int arity = ARITY(n->type);

@@ -597,10 +597,39 @@ static void test_reduction_in_expression(void) {
     printf("  %s\n", failures == before ? "ok" : "FAILED");
 }
 
+/* The variables of a reduction's argument keep their dtype when the
+ * reduction meets a wider operand: sum(a * a) + b with int8 a and int64 b
+ * squares in int8 (wrapping, as NumPy does), not in int64. */
+static void test_reduction_argument_dtype(void) {
+    printf("\n=== reduction arguments keep their dtype inside wider expressions ===\n");
+    const int8_t a[3] = {100, 1, 2};
+    const int64_t b[3] = {0, 0, 0};
+    int64_t out[3];
+    const void *ptrs[2] = {a, b};
+    me_variable vars[] = {{"a", ME_INT8}, {"b", ME_INT64}};
+    me_expr *expr = NULL;
+    int err = 0;
+    const int before = failures;
+    checks++;
+    if (me_compile("sum(a * a) + b", vars, 2, ME_INT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        printf("  FAILED compile error at %d\n", err);
+        failures++;
+        return;
+    }
+    /* 100 * 100 is 16 in int8; 16 + 1 + 4 = 21 */
+    if (me_eval(expr, ptrs, 2, out, 3, NULL) != ME_EVAL_SUCCESS || out[0] != 21 || out[2] != 21) {
+        printf("  FAILED got %lld, expected 21\n", (long long)out[0]);
+        failures++;
+    }
+    me_free(expr);
+    printf("  %s\n", failures == before ? "ok" : "FAILED");
+}
+
 int main(void) {
     test_expression_matrix();
     test_constant_argument();
     test_reduction_in_expression();
+    test_reduction_argument_dtype();
     printf("\n%d of %d checks failed\n", failures, checks);
     return failures ? 1 : 0;
 }
