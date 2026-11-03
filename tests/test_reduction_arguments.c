@@ -1,8 +1,9 @@
 /*
  * Reductions (sum, prod, mean, min, max, any, all) over every numeric dtype and
  * several kinds of argument: an argument with a constant subexpression
- * (sum(x * -2), max(x + sin(1.0)), sum(where(x > 0, -1, 1)), sum(x > -2)) and a
- * constant argument (sum(-2)).
+ * (sum(x * -2), max(x + sin(1.0)), sum(where(x > 0, -1, 1))), comparisons
+ * including those of two bools (sum(p == q)), and a constant argument
+ * (sum(-2)).
  *
  * Every case is evaluated three ways: me_eval over the whole array, and
  * me_eval_nd block by block (as python-blosc2 drives reductions) for a shape
@@ -130,8 +131,15 @@ static double f_mul_sqrt4(double x, double y) { (void)y; return x * sqrt(4.0); }
 static double f_add_sin1(double x, double y) { (void)y; return x + sin(1.0); }
 static double f_mul_abs3(double x, double y) { (void)y; return x * 3.0; }
 static double f_gt_m2(double x, double y) { (void)y; return x > -2.0; }
+static double f_gt_1(double x, double y) { (void)y; return x > 1.0; }
 static double f_where_m1(double x, double y) { (void)y; return x > 0.0 ? -1.0 : 1.0; }
 static double f_where_xy(double x, double y) { return x > 0.0 ? x : y; }
+static double f_eq(double x, double y) { return x == y; }
+static double f_ne(double x, double y) { return x != y; }
+static double f_lt(double x, double y) { return x < y; }
+static double f_le(double x, double y) { return x <= y; }
+static double f_gt(double x, double y) { return x > y; }
+static double f_ge(double x, double y) { return x >= y; }
 
 #define ANY_DTYPE 0
 #define SIGNED_OR_FLOAT 1 /* negative literals: keep unsigned/bool typing out of it */
@@ -163,6 +171,15 @@ static const test_case cases[] = {
     {"x > -2", f_gt_m2, RES_BOOL, SIGNED_OR_FLOAT, 1},
     {"where(x > 0, -1, 1)", f_where_m1, RES_INT, SIGNED_OR_FLOAT, 1},
     {"where(x > 0, x, y)", f_where_xy, RES_SAME, ANY_DTYPE, 2},
+    /* Comparisons, including of two bool operands (and of a bool with a
+     * literal, which a bool-typed reduction types as bool). */
+    {"x > 1", f_gt_1, RES_BOOL, ANY_DTYPE, 1},
+    {"x == y", f_eq, RES_BOOL, ANY_DTYPE, 2},
+    {"x != y", f_ne, RES_BOOL, ANY_DTYPE, 2},
+    {"x < y", f_lt, RES_BOOL, ANY_DTYPE, 2},
+    {"x <= y", f_le, RES_BOOL, ANY_DTYPE, 2},
+    {"x > y", f_gt, RES_BOOL, ANY_DTYPE, 2},
+    {"x >= y", f_ge, RES_BOOL, ANY_DTYPE, 2},
 };
 #define N_CASES ((int)(sizeof(cases) / sizeof(cases[0])))
 

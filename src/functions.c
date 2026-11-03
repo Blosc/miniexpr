@@ -7809,8 +7809,14 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
     me_dtype arg_type = arg->dtype;
     if (arg->type != ME_CONSTANT && arg->type != ME_VARIABLE) {
         arg_type = infer_output_type(arg);
-        const bool is_comparison_bool = (arg_type == ME_BOOL) && is_comparison_node(arg);
-        me_dtype eval_type = is_comparison_bool ? infer_result_type(arg) : arg_type;
+        /* A comparison is computed in its operands' type, then converted to
+         * bool. Operands that are already bool (p == q for bool p, q) need no
+         * conversion; they take the direct path below. */
+        me_dtype eval_type = arg_type;
+        if (arg_type == ME_BOOL && is_comparison_node(arg)) {
+            eval_type = infer_result_type(arg);
+        }
+        const bool is_comparison_bool = eval_type != arg_type;
         if (nitems > 0) {
             if (is_comparison_bool) {
                 void* eval_output = malloc((size_t)nitems * dtype_size(eval_type));
