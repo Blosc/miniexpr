@@ -10,6 +10,7 @@
 
 static void schema1_fixture(void);
 static void schema1_strings_nd_fixture(void);
+static void schema1_string_arena_fixture(void);
 
 static char *read_fixture(void) {
     FILE *file = fopen(MINIEXPR_ARTIFACT_FIXTURE, "rb");
@@ -234,6 +235,7 @@ int main(void) {
     inferred_output_fixture();
     schema1_fixture();
     schema1_strings_nd_fixture();
+    schema1_string_arena_fixture();
     char *json = read_fixture();
     me_artifact *artifact = load(json);
     assert(me_artifact_ninputs(artifact) == 1);
@@ -443,6 +445,45 @@ static void schema1_fixture(void) {
     reject(unsigned_json, "18446744073709551615", "18446744073709551616", ME_ARTIFACT_ERR_FORMAT);
     me_artifact_free(artifact);
     free(unsigned_json);
+}
+
+static void schema1_string_arena_fixture(void) {
+    /* Cross multiple temporary slabs, keep nested branch/reduction contexts
+     * alive, and exercise UTF-32 alignment and zero padding on reused calls. */
+    const char *json = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
+        "\"requires\":[\"numeric\",\"fixed-strings\",\"block-reductions\"],"
+        "\"source\":\"def k(x):\\n    return where(contains(x, 'a'), where(block_sum(int64(contains(x, 'b'))) > 0, upper(x) + lower(x), x + x), lower(x) + upper(x))\\n\","
+        "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"unicode32\",\"itemsize\":16}],\"constants\":[],"
+        "\"output\":{\"dtype\":\"unicode32\",\"itemsize\":32,\"contract\":\"elementwise\"},"
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":0}}";
+    enum { count = 4097 };
+    const uint32_t subjects[4][4] = {{'a','b',0,0}, {'C','d',0,0}, {0}, {'a',0,0,0}};
+    const uint32_t expected[4][8] = {{'A','B','a','b',0,0,0,0}, {'c','d','C','D',0,0,0,0}, {0}, {'A','a',0,0,0,0,0,0}};
+    uint32_t *input = calloc(count, sizeof(subjects[0]));
+    uint32_t *output = malloc((count * 8 + 2) * sizeof(*output));
+    uint8_t *mask = malloc(count);
+    assert(input && output && mask);
+    for (int i = 0; i < count; i++) {
+        memcpy(input + i * 4, subjects[i % 4], sizeof(subjects[0]));
+        mask[i] = (i % 7) != 0;
+    }
+    me_artifact *artifact = load(json);
+    me_artifact_buffer binding = {"x", ME_STRING, 16, input, count * 16};
+    me_artifact_eval_descriptor descriptor = {.struct_size=sizeof(descriptor), .version=1,
+        .nitems=count, .output_capacity=count * 32, .valid_mask=mask, .valid_mask_capacity=count};
+    for (int repeat = 0; repeat < 2; repeat++) {
+        for (int i = 0; i < count * 8 + 2; i++) output[i] = UINT32_C(0x76543210);
+        assert(me_artifact_eval_ex(artifact, &binding, 1, output + 1, &descriptor, NULL) == ME_ARTIFACT_SUCCESS);
+        assert(output[0] == UINT32_C(0x76543210) && output[count * 8 + 1] == UINT32_C(0x76543210));
+        for (int i = 0; i < count; i++) {
+            if (mask[i]) assert(!memcmp(output + 1 + i * 8, expected[i % 4], sizeof(expected[0])));
+            else for (int j = 0; j < 8; j++) assert(output[1 + i * 8 + j] == UINT32_C(0x76543210));
+        }
+    }
+    me_artifact_free(artifact);
+    free(mask);
+    free(output);
+    free(input);
 }
 
 static void schema1_strings_nd_fixture(void) {

@@ -1186,15 +1186,32 @@ static void p_operation(p_eval_context *ctx, const me_expr *node, const char **o
 
 typedef struct p_string_allocation {
     struct p_string_allocation *next;
+    size_t used;
+    size_t capacity;
     unsigned char data[];
 } p_string_allocation;
 
 static void *p_string_alloc(p_eval_context *ctx, size_t size) {
-    p_string_allocation *value = calloc(1, sizeof(*value) + size);
-    if (!value) return NULL;
-    value->next = ctx->strings;
-    ctx->strings = value;
-    return value->data;
+    /* All expression temporaries live until p_context_free(), including nested
+     * reduction/selection contexts. Allocate zeroed slabs rather than one heap
+     * object per string per lane; never recycle a live temporary. Pointer-size
+     * alignment also keeps UTF-32 scratch aligned on supported hosts. */
+    const size_t alignment = sizeof(void *);
+    if (size > SIZE_MAX - (alignment - 1)) return NULL;
+    size_t padded = (size + alignment - 1) & ~(alignment - 1);
+    p_string_allocation *value = ctx->strings;
+    if (!value || padded > value->capacity - value->used) {
+        size_t capacity = padded > 16384 ? padded : 16384;
+        if (capacity > SIZE_MAX - sizeof(*value)) return NULL;
+        value = calloc(1, sizeof(*value) + capacity);
+        if (!value) return NULL;
+        value->capacity = capacity;
+        value->next = ctx->strings;
+        ctx->strings = value;
+    }
+    void *result = value->data + value->used;
+    value->used += padded;
+    return result;
 }
 
 static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *out);
