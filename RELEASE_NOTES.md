@@ -4,6 +4,10 @@ Release notes for miniexpr
 Changes from 0.2.0 to 0.2.1
 ===========================
 
+* `and`, `or` and `not` treat a nonzero operand as true, as Python does,
+  also when the result is numeric: `x or y` with float64 `x = -0.5` and a float
+  output was 0 (the operands were truncated to int), and NaN was undefined.
+
 * Menudet JIT emits same-width typed integer bitwise operations directly instead
   of calling scalar interpreter helpers. Scalar integer/Boolean local declarations no
   longer use volatile rounding barriers, reducing stack traffic in hash kernels.

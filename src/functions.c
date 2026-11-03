@@ -2811,11 +2811,13 @@ bool validate_string_usage(const me_expr* n) {
     return true;
 }
 
-/* Logical operators (for bool type) - short-circuit via OR/AND */
-static double logical_and(double a, double b) { return ((int)a) && ((int)b) ? 1.0 : 0.0; }
-static double logical_or(double a, double b) { return ((int)a) || ((int)b) ? 1.0 : 0.0; }
-static double logical_not(double a) { return !(int)a ? 1.0 : 0.0; }
-static double logical_xor(double a, double b) { return ((int)a) != ((int)b) ? 1.0 : 0.0; }
+/* Logical operators (for bool type) - short-circuit via OR/AND. An operand
+ * is true when it is nonzero, as in Python (0.5 and -0.5 are true, NaN too);
+ * (int)a truncated fractions to 0 and is undefined for NaN. */
+static double logical_and(double a, double b) { return (a != 0.0) && (b != 0.0) ? 1.0 : 0.0; }
+static double logical_or(double a, double b) { return (a != 0.0) || (b != 0.0) ? 1.0 : 0.0; }
+static double logical_not(double a) { return a == 0.0 ? 1.0 : 0.0; }
+static double logical_xor(double a, double b) { return (a != 0.0) != (b != 0.0) ? 1.0 : 0.0; }
 
 static bool is_logical_function(const void* func) {
     return func == (void*)logical_and || func == (void*)logical_or ||
