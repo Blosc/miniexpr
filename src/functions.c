@@ -6492,6 +6492,16 @@ static bool me_dtype_is_signed_int(me_dtype dtype) {
         } \
     } while (0)
 
+/* Preserve integer identity even when the CRT registers an import/inline alias. */
+static bool is_integer_rounding_function(const void* func) {
+    if (func == (void*)floor || func == (void*)ceil ||
+        func == (void*)trunc_wrapper || func == (void*)round_wrapper) return true;
+    const me_variable* builtin = find_builtin("floor", 5);
+    if (builtin && func == builtin->address) return true;
+    builtin = find_builtin("ceil", 4);
+    return builtin && func == builtin->address;
+}
+
 #define ME_INT_UNARY(SUFFIX, TYPE, FUNC, ADATA, OUT, NITEMS) \
     do { \
         const TYPE *a_ = (ADATA); \
@@ -7018,8 +7028,7 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                 \
                 if (is_integer_dtype(ME_EVAL_DTYPE_##SUFFIX) && adata && \
                     (func_ptr == (void*)bit_not || func_ptr == (void*)fabs || func_ptr == (void*)square || \
-                     func_ptr == (void*)floor || func_ptr == (void*)ceil || \
-                     func_ptr == (void*)trunc_wrapper || func_ptr == (void*)round_wrapper)) { \
+                     is_integer_rounding_function(func_ptr))) { \
                     me_typed_unary_##SUFFIX(n, func_ptr, adata, output); \
                 } else if (func_ptr == (void*)sqrt) { \
                     if (adata) VEC_SQRT(adata, output, n->nitems); \
