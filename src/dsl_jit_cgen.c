@@ -480,10 +480,11 @@ static int me_jit_integral_bits(me_dtype dtype) {
     }
 }
 
-/* C shifts are undefined for counts outside [0, bits), where the interpreter
- * follows NumPy (0 for <<, the sign fill for >>). Only a shift by a decimal
- * literal below the width, not followed by a tighter-binding operator, is
- * emitted as a C shift; other shifts keep the kernel on the interpreter. */
+/* C right shifts require counts in [0, bits). Only decimal literal counts
+ * below the width and below 32 are emitted; other counts use the interpreter.
+ * Left shifts always use the interpreter: generated expression text lacks
+ * operand types needed for unsigned lowering, and signed C left shifts can
+ * be undefined even with a valid count (negative operands or overflow). */
 static bool me_jit_shift_count_is_safe_literal(const char *count, me_dtype dtype) {
     while (isspace((unsigned char)*count)) count++;
     if (!isdigit((unsigned char)*count)) return false;
@@ -548,7 +549,10 @@ static bool me_jit_expr_contains_unsupported_tokens(const char *expr, me_dtype d
         if (c == '%') {
             return true;
         }
-        if ((c == '<' && p[1] == '<') || (c == '>' && p[1] == '>')) {
+        if (c == '<' && p[1] == '<') {
+            return true;
+        }
+        if (c == '>' && p[1] == '>') {
             if (!me_jit_dtype_is_integral(dtype) || !me_jit_shift_count_is_safe_literal(p + 2, dtype)) {
                 return true;
             }

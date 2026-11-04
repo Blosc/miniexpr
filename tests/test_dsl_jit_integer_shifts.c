@@ -1,10 +1,8 @@
 /*
- * Integer shifts in DSL kernels follow NumPy with the JIT on and off.  A C
- * shift by a count outside [0, bits) is undefined, while NumPy gives 0 for <<
- * and the sign fill for >>; so the JIT compiles only shifts by a literal
- * count below the width, and below 32, since C shifts an operand narrower
- * than the expression (int32 in an int64 sum) as an int.  Other shifts keep
- * the kernel on the interpreter.
+ * Left shifts stay on the interpreter: signed C left shifts can be undefined
+ * for negative operands or overflow, even with a valid count. Right shifts
+ * compile only for literal counts below the width and below 32; other counts
+ * stay on the interpreter to preserve NumPy's out-of-range sign fill.
  *
  * Named test_dsl_jit_* so that ctest runs it with the JIT enabled.
  */
@@ -47,6 +45,7 @@ typedef struct {
     const int64_t *expected;
     /* With a JIT available: whether the kernel must be compiled by it. */
     bool jit_compiles;
+    const int64_t *a_values;
 } shift_case;
 
 int main(void) {
@@ -55,11 +54,16 @@ int main(void) {
     if (!jit) printf("  (no JIT in this build: interpreter only)\n");
     /* a = {5, -5, 5, -5}, b = {64, 64, 70, -1}; NumPy: 5 << 64 == 0, -5 >> 64 == -1, -5 >> -1 == -1. */
     static const int64_t zeros[N] = {0, 0, 0, 0}, shr[N] = {0, -1, 0, -1}, shl3[N] = {104, 24, 110, -41};
+    static const int64_t edges[N] = {INT64_MAX, INT64_MIN, -1, INT64_C(1) << 62};
+    static const int64_t shifted[N] = {-2, 0, -2, INT64_MIN};
+    static const int64_t shr3[N] = {64, 63, 70, -2};
     static const shift_case cases[] = {
         {"def k(a, b):\n    return a << b\n", ME_INT64, zeros, false},
         {"def k(a, b):\n    return a >> b\n", ME_INT64, shr, false},
-        {"def k(a, b):\n    return (a << 3) + b\n", ME_INT64, shl3, true},
+        {"def k(a, b):\n    return (a << 3) + b\n", ME_INT64, shl3, false},
         {"def k(a, b):\n    return a << 3 * b\n", ME_INT64, zeros, false},
+        {"def k(a, b):\n    return a << 1\n", ME_INT64, shifted, false, edges},
+        {"def k(a, b):\n    return (a >> 3) + b\n", ME_INT64, shr3, true},
         /* An int32 operand in an int64 expression: C would shift it as an int.
          * (Its NumPy value, an int32 shift, needs the mixed-dtype typing of
          * conversion nodes; here both engines compute in int64.) */
@@ -71,7 +75,7 @@ int main(void) {
     for (size_t k = 0; k < sizeof(cases) / sizeof(cases[0]); k++) {
         const shift_case *c = &cases[k];
         me_variable vars[] = {{"a", c->a_dtype}, {"b", ME_INT64}};
-        const void *ptrs[] = {c->a_dtype == ME_INT32 ? (const void *)a32 : (const void *)a64, b64};
+        const void *ptrs[] = {c->a_dtype == ME_INT32 ? (const void *)a32 : (const void *)(c->a_values ? c->a_values : a64), b64};
         int64_t results[2][N];
         for (int mode = 0; mode < 2; mode++) {
             me_expr *e = compile_kernel(c->src, vars, mode);

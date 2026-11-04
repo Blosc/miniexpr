@@ -6829,6 +6829,17 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                         VEC_POW(ldata, rdata, output, n->nitems); \
                     } else if (ldata && right->type == ME_CONSTANT) { \
                         VEC_POW_SCALAR(ldata, TO_TYPE_##SUFFIX(right->value), output, n->nitems); \
+                    } else if (is_integer_dtype(ME_EVAL_DTYPE_##SUFFIX) && \
+                               left->type == ME_CONSTANT && rdata && \
+                               me_constant_fits_dtype(left->value, ME_EVAL_DTYPE_##SUFFIX)) { \
+                        /* Constant bases need the same wrapping integer power \
+                         * as array bases; the generic double path loses bits or \
+                         * converts an overflowing pow() result out of range. \
+                         * Read each exponent before writing, for DSL aliases. */ \
+                        const TYPE base_ = TO_TYPE_##SUFFIX(left->value); \
+                        for (i = 0; i < n->nitems; i++) { \
+                            VEC_POW(&base_, &rdata[i], &output[i], 1); \
+                        } \
                     } else { \
                         goto general_case_binary_##SUFFIX; \
                     } \
