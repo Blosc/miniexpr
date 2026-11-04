@@ -3009,16 +3009,24 @@ static bool compare_to_bool_output(const me_expr* n, me_dtype eval_type,
 
     const void* func = n->function;
 
+/* One loop per operand kind, so that each vectorizes whether or not the
+ * compiler unswitches a per-element constant test (that depends on how much
+ * of the caller gets inlined). */
 #define CMP_LOOP_OP(TYPE, OP) \
     do { \
         const TYPE* lptr = (const TYPE*)ldata; \
         const TYPE* rptr = (const TYPE*)rdata; \
-        TYPE lc = (TYPE)lval; \
-        TYPE rc = (TYPE)rval; \
-        for (int i = 0; i < nitems; i++) { \
-            TYPE a = lconst ? lc : lptr[i]; \
-            TYPE b = rconst ? rc : rptr[i]; \
-            out[i] = (a OP b); \
+        const TYPE lc = (TYPE)lval; \
+        const TYPE rc = (TYPE)rval; \
+        if (lconst && rconst) { \
+            const bool v = (lc OP rc); \
+            for (int i = 0; i < nitems; i++) out[i] = v; \
+        } else if (rconst) { \
+            for (int i = 0; i < nitems; i++) out[i] = (lptr[i] OP rc); \
+        } else if (lconst) { \
+            for (int i = 0; i < nitems; i++) out[i] = (lc OP rptr[i]); \
+        } else { \
+            for (int i = 0; i < nitems; i++) out[i] = (lptr[i] OP rptr[i]); \
         } \
     } while (0)
 
