@@ -318,6 +318,11 @@ foreach(test_src IN LISTS MINIEXPR_TEST_SOURCES)
   target_compile_definitions("${test_name}"
     PRIVATE ME_DSL_JIT_TEST_STUB_SO_PATH="$<TARGET_FILE:me_jit_test_stub>")
   target_link_libraries("${test_name}" PRIVATE ${MINIEXPR_DEFAULT_LIB} ${MINIEXPR_THREADS_LIB})
+  if(EMSCRIPTEN)
+    # Match the 1 MiB stack used by the other WASM test runners: evaluator
+    # and artifact tests exceed Emscripten's default 64 KiB stack.
+    target_link_options("${test_name}" PRIVATE "-sSTACK_SIZE=1048576")
+  endif()
   if(test_name STREQUAL "test_dsl_artifact" OR test_name STREQUAL "test_dsl_math_policy" OR
      test_name STREQUAL "test_menudet_complex" OR test_name STREQUAL "test_menudet_complex_wasm")
     target_link_libraries("${test_name}" PRIVATE miniexpr_artifact)
