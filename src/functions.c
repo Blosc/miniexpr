@@ -561,6 +561,13 @@ static const me_variable* find_builtin(const char* name, int len) {
     return 0;
 }
 
+/* CRT inline/import aliases can differ from the builtin registration address. */
+static bool is_nextafter_function(const void* func) {
+    if (func == (void*)nextafter) return true;
+    const me_variable* builtin = find_builtin("nextafter", 9);
+    return builtin && func == builtin->address;
+}
+
 bool me_is_builtin_function_name(const char* name, size_t len) {
     if (!name || len == 0) {
         return false;
@@ -6646,7 +6653,7 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                     } else { \
                         goto general_case_binary_##SUFFIX; \
                     } \
-                } else if (func == (me_fun2)nextafter) { \
+                } else if (is_nextafter_function((const void*)func)) { \
                     if (ldata && rdata && HAS_VEC_MATH) { \
                         VEC_NEXTAFTER(ldata, rdata, output, n->nitems); \
                     } else if (ME_EVAL_DTYPE_##SUFFIX == ME_FLOAT32) { \
