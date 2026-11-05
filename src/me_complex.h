@@ -18,6 +18,7 @@
 #define ME_COMPLEX_H
 
 #include <complex.h>
+#include <math.h>
 #include <string.h>
 
 typedef float _Complex float_complex;
@@ -200,5 +201,62 @@ ME_COMPLEX_CALL_D(catanh)
 #define me_conjf conjf
 #define me_conj conj
 #endif
+
+/* Complex power as NumPy computes it (npy_cpow): x**0 is 1; a zero base gives
+ * 0 for an exponent with a positive real part and NaN otherwise; an integer
+ * exponent with |n| < 100 is computed by repeated multiplication (and Smith's
+ * division for n < 0); other exponents go to the C library's cpow, as in
+ * NumPy. The C library alone gives NaN for 0**0 and inexact integer powers. */
+#define ME_DEFINE_NPY_CPOW(NAME, T, CT, CPOW, MUL, FABS)                                \
+    static inline CT NAME##_pack(T re, T im) {                                          \
+        T parts[2] = {re, im};                                                          \
+        CT z;                                                                           \
+        memcpy(&z, parts, sizeof(z));                                                   \
+        return z;                                                                       \
+    }                                                                                   \
+    /* 1 / z by Smith's algorithm, as NumPy's cdiv(1, z). */                            \
+    static inline CT NAME##_inverse(CT z) {                                             \
+        T v[2];                                                                         \
+        memcpy(v, &z, sizeof(v));                                                       \
+        const T ar = 1, ai = 0, br = v[0], bi = v[1];                                   \
+        const T abs_br = FABS(br), abs_bi = FABS(bi);                                   \
+        if (abs_br >= abs_bi) {                                                         \
+            if (abs_br == 0 && abs_bi == 0) return NAME##_pack(ar / abs_br, ai / abs_bi); \
+            const T rat = bi / br, scl = (T)1 / (br + bi * rat);                        \
+            return NAME##_pack((ar + ai * rat) * scl, (ai - ar * rat) * scl);           \
+        }                                                                               \
+        const T rat = br / bi, scl = (T)1 / (bi + br * rat);                            \
+        return NAME##_pack((ar * rat + ai) * scl, (ai * rat - ar) * scl);               \
+    }                                                                                   \
+    static inline CT NAME(CT a, CT b) {                                                 \
+        T av[2], bv[2];                                                                 \
+        memcpy(av, &a, sizeof(av));                                                     \
+        memcpy(bv, &b, sizeof(bv));                                                     \
+        const T br = bv[0], bi = bv[1];                                                 \
+        if (br == 0 && bi == 0) return NAME##_pack(1, 0);                               \
+        if (av[0] == 0 && av[1] == 0) {                                                 \
+            return br > 0 ? NAME##_pack(0, 0) : NAME##_pack((T)NAN, (T)NAN);            \
+        }                                                                               \
+        if (bi == 0 && br > -100 && br < 100 && br == (T)(int)br) {                     \
+            int n = (int)br;                                                            \
+            if (n == 1) return a;                                                       \
+            if (n == 2) return MUL(a, a);                                               \
+            if (n == 3) return MUL(a, MUL(a, a));                                       \
+            if (n < 0) n = -n;                                                          \
+            CT acc = NAME##_pack(1, 0), p = a;                                          \
+            for (int mask = 1;; mask <<= 1) {                                           \
+                if (n & mask) acc = MUL(acc, p);                                        \
+                if (n < (mask << 1)) break;                                             \
+                p = MUL(p, p);                                                          \
+            }                                                                           \
+            return br < 0 ? NAME##_inverse(acc) : acc;                                  \
+        }                                                                               \
+        return CPOW(a, b);                                                              \
+    }
+
+ME_DEFINE_NPY_CPOW(me_npy_cpowf, float, float _Complex, me_cpowf, mul_c64, fabsf)
+ME_DEFINE_NPY_CPOW(me_npy_cpow, double, double _Complex, me_cpow, mul_c128, fabs)
+#undef ME_DEFINE_NPY_CPOW
+
 
 #endif /* ME_COMPLEX_H */

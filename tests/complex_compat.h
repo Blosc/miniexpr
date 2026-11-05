@@ -23,6 +23,8 @@
 #define cexp me_cexp
 #define clog me_clog
 #define csqrt me_csqrt
+#define cpow me_cpow
+#define cpowf me_cpowf
 #endif
 
 #endif
