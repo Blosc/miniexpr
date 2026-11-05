@@ -2751,6 +2751,11 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         scalar ? "" : masked_loop,
         scalar ? "" : (preamble.text ? preamble.text : ""),body.text,
         scalar ? "" : loop_close,ME_DSL_JIT_SYMBOL_NAME,entry_count_type,p->n_inputs);
+    /* The assembled source owns copies, not these temporary builder buffers. */
+    free(body.text);
+    free(preamble.text);
+    free(input_declarations.text);
+    free(unmasked_body.text);
     free(unmasked_func.text);
     free(unmasked_bridge.text);
     if (used < 0) {
