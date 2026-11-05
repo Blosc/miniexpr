@@ -65,6 +65,9 @@ Rules:
 
 - The argument may be any expression that does not itself contain reductions.
 - Reductions may appear inside larger expressions and their scalar result is broadcast.
+- Constant subexpressions of the argument are folded at compile time, as elsewhere
+  (`sum(x * -2)` multiplies by the constant `-2`); the `x**2`/`x**3` to product
+  rewrite is not applied inside a reduction argument.
 
 Result types:
 

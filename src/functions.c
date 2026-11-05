@@ -7515,6 +7515,10 @@ static void save_variable_bindings(const me_expr* node,
             if (node->flags & (ME_EXPR_FLAG_DSL_VALUE_CAST | ME_EXPR_FLAG_DSL_STRICT_F32_MATH)) {
                 break;
             }
+            /* A reduction evaluates its argument in its own dtype. */
+            if (is_reduction_node(node)) {
+                break;
+            }
             if (IS_FUNCTION(node->type) && ARITY(node->type) == 1 && node->function == NULL) {
                 break;
             }
@@ -7587,6 +7591,10 @@ static void promote_variables_in_tree(me_expr* n, me_dtype target_type,
                 (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == NULL)) {
                 break;
             }
+            /* A reduction evaluates its argument in its own dtype. */
+            if (is_reduction_node(n)) {
+                break;
+            }
             const int arity = ARITY(n->type);
             for (int i = 0; i < arity; i++) {
                 promote_variables_in_tree((me_expr*)n->parameters[i], target_type,
@@ -7633,6 +7641,10 @@ static void restore_variables_in_tree(me_expr* n, const void** original_bounds,
                 (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == NULL)) {
                 break;
             }
+            /* A reduction evaluates its argument in its own dtype. */
+            if (is_reduction_node(n)) {
+                break;
+            }
             const int arity = ARITY(n->type);
             for (int i = 0; i < arity; i++) {
                 restore_variables_in_tree((me_expr*)n->parameters[i], original_bounds, original_types, restore_idx);
@@ -7673,6 +7685,10 @@ static bool all_variables_match_type(const me_expr* n, me_dtype target_type) {
             // Skip conversion nodes - they handle their own type conversion
             if ((n->flags & (ME_EXPR_FLAG_DSL_VALUE_CAST | ME_EXPR_FLAG_DSL_STRICT_F32_MATH)) ||
                 (IS_FUNCTION(n->type) && ARITY(n->type) == 1 && n->function == NULL)) {
+                return true;
+            }
+            /* A reduction evaluates its argument in its own dtype. */
+            if (is_reduction_node(n)) {
                 return true;
             }
             const int arity = ARITY(n->type);
@@ -7811,8 +7827,14 @@ static void eval_reduction(const me_expr* n, int output_nitems) {
     me_dtype arg_type = arg->dtype;
     if (arg->type != ME_CONSTANT && arg->type != ME_VARIABLE) {
         arg_type = infer_output_type(arg);
-        const bool is_comparison_bool = (arg_type == ME_BOOL) && is_comparison_node(arg);
-        me_dtype eval_type = is_comparison_bool ? infer_result_type(arg) : arg_type;
+        /* A comparison is computed in its operands' type, then converted to
+         * bool. Operands that are already bool (p == q for bool p, q) need no
+         * conversion; they take the direct path below. */
+        me_dtype eval_type = arg_type;
+        if (arg_type == ME_BOOL && is_comparison_node(arg)) {
+            eval_type = infer_result_type(arg);
+        }
+        const bool is_comparison_bool = eval_type != arg_type;
         if (nitems > 0) {
             if (is_comparison_bool) {
                 void* eval_output = malloc((size_t)nitems * dtype_size(eval_type));
@@ -9676,7 +9698,8 @@ cleanup:
 }
 
 
-void optimize(me_expr* n) {
+/* rewrite_pow: also strength-reduce x**2 and x**3 to products. */
+static void optimize_node(me_expr* n, bool rewrite_pow) {
     /* Evaluates as much as possible. */
     if (!n) return;
     if (n->type == ME_CONSTANT) return;
@@ -9689,12 +9712,13 @@ void optimize(me_expr* n) {
         int known = 1;
         int i;
         for (i = 0; i < arity; ++i) {
-            optimize(n->parameters[i]);
+            optimize_node(n->parameters[i], rewrite_pow);
             if (((me_expr*)(n->parameters[i]))->type != ME_CONSTANT) {
                 known = 0;
             }
         }
-        if (IS_FUNCTION(n->type) && arity == 2 && n->function == (void*)pow) {
+        /* A constant base is folded below instead (3**2 becomes 9, not 3 * 3). */
+        if (rewrite_pow && !known && IS_FUNCTION(n->type) && arity == 2 && n->function == (void*)pow) {
             me_expr *right = (me_expr*)n->parameters[1];
             if (right && right->type == ME_CONSTANT && right->value == 2.0) {
                 /* Fast path: rewrite x**2 (or pow(x,2)) to x*x to avoid scalar pow in eval. */
@@ -9740,6 +9764,22 @@ void optimize(me_expr* n) {
             n->value = value;
         }
     }
+    else {
+        /* A non-pure node (a reduction such as sum(), or a user function) is
+         * kept, but constant subtrees of its operands are folded, so that e.g.
+         * the negate(2) of sum(x * -2) becomes the constant -2. The x**2 and
+         * x**3 product rewrites are not applied there: a conversion node
+         * duplicated as x * x is not evaluated correctly yet (sum((a + b) ** 2)
+         * with int8 a, b and an int64 result gives 0). */
+        const int arity = ARITY(n->type);
+        for (int i = 0; i < arity; ++i) {
+            optimize_node(n->parameters[i], false);
+        }
+    }
+}
+
+void optimize(me_expr* n) {
+    optimize_node(n, true);
 }
 
 bool has_complex_input_types(const me_expr* n) {

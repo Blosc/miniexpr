@@ -374,7 +374,7 @@ bool reduce_strided_variable(const me_expr *expr, const void **vars_block, int n
         return false;
     }
 
-    const me_reduce_kind rkind = reduction_kind(expr->function);
+    me_reduce_kind rkind = reduction_kind(expr->function);
     if (rkind == ME_REDUCE_NONE) {
         return false;
     }
@@ -383,6 +383,13 @@ bool reduce_strided_variable(const me_expr *expr, const void **vars_block, int n
     const me_dtype arg_type = infer_result_type(arg);
     const me_dtype result_type = reduction_output_dtype(arg_type, expr->function);
     const me_dtype output_type = expr->dtype;
+    /* min/max of bools (a bool result) are all/any. */
+    if (arg_type == ME_BOOL && rkind == ME_REDUCE_MIN) {
+        rkind = ME_REDUCE_ALL;
+    }
+    else if (arg_type == ME_BOOL && rkind == ME_REDUCE_MAX) {
+        rkind = ME_REDUCE_ANY;
+    }
 
     int64_t indices[64] = {0};
     int64_t total_iters = 1;
