@@ -106,6 +106,21 @@ ME_BATCH_INT_OPS(uint32_t,u32)
 ME_BATCH_INT_OPS(uint64_t,u64)
 #undef ME_BATCH_INT_OPS
 
+/* NumPy signed remainder is total, with the divisor's sign. Guard C's
+ * exceptional divisions before %, including INT32_MIN / -1. */
+ME_BATCH_NOINLINE void dsl_menudet_batch_mod_i32(const int32_t *a, const int32_t *b,
+                                               int32_t *restrict out, int count) {
+    for (int i = 0; i < count; i++) {
+        int32_t left = a[i], right = b[i];
+        if (!right || (left == INT32_MIN && right == -1)) {
+            out[i] = 0;
+        } else {
+            int32_t rem = left % right;
+            out[i] = rem && ((rem < 0) != (right < 0)) ? rem + right : rem;
+        }
+    }
+}
+
 /* Real -> complex follows p_convert's double intermediate (including integer
  * -> complex64 double rounding); never construct values with real + I*imag. */
 #define ME_BATCH_COMPLEX_CAST(T,S) \

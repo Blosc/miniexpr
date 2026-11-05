@@ -1123,6 +1123,88 @@ static void batch_integer_parity(void) {
     }
 }
 
+static void batch_int32_modulo_parity(void) {
+    const char *recipes[] = {"return x % y", "return y % x", "return (x + x) % y + x"};
+    const int32_t edges[] = {INT32_MIN, INT32_MIN + 1, -999, -7, -3, -1, 0, 1, 3, 7, INT32_MAX};
+    const int lengths[] = {1, 31, 32, 259, 513};
+    enum { lanes = 513 };
+    int32_t x[lanes], y[lanes], actual[lanes], expected[lanes];
+    uint8_t mask[lanes];
+    for (int i = 0; i < lanes; i++) {
+        x[i] = edges[i % 11];
+        y[i] = edges[(i / 11) % 11];
+        mask[i] = i % 3 != 0;
+    }
+    for (int uniform = 0; uniform < 2; uniform++) {
+        for (size_t recipe = 0; recipe < sizeof(recipes) / sizeof(*recipes); recipe++) {
+            parity_case test = {"batched int32 floor remainder", recipes[recipe], "int32", "int32", false};
+            me_artifact *artifact = load_contract(&test, ME_JIT_OFF,
+                uniform ? NULL : "{\"name\":\"y\",\"dtype\":\"int32\"}",
+                uniform ? "{\"name\":\"y\",\"dtype\":\"int32\",\"category\":\"typed_scalar\",\"encoding\":\"decimal\",\"value\":\"-3\"}" : NULL,
+                "elementwise");
+            me_artifact_error error;
+            for (size_t length = 0; length < sizeof(lengths) / sizeof(*lengths); length++) {
+                int count = lengths[length];
+                for (int masked = 0; masked < 2; masked++) {
+                    memset(actual, 0xaa, sizeof(actual));
+                    memset(expected, 0xaa, sizeof(expected));
+                    unsigned flags = 0;
+                    for (int i = 0; i < count; i++) {
+                        me_artifact_buffer inputs[] = {{"x", ME_INT32, 4, x + i, 4},
+                            {"y", ME_INT32, 4, y + i, 4}};
+                        me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor), .version = 1,
+                            .nitems = 1, .output_capacity = 4,
+                            .valid_mask = masked ? mask + i : NULL, .valid_mask_capacity = masked ? 1 : 0};
+                        me_artifact_fp_status status;
+                        CHECK(!me_artifact_eval_status(artifact, inputs, uniform ? 1 : 2,
+                            expected + i, &descriptor, 0, &status, &error));
+                        flags |= status.flags;
+                    }
+                    me_artifact_buffer inputs[] = {{"x", ME_INT32, 4, x, sizeof(x)},
+                        {"y", ME_INT32, 4, y, sizeof(y)}};
+                    me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor), .version = 1,
+                        .nitems = count, .output_capacity = sizeof(actual),
+                        .valid_mask = masked ? mask : NULL, .valid_mask_capacity = masked ? count : 0};
+                    me_artifact_fp_status status;
+                    size_t before = dsl_menudet_batch_calls_for_tests();
+                    CHECK(!me_artifact_eval_status(artifact, inputs, uniform ? 1 : 2,
+                        actual, &descriptor, 0, &status, &error));
+                    CHECK(dsl_menudet_batch_calls_for_tests() == before + (!masked && count >= 32 ? 1 : 0));
+                    CHECK(status.flags == flags);
+                    CHECK(!memcmp(actual, expected, sizeof(actual)));
+                }
+            }
+            if (!uniform && recipe == 0) {
+                me_dsl_compiled_program *program = dsl_artifact_program_for_tests(artifact);
+                const me_expr *root = program->block.stmts[0]->as.return_stmt.expr.expr;
+                int32_t source[lanes + 1], reference[lanes + 1], other[lanes], reference_other[lanes];
+                for (int alias = 0; alias < 3; alias++) {
+                    memcpy(source, x, sizeof(x));
+                    memcpy(reference, x, sizeof(x));
+                    memcpy(other, y, sizeof(y));
+                    memcpy(reference_other, y, sizeof(y));
+                    source[lanes] = reference[lanes] = 17;
+                    int32_t *destination = alias == 0 ? source : alias == 1 ? other : source + 1;
+                    int32_t *expected_destination = alias == 0 ? reference :
+                        alias == 1 ? reference_other : reference + 1;
+                    for (int i = 0; i < lanes; i++) {
+                        const void *inputs[] = {reference + i, reference_other + i};
+                        CHECK(!dsl_menudet_eval_expr_masked(root, inputs, 2, NULL, 1, NULL, 4,
+                            expected_destination + i));
+                    }
+                    const void *inputs[] = {source, other};
+                    size_t before = dsl_menudet_batch_calls_for_tests();
+                    CHECK(!dsl_menudet_eval_expr_masked(root, inputs, 2, NULL, lanes, NULL, 4, destination));
+                    CHECK(dsl_menudet_batch_calls_for_tests() == before + (alias < 2 ? 1 : 0));
+                    CHECK(!memcmp(source, reference, sizeof(source)));
+                    CHECK(!memcmp(other, reference_other, sizeof(other)));
+                }
+            }
+            me_artifact_free(artifact);
+        }
+    }
+}
+
 static void batch_cast_parity(void) {
     const char *names[]={"int64","uint64","float32","float64"};
     me_dtype dtypes[]={ME_INT64,ME_UINT64,ME_FLOAT32,ME_FLOAT64};
@@ -2436,6 +2518,7 @@ int main(int argc, char **argv) {
     batch_complex_cast_parity();
     batch_complex_aliases();
     batch_integer_parity();
+    batch_int32_modulo_parity();
     batch_checked_and_alias_fallbacks();
     batch_cast_parity();
     batch_uniform_cast_parity();

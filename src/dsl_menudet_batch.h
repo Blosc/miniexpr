@@ -57,6 +57,7 @@ void dsl_menudet_batch_compare_f32(const void *, const float *, int, const float
 void dsl_menudet_batch_compare_f64(const void *, const double *, int, const double *, int, uint8_t *restrict, int);
 void dsl_menudet_batch_powi_f32(const float *a, int64_t exponent, float *restrict out, int count);
 void dsl_menudet_batch_powi_f64(const double *a, int64_t exponent, double *restrict out, int count);
+void dsl_menudet_batch_mod_i32(const int32_t *a, const int32_t *b, int32_t *restrict out, int count);
 
 /* Internal, all-participating contiguous primitives. The caller establishes
  * nearest/ties-even, nontrapping IEEE execution and collects aggregate status. */

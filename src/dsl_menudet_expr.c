@@ -2389,7 +2389,7 @@ int dsl_menudet_eval_expr(const me_expr *expr, const void *const *vars, int nvar
 #define P_BATCH_LANES 256
 typedef enum { P_BATCH_LEAF, P_BATCH_CAST, P_BATCH_NEG, P_BATCH_ADD,
     P_BATCH_SUB, P_BATCH_MUL, P_BATCH_DIV, P_BATCH_MATH, P_BATCH_COMPARE,
-    P_BATCH_POWER, P_BATCH_POWER_CHAIN, P_BATCH_MASK, P_BATCH_SELECT } p_batch_op;
+    P_BATCH_POWER, P_BATCH_POWER_CHAIN, P_BATCH_MASK, P_BATCH_SELECT, P_BATCH_MOD } p_batch_op;
 typedef struct {
     const me_expr *expr;
     p_batch_op op;
@@ -2533,8 +2533,11 @@ static int p_batch_build(p_batch_program *program, const me_expr *n,
                 instruction.op=P_BATCH_NEG;
             else if (op && arity == 2 && left->dtype == n->dtype &&
                      ((const me_expr *)n->parameters[1])->dtype == n->dtype) {
+                /* Strong NumPy int32 remainder is total, unlike checked integer
+                 * division; other remainder domains retain scalar evaluation. */
                 instruction.op=!strcmp(op,"+") ? P_BATCH_ADD : !strcmp(op,"-") ? P_BATCH_SUB :
-                    !strcmp(op,"*") ? P_BATCH_MUL : !strcmp(op,"/") ? P_BATCH_DIV : P_BATCH_LEAF;
+                    !strcmp(op,"*") ? P_BATCH_MUL : !strcmp(op,"/") ? P_BATCH_DIV :
+                    !strcmp(op,"%") && n->dtype == ME_INT32 ? P_BATCH_MOD : P_BATCH_LEAF;
                 if (instruction.op == P_BATCH_LEAF || (!floating && instruction.op == P_BATCH_DIV)) return -1;
             } else if (floating && arity == 1 && left->dtype == n->dtype &&
                        (instruction.math=dsl_menudet_resolve_unary_math(n)) != NULL)
@@ -2749,6 +2752,11 @@ static bool p_batch_eval(const me_expr *expr, p_eval_context *ctx, int nitems,
                 }
                 bool left_u = instruction->left >= 0 && program.instructions[instruction->left].uniform;
                 bool right_u = instruction->right >= 0 && program.instructions[instruction->right].uniform;
+                if (instruction->op == P_BATCH_MOD) {
+                    dsl_menudet_batch_mod_i32((const int32_t *)left, (const int32_t *)right,
+                        (int32_t *)destination, count);
+                    continue;
+                }
                 if (instruction->op == P_BATCH_POWER_CHAIN) {
                     if (n->dtype == ME_FLOAT32) dsl_menudet_batch_powi_f32((const float *)left,instruction->exponent,(float *)destination,count);
                     else dsl_menudet_batch_powi_f64((const double *)left,instruction->exponent,(double *)destination,count);
