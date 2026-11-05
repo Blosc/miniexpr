@@ -90,6 +90,15 @@ ME_BATCH_INTEGER(uint64_t,u64)
 ME_BATCH_INTEGER(float _Complex,c64)
 ME_BATCH_INTEGER(double _Complex,c128)
 #undef ME_BATCH_INTEGER
+
+/* Bitwise lane-local kernels; boolean lanes are stored as 0/1 bytes. */
+#define ME_BATCH_BITWISE(T,S) \
+    ME_BATCH_DECL(and,T,S) ME_BATCH_DECL(or,T,S) ME_BATCH_DECL(xor,T,S)
+ME_BATCH_BITWISE(uint8_t,u8)
+ME_BATCH_BITWISE(uint16_t,u16)
+ME_BATCH_BITWISE(uint32_t,u32)
+ME_BATCH_BITWISE(uint64_t,u64)
+#undef ME_BATCH_BITWISE
 #undef ME_BATCH_UNARY_DECL
 #undef ME_BATCH_DECL
 

@@ -106,6 +106,25 @@ ME_BATCH_INT_OPS(uint32_t,u32)
 ME_BATCH_INT_OPS(uint64_t,u64)
 #undef ME_BATCH_INT_OPS
 
+/* Bitwise lane-local kernels; boolean lanes are stored as 0/1 bytes, where
+ * &, | and ^ coincide with the logical operators. */
+#define ME_BATCH_BITWISE(T,S) \
+    ME_BATCH_KERNEL_VV(and,T,S,(T)(a[i]&b[i])) \
+    ME_BATCH_KERNEL_VS(and,T,S,(T)(a[i]&b)) \
+    ME_BATCH_KERNEL_SV(and,T,S,(T)(a&b[i])) \
+    ME_BATCH_KERNEL_VV(or,T,S,(T)(a[i]|b[i])) \
+    ME_BATCH_KERNEL_VS(or,T,S,(T)(a[i]|b)) \
+    ME_BATCH_KERNEL_SV(or,T,S,(T)(a|b[i])) \
+    ME_BATCH_KERNEL_VV(xor,T,S,(T)(a[i]^b[i])) \
+    ME_BATCH_KERNEL_VS(xor,T,S,(T)(a[i]^b)) \
+    ME_BATCH_KERNEL_SV(xor,T,S,(T)(a^b[i]))
+
+ME_BATCH_BITWISE(uint8_t,u8)
+ME_BATCH_BITWISE(uint16_t,u16)
+ME_BATCH_BITWISE(uint32_t,u32)
+ME_BATCH_BITWISE(uint64_t,u64)
+#undef ME_BATCH_BITWISE
+
 /* NumPy signed remainder is total, with the divisor's sign. Guard C's
  * exceptional divisions before %, including INT32_MIN / -1. */
 ME_BATCH_NOINLINE void dsl_menudet_batch_mod_i32(const int32_t *a, const int32_t *b,

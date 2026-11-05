@@ -1327,6 +1327,152 @@ static void batch_identity_cast_parity(void) {
     }
 }
 
+/* Boolean and integral bitwise operators are lane-local; boolean lanes are 0/1
+ * bytes, where &, | and ^ coincide with the logical operators. */
+/* Python-Blosc2 captures integer literals as uniform int64 weak scalars, so
+ * every literal use inserts a narrowing conversion. Those must stay batchable
+ * and keep the interpreter's checked (weak) conversion semantics. */
+static void batch_captured_scalar_parity(void) {
+    typedef struct { const char *name; me_dtype dtype; size_t width; } capture_case;
+    const capture_case cases[] = {
+        {"int8",ME_INT8,1},{"uint8",ME_UINT8,1},
+        {"int16",ME_INT16,2},{"uint16",ME_UINT16,2},
+        {"int32",ME_INT32,4},{"uint32",ME_UINT32,4},
+        {"int64",ME_INT64,8},{"uint64",ME_UINT64,8},
+    };
+    const char *constant = "{\"name\":\"y\",\"dtype\":\"int64\",\"category\":\"weak\","
+        "\"encoding\":\"decimal\",\"value\":\"3\"}";
+    enum { lanes = 259 };
+    for (size_t c = 0; c < sizeof(cases) / sizeof(*cases); c++) {
+        size_t width = cases[c].width;
+        unsigned bits = (unsigned)width * 8;
+        uint64_t values[] = {0, 1, UINT64_MAX, UINT64_C(1) << (bits - 1), UINT64_MAX >> (65 - bits)};
+        uint64_t x[lanes], actual[lanes], expected[lanes];
+        for (int i = 0; i < lanes; i++)
+            memcpy((char *)x + (size_t)i * width, values + i % 5, width);
+        parity_case test = {"batch captured scalar", "return (x * y) + y",
+            cases[c].name, cases[c].name, false};
+        me_artifact *artifact = load_contract(&test, ME_JIT_OFF, NULL, constant, "elementwise");
+        me_artifact_error error;
+        for (int i = 0; i < lanes; i++) {
+            me_artifact_buffer inputs[] = {{"x", cases[c].dtype, width,
+                (char *)x + (size_t)i * width, width}};
+            me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor), .version = 1,
+                .nitems = 1, .output_capacity = width};
+            CHECK(!me_artifact_eval_ex(artifact, inputs, 1,
+                (char *)expected + (size_t)i * width, &descriptor, &error));
+        }
+        me_artifact_buffer inputs[] = {{"x", cases[c].dtype, width, x, lanes * width}};
+        me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor), .version = 1,
+            .nitems = lanes, .output_capacity = lanes * width};
+        size_t before = dsl_menudet_batch_calls_for_tests();
+        CHECK(!me_artifact_eval_ex(artifact, inputs, 1, actual, &descriptor, &error));
+        CHECK(dsl_menudet_batch_calls_for_tests() == before + 1);
+        CHECK(!memcmp(actual, expected, lanes * width));
+        me_artifact_free(artifact);
+    }
+}
+
+static void batch_bitwise_parity(void) {
+    typedef struct { const char *name; me_dtype dtype; size_t width; } bitwise_case;
+    const bitwise_case cases[] = {
+        {"bool",ME_BOOL,1},{"int8",ME_INT8,1},{"uint8",ME_UINT8,1},
+        {"int16",ME_INT16,2},{"uint16",ME_UINT16,2},
+        {"int32",ME_INT32,4},{"uint32",ME_UINT32,4},
+        {"int64",ME_INT64,8},{"uint64",ME_UINT64,8},
+    };
+    const char *recipes[] = {"return x & y", "return x | y", "return x ^ y"};
+    enum { lanes = 259 };
+    uint8_t mask[lanes];
+    for (int i = 0; i < lanes; i++) mask[i] = i % 3 != 0;
+    for (size_t c = 0; c < sizeof(cases) / sizeof(*cases); c++) {
+        size_t width = cases[c].width;
+        unsigned bits = (unsigned)width * 8;
+        uint64_t values[5];
+        if (cases[c].dtype == ME_BOOL) {
+            values[0] = 0; values[1] = 1; values[2] = 0; values[3] = 1; values[4] = 1;
+        } else {
+            values[0] = 0; values[1] = 1; values[2] = UINT64_MAX;
+            values[3] = UINT64_C(1) << (bits - 1); values[4] = UINT64_MAX >> (65 - bits);
+        }
+        uint64_t x[lanes], y[lanes], actual[lanes], expected[lanes];
+        for (int i = 0; i < lanes; i++) {
+            memcpy((char *)x + (size_t)i * width, values + i % 5, width);
+            memcpy((char *)y + (size_t)i * width, values + (i * 3 + 1) % 5, width);
+        }
+        char second[128];
+        snprintf(second, sizeof(second), "{\"name\":\"y\",\"dtype\":\"%s\"}", cases[c].name);
+        for (size_t recipe = 0; recipe < sizeof(recipes) / sizeof(*recipes); recipe++) {
+            parity_case test = {"batch bitwise parity", recipes[recipe], cases[c].name, cases[c].name, false};
+            me_artifact *artifact = load_contract(&test, ME_JIT_OFF, second, NULL, "elementwise");
+            me_artifact_error error;
+            for (int masked = 0; masked < 2; masked++) {
+                memset(actual, 0xaa, sizeof(actual));
+                memset(expected, 0xaa, sizeof(expected));
+                for (int i = 0; i < lanes; i++) {
+                    me_artifact_buffer inputs[] = {
+                        {"x", cases[c].dtype, width, (char *)x + (size_t)i * width, width},
+                        {"y", cases[c].dtype, width, (char *)y + (size_t)i * width, width}};
+                    me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor), .version = 1,
+                        .nitems = 1, .output_capacity = width,
+                        .valid_mask = masked ? mask + i : NULL, .valid_mask_capacity = masked ? 1 : 0};
+                    CHECK(!me_artifact_eval_ex(artifact, inputs, 2,
+                        (char *)expected + (size_t)i * width, &descriptor, &error));
+                }
+                me_artifact_buffer inputs[] = {
+                    {"x", cases[c].dtype, width, x, lanes * width},
+                    {"y", cases[c].dtype, width, y, lanes * width}};
+                me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor), .version = 1,
+                    .nitems = lanes, .output_capacity = lanes * width,
+                    .valid_mask = masked ? mask : NULL, .valid_mask_capacity = masked ? lanes : 0};
+                size_t before = dsl_menudet_batch_calls_for_tests();
+                CHECK(!me_artifact_eval_ex(artifact, inputs, 2, actual, &descriptor, &error));
+                CHECK(dsl_menudet_batch_calls_for_tests() == before + (!masked ? 1 : 0));
+                CHECK(!memcmp(actual, expected, sizeof(actual)));
+            }
+            me_artifact_free(artifact);
+        }
+    }
+}
+
+/* Conjunctions/disjunctions inside where() must keep the whole masked select
+ * batched, without evaluating inactive branches eagerly. */
+static void batch_where_conjunction_parity(void) {
+    const char *recipes[] = {
+        "return where((x > 0) & (y > 0), x, y)",
+        "return where((x > 0) | (y > 0), x, y)",
+        "return where((x > 0) & (y < 0), x, 0.0)",
+    };
+    enum { lanes = 259 };
+    float x[lanes], y[lanes], actual[lanes], expected[lanes];
+    for (int i = 0; i < lanes; i++) {
+        x[i] = (float)((i % 7) - 3);
+        y[i] = (float)((i % 5) - 2);
+    }
+    for (size_t recipe = 0; recipe < sizeof(recipes) / sizeof(*recipes); recipe++) {
+        parity_case test = {"batch where conjunction", recipes[recipe], "float32", "float32", false};
+        me_artifact *artifact = load_contract(&test, ME_JIT_OFF,
+            "{\"name\":\"y\",\"dtype\":\"float32\"}", NULL, "elementwise");
+        me_artifact_error error;
+        for (int i = 0; i < lanes; i++) {
+            me_artifact_buffer inputs[] = {{"x", ME_FLOAT32, 4, x + i, 4},
+                {"y", ME_FLOAT32, 4, y + i, 4}};
+            me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor), .version = 1,
+                .nitems = 1, .output_capacity = 4};
+            CHECK(!me_artifact_eval_ex(artifact, inputs, 2, expected + i, &descriptor, &error));
+        }
+        me_artifact_buffer inputs[] = {{"x", ME_FLOAT32, 4, x, sizeof(x)},
+            {"y", ME_FLOAT32, 4, y, sizeof(y)}};
+        me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor), .version = 1,
+            .nitems = lanes, .output_capacity = sizeof(actual)};
+        size_t before = dsl_menudet_batch_calls_for_tests();
+        CHECK(!me_artifact_eval_ex(artifact, inputs, 2, actual, &descriptor, &error));
+        CHECK(dsl_menudet_batch_calls_for_tests() == before + 1);
+        CHECK(!memcmp(actual, expected, sizeof(actual)));
+        me_artifact_free(artifact);
+    }
+}
+
 static void batch_cast_parity(void) {
     const char *names[]={"int64","uint64","float32","float64"};
     me_dtype dtypes[]={ME_INT64,ME_UINT64,ME_FLOAT32,ME_FLOAT64};
@@ -2643,6 +2789,9 @@ int main(int argc, char **argv) {
     batch_int32_modulo_parity();
     batch_integer_promotion_parity();
     batch_identity_cast_parity();
+    batch_captured_scalar_parity();
+    batch_bitwise_parity();
+    batch_where_conjunction_parity();
     batch_checked_and_alias_fallbacks();
     batch_cast_parity();
     batch_uniform_cast_parity();
