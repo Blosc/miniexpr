@@ -73,6 +73,16 @@ For log = base 10 log comment the next line. */
 #define IVDEP _Pragma("GCC ivdep")
 #endif
 
+/* The element-wise arithmetic loops are kept out of the me_eval_<type>()
+ * templates: inside those large functions, their speed depended on unrelated
+ * code in the template (adding typed comparisons there made float32 a + 1
+ * six times slower). */
+#if defined(_MSC_VER)
+#define ME_VEC_NOINLINE __declspec(noinline)
+#else
+#define ME_VEC_NOINLINE __attribute__((noinline))
+#endif
+
 #include <complex.h>
 
 /* ABI-safe complex function set */
@@ -3001,16 +3011,24 @@ static bool compare_to_bool_output(const me_expr* n, me_dtype eval_type,
 
     const void* func = n->function;
 
+/* One loop per operand kind, so that each vectorizes whether or not the
+ * compiler unswitches a per-element constant test (that depends on how much
+ * of the caller gets inlined). */
 #define CMP_LOOP_OP(TYPE, OP) \
     do { \
         const TYPE* lptr = (const TYPE*)ldata; \
         const TYPE* rptr = (const TYPE*)rdata; \
-        TYPE lc = (TYPE)lval; \
-        TYPE rc = (TYPE)rval; \
-        for (int i = 0; i < nitems; i++) { \
-            TYPE a = lconst ? lc : lptr[i]; \
-            TYPE b = rconst ? rc : rptr[i]; \
-            out[i] = (a OP b); \
+        const TYPE lc = (TYPE)lval; \
+        const TYPE rc = (TYPE)rval; \
+        if (lconst && rconst) { \
+            const bool v = (lc OP rc); \
+            for (int i = 0; i < nitems; i++) out[i] = v; \
+        } else if (rconst) { \
+            for (int i = 0; i < nitems; i++) out[i] = (lptr[i] OP rc); \
+        } else if (lconst) { \
+            for (int i = 0; i < nitems; i++) out[i] = (lc OP rptr[i]); \
+        } else { \
+            for (int i = 0; i < nitems; i++) out[i] = (lptr[i] OP rptr[i]); \
         } \
     } while (0)
 
@@ -5334,7 +5352,7 @@ static double me_eval_scalar(const me_expr* n) {
 #undef M
 
 /* Specialized vector operations for better performance */
-static void vec_add(const double* a, const double* b, double* out, int n) {
+static ME_VEC_NOINLINE void vec_add(const double* a, const double* b, double* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -5342,7 +5360,7 @@ static void vec_add(const double* a, const double* b, double* out, int n) {
     }
 }
 
-static void vec_sub(const double* a, const double* b, double* out, int n) {
+static ME_VEC_NOINLINE void vec_sub(const double* a, const double* b, double* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -5350,7 +5368,7 @@ static void vec_sub(const double* a, const double* b, double* out, int n) {
     }
 }
 
-static void vec_mul(const double* a, const double* b, double* out, int n) {
+static ME_VEC_NOINLINE void vec_mul(const double* a, const double* b, double* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -5358,7 +5376,7 @@ static void vec_mul(const double* a, const double* b, double* out, int n) {
     }
 }
 
-static void vec_div(const double* a, const double* b, double* out, int n) {
+static ME_VEC_NOINLINE void vec_div(const double* a, const double* b, double* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -5366,7 +5384,7 @@ static void vec_div(const double* a, const double* b, double* out, int n) {
     }
 }
 
-static void vec_add_scalar(const double* a, double b, double* out, int n) {
+static ME_VEC_NOINLINE void vec_add_scalar(const double* a, double b, double* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -5374,7 +5392,7 @@ static void vec_add_scalar(const double* a, double b, double* out, int n) {
     }
 }
 
-static void vec_mul_scalar(const double* a, double b, double* out, int n) {
+static ME_VEC_NOINLINE void vec_mul_scalar(const double* a, double b, double* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -5406,7 +5424,7 @@ static void vec_sqrt(const double* a, double* out, int n) {
     }
 }
 
-static void vec_negate(const double* a, double* out, int n) {
+static ME_VEC_NOINLINE void vec_negate(const double* a, double* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -5418,7 +5436,7 @@ static void vec_negate(const double* a, double* out, int n) {
  * FLOAT32 VECTOR OPERATIONS
  * ============================================================================ */
 
-static void vec_add_f32(const float* a, const float* b, float* out, int n) {
+static ME_VEC_NOINLINE void vec_add_f32(const float* a, const float* b, float* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -5426,7 +5444,7 @@ static void vec_add_f32(const float* a, const float* b, float* out, int n) {
     }
 }
 
-static void vec_sub_f32(const float* a, const float* b, float* out, int n) {
+static ME_VEC_NOINLINE void vec_sub_f32(const float* a, const float* b, float* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -5434,7 +5452,7 @@ static void vec_sub_f32(const float* a, const float* b, float* out, int n) {
     }
 }
 
-static void vec_mul_f32(const float* a, const float* b, float* out, int n) {
+static ME_VEC_NOINLINE void vec_mul_f32(const float* a, const float* b, float* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -5442,7 +5460,7 @@ static void vec_mul_f32(const float* a, const float* b, float* out, int n) {
     }
 }
 
-static void vec_div_f32(const float* a, const float* b, float* out, int n) {
+static ME_VEC_NOINLINE void vec_div_f32(const float* a, const float* b, float* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -5450,7 +5468,7 @@ static void vec_div_f32(const float* a, const float* b, float* out, int n) {
     }
 }
 
-static void vec_add_scalar_f32(const float* a, float b, float* out, int n) {
+static ME_VEC_NOINLINE void vec_add_scalar_f32(const float* a, float b, float* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -5458,7 +5476,7 @@ static void vec_add_scalar_f32(const float* a, float b, float* out, int n) {
     }
 }
 
-static void vec_mul_scalar_f32(const float* a, float b, float* out, int n) {
+static ME_VEC_NOINLINE void vec_mul_scalar_f32(const float* a, float b, float* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -5490,7 +5508,7 @@ static void vec_sqrt_f32(const float* a, float* out, int n) {
     }
 }
 
-static void vec_negame_f32(const float* a, float* out, int n) {
+static ME_VEC_NOINLINE void vec_negame_f32(const float* a, float* out, int n) {
     int i;
 #pragma GCC ivdep
     for (i = 0; i < n; i++) {
@@ -5504,32 +5522,32 @@ static void vec_negame_f32(const float* a, float* out, int n) {
 
 /* Macros to generate integer vector operations */
 #define DEFINE_INT_VEC_OPS(SUFFIX, TYPE) \
-static void vec_add_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
+static ME_VEC_NOINLINE void vec_add_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
     int i; \
     _Pragma("GCC ivdep") \
     for (i = 0; i < n; i++) out[i] = a[i] + b[i]; \
 } \
-static void vec_sub_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
+static ME_VEC_NOINLINE void vec_sub_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
     int i; \
     _Pragma("GCC ivdep") \
     for (i = 0; i < n; i++) out[i] = a[i] - b[i]; \
 } \
-static void vec_mul_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
+static ME_VEC_NOINLINE void vec_mul_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
     int i; \
     _Pragma("GCC ivdep") \
     for (i = 0; i < n; i++) out[i] = a[i] * b[i]; \
 } \
-static void vec_div_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
+static ME_VEC_NOINLINE void vec_div_##SUFFIX(const TYPE *a, const TYPE *b, TYPE *out, int n) { \
     int i; \
     _Pragma("GCC ivdep") \
     for (i = 0; i < n; i++) out[i] = (b[i] != 0) ? (a[i] / b[i]) : 0; \
 } \
-static void vec_add_scalar_##SUFFIX(const TYPE *a, TYPE b, TYPE *out, int n) { \
+static ME_VEC_NOINLINE void vec_add_scalar_##SUFFIX(const TYPE *a, TYPE b, TYPE *out, int n) { \
     int i; \
     _Pragma("GCC ivdep") \
     for (i = 0; i < n; i++) out[i] = a[i] + b; \
 } \
-static void vec_mul_scalar_##SUFFIX(const TYPE *a, TYPE b, TYPE *out, int n) { \
+static ME_VEC_NOINLINE void vec_mul_scalar_##SUFFIX(const TYPE *a, TYPE b, TYPE *out, int n) { \
     int i; \
     _Pragma("GCC ivdep") \
     for (i = 0; i < n; i++) out[i] = a[i] * b; \
@@ -5549,7 +5567,7 @@ static void vec_sqrt_##SUFFIX(const TYPE *a, TYPE *out, int n) { \
     _Pragma("GCC ivdep") \
     for (i = 0; i < n; i++) out[i] = (TYPE)sqrt((double)a[i]); \
 } \
-static void vec_negame_##SUFFIX(const TYPE *a, TYPE *out, int n) { \
+static ME_VEC_NOINLINE void vec_negame_##SUFFIX(const TYPE *a, TYPE *out, int n) { \
     int i; \
     _Pragma("GCC ivdep") \
     for (i = 0; i < n; i++) out[i] = -a[i]; \
@@ -6374,6 +6392,31 @@ static void eval_dsl_strict_f32_math(const me_expr *node, me_dtype output_dtype)
 #define ME_EVAL_DTYPE_c64 ME_COMPLEX64
 #define ME_EVAL_DTYPE_c128 ME_COMPLEX128
 
+/* Subtraction with a constant operand, out of line like the other
+ * element-wise loops (see ME_VEC_NOINLINE). */
+#define DEFINE_ME_VEC_SUB_SCALAR(SUFFIX, TYPE) \
+static ME_VEC_NOINLINE void vec_sub_scalar_##SUFFIX(const TYPE *a, TYPE b, TYPE *out, int n) { \
+    IVDEP \
+    for (int i = 0; i < n; i++) out[i] = a[i] - b; \
+} \
+static ME_VEC_NOINLINE void vec_rsub_scalar_##SUFFIX(TYPE a, const TYPE *b, TYPE *out, int n) { \
+    IVDEP \
+    for (int i = 0; i < n; i++) out[i] = a - b[i]; \
+}
+
+DEFINE_ME_VEC_SUB_SCALAR(f32, float)
+DEFINE_ME_VEC_SUB_SCALAR(f64, double)
+DEFINE_ME_VEC_SUB_SCALAR(i8, int8_t)
+DEFINE_ME_VEC_SUB_SCALAR(i16, int16_t)
+DEFINE_ME_VEC_SUB_SCALAR(i32, int32_t)
+DEFINE_ME_VEC_SUB_SCALAR(i64, int64_t)
+DEFINE_ME_VEC_SUB_SCALAR(u8, uint8_t)
+DEFINE_ME_VEC_SUB_SCALAR(u16, uint16_t)
+DEFINE_ME_VEC_SUB_SCALAR(u32, uint32_t)
+DEFINE_ME_VEC_SUB_SCALAR(u64, uint64_t)
+DEFINE_ME_VEC_SUB_SCALAR(c64, float _Complex)
+DEFINE_ME_VEC_SUB_SCALAR(c128, double _Complex)
+
 #define DEFINE_ME_EVAL(SUFFIX, TYPE, VEC_ADD, VEC_SUB, VEC_MUL, VEC_DIV, VEC_POW, \
     VEC_ADD_SCALAR, VEC_MUL_SCALAR, VEC_POW_SCALAR, \
     VEC_SQRT, VEC_SIN, VEC_COS, VEC_TAN, \
@@ -6558,15 +6601,9 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
                     if (ldata && rdata) { \
                         VEC_SUB(ldata, rdata, output, n->nitems); \
                     } else if (ldata && right->type == ME_CONSTANT) { \
-                        TYPE b = TO_TYPE_##SUFFIX(right->value); \
-                        for (i = 0; i < n->nitems; i++) { \
-                            output[i] = ldata[i] - b; \
-                        } \
+                        vec_sub_scalar_##SUFFIX(ldata, TO_TYPE_##SUFFIX(right->value), output, n->nitems); \
                     } else if (left->type == ME_CONSTANT && rdata) { \
-                        TYPE a = TO_TYPE_##SUFFIX(left->value); \
-                        for (i = 0; i < n->nitems; i++) { \
-                            output[i] = a - rdata[i]; \
-                        } \
+                        vec_rsub_scalar_##SUFFIX(TO_TYPE_##SUFFIX(left->value), rdata, output, n->nitems); \
                     } else { \
                         goto general_case_binary_##SUFFIX; \
                     } \
@@ -6983,13 +7020,7 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 }
 
 /* Vector operation macros - expand to inline loops */
-#define vec_add(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
 #define vec_pow(a, b, out, n) vec_pow_dispatch((a), (b), (out), (n))
-#define vec_add_scalar(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
 #define vec_pow_scalar(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = pow((a)[_i], (b)); } while(0)
 #define vec_sqrt(a, out, n) vec_sqrt_dispatch((a), (out), (n))
 #define vec_sin(a, out, n) vec_sin_dispatch((a), (out), (n))
@@ -7036,16 +7067,9 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_remainder(a, b, out, n) vec_remainder_dispatch((a), (b), (out), (n))
 #define vec_fma(a, b, c, out, n) vec_fma_dispatch((a), (b), (c), (out), (n))
 #define vec_fma_unused(a, b, c, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i]; } while(0)
-#define vec_negate(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 #define vec_copy(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i]; } while(0)
 
-#define vec_add_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
 #define vec_pow_f32(a, b, out, n) vec_pow_f32_dispatch((a), (b), (out), (n))
-#define vec_add_scalar_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
 #define vec_pow_scalar_f32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = powf((a)[_i], (b)); } while(0)
 #define vec_sqrt_f32(a, out, n) vec_sqrt_f32_dispatch((a), (out), (n))
 #define vec_sin_f32(a, out, n) vec_sin_f32_dispatch((a), (out), (n))
@@ -7091,98 +7115,41 @@ static void me_eval_##SUFFIX(const me_expr *n) { \
 #define vec_nextafter_f32(a, b, out, n) vec_nextafter_f32_dispatch((a), (b), (out), (n))
 #define vec_remainder_f32(a, b, out, n) vec_remainder_f32_dispatch((a), (b), (out), (n))
 #define vec_fma_f32(a, b, c, out, n) vec_fma_f32_dispatch((a), (b), (c), (out), (n))
-#define vec_negame_f32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
 #define vec_atan2(a, b, out, n) vec_atan2_dispatch((a), (b), (out), (n))
 #define vec_atan2_f32(a, b, out, n) vec_atan2_f32_dispatch((a), (b), (out), (n))
 
-#define vec_add_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
 #define vec_pow_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int8_t)pow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
 #define vec_pow_scalar_i8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int8_t)pow((a)[_i], (b)); } while(0)
 #define vec_sqrt_i8(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int8_t)sqrt((a)[_i]); } while(0)
-#define vec_negame_i8(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
-#define vec_add_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
 #define vec_pow_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int16_t)pow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
 #define vec_pow_scalar_i16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int16_t)pow((a)[_i], (b)); } while(0)
 #define vec_sqrt_i16(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int16_t)sqrt((a)[_i]); } while(0)
-#define vec_negame_i16(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
-#define vec_add_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
 #define vec_pow_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int32_t)pow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
 #define vec_pow_scalar_i32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int32_t)pow((a)[_i], (b)); } while(0)
 #define vec_sqrt_i32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int32_t)sqrt((a)[_i]); } while(0)
-#define vec_negame_i32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
-#define vec_add_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
 #define vec_pow_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int64_t)pow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
 #define vec_pow_scalar_i64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int64_t)pow((a)[_i], (b)); } while(0)
 #define vec_sqrt_i64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (int64_t)sqrt((a)[_i]); } while(0)
-#define vec_negame_i64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
-#define vec_add_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
 #define vec_pow_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint8_t)pow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
 #define vec_pow_scalar_u8(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint8_t)pow((a)[_i], (b)); } while(0)
 #define vec_sqrt_u8(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint8_t)sqrt((a)[_i]); } while(0)
-#define vec_negame_u8(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
-#define vec_add_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
 #define vec_pow_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint16_t)pow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
 #define vec_pow_scalar_u16(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint16_t)pow((a)[_i], (b)); } while(0)
 #define vec_sqrt_u16(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint16_t)sqrt((a)[_i]); } while(0)
-#define vec_negame_u16(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
-#define vec_add_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
 #define vec_pow_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint32_t)pow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
 #define vec_pow_scalar_u32(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint32_t)pow((a)[_i], (b)); } while(0)
 #define vec_sqrt_u32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint32_t)sqrt((a)[_i]); } while(0)
-#define vec_negame_u32(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
-#define vec_add_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
-#define vec_sub_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
-#define vec_mul_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b)[_i]; } while(0)
-#define vec_div_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] / (b)[_i]; } while(0)
 #define vec_pow_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint64_t)pow((a)[_i], (b)[_i]); } while(0)
-#define vec_add_scalar_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b); } while(0)
-#define vec_mul_scalar_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] * (b); } while(0)
 #define vec_pow_scalar_u64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint64_t)pow((a)[_i], (b)); } while(0)
 #define vec_sqrt_u64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (uint64_t)sqrt((a)[_i]); } while(0)
-#define vec_negame_u64(a, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = -(a)[_i]; } while(0)
 
 #define vec_add_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] + (b)[_i]; } while(0)
 #define vec_sub_c64(a, b, out, n) do { for (int _i = 0; _i < (n); _i++) (out)[_i] = (a)[_i] - (b)[_i]; } while(0)
