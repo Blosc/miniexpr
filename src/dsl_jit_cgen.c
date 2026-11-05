@@ -508,6 +508,11 @@ static bool me_jit_expr_contains_unsupported_tokens(const char *expr, me_dtype d
     if (!expr) {
         return true;
     }
+    /* The generated C calls the double nextafter(), whose step is a float64
+     * ulp; float32 expressions need nextafterf() and stay on the interpreter. */
+    if (dtype == ME_FLOAT32 && strstr(expr, "nextafter")) {
+        return true;
+    }
     for (const char *p = expr; *p; p++) {
         char c = *p;
         if (in_string) {
@@ -3228,6 +3233,56 @@ static me_jit_reserved_param_kind me_jit_reserved_param_from_name(const char *na
     return ME_JIT_RESERVED_PARAM_NONE;
 }
 
+static bool me_jit_block_calls_nextafter(const me_dsl_jit_ir_block *block);
+
+static bool me_jit_ir_expr_calls_nextafter(const me_dsl_jit_ir_expr *expr) {
+    return expr && expr->text && strstr(expr->text, "nextafter");
+}
+
+static bool me_jit_stmt_calls_nextafter(const me_dsl_jit_ir_stmt *stmt) {
+    if (!stmt) {
+        return false;
+    }
+    switch (stmt->kind) {
+    case ME_DSL_JIT_IR_STMT_ASSIGN:
+        return me_jit_ir_expr_calls_nextafter(&stmt->as.assign.value);
+    case ME_DSL_JIT_IR_STMT_RETURN:
+        return me_jit_ir_expr_calls_nextafter(&stmt->as.return_stmt.expr);
+    case ME_DSL_JIT_IR_STMT_IF:
+        if (me_jit_ir_expr_calls_nextafter(&stmt->as.if_stmt.cond) ||
+            me_jit_block_calls_nextafter(&stmt->as.if_stmt.then_block) ||
+            (stmt->as.if_stmt.has_else && me_jit_block_calls_nextafter(&stmt->as.if_stmt.else_block))) {
+            return true;
+        }
+        for (int i = 0; i < stmt->as.if_stmt.n_elifs; i++) {
+            if (me_jit_ir_expr_calls_nextafter(&stmt->as.if_stmt.elif_branches[i].cond) ||
+                me_jit_block_calls_nextafter(&stmt->as.if_stmt.elif_branches[i].block)) {
+                return true;
+            }
+        }
+        return false;
+    case ME_DSL_JIT_IR_STMT_WHILE:
+        return me_jit_ir_expr_calls_nextafter(&stmt->as.while_loop.cond) ||
+               me_jit_block_calls_nextafter(&stmt->as.while_loop.body);
+    case ME_DSL_JIT_IR_STMT_FOR:
+        return me_jit_ir_expr_calls_nextafter(&stmt->as.for_loop.start) ||
+               me_jit_ir_expr_calls_nextafter(&stmt->as.for_loop.stop) ||
+               me_jit_ir_expr_calls_nextafter(&stmt->as.for_loop.step) ||
+               me_jit_block_calls_nextafter(&stmt->as.for_loop.body);
+    default:
+        return false;
+    }
+}
+
+static bool me_jit_block_calls_nextafter(const me_dsl_jit_ir_block *block) {
+    for (int i = 0; block && i < block->nstmts; i++) {
+        if (me_jit_stmt_calls_nextafter(block->stmts[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_dtype,
                           const me_dsl_jit_cgen_options *options,
                           char **out_source, me_dsl_error *error) {
@@ -3282,6 +3337,22 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
             me_jit_locals_free(&ctx.locals);
             return false;
         }
+    }
+    /* The generated C calls the double nextafter(), whose step is a float64
+     * ulp. In a kernel with float32 values it may be called on them, also
+     * inside a bool, integer or float64 statement, so such a kernel stays on
+     * the interpreter. */
+    bool has_float32 = output_dtype == ME_FLOAT32;
+    for (int i = 0; i < program->nparams && !has_float32; i++) {
+        has_float32 = program->param_dtypes[i] == ME_FLOAT32;
+    }
+    for (int i = 0; i < ctx.locals.count && !has_float32; i++) {
+        has_float32 = ctx.locals.items[i].dtype == ME_FLOAT32;
+    }
+    if (has_float32 && me_jit_block_calls_nextafter(&program->block)) {
+        me_jit_set_error(error, 0, 0, "nextafter() of float32 values is not supported by jit c codegen");
+        me_jit_locals_free(&ctx.locals);
+        return false;
     }
 
     const char *symbol = "me_dsl_jit_kernel";
