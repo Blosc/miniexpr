@@ -2255,6 +2255,11 @@ static void partitionability_proof(void) {
         {"s = block_sum(y)\\n    for i in range(3):\\n        s = s + x\\n    return s","float64",false},
         {"s = x\\n    for i in range(2):\\n        if i == 1:\\n            s = s + (1 // 0)\\n    return s","float64",false},
         {"s = x\\n    for i in range(2):\\n        if i < 0:\\n            s = s + (1 // 0)\\n        s = s + y\\n    return s","float64",true},
+        {"zr = 0.0\\n    zi = 0.0\\n    escape_iter = 64.0\\n    for i in range(64):\\n        if zr * zr + zi * zi > 4.0:\\n            escape_iter = i + 0.0\\n            break\\n        zr_new = zr * zr - zi * zi + x\\n        zi = 2.0 * zr * zi + y\\n        zr = zr_new\\n    return escape_iter","float64",true},
+        {"s = x\\n    for i in range(10):\\n        s = s + y\\n        break\\n    return s","float64",true},
+        {"s = x\\n    for i in range(4):\\n        if i == 2:\\n            continue\\n        s = s + y\\n    return s","float64",true},
+        {"s = x\\n    while s < y:\\n        break\\n    return s","float64",false},
+        {"s = x\\n    for i in range(2):\\n        if x > y:\\n            s = s + (1 // 0)\\n            break\\n    return s","float64",false},
     };
     for (size_t i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
         parity_case test={"partitionability proof",tests[i].body,"float64",tests[i].output,true};

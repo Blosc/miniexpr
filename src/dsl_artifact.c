@@ -1212,9 +1212,28 @@ static artifact_proof_value artifact_proof_merge(artifact_proof_value a, artifac
     return (artifact_proof_value){.valid=true};
 }
 
-static bool artifact_proof_block(artifact_proof *proof, const me_dsl_compiled_block *block, int depth) {
+typedef enum {
+    ARTIFACT_FLOW_NEXT = 0,
+    ARTIFACT_FLOW_BREAK,
+    ARTIFACT_FLOW_CONTINUE
+} artifact_proof_flow;
+
+static void artifact_proof_merge_into(artifact_proof *dest, const artifact_proof *src) {
+    if (!dest->program) {
+        *dest = *src;
+        return;
+    }
+    for (int j = 0; j < dest->program->vars.count; j++) {
+        dest->values[j] = artifact_proof_merge(dest->values[j], src->values[j]);
+    }
+}
+
+static bool artifact_proof_block(artifact_proof *proof, const me_dsl_compiled_block *block,
+    int depth, int loop_depth, artifact_proof_flow *flow,
+    artifact_proof *break_proof, artifact_proof *continue_proof) {
     if (depth > 16) return false;
     const me_dsl_compiled_program *p=proof->program;
+    if (flow) *flow = ARTIFACT_FLOW_NEXT;
     for (int i=0; i<block->nstmts; i++) {
         if (--*proof->budget < 0) return false;
         const me_dsl_compiled_stmt *s=block->stmts[i];
@@ -1233,18 +1252,84 @@ static bool artifact_proof_block(artifact_proof *proof, const me_dsl_compiled_bl
                 (expr->flags & (ME_EXPR_FLAG_WEAK_SCALAR | ME_EXPR_FLAG_WEAK_LITERAL)) &&
                 !value.known_integer && (!value.known_float ||
                  fabs(value.floating) > (p->output_dtype == ME_FLOAT32 ? FLT_MAX : DBL_MAX))) return false;
+        } else if (s->kind == ME_DSL_STMT_BREAK) {
+            if (loop_depth <= 0) return false;
+            if (s->as.flow.cond.expr) {
+                artifact_proof_value cond = artifact_proof_expr(proof, s->as.flow.cond.expr, 0);
+                if (!cond.valid) return false;
+                if (cond.known_integer) {
+                    if (!cond.integer) continue;
+                } else return false;
+            }
+            if (flow) *flow = ARTIFACT_FLOW_BREAK;
+            return true;
+        } else if (s->kind == ME_DSL_STMT_CONTINUE) {
+            if (loop_depth <= 0) return false;
+            if (s->as.flow.cond.expr) {
+                artifact_proof_value cond = artifact_proof_expr(proof, s->as.flow.cond.expr, 0);
+                if (!cond.valid) return false;
+                if (cond.known_integer) {
+                    if (!cond.integer) continue;
+                } else return false;
+            }
+            if (flow) *flow = ARTIFACT_FLOW_CONTINUE;
+            return true;
         } else if (s->kind == ME_DSL_STMT_IF) {
             if (s->as.if_stmt.n_elifs) return false;
             artifact_proof_value condition=artifact_proof_expr(proof,s->as.if_stmt.cond.expr,0);
             if (!condition.valid) return false;
             if (condition.known_integer) {
                 if (!artifact_proof_block(proof,condition.integer ? &s->as.if_stmt.then_block :
-                    &s->as.if_stmt.else_block,depth+1)) return false;
+                    &s->as.if_stmt.else_block,depth+1,loop_depth,flow,break_proof,continue_proof)) return false;
+                if (flow && *flow != ARTIFACT_FLOW_NEXT) return true;
             } else {
                 artifact_proof left=*proof, right=*proof;
-                if (!artifact_proof_block(&left,&s->as.if_stmt.then_block,depth+1) ||
-                    !artifact_proof_block(&right,&s->as.if_stmt.else_block,depth+1)) return false;
-                for (int j=0; j<p->vars.count; j++) proof->values[j]=artifact_proof_merge(left.values[j],right.values[j]);
+                artifact_proof_flow left_flow=ARTIFACT_FLOW_NEXT, right_flow=ARTIFACT_FLOW_NEXT;
+                if (!artifact_proof_block(&left,&s->as.if_stmt.then_block,depth+1,loop_depth,
+                    &left_flow,break_proof,continue_proof)) return false;
+                if (!artifact_proof_block(&right,&s->as.if_stmt.else_block,depth+1,loop_depth,
+                    &right_flow,break_proof,continue_proof)) return false;
+                if (left_flow == ARTIFACT_FLOW_BREAK && right_flow == ARTIFACT_FLOW_BREAK) {
+                    if (!break_proof) return false;
+                    artifact_proof_merge_into(break_proof, &left);
+                    artifact_proof_merge_into(break_proof, &right);
+                    if (flow) *flow = ARTIFACT_FLOW_BREAK;
+                    return true;
+                }
+                if (left_flow == ARTIFACT_FLOW_CONTINUE && right_flow == ARTIFACT_FLOW_CONTINUE) {
+                    if (!continue_proof) return false;
+                    artifact_proof_merge_into(continue_proof, &left);
+                    artifact_proof_merge_into(continue_proof, &right);
+                    if (flow) *flow = ARTIFACT_FLOW_CONTINUE;
+                    return true;
+                }
+                if (left_flow == ARTIFACT_FLOW_BREAK) {
+                    if (!break_proof) return false;
+                    artifact_proof_merge_into(break_proof, &left);
+                    *proof = right;
+                    if (right_flow != ARTIFACT_FLOW_NEXT) {
+                        if (flow) *flow = right_flow;
+                        return true;
+                    }
+                } else if (right_flow == ARTIFACT_FLOW_BREAK) {
+                    if (!break_proof) return false;
+                    artifact_proof_merge_into(break_proof, &right);
+                    *proof = left;
+                    if (left_flow != ARTIFACT_FLOW_NEXT) {
+                        if (flow) *flow = left_flow;
+                        return true;
+                    }
+                } else if (left_flow == ARTIFACT_FLOW_CONTINUE) {
+                    if (!continue_proof) return false;
+                    artifact_proof_merge_into(continue_proof, &left);
+                    *proof = right;
+                } else if (right_flow == ARTIFACT_FLOW_CONTINUE) {
+                    if (!continue_proof) return false;
+                    artifact_proof_merge_into(continue_proof, &right);
+                    *proof = left;
+                } else {
+                    for (int j=0; j<p->vars.count; j++) proof->values[j]=artifact_proof_merge(left.values[j],right.values[j]);
+                }
             }
         } else if (s->kind == ME_DSL_STMT_FOR) {
             artifact_proof_value start=artifact_proof_expr(proof,s->as.for_loop.start.expr,0);
@@ -1253,14 +1338,36 @@ static bool artifact_proof_block(artifact_proof *proof, const me_dsl_compiled_bl
             int index=p->local_var_indices[s->as.for_loop.loop_var_slot];
             if (!start.known_integer || !stop.known_integer || !step.known_integer || !step.integer || proof->counters[index]) return false;
             proof->counters[index]=true;
+            artifact_proof loop_break={0};
+            bool has_survivor=true;
             for (int64_t value=start.integer; step.integer > 0 ? value < stop.integer : value > stop.integer; value+=step.integer) {
                 if (--*proof->budget < 0) return false;
                 proof->values[index]=artifact_proof_integer(value);
-                if (!proof->values[index].valid || !artifact_proof_block(proof,&s->as.for_loop.body,depth+1)) return false;
+                if (!proof->values[index].valid) return false;
+                artifact_proof_flow iter_flow=ARTIFACT_FLOW_NEXT;
+                artifact_proof loop_continue={0};
+                if (!artifact_proof_block(proof,&s->as.for_loop.body,depth+1,loop_depth+1,
+                    &iter_flow,&loop_break,&loop_continue)) return false;
+                if (loop_continue.program) {
+                    if (iter_flow == ARTIFACT_FLOW_NEXT) {
+                        for (int j=0; j<p->vars.count; j++) proof->values[j]=artifact_proof_merge(proof->values[j],loop_continue.values[j]);
+                    } else {
+                        *proof=loop_continue;
+                        iter_flow=ARTIFACT_FLOW_NEXT;
+                    }
+                }
+                if (iter_flow == ARTIFACT_FLOW_BREAK) {
+                    has_survivor=false;
+                    break;
+                }
+            }
+            if (loop_break.program) {
+                if (has_survivor) artifact_proof_merge_into(&loop_break,proof);
+                *proof=loop_break;
             }
             proof->counters[index]=false;
             proof->values[index]=(artifact_proof_value){0};
-        } else return false; /* No effects, while caps, early flow or reductions. */
+        } else return false; /* No effects, while caps or reductions. */
     }
     return true;
 }
@@ -1286,7 +1393,8 @@ bool me_artifact_is_partitionable(const me_artifact *artifact) {
                 (const void *)&artifact->bindings[i].value.f32 : (const void *)&artifact->bindings[i].value.f64);
         }
     }
-    return artifact_proof_block(&proof,&p->block,0);
+    artifact_proof_flow flow=ARTIFACT_FLOW_NEXT;
+    return artifact_proof_block(&proof,&p->block,0,0,&flow,NULL,NULL);
 }
 
 me_artifact_cardinality me_artifact_result_cardinality(const me_artifact *artifact) {
