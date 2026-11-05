@@ -2449,6 +2449,32 @@ static bool p_batch_integer_conversion(me_dtype from, me_dtype to) {
     return p_integer(from) && p_integer(to);
 }
 
+/* Eagerly evaluating an inactive branch is observationally identical only when
+ * it cannot raise floating-point exceptions: plain lanes, value-preserving
+ * integer conversions, and integer bitwise/arithmetic. Float math keeps the
+ * contiguous-run guards so inactive lanes never touch the FP status flags. */
+static bool p_batch_eager_safe(const me_expr *n) {
+    if (!n) return false;
+    int kind = TYPE_MASK(n->type);
+    if (kind == ME_VARIABLE || kind == ME_CONSTANT) return true;
+    if (!IS_FUNCTION(n->type) || is_reduction_node(n)) return false;
+    if (n->dtype != ME_BOOL && !p_integer(n->dtype)) return false;
+    if (!n->function) {
+        const me_expr *arg = n->parameters[0];
+        return ARITY(n->type) == 1 && arg && (arg->dtype == ME_BOOL || p_integer(arg->dtype));
+    }
+    const char *op = me_menudet_operator(n);
+    if (!op) return false;
+    int arity = ARITY(n->type);
+    bool flag_neutral =
+        (arity == 2 && (!strcmp(op,"&") || !strcmp(op,"|") || !strcmp(op,"^") ||
+                        !strcmp(op,"+") || !strcmp(op,"-") || !strcmp(op,"*"))) ||
+        (arity == 1 && !strcmp(op,"-"));
+    if (!flag_neutral) return false;
+    for (int i = 0; i < arity; i++) if (!p_batch_eager_safe(n->parameters[i])) return false;
+    return true;
+}
+
 static int p_batch_build(p_batch_program *program, const me_expr *n,
     p_eval_context *ctx, int depth, int guard) {
     if (!n || depth > 32 || program->count == P_BATCH_NODES || dtype_size(n->dtype) > sizeof(double _Complex)) return -1;
@@ -2505,12 +2531,17 @@ static int p_batch_build(p_batch_program *program, const me_expr *n,
                 yes->dtype != n->dtype || no->dtype != n->dtype) return -1;
             instruction.third = p_batch_build(program, condition, ctx, depth+1, guard);
             if (instruction.third < 0) return -1;
-            p_batch_instruction mask = {.expr=condition,.op=P_BATCH_MASK,
-                .left=instruction.third,.right=guard,.third=-1,.guard=-1,.mask_truth=true};
-            int yes_guard = p_batch_append(program, &mask);
-            mask.mask_truth = false;
-            int no_guard = p_batch_append(program, &mask);
-            if (yes_guard < 0 || no_guard < 0) return -1;
+            /* Flag-neutral branches may run on every lane: the select still
+             * picks the active one, so inactive lanes cannot be observed. */
+            int yes_guard = -1, no_guard = -1;
+            if (!p_batch_eager_safe(yes) || !p_batch_eager_safe(no)) {
+                p_batch_instruction mask = {.expr=condition,.op=P_BATCH_MASK,
+                    .left=instruction.third,.right=guard,.third=-1,.guard=-1,.mask_truth=true};
+                yes_guard = p_batch_append(program, &mask);
+                mask.mask_truth = false;
+                no_guard = p_batch_append(program, &mask);
+                if (yes_guard < 0 || no_guard < 0) return -1;
+            }
             instruction.left = p_batch_build(program, yes, ctx, depth+1, yes_guard);
             instruction.right = p_batch_build(program, no, ctx, depth+1, no_guard);
             if (instruction.left < 0 || instruction.right < 0) return -1;
@@ -2736,6 +2767,7 @@ static bool p_batch_eval(const me_expr *expr, p_eval_context *ctx, int nitems,
             p_batch_splat(destination,destination,width,prefill_lanes);
         }
     }
+    bool uniform_ready[P_BATCH_NODES] = {false};
     for (int begin=0; begin<nitems;) {
         int count=nitems-begin < tile_lanes ? nitems-begin : tile_lanes;
         unsigned char *out_tile=(unsigned char *)out+(size_t)begin*stride;
@@ -2767,6 +2799,8 @@ static bool p_batch_eval(const me_expr *expr, p_eval_context *ctx, int nitems,
              * Masks also form part of CSE identity: values are never reused
              * from an unrelated participation domain. */
             const bool *guard = instruction->guard < 0 ? NULL : (const bool *)values[instruction->guard];
+            /* A uniform conversion that already ran needs no per-run traversal. */
+            if (instruction->op == P_BATCH_CAST && instruction->uniform && uniform_ready[op]) continue;
             int tile_count = count;
             for (int lane = 0; lane < tile_count;) {
                 while (lane < tile_count && guard && !guard[lane]) lane++;
@@ -2789,20 +2823,47 @@ static bool p_batch_eval(const me_expr *expr, p_eval_context *ctx, int nitems,
                 }
                 if (instruction->op == P_BATCH_SELECT) {
                     const bool *condition = (const bool *)values[instruction->third] + offset;
-                    for (int i = 0; i < count; i++) {
+                    /* Element-width selects compile to branchless moves; the
+                     * generic path covers strings/complex and exotic widths. */
+#define P_BATCH_SELECT_LOOP(T) do { \
+    T *d=(T *)destination; const T *l=(const T *)left, *r=(const T *)right; \
+    for (int i=0; i<count; i++) d[i]=condition[i] ? l[i] : r[i]; \
+} while (0)
+                    if (width == 1) P_BATCH_SELECT_LOOP(uint8_t);
+                    else if (width == 2) P_BATCH_SELECT_LOOP(uint16_t);
+                    else if (width == 4) P_BATCH_SELECT_LOOP(uint32_t);
+                    else if (width == 8) P_BATCH_SELECT_LOOP(uint64_t);
+                    else for (int i = 0; i < count; i++)
                         memcpy(destination + (size_t)i * width,
                             (condition[i] ? left : right) + (size_t)i * width, width);
-                    }
+#undef P_BATCH_SELECT_LOOP
                     continue;
                 }
                 if (instruction->op == P_BATCH_CAST) {
-                    /* Only unguarded uniform conversions persist across tiles.
-                     * A guarded slot may be uninitialized in earlier tiles. */
-                    if (instruction->uniform && !guard && begin) continue;
                     const me_expr *arg=n->parameters[0];
-                    if (!instruction->uniform && p_batch_cast(arg->dtype,n->dtype,left,destination,count)) continue;
-                    bool converted_all = true;
-                    for (int i=0; i<(instruction->uniform ? 1 : count); i++) {
+                    if (instruction->uniform) {
+                        /* A uniform conversion is one scalar. Convert it once when
+                         * any lane first participates, then fill the whole tile:
+                         * a map whose lanes all skip never converts, so strict FP
+                         * status flags stay identical to per-run evaluation. */
+                        if (uniform_ready[op]) continue;
+                        unsigned char *slot = storage + (size_t)op * slot_bytes;
+                        me_scalar value,converted;
+                        read_scalar(values[instruction->left],arg->dtype,&value);
+                        me_menudet_numeric_status status = p_numpy(n) && !p_weak(arg) ?
+                            p_numpy_convert(arg->dtype,&value,n->dtype,&converted) :
+                            p_convert(arg->dtype,&value,n->dtype,&converted);
+                        if (status != ME_MENUDET_NUMERIC_OK) {
+                            if (storage != stack_storage.bytes) free(storage);
+                            return false;
+                        }
+                        write_scalar(slot,n->dtype,n->dtype,&converted);
+                        p_batch_splat(slot,slot,width,tile_count);
+                        uniform_ready[op] = true;
+                        continue;
+                    }
+                    if (p_batch_cast(arg->dtype,n->dtype,left,destination,count)) continue;
+                    for (int i=0; i<count; i++) {
                         me_scalar value,converted;
                         read_scalar(left+(size_t)i*dtype_size(arg->dtype),arg->dtype,&value);
                         /* Mirror p_eval: weak scalars take the checked conversion,
@@ -2811,16 +2872,11 @@ static bool p_batch_eval(const me_expr *expr, p_eval_context *ctx, int nitems,
                             p_numpy_convert(arg->dtype,&value,n->dtype,&converted) :
                             p_convert(arg->dtype,&value,n->dtype,&converted);
                         if (status != ME_MENUDET_NUMERIC_OK) {
-                            converted_all = false;
-                            break;
+                            if (storage != stack_storage.bytes) free(storage);
+                            return false;
                         }
                         write_scalar(destination+(size_t)i*width,n->dtype,n->dtype,&converted);
                     }
-                    if (!converted_all) {
-                        if (storage != stack_storage.bytes) free(storage);
-                        return false;
-                    }
-                    if (instruction->uniform) p_batch_splat(destination,destination,width,count);
                     continue;
                 }
                 bool left_u = instruction->left >= 0 && program.instructions[instruction->left].uniform;

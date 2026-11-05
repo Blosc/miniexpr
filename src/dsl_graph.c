@@ -338,21 +338,25 @@ static char *g_copy(const char *s) {
 }
 static bool g_partitionable(graph_node *nodes, int count) {
     bool runtime[ME_GRAPH_MAX_NODES] = {0};
-    /* Initial native policy: floating runtime expressions, plus same-signature
-     * modular integer maps. No casts, scalar-only computed subtrees or shifts.
-     * Capabilities can broaden without duplicating these rules in each host. */
+    /* Initial native policy: floating runtime expressions, plus lane-local
+     * modular integer maps. NumPy promotion may mix integer widths and booleans,
+     * because it only inserts value-preserving per-lane conversions. No explicit
+     * casts, scalar-only computed subtrees or shifts. */
     me_dtype integer = ME_AUTO;
     bool floating = true;
     for (int i = 0; i < count; i++) if (!strcmp(nodes[i].op,"input")) {
         me_dtype dtype = g_dtype(g_str(yyjson_obj_get(nodes[i].value,"dtype")));
         if (dtype != ME_FLOAT32 && dtype != ME_FLOAT64) {
             floating = false;
+            if (dtype == ME_AUTO) return false;
             if (integer == ME_AUTO) integer = dtype;
-            if (integer != dtype || dtype == ME_BOOL) return false;
+            else {
+                integer = dsl_numpy_numeric_promote(integer, dtype);
+                /* int64/uint64 promotes to float64: keep it scalar. */
+                if (integer == ME_AUTO || integer == ME_FLOAT32 || integer == ME_FLOAT64) return false;
+            }
         } else if (integer != ME_AUTO) return false;
     }
-    if (!floating) for (int i = 0; i < count; i++) if (!strcmp(nodes[i].op,"input") &&
-        g_dtype(g_str(yyjson_obj_get(nodes[i].value,"dtype"))) != integer) return false;
     for (int i = 0; i < count; i++) {
         graph_node *node = &nodes[i];
         if (!strcmp(node->op,"input")) { runtime[i] = true; continue; }
