@@ -104,6 +104,21 @@ ME_BATCH_CAST(double,f64)
 void dsl_menudet_batch_cast_f32_f64(const float *a, double *restrict out, int count);
 #undef ME_BATCH_CAST
 
+/* Value-preserving integer extensions inserted by NumPy dtype promotion. */
+#define ME_BATCH_INT_CAST(TO,TO_S,FROM,FROM_S) \
+    void dsl_menudet_batch_cast_##FROM_S##_##TO_S(const FROM *a, TO *restrict out, int count);
+ME_BATCH_INT_CAST(int16_t,i16,int8_t,i8) ME_BATCH_INT_CAST(int16_t,i16,uint8_t,u8)
+ME_BATCH_INT_CAST(int32_t,i32,int8_t,i8) ME_BATCH_INT_CAST(int32_t,i32,uint8_t,u8)
+ME_BATCH_INT_CAST(int32_t,i32,int16_t,i16) ME_BATCH_INT_CAST(int32_t,i32,uint16_t,u16)
+ME_BATCH_INT_CAST(int64_t,i64,int8_t,i8) ME_BATCH_INT_CAST(int64_t,i64,uint8_t,u8)
+ME_BATCH_INT_CAST(int64_t,i64,int16_t,i16) ME_BATCH_INT_CAST(int64_t,i64,uint16_t,u16)
+ME_BATCH_INT_CAST(int64_t,i64,int32_t,i32) ME_BATCH_INT_CAST(int64_t,i64,uint32_t,u32)
+ME_BATCH_INT_CAST(uint16_t,u16,uint8_t,u8)
+ME_BATCH_INT_CAST(uint32_t,u32,uint8_t,u8) ME_BATCH_INT_CAST(uint32_t,u32,uint16_t,u16)
+ME_BATCH_INT_CAST(uint64_t,u64,uint8_t,u8) ME_BATCH_INT_CAST(uint64_t,u64,uint16_t,u16)
+ME_BATCH_INT_CAST(uint64_t,u64,uint32_t,u32)
+#undef ME_BATCH_INT_CAST
+
 #define ME_BATCH_COMPLEX_CAST(T,S) \
     void dsl_menudet_batch_cast_##S##_c64(const T *a, float _Complex *restrict out, int count); \
     void dsl_menudet_batch_cast_##S##_c128(const T *a, double _Complex *restrict out, int count);

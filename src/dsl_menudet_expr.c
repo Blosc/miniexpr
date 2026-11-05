@@ -80,6 +80,10 @@ static bool p_unsigned(me_dtype d) {
     return d == ME_UINT8 || d == ME_UINT16 || d == ME_UINT32 || d == ME_UINT64;
 }
 
+static bool p_integer(me_dtype d) {
+    return d == ME_INT8 || d == ME_INT16 || d == ME_INT32 || d == ME_INT64 || p_unsigned(d);
+}
+
 static bool p_float(me_dtype d) {
     return d == ME_FLOAT32 || d == ME_FLOAT64;
 }
@@ -2435,6 +2439,15 @@ static int p_batch_append(p_batch_program *program, const p_batch_instruction *i
     return result;
 }
 
+/* NumPy implicitly inserts only value-preserving integer conversions: equal
+ * signedness widens, and an unsigned operand widens into a signed one. Narrowing
+ * is an explicit modular cast and keeps scalar semantics. */
+static bool p_batch_integer_promotion(me_dtype from, me_dtype to) {
+    if (!p_integer(from) || !p_integer(to) || dtype_size(from) > dtype_size(to)) return false;
+    if (p_unsigned(from) == p_unsigned(to)) return true;
+    return p_unsigned(from) && !p_unsigned(to) && dtype_size(from) < dtype_size(to);
+}
+
 static int p_batch_build(p_batch_program *program, const me_expr *n,
     p_eval_context *ctx, int depth, int guard) {
     if (!n || depth > 32 || program->count == P_BATCH_NODES || dtype_size(n->dtype) > sizeof(double _Complex)) return -1;
@@ -2508,7 +2521,8 @@ static int p_batch_build(p_batch_program *program, const me_expr *n,
                 left->dtype != ((const me_expr *)n->parameters[1])->dtype) return -1;
             instruction.op=P_BATCH_COMPARE;
         } else if (!n->function && arity == 1 && p_numeric(left->dtype) &&
-            (is_complex || (floating && !p_complex(left->dtype)))) instruction.op=P_BATCH_CAST;
+            (is_complex || (floating && !p_complex(left->dtype)) ||
+             p_batch_integer_promotion(left->dtype, n->dtype))) instruction.op=P_BATCH_CAST;
         else {
             const char *op=me_menudet_operator(n);
             const char *name=op ? NULL : me_menudet_math_name(n);
@@ -2601,6 +2615,45 @@ static bool p_batch_cast(me_dtype from, me_dtype to, const void *source, void *o
         }
 #undef P_BATCH_COMPLEX_CAST_CASE
     }
+    /* Identity conversions are bit copies. The typed switch below assumes a
+     * floating destination, so an unhandled integer target must decline. */
+    if (from == to && p_integer(from)) {
+        memmove(out, source, (size_t)count * dtype_size(from));
+        return true;
+    }
+    /* Implicit promotion only inserts value-preserving integer extensions. */
+#define P_BATCH_INT_CAST(FROM_D,FROM,FROM_S,TO,TO_S) \
+    if (from == FROM_D) { \
+        dsl_menudet_batch_cast_##FROM_S##_##TO_S((const FROM *)source,(TO *)out,count); \
+        return true; \
+    }
+    if (to == ME_INT16) {
+        P_BATCH_INT_CAST(ME_INT8,int8_t,i8,int16_t,i16)
+        P_BATCH_INT_CAST(ME_UINT8,uint8_t,u8,int16_t,i16)
+    } else if (to == ME_INT32) {
+        P_BATCH_INT_CAST(ME_INT8,int8_t,i8,int32_t,i32)
+        P_BATCH_INT_CAST(ME_UINT8,uint8_t,u8,int32_t,i32)
+        P_BATCH_INT_CAST(ME_INT16,int16_t,i16,int32_t,i32)
+        P_BATCH_INT_CAST(ME_UINT16,uint16_t,u16,int32_t,i32)
+    } else if (to == ME_INT64) {
+        P_BATCH_INT_CAST(ME_INT8,int8_t,i8,int64_t,i64)
+        P_BATCH_INT_CAST(ME_UINT8,uint8_t,u8,int64_t,i64)
+        P_BATCH_INT_CAST(ME_INT16,int16_t,i16,int64_t,i64)
+        P_BATCH_INT_CAST(ME_UINT16,uint16_t,u16,int64_t,i64)
+        P_BATCH_INT_CAST(ME_INT32,int32_t,i32,int64_t,i64)
+        P_BATCH_INT_CAST(ME_UINT32,uint32_t,u32,int64_t,i64)
+    } else if (to == ME_UINT16) {
+        P_BATCH_INT_CAST(ME_UINT8,uint8_t,u8,uint16_t,u16)
+    } else if (to == ME_UINT32) {
+        P_BATCH_INT_CAST(ME_UINT8,uint8_t,u8,uint32_t,u32)
+        P_BATCH_INT_CAST(ME_UINT16,uint16_t,u16,uint32_t,u32)
+    } else if (to == ME_UINT64) {
+        P_BATCH_INT_CAST(ME_UINT8,uint8_t,u8,uint64_t,u64)
+        P_BATCH_INT_CAST(ME_UINT16,uint16_t,u16,uint64_t,u64)
+        P_BATCH_INT_CAST(ME_UINT32,uint32_t,u32,uint64_t,u64)
+    }
+#undef P_BATCH_INT_CAST
+    if (!p_float(to)) return false;
 #define P_BATCH_CAST_CASE(D,T,S) \
     case D: if (to == ME_FLOAT32) dsl_menudet_batch_cast_##S##_f32((const T *)source,(float *)out,count); \
         else dsl_menudet_batch_cast_##S##_f64((const T *)source,(double *)out,count); return true;
