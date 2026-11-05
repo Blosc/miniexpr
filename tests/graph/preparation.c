@@ -201,6 +201,36 @@ static void partition_policies(void) {
         CHECK(!(me_graph_execution_capabilities(plan) & ME_GRAPH_EXEC_PARTITIONABLE));
         me_graph_plan_free(plan);
     }
+    /* Promotion at the root must not hide a checked weak-scalar conversion in
+     * a narrower subtree. Safe mixed-width/Boolean maps remain partitionable. */
+    struct { const char *source; me_dtype x, y; bool safe; } mixed[] = {
+        {"(x + 300) + y", ME_UINT8, ME_INT16, false},
+        {"y + (x + 300)", ME_UINT8, ME_INT16, false},
+        {"(x + -1) + y", ME_UINT8, ME_INT16, false},
+        {"(x + 128) + y", ME_INT8, ME_INT16, false},
+        {"(x + -129) + y", ME_INT8, ME_INT16, false},
+        {"(x + 32768) + y", ME_INT16, ME_INT32, false},
+        {"(x + 255) + y", ME_UINT8, ME_INT16, true},
+        {"(x + 127) + y", ME_INT8, ME_INT16, true},
+        {"(x + -128) + y", ME_INT8, ME_INT16, true},
+        {"(x + 32767) + y", ME_INT16, ME_INT32, true},
+        {"x + y", ME_INT16, ME_UINT8, true},
+        {"x | y", ME_BOOL, ME_BOOL, true},
+        {"where(x, y + 300, y)", ME_BOOL, ME_INT16, true},
+        /* A conservative decline is allowed even after explicit promotion. */
+        {"(x + y) + 300", ME_UINT8, ME_INT16, false}
+    };
+    for (size_t i = 0; i < sizeof(mixed) / sizeof(*mixed); i++) {
+        me_graph_input_metadata inputs[] = {{"x", mixed[i].x, 1, {3}}, {"y", mixed[i].y, 1, {3}}};
+        me_graph_plan *plan = prepare(mixed[i].source, inputs, 2, false), *copy = NULL;
+        CHECK(!!(me_graph_execution_capabilities(plan) & ME_GRAPH_EXEC_PARTITIONABLE) == mixed[i].safe);
+        size_t length;
+        const char *json = me_graph_export_json(plan, &length);
+        CHECK(!me_graph_prepare_json(json, length, NULL, &copy, &error));
+        CHECK(!!(me_graph_execution_capabilities(copy) & ME_GRAPH_EXEC_PARTITIONABLE) == mixed[i].safe);
+        me_graph_plan_free(copy);
+        me_graph_plan_free(plan);
+    }
 }
 static void integer_extrema(bool jit) {
     /* Exercise exact signed/unsigned boundaries and generated nested extrema,

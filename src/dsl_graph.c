@@ -343,12 +343,21 @@ static bool g_partitionable(graph_node *nodes, int count) {
      * because it only inserts value-preserving per-lane conversions. No explicit
      * casts, scalar-only computed subtrees or shifts. */
     me_dtype integer = ME_AUTO;
+    int64_t integer_min = INT64_MIN, integer_max = INT64_MAX;
     bool floating = true;
     for (int i = 0; i < count; i++) if (!strcmp(nodes[i].op,"input")) {
         me_dtype dtype = g_dtype(g_str(yyjson_obj_get(nodes[i].value,"dtype")));
         if (dtype != ME_FLOAT32 && dtype != ME_FLOAT64) {
             floating = false;
             if (dtype == ME_AUTO) return false;
+            if (dtype != ME_BOOL) {
+                size_t width = g_width(dtype);
+                bool unsign = dtype == ME_UINT8 || dtype == ME_UINT16 || dtype == ME_UINT32 || dtype == ME_UINT64;
+                int64_t minimum = unsign ? 0 : width < 8 ? -(INT64_C(1) << (width * 8 - 1)) : INT64_MIN;
+                int64_t maximum = width < 8 ? (INT64_C(1) << (width * 8 - (unsign ? 0 : 1))) - 1 : INT64_MAX;
+                if (minimum > integer_min) integer_min = minimum;
+                if (maximum < integer_max) integer_max = maximum;
+            }
             if (integer == ME_AUTO) integer = dtype;
             else {
                 integer = dsl_numpy_numeric_promote(integer, dtype);
@@ -375,6 +384,11 @@ static bool g_partitionable(graph_node *nodes, int count) {
                 const char *text = g_str(yyjson_obj_get(node->value,"value"));
                 if (!text) return false;
                 int64_t value = strtoll(text,NULL,10);
+                /* The promoted input type does not describe every intermediate:
+                 * (uint8_input + 300) + int16_input still checks 300 as uint8.
+                 * Until this proof tracks consuming-node types, require literals
+                 * to fit every integral input, not just their common promotion. */
+                if (value < integer_min || value > integer_max) return false;
                 size_t width = g_width(integer);
                 bool unsign = integer == ME_UINT8 || integer == ME_UINT16 || integer == ME_UINT32 || integer == ME_UINT64;
                 if ((unsign && value < 0) || (width < 8 && (unsign ?
