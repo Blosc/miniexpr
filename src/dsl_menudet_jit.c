@@ -257,11 +257,8 @@ static bool pj_runtime_float(const me_dsl_compiled_program *p, const me_expr *n,
     if (!n || depth > 128 || !pj_float(n->dtype)) return false;
     if (TYPE_MASK(n->type) == ME_VARIABLE && is_synthetic_address(n->bound)) {
         int index = (int)((const char *)n->bound - synthetic_var_addresses);
-#ifdef __EMSCRIPTEN__
-        return index >= 0 && index < p->vars.count;
-#else
-        return index >= 0 && index < p->n_inputs && !p->vars.uniform[index];
-#endif
+        return (index >= 0 && index < p->n_inputs && !p->vars.uniform[index]) ||
+               (index >= p->n_inputs && index < p->vars.count);
     }
     if (!IS_FUNCTION(n->type) || is_reduction_node(n)) return false;
     const char *op = me_menudet_operator(n);
@@ -274,6 +271,10 @@ static bool pj_runtime_float(const me_dsl_compiled_program *p, const me_expr *n,
 }
 
 static bool pj_plain_literal(const me_expr *n, const char *op) {
+    if (!n) return false;
+    if (IS_FUNCTION(n->type) && !n->function && ARITY(n->type) == 1 && pj_float(n->dtype)) {
+        n = (const me_expr *)n->parameters[0];
+    }
     if (!n || TYPE_MASK(n->type) != ME_CONSTANT || !pj_float(n->dtype)) return false;
     double value;
     if (n->flags & ME_EXPR_FLAG_INTEGER_LITERAL) {
@@ -289,6 +290,17 @@ static bool pj_plain_literal(const me_expr *n, const char *op) {
      * exceptions. Keep their barriers even though the literal itself is exact. */
     return isfinite(value) && value != 0 &&
         ((strcmp(op,"*") && strcmp(op,"/")) || fabs(value) != 1);
+}
+
+static bool pj_finite_literal(const me_expr *n) {
+    if (!n) return false;
+    if (IS_FUNCTION(n->type) && !n->function && ARITY(n->type) == 1 && pj_float(n->dtype)) {
+        n = (const me_expr *)n->parameters[0];
+    }
+    if (TYPE_MASK(n->type) != ME_CONSTANT) return false;
+    if (n->flags & ME_EXPR_FLAG_INTEGER_LITERAL) return true;
+    double value = n->dtype == ME_FLOAT32 ? (double)n->literal_f32 : n->value;
+    return isfinite(value);
 }
 
 static bool pj_cse_key(const me_dsl_compiled_program *p, const me_expr *n, uint64_t *hash,
@@ -598,6 +610,40 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
             return strdup(literal);
         }
     }
+    if (conversion && pj_float(n->dtype) && arg0 && TYPE_MASK(arg0->type) == ME_CONSTANT) {
+        double val = 0.0;
+        bool ok = false;
+        if (arg0->flags & ME_EXPR_FLAG_INTEGER_LITERAL) {
+            uint64_t bits;
+            if (pj_literal_integer_bits(arg0, arg0->dtype, &bits)) {
+                val = pj_unsigned(arg0->dtype) ? (double)bits : (double)(int64_t)bits;
+                ok = true;
+            }
+        } else if (arg0->dtype == ME_FLOAT32) {
+            val = (double)arg0->literal_f32;
+            ok = true;
+        } else if (arg0->dtype == ME_FLOAT64) {
+            val = arg0->value;
+            ok = true;
+        } else if (arg0->dtype == ME_BOOL) {
+            val = arg0->value != 0 ? 1.0 : 0.0;
+            ok = true;
+        }
+        if (ok && (plain_literal || isfinite(val))) {
+            char leaf[128];
+            if (n->dtype == ME_FLOAT32) {
+                snprintf(leaf, sizeof(leaf), "((float)%af)", (double)(float)val);
+            } else {
+                snprintf(leaf, sizeof(leaf), "((double)%a)", val);
+            }
+            if (plain_literal) {
+                return strdup(leaf);
+            }
+            char literal[300];
+            snprintf(literal, sizeof(literal), "((volatile %s){%s})", type, leaf);
+            return strdup(literal);
+        }
+    }
     bool int_cast = conversion && (n->flags & ME_EXPR_FLAG_NUMPY_1_1) && pj_integer(n->dtype) && pj_integral(arg0->dtype) &&
         arg0->dtype != n->dtype && !weak_operand;
     if (conversion && pj_integer(n->dtype) && arg0->dtype != n->dtype && weak_operand) {
@@ -738,11 +784,13 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
     for (int j = 0; j < arity; j++) {
         bool plain = arithmetic && arity == 2 && pj_plain_literal(n->parameters[j],op) &&
             pj_runtime_float(p,n->parameters[1-j],0);
-#ifdef __EMSCRIPTEN__
+        const me_expr *lit = n->parameters[j];
+        if (lit && IS_FUNCTION(lit->type) && !lit->function && ARITY(lit->type) == 1 && pj_float(lit->dtype)) {
+            lit = (const me_expr *)lit->parameters[0];
+        }
         plain = plain || (comparison && arity == 2 &&
-            TYPE_MASK(((const me_expr *)n->parameters[j])->type) == ME_CONSTANT &&
+            lit && TYPE_MASK(lit->type) == ME_CONSTANT &&
             pj_runtime_float(p,n->parameters[1-j],0));
-#endif
         /* Runtime-bound callbacks cannot be folded into compile-time libm
          * answers. Exact nonzero call literals therefore need no barrier. */
         plain = plain || ((predicate || unary_math || binary_math || exponent_math || ternary_math) &&
@@ -1023,18 +1071,85 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                 int id = p->menudet_jit_ncomparisons++;
                 p->menudet_jit_comparisons[id] = n;
                 int temporary = (*next_temp)++;
-                bool ok = pj_append(s,
-                    "union { double f; uint64_t u; } pj_cmp_a_%d, pj_cmp_b_%d;\n"
-                    "pj_cmp_a_%d.f = (double)(%s); pj_cmp_b_%d.f = (double)(%s);\n"
-                    "_Bool pj_cmp_result_%d;\n",temporary,temporary,temporary,args[0],temporary,args[1],temporary);
-                ok = ok && pj_append(s,
-                    "if ((pj_cmp_a_%d.u & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000) || "
-                    "(pj_cmp_b_%d.u & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000))\n"
-                    "pj_cmp_result_%d = ((pj_cmp)inputs[%d])(inputs[%d],pj_cmp_a_%d.f,pj_cmp_b_%d.f);\n"
-                    "else pj_cmp_result_%d = pj_cmp_a_%d.f %s pj_cmp_b_%d.f;\n",
-                    temporary,temporary,temporary,p->n_inputs+ME_DSL_MENUDET_JIT_CMP_OFF,
-                    p->n_inputs+ME_DSL_MENUDET_JIT_CMP_OFF+1+id,temporary,temporary,
-                    temporary,temporary,op,temporary);
+                bool is_f32 = (arg0->dtype == ME_FLOAT32 && arg1->dtype == ME_FLOAT32);
+                bool lit0 = pj_finite_literal(arg0);
+                bool lit1 = pj_finite_literal(arg1);
+                bool ok = true;
+                if (is_f32) {
+                    if (!lit0) ok = ok && pj_append(s,"union { float f; uint32_t u; } pj_cmp_a_%d;\npj_cmp_a_%d.f = (float)(%s);\n",temporary,temporary,args[0]);
+                    if (!lit1) ok = ok && pj_append(s,"union { float f; uint32_t u; } pj_cmp_b_%d;\npj_cmp_b_%d.f = (float)(%s);\n",temporary,temporary,args[1]);
+                    ok = ok && pj_append(s,"_Bool pj_cmp_result_%d;\n",temporary);
+                    char a_val[64], b_val[64];
+                    if (lit0) snprintf(a_val,sizeof(a_val),"(%s)",args[0]);
+                    else snprintf(a_val,sizeof(a_val),"pj_cmp_a_%d.f",temporary);
+                    if (lit1) snprintf(b_val,sizeof(b_val),"(%s)",args[1]);
+                    else snprintf(b_val,sizeof(b_val),"pj_cmp_b_%d.f",temporary);
+                    if (lit0 && lit1) {
+                        ok = ok && pj_append(s,"pj_cmp_result_%d = %s %s %s;\n",temporary,a_val,op,b_val);
+                    } else if (lit0) {
+                        ok = ok && pj_append(s,
+                            "if ((pj_cmp_b_%d.u & UINT32_C(0x7fffffff)) > UINT32_C(0x7f800000))\n"
+                            "pj_cmp_result_%d = ((pj_cmp)inputs[%d])(inputs[%d],(double)%s,(double)%s);\n"
+                            "else pj_cmp_result_%d = %s %s %s;\n",
+                            temporary,temporary,p->n_inputs+ME_DSL_MENUDET_JIT_CMP_OFF,
+                            p->n_inputs+ME_DSL_MENUDET_JIT_CMP_OFF+1+id,a_val,b_val,
+                            temporary,a_val,op,b_val);
+                    } else if (lit1) {
+                        ok = ok && pj_append(s,
+                            "if ((pj_cmp_a_%d.u & UINT32_C(0x7fffffff)) > UINT32_C(0x7f800000))\n"
+                            "pj_cmp_result_%d = ((pj_cmp)inputs[%d])(inputs[%d],(double)%s,(double)%s);\n"
+                            "else pj_cmp_result_%d = %s %s %s;\n",
+                            temporary,temporary,p->n_inputs+ME_DSL_MENUDET_JIT_CMP_OFF,
+                            p->n_inputs+ME_DSL_MENUDET_JIT_CMP_OFF+1+id,a_val,b_val,
+                            temporary,a_val,op,b_val);
+                    } else {
+                        ok = ok && pj_append(s,
+                            "if ((pj_cmp_a_%d.u & UINT32_C(0x7fffffff)) > UINT32_C(0x7f800000) || "
+                            "(pj_cmp_b_%d.u & UINT32_C(0x7fffffff)) > UINT32_C(0x7f800000))\n"
+                            "pj_cmp_result_%d = ((pj_cmp)inputs[%d])(inputs[%d],(double)%s,(double)%s);\n"
+                            "else pj_cmp_result_%d = %s %s %s;\n",
+                            temporary,temporary,temporary,p->n_inputs+ME_DSL_MENUDET_JIT_CMP_OFF,
+                            p->n_inputs+ME_DSL_MENUDET_JIT_CMP_OFF+1+id,a_val,b_val,
+                            temporary,a_val,op,b_val);
+                    }
+                } else {
+                    if (!lit0) ok = ok && pj_append(s,"union { double f; uint64_t u; } pj_cmp_a_%d;\npj_cmp_a_%d.f = (double)(%s);\n",temporary,temporary,args[0]);
+                    if (!lit1) ok = ok && pj_append(s,"union { double f; uint64_t u; } pj_cmp_b_%d;\npj_cmp_b_%d.f = (double)(%s);\n",temporary,temporary,args[1]);
+                    ok = ok && pj_append(s,"_Bool pj_cmp_result_%d;\n",temporary);
+                    char a_val[64], b_val[64];
+                    if (lit0) snprintf(a_val,sizeof(a_val),"(%s)",args[0]);
+                    else snprintf(a_val,sizeof(a_val),"pj_cmp_a_%d.f",temporary);
+                    if (lit1) snprintf(b_val,sizeof(b_val),"(%s)",args[1]);
+                    else snprintf(b_val,sizeof(b_val),"pj_cmp_b_%d.f",temporary);
+                    if (lit0 && lit1) {
+                        ok = ok && pj_append(s,"pj_cmp_result_%d = %s %s %s;\n",temporary,a_val,op,b_val);
+                    } else if (lit0) {
+                        ok = ok && pj_append(s,
+                            "if ((pj_cmp_b_%d.u & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000))\n"
+                            "pj_cmp_result_%d = ((pj_cmp)inputs[%d])(inputs[%d],%s,%s);\n"
+                            "else pj_cmp_result_%d = %s %s %s;\n",
+                            temporary,temporary,p->n_inputs+ME_DSL_MENUDET_JIT_CMP_OFF,
+                            p->n_inputs+ME_DSL_MENUDET_JIT_CMP_OFF+1+id,a_val,b_val,
+                            temporary,a_val,op,b_val);
+                    } else if (lit1) {
+                        ok = ok && pj_append(s,
+                            "if ((pj_cmp_a_%d.u & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000))\n"
+                            "pj_cmp_result_%d = ((pj_cmp)inputs[%d])(inputs[%d],%s,%s);\n"
+                            "else pj_cmp_result_%d = %s %s %s;\n",
+                            temporary,temporary,p->n_inputs+ME_DSL_MENUDET_JIT_CMP_OFF,
+                            p->n_inputs+ME_DSL_MENUDET_JIT_CMP_OFF+1+id,a_val,b_val,
+                            temporary,a_val,op,b_val);
+                    } else {
+                        ok = ok && pj_append(s,
+                            "if ((pj_cmp_a_%d.u & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000) || "
+                            "(pj_cmp_b_%d.u & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000))\n"
+                            "pj_cmp_result_%d = ((pj_cmp)inputs[%d])(inputs[%d],%s,%s);\n"
+                            "else pj_cmp_result_%d = %s %s %s;\n",
+                            temporary,temporary,temporary,p->n_inputs+ME_DSL_MENUDET_JIT_CMP_OFF,
+                            p->n_inputs+ME_DSL_MENUDET_JIT_CMP_OFF+1+id,a_val,b_val,
+                            temporary,a_val,op,b_val);
+                    }
+                }
                 if (!ok) { free(out); out = NULL; }
                 else snprintf(out,capacity,"pj_cmp_result_%d",temporary);
             }
@@ -2407,10 +2522,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
 #ifdef __EMSCRIPTEN__
             !pj_append(&body,"%s local_%d;\n",pj_type(p->vars.dtypes[index]),index)) {
 #else
-            /* Typed integer locals need no rounding barrier. Volatile forces
-             * stack traffic per hash round and prevents SIMD in the CC JIT.
-             * Keep floating locals' existing observation/rounding policy. */
-            !pj_append(&body,"%s%s local_%d;\n",pj_integral(p->vars.dtypes[index]) ? "" : "volatile ",
+            !pj_append(&body,"%s local_%d;\n",
                 pj_type(p->vars.dtypes[index]),index)) {
 #endif
             free(body.text);
