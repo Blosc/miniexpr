@@ -257,8 +257,12 @@ static bool pj_runtime_float(const me_dsl_compiled_program *p, const me_expr *n,
     if (!n || depth > 128 || !pj_float(n->dtype)) return false;
     if (TYPE_MASK(n->type) == ME_VARIABLE && is_synthetic_address(n->bound)) {
         int index = (int)((const char *)n->bound - synthetic_var_addresses);
+#ifdef __EMSCRIPTEN__
+        return index >= 0 && index < p->vars.count;
+#else
         return (index >= 0 && index < p->n_inputs && !p->vars.uniform[index]) ||
                (index >= p->n_inputs && index < p->vars.count);
+#endif
     }
     if (!IS_FUNCTION(n->type) || is_reduction_node(n)) return false;
     const char *op = me_menudet_operator(n);
@@ -303,6 +307,19 @@ static bool pj_finite_literal(const me_expr *n) {
     return isfinite(value);
 }
 
+#ifdef __EMSCRIPTEN__
+static const char *pj_direct_libm_unary_name(const char *name, me_dtype dtype) {
+    (void)name;
+    (void)dtype;
+    return NULL;
+}
+
+static const char *pj_direct_libm_binary_name(const char *name, me_dtype dtype) {
+    (void)name;
+    (void)dtype;
+    return NULL;
+}
+#else
 static const char *pj_direct_libm_unary_name(const char *name, me_dtype dtype) {
     if (!name) return NULL;
     bool f32 = (dtype == ME_FLOAT32);
@@ -351,6 +368,7 @@ static const char *pj_direct_libm_binary_name(const char *name, me_dtype dtype) 
     if (!strcmp(name, "fmax")) return f32 ? "fmaxf" : "fmax";
     return NULL;
 }
+#endif
 
 static bool pj_cse_key(const me_dsl_compiled_program *p, const me_expr *n, uint64_t *hash,
                        int depth) {
@@ -2839,7 +2857,9 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "#include <stdint.h>\n"
         "#include <limits.h>\n"
         "#include <string.h>\n"
+#ifndef __EMSCRIPTEN__
         "#include <math.h>\n"
+#endif
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"
         "typedef double (*pj_math)(const void *,double);\n"
         "typedef double (*pj_math2)(const void *,double,double);\n"

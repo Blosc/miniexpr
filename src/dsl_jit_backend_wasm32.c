@@ -750,6 +750,7 @@ static char *dsl_wasm32_prepare_menudet_source(const char *src) {
         if (strncmp(p, "#include <stdint.h>\n", 20) == 0) p += 20;
         else if (strncmp(p, "#include <limits.h>\n", 20) == 0) p += 20;
         else if (strncmp(p, "#include <string.h>\n", 20) == 0) p += 20;
+        else if (strncmp(p, "#include <math.h>\n", 18) == 0) p += 18;
         else out[used++] = *p++;
     }
     out[used] = '\0';
