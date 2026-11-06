@@ -303,6 +303,55 @@ static bool pj_finite_literal(const me_expr *n) {
     return isfinite(value);
 }
 
+static const char *pj_direct_libm_unary_name(const char *name, me_dtype dtype) {
+    if (!name) return NULL;
+    bool f32 = (dtype == ME_FLOAT32);
+    if (!strcmp(name, "fabs") || !strcmp(name, "floating_abs")) return f32 ? "fabsf" : "fabs";
+    if (!strcmp(name, "sqrt")) return f32 ? "sqrtf" : "sqrt";
+    if (!strcmp(name, "floor")) return f32 ? "floorf" : "floor";
+    if (!strcmp(name, "ceil")) return f32 ? "ceilf" : "ceil";
+    if (!strcmp(name, "trunc")) return f32 ? "truncf" : "trunc";
+    if (!strcmp(name, "rint")) return f32 ? "rintf" : "rint";
+    if (!strcmp(name, "round")) return f32 ? "roundf" : "round";
+    if (!strcmp(name, "exp")) return f32 ? "expf" : "exp";
+    if (!strcmp(name, "exp2")) return f32 ? "exp2f" : "exp2";
+    if (!strcmp(name, "expm1")) return f32 ? "expm1f" : "expm1";
+    if (!strcmp(name, "log")) return f32 ? "logf" : "log";
+    if (!strcmp(name, "log10")) return f32 ? "log10f" : "log10";
+    if (!strcmp(name, "log1p")) return f32 ? "log1pf" : "log1p";
+    if (!strcmp(name, "log2")) return f32 ? "log2f" : "log2";
+    if (!strcmp(name, "sin")) return f32 ? "sinf" : "sin";
+    if (!strcmp(name, "cos")) return f32 ? "cosf" : "cos";
+    if (!strcmp(name, "tan")) return f32 ? "tanf" : "tan";
+    if (!strcmp(name, "sinh")) return f32 ? "sinhf" : "sinh";
+    if (!strcmp(name, "cosh")) return f32 ? "coshf" : "cosh";
+    if (!strcmp(name, "tanh")) return f32 ? "tanhf" : "tanh";
+    if (!strcmp(name, "asin")) return f32 ? "asinf" : "asin";
+    if (!strcmp(name, "acos")) return f32 ? "acosf" : "acos";
+    if (!strcmp(name, "atan")) return f32 ? "atanf" : "atan";
+    if (!strcmp(name, "cbrt")) return f32 ? "cbrtf" : "cbrt";
+    if (!strcmp(name, "erf")) return f32 ? "erff" : "erf";
+    if (!strcmp(name, "erfc")) return f32 ? "erfcf" : "erfc";
+    if (!strcmp(name, "lgamma")) return f32 ? "lgammaf" : "lgamma";
+    if (!strcmp(name, "tgamma")) return f32 ? "tgammaf" : "tgamma";
+    return NULL;
+}
+
+static const char *pj_direct_libm_binary_name(const char *name, me_dtype dtype) {
+    if (!name) return NULL;
+    bool f32 = (dtype == ME_FLOAT32);
+    if (!strcmp(name, "atan2")) return f32 ? "atan2f" : "atan2";
+    if (!strcmp(name, "hypot")) return f32 ? "hypotf" : "hypot";
+    if (!strcmp(name, "copysign")) return f32 ? "copysignf" : "copysign";
+    if (!strcmp(name, "fdim")) return f32 ? "fdimf" : "fdim";
+    if (!strcmp(name, "fmod")) return f32 ? "fmodf" : "fmod";
+    if (!strcmp(name, "remainder")) return f32 ? "remainderf" : "remainder";
+    if (!strcmp(name, "pow")) return f32 ? "powf" : "pow";
+    if (!strcmp(name, "fmin")) return f32 ? "fminf" : "fmin";
+    if (!strcmp(name, "fmax")) return f32 ? "fmaxf" : "fmax";
+    return NULL;
+}
+
 static bool pj_cse_key(const me_dsl_compiled_program *p, const me_expr *n, uint64_t *hash,
                        int depth) {
     if (!n || depth > 32 || n->flags & (ME_EXPR_FLAG_WEAK_LITERAL | ME_EXPR_FLAG_WEAK_SCALAR))
@@ -948,13 +997,19 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                 int id = p->menudet_jit_nmath++;
                 p->menudet_jit_math[id] = n;
                 p->menudet_jit_math_fn[id] = dsl_menudet_resolve_unary_math(n);
-                if (p->menudet_jit_math_fn[id]) {
+                const char *direct_fn = pj_direct_libm_unary_name(math, n->dtype);
+                if (direct_fn) {
+                    snprintf(out, capacity, "((%s)(%s((%s)(%s))))",
+                        type, direct_fn, type, args[0]);
+                } else if (p->menudet_jit_math_fn[id]) {
                     snprintf(out,capacity,"((%s)(((%s)inputs[%d])((%s)(%s))))",
                         type,n->dtype == ME_FLOAT32 ? "pj_libmf" : "pj_libm",
                         p->n_inputs+ME_DSL_MENUDET_JIT_MATH1_FN_OFF+id,type,args[0]);
-                } else snprintf(out,capacity,"((%s)(((pj_math)inputs[%d])(inputs[%d],(double)(%s))))",
-                    type,p->n_inputs+ME_DSL_MENUDET_JIT_MATH1_OFF,
-                    p->n_inputs+ME_DSL_MENUDET_JIT_MATH1_OFF+1+id,args[0]);
+                } else {
+                    snprintf(out,capacity,"((%s)(((pj_math)inputs[%d])(inputs[%d],(double)(%s))))",
+                        type,p->n_inputs+ME_DSL_MENUDET_JIT_MATH1_OFF,
+                        p->n_inputs+ME_DSL_MENUDET_JIT_MATH1_OFF+1+id,args[0]);
+                }
             }
         }
         else if (constant_power) {
@@ -991,13 +1046,20 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                 int id = p->menudet_jit_nmath2++;
                 p->menudet_jit_math2[id] = n;
                 p->menudet_jit_math2_fn[id] = dsl_menudet_resolve_binary_math(n);
-                if (p->menudet_jit_math2_fn[id]) {
+                bool power = op && !strcmp(op, "**");
+                const char *direct_fn2 = pj_direct_libm_binary_name(math ? math : (power ? "pow" : NULL), n->dtype);
+                if (direct_fn2) {
+                    snprintf(out, capacity, "((%s)(%s((%s)(%s),(%s)(%s))))",
+                        type, direct_fn2, type, args[0], type, args[1]);
+                } else if (p->menudet_jit_math2_fn[id]) {
                     snprintf(out,capacity,"((%s)(((%s)inputs[%d])((%s)(%s),(%s)(%s))))",
                         type,n->dtype == ME_FLOAT32 ? "pj_libm2f" : "pj_libm2",
                         p->n_inputs+ME_DSL_MENUDET_JIT_MATH2_FN_OFF+id,type,args[0],type,args[1]);
-                } else snprintf(out,capacity,"((%s)(((pj_math2)inputs[%d])(inputs[%d],(double)(%s),(double)(%s))))",
-                    type,p->n_inputs+ME_DSL_MENUDET_JIT_MATH2_OFF,
-                    p->n_inputs+ME_DSL_MENUDET_JIT_MATH2_OFF+1+id,args[0],args[1]);
+                } else {
+                    snprintf(out,capacity,"((%s)(((pj_math2)inputs[%d])(inputs[%d],(double)(%s),(double)(%s))))",
+                        type,p->n_inputs+ME_DSL_MENUDET_JIT_MATH2_OFF,
+                        p->n_inputs+ME_DSL_MENUDET_JIT_MATH2_OFF+1+id,args[0],args[1]);
+                }
             }
         }
         else if (native_bitwise) {
@@ -2777,6 +2839,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "#include <stdint.h>\n"
         "#include <limits.h>\n"
         "#include <string.h>\n"
+        "#include <math.h>\n"
         "typedef _Bool (*pj_cmp)(const void *,double,double);\n"
         "typedef double (*pj_math)(const void *,double);\n"
         "typedef double (*pj_math2)(const void *,double,double);\n"
