@@ -1808,6 +1808,38 @@ static bool pj_scalar_block(const me_dsl_compiled_block *block, int *count, int 
     return true;
 }
 
+static bool pj_has_uniform_var(const me_dsl_compiled_program *p, const me_expr *n, int depth) {
+    if (!n || depth > 128) return false;
+    if (TYPE_MASK(n->type) == ME_VARIABLE && is_synthetic_address(n->bound)) {
+        int index = (int)((const char *)n->bound - synthetic_var_addresses);
+        return index >= 0 && index < p->n_inputs &&
+            (p->vars.uniform[index] || (n->flags & ME_EXPR_FLAG_UNIFORM_INPUT));
+    }
+    if (!IS_FUNCTION(n->type)) return false;
+    for (int i=0; i<ARITY(n->type); i++) {
+        if (pj_has_uniform_var(p, n->parameters[i], depth+1)) return true;
+    }
+    return false;
+}
+
+static bool pj_uniform_tree(const me_dsl_compiled_program *p, const me_expr *n, int depth) {
+    if (!n || depth > 128) return false;
+    int kind = TYPE_MASK(n->type);
+    if (kind == ME_CONSTANT) return true;
+    if (kind == ME_VARIABLE && is_synthetic_address(n->bound)) {
+        int index = (int)((const char *)n->bound - synthetic_var_addresses);
+        return index >= 0 && index < p->n_inputs &&
+            (p->vars.uniform[index] || (n->flags & ME_EXPR_FLAG_UNIFORM_INPUT));
+    }
+    if (!IS_FUNCTION(n->type) || is_reduction_node(n)) return false;
+    const char *op = me_menudet_operator(n);
+    if (op && (!strcmp(op, "where") || !strcmp(op, "and") || !strcmp(op, "or"))) return false;
+    for (int i=0; i<ARITY(n->type); i++) {
+        if (!pj_uniform_tree(p, n->parameters[i], depth+1)) return false;
+    }
+    return true;
+}
+
 #ifndef __EMSCRIPTEN__
 
 static bool pj_arith_bridge_enabled(void) {
@@ -2382,38 +2414,6 @@ static bool pj_emit_arith_bridge(const pj_arith_dag *dag, me_dsl_compiled_progra
 
     if (!pj_append(out, "    }\n    return 0;\n}\n"))
         return false;
-    return true;
-}
-
-static bool pj_has_uniform_var(const me_dsl_compiled_program *p, const me_expr *n, int depth) {
-    if (!n || depth > 128) return false;
-    if (TYPE_MASK(n->type) == ME_VARIABLE && is_synthetic_address(n->bound)) {
-        int index = (int)((const char *)n->bound - synthetic_var_addresses);
-        return index >= 0 && index < p->n_inputs &&
-            (p->vars.uniform[index] || (n->flags & ME_EXPR_FLAG_UNIFORM_INPUT));
-    }
-    if (!IS_FUNCTION(n->type)) return false;
-    for (int i=0; i<ARITY(n->type); i++) {
-        if (pj_has_uniform_var(p, n->parameters[i], depth+1)) return true;
-    }
-    return false;
-}
-
-static bool pj_uniform_tree(const me_dsl_compiled_program *p, const me_expr *n, int depth) {
-    if (!n || depth > 128) return false;
-    int kind = TYPE_MASK(n->type);
-    if (kind == ME_CONSTANT) return true;
-    if (kind == ME_VARIABLE && is_synthetic_address(n->bound)) {
-        int index = (int)((const char *)n->bound - synthetic_var_addresses);
-        return index >= 0 && index < p->n_inputs &&
-            (p->vars.uniform[index] || (n->flags & ME_EXPR_FLAG_UNIFORM_INPUT));
-    }
-    if (!IS_FUNCTION(n->type) || is_reduction_node(n)) return false;
-    const char *op = me_menudet_operator(n);
-    if (op && (!strcmp(op, "where") || !strcmp(op, "and") || !strcmp(op, "or"))) return false;
-    for (int i=0; i<ARITY(n->type); i++) {
-        if (!pj_uniform_tree(p, n->parameters[i], depth+1)) return false;
-    }
     return true;
 }
 
