@@ -187,6 +187,34 @@ static bool dsl_dtype_is_float_or_complex(me_dtype dtype) {
     }
 }
 
+/* Join a weak scalar binding with a strong one using NumPy 2.x strength rules.
+ * Weak floats adopt a strong float/complex width but promote to float64 over a
+ * strong integer; weak integers/booleans adopt a strong numeric storage width. */
+static me_dtype dsl_menudet_join_weak(me_dtype weak, me_dtype strong) {
+    if (weak == ME_AUTO || strong == ME_AUTO) {
+        return dsl_numpy_numeric_promote(weak, strong);
+    }
+    if (weak == strong) {
+        return strong;
+    }
+    if (dsl_menudet_is_complex(weak)) {
+        return dsl_numpy_numeric_promote(weak, strong);
+    }
+    if (dsl_dtype_is_float_or_complex(weak)) {
+        if (dsl_dtype_is_float_or_complex(strong)) {
+            return strong;
+        }
+        return ME_FLOAT64;
+    }
+    if (dsl_dtype_is_integer(weak)) {
+        if (strong == ME_BOOL) {
+            return dsl_numpy_numeric_promote(weak, strong);
+        }
+        return strong;
+    }
+    return dsl_numpy_numeric_promote(weak, strong);
+}
+
 static me_dtype dsl_cast_int_target_dtype(me_dtype expr_dtype) {
     switch (expr_dtype) {
     case ME_INT8:
@@ -1102,7 +1130,7 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
     int cast_count = 0;
     cast_funcs[cast_count++] = (me_variable){
         .name = "int",
-        .dtype = ctx->program->semantic_profile == ME_DSL_PROFILE_MENUDET_0_1 ? ME_INT64 : dsl_cast_int_target_dtype(expr_dtype),
+        .dtype = dsl_menudet_typed_profile(ctx->program->semantic_profile) ? ME_AUTO : dsl_cast_int_target_dtype(expr_dtype),
         .address = (const void *)dsl_cast_int_intrinsic,
         .type = ME_FUNCTION1 | ME_FLAG_PURE,
         .context = NULL,
@@ -1110,7 +1138,7 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
     };
     cast_funcs[cast_count++] = (me_variable){
         .name = "float",
-        .dtype = ctx->program->semantic_profile == ME_DSL_PROFILE_MENUDET_0_1 ? ME_FLOAT64 : dsl_cast_float_target_dtype(expr_dtype),
+        .dtype = dsl_menudet_typed_profile(ctx->program->semantic_profile) ? ME_AUTO : dsl_cast_float_target_dtype(expr_dtype),
         .address = (const void *)dsl_cast_float_intrinsic,
         .type = ME_FUNCTION1 | ME_FLAG_PURE,
         .context = NULL,
@@ -1118,7 +1146,7 @@ static bool dsl_compile_expr(dsl_compile_ctx *ctx, const me_dsl_expr *expr_node,
     };
     cast_funcs[cast_count++] = (me_variable){
         .name = "bool",
-        .dtype = ME_BOOL,
+        .dtype = dsl_menudet_typed_profile(ctx->program->semantic_profile) ? ME_AUTO : ME_BOOL,
         .address = (const void *)dsl_cast_bool_intrinsic,
         .type = ME_FUNCTION1 | ME_FLAG_PURE,
         .context = NULL,
@@ -2307,6 +2335,9 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 is_uniform = false;
                 compiled->as.assign.active_only = true;
             }
+            bool assigned_weak =
+                (compiled->as.assign.value.expr->flags &
+                 (ME_EXPR_FLAG_WEAK_LITERAL | ME_EXPR_FLAG_WEAK_SCALAR)) != 0;
 
             if (var_index < 0) {
                 if (!ctx->allow_new_locals) {
@@ -2339,6 +2370,8 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                     dsl_compiled_stmt_free(compiled);
                     return false;
                 }
+                ctx->program->numpy_weak_vars[var_index] =
+                    ctx->program->semantic_profile == ME_DSL_PROFILE_MENUDET_0_1 && assigned_weak;
                 if (ctx->infer_menudet_joins) ctx->menudet_types_changed = true;
             }
             else if (is_string_dtype(assigned_dtype) &&
@@ -2366,7 +2399,17 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             else if (ctx->program->vars.dtypes[var_index] != assigned_dtype) {
                 if (dsl_menudet_typed_profile(ctx->program->semantic_profile)) {
                     me_dtype previous = ctx->program->vars.dtypes[var_index];
-                    me_dtype joined = dsl_menudet_join(previous, assigned_dtype, ctx->program->semantic_profile);
+                    me_dtype joined;
+                    if (ctx->program->semantic_profile == ME_DSL_PROFILE_MENUDET_0_1 &&
+                        ctx->program->numpy_weak_vars[var_index] != assigned_weak) {
+                        joined = ctx->program->numpy_weak_vars[var_index] ?
+                            dsl_menudet_join_weak(previous, assigned_dtype) :
+                            dsl_menudet_join_weak(assigned_dtype, previous);
+                    }
+                    else {
+                        joined = dsl_menudet_join(previous, assigned_dtype,
+                                                  ctx->program->semantic_profile);
+                    }
                     if (joined != ME_AUTO && ctx->infer_menudet_joins) {
                         ctx->program->vars.dtypes[var_index] = joined;
                         ctx->menudet_types_changed |= joined != previous;
@@ -2400,6 +2443,10 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                     ctx->program->vars.uniform[var_index] = false;
                     if (ctx->infer_menudet_joins) ctx->menudet_types_changed = true;
                 }
+                if (ctx->program->numpy_weak_vars[var_index] && !assigned_weak) {
+                    ctx->program->numpy_weak_vars[var_index] = false;
+                    if (ctx->infer_menudet_joins) ctx->menudet_types_changed = true;
+                }
                 bool reduced = dsl_menudet_reduced_value(compiled->as.assign.value.expr, ctx->program);
                 if (reduced && !ctx->program->menudet_reduced_vars[var_index]) {
                     ctx->program->menudet_reduced_vars[var_index] = true;
@@ -2412,11 +2459,6 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
                 return false;
             }
             compiled->as.assign.local_slot = ctx->program->local_slots[var_index];
-            if (ctx->program->semantic_profile == ME_DSL_PROFILE_MENUDET_0_1) {
-                bool weak = (compiled->as.assign.value.expr->flags & (ME_EXPR_FLAG_WEAK_LITERAL | ME_EXPR_FLAG_WEAK_SCALAR)) != 0;
-                ctx->program->numpy_weak_vars[var_index] = ctx->menudet_seen_bindings[var_index] ?
-                    ctx->program->numpy_weak_vars[var_index] && weak : weak;
-            }
             if (dsl_menudet_typed_profile(ctx->program->semantic_profile)) ctx->menudet_seen_bindings[var_index] = true;
             ctx->menudet_synthetic_expr = false;
             break;

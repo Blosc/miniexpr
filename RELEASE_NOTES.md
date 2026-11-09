@@ -4,6 +4,13 @@ Release notes for miniexpr
 Changes from 0.2.0 to 0.2.1
 ===========================
 
+* Menudet weak-scalar strength is preserved across local variable joins. A local
+  initialized from a weak Python literal and later reassigned from a strong
+  float32/int operand no longer widens to float64/int64: for example,
+  `z = 0.0; z = z + x_float32` now keeps float32 storage and values, matching
+  NumPy 2.x and the documented local-weak-binding rule. Adds a focused regression
+  test for float32, float64, integer and widening/checking cases.
+
 * Menudet JIT emits same-width typed integer bitwise operations directly instead
   of calling scalar interpreter helpers. Scalar integer/Boolean local declarations no
   longer use volatile rounding barriers, reducing stack traffic in hash kernels.

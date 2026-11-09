@@ -55,6 +55,11 @@ static bool pj_integral(me_dtype d) {
 }
 
 typedef struct {
+    char *text;
+    size_t used, capacity;
+} pj_text;
+
+typedef struct {
     const int64_t *values;
     const bool *known;
     int count;
@@ -63,12 +68,8 @@ typedef struct {
     const int64_t *loop_values;
     const bool *loop_known;
     int *unroll_budget;
+    pj_text *uniform_setup;
 } pj_constants;
-
-typedef struct {
-    char *text;
-    size_t used, capacity;
-} pj_text;
 
 typedef struct {
     const me_expr *node;
@@ -83,6 +84,8 @@ typedef struct {
 } pj_cse_context;
 
 static bool pj_append(pj_text *s, const char *format, ...);
+static bool pj_uniform_tree(const me_dsl_compiled_program *p, const me_expr *n, int depth);
+static bool pj_has_uniform_var(const me_dsl_compiled_program *p, const me_expr *n, int depth);
 
 static const char *pj_unsigned_type(me_dtype dtype) {
     switch (dtype) {
@@ -127,9 +130,16 @@ static bool pj_loop_integer(const me_dsl_compiled_program *p, const me_expr *n,
     }
     if (TYPE_MASK(n->type) == ME_VARIABLE && is_synthetic_address(n->bound)) {
         int index=(int)((const char *)n->bound-synthetic_var_addresses);
-        if (index < 0 || index >= p->vars.count || !constants->loop_known[index]) return false;
-        *out=constants->loop_values[index];
-        return true;
+        if (index < 0 || index >= p->vars.count) return false;
+        if (constants->loop_known && constants->loop_known[index]) {
+            *out=constants->loop_values[index];
+            return true;
+        }
+        if (constants->known && index < constants->count && constants->known[index] && p->vars.uniform[index]) {
+            *out=constants->values[index];
+            return true;
+        }
+        return false;
     }
     if (!IS_FUNCTION(n->type)) return false;
     int arity=ARITY(n->type);
@@ -195,8 +205,8 @@ static bool pj_integer_tree(const me_dsl_compiled_program *p, const me_expr *n,
     if (TYPE_MASK(n->type) == ME_VARIABLE && is_synthetic_address(n->bound)) {
         int index = (int)((const char *)n->bound-synthetic_var_addresses);
         if (index < 0 || index >= p->vars.count) return false;
-        if (index < p->n_inputs) return pj_append(out,"((uint64_t)pj_input_%d[%s])",index,
-            p->vars.uniform[index] ? "0" : "i");
+        if (index < p->n_inputs) return pj_append(out,
+            p->vars.uniform[index] ? "((uint64_t)pj_uni_%d)" : "((uint64_t)pj_input_%d[i])", index);
         if (defined && p->local_slots && p->local_slots[index] >= 0 && defined[index] && !p->output_is_scalar)
             return pj_append(out,"((uint64_t)local_%d)",index);
         return false;
@@ -323,13 +333,12 @@ static const char *pj_direct_libm_binary_name(const char *name, me_dtype dtype) 
 static const char *pj_direct_libm_unary_name(const char *name, me_dtype dtype) {
     if (!name) return NULL;
     bool f32 = (dtype == ME_FLOAT32);
-    if (!strcmp(name, "fabs") || !strcmp(name, "floating_abs")) return f32 ? "fabsf" : "fabs";
+    if (!strcmp(name, "floating_abs")) return f32 ? "fabsf" : "fabs";
+    if (!strcmp(name, "fabs")) return f32 ? NULL : "fabs";
     if (!strcmp(name, "sqrt")) return f32 ? "sqrtf" : "sqrt";
     if (!strcmp(name, "floor")) return f32 ? "floorf" : "floor";
     if (!strcmp(name, "ceil")) return f32 ? "ceilf" : "ceil";
     if (!strcmp(name, "trunc")) return f32 ? "truncf" : "trunc";
-    if (!strcmp(name, "rint")) return f32 ? "rintf" : "rint";
-    if (!strcmp(name, "round")) return f32 ? "roundf" : "round";
     if (!strcmp(name, "exp")) return f32 ? "expf" : "exp";
     if (!strcmp(name, "exp2")) return f32 ? "exp2f" : "exp2";
     if (!strcmp(name, "expm1")) return f32 ? "expm1f" : "expm1";
@@ -346,6 +355,9 @@ static const char *pj_direct_libm_unary_name(const char *name, me_dtype dtype) {
     if (!strcmp(name, "asin")) return f32 ? "asinf" : "asin";
     if (!strcmp(name, "acos")) return f32 ? "acosf" : "acos";
     if (!strcmp(name, "atan")) return f32 ? "atanf" : "atan";
+    if (!strcmp(name, "asinh")) return f32 ? "asinhf" : "asinh";
+    if (!strcmp(name, "acosh")) return f32 ? "acoshf" : "acosh";
+    if (!strcmp(name, "atanh")) return f32 ? "atanhf" : "atanh";
     if (!strcmp(name, "cbrt")) return f32 ? "cbrtf" : "cbrt";
     if (!strcmp(name, "erf")) return f32 ? "erff" : "erf";
     if (!strcmp(name, "erfc")) return f32 ? "erfcf" : "erfc";
@@ -359,13 +371,11 @@ static const char *pj_direct_libm_binary_name(const char *name, me_dtype dtype) 
     bool f32 = (dtype == ME_FLOAT32);
     if (!strcmp(name, "atan2")) return f32 ? "atan2f" : "atan2";
     if (!strcmp(name, "hypot")) return f32 ? "hypotf" : "hypot";
-    if (!strcmp(name, "copysign")) return f32 ? "copysignf" : "copysign";
+    if (!strcmp(name, "copysign")) return f32 ? NULL : "copysign";
     if (!strcmp(name, "fdim")) return f32 ? "fdimf" : "fdim";
     if (!strcmp(name, "fmod")) return f32 ? "fmodf" : "fmod";
-    if (!strcmp(name, "remainder")) return f32 ? "remainderf" : "remainder";
+    if (!strcmp(name, "nextafter")) return f32 ? "nextafterf" : "nextafter";
     if (!strcmp(name, "pow")) return f32 ? "powf" : "pow";
-    if (!strcmp(name, "fmin")) return f32 ? "fminf" : "fmin";
-    if (!strcmp(name, "fmax")) return f32 ? "fmaxf" : "fmax";
     return NULL;
 }
 #endif
@@ -480,10 +490,27 @@ static char *pj_expr(me_dsl_compiled_program *p, const me_expr *n, const bool *d
 #endif
 }
 
+static bool pj_has_checked_weak(const me_expr *n, int depth) {
+    if (!n || depth > 128) return false;
+    if (pj_integer(n->dtype) && (n->flags & ME_EXPR_FLAG_WEAK_SCALAR) && IS_FUNCTION(n->type)) {
+        return true;
+    }
+    if (!IS_FUNCTION(n->type)) return false;
+    for (int i = 0; i < ARITY(n->type); i++) {
+        if (pj_has_checked_weak(n->parameters[i], depth + 1)) return true;
+    }
+    return false;
+}
+
 static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bool *defined, int depth,
     const pj_constants *constants, pj_text *s, int *next_temp, bool plain_literal,
     pj_cse_context *cse) {
     if (!n || depth > 128 || !pj_type(n->dtype)) return NULL;
+    bool can_hoist = !p->output_is_scalar && constants && constants->uniform_setup &&
+                     !(constants->scalar_phase) && pj_uniform_tree(p, n, 0) &&
+                     pj_has_uniform_var(p, n, 0) &&
+                     pj_float(n->dtype) && !pj_has_checked_weak(n, 0);
+    pj_text *target = can_hoist ? constants->uniform_setup : s;
     int64_t loop_constant;
     if (pj_loop_integer(p,n,constants,&loop_constant,0)) {
         char folded[96];
@@ -645,8 +672,11 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                 return strdup(leaf);
             }
         }
-        if (index < p->n_inputs) snprintf(leaf,sizeof(leaf),"pj_input_%d[%s]",index,
-            p->vars.uniform[index] || (constants && constants->scalar_phase) ? "0" : "i");
+        if (index < p->n_inputs) {
+            if (p->vars.uniform[index]) snprintf(leaf,sizeof(leaf),"pj_uni_%d",index);
+            else snprintf(leaf,sizeof(leaf),"pj_input_%d[%s]",index,
+                (constants && constants->scalar_phase) ? "0" : "i");
+        }
         else if (p->local_slots && p->local_slots[index] >= 0 && defined[index]) {
             snprintf(leaf,sizeof(leaf),p->output_is_scalar && !p->vars.uniform[index] ?
                 "local_%d[i]" : "local_%d",index);
@@ -862,7 +892,7 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
          * answers. Exact nonzero call literals therefore need no barrier. */
         plain = plain || ((predicate || unary_math || binary_math || exponent_math || ternary_math) &&
             pj_plain_literal(n->parameters[j],"+"));
-        args[j] = pj_expr_impl(p,n->parameters[j],defined,depth+1,constants,s,next_temp,plain,cse);
+        args[j] = pj_expr_impl(p,n->parameters[j],defined,depth+1,constants,target,next_temp,plain,cse);
         if (!args[j]) {
             for (int k = 0; k < arity; k++) free(args[k]);
             return NULL;
@@ -896,10 +926,10 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
         }
         else if (native_power) {
             int id = (*next_temp)++;
-            bool ok = pj_append(s,"uint64_t pj_power_base_%d = (uint64_t)(%s), pj_power_exp_%d = (uint64_t)(%s), pj_power_result_%d = 1;\n",
+            bool ok = pj_append(target,"uint64_t pj_power_base_%d = (uint64_t)(%s), pj_power_exp_%d = (uint64_t)(%s), pj_power_result_%d = 1;\n",
                 id,args[0],id,args[1],id);
-            if (!pj_unsigned(n->dtype)) ok = ok && pj_append(s,"if ((%s) < 0) return -5;\n",args[1]);
-            ok = ok && pj_append(s,"while (pj_power_exp_%d) { if (pj_power_exp_%d & 1) pj_power_result_%d *= pj_power_base_%d;\n"
+            if (!pj_unsigned(n->dtype)) ok = ok && pj_append(target,"if ((%s) < 0) return -5;\n",args[1]);
+            ok = ok && pj_append(target,"while (pj_power_exp_%d) { if (pj_power_exp_%d & 1) pj_power_result_%d *= pj_power_base_%d;\n"
                 "pj_power_exp_%d >>= 1; if (pj_power_exp_%d) pj_power_base_%d *= pj_power_base_%d; }\n",
                 id,id,id,id,id,id,id,id);
             if (!ok) { free(out); out = NULL; }
@@ -950,18 +980,18 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
             int id = (*next_temp)++;
             const char *left = arity == 1 ? "0ULL" : args[0];
             const char *right = arity == 1 ? args[0] : args[1];
-            bool ok = pj_append(s,"uint64_t pj_weak_a_%d = (uint64_t)(%s), pj_weak_b_%d = (uint64_t)(%s);\n",
+            bool ok = pj_append(target,"uint64_t pj_weak_a_%d = (uint64_t)(%s), pj_weak_b_%d = (uint64_t)(%s);\n",
                 id,left,id,right);
             if (!strcmp(op,"*")) {
-                ok = ok && pj_append(s,"int64_t pj_weak_x_%d = pj_int64_t(pj_weak_a_%d), pj_weak_y_%d = pj_int64_t(pj_weak_b_%d);\n"
+                ok = ok && pj_append(target,"int64_t pj_weak_x_%d = pj_int64_t(pj_weak_a_%d), pj_weak_y_%d = pj_int64_t(pj_weak_b_%d);\n"
                     "if (pj_weak_x_%d > 0 ? (pj_weak_y_%d > 0 ? pj_weak_x_%d > INT64_MAX/pj_weak_y_%d : "
                     "pj_weak_y_%d < INT64_MIN/pj_weak_x_%d) : (pj_weak_x_%d < 0 && "
                     "(pj_weak_y_%d > 0 ? pj_weak_x_%d < INT64_MIN/pj_weak_y_%d : pj_weak_y_%d < INT64_MAX/pj_weak_x_%d))) return -5;\n",
                     id,id,id,id,id,id,id,id,id,id,id,id,id,id,id,id);
             }
-            ok = ok && pj_append(s,"uint64_t pj_weak_r_%d = pj_weak_a_%d %s pj_weak_b_%d;\n",id,id,op,id);
+            ok = ok && pj_append(target,"uint64_t pj_weak_r_%d = pj_weak_a_%d %s pj_weak_b_%d;\n",id,id,op,id);
             if (strcmp(op,"*")) {
-                ok = ok && pj_append(s,!strcmp(op,"+") ?
+                ok = ok && pj_append(target,!strcmp(op,"+") ?
                     "if ((~(pj_weak_a_%d ^ pj_weak_b_%d) & (pj_weak_a_%d ^ pj_weak_r_%d)) >> 63) return -5;\n" :
                     "if (((pj_weak_a_%d ^ pj_weak_b_%d) & (pj_weak_a_%d ^ pj_weak_r_%d)) >> 63) return -5;\n",
                     id,id,id,id);
@@ -989,7 +1019,7 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                 int id = p->menudet_jit_nmath2++, exponent = (*next_temp)++;
                 p->menudet_jit_math2[id] = n;
                 p->menudet_jit_math2_fn[id] = dsl_menudet_resolve_binary_math(n);
-                if (!p->menudet_jit_math2_fn[id] || !pj_append(s,
+                if (!p->menudet_jit_math2_fn[id] || !pj_append(target,
                     "int64_t pj_exponent_%d = (int64_t)(%s); if (pj_exponent_%d < INT_MIN || pj_exponent_%d > INT_MAX) return -5;\n",
                     exponent,args[1],exponent,exponent)) { free(out); out = NULL; }
                 else snprintf(out,capacity,"((%s)(((%s)inputs[%d])((%s)(%s),(int)pj_exponent_%d)))",
@@ -1015,7 +1045,8 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                 int id = p->menudet_jit_nmath++;
                 p->menudet_jit_math[id] = n;
                 p->menudet_jit_math_fn[id] = dsl_menudet_resolve_unary_math(n);
-                const char *direct_fn = pj_direct_libm_unary_name(math, n->dtype);
+                const char *direct_fn = p->menudet_jit_math_fn[id] ?
+                    pj_direct_libm_unary_name(math, n->dtype) : NULL;
                 if (direct_fn) {
                     snprintf(out, capacity, "((%s)(%s((%s)(%s))))",
                         type, direct_fn, type, args[0]);
@@ -1034,26 +1065,26 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
             int id=(*next_temp)++;
             uint64_t exponent=(uint64_t)(power_exponent < 0 ? -power_exponent : power_exponent);
             bool negative=power_exponent < 0;
-            bool ok=pj_append(s,"%s pj_power_base_%d = (%s)(%s);\n%s pj_power_result_%d = (%s)1;\n",
+            bool ok=pj_append(target,"%s pj_power_base_%d = (%s)(%s);\n%s pj_power_result_%d = (%s)1;\n",
                 type,id,type,args[0],type,id,type);
             /* A zero exponent must not erase evaluation/status of a compound
              * base under the targeted policy (global fast mode is separate). */
-            if (!exponent && p->fp_mode != ME_DSL_FP_FAST) ok=ok && pj_append(s,
+            if (!exponent && p->fp_mode != ME_DSL_FP_FAST) ok=ok && pj_append(target,
                 "volatile %s pj_power_observed_%d = pj_power_base_%d; (void)pj_power_observed_%d;\n",
                 type,id,id,id);
             /* Invert first for negative powers: forming x^abs(n) first can
              * overflow even when the reciprocal result is representable. */
-            if (negative && exponent) ok=ok && pj_append(s,
+            if (negative && exponent) ok=ok && pj_append(target,
                 "pj_power_base_%d = (%s)1 / pj_power_base_%d;\n",id,type,id);
             bool first=true;
             while (exponent && ok) {
                 if (exponent & 1) {
-                    ok=pj_append(s,first ? "pj_power_result_%d = pj_power_base_%d;\n" :
+                    ok=pj_append(target,first ? "pj_power_result_%d = pj_power_base_%d;\n" :
                         "pj_power_result_%d *= pj_power_base_%d;\n",id,id);
                     first=false;
                 }
                 exponent >>= 1;
-                if (exponent) ok=ok && pj_append(s,"pj_power_base_%d *= pj_power_base_%d;\n",id,id);
+                if (exponent) ok=ok && pj_append(target,"pj_power_base_%d *= pj_power_base_%d;\n",id,id);
             }
             if (ok) snprintf(out,capacity,"pj_power_result_%d",id);
             else { free(out); out=NULL; }
@@ -1065,10 +1096,59 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                 p->menudet_jit_math2[id] = n;
                 p->menudet_jit_math2_fn[id] = dsl_menudet_resolve_binary_math(n);
                 bool power = op && !strcmp(op, "**");
-                const char *direct_fn2 = pj_direct_libm_binary_name(math ? math : (power ? "pow" : NULL), n->dtype);
+                const char *direct_fn2 = p->menudet_jit_math2_fn[id] ?
+                    pj_direct_libm_binary_name(math ? math : (power ? "pow" : NULL), n->dtype) : NULL;
+                bool is_minmax = math && p->menudet_jit_math2_fn[id] &&
+                    (!strcmp(math, "minimum") || !strcmp(math, "maximum") ||
+                     !strcmp(math, "fmin") || !strcmp(math, "fmax"));
                 if (direct_fn2) {
                     snprintf(out, capacity, "((%s)(%s((%s)(%s),(%s)(%s))))",
                         type, direct_fn2, type, args[0], type, args[1]);
+                } else if (is_minmax) {
+                    bool is_min = !strcmp(math, "minimum") || !strcmp(math, "fmin");
+                    int temporary = (*next_temp)++;
+                    bool ok;
+                    if (n->dtype == ME_FLOAT32) {
+                        ok = pj_append(target,
+                            "union { float f; uint32_t u; } pj_mm_a_%d, pj_mm_b_%d, pj_mm_r_%d;\n"
+                            "pj_mm_a_%d.f = (float)(%s); pj_mm_b_%d.f = (float)(%s);\n"
+                            "if ((pj_mm_a_%d.u & UINT32_C(0x7fffffff)) > UINT32_C(0x7f800000) || "
+                            "(pj_mm_b_%d.u & UINT32_C(0x7fffffff)) > UINT32_C(0x7f800000))\n"
+                            "pj_mm_r_%d.f = ((pj_libm2f)inputs[%d])(pj_mm_a_%d.f, pj_mm_b_%d.f);\n"
+                            "else if (((pj_mm_a_%d.u | pj_mm_b_%d.u) & UINT32_C(0x7fffffff)) == 0)\n"
+                            "pj_mm_r_%d.u = pj_mm_a_%d.u %s pj_mm_b_%d.u;\n"
+                            "else pj_mm_r_%d.f = pj_mm_a_%d.f %s pj_mm_b_%d.f ? pj_mm_a_%d.f : pj_mm_b_%d.f;\n",
+                            temporary, temporary, temporary,
+                            temporary, args[0], temporary, args[1],
+                            temporary, temporary,
+                            temporary, p->n_inputs + ME_DSL_MENUDET_JIT_MATH2_FN_OFF + id, temporary, temporary,
+                            temporary, temporary,
+                            temporary, temporary, is_min ? "|" : "&", temporary,
+                            temporary, temporary, is_min ? "<" : ">", temporary, temporary, temporary);
+                    } else {
+                        ok = pj_append(target,
+                            "union { double f; uint64_t u; } pj_mm_a_%d, pj_mm_b_%d, pj_mm_r_%d;\n"
+                            "pj_mm_a_%d.f = (double)(%s); pj_mm_b_%d.f = (double)(%s);\n"
+                            "if ((pj_mm_a_%d.u & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000) || "
+                            "(pj_mm_b_%d.u & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000))\n"
+                            "pj_mm_r_%d.f = ((pj_libm2)inputs[%d])(pj_mm_a_%d.f, pj_mm_b_%d.f);\n"
+                            "else if (((pj_mm_a_%d.u | pj_mm_b_%d.u) & UINT64_C(0x7fffffffffffffff)) == 0)\n"
+                            "pj_mm_r_%d.u = pj_mm_a_%d.u %s pj_mm_b_%d.u;\n"
+                            "else pj_mm_r_%d.f = pj_mm_a_%d.f %s pj_mm_b_%d.f ? pj_mm_a_%d.f : pj_mm_b_%d.f;\n",
+                            temporary, temporary, temporary,
+                            temporary, args[0], temporary, args[1],
+                            temporary, temporary,
+                            temporary, p->n_inputs + ME_DSL_MENUDET_JIT_MATH2_FN_OFF + id, temporary, temporary,
+                            temporary, temporary,
+                            temporary, temporary, is_min ? "|" : "&", temporary,
+                            temporary, temporary, is_min ? "<" : ">", temporary, temporary, temporary);
+                    }
+                    if (!ok) {
+                        free(out);
+                        out = NULL;
+                    } else {
+                        snprintf(out, capacity, "pj_mm_r_%d.f", temporary);
+                    }
                 } else if (p->menudet_jit_math2_fn[id]) {
                     snprintf(out,capacity,"((%s)(((%s)inputs[%d])((%s)(%s),(%s)(%s))))",
                         type,n->dtype == ME_FLOAT32 ? "pj_libm2f" : "pj_libm2",
@@ -1104,7 +1184,7 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
             bool modulo = integer_fmod || !strcmp(op,"%");
             bool ok;
             if (pj_unsigned(n->dtype)) {
-                ok = pj_append(s,"uint64_t pj_div_left_%d = (uint64_t)(%s), pj_div_right_%d = (uint64_t)(%s);\n"
+                ok = pj_append(target,"uint64_t pj_div_left_%d = (uint64_t)(%s), pj_div_right_%d = (uint64_t)(%s);\n"
                     "uint64_t pj_div_bits_%d = pj_div_right_%d ? pj_div_left_%d %s pj_div_right_%d : 0ULL;\n",
                     id,args[0],id,args[1],id,id,id,modulo ? "%" : "/",id);
             } else {
@@ -1112,18 +1192,18 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                 char overflow[64];
                 if (modulo) strcpy(overflow,"0ULL");
                 else snprintf(overflow,sizeof(overflow),"(uint64_t)pj_div_left_%d",id);
-                ok = pj_append(s,"int64_t pj_div_left_%d = (int64_t)(%s), pj_div_right_%d = (int64_t)(%s);\n"
+                ok = pj_append(target,"int64_t pj_div_left_%d = (int64_t)(%s), pj_div_right_%d = (int64_t)(%s);\n"
                     "uint64_t pj_div_bits_%d = 0;\n",id,args[0],id,args[1],id);
-                ok = ok && pj_append(s,
+                ok = ok && pj_append(target,
                     "if (pj_div_right_%d) { if ((uint64_t)pj_div_left_%d == (UINT64_MAX << %d) && pj_div_right_%d == -1) "
                     "pj_div_bits_%d = %s; else {\n",id,id,bits-1,id,id,overflow);
-                ok = ok && pj_append(s,
+                ok = ok && pj_append(target,
                     "int64_t pj_div_q_%d = pj_div_left_%d / pj_div_right_%d;\n"
                     "int64_t pj_div_r_%d = pj_div_left_%d %% pj_div_right_%d;\n",id,id,id,id,id,id);
-                if (!integer_fmod) ok = ok && pj_append(s,
+                if (!integer_fmod) ok = ok && pj_append(target,
                     "if (pj_div_r_%d && ((pj_div_left_%d < 0) != (pj_div_right_%d < 0))) "
                     "{ pj_div_q_%d--; pj_div_r_%d += pj_div_right_%d; }\n",id,id,id,id,id,id);
-                ok = ok && pj_append(s,"pj_div_bits_%d = (uint64_t)pj_div_%s_%d; } }\n",id,modulo ? "r" : "q",id);
+                ok = ok && pj_append(target,"pj_div_bits_%d = (uint64_t)pj_div_%s_%d; } }\n",id,modulo ? "r" : "q",id);
             }
             if (!ok) { free(out); out = NULL; }
             else snprintf(out,capacity,"pj_%s(pj_div_bits_%d)",type,id);
@@ -1156,18 +1236,18 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                 bool lit1 = pj_finite_literal(arg1);
                 bool ok = true;
                 if (is_f32) {
-                    if (!lit0) ok = ok && pj_append(s,"union { float f; uint32_t u; } pj_cmp_a_%d;\npj_cmp_a_%d.f = (float)(%s);\n",temporary,temporary,args[0]);
-                    if (!lit1) ok = ok && pj_append(s,"union { float f; uint32_t u; } pj_cmp_b_%d;\npj_cmp_b_%d.f = (float)(%s);\n",temporary,temporary,args[1]);
-                    ok = ok && pj_append(s,"_Bool pj_cmp_result_%d;\n",temporary);
+                    if (!lit0) ok = ok && pj_append(target,"union { float f; uint32_t u; } pj_cmp_a_%d;\npj_cmp_a_%d.f = (float)(%s);\n",temporary,temporary,args[0]);
+                    if (!lit1) ok = ok && pj_append(target,"union { float f; uint32_t u; } pj_cmp_b_%d;\npj_cmp_b_%d.f = (float)(%s);\n",temporary,temporary,args[1]);
+                    ok = ok && pj_append(target,"_Bool pj_cmp_result_%d;\n",temporary);
                     char a_val[64], b_val[64];
                     if (lit0) snprintf(a_val,sizeof(a_val),"(%s)",args[0]);
                     else snprintf(a_val,sizeof(a_val),"pj_cmp_a_%d.f",temporary);
                     if (lit1) snprintf(b_val,sizeof(b_val),"(%s)",args[1]);
                     else snprintf(b_val,sizeof(b_val),"pj_cmp_b_%d.f",temporary);
                     if (lit0 && lit1) {
-                        ok = ok && pj_append(s,"pj_cmp_result_%d = %s %s %s;\n",temporary,a_val,op,b_val);
+                        ok = ok && pj_append(target,"pj_cmp_result_%d = %s %s %s;\n",temporary,a_val,op,b_val);
                     } else if (lit0) {
-                        ok = ok && pj_append(s,
+                        ok = ok && pj_append(target,
                             "if ((pj_cmp_b_%d.u & UINT32_C(0x7fffffff)) > UINT32_C(0x7f800000))\n"
                             "pj_cmp_result_%d = ((pj_cmp)inputs[%d])(inputs[%d],(double)%s,(double)%s);\n"
                             "else pj_cmp_result_%d = %s %s %s;\n",
@@ -1175,7 +1255,7 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                             p->n_inputs+ME_DSL_MENUDET_JIT_CMP_OFF+1+id,a_val,b_val,
                             temporary,a_val,op,b_val);
                     } else if (lit1) {
-                        ok = ok && pj_append(s,
+                        ok = ok && pj_append(target,
                             "if ((pj_cmp_a_%d.u & UINT32_C(0x7fffffff)) > UINT32_C(0x7f800000))\n"
                             "pj_cmp_result_%d = ((pj_cmp)inputs[%d])(inputs[%d],(double)%s,(double)%s);\n"
                             "else pj_cmp_result_%d = %s %s %s;\n",
@@ -1183,7 +1263,7 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                             p->n_inputs+ME_DSL_MENUDET_JIT_CMP_OFF+1+id,a_val,b_val,
                             temporary,a_val,op,b_val);
                     } else {
-                        ok = ok && pj_append(s,
+                        ok = ok && pj_append(target,
                             "if ((pj_cmp_a_%d.u & UINT32_C(0x7fffffff)) > UINT32_C(0x7f800000) || "
                             "(pj_cmp_b_%d.u & UINT32_C(0x7fffffff)) > UINT32_C(0x7f800000))\n"
                             "pj_cmp_result_%d = ((pj_cmp)inputs[%d])(inputs[%d],(double)%s,(double)%s);\n"
@@ -1193,18 +1273,18 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                             temporary,a_val,op,b_val);
                     }
                 } else {
-                    if (!lit0) ok = ok && pj_append(s,"union { double f; uint64_t u; } pj_cmp_a_%d;\npj_cmp_a_%d.f = (double)(%s);\n",temporary,temporary,args[0]);
-                    if (!lit1) ok = ok && pj_append(s,"union { double f; uint64_t u; } pj_cmp_b_%d;\npj_cmp_b_%d.f = (double)(%s);\n",temporary,temporary,args[1]);
-                    ok = ok && pj_append(s,"_Bool pj_cmp_result_%d;\n",temporary);
+                    if (!lit0) ok = ok && pj_append(target,"union { double f; uint64_t u; } pj_cmp_a_%d;\npj_cmp_a_%d.f = (double)(%s);\n",temporary,temporary,args[0]);
+                    if (!lit1) ok = ok && pj_append(target,"union { double f; uint64_t u; } pj_cmp_b_%d;\npj_cmp_b_%d.f = (double)(%s);\n",temporary,temporary,args[1]);
+                    ok = ok && pj_append(target,"_Bool pj_cmp_result_%d;\n",temporary);
                     char a_val[64], b_val[64];
                     if (lit0) snprintf(a_val,sizeof(a_val),"(%s)",args[0]);
                     else snprintf(a_val,sizeof(a_val),"pj_cmp_a_%d.f",temporary);
                     if (lit1) snprintf(b_val,sizeof(b_val),"(%s)",args[1]);
                     else snprintf(b_val,sizeof(b_val),"pj_cmp_b_%d.f",temporary);
                     if (lit0 && lit1) {
-                        ok = ok && pj_append(s,"pj_cmp_result_%d = %s %s %s;\n",temporary,a_val,op,b_val);
+                        ok = ok && pj_append(target,"pj_cmp_result_%d = %s %s %s;\n",temporary,a_val,op,b_val);
                     } else if (lit0) {
-                        ok = ok && pj_append(s,
+                        ok = ok && pj_append(target,
                             "if ((pj_cmp_b_%d.u & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000))\n"
                             "pj_cmp_result_%d = ((pj_cmp)inputs[%d])(inputs[%d],%s,%s);\n"
                             "else pj_cmp_result_%d = %s %s %s;\n",
@@ -1212,7 +1292,7 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                             p->n_inputs+ME_DSL_MENUDET_JIT_CMP_OFF+1+id,a_val,b_val,
                             temporary,a_val,op,b_val);
                     } else if (lit1) {
-                        ok = ok && pj_append(s,
+                        ok = ok && pj_append(target,
                             "if ((pj_cmp_a_%d.u & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000))\n"
                             "pj_cmp_result_%d = ((pj_cmp)inputs[%d])(inputs[%d],%s,%s);\n"
                             "else pj_cmp_result_%d = %s %s %s;\n",
@@ -1220,7 +1300,7 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
                             p->n_inputs+ME_DSL_MENUDET_JIT_CMP_OFF+1+id,a_val,b_val,
                             temporary,a_val,op,b_val);
                     } else {
-                        ok = ok && pj_append(s,
+                        ok = ok && pj_append(target,
                             "if ((pj_cmp_a_%d.u & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000) || "
                             "(pj_cmp_b_%d.u & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000))\n"
                             "pj_cmp_result_%d = ((pj_cmp)inputs[%d])(inputs[%d],%s,%s);\n"
@@ -1246,7 +1326,7 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
     }
 #endif
     int id = (*next_temp)++;
-    bool ok = pj_append(s,"%s pj_expr_%d = %s; PJ_STATUS_CHECK();\n",type,id,out);
+    bool ok = pj_append(target,"%s pj_expr_%d = %s; PJ_STATUS_CHECK();\n",type,id,out);
     free(out);
     if (!ok) return NULL;
     snprintf(leaf,sizeof(leaf),"pj_expr_%d",id);
@@ -2305,16 +2385,32 @@ static bool pj_emit_arith_bridge(const pj_arith_dag *dag, me_dsl_compiled_progra
     return true;
 }
 
+static bool pj_has_uniform_var(const me_dsl_compiled_program *p, const me_expr *n, int depth) {
+    if (!n || depth > 128) return false;
+    if (TYPE_MASK(n->type) == ME_VARIABLE && is_synthetic_address(n->bound)) {
+        int index = (int)((const char *)n->bound - synthetic_var_addresses);
+        return index >= 0 && index < p->n_inputs &&
+            (p->vars.uniform[index] || (n->flags & ME_EXPR_FLAG_UNIFORM_INPUT));
+    }
+    if (!IS_FUNCTION(n->type)) return false;
+    for (int i=0; i<ARITY(n->type); i++) {
+        if (pj_has_uniform_var(p, n->parameters[i], depth+1)) return true;
+    }
+    return false;
+}
+
 static bool pj_uniform_tree(const me_dsl_compiled_program *p, const me_expr *n, int depth) {
     if (!n || depth > 128) return false;
     int kind = TYPE_MASK(n->type);
     if (kind == ME_CONSTANT) return true;
     if (kind == ME_VARIABLE && is_synthetic_address(n->bound)) {
         int index = (int)((const char *)n->bound - synthetic_var_addresses);
-        return index >= 0 && index < p->vars.count &&
+        return index >= 0 && index < p->n_inputs &&
             (p->vars.uniform[index] || (n->flags & ME_EXPR_FLAG_UNIFORM_INPUT));
     }
     if (!IS_FUNCTION(n->type) || is_reduction_node(n)) return false;
+    const char *op = me_menudet_operator(n);
+    if (op && (!strcmp(op, "where") || !strcmp(op, "and") || !strcmp(op, "or"))) return false;
     for (int i=0; i<ARITY(n->type); i++) {
         if (!pj_uniform_tree(p, n->parameters[i], depth+1)) return false;
     }
@@ -2413,6 +2509,11 @@ static bool pj_emit_ramp_bridge(const me_dsl_compiled_program *p, const char *st
         if (!input_type || !pj_append(out,
             "const %s *pj_input_%d = (const %s *)inputs[%d];\n",
             input_type, i, input_type, i)) return false;
+        if (p->vars.uniform[i]) {
+            if (!pj_append(out,
+                "const %s pj_uni_%d = pj_input_%d[0];\n",
+                input_type, i, i)) return false;
+        }
     }
     if (setup && *setup) {
         ok = ok && pj_append(out,
@@ -2615,11 +2716,16 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     int unroll_budget=256;
     pj_constants bounded_constants=constants ? *constants : (pj_constants){0};
     bounded_constants.unroll_budget=&unroll_budget;
+    pj_text uniform_setup = {0};
+    if (!scalar) {
+        bounded_constants.uniform_setup = &uniform_setup;
+    }
     bool lowered;
     /* Scalar loops need the ND preamble; lower them after constructing it. */
     lowered = scalar || pj_block(p,&p->block,defined,&body,0,&bounded_constants,flow);
     if (!lowered) {
         free(body.text);
+        free(uniform_setup.text);
         dsl_tracef("menudet jit ineligible: unsupported typed statements");
         return;
     }
@@ -2704,6 +2810,10 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         const char *type = pj_type(p->vars.dtypes[i]);
         declarations_ok = declarations_ok && type && pj_append(&input_declarations,
             "const %s *pj_input_%d = (const %s *)inputs[%d];\n",type,i,type,i);
+        if (p->vars.uniform[i]) {
+            declarations_ok = declarations_ok && type && pj_append(&input_declarations,
+                "const %s pj_uni_%d = pj_input_%d[0];\n",type,i,i);
+        }
     }
     /* Pointer-table reads must be outside byte-output loops: a char store may
      * otherwise alias inputs[] and force a reload on every lane. Separate
@@ -2718,7 +2828,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     declarations_ok = declarations_ok && pj_append(&unmasked_body,"%s",scan);
     if (!declarations_ok) {
         dsl_tracef("menudet jit ineligible: input declarations");
-        free(input_declarations.text); free(unmasked_body.text); free(body.text); free(preamble.text);
+        free(input_declarations.text); free(uniform_setup.text); free(unmasked_body.text); free(body.text); free(preamble.text);
         return;
     }
     bool use_arith_bridge = false;
@@ -2823,9 +2933,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     loop_close = "pj_lane_done: i++; } }";
 #endif
 
-    const char *status_macro = (p->menudet_jit_nchecked || p->menudet_jit_niops || p->menudet_jit_ncomparisons ||
-        p->menudet_jit_npreds || p->menudet_jit_nmath || p->menudet_jit_nmath2 ||
-        p->menudet_jit_nmath3) ?
+    const char *status_macro = (p->menudet_jit_nchecked || p->menudet_jit_niops) ?
         "#undef PJ_STATUS_CHECK\n#define PJ_STATUS_CHECK() do { if (pj_status) return pj_status; } while (0)\n" :
         "#undef PJ_STATUS_CHECK\n#define PJ_STATUS_CHECK() ((void)0)\n";
 
@@ -2835,6 +2943,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     } else {
         pj_append(&unmasked_func,
             "static int pj_unmasked(const void *const *inputs, void *restrict output, %s count) {\n"
+            "%s"
             "const unsigned char *mask = 0;\n"
             "const int64_t pj_cap = *(const int64_t *)inputs[%d];\n"
             "int pj_status = 0;\n"
@@ -2843,17 +2952,22 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
             "%s"
             "%s"
             "%s"
+            "%s"
             "%s %s return 0; }\n",
-            entry_count_type, p->n_inputs + ME_DSL_MENUDET_JIT_CAP_OFF,
+            entry_count_type,
+            scalar ? "" : "if (count <= 0) return 0;\n",
+            p->n_inputs + ME_DSL_MENUDET_JIT_CAP_OFF,
             status_macro,
-            input_declarations.text ? input_declarations.text : "", nd_decl,
+            input_declarations.text ? input_declarations.text : "",
+            uniform_setup.text ? uniform_setup.text : "",
+            nd_decl,
             scalar ? "" : unmasked_loop,
             scalar ? "" : (preamble.text ? preamble.text : ""), unmasked_body.text,
             scalar ? "" : loop_close);
     }
 
     int used = snprintf(source,capacity,
-        "/* menudet-1.1 lowering-r31 integral-math arith-bridge abi-r12 */\n"
+        "/* menudet-1.1 lowering-r33 integral-math arith-bridge abi-r12 */\n"
         "#include <stdint.h>\n"
         "#include <limits.h>\n"
         "#include <string.h>\n"
@@ -2932,17 +3046,22 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         "#define pj_uint64_t(x) ((uint64_t)(x))\n"
         "%s"
         "static int pj_masked(const void *const *inputs, void *restrict output, %s count) {\n"
+        "%s"
         "const unsigned char *mask = inputs[%d];\n"
         "const int64_t pj_cap = *(const int64_t *)inputs[%d];\nint pj_status = 0;\n"
         "%s"
-        "%s%s%s%s%s %s return 0; }\n"
+        "%s%s%s%s%s%s %s return 0; }\n"
         "int %s(const void *const *inputs, void *output, %s count) {\n"
         "if (count < 0) return -1;\n"
         "return inputs[%d] ? pj_masked(inputs,output,count) : pj_unmasked(inputs,output,count); }\n",
         unmasked_func.text ? unmasked_func.text : "",
-        entry_count_type,p->n_inputs,p->n_inputs+ME_DSL_MENUDET_JIT_CAP_OFF,
+        entry_count_type,
+        scalar ? "" : "if (count <= 0) return 0;\n",
+        p->n_inputs,p->n_inputs+ME_DSL_MENUDET_JIT_CAP_OFF,
         status_macro,
-        input_declarations.text ? input_declarations.text : "",nd_decl,
+        input_declarations.text ? input_declarations.text : "",
+        uniform_setup.text ? uniform_setup.text : "",
+        nd_decl,
         scalar ? "" : masked_loop,
         scalar ? "" : (preamble.text ? preamble.text : ""),body.text,
         scalar ? "" : loop_close,ME_DSL_JIT_SYMBOL_NAME,entry_count_type,p->n_inputs);
@@ -2950,6 +3069,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     free(body.text);
     free(preamble.text);
     free(input_declarations.text);
+    free(uniform_setup.text);
     free(unmasked_body.text);
     free(unmasked_func.text);
     free(unmasked_bridge.text);

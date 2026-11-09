@@ -2260,6 +2260,7 @@ static void partitionability_proof(void) {
         {"s = x\\n    for i in range(4):\\n        if i == 2:\\n            continue\\n        s = s + y\\n    return s","float64",true},
         {"s = x\\n    while s < y:\\n        break\\n    return s","float64",false},
         {"s = x\\n    for i in range(2):\\n        if x > y:\\n            s = s + (1 // 0)\\n            break\\n    return s","float64",false},
+        {"k = 0\\n    if x > y:\\n        k = 1\\n    return x + (1 // k)","float64",false},
     };
     for (size_t i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
         parity_case test={"partitionability proof",tests[i].body,"float64",tests[i].output,true};
@@ -2267,6 +2268,18 @@ static void partitionability_proof(void) {
         bool result=me_artifact_is_partitionable(artifact);
         if (result != tests[i].safe) fprintf(stderr,"partitionability case=%zu body=%s\n",i,tests[i].body);
         CHECK(result == tests[i].safe);
+        me_artifact_free(artifact);
+    }
+    const char *f32_mandelbrot[] = {
+        "zr = 0.0\\n    zi = 0.0\\n    escape_iter = float(64)\\n    for i in range(64):\\n        if zr * zr + zi * zi > 4:\\n            escape_iter = float(i)\\n            break\\n        zr_new = zr * zr - zi * zi + x\\n        zi = 2 * zr * zi + y\\n        zr = zr_new\\n    return escape_iter",
+        "zr = 0.0\\n    zi = 0.0\\n    escape_iter = 64\\n    for i in range(64):\\n        if zr * zr + zi * zi > 4:\\n            escape_iter = i\\n            break\\n        zr_new = zr * zr - zi * zi + x\\n        zi = 2 * zr * zi + y\\n        zr = zr_new\\n    return escape_iter",
+        "return fmin(floor(1000 * (x - 0.0) / (10.0 - 0.0)), float(1000 - 1))",
+    };
+    for (size_t i = 0; i < sizeof(f32_mandelbrot) / sizeof(f32_mandelbrot[0]); i++) {
+        parity_case test = {"f32 mandelbrot partitionability", f32_mandelbrot[i], "float32", "float32", true};
+        me_artifact *artifact = load(&test, ME_JIT_OFF);
+        CHECK(me_artifact_is_partitionable(artifact));
+        if (i == 2) CHECK(me_artifact_inferred_dtype(artifact) == ME_FLOAT32);
         me_artifact_free(artifact);
     }
     parity_case captured={"nonfinite proof capture","return x + z","float64","float64",true};

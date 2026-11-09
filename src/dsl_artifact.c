@@ -1149,10 +1149,9 @@ static artifact_proof_value artifact_proof_expr(artifact_proof *proof, const me_
     if (!n->function) {
         if (n->dtype == ME_FLOAT32 || n->dtype == ME_FLOAT64) {
             const me_expr *arg=n->parameters[0];
-            if (arg->flags & (ME_EXPR_FLAG_WEAK_SCALAR | ME_EXPR_FLAG_WEAK_LITERAL)) {
-                if (!args[0].known_integer && (!args[0].known_float ||
-                    fabs(args[0].floating) > (n->dtype == ME_FLOAT32 ? FLT_MAX : DBL_MAX))) return invalid;
-            }
+            if ((arg->flags & (ME_EXPR_FLAG_WEAK_SCALAR | ME_EXPR_FLAG_WEAK_LITERAL)) &&
+                args[0].known_float &&
+                fabs(args[0].floating) > (n->dtype == ME_FLOAT32 ? FLT_MAX : DBL_MAX)) return invalid;
             return unknown;
         }
         if (n->dtype == ME_BOOL) return unknown;
@@ -1207,8 +1206,6 @@ static artifact_proof_value artifact_proof_expr(artifact_proof *proof, const me_
 static artifact_proof_value artifact_proof_merge(artifact_proof_value a, artifact_proof_value b) {
     if (!a.valid || !b.valid) return (artifact_proof_value){0};
     if (a.known_integer && b.known_integer && a.integer == b.integer) return a;
-    /* Unknown scalar integers must not flow into later checked operations. */
-    if (a.known_integer || b.known_integer) return (artifact_proof_value){0};
     return (artifact_proof_value){.valid=true};
 }
 
@@ -1250,8 +1247,8 @@ static bool artifact_proof_block(artifact_proof *proof, const me_dsl_compiled_bl
             if (!value.valid) return false;
             if (expr->dtype != p->output_dtype &&
                 (expr->flags & (ME_EXPR_FLAG_WEAK_SCALAR | ME_EXPR_FLAG_WEAK_LITERAL)) &&
-                !value.known_integer && (!value.known_float ||
-                 fabs(value.floating) > (p->output_dtype == ME_FLOAT32 ? FLT_MAX : DBL_MAX))) return false;
+                value.known_float &&
+                fabs(value.floating) > (p->output_dtype == ME_FLOAT32 ? FLT_MAX : DBL_MAX)) return false;
         } else if (s->kind == ME_DSL_STMT_BREAK) {
             if (loop_depth <= 0) return false;
             if (s->as.flow.cond.expr) {

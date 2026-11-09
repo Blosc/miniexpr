@@ -514,6 +514,9 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
         if (p_complex(a->dtype) && cast != ME_BOOL && !p_complex(cast)) {
             return p_fail(reason, cap, "explicit complex to real or integer cast is unsupported");
         }
+        if (numpy && !(n->flags & ME_EXPR_FLAG_EXPLICIT_DTYPE) && cast == ME_FLOAT64 && p_weak(a)) {
+            n->flags |= ME_EXPR_FLAG_WEAK_SCALAR;
+        }
         n->function = NULL;
         n->dtype = cast;
         n->input_dtype = a->dtype;
