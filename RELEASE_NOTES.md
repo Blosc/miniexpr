@@ -4,6 +4,11 @@ Release notes for miniexpr
 Changes from 0.3.0 to 0.3.1
 ===========================
 
+* Fixes true division of integer/Boolean operands in classic expressions (#26).
+  `/` now computes and infers float64 for integral inputs, including nested
+  arithmetic, comparisons, reductions and constant divisors. Zero divisors
+  produce floating-point infinities/NaNs rather than integer division.
+
 * Fixes binary real math (`hypot`, `atan2`, `logaddexp`, `nextafter` and
   `copysign`) on integer/Boolean inputs in classic expressions, including
   automatic dtype inference, comparisons and reductions (#27). These functions

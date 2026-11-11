@@ -1168,6 +1168,9 @@ me_dtype infer_result_type(const me_expr* n) {
             if (IS_FUNCTION(n->type) && arity == 2 && (n->flags & ME_EXPR_FLAG_FLOAT_MATH)) {
                 return promote_binary_float_math_result(result);
             }
+            if (n->flags & ME_EXPR_FLAG_TRUE_DIVISION) {
+                return promote_float_math_result(result);
+            }
             return result;
         }
     }
@@ -1258,6 +1261,14 @@ me_dtype infer_output_type(const me_expr* n) {
                 return promote_float_math_result(param_type);
             }
 
+            /* True division returns a floating value even for bool operands;
+             * handle it before the bool-output shortcut below. */
+            if (n->flags & ME_EXPR_FLAG_TRUE_DIVISION) {
+                me_dtype left = infer_output_type(n->parameters[0]);
+                me_dtype right = infer_output_type(n->parameters[1]);
+                return promote_float_math_result(promote_types(left, right));
+            }
+
             // If this node is a comparison (dtype == ME_BOOL set during parsing),
             // the output type is ME_BOOL
             if (n->dtype == ME_BOOL) {
@@ -1318,6 +1329,12 @@ void apply_type_promotion(me_expr* node) {
         me_dtype left_type = left->dtype;
         me_dtype right_type = right->dtype;
         me_dtype promoted = promote_types(left_type, right_type);
+
+        /* Integral / is true division, not an integer operation followed by
+         * an output cast. Record its floating dtype for enclosing nodes. */
+        if (node->flags & ME_EXPR_FLAG_TRUE_DIVISION) {
+            promoted = promote_float_math_result(promoted);
+        }
 
         // Store the promoted output type
         node->dtype = promoted;

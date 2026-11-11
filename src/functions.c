@@ -5007,6 +5007,9 @@ static me_expr* term(state* s) {
         CHECK_NULL(ret, me_free(f), me_free(prev));
 
         ret->function = (void*)t;
+        if (t == divide && !dsl_menudet_typed_profile(s->semantic_profile)) {
+            ret->flags |= ME_EXPR_FLAG_TRUE_DIVISION;
+        }
         apply_type_promotion(ret);
     }
 
