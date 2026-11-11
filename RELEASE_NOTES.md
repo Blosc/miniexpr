@@ -1,6 +1,11 @@
 Release notes for miniexpr
 ==========================
 
+Changes from 0.3.1 to 0.3.2
+===========================
+
+* No changes yet.
+
 Changes from 0.3.0 to 0.3.1
 ===========================
 
