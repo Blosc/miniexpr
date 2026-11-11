@@ -1,8 +1,47 @@
 Release notes for miniexpr
 ==========================
 
-Changes from 0.2.0 to 0.2.1
+Changes from 0.2.0 to 0.3.0
 ===========================
+
+* Introduces the feature-frozen Menudet 0.1 beta language profile, independently
+  versioned from miniexpr. It defines NumPy-compatible arithmetic, promotion,
+  casting and floating-point status rules, with native source validation via
+  `me_validate_menudet()` and `me_validate_menudet_ex()`.
+  - Adds chained comparisons, `pass`, Python-style numeric literals, docstrings,
+    semicolon-separated statements and explicit block-scoped reductions.
+  - Optional portable JSON artifacts are available with
+    `MINIEXPR_BUILD_ARTIFACT=ON`; the core does not require a JSON dependency.
+  - See `doc/menudet-intro.md`, `doc/menudet-syntax.md` and `doc/dsl-spec/0.1.md`.
+
+* Source compatibility change: native expressions, kernels and saved artifacts
+  no longer accept the inverse-function aliases `arcsin`, `arccos`, `arctan`,
+  `arctan2`, `arcsinh`, `arccosh` and `arctanh`. Use the canonical names `asin`,
+  `acos`, `atan`, `atan2`, `asinh`, `acosh` and `atanh` instead.
+  See `doc/inverse-function-names.md` for migration details.
+
+* Adds native numerical graph preparation and execution, including materialized
+  stages, strided destinations, bounded storage readers, transactional output
+  aliases and host-provided synchronous executors. Proven lane-independent maps
+  can be partitioned and scheduled in parallel. See `doc/native-graphs-1.md`
+  and `doc/native-execution.md`.
+
+* Expands portable JIT coverage for typed operators, math functions, casts,
+  loops, ND index variables and reductions, including wasm32 support. Bundled
+  TinyCC compilation stays in memory, and installed compiler headers are
+  relocatable. Per-call `me_jit_options` select compiler settings, diagnostics,
+  cache directories and math backends without changing the environment.
+  Unsupported kernels retain interpreter fallback.
+
+* Improves numerical correctness and interpreter/JIT parity for exact 64-bit
+  integer operations, Boolean arithmetic and reductions, float32 rounding and
+  `nextafter`, complex powers, masked evaluation and checked conversions.
+  Adds NumPy conformance corpora and backend qualification tests.
+
+* Extends fixed-width strings and bytes (`ME_BYTES`) with string-valued
+  expressions, DSL locals and returns, chunked evaluation and string kernels.
+  Fixed-width behavior follows NumPy semantics rather than NUL termination;
+  case conversion preserves the inferred output width.
 
 * Menudet weak-scalar strength is preserved across local variable joins. A local
   initialized from a weak Python literal and later reassigned from a strong
@@ -41,6 +80,7 @@ Changes from 0.2.0 to 0.2.1
   - Explicit unavailable SLEEF/Accelerate requests fail during preparation.
   - Accelerated math uses a kernel-local immutable callback table and bounded
     vector interpretation; artifacts declare the `flexible-math` capability.
+
 * New varlen output for string expressions: `me_eval_varlen()` writes the Arrow
   layout (int64 offsets + a tight byte blob) instead of fixed-width slots.
   - `ME_STRING` yields UTF-8 (`large_string`); `ME_BYTES` copies bytes verbatim
@@ -50,9 +90,10 @@ Changes from 0.2.0 to 0.2.1
     never on the result: 9.7x smaller output for a 12% pack overhead on
     `bench/benchmark_varlen_output.c`. See `doc/strings.md`.
 
-* macOS SIMD math now prefers SLEEF by default when it is available at build time.
+* Classic expression SIMD math on macOS prefers SLEEF when available at build
+  time; Menudet's separate `auto` policy follows system math as described above.
   - New CMake option: `MINIEXPR_USE_ACCELERATE=ON|OFF` (enabled by default on macOS, off elsewhere).
-  - In runtime `auto` mode, macOS prefers SLEEF first, then falls back to Accelerate when enabled, then to scalar kernels.
+  - For classic expression SIMD math in runtime `auto` mode, macOS prefers SLEEF first, then falls back to Accelerate when enabled, then to scalar kernels.
   - Added `ME_SIMD_MATH_BACKEND=auto|sleef|accelerate|scalar` for backend forcing during debugging and benchmarking.
   - Updated SIMD math benchmarks to report backend-appropriate columns instead of implying fake `U10/U35` distinctions for Accelerate/scalar runs.
 
