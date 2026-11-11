@@ -455,7 +455,7 @@ static const me_variable functions[] = {
     {"asin", 0, asin, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"asinh", 0, asinh, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"atan", 0, atan, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
-    {"atan2", 0, atan2, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"atan2", 0, atan2, ME_FUNCTION2 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"atanh", 0, atanh, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"block_all", 0, all_reduce, ME_FUNCTION1, 0},
     {"block_any", 0, any_reduce, ME_FUNCTION1, 0},
@@ -468,7 +468,7 @@ static const me_variable functions[] = {
     {"ceil", 0, ceil, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"conj", 0, conj_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"contains", 0, str_contains, ME_FUNCTION2 | ME_FLAG_PURE, 0},
-    {"copysign", 0, copysign, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"copysign", 0, copysign, ME_FUNCTION2 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"cos", 0, cos, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"cosh", 0, cosh, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"cospi", 0, cospi_wrapper, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
@@ -488,7 +488,7 @@ static const me_variable functions[] = {
     {"fmax", 0, fmax, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"fmin", 0, fmin, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"fmod", 0, fmod, ME_FUNCTION2 | ME_FLAG_PURE, 0},
-    {"hypot", 0, hypot, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"hypot", 0, hypot, ME_FUNCTION2 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"imag", 0, imag_wrapper, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"isfinite", 0, numpy_isfinite, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"isinf", 0, numpy_isinf, ME_FUNCTION1 | ME_FLAG_PURE, 0},
@@ -504,7 +504,7 @@ static const me_variable functions[] = {
     {"log10", 0, log10, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"log1p", 0, log1p_wrapper, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"log2", 0, log2_wrapper, ME_FUNCTION1 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
-    {"logaddexp", 0, logaddexp, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"logaddexp", 0, logaddexp, ME_FUNCTION2 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"lower", 0, str_lower, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"lstrip", 0, str_lstrip, ME_FUNCTION1 | ME_FLAG_PURE, 0},
     {"max", 0, max_reduce, ME_FUNCTION1, 0},
@@ -513,7 +513,7 @@ static const me_variable functions[] = {
     {"min", 0, min_reduce, ME_FUNCTION1, 0},
     {"minimum", 0, numpy_minimum, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"ncr", 0, ncr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
-    {"nextafter", 0, nextafter, ME_FUNCTION2 | ME_FLAG_PURE, 0},
+    {"nextafter", 0, nextafter, ME_FUNCTION2 | ME_FLAG_PURE | ME_FLAG_FLOAT_MATH, 0},
     {"npr", 0, npr, ME_FUNCTION2 | ME_FLAG_PURE, 0},
     {"pi", 0, pi, ME_FUNCTION0 | ME_FLAG_PURE, 0},
     {"pow", 0, pow, ME_FUNCTION2 | ME_FLAG_PURE, 0},
@@ -4831,6 +4831,9 @@ static me_expr* base(state* s) {
             CHECK_NULL(ret);
 
             ret->function = s->function;
+            if (s->type & ME_FLAG_FLOAT_MATH) {
+                ret->flags |= ME_EXPR_FLAG_FLOAT_MATH;
+            }
             if (func_dtype != ME_AUTO) {
                 ret->dtype = func_dtype;
                 ret->flags |= ME_EXPR_FLAG_EXPLICIT_DTYPE;

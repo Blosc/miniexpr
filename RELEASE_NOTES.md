@@ -4,7 +4,11 @@ Release notes for miniexpr
 Changes from 0.3.0 to 0.3.1
 ===========================
 
-* No changes yet.
+* Fixes binary real math (`hypot`, `atan2`, `logaddexp`, `nextafter` and
+  `copysign`) on integer/Boolean inputs in classic expressions, including
+  automatic dtype inference, comparisons and reductions (#27). These functions
+  now compute in floating point; narrow inputs use float32 (also in place of
+  unsupported float16), and 32-/64-bit integers use float64.
 
 Changes from 0.2.0 to 0.3.0
 ===========================

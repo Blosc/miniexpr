@@ -366,6 +366,16 @@ static me_dtype promote_float_math_result(me_dtype param_type) {
     return param_type;
 }
 
+/* Binary real math uses NumPy's smallest supported floating loop. Float16
+ * is unavailable here, so bool and 8-bit inputs use float32 as well. */
+static me_dtype promote_binary_float_math_result(me_dtype dtype) {
+    if (dtype == ME_BOOL || dtype == ME_INT8 || dtype == ME_UINT8 ||
+        dtype == ME_INT16 || dtype == ME_UINT16) {
+        return ME_FLOAT32;
+    }
+    return promote_float_math_result(dtype);
+}
+
 
 bool contains_reduction(const me_expr* n) {
     if (!n) return false;
@@ -1155,6 +1165,9 @@ me_dtype infer_result_type(const me_expr* n) {
                 result = promote_types(result, param_type);
             }
 
+            if (IS_FUNCTION(n->type) && arity == 2 && (n->flags & ME_EXPR_FLAG_FLOAT_MATH)) {
+                return promote_binary_float_math_result(result);
+            }
             return result;
         }
     }
@@ -1260,6 +1273,9 @@ me_dtype infer_output_type(const me_expr* n) {
                 result = promote_types(result, param_type);
             }
 
+            if (IS_FUNCTION(n->type) && arity == 2 && (n->flags & ME_EXPR_FLAG_FLOAT_MATH)) {
+                return promote_binary_float_math_result(result);
+            }
             return result;
         }
     }
