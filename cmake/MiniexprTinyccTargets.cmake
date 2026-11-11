@@ -55,6 +55,20 @@ if(MINIEXPR_NEEDS_BUNDLED_TINYCC)
     )
   endif()
 
+  # Share Make's parallel job budget with the nested build on CMake 3.28+.
+  # Older CMake versions retain the existing serial fallback.
+  set(MINIEXPR_TINYCC_JOB_SERVER_ARGS)
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.28")
+    list(APPEND MINIEXPR_TINYCC_JOB_SERVER_ARGS JOB_SERVER_AWARE TRUE)
+    if(CMAKE_GENERATOR MATCHES "Makefiles")
+      # Invoke Make directly: an intermediate cmake --build can close the
+      # inherited jobserver handles before launching the nested Make.
+      set(MINIEXPR_TINYCC_BUILD_CMD
+        "${CMAKE_MAKE_PROGRAM}" -C "${tinycc_BINARY_DIR}" minicc_libtcc_shared
+      )
+    endif()
+  endif()
+
   add_custom_command(
     OUTPUT "${MINIEXPR_TINYCC_CONFIG_STAMP}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${tinycc_BINARY_DIR}"
@@ -82,6 +96,7 @@ if(MINIEXPR_NEEDS_BUNDLED_TINYCC)
               -Ddst="${MINIEXPR_TINYCC_STAGED_SHARED_PATH}"
               -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/copy_first_existing.cmake"
       DEPENDS "${MINIEXPR_TINYCC_CONFIG_STAMP}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/copy_first_existing.cmake"
+      ${MINIEXPR_TINYCC_JOB_SERVER_ARGS}
       VERBATIM
     )
   else()
@@ -92,6 +107,7 @@ if(MINIEXPR_NEEDS_BUNDLED_TINYCC)
       DEPENDS "${MINIEXPR_TINYCC_CONFIG_STAMP}"
               "${tinycc_SOURCE_DIR}/tccrun.c"
               "${tinycc_SOURCE_DIR}/tcc_memfd.h"
+      ${MINIEXPR_TINYCC_JOB_SERVER_ARGS}
       VERBATIM
     )
   endif()
