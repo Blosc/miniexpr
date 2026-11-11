@@ -1,16 +1,16 @@
-# miniexpr DSL Syntax (Canonical Reference)
+# Menudet Syntax (Canonical Reference)
 
-This is the practical reference for the DSL accepted by `me_compile()`.
+This is the practical, canonical reference for the Menudet language accepted by `me_compile()`.
 It focuses on what works today and the most common gotchas.
 For usage walkthroughs and end-to-end examples, see `doc/dsl-usage.md`.
 
 The [Menudet profile 0.1 (beta)](dsl-spec/0.1.md) specifies a feature-frozen, versioned
 language-independent subset with shared native/Python conformance fixtures.
-This reference continues to describe the full native language.
+This reference describes the full native language accepted by miniexpr.
 
 ## Quick start
 
-A valid DSL program is one function:
+A valid Menudet program is one function:
 
 ```python
 def kernel(x, y):

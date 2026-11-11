@@ -183,7 +183,7 @@ For complete JIT configuration details and tuning knobs, see [doc/dsl-usage.md](
 - **Menudet Language**:
   - **[doc/menudet-intro.md](doc/menudet-intro.md)**: **Recommended overview** of Menudet, portability dimensions, and arithmetic guarantees.
   - **[doc/dsl-usage.md](doc/dsl-usage.md)**: Practical programming guide, JIT controls, and UDF integration.
-  - **[doc/dsl-syntax.md](doc/dsl-syntax.md)**: Canonical language grammar, statements, and pragmas reference.
+  - **[doc/menudet-syntax.md](doc/menudet-syntax.md)**: Canonical language grammar, statements, and pragmas reference.
   - **[doc/dsl-spec/0.1.md](doc/dsl-spec/0.1.md)**: Formal Menudet 0.1 language specification.
   - **[doc/dsl-spec/artifact-0.1.md](doc/dsl-spec/artifact-0.1.md)**: Computational artifact schema and requirements.
 - **Types, Strings & Arrays**:

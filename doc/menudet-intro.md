@@ -134,7 +134,7 @@ me_free(expr);
 
 - **Language & Programming Guides**:
   - [doc/dsl-usage.md](dsl-usage.md): Practical guide for writing kernels, configuring JIT, and integrating UDFs.
-  - [doc/dsl-syntax.md](dsl-syntax.md): Canonical reference for grammar, statements, pragmas, and expressions.
+  - [doc/menudet-syntax.md](menudet-syntax.md): Canonical reference for grammar, statements, pragmas, and expressions.
   - [doc/strings.md](strings.md): Working with UCS-4 strings (`ME_STRING`), bytes (`ME_BYTES`), and Arrow variable-length output (`me_eval_varlen()`).
 
 - **Menudet Specifications**:

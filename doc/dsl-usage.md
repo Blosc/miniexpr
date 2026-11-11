@@ -5,7 +5,7 @@ The versioned portable language is **Menudet**, a little language for portable
 computation on arrays and tables. Its [0.1 language draft](dsl-spec/0.1.md) and
 [artifact draft](dsl-spec/artifact-0.1.md) define the Menudet contract; this guide
 also covers ordinary full-DSL features that need not be portable.
-Canonical syntax, accepted statements, and exact error behavior are documented in `doc/dsl-syntax.md`.
+Canonical syntax, accepted statements, and exact error behavior are documented in `doc/menudet-syntax.md`.
 
 ## Overview
 
@@ -15,7 +15,7 @@ Use this guide for:
 - Common kernel-writing patterns
 - UDF integration examples
 
-For language syntax details, always refer to `doc/dsl-syntax.md`.
+For language syntax details, always refer to `doc/menudet-syntax.md`.
 
 ## Quick Start
 
@@ -45,7 +45,7 @@ if (me_compile(src, vars, 1, ME_FLOAT64, &err, &expr) == ME_COMPILE_SUCCESS) {
 Notes:
 - Signature parameter names in the DSL must match input variable names passed to `me_compile()`.
 - The order of `vars[]` defines input pointer order for `me_eval()`.
-- Full syntax constraints are in `doc/dsl-syntax.md`.
+- Full syntax constraints are in `doc/menudet-syntax.md`.
 
 ## Menudet validation before execution
 
@@ -97,7 +97,7 @@ Supported values:
 - `# me:math=auto|system|sleef|accelerate`
 - `# me:ulp=u10|u35` (SLEEF only; defaults to `u35`)
 
-Only these pragmas are supported. See `doc/dsl-syntax.md` for exact pragma parsing rules.
+Only these pragmas are supported. See `doc/menudet-syntax.md` for exact pragma parsing rules.
 
 Math-library selection is independent of floating-point mode. `auto` and
 `system` both use the system math library; `auto` is the built-in default.
@@ -150,7 +150,7 @@ At evaluation time, `me_eval_params.jit_mode` provides the same per-call overrid
 
 ## Practical Patterns
 
-These patterns are usage-oriented. For strict language rules, see `doc/dsl-syntax.md`.
+These patterns are usage-oriented. For strict language rules, see `doc/menudet-syntax.md`.
 
 ### Temporary variables and inference
 
@@ -288,7 +288,7 @@ me_dsl_program_free(prog);
 
 ## Limitations
 
-For the canonical list, see `doc/dsl-syntax.md`.
+For the canonical list, see `doc/menudet-syntax.md`.
 
 Current high-level limits:
 - No recursion

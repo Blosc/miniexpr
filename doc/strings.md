@@ -163,7 +163,7 @@ Example: `"α"` matches U+03B1 (Greek alpha).
 ## DSL Notes
 
 String locals and string-valued `return` statements are supported; see
-`doc/dsl-syntax.md`. DSL conditions must still be scalar, so use `any()` /
+`doc/menudet-syntax.md`. DSL conditions must still be scalar, so use `any()` /
 `all()` to collapse an element-wise string predicate.
 
 There is no JIT for string kernels (`me_jit_c_type()` returns NULL for
