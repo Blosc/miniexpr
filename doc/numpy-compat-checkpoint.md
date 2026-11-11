@@ -1,5 +1,5 @@
 > Historical qualification checkpoint. Current public Menudet 0.1 beta uses
-> NumPy numerical semantics and optional JIT; see [the specification](dsl-spec/1.0.md).
+> NumPy numerical semantics and optional JIT; see [the specification](dsl-spec/0.1.md).
 
 # NumPy compatibility: first checkpoint
 

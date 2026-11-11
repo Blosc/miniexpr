@@ -1,31 +1,79 @@
 # miniexpr
 
-A small, efficient C library for parsing and evaluating mathematical expressions with support for vectorized operations across multiple data types. Derived from [tinyexpr](https://github.com/codeplea/tinyexpr).
+A small, efficient C library for parsing and evaluating mathematical expressions and portable Menudet kernels over arrays.
 
 ## Overview
 
-miniexpr is designed to be embedded directly into larger projects, not distributed as a standalone library. It provides fast expression evaluation with support for:
+miniexpr is designed to be embedded directly into larger projects (such as [C-Blosc2](https://github.com/Blosc/c-blosc2)), not distributed as a standalone library.
 
-- Standard mathematical operations and functions
-- Multiple data types: integers, floats, complex numbers, strings (`ME_STRING`), and bytes (`ME_BYTES`)
-- Vectorized evaluation for processing arrays efficiently (fixed-width and Arrow-compatible variable-length output)
-- Multi-statement DSL computational kernels with optional runtime JIT compilation
-- Thread-safe operations for parallel processing
+miniexpr has two evaluation modes:
 
-**Note**: This is a beta project.
-**Windows**: Building requires clang-cl; complex64 and complex128 are supported, including portable interpretation. DSL JIT complex kernels remain unsupported on all platforms.
+1. **Expressions**: Simple one-line mathematical formulas (the original TinyExpr heritage), evaluated element-wise:
+   ```c
+   me_compile("sqrt(x*x + y*y)", vars, 2, ME_FLOAT64, &err, &expr);
+   ```
 
-## Usage
+2. **Menudet Kernels**: Multi-statement Python-like computational programs with `def`, temporaries, conditionals, loops, and reductions:
+   ```python
+   def kernel(x, y):
+       t = sin(x) ** 2
+       if y > 0:
+           return t + cos(y) ** 2
+       return t
+   ```
 
-To use miniexpr in your project, simply include the source files (`miniexpr.c` and `miniexpr.h`) directly in your build system.
+### Key Capabilities
 
-For dtype rules, reduction semantics, and versioning details, see [README_DEVELOPERS.md](README_DEVELOPERS.md), [doc/get-started.md](doc/get-started.md), and [src/miniexpr.h](src/miniexpr.h).
+- **Mathematical operations & functions**: Standard arithmetic, trigonometry, hyperbolic, exponential, and special functions.
+- **Rich type system**: Signed/unsigned integers (`int8` through `uint64`), floating-point (`float32`, `float64`), C99 complex numbers (`complex64`, `complex128`), strings (`ME_STRING` / UCS-4), and bytes (`ME_BYTES`).
+- **Chunked & N-dimensional evaluation**: Efficient vectorized evaluation over chunked array blocks, with both fixed-width and Arrow-compatible variable-length output (`me_eval_varlen`).
+- **Runtime JIT compilation**: Optional JIT compilation via bundled in-memory TinyCC or system C compilers for near-native execution speed.
+- **Thread-safe & re-entrant**: Compiled expressions and kernels are evaluated concurrently across threads on separate data buffers with no internal locks.
+
+**Windows**: Building requires clang-cl; `complex64` and `complex128` are supported under portable interpretation. JIT complex kernels remain unsupported across all platforms.
+
+---
+
+## Quick Example
+
+```c
+#include "miniexpr.h"
+#include <stdio.h>
+
+int main(void) {
+    // 1. Define variables
+    me_variable vars[] = {{"x"}, {"y"}};
+    int err;
+
+    // 2. Compile expression
+    me_expr *expr = NULL;
+    if (me_compile("x + y", vars, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) {
+        fprintf(stderr, "Compilation error: %s\n", me_get_last_error_message());
+        return -1;
+    }
+
+    // 3. Prepare data buffers
+    double x_data[] = {1.0, 2.0, 3.0};
+    double y_data[] = {4.0, 5.0, 6.0};
+    double result[3];
+    const void *ptrs[] = {x_data, y_data};
+
+    // 4. Evaluate (thread-safe)
+    if (me_eval(expr, ptrs, 2, result, 3, NULL) != ME_EVAL_SUCCESS) {
+        fprintf(stderr, "Evaluation failed\n");
+    }
+
+    // 5. Clean up
+    me_free(expr);
+    return 0;
+}
+```
+
+---
 
 ## API Reference
 
-miniexpr provides a focused, thread-safe API for expression compilation, evaluation, and diagnostics.
-
-### `me_compile()`, `me_compile_nd()`, `me_compile_nd_jit()`, and `me_compile_nd_jit_options()`
+### Compilation
 
 ```c
 int me_compile(const char *expression, const me_variable *variables,
@@ -49,30 +97,15 @@ int me_compile_nd_jit_options(const char *expression, const me_variable *variabl
                               const me_jit_options *options, int *error, me_expr **out);
 ```
 
-Compiles an expression for evaluation. Variable and output pointers are provided during evaluation rather than compilation.
+- Compiles an expression or Menudet kernel for evaluation. Variable and output memory pointers are bound during evaluation, not compilation.
+- `jit_mode` controls compile-time runtime JIT preparation:
+  - `ME_JIT_DEFAULT` (`0`): Default policy.
+  - `ME_JIT_ON` (`1`): Prefer runtime JIT preparation.
+  - `ME_JIT_OFF` (`2`): Skip runtime JIT preparation.
+  - `ME_JIT_AUTO` (`3`): Interpret simple single-expression paths and prefer JIT for multi-statement programs.
+- `me_compile_nd_jit_options()` accepts per-call compilation settings (`compiler`, `cflags`, `cache_dir`, `trace`, `math_backend`) without altering environment variables.
 
-Variables are matched by position in the arrays. Unspecified fields default to NULL/0.
-
-`me_compile_nd_jit(...)` adds a compile-time JIT policy hint:
-
-- `jit_mode = 0` (`ME_JIT_DEFAULT`): default behavior.
-- `jit_mode = 1` (`ME_JIT_ON`): prefer runtime JIT preparation.
-- `jit_mode = 2` (`ME_JIT_OFF`): skip runtime JIT preparation at compile time.
-- `jit_mode = 3` (`ME_JIT_AUTO`): opt into structural policy: interpret a parsed
-  single-return expression and prefer JIT for a multi-statement program. Explicit
-  source compiler pragmas and `ME_DSL_JIT` take priority over this heuristic.
-  Explicit `ME_JIT_OFF` still disables compilation, including for source pragmas.
-  Existing `ME_JIT_DEFAULT` consumers keep their previous behavior.
-
-Portable artifact consumers can inspect `me_artifact_execution_kind()` after
-validation (`"expression"` or `"program"`). The classification is structural,
-not based on physical source line count, and does not depend on whether JIT was
-requested or successfully compiled. `ME_ARTIFACT_EXECUTION_KIND_VERSION` advertises
-availability of this metadata and the opt-in automatic policy.
-
-`me_compile_nd_jit_options(...)` accepts fine-grained compile options (compiler binary, custom CFLAGS, cache directory, and diagnostic verbosity) for that call without modifying environment variables.
-
-### `me_eval()`, `me_eval_nd()`, and `me_eval_varlen()`
+### Evaluation
 
 ```c
 int me_eval(const me_expr *expr, const void **vars_block,
@@ -93,251 +126,105 @@ int me_eval_varlen(const me_expr *expr, const void **vars_block, int n_vars,
                    const me_eval_params *params);
 ```
 
-Evaluates the compiled expression with new variable and output pointers. This allows processing arrays in chunks without recompilation and is thread-safe for parallel evaluation.
+- Evaluates compiled expressions over chunk buffers. Safe for concurrent evaluation across threads.
+- For string (`ME_STRING`) or bytes (`ME_BYTES`) outputs, `me_eval_varlen()` writes directly into an Arrow-compatible layout (`int64_t` offsets array + compact data blob), avoiding fixed-width worst-case padding. Size the buffer using `me_varlen_data_bound()`.
+- Use `ME_EVAL_PARAMS_DEFAULTS` to customize evaluation behavior (e.g. `params.disable_simd = true` or `params.jit_mode = ME_JIT_OFF`).
 
-For string (`ME_STRING`) or bytes (`ME_BYTES`) outputs, `me_eval_varlen()` writes directly into an Arrow-compatible variable-length format (`int64_t` offsets array + compact data blob), avoiding conservative fixed-width padding memory waste. Use `me_varlen_data_bound()` to safely size the data buffer.
-
-Use `ME_EVAL_PARAMS_DEFAULTS` to start from defaults and override only what you need:
-
-```c
-me_eval_params params = ME_EVAL_PARAMS_DEFAULTS;
-params.disable_simd = true;
-if (me_eval(expr, var_ptrs, 2, result, 3, &params) != ME_EVAL_SUCCESS) { /* handle error */ }
-```
-
-JIT policy can also be controlled per-evaluation call:
-
-```c
-me_eval_params params = ME_EVAL_PARAMS_DEFAULTS;
-params.jit_mode = ME_JIT_OFF;
-if (me_eval(expr, var_ptrs, 2, result, 3, &params) != ME_EVAL_SUCCESS) { /* handle error */ }
-```
-
-### `me_get_last_error_message()`
+### Diagnostics and Cleanup
 
 ```c
 const char *me_get_last_error_message(void);
-```
-
-Returns a thread-local, human-readable diagnostic message explaining the most recent compilation or setup failure in this thread, or `NULL` if no diagnostic is available.
-
-### `me_free()`
-
-```c
 void me_free(me_expr *n);
 ```
 
-Frees the compiled expression. Safe to call on `NULL`.
+- `me_get_last_error_message()`: Returns a thread-local, human-readable message for the most recent compile or setup failure.
+- `me_free()`: Safely frees expression resources (safe to call on `NULL`).
 
-### Quick Example
+---
 
-```c
-#include "miniexpr.h"
+## Menudet Kernels
 
-// Define variables
-me_variable vars[] = {{"x"}, {"y"}};
-int err;
+miniexpr executes computational kernels written in **Menudet**, a versioned little language for portable computation on arrays and tables:
 
-// Compile expression
-me_expr *expr = NULL;
-if (me_compile("x + y", vars, 2, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS) { /* handle error */ }
-// Prepare data
-double x_data[] = {1.0, 2.0, 3.0};
-double y_data[] = {4.0, 5.0, 6.0};
-double result[3];
+- **Language features**: Temporary variables, `if`/`elif`/`else` conditionals, `for`/`while` loops with `break`/`continue`/`pass`, chained comparisons (`0 < x <= 10`), Python numeric literals (`0x...`, `0b...`, `1_000_000`), and block reductions (`block_sum`, `block_min`, etc.).
+- **Frozen 0.1 Beta**: Menudet 0.1 is feature-frozen with strictly defined arithmetic (exact two's complement wrapping, defined shift behavior, and division-by-zero protection matching NumPy 2.x).
+- **Validation**: Call `me_validate_menudet(source, ME_MENUDET_DSL_VERSION, ...)` to preflight and validate kernels before compilation.
 
-const void *var_ptrs[] = {x_data, y_data};
+See **[doc/menudet-intro.md](doc/menudet-intro.md)** for a complete overview of Menudet portability, arithmetic edge-case guarantees, and examples.
 
-// Evaluate (thread-safe)
-if (me_eval(expr, var_ptrs, 2, result, 3, NULL) != ME_EVAL_SUCCESS) { /* handle error */ }
-// Clean up
-me_free(expr);
-```
+---
 
-## Examples
+## Runtime JIT Compilation
 
-The `examples/` directory contains complete, runnable examples demonstrating various features:
+Menudet kernels can be compiled to native code on the fly:
 
-- **01_simple_expression.c** - Basic arithmetic expressions (beginner)
-- **02_complex_expression.c** - Complex formulas with trigonometry
-- **03_mixed_types.c** - Type promotion and ME_AUTO inference
-- **04_large_dataset.c** - Processing 1M elements in chunks
-- **05_parallel_evaluation.c** - Multi-threaded parallel processing
-- **06_debug_print.c** - Expression tree visualization with me_print()
+- **Bundled TinyCC (Default)**: Compiles completely in memory with no disk cache. On Linux, it uses anonymous `memfd` RW/RX memory mappings with no external toolchain dependencies.
+- **System CC Backend**: Uses an external compiler (GCC/Clang/MSVC) to generate optimized shared libraries with persistent disk caching.
+- **Source Pragmas**: Control compilation per-kernel via header pragmas:
+  ```python
+  # me:compiler=tcc|cc
+  # me:fp=strict|contract|fast
+  # me:math=auto|system|sleef|accelerate
+  # me:ulp=u10|u35
+  def kernel(x):
+      return sqrt(x) + 1.0
+  ```
+- **Environment Overrides**: `ME_DSL_JIT=0` (force interpreter), `ME_DSL_TRACE=1` (diagnostic tracing), `ME_SIMD_MATH_BACKEND=...` (select math acceleration library).
 
-Build and run:
-```bash
-cmake -S . -B build -G Ninja
-cmake --build build -j
-./build/examples/01_simple_expression
-```
+For complete JIT configuration details and tuning knobs, see [doc/dsl-usage.md](doc/dsl-usage.md) and [README_DEVELOPERS.md](README_DEVELOPERS.md).
 
-See [examples/README.md](examples/README.md) for detailed documentation of each example.
+---
+
+## Documentation
+
+- **Getting Started & Tutorials**:
+  - **[doc/get-started.md](doc/get-started.md)**: Step-by-step introduction and walkthrough.
+  - **[examples/README.md](examples/README.md)**: Descriptions of complete, runnable C examples.
+- **Menudet Language**:
+  - **[doc/menudet-intro.md](doc/menudet-intro.md)**: **Recommended overview** of Menudet, portability dimensions, and arithmetic guarantees.
+  - **[doc/dsl-usage.md](doc/dsl-usage.md)**: Practical programming guide, JIT controls, and UDF integration.
+  - **[doc/dsl-syntax.md](doc/dsl-syntax.md)**: Canonical language grammar, statements, and pragmas reference.
+  - **[doc/dsl-spec/0.1.md](doc/dsl-spec/0.1.md)**: Formal Menudet 0.1 language specification.
+  - **[doc/dsl-spec/artifact-0.1.md](doc/dsl-spec/artifact-0.1.md)**: Computational artifact schema and requirements.
+- **Types, Strings & Arrays**:
+  - **[doc/data-types.md](doc/data-types.md)**: Data types reference and Windows notes.
+  - **[doc/type-inference.md](doc/type-inference.md)**: Type inference and NumPy promotion rules.
+  - **[doc/strings.md](doc/strings.md)**: Fixed-width strings (`ME_STRING`), bytes (`ME_BYTES`), and Arrow varlen output.
+  - **[doc/chunk-processing.md](doc/chunk-processing.md)**: Chunked and blocked memory layout evaluation.
+  - **[doc/parallel-processing.md](doc/parallel-processing.md)**: Thread-safe multi-threaded evaluation patterns.
+- **NumPy Conformance**:
+  - **[doc/numpy-functions-0.1.md](doc/numpy-functions-0.1.md)**: Numerical function catalog and status rules.
+  - **[doc/numpy-arithmetic-0.1.md](doc/numpy-arithmetic-0.1.md)**: Arithmetic, promotion, and casting reference.
+  - **[doc/numpy-compat-checkpoint.md](doc/numpy-compat-checkpoint.md)**: Conformance corpus and verification.
+- **Native Graphs & Execution**:
+  - **[doc/native-graphs-1.md](doc/native-graphs-1.md)**: Materialized graph execution contract.
+  - **[doc/native-execution.md](doc/native-execution.md)**: Host executors and partitioning engine.
+- **Developer & Contributor Notes**:
+  - **[README_DEVELOPERS.md](README_DEVELOPERS.md)**: Build options, internal tuning knobs, and contributor guidelines.
+
+---
 
 ## Building
 
-CMake + Ninja (recommended):
+Build with CMake and Ninja:
+
 ```bash
 cmake -S . -B build -G Ninja
 cmake --build build -j
 ctest --test-dir build
 ```
-For build variants, CMake options, SLEEF notes, platform-specific invocations, and contributor workflow, see [README_DEVELOPERS.md](README_DEVELOPERS.md).
 
-## Documentation
+See [README_DEVELOPERS.md](README_DEVELOPERS.md) for build variants, CMake flags, SLEEF SIMD options, and platform-specific invocations.
 
-- **[examples/README.md](examples/README.md)** - Complete examples with explanations
-- **[doc/get-started.md](doc/get-started.md)** - Getting started guide
-- **[doc/data-types.md](doc/data-types.md)** - Data types guide
-- **[doc/type-inference.md](doc/type-inference.md)** - Type inference rules
-- **[doc/parallel-processing.md](doc/parallel-processing.md)** - Parallel processing patterns
-- **[doc/dsl-usage.md](doc/dsl-usage.md)** - DSL kernel programming guide
-- **[doc/dsl-syntax.md](doc/dsl-syntax.md)** - DSL syntax and grammar reference
-- **[doc/strings.md](doc/strings.md)** - UCS4 string support, byte strings, and string operators
-
-## DSL Kernels
-
-miniexpr includes a DSL (Domain-Specific Language) for writing multi-statement computational kernels. The DSL extends single-expression evaluation with:
-
-- **Temporary variables**: Intermediate results for complex computations
-- **Conditionals**: `if` / `elif` / `else` blocks and element-wise `where(cond, then, else)` expressions
-- **Loops & Control flow**: `for var in range(...)` and `while` loops with `break`, `continue`, and `pass`
-- **Chained comparisons**: Python-style comparison chains such as `0 < x <= 10`
-- **Python literals & syntax**: Hex (`0x`), binary (`0b`), octal (`0o`), digit separators (`1_000_000`), byte literals (`b"..."`), docstrings (`"""..."""`), and semicolon-separated statements
-- **String kernels**: String functions (`upper`, `lower`, `strip`, `startswith`, `endswith`, `find`, `replace`, slicing) for `ME_STRING` and `ME_BYTES`
-- **Index access**: Built-in `_i0`–`_i7` (position), `_n0`–`_n7` (shape), `_ndim`, and `_flat_idx` variables
-- **Function-style kernels**: `def name(args): ... return expr`
-
-### DSL Example
-
-```c
-const char *dsl_source =
-    "def kernel(x):\n"
-    "    t1 = 1.0 * x - 2.0\n"
-    "    t2 = t1 * x + 3.0\n"
-    "    return t2 * x - 1.0";
-
-me_dsl_error error;
-me_dsl_program *prog = me_dsl_parse(dsl_source, &error);
-if (!prog) {
-    printf("Parse error: %s\n", error.message);
-}
-// Compile and evaluate each statement's expression...
-me_dsl_program_free(prog);
-```
-
-See [doc/dsl-usage.md](doc/dsl-usage.md) and [doc/dsl-syntax.md](doc/dsl-syntax.md) for the complete DSL reference and [examples/11_dsl_kernel.c](examples/11_dsl_kernel.c) for a working example.
-
-### DSL Runtime JIT Controls
-
-Embedders can call `me_compile_nd_jit_options()` with a `me_jit_options` snapshot
-to select a CC compiler command, extra flags, an exact cache directory, tracing
-and compiler output for that compilation. The appended `math_backend` field
-selects `system`, `sleef` or `accelerate` for that compilation without setting
-`ME_SIMD_MATH_BACKEND`; an explicit value overrides that environment variable
-for the call. Strings are borrowed only during the call; NULL strings
-and -1 booleans use environment/built-in settings. Nonempty environment
-overrides take precedence for the other string options. Settings are thread-local during compilation
-and restored on return, including errors; no process environment is modified.
-Toolchain settings and explicit cache directories participate in process-cache
-identity; diagnostic toggles do not. Compiler commands/flags are trusted shell
-configuration, while generated source/output paths are shell-quoted.
-
-On supported platforms (Linux, macOS, and Windows via bundled TCC), DSL kernels may use runtime JIT compilation when eligible. The following environment variables control this path:
-
-Native JIT is best effort, including an explicit TCC/CC request: allocation,
-compilation, or library-loading failures use the interpreter without compiler
-messages by default. `ME_DSL_TRACE=1` explains fallback. Bundled TCC compiles in
-memory and never creates a disk cache; on Linux its executable storage uses
-anonymous memfd-backed RW/RX aliases. It needs neither a system compiler nor
-writable temporary storage. A security policy can still deny those mappings.
-The explicitly selected CC backend builds optimized shared libraries and caches
-them persistently; it requires a compiler and a usable executable cache location.
-
-- `ME_DSL_JIT=0`: Disable runtime JIT and always use interpreter fallback.
-- `ME_DSL_JIT_POS_CACHE=0`: Disable process-local positive cache reuse for loaded JIT kernels.
-- `ME_DSL_JIT_INDEX_VARS=0`: Disable runtime JIT for DSL kernels that use reserved index vars (`_i*`, `_n*`, `_ndim`, `_flat_idx`).
-- `ME_DSL_TRACE=1`: Print DSL compile/JIT trace lines to stderr. When unset, the default comes from `MINIEXPR_DSL_TRACE_DEFAULT`.
-- `ME_DSL_FP_MODE=strict|contract|fast|relaxed`: Select default floating-point mode for DSL JIT kernels. `strict` is the default; `relaxed` is an alias of `fast`. Malformed values are preparation errors.
-- `ME_SIMD_MATH_BACKEND=auto|system|sleef|accelerate|scalar`: Select the default math library. `auto` and `system` both mean system math; legacy `auto` no longer prefers SLEEF. `scalar` forces system scalar math. Explicit `sleef`/`accelerate` requests fail when unavailable. Malformed values are preparation errors.
-- `ME_DSL_JIT_TCC_OPTIONS="..."`: Extra options passed to `tcc_set_options()` for the `libtcc` backend.
-- `CC=...`: Compiler executable used by the `# me:compiler=cc` runtime JIT backend. Defaults to `cc`.
-- `CFLAGS="..."`: Standard C compiler flags honored by the `cc` backend runtime JIT path.
-- `TMPDIR=...`: Root directory for **CC** runtime JIT cache artifacts. When unset, miniexpr uses a per-user directory under `/tmp`. TCC does not use this cache.
-- `ME_DSL_JIT_LIBTCC_PATH=...`: Explicit libtcc library path, without silently substituting another library if loading fails.
-- `ME_DSL_JIT_DEBUG_CC=1`: Show the system compiler's normally suppressed output.
-
-Per-call policy overrides are available via API:
-- `me_eval_params.jit_mode = ME_JIT_ON|ME_JIT_OFF|ME_JIT_DEFAULT`
-- `me_compile_nd_jit(..., jit_mode, ...)` to control compile-time runtime-JIT preparation.
-
-When `jit_mode=ME_JIT_OFF` is used in `me_compile_nd_jit(...)`, trace logs include:
-- `jit runtime skipped: ... reason=jit_mode=off`
-and no runtime JIT backend step (`tcc`/`cc` compile/load) is performed for that compiled expression path.
-
-Backend selection is done in DSL source via pragma:
-
-- `# me:compiler=tcc` (default when omitted)
-- `# me:compiler=cc`
-- `# me:fp=strict|contract|fast`
-- `# me:math=auto|system|sleef|accelerate`
-- `# me:ulp=u10|u35` (SLEEF only; defaults to `u35`)
-
-`contract` and `fast` require the `cc` backend. Math-library choice is
-independent of floating-point mode: strict plus SLEEF/Accelerate is valid.
-Accelerated math uses bounded vector interpretation over tiles; optional JIT
-falls back to that path because the fused per-lane generated bridge would pay a
-lane-packing dispatch per element. System math retains generated-JIT support.
-
-Real floating-point powers (`x**y` and `pow(x, y)`) also use bounded vector
-interpretation when eligible, preserving the selected math backend and strict
-`pow` rounding rather than falling back to recursive per-element evaluation.
-Constant real floating squares (`x**2`, `pow(x, 2)`, including `2.0`) use one
-multiplication in every FP mode/backend, with no contraction across the square
-in strict mode. This follows square-ufunc semantics; libm `errno` and NaN payload
-identity are not promised. Integer and complex bases retain their existing rules.
-With system math, the CC JIT in `fast` mode additionally lowers constant integer
-powers to multiplication chains (exponentiation by squaring), evaluating the
-base once and taking its reciprocal first for negative exponents. This rewrite
-can change rounding and floating-point status, so `strict` and `contract` keep
-the selected backend's power operation for other exponents by default. Explicit
-graph `optimization: "aggressive"` (artifact `semantics.integer_powers: "multiply"`)
-enables only these integer-power chains in the interpreter and JIT, without
-enabling global fast-math. This policy is serialized with the graph/artifact.
-Integer literals up to magnitude 2^24
-for float32 and 2^31-1 for float64 qualify; larger or nonconstant exponents
-retain general power. Integer and complex base semantics are unchanged.
-
-- On Linux, the libtcc JIT automatically appends common multiarch library directories
-  (for example `/usr/lib/x86_64-linux-gnu`) to help `-lm` resolve without extra flags.
-
-Developer-oriented/internal DSL JIT knobs and build-time notes are documented in [README_DEVELOPERS.md](README_DEVELOPERS.md).
+---
 
 ## License
 
 BSD 3-Clause License. See [LICENSE](LICENSE) for details.
 
-Third-party licensing:
+Third-party components:
+- **tinyexpr**: Zlib license (see [LICENSE-TINYEXPR](LICENSE-TINYEXPR)).
+- **SLEEF**: Boost Software License 1.0 (see [LICENSE-SLEEF](LICENSE-SLEEF)).
+- **libtcc (TinyCC)**: LGPL-2.1-or-later (see [LICENSE-LIBTCC](LICENSE-LIBTCC)).
 
-- tinyexpr portions are under Zlib terms (see [LICENSE-TINYEXPR](LICENSE-TINYEXPR)).
-- SLEEF portions are under Boost Software License 1.0 (see [LICENSE-SLEEF](LICENSE-SLEEF)).
-- Runtime `libtcc` (TinyCC) is under LGPL-2.1-or-later (see [LICENSE-LIBTCC](LICENSE-LIBTCC)).
-
-For binary installs built with libtcc support, the corresponding TinyCC source and
-license are installed under:
-
-- `${CMAKE_INSTALL_DATADIR}/miniexpr/third_party/tinycc/source`
-- `${CMAKE_INSTALL_DATADIR}/miniexpr/third_party/tinycc/COPYING`
-
-Copyright (c) 2025-2026, The Blosc Development Team
-
-## Acknowledgments
-
-Based on [tinyexpr](https://github.com/codeplea/tinyexpr) by Lewis Van Winkle. See [LICENSE-TINYEXPR](LICENSE-TINYEXPR) for the original license.
-## Native graph preparation
-
-The opt-in numerical graph API prepares declarative JSON or restricted expression
-text without Python, specializes pointer-free shapes and executes checked native
-array buffers. See [the API/format contract](doc/native-graphs-1.md) and
-`tests/graph/host.c` for standalone C/Node deployment. Artifact 1.0/1.1 compatibility
-and ordinary backend defaults are unchanged.
+Copyright (c) 2025-2026, The Blosc Development Team.

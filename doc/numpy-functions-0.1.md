@@ -1,6 +1,6 @@
 # Menudet 0.1 beta functions and floating status
 
-This defines the experimental Menudet 0.1 beta numerical functions and status rules. The native-owned `tests/numpy-compat/functions-v1.0.json`
+This defines the Menudet 0.1 beta numerical functions and status rules. The native-owned `tests/numpy-compat/functions-v1.0.json`
 enumerates function/type signatures, aliases, exceptional vectors and accuracy
 policies. NumPy **2.5.3** is the reference. Native library extensions that have no
 NumPy equivalent are explicitly marked `native-contract`, not NumPy passes.
@@ -22,7 +22,8 @@ The corpus covers the advertised real numerical functions:
 
 Every spelling has arity/type/value coverage. `block_min`/`block_max` are block reductions, not
 elementwise extrema. String operations/reduction families are separate milestones.
-Complex, half and extended floats remain unsupported. The corpus explicitly
+While complex64 and complex128 are supported under portable interpretation, complex JIT,
+half and extended floats remain unsupported. The corpus explicitly
 rejects NumPy signatures whose result loop would require float16 (including
 transcendentals/rint/fabs with bool/int8/uint8). These must not be silently mapped
 to float64. Int16/uint16 real-math loops produce float32; larger integral inputs
@@ -140,5 +141,5 @@ See [current JIT capabilities](native-arrays-0.1.md#opt-in-menudet-host-jit). CI
 and standalone Node/WASM. Local macOS/WASM results are not remote CI results.
 
 Menudet 0.1 beta inherits the seven explicit `block_*` reduction names and block scope
-from [the DSL spec](dsl-spec/1.0.md#limited-block-reductions). Bare reduction
+from [the DSL spec](dsl-spec/0.1.md#limited-block-reductions). Bare reduction
 calls and axis arguments are rejected; array/graph reductions retain their names.

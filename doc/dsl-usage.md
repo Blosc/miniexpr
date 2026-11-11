@@ -2,7 +2,7 @@
 
 This guide focuses on practical usage of miniexpr DSL kernels.
 The versioned portable language is **Menudet**, a little language for portable
-computation on arrays and tables. Its [1.0 language draft](dsl-spec/1.0.md) and
+computation on arrays and tables. Its [0.1 language draft](dsl-spec/0.1.md) and
 [artifact draft](dsl-spec/artifact-0.1.md) define the Menudet contract; this guide
 also covers ordinary full-DSL features that need not be portable.
 Canonical syntax, accepted statements, and exact error behavior are documented in `doc/dsl-syntax.md`.
@@ -49,7 +49,7 @@ Notes:
 
 ## Menudet validation before execution
 
-The experimental versioned profile is smaller than the full DSL:
+The Menudet 0.1 beta profile is a feature-frozen subset of the full DSL:
 
 ```c
 me_variable signature[] = {
@@ -57,13 +57,13 @@ me_variable signature[] = {
 };
 me_menudet_error diagnostic;
 me_menudet_status status = me_validate_menudet(
-    src, "1.0", signature, 1, ME_FLOAT64, &diagnostic);
+    src, ME_MENUDET_DSL_VERSION, signature, 1, ME_FLOAT64, &diagnostic);
 ```
 
 This checks native source and a typed signature without executing it or invoking
 a compiler. It does not require Python or a working JIT backend. Check `status`
 before Menudet artifact loading/evaluation; ordinary `me_compile()` retains the
-separate full-DSL semantics. See [the draft profile](dsl-spec/1.0.md)
+separate full-DSL semantics. See [the draft profile](dsl-spec/0.1.md)
 for supported features and diagnostic categories.
 
 ## Menudet artifact loading

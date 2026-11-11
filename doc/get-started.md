@@ -90,27 +90,17 @@ a=1.0, b=1.0 -> distance=1.41
 
 5. **Clean up**: Always call `me_free()` to release the compiled expression.
 
-## Compiling the Example
+## Building and Linking
 
-If you have the miniexpr source files in your project:
+The recommended way to build miniexpr, examples, and tests is with CMake:
 
-```bash
-gcc -o distance example.c src/miniexpr.c src/functions.c -lm
-./distance
-```
-
-The `-lm` flag links the math library for functions like `sqrt()`.
-
-### SLEEF SIMD acceleration
-
-miniexpr can use SLEEF to accelerate SIMD math kernels. With CMake, `-DMINIEXPR_USE_SLEEF=ON` (default) fetches and enables SLEEF; set it to `OFF` to build without SLEEF. You can also disable SIMD at runtime by setting `me_eval_params.disable_simd = true`.
-
-With CMake (recommended):
 ```bash
 cmake -S . -B build -G Ninja
 cmake --build build -j
 ctest --test-dir build
 ```
+
+When embedding miniexpr in your project's CMake build, link against the `miniexpr` target. If compiling manually, include the necessary sources under `src/` and link the standard math library (`-lm`).
 
 ## Next Steps
 
