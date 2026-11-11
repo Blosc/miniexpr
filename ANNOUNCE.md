@@ -1,39 +1,25 @@
-# Announcing miniexpr 0.3.0
+# Announcing miniexpr 0.3.1
 A small, efficient C library for parsing and evaluating mathematical
 expressions and DSL kernels.
 
 ## What is new?
 
-This release introduces the feature-frozen Menudet 0.1 beta language profile,
-native numerical graphs, and expanded portable execution.
+This maintenance release fixes floating-point computation and dtype inference
+for integer and Boolean inputs in classic expressions.
 
 Highlights:
 
-- Menudet 0.1 beta: a versioned Python-like language with defined NumPy-compatible
-  arithmetic, promotion, casting and floating-point status rules.
-  - Native source validation and optional portable JSON artifacts.
-  - Chained comparisons, Python numeric literals and block-scoped reductions.
-  - See `doc/menudet-intro.md` and `doc/menudet-syntax.md`.
-
-- Native numerical graphs with materialized stages, strided destinations,
-  bounded storage readers and host executors for parallel partitionable maps.
-
-- Expanded portable JIT coverage, including wasm32, plus faster bounded vector
-  interpretation and in-memory TinyCC compilation.
-- Flexible math backends and floating-point modes, configurable per kernel or
-  compilation call.
-- Fixed-width string and byte kernels, plus Arrow-compatible variable-length
-  output through `me_eval_varlen()`.
-- Portable complex64/complex128 interpretation, now also supported on Windows
-  with clang-cl. Complex JIT kernels remain unsupported on all platforms.
-
-- Numerous numerical correctness and performance improvements, backed by NumPy
-  conformance corpora and interpreter/JIT qualification tests.
-
-Compatibility note: native inverse-function calls now require canonical names
-such as `asin` rather than `arcsin`, and the obsolete
-`ME_COMPILE_ERR_COMPLEX_UNSUPPORTED` enum name has been removed. See the release
-notes for migration details.
+- True division (`/`) of integer and Boolean operands now computes and infers
+  float64, including within nested arithmetic, comparisons and reductions.
+  Zero divisors produce floating-point infinities/NaNs instead of integer
+  division (issue #26).
+- Binary real math (`hypot`, `atan2`, `logaddexp`, `nextafter` and `copysign`)
+  now computes integer/Boolean inputs in floating point, with correct automatic
+  dtype inference, comparisons and reductions (issue #27).
+  Narrow inputs use float32, including where NumPy would use unsupported
+  float16; 32-/64-bit integers use float64.
+- New regression coverage for both fixes, including scalar/SIMD paths and
+  sanitizer checks. Menudet's independently typed arithmetic is unchanged.
 
 For full details, see:
 
