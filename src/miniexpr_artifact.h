@@ -11,20 +11,29 @@
 extern "C" {
 #endif
 
-#define ME_ARTIFACT_SCHEMA_VERSION "1.0"
+#define ME_ARTIFACT_SCHEMA_VERSION "0.1"
+#define ME_ARTIFACT_MATH_POLICY_VERSION 1
+#define ME_ARTIFACT_PARTITIONABLE_VERSION 1
+#define ME_ARTIFACT_NUMPY_SCHEMA_VERSION ME_ARTIFACT_SCHEMA_VERSION
 #define ME_ARTIFACT_MAX_BYTES (1024 * 1024)
 #define ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION 1
-#define ME_ARTIFACT_DRAFT_SCHEMA_VERSION "1.0"
+#define ME_ARTIFACT_MENUDET_SCHEMA_VERSION "0.1"
 
 enum {
     ME_ARTIFACT_CAP_NUMERIC = 1,
     ME_ARTIFACT_CAP_CONTROL_FLOW = 2,
     ME_ARTIFACT_CAP_BLOCK_REDUCTIONS = 4,
     ME_ARTIFACT_CAP_ND_CONTEXT = 8,
-    ME_ARTIFACT_CAP_FIXED_STRINGS = 16
+    ME_ARTIFACT_CAP_FIXED_STRINGS = 16,
+    ME_ARTIFACT_CAP_FLEXIBLE_MATH = 32
 };
 
 typedef struct me_artifact me_artifact;
+
+/* Conservative metadata-only proof that a context-free elementwise program
+ * may run on independent lane groups. False means unproven, not invalid.
+ * The proof includes any final output conversion; it never executes a kernel. */
+bool me_artifact_is_partitionable(const me_artifact *artifact);
 
 typedef enum {
     ME_ARTIFACT_SUCCESS = 0,
@@ -82,10 +91,22 @@ typedef struct {
 /* Decode, validate, and compile without executing. The handle owns a copy of
  * source, names, and constants; JSON storage can be released on return. jit_mode
  * is a host preference, not an artifact requirement. No sandbox is provided.
- * Only draft schema/language 1.0 is accepted; see doc/dsl-spec/artifact-1.0.md.
+ * Only Menudet schema/language pair 0.1/0.1 is accepted, with NumPy numerical semantics.
  * On any failure *out is NULL. error may be NULL. */
+#define ME_ARTIFACT_LOAD_OPTIONS_VERSION 1
+#define ME_ARTIFACT_INFER_OUTPUT_VERSION 1
+me_artifact_status me_artifact_load_options(const char *json, size_t length, me_jit_mode jit_mode,
+    const me_jit_options *options, me_artifact **out, me_artifact_error *error);
 me_artifact_status me_artifact_load(const char *json, size_t length, me_jit_mode jit_mode,
                                   me_artifact **out, me_artifact_error *error);
+/* Metadata-only output inference: accepts output dtype "auto", infers the native
+ * result dtype under the declared signatures/casting policy, and returns a handle
+ * whose output dtype/itemsize are concrete. The input JSON is not retained, so an
+ * exporter must still emit the concrete output dtype when persisting the recipe. */
+me_artifact_status me_artifact_load_inferred(const char *json, size_t length, me_jit_mode jit_mode,
+    me_artifact **out, me_artifact_error *error);
+me_artifact_status me_artifact_load_inferred_options(const char *json, size_t length,
+    me_jit_mode jit_mode, const me_jit_options *options, me_artifact **out, me_artifact_error *error);
 
 /* Bind inputs by name, not caller order. All inputs and the output have nitems
  * elements. Host owns buffers and must allocate their declared lengths/dtypes;
@@ -99,17 +120,144 @@ me_artifact_status me_artifact_eval(const me_artifact *artifact,
     const me_artifact_input *inputs, int ninputs, void *output, size_t nitems,
     me_artifact_error *error);
 
-/* Checked capacities/alignment/overlap before execution. Draft 1.0 validates
+/* Checked capacities/alignment/overlap before execution. Menudet 0.1 beta validates
  * signatures/capabilities on load and uses the typed interpreter, never full-DSL JIT. */
 me_artifact_status me_artifact_eval_ex(const me_artifact *artifact,
     const me_artifact_buffer *inputs, int ninputs, void *output,
     const me_artifact_eval_descriptor *descriptor, me_artifact_error *error);
+
+#define ME_ARTIFACT_FP_STATUS_VERSION 1
+#define ME_ARTIFACT_ARRAY_VERSION 1
+#define ME_ARRAY_MAX_RANK 16
+/* Bounds describe the entire accessible allocation, not only the logical data
+ * pointer. Offset/strides are bytes; byte_order: 0 native, 1 little, 2 big.
+ * Caller owns all buffers; output is disjoint, aligned C-order storage. */
+typedef struct {
+    const char *name;
+    me_dtype dtype;
+    const void *base;
+    size_t capacity;
+    size_t offset;
+    int rank;
+    int64_t shape[ME_ARRAY_MAX_RANK];
+    int64_t strides[ME_ARRAY_MAX_RANK];
+    unsigned byte_order;
+} me_array_view;
+/* Writable, native-endian, non-overlapping array destination. Bounds refer to
+ * the complete accessible allocation; offset is the logical origin. Ordinary
+ * execution requires disjoint input/output allocations. Version 1 accepts a
+ * conservative, provably injective stride subset (including F order, transposes,
+ * stepped and reversed views). Empty arrays are validated but never accessed. */
+#define ME_ARRAY_OUTPUT_VERSION 1
+typedef struct {
+    size_t struct_size;
+    unsigned version;
+    me_dtype dtype;
+    void *base;
+    size_t capacity;
+    size_t offset;
+    int rank;
+    int64_t shape[ME_ARRAY_MAX_RANK];
+    int64_t strides[ME_ARRAY_MAX_RANK];
+} me_array_output;
+/* Storage-neutral gathered input. A reader fills native-endian values for the
+ * requested source C-order logical indices, in exactly that order (duplicates
+ * are permitted by broadcasting). The destination is invocation-owned scratch.
+ * No pointer survives a callback. Return zero on success, nonzero on failure;
+ * a failed read terminates the invocation and is never retried/replayed.
+ * Reader storage must be disjoint from output and remain stable during a call.
+ * Readers are called synchronously; shared owners provide their own locking.
+ * With read != NULL, view supplies name/dtype/rank/shape only: base/capacity,
+ * offset and byte_order must be zero. With read == NULL it is a resident view.
+ * Preparation/preflight never calls readers. Storage/decompression allocations
+ * owned by callbacks are outside the native iterator scratch bound. */
+typedef int (*me_array_reader)(void *owner, const size_t *indices, size_t count,
+    void *destination, size_t capacity);
+typedef struct {
+    me_array_view view;
+    me_array_reader read;
+    void *owner;
+} me_array_source;
+typedef enum { ME_ARRAY_NONE, ME_ARRAY_SUM, ME_ARRAY_PROD, ME_ARRAY_MIN,
+               ME_ARRAY_MAX, ME_ARRAY_ANY, ME_ARRAY_ALL } me_array_reduction;
+typedef struct {
+    unsigned version;
+    me_array_reduction reduction;
+    int naxes; /* -1 selects every axis; 0 selects no axes. */
+    int axes[ME_ARRAY_MAX_RANK]; /* Negative axes normalized natively. */
+    bool keepdims;
+    me_dtype accumulator; /* AUTO uses int64/uint64 widening for sum/prod. */
+    const void *initial; /* One host-native accumulator value; NULL = default. */
+    size_t tile_items; /* 0 = 1024. Storage chunking does not affect grouping. */
+    const me_array_view *where; /* Optional broadcast Boolean participating mask. */
+} me_array_options;
+typedef struct {
+    size_t temporary_bytes; /* Peak iterator scratch, excluding output/DSL internals. */
+    size_t gathered_bytes; /* Cumulative copied input/mask bytes. */
+    size_t zero_copy_tiles;
+    size_t evaluated_tiles;
+    unsigned fp_flags;
+    unsigned fp_supported;
+} me_array_report;
+me_artifact_status me_array_result_shape(const me_artifact *artifact, int rank,
+    const int64_t *shape, const me_array_options *options, int *output_rank,
+    int64_t *output_shape, me_dtype *output_dtype, me_artifact_error *error);
+me_artifact_status me_artifact_eval_array(const me_artifact *artifact,
+    const me_array_view *inputs, int ninputs, int rank, const int64_t *shape,
+    const me_array_options *options, void *output, size_t output_capacity,
+    me_array_report *report, me_artifact_error *error);
+me_artifact_status me_artifact_eval_array_sources(const me_artifact *artifact,
+    const me_array_source *inputs, int ninputs, int rank, const int64_t *shape,
+    const me_array_options *options, void *output, size_t output_capacity,
+    me_array_report *report, me_artifact_error *error);
+/* Descriptor-output variants preserve logical C traversal and reduction order.
+ * Non-contiguous maps use bounded tile scratch, not full-result staging. Failed
+ * calls may leave earlier successful tiles written; execution is not replayed. */
+me_artifact_status me_artifact_eval_array_into(const me_artifact *artifact,
+    const me_array_view *inputs, int ninputs, int rank, const int64_t *shape,
+    const me_array_options *options, const me_array_output *output,
+    me_array_report *report, me_artifact_error *error);
+me_artifact_status me_artifact_eval_array_sources_into(const me_artifact *artifact,
+    const me_array_source *inputs, int ninputs, int rank, const int64_t *shape,
+    const me_array_options *options, const me_array_output *output,
+    me_array_report *report, me_artifact_error *error);
+/* Metadata-only borrowed views. No mutation/view-alias guarantees for results.
+ * Reshape requires C contiguous input. Slice uses normalized start/count/step. */
+me_artifact_status me_array_reshape(const me_array_view *input, int rank,
+    const int64_t *shape, me_array_view *output, me_artifact_error *error);
+me_artifact_status me_array_transpose(const me_array_view *input, const int *axes,
+    me_array_view *output, me_artifact_error *error);
+me_artifact_status me_array_slice(const me_array_view *input, int axis, int64_t start,
+    int64_t count, int64_t step, me_array_view *output, me_artifact_error *error);
+enum { ME_FP_INVALID = 1u, ME_FP_DIVIDE = 2u, ME_FP_OVERFLOW = 4u, ME_FP_UNDERFLOW = 8u };
+typedef struct {
+    unsigned flags; /* OR of active evaluated operations; cleared per call. */
+    unsigned supported; /* 1 if host IEEE flags are observable, 0 on WASM. */
+} me_artifact_fp_status;
+/* Per-call policy, never mutable handle/global state. raise_mask selects flags
+ * that turn a completed evaluation into ME_ARTIFACT_ERR_EVAL. Outputs on failure
+ * are unspecified. Collection restores caller flags/rounding and is thread-safe.
+ * On WASM reporting is unavailable: ignore computes values; raise rejects before
+ * execution. Cross-block callers aggregate flags explicitly by OR. */
+me_artifact_status me_artifact_eval_status(const me_artifact *artifact,
+    const me_artifact_buffer *inputs, int ninputs, void *output,
+    const me_artifact_eval_descriptor *descriptor, unsigned raise_mask,
+    me_artifact_fp_status *status, me_artifact_error *error);
 me_artifact_cardinality me_artifact_result_cardinality(const me_artifact *artifact);
 size_t me_artifact_input_itemsize(const me_artifact *artifact, int index);
 size_t me_artifact_output_itemsize(const me_artifact *artifact);
 unsigned int me_artifact_capabilities(const me_artifact *artifact);
 int me_artifact_context_ndim(const me_artifact *artifact);
 const char *me_artifact_schema_version(const me_artifact *artifact);
+/* Effective immutable policy resolved at load/preparation. Returns "unknown"
+ * for NULL handles. `me_artifact_sleef_accuracy` returns "" when not SLEEF. */
+const char *me_artifact_math_backend(const me_artifact *artifact);
+const char *me_artifact_sleef_accuracy(const me_artifact *artifact);
+const char *me_artifact_fp_mode(const me_artifact *artifact);
+/* Explicit backend coverage for one direct math operation name. Returns 1 when
+ * the effective accelerated backend supplies it, 0 for a documented system
+ * fallback, and -1 for an unknown name/NULL handle. */
+int me_artifact_math_covers(const me_artifact *artifact, const char *operation);
 
 /* Borrowed strings remain valid until free; invalid query indices return NULL
  * or ME_AUTO. Invalid handles return NULL/0/ME_AUTO as appropriate. */
@@ -119,7 +267,13 @@ int me_artifact_ninputs(const me_artifact *artifact);
 const char *me_artifact_input_name(const me_artifact *artifact, int index);
 me_dtype me_artifact_input_dtype(const me_artifact *artifact, int index);
 me_dtype me_artifact_output_dtype(const me_artifact *artifact);
+/* Metadata-only result dtype before final output conversion (Menudet 0.1 beta artifacts).
+ * Returns ME_AUTO for legacy artifacts and NULL handles. */
+me_dtype me_artifact_inferred_dtype(const me_artifact *artifact);
 bool me_artifact_has_jit(const me_artifact *artifact);
+#define ME_ARTIFACT_EXECUTION_KIND_VERSION 1
+/* Validated program structure, independent of explicit execution policy. */
+const char *me_artifact_execution_kind(const me_artifact *artifact);
 void me_artifact_free(me_artifact *artifact); /* NULL-safe. */
 
 #ifdef __cplusplus

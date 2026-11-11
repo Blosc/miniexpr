@@ -216,6 +216,10 @@ typedef struct me_jit_options {
     const char *cache_dir;
     int trace;
     int compiler_output;
+    /* Appended optional math library: NULL inherits the environment/default.
+     * A nonempty value overrides ME_SIMD_MATH_BACKEND for this call. Borrowed
+     * for the duration of the call, like the other string options. */
+    const char *math_backend;
 } me_jit_options;
 
 int me_compile_nd_jit_options(const char *expression, const me_variable *variables,
@@ -235,59 +239,60 @@ int me_compile_nd_jit(const char *expression, const me_variable *variables,
  */
 const char *me_get_last_error_message(void);
 
-/* Experimental portable kernel profile, independent of package/JIT versions. */
-#define ME_PORTABLE_DSL_VERSION "1.0"
-#define ME_PORTABLE_DSL_VALIDATION_DESCRIPTOR_VERSION 1
+/* Menudet 0.1 beta kernel profile, independent of package/JIT versions. */
+#define ME_MENUDET_DSL_VERSION "0.1"
+#define ME_NUMPY_MENUDET_DSL_VERSION ME_MENUDET_DSL_VERSION
+#define ME_MENUDET_DSL_VALIDATION_DESCRIPTOR_VERSION 1
 
 typedef enum {
-    ME_PORTABLE_SUCCESS = 0,
-    ME_PORTABLE_ERR_VERSION = -1,
-    ME_PORTABLE_ERR_SIGNATURE = -2,
-    ME_PORTABLE_ERR_SOURCE = -3,
-    ME_PORTABLE_ERR_UNSUPPORTED = -4,
-    ME_PORTABLE_ERR_OOM = -5
-} me_portable_status;
+    ME_MENUDET_SUCCESS = 0,
+    ME_MENUDET_ERR_VERSION = -1,
+    ME_MENUDET_ERR_SIGNATURE = -2,
+    ME_MENUDET_ERR_SOURCE = -3,
+    ME_MENUDET_ERR_UNSUPPORTED = -4,
+    ME_MENUDET_ERR_OOM = -5
+} me_menudet_status;
 
 typedef struct {
     int line;    /* 1-based source location, or 0 for non-source diagnostics. */
     int column;
     char message[256];
-} me_portable_error;
+} me_menudet_error;
 
 /* Validate raw native DSL and an explicit signature without executing a kernel
  * or invoking a JIT compiler. Inputs are plain, explicitly typed variables
  * with NULL address/context; order need not match source order.
- * This checks draft profile membership and native compilation, not runtime
+ * This checks beta profile membership and native compilation, not runtime
  * input constraints, backend availability, or a sandbox/trust guarantee.
- * error may be NULL. Version 1.0 dispatch uses the extended defaults below.
- * See doc/dsl-spec/1.0.md for admitted features. */
-me_portable_status me_validate_portable_dsl(const char *source, const char *version,
+ * error may be NULL. Version 0.1 dispatch uses the extended defaults below.
+ * See doc/dsl-spec/0.1.md for admitted features. */
+me_menudet_status me_validate_menudet(const char *source, const char *version,
     const me_variable *inputs, int ninputs, me_dtype output_dtype,
-    me_portable_error *error);
+    me_menudet_error *error);
 
 typedef enum {
-    ME_PORTABLE_CARDINALITY_INFER = 0,
-    ME_PORTABLE_ELEMENTWISE = 1,
-    ME_PORTABLE_BLOCK_SCALAR = 2
-} me_portable_cardinality;
+    ME_MENUDET_CARDINALITY_INFER = 0,
+    ME_MENUDET_ELEMENTWISE = 1,
+    ME_MENUDET_BLOCK_SCALAR = 2
+} me_menudet_cardinality;
 
 typedef struct {
     size_t struct_size;
     unsigned version;
     size_t output_itemsize; /* Exact positive byte width for strings; numeric 0 or dtype width. */
     int ndim;              /* Logical rank, required when source uses reserved ND symbols. */
-    me_portable_cardinality cardinality; /* INFER checks membership without asserting a return contract. */
-} me_portable_validation_descriptor;
+    me_menudet_cardinality cardinality; /* INFER checks membership without asserting a return contract. */
+} me_menudet_validation_descriptor;
 
 /* Core-only typed source validation: no artifact/JSON dependency, evaluation or
- * JIT. Version 1.0 inputs are plain variables; string itemsize is a positive byte
+ * JIT. Version 0.1 inputs are plain variables; string itemsize is a positive byte
  * width (Unicode multiples of four), numeric itemsize may be zero or dtype width.
  * No input buffers/callbacks are accepted. A NULL descriptor means rank zero,
  * inferred cardinality and numeric output width; string output requires a descriptor.
- * The original entry point also dispatches numeric, rank-zero 1.0 with this default. */
-me_portable_status me_validate_portable_dsl_ex(const char *source, const char *version,
+ * The original entry point also dispatches numeric, rank-zero 0.1 with this default. */
+me_menudet_status me_validate_menudet_ex(const char *source, const char *version,
     const me_variable *inputs, int ninputs, me_dtype output_dtype,
-    const me_portable_validation_descriptor *descriptor, me_portable_error *error);
+    const me_menudet_validation_descriptor *descriptor, me_menudet_error *error);
 
 /* Status codes for me_compile(). */
 typedef enum {
@@ -295,8 +300,7 @@ typedef enum {
     ME_COMPILE_ERR_OOM = -1,
     ME_COMPILE_ERR_PARSE = -2,
     ME_COMPILE_ERR_INVALID_ARG = -3,
-    ME_COMPILE_ERR_COMPLEX_UNSUPPORTED = -4,
-    ME_COMPILE_ERR_REDUCTION_INVALID = -5,
+    ME_COMPILE_ERR_REDUCTION_INVALID = -5,  /* -4 was ME_COMPILE_ERR_COMPLEX_UNSUPPORTED */
     ME_COMPILE_ERR_VAR_MIXED = -6,
     ME_COMPILE_ERR_VAR_UNSPECIFIED = -7,
     ME_COMPILE_ERR_INVALID_ARG_TYPE = -8,
@@ -322,7 +326,8 @@ typedef enum {
 
 /* JIT policy for a single evaluation call. */
 typedef enum {
-    ME_JIT_DEFAULT = 0,  /* auto policy (environment/default behavior) */
+    ME_JIT_DEFAULT = 0,  /* environment/default behavior */
+    ME_JIT_AUTO = 3,     /* interpret single-return expressions; JIT programs */
     ME_JIT_ON = 1,       /* prefer JIT when available */
     ME_JIT_OFF = 2       /* disable JIT for this call */
 } me_jit_mode;

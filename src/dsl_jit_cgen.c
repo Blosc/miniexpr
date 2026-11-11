@@ -463,10 +463,54 @@ static bool me_jit_collect_locals_block(me_jit_locals *locals, const me_dsl_jit_
     return true;
 }
 
+static int me_jit_integral_bits(me_dtype dtype) {
+    switch (dtype) {
+    case ME_BOOL:
+    case ME_INT8:
+    case ME_UINT8:
+        return 8;
+    case ME_INT16:
+    case ME_UINT16:
+        return 16;
+    case ME_INT32:
+    case ME_UINT32:
+        return 32;
+    default:
+        return 64;
+    }
+}
+
+/* C right shifts require counts in [0, bits). Only decimal literal counts
+ * below the width and below 32 are emitted; other counts use the interpreter.
+ * Left shifts always use the interpreter: generated expression text lacks
+ * operand types needed for unsigned lowering, and signed C left shifts can
+ * be undefined even with a valid count (negative operands or overflow). */
+static bool me_jit_shift_count_is_safe_literal(const char *count, me_dtype dtype) {
+    while (isspace((unsigned char)*count)) count++;
+    if (!isdigit((unsigned char)*count)) return false;
+    long value = 0;
+    while (isdigit((unsigned char)*count)) {
+        value = value * 10 + (*count - '0');
+        if (value >= 64) return false;
+        count++;
+    }
+    while (isspace((unsigned char)*count)) count++;
+    if (*count && !strchr("),&|^<>=!]", *count)) return false;
+    /* The shifted operand can be narrower than the expression (an int32 in an
+     * int64 sum); C shifts it as an int, so counts of 32 and more stay on the
+     * interpreter too. */
+    return value < me_jit_integral_bits(dtype) && value < 32;
+}
+
 static bool me_jit_expr_contains_unsupported_tokens(const char *expr, me_dtype dtype) {
     bool in_string = false;
     char quote = '\0';
     if (!expr) {
+        return true;
+    }
+    /* The generated C calls the double nextafter(), whose step is a float64
+     * ulp; float32 expressions need nextafterf() and stay on the interpreter. */
+    if (dtype == ME_FLOAT32 && strstr(expr, "nextafter")) {
         return true;
     }
     for (const char *p = expr; *p; p++) {
@@ -511,14 +555,10 @@ static bool me_jit_expr_contains_unsupported_tokens(const char *expr, me_dtype d
             return true;
         }
         if (c == '<' && p[1] == '<') {
-            if (!me_jit_dtype_is_integral(dtype)) {
-                return true;
-            }
-            p++;
-            continue;
+            return true;
         }
         if (c == '>' && p[1] == '>') {
-            if (!me_jit_dtype_is_integral(dtype)) {
+            if (!me_jit_dtype_is_integral(dtype) || !me_jit_shift_count_is_safe_literal(p + 2, dtype)) {
                 return true;
             }
             p++;
@@ -576,9 +616,7 @@ static const char *me_jit_function_name_rewrite(const char *start, size_t ident_
     /* Builtin spellings that are plain aliases of a libc name. Without these the
        alias reaches C verbatim and the kernel fails to link. */
     static const struct { const char *alias; const char *libc; } libc_aliases[] = {
-        {"arctan2", "atan2"}, {"arcsin", "asin"},   {"arccos", "acos"},
-        {"arctan", "atan"},   {"arcsinh", "asinh"}, {"arccosh", "acosh"},
-        {"arctanh", "atanh"}, {"ln", "log"},      {"power", "pow"},
+        {"ln", "log"}, {"power", "pow"},
     };
     for (size_t i = 0; i < sizeof(libc_aliases) / sizeof(libc_aliases[0]); i++) {
         if (me_jit_ident_equals(start, ident_len, libc_aliases[i].alias)) {
@@ -1601,28 +1639,22 @@ static me_jit_vec_unary_kind me_jit_vec_unary_kind_from_ident(const char *fn_sta
     if (me_jit_ident_equals(fn_start, fn_len, "tanh")) {
         return ME_JIT_VEC_UNARY_TANH;
     }
-    if (me_jit_ident_equals(fn_start, fn_len, "asinh") ||
-        me_jit_ident_equals(fn_start, fn_len, "arcsinh")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "asinh")) {
         return ME_JIT_VEC_UNARY_ASINH;
     }
-    if (me_jit_ident_equals(fn_start, fn_len, "acosh") ||
-        me_jit_ident_equals(fn_start, fn_len, "arccosh")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "acosh")) {
         return ME_JIT_VEC_UNARY_ACOSH;
     }
-    if (me_jit_ident_equals(fn_start, fn_len, "atanh") ||
-        me_jit_ident_equals(fn_start, fn_len, "arctanh")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "atanh")) {
         return ME_JIT_VEC_UNARY_ATANH;
     }
-    if (me_jit_ident_equals(fn_start, fn_len, "asin") ||
-        me_jit_ident_equals(fn_start, fn_len, "arcsin")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "asin")) {
         return ME_JIT_VEC_UNARY_ASIN;
     }
-    if (me_jit_ident_equals(fn_start, fn_len, "acos") ||
-        me_jit_ident_equals(fn_start, fn_len, "arccos")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "acos")) {
         return ME_JIT_VEC_UNARY_ACOS;
     }
-    if (me_jit_ident_equals(fn_start, fn_len, "atan") ||
-        me_jit_ident_equals(fn_start, fn_len, "arctan")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "atan")) {
         return ME_JIT_VEC_UNARY_ATAN;
     }
     return ME_JIT_VEC_UNARY_NONE;
@@ -1630,8 +1662,7 @@ static me_jit_vec_unary_kind me_jit_vec_unary_kind_from_ident(const char *fn_sta
 
 static me_jit_vec_binary_kind me_jit_vec_binary_kind_from_ident(const char *fn_start,
                                                                  size_t fn_len) {
-    if (me_jit_ident_equals(fn_start, fn_len, "atan2") ||
-        me_jit_ident_equals(fn_start, fn_len, "arctan2")) {
+    if (me_jit_ident_equals(fn_start, fn_len, "atan2")) {
         return ME_JIT_VEC_BINARY_ATAN2;
     }
     if (me_jit_ident_equals(fn_start, fn_len, "hypot")) {
@@ -3202,6 +3233,56 @@ static me_jit_reserved_param_kind me_jit_reserved_param_from_name(const char *na
     return ME_JIT_RESERVED_PARAM_NONE;
 }
 
+static bool me_jit_block_calls_nextafter(const me_dsl_jit_ir_block *block);
+
+static bool me_jit_ir_expr_calls_nextafter(const me_dsl_jit_ir_expr *expr) {
+    return expr && expr->text && strstr(expr->text, "nextafter");
+}
+
+static bool me_jit_stmt_calls_nextafter(const me_dsl_jit_ir_stmt *stmt) {
+    if (!stmt) {
+        return false;
+    }
+    switch (stmt->kind) {
+    case ME_DSL_JIT_IR_STMT_ASSIGN:
+        return me_jit_ir_expr_calls_nextafter(&stmt->as.assign.value);
+    case ME_DSL_JIT_IR_STMT_RETURN:
+        return me_jit_ir_expr_calls_nextafter(&stmt->as.return_stmt.expr);
+    case ME_DSL_JIT_IR_STMT_IF:
+        if (me_jit_ir_expr_calls_nextafter(&stmt->as.if_stmt.cond) ||
+            me_jit_block_calls_nextafter(&stmt->as.if_stmt.then_block) ||
+            (stmt->as.if_stmt.has_else && me_jit_block_calls_nextafter(&stmt->as.if_stmt.else_block))) {
+            return true;
+        }
+        for (int i = 0; i < stmt->as.if_stmt.n_elifs; i++) {
+            if (me_jit_ir_expr_calls_nextafter(&stmt->as.if_stmt.elif_branches[i].cond) ||
+                me_jit_block_calls_nextafter(&stmt->as.if_stmt.elif_branches[i].block)) {
+                return true;
+            }
+        }
+        return false;
+    case ME_DSL_JIT_IR_STMT_WHILE:
+        return me_jit_ir_expr_calls_nextafter(&stmt->as.while_loop.cond) ||
+               me_jit_block_calls_nextafter(&stmt->as.while_loop.body);
+    case ME_DSL_JIT_IR_STMT_FOR:
+        return me_jit_ir_expr_calls_nextafter(&stmt->as.for_loop.start) ||
+               me_jit_ir_expr_calls_nextafter(&stmt->as.for_loop.stop) ||
+               me_jit_ir_expr_calls_nextafter(&stmt->as.for_loop.step) ||
+               me_jit_block_calls_nextafter(&stmt->as.for_loop.body);
+    default:
+        return false;
+    }
+}
+
+static bool me_jit_block_calls_nextafter(const me_dsl_jit_ir_block *block) {
+    for (int i = 0; block && i < block->nstmts; i++) {
+        if (me_jit_stmt_calls_nextafter(block->stmts[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_dtype,
                           const me_dsl_jit_cgen_options *options,
                           char **out_source, me_dsl_error *error) {
@@ -3256,6 +3337,22 @@ bool me_dsl_jit_codegen_c(const me_dsl_jit_ir_program *program, me_dtype output_
             me_jit_locals_free(&ctx.locals);
             return false;
         }
+    }
+    /* The generated C calls the double nextafter(), whose step is a float64
+     * ulp. In a kernel with float32 values it may be called on them, also
+     * inside a bool, integer or float64 statement, so such a kernel stays on
+     * the interpreter. */
+    bool has_float32 = output_dtype == ME_FLOAT32;
+    for (int i = 0; i < program->nparams && !has_float32; i++) {
+        has_float32 = program->param_dtypes[i] == ME_FLOAT32;
+    }
+    for (int i = 0; i < ctx.locals.count && !has_float32; i++) {
+        has_float32 = ctx.locals.items[i].dtype == ME_FLOAT32;
+    }
+    if (has_float32 && me_jit_block_calls_nextafter(&program->block)) {
+        me_jit_set_error(error, 0, 0, "nextafter() of float32 values is not supported by jit c codegen");
+        me_jit_locals_free(&ctx.locals);
+        return false;
     }
 
     const char *symbol = "me_dsl_jit_kernel";

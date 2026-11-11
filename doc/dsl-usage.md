@@ -2,8 +2,8 @@
 
 This guide focuses on practical usage of miniexpr DSL kernels.
 The versioned portable language is **Menudet**, a little language for portable
-computation on arrays and tables. Its [1.0 language draft](dsl-spec/1.0.md) and
-[artifact draft](dsl-spec/artifact-1.0.md) define the portable contract; this guide
+computation on arrays and tables. Its [0.1 language draft](dsl-spec/0.1.md) and
+[artifact draft](dsl-spec/artifact-0.1.md) define the Menudet contract; this guide
 also covers ordinary full-DSL features that need not be portable.
 Canonical syntax, accepted statements, and exact error behavior are documented in `doc/dsl-syntax.md`.
 
@@ -47,34 +47,34 @@ Notes:
 - The order of `vars[]` defines input pointer order for `me_eval()`.
 - Full syntax constraints are in `doc/dsl-syntax.md`.
 
-## Portable-profile validation before execution
+## Menudet validation before execution
 
-The experimental versioned profile is smaller than the full DSL:
+The Menudet 0.1 beta profile is a feature-frozen subset of the full DSL:
 
 ```c
 me_variable signature[] = {
     {"x", ME_FLOAT64, NULL, ME_VARIABLE, NULL, 0},
 };
-me_portable_error diagnostic;
-me_portable_status status = me_validate_portable_dsl(
-    src, "1.0", signature, 1, ME_FLOAT64, &diagnostic);
+me_menudet_error diagnostic;
+me_menudet_status status = me_validate_menudet(
+    src, ME_MENUDET_DSL_VERSION, signature, 1, ME_FLOAT64, &diagnostic);
 ```
 
 This checks native source and a typed signature without executing it or invoking
 a compiler. It does not require Python or a working JIT backend. Check `status`
-before portable artifact loading/evaluation; ordinary `me_compile()` retains the
-separate full-DSL semantics. See [the draft profile](dsl-spec/1.0.md)
+before Menudet artifact loading/evaluation; ordinary `me_compile()` retains the
+separate full-DSL semantics. See [the draft profile](dsl-spec/0.1.md)
 for supported features and diagnostic categories.
 
-## Portable artifact loading
+## Menudet artifact loading
 
 For a standalone versioned JSON kernel, enable `MINIEXPR_BUILD_ARTIFACT` and link
 the separate `miniexpr_artifact` target. This optional adapter decodes typed scalar
 constants, validates exact name coverage, and provides `me_artifact_load()` /
 `me_artifact_eval_ex()` / `me_artifact_free()` in `miniexpr_artifact.h`. It neither
 requires Python nor adds JSON support to the raw language compiler. See
-[the draft artifact contract](dsl-spec/artifact-1.0.md) and the
-[standalone example](../tests/portable-artifacts/README.md).
+[the draft artifact contract](dsl-spec/artifact-0.1.md) and the
+[standalone example](../tests/menudet-artifacts/README.md).
 
 ## Runtime JIT Controls
 
@@ -85,20 +85,46 @@ Use source pragmas or API policy to control JIT behavior.
 ```python
 # me:fp=strict
 # me:compiler=tcc
+# me:math=sleef
+# me:ulp=u35
 def kernel(x):
-    return x
+    return sin(x) + cos(x)
 ```
 
 Supported values:
 - `# me:fp=strict|contract|fast`
 - `# me:compiler=tcc|cc`
+- `# me:math=auto|system|sleef|accelerate`
+- `# me:ulp=u10|u35` (SLEEF only; defaults to `u35`)
 
 Only these pragmas are supported. See `doc/dsl-syntax.md` for exact pragma parsing rules.
+
+Math-library selection is independent of floating-point mode. `auto` and
+`system` both use the system math library; `auto` is the built-in default.
+`scalar` remains an accepted environment-only spelling for forced system scalar
+math. Explicit unavailable `sleef`/`accelerate` requests fail during preparation
+instead of falling back to another library.
+
+Accelerated math kernels use the bounded vector interpreter over tiles, which
+reuses the same resolved callback table as scalar interpretation. Scalar calls
+and partial-vector tails are lane-packed so a SLEEF/Accelerate kernel does not
+switch libraries merely because a tile is shorter than the SIMD width. They are
+intentionally ineligible for the fused per-lane generated JIT, whose math bridge
+would otherwise pay a lane-packing dispatch per element; optional JIT therefore
+falls back to the vector interpreter. System math keeps generated-JIT support,
+including `contract`/`fast` with the `cc` backend.
 
 An explicit compiler pragma takes precedence over the `ME_DSL_JIT_COMPILER`
 environment default. Compiler selection is a preference, not a requirement to
 have that compiler available. Explicit `ME_JIT_OFF` still disables JIT, and
-best-effort interpreter fallback remains available.
+best-effort interpreter fallback remains available. The TCC backend supports
+strict floating point only; use `# me:compiler=cc` with `contract` or `fast`.
+
+Precedence for each setting is: explicit source pragma, artifact declaration,
+environment (`ME_SIMD_MATH_BACKEND`, `ME_DSL_FP_MODE`), built-in default.
+`ME_SIMD_MATH_BACKEND` accepts `auto|system|sleef|accelerate|scalar`; malformed
+values are errors. An explicit `me:math=auto` selects the system policy without
+consulting the environment.
 
 ### API policy override
 

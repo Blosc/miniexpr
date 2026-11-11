@@ -49,9 +49,10 @@ static void me_init_simd(void);
 
 typedef enum {
     ME_SIMD_BACKEND_AUTO = 0,
-    ME_SIMD_BACKEND_SLEEF = 1,
-    ME_SIMD_BACKEND_ACCELERATE = 2,
-    ME_SIMD_BACKEND_SCALAR = 3
+    ME_SIMD_BACKEND_SYSTEM = 1,
+    ME_SIMD_BACKEND_SLEEF = 2,
+    ME_SIMD_BACKEND_ACCELERATE = 3,
+    ME_SIMD_BACKEND_SCALAR = 4
 } me_simd_backend_preference_t;
 
 #ifndef ME_USE_SLEEF
@@ -217,6 +218,28 @@ void me_simd_params_push(const me_eval_params *params, me_simd_params_state *sta
 
 void me_simd_params_pop(const me_simd_params_state *state) {
     me_simd_force_scalar = state->force_scalar;
+    me_simd_use_u35_override = state->override_u35;
+}
+
+void me_simd_accuracy_push(me_dsl_sleef_ulp ulp, me_simd_accuracy_state *state) {
+    if (!state) return;
+    state->override_u35 = me_simd_use_u35_override;
+    switch (ulp) {
+    case ME_DSL_ULP_U10:
+        me_simd_use_u35_override = 0;
+        break;
+    case ME_DSL_ULP_U35:
+        me_simd_use_u35_override = 1;
+        break;
+    case ME_DSL_ULP_OMIT:
+    default:
+        me_simd_use_u35_override = -1;
+        break;
+    }
+}
+
+void me_simd_accuracy_pop(const me_simd_accuracy_state *state) {
+    if (!state) return;
     me_simd_use_u35_override = state->override_u35;
 }
 
@@ -3921,14 +3944,16 @@ static void me_init_simd_backend_preference(void) {
     if (!value || !value[0]) {
         return;
     }
-    if (strcmp(value, "auto") == 0) {
-        me_simd_backend_preference = ME_SIMD_BACKEND_AUTO;
+    if (strcmp(value, "auto") == 0 || strcmp(value, "system") == 0) {
+        me_simd_backend_preference = ME_SIMD_BACKEND_SYSTEM;
     } else if (strcmp(value, "sleef") == 0) {
         me_simd_backend_preference = ME_SIMD_BACKEND_SLEEF;
     } else if (strcmp(value, "accelerate") == 0) {
         me_simd_backend_preference = ME_SIMD_BACKEND_ACCELERATE;
     } else if (strcmp(value, "scalar") == 0) {
         me_simd_backend_preference = ME_SIMD_BACKEND_SCALAR;
+    } else {
+        me_simd_backend_preference = ME_SIMD_BACKEND_SYSTEM;
     }
 }
 
@@ -4178,7 +4203,7 @@ static void me_init_simd(void) {
 
     /* Use SLEEF SIMD kernels when the CPU supports them. */
 #if ME_ENABLE_SLEEF_SIMD && (defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64))
-    if (me_simd_backend_preference != ME_SIMD_BACKEND_ACCELERATE &&
+    if (me_simd_backend_preference == ME_SIMD_BACKEND_SLEEF &&
         me_cpu_supports_avx2()) {
         vec_sin_impl = vec_sin_avx2;
         vec_cos_impl = vec_cos_avx2;
@@ -4289,7 +4314,7 @@ static void me_init_simd(void) {
 #endif
 
 #if ME_ENABLE_SLEEF_SIMD && (defined(__aarch64__) || defined(_M_ARM64))
-    if (me_simd_backend_preference != ME_SIMD_BACKEND_ACCELERATE &&
+    if (me_simd_backend_preference == ME_SIMD_BACKEND_SLEEF &&
         me_cpu_supports_advsimd()) {
         vec_sin_impl = vec_sin_advsimd;
         vec_cos_impl = vec_cos_advsimd;
@@ -4399,7 +4424,7 @@ static void me_init_simd(void) {
     }
 #endif
 
-    if (me_simd_backend_preference != ME_SIMD_BACKEND_SLEEF) {
+    if (me_simd_backend_preference == ME_SIMD_BACKEND_ACCELERATE) {
 #if ME_USE_ACCELERATE && defined(__APPLE__)
         me_set_accelerate_backend();
         me_simd_backend = "accelerate";
@@ -4426,6 +4451,299 @@ void me_simd_reset_for_tests(void) {
 
 const char *me_simd_backend_for_tests(void) {
     return me_simd_backend;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Kernel-local immutable math dispatch                                      */
+/* ------------------------------------------------------------------------- */
+
+static ME_THREAD_LOCAL const me_math_dispatch *me_math_dispatch_active = NULL;
+
+const me_math_dispatch *me_math_dispatch_current(void) {
+    return me_math_dispatch_active;
+}
+
+const me_math_dispatch *me_math_dispatch_set(const me_math_dispatch *dispatch) {
+    const me_math_dispatch *previous = me_math_dispatch_active;
+    me_math_dispatch_active = dispatch;
+    return previous;
+}
+
+me_math_op me_math_op_from_name(const char *name) {
+    static const struct {
+        const char *name;
+        me_math_op op;
+    } names[] = {
+#define ME_MATH_NAME(OP) {#OP, ME_MATHOP_##OP}
+        {"acos", ME_MATHOP_ACOS}, {"acosh", ME_MATHOP_ACOSH},
+        {"asin", ME_MATHOP_ASIN}, {"asinh", ME_MATHOP_ASINH},
+        {"atan", ME_MATHOP_ATAN}, {"atanh", ME_MATHOP_ATANH},
+        {"cbrt", ME_MATHOP_CBRT}, {"cos", ME_MATHOP_COS},
+        {"cosh", ME_MATHOP_COSH}, {"erf", ME_MATHOP_ERF},
+        {"erfc", ME_MATHOP_ERFC}, {"exp", ME_MATHOP_EXP},
+        {"exp2", ME_MATHOP_EXP2}, {"expm1", ME_MATHOP_EXPM1},
+        {"lgamma", ME_MATHOP_LGAMMA}, {"log", ME_MATHOP_LOG},
+        {"log10", ME_MATHOP_LOG10}, {"log1p", ME_MATHOP_LOG1P},
+        {"log2", ME_MATHOP_LOG2}, {"sin", ME_MATHOP_SIN},
+        {"sinh", ME_MATHOP_SINH}, {"sqrt", ME_MATHOP_SQRT},
+        {"tan", ME_MATHOP_TAN}, {"tanh", ME_MATHOP_TANH},
+        {"tgamma", ME_MATHOP_TGAMMA}, {"fabs", ME_MATHOP_FABS},
+        {"ceil", ME_MATHOP_CEIL}, {"floor", ME_MATHOP_FLOOR},
+        {"trunc", ME_MATHOP_TRUNC}, {"atan2", ME_MATHOP_ATAN2},
+        {"copysign", ME_MATHOP_COPYSIGN}, {"fdim", ME_MATHOP_FDIM},
+        {"hypot", ME_MATHOP_HYPOT}, {"nextafter", ME_MATHOP_NEXTAFTER},
+        {"remainder", ME_MATHOP_REMAINDER}, {"fmod", ME_MATHOP_FMOD},
+        {"pow", ME_MATHOP_POW},
+#undef ME_MATH_NAME
+    };
+    if (!name) return ME_MATHOP_COUNT;
+    for (size_t i = 0; i < sizeof(names)/sizeof(names[0]); i++) {
+        if (!strcmp(name, names[i].name)) return names[i].op;
+    }
+    return ME_MATHOP_COUNT;
+}
+
+bool me_math_dispatch_has_unary(const me_math_dispatch *dispatch, me_math_op op) {
+    return dispatch && op >= 0 && op < ME_MATHOP_COUNT &&
+        (dispatch->unary_f64[op] || dispatch->unary_f32[op]);
+}
+
+bool me_math_dispatch_has_binary(const me_math_dispatch *dispatch, me_math_op op) {
+    return dispatch && op >= 0 && op < ME_MATHOP_COUNT &&
+        (dispatch->binary_f64[op] || dispatch->binary_f32[op]);
+}
+
+#define ME_ASSIGN_UNARY(FN, OP, base) do { \
+    dispatch->unary_f64[ME_MATHOP_##OP] = vec_##base##_##FN; \
+    dispatch->unary_f32[ME_MATHOP_##OP] = vec_##base##_f32_##FN; \
+} while (0)
+#define ME_ASSIGN_BINARY(FN, OP, base) do { \
+    dispatch->binary_f64[ME_MATHOP_##OP] = vec_##base##_##FN; \
+    dispatch->binary_f32[ME_MATHOP_##OP] = vec_##base##_f32_##FN; \
+} while (0)
+
+#if ME_ENABLE_SLEEF_SIMD && (defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64))
+static void me_math_dispatch_sleef_avx2(me_math_dispatch *dispatch) {
+    ME_ASSIGN_UNARY(avx2, ACOS, acos);
+    ME_ASSIGN_UNARY(avx2, ACOSH, acosh);
+    ME_ASSIGN_UNARY(avx2, ASIN, asin);
+    ME_ASSIGN_UNARY(avx2, ASINH, asinh);
+    ME_ASSIGN_UNARY(avx2, ATAN, atan);
+    ME_ASSIGN_UNARY(avx2, ATANH, atanh);
+    ME_ASSIGN_UNARY(avx2, CBRT, cbrt);
+    ME_ASSIGN_UNARY(avx2, COS, cos);
+    ME_ASSIGN_UNARY(avx2, COSH, cosh);
+    ME_ASSIGN_UNARY(avx2, ERF, erf);
+    ME_ASSIGN_UNARY(avx2, ERFC, erfc);
+    ME_ASSIGN_UNARY(avx2, EXP, exp);
+    ME_ASSIGN_UNARY(avx2, EXP2, exp2);
+    ME_ASSIGN_UNARY(avx2, EXPM1, expm1);
+    ME_ASSIGN_UNARY(avx2, LGAMMA, lgamma);
+    ME_ASSIGN_UNARY(avx2, LOG, log);
+    ME_ASSIGN_UNARY(avx2, LOG10, log10);
+    ME_ASSIGN_UNARY(avx2, LOG1P, log1p);
+    ME_ASSIGN_UNARY(avx2, LOG2, log2);
+    ME_ASSIGN_UNARY(avx2, SIN, sin);
+    ME_ASSIGN_UNARY(avx2, SINH, sinh);
+    ME_ASSIGN_UNARY(avx2, SQRT, sqrt);
+    ME_ASSIGN_UNARY(avx2, TAN, tan);
+    ME_ASSIGN_UNARY(avx2, TANH, tanh);
+    ME_ASSIGN_UNARY(avx2, TGAMMA, tgamma);
+    ME_ASSIGN_UNARY(avx2, FABS, abs);
+    ME_ASSIGN_UNARY(avx2, CEIL, ceil);
+    ME_ASSIGN_UNARY(avx2, FLOOR, floor);
+    ME_ASSIGN_UNARY(avx2, TRUNC, trunc);
+    ME_ASSIGN_BINARY(avx2, ATAN2, atan2);
+    ME_ASSIGN_BINARY(avx2, COPYSIGN, copysign);
+    ME_ASSIGN_BINARY(avx2, FDIM, fdim);
+    ME_ASSIGN_BINARY(avx2, HYPOT, hypot);
+    ME_ASSIGN_BINARY(avx2, NEXTAFTER, nextafter);
+    ME_ASSIGN_BINARY(avx2, REMAINDER, remainder);
+    ME_ASSIGN_BINARY(avx2, FMOD, fmod);
+    ME_ASSIGN_BINARY(avx2, POW, pow);
+#ifdef _WIN32
+    dispatch->binary_f64[ME_MATHOP_NEXTAFTER] = NULL;
+    dispatch->binary_f32[ME_MATHOP_NEXTAFTER] = NULL;
+#endif
+}
+#endif
+
+#if ME_ENABLE_SLEEF_SIMD && (defined(__aarch64__) || defined(_M_ARM64))
+static void me_math_dispatch_sleef_advsimd(me_math_dispatch *dispatch) {
+    ME_ASSIGN_UNARY(advsimd, ACOS, acos);
+    ME_ASSIGN_UNARY(advsimd, ACOSH, acosh);
+    ME_ASSIGN_UNARY(advsimd, ASIN, asin);
+    ME_ASSIGN_UNARY(advsimd, ASINH, asinh);
+    ME_ASSIGN_UNARY(advsimd, ATAN, atan);
+    ME_ASSIGN_UNARY(advsimd, ATANH, atanh);
+    ME_ASSIGN_UNARY(advsimd, CBRT, cbrt);
+    ME_ASSIGN_UNARY(advsimd, COS, cos);
+    ME_ASSIGN_UNARY(advsimd, COSH, cosh);
+    ME_ASSIGN_UNARY(advsimd, ERF, erf);
+    ME_ASSIGN_UNARY(advsimd, ERFC, erfc);
+    ME_ASSIGN_UNARY(advsimd, EXP, exp);
+    ME_ASSIGN_UNARY(advsimd, EXP2, exp2);
+    ME_ASSIGN_UNARY(advsimd, EXPM1, expm1);
+    ME_ASSIGN_UNARY(advsimd, LGAMMA, lgamma);
+    ME_ASSIGN_UNARY(advsimd, LOG, log);
+    ME_ASSIGN_UNARY(advsimd, LOG10, log10);
+    ME_ASSIGN_UNARY(advsimd, LOG1P, log1p);
+    ME_ASSIGN_UNARY(advsimd, LOG2, log2);
+    ME_ASSIGN_UNARY(advsimd, SIN, sin);
+    ME_ASSIGN_UNARY(advsimd, SINH, sinh);
+    ME_ASSIGN_UNARY(advsimd, SQRT, sqrt);
+    ME_ASSIGN_UNARY(advsimd, TAN, tan);
+    ME_ASSIGN_UNARY(advsimd, TANH, tanh);
+    ME_ASSIGN_UNARY(advsimd, TGAMMA, tgamma);
+    ME_ASSIGN_UNARY(advsimd, FABS, abs);
+    ME_ASSIGN_UNARY(advsimd, CEIL, ceil);
+    ME_ASSIGN_UNARY(advsimd, FLOOR, floor);
+    ME_ASSIGN_UNARY(advsimd, TRUNC, trunc);
+    ME_ASSIGN_BINARY(advsimd, ATAN2, atan2);
+    ME_ASSIGN_BINARY(advsimd, COPYSIGN, copysign);
+    ME_ASSIGN_BINARY(advsimd, FDIM, fdim);
+    ME_ASSIGN_BINARY(advsimd, HYPOT, hypot);
+    ME_ASSIGN_BINARY(advsimd, NEXTAFTER, nextafter);
+    ME_ASSIGN_BINARY(advsimd, REMAINDER, remainder);
+    ME_ASSIGN_BINARY(advsimd, FMOD, fmod);
+    ME_ASSIGN_BINARY(advsimd, POW, pow);
+#ifdef _WIN32
+    dispatch->binary_f64[ME_MATHOP_NEXTAFTER] = NULL;
+    dispatch->binary_f32[ME_MATHOP_NEXTAFTER] = NULL;
+#endif
+}
+#endif
+
+#if ME_USE_ACCELERATE && defined(__APPLE__)
+static void me_math_dispatch_accelerate(me_math_dispatch *dispatch) {
+    ME_ASSIGN_UNARY(accelerate, ACOS, acos);
+    ME_ASSIGN_UNARY(accelerate, ACOSH, acosh);
+    ME_ASSIGN_UNARY(accelerate, ASIN, asin);
+    ME_ASSIGN_UNARY(accelerate, ASINH, asinh);
+    ME_ASSIGN_UNARY(accelerate, ATAN, atan);
+    ME_ASSIGN_UNARY(accelerate, ATANH, atanh);
+    ME_ASSIGN_UNARY(accelerate, CBRT, cbrt);
+    ME_ASSIGN_UNARY(accelerate, COS, cos);
+    ME_ASSIGN_UNARY(accelerate, COSH, cosh);
+    ME_ASSIGN_UNARY(accelerate, EXP, exp);
+    ME_ASSIGN_UNARY(accelerate, EXPM1, expm1);
+    ME_ASSIGN_UNARY(accelerate, LOG, log);
+    ME_ASSIGN_UNARY(accelerate, LOG10, log10);
+    ME_ASSIGN_UNARY(accelerate, LOG1P, log1p);
+    ME_ASSIGN_UNARY(accelerate, LOG2, log2);
+    ME_ASSIGN_UNARY(accelerate, SIN, sin);
+    ME_ASSIGN_UNARY(accelerate, SINH, sinh);
+    ME_ASSIGN_UNARY(accelerate, SQRT, sqrt);
+    ME_ASSIGN_UNARY(accelerate, TAN, tan);
+    ME_ASSIGN_UNARY(accelerate, TANH, tanh);
+    ME_ASSIGN_UNARY(accelerate, FABS, abs);
+    ME_ASSIGN_UNARY(accelerate, CEIL, ceil);
+    ME_ASSIGN_UNARY(accelerate, FLOOR, floor);
+    ME_ASSIGN_BINARY(accelerate, ATAN2, atan2);
+    ME_ASSIGN_BINARY(accelerate, COPYSIGN, copysign);
+    ME_ASSIGN_BINARY(accelerate, FMOD, fmod);
+    ME_ASSIGN_BINARY(accelerate, REMAINDER, remainder);
+    ME_ASSIGN_BINARY(accelerate, NEXTAFTER, nextafter);
+    ME_ASSIGN_BINARY(accelerate, POW, pow);
+    /* NotImplemented system fallbacks: exp2, erf, erfc, fdim, hypot, lgamma,
+     * tgamma and trunc keep their system/libm entries (NULL here). */
+}
+#endif
+
+#undef ME_ASSIGN_UNARY
+#undef ME_ASSIGN_BINARY
+
+bool me_math_dispatch_init(me_math_dispatch *dispatch, me_dsl_math_backend backend,
+                           me_dsl_sleef_ulp ulp) {
+    if (!dispatch) return false;
+    memset(dispatch, 0, sizeof(*dispatch));
+    dispatch->backend = backend;
+    dispatch->ulp = ulp;
+    switch (backend) {
+    case ME_DSL_MATH_AUTO:
+    case ME_DSL_MATH_SYSTEM:
+    case ME_DSL_MATH_SCALAR:
+        return true;
+    case ME_DSL_MATH_SLEEF:
+#if ME_ENABLE_SLEEF_SIMD && (defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64))
+        if (me_cpu_supports_avx2()) {
+            me_math_dispatch_sleef_avx2(dispatch);
+            dispatch->accelerated = true;
+            return true;
+        }
+#endif
+#if ME_ENABLE_SLEEF_SIMD && (defined(__aarch64__) || defined(_M_ARM64))
+        if (me_cpu_supports_advsimd()) {
+            me_math_dispatch_sleef_advsimd(dispatch);
+            dispatch->accelerated = true;
+            return true;
+        }
+#endif
+        return false;
+    case ME_DSL_MATH_ACCELERATE:
+#if ME_USE_ACCELERATE && defined(__APPLE__)
+        me_math_dispatch_accelerate(dispatch);
+        dispatch->accelerated = true;
+        return true;
+#else
+        return false;
+#endif
+    default:
+        return false;
+    }
+}
+
+#define ME_MATH_PACK_F64 4
+#define ME_MATH_PACK_F32 8
+
+bool me_math_scalar_unary_f64(me_math_op op, double x, double *out) {
+    const me_math_dispatch *dispatch = me_math_dispatch_active;
+    if (!dispatch || !out || op < 0 || op >= ME_MATHOP_COUNT || !dispatch->unary_f64[op]) {
+        return false;
+    }
+    double lanes[ME_MATH_PACK_F64] = {x, x, x, x};
+    double result[ME_MATH_PACK_F64];
+    dispatch->unary_f64[op](lanes, result, ME_MATH_PACK_F64);
+    *out = result[0];
+    return true;
+}
+
+bool me_math_scalar_unary_f32(me_math_op op, float x, float *out) {
+    const me_math_dispatch *dispatch = me_math_dispatch_active;
+    if (!dispatch || !out || op < 0 || op >= ME_MATHOP_COUNT || !dispatch->unary_f32[op]) {
+        return false;
+    }
+    float lanes[ME_MATH_PACK_F32] = {x, x, x, x, x, x, x, x};
+    float result[ME_MATH_PACK_F32];
+    dispatch->unary_f32[op](lanes, result, ME_MATH_PACK_F32);
+    *out = result[0];
+    return true;
+}
+
+bool me_math_scalar_binary_f64(me_math_op op, double x, double y, double *out) {
+    const me_math_dispatch *dispatch = me_math_dispatch_active;
+    if (!dispatch || !out || op < 0 || op >= ME_MATHOP_COUNT || !dispatch->binary_f64[op]) {
+        return false;
+    }
+    double left[ME_MATH_PACK_F64] = {x, x, x, x};
+    double right[ME_MATH_PACK_F64] = {y, y, y, y};
+    double result[ME_MATH_PACK_F64];
+    dispatch->binary_f64[op](left, right, result, ME_MATH_PACK_F64);
+    *out = result[0];
+    return true;
+}
+
+bool me_math_scalar_binary_f32(me_math_op op, float x, float y, float *out) {
+    const me_math_dispatch *dispatch = me_math_dispatch_active;
+    if (!dispatch || !out || op < 0 || op >= ME_MATHOP_COUNT || !dispatch->binary_f32[op]) {
+        return false;
+    }
+    float left[ME_MATH_PACK_F32] = {x, x, x, x, x, x, x, x};
+    float right[ME_MATH_PACK_F32] = {y, y, y, y, y, y, y, y};
+    float result[ME_MATH_PACK_F32];
+    dispatch->binary_f32[op](left, right, result, ME_MATH_PACK_F32);
+    *out = result[0];
+    return true;
 }
 
 void vec_sin_dispatch(const double* a, double* out, int n) {

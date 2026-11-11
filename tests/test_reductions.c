@@ -284,13 +284,8 @@ static int test_prod_complex64() {
     me_expr *expr = NULL;
     int rc_expr = me_compile("prod(x)", vars, 1, ME_AUTO, &err, &expr);
     if (rc_expr != ME_COMPILE_SUCCESS) {
-#if defined(_WIN32) || defined(_WIN64)
-        printf("  ✅ PASSED (complex not supported on Windows)\n");
-        return 0;
-#else
         printf("  ❌ FAILED: compilation failed with status %d at position %d\n", rc_expr, err);
         return 1;
-#endif
     }
 
     if (me_get_dtype(expr) != ME_COMPLEX64) {
@@ -969,9 +964,6 @@ static int test_reduction_all_types() {
     }
 
     {
-#if defined(_WIN32) || defined(_WIN64)
-        printf("  ✅ PASSED (complex not supported on Windows)\n");
-#else
         float _Complex data[] = {MAKE_C64(1.0f, 1.0f), MAKE_C64(2.0f, -1.0f), MAKE_C64(0.5f, 0.0f)};
         me_variable vars[] = {{"x", ME_COMPLEX64, data}};
         const void *var_ptrs[] = {data};
@@ -1011,13 +1003,9 @@ static int test_reduction_all_types() {
 
         RUN_REDUCE_EXPECT_FAIL("min(x)", vars);
         RUN_REDUCE_EXPECT_FAIL("max(x)", vars);
-#endif
     }
 
     {
-#if defined(_WIN32) || defined(_WIN64)
-        printf("  ✅ PASSED (complex not supported on Windows)\n");
-#else
         double _Complex data[] = {MAKE_C128(1.0, 1.0), MAKE_C128(2.0, -1.0), MAKE_C128(0.5, 0.0)};
         me_variable vars[] = {{"x", ME_COMPLEX128, data}};
         const void *var_ptrs[] = {data};
@@ -1057,7 +1045,6 @@ static int test_reduction_all_types() {
 
         RUN_REDUCE_EXPECT_FAIL("min(x)", vars);
         RUN_REDUCE_EXPECT_FAIL("max(x)", vars);
-#endif
     }
 
 #undef RUN_REDUCE
@@ -1362,13 +1349,8 @@ static int test_empty_inputs() {
         me_expr *expr = NULL;
         int rc_expr = me_compile("sum(x)", vars, 1, ME_AUTO, &err, &expr);
         if (rc_expr != ME_COMPILE_SUCCESS) {
-#if defined(_WIN32) || defined(_WIN64)
-            printf("  ✅ PASSED (complex not supported on Windows)\n");
-            return 0;
-#else
             printf("  ❌ FAILED: sum(complex64) compile error %d\n", err);
             return 1;
-#endif
         }
         const void *var_ptrs[] = {c64_data};
         ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);
@@ -1387,13 +1369,8 @@ static int test_empty_inputs() {
         me_expr *expr = NULL;
         int rc_expr = me_compile("prod(x)", vars, 1, ME_AUTO, &err, &expr);
         if (rc_expr != ME_COMPILE_SUCCESS) {
-#if defined(_WIN32) || defined(_WIN64)
-            printf("  ✅ PASSED (complex not supported on Windows)\n");
-            return 0;
-#else
             printf("  ❌ FAILED: prod(complex64) compile error %d\n", err);
             return 1;
-#endif
         }
         const void *var_ptrs[] = {c64_data};
         ME_EVAL_CHECK(expr, var_ptrs, 1, &output, 0);

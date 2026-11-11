@@ -126,6 +126,20 @@ For log = base 10 log comment the next line. */
 static ME_THREAD_LOCAL char g_me_last_error_msg[ME_LAST_ERROR_MSG_CAP];
 static ME_THREAD_LOCAL const me_jit_options *g_me_jit_options;
 
+const me_jit_options *dsl_jit_exchange_options(const me_jit_options *options) {
+    const me_jit_options *previous = g_me_jit_options;
+    g_me_jit_options = options;
+    return previous;
+}
+
+/* Explicit call-local math policy is authoritative; the environment supplies
+ * only the default when no backend was requested for this compilation. */
+const char *me_jit_explicit_math_backend(void) {
+    const me_jit_options *options = g_me_jit_options;
+    const char *value = options ? options->math_backend : NULL;
+    return value && value[0] ? value : NULL;
+}
+
 /* Options live on the compiling thread, never in process-wide environment
  * variables. Save/restore in the entry point also supports nested compilation. */
 const char *me_jit_option_value(const char *name) {
@@ -146,7 +160,9 @@ const char *me_jit_option_value(const char *name) {
     if (strcmp(name, "ME_DSL_JIT_CACHE_DIR") == 0) {
         return options->cache_dir;
     }
-    if (strcmp(name, "ME_DSL_TRACE") == 0 && options->trace >= 0) {
+    if (strcmp(name, "ME_SIMD_MATH_BACKEND") == 0) {
+        return options->math_backend;
+    }    if (strcmp(name, "ME_DSL_TRACE") == 0 && options->trace >= 0) {
         return options->trace ? "1" : "0";
     }
     if (strcmp(name, "ME_DSL_JIT_DEBUG_CC") == 0 && options->compiler_output >= 0) {
@@ -1266,12 +1282,12 @@ static me_expr* create_conversion_node(me_expr* source, me_dtype target_dtype) {
 void apply_type_promotion(me_expr* node) {
     if (!node || ARITY(node->type) < 2) return;
 
-    /* The portable typed pass must see the original operands, not full-DSL
+    /* The menudet typed pass must see the original operands, not full-DSL
      * conversion nodes or output-context promotions. */
     for (int i = 0; i < ARITY(node->type); i++) {
         const me_expr *child = node->parameters[i];
-        if (child && (child->flags & ME_EXPR_FLAG_PORTABLE_1)) {
-            node->flags |= ME_EXPR_FLAG_PORTABLE_1;
+        if (child && (child->flags & ME_EXPR_FLAG_MENUDET_1)) {
+            node->flags |= ME_EXPR_FLAG_MENUDET_1;
             return;
         }
     }
@@ -1614,7 +1630,7 @@ int private_compile_profile_ex(const char* expression, const me_variable* variab
         s.target_dtype = ME_AUTO;
     }
 
-    if (profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+    if (dsl_menudet_typed_profile(profile)) {
         s.target_dtype = ME_AUTO;
     }
     next_token(&s);
@@ -1632,7 +1648,7 @@ int private_compile_profile_ex(const char* expression, const me_variable* variab
     /* Internal raw-tree entry point: the profile-aware DSL compiler performs
      * typed validation before this tree can be executed. No folding, bytecode,
      * output retyping or callback dispatch is safe before that gate. */
-    if (profile == ME_DSL_PROFILE_PORTABLE_1_0) {
+    if (dsl_menudet_typed_profile(profile)) {
         if (vars_copy) free(vars_copy);
         if (s.str_data) free((void *)s.str_data);
         if (s.type != TOK_END) {
@@ -1682,33 +1698,6 @@ int private_compile_profile_ex(const char* expression, const me_variable* variab
         if (vars_copy) free(vars_copy);
         return ME_COMPILE_ERR_INVALID_ARG_TYPE;
     }
-
-#if defined(_WIN32) || defined(_WIN64)
-    {
-        const me_variable* vars_check = vars_copy ? vars_copy : variables;
-        bool complex_vars = false;
-        if (vars_check) {
-            for (int i = 0; i < var_count; i++) {
-                if (!is_variable_entry(&vars_check[i])) {
-                    continue;
-                }
-                if (vars_check[i].dtype == ME_COMPLEX64 || vars_check[i].dtype == ME_COMPLEX128) {
-                    complex_vars = true;
-                    break;
-                }
-            }
-        }
-        if (complex_vars ||
-            dtype == ME_COMPLEX64 || dtype == ME_COMPLEX128 ||
-            has_complex_node(root) || has_complex_input(root)) {
-            fprintf(stderr, "Error: Complex expressions are not supported on Windows (no C99 complex ABI)\n");
-            me_free(root);
-            if (error) *error = -1;
-            if (vars_copy) free(vars_copy);
-            return ME_COMPILE_ERR_COMPLEX_UNSUPPORTED;
-        }
-    }
-#endif
 
     if (s.type != TOK_END) {
         me_free(root);
@@ -2549,6 +2538,13 @@ void me_jit_vec_log2_f32(const float *in, float *out, int64_t nitems) {
 int is_synthetic_address(const void* ptr) {
     const char* p = (const char*)ptr;
     return (p >= synthetic_var_addresses && p < synthetic_var_addresses + ME_MAX_VARS);
+}
+
+/* Cross-library accessor: the synthetic address array is a data symbol, which
+ * Windows DLL builds do not export, so consumers must use this function. */
+int dsl_synthetic_var_index(const void *bound) {
+    if (!is_synthetic_address(bound)) return -1;
+    return (int)((const char *)bound - synthetic_var_addresses);
 }
 
 static int compile_with_jit(const char* expression, const me_variable* variables,

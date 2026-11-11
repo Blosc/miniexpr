@@ -1,0 +1,388 @@
+# Native numerical graph preparation (opt-in, graph format 1)
+
+`src/miniexpr_graph.h` introduces a **new, experimental** interface, independent
+of artifact schema/language 1.0 and of product version numbering. Build with
+`MINIEXPR_BUILD_ARTIFACT=ON` and link `miniexpr_artifact` and its miniexpr dependency.
+There are no new dependencies: JSON uses the existing yyjson library.
+
+## Lifecycle and ownership
+
+1. `me_graph_prepare_json` copies a declarative graph and captures, validates it,
+   and infers numerical types using the Menudet **1.0** compiler. No array
+   pointers, Python, numerical evaluation, callbacks or full-DSL fallback exist
+   in this path. Caller FP flags and rounding are preserved, including on errors.
+2. `me_graph_specialize` accepts names, dtypes, ranks and shapes only. It performs
+   trailing-axis broadcasting (including rank zero, singleton-to-empty axes),
+   native axis normalization and reduction result-shape/accumulator validation.
+   Query output dtype/shape/bytes and scratch before allocation or storage reads.
+3. `me_graph_execute` binds checked `me_array_view` buffers by name. Shapes and
+   dtypes must exactly match the specialization. Layout, capacity, byte order,
+   mask and overlap validation precede numerical execution. Changing shapes
+   requires a new schedule; changing values does not require a new plan.
+4. Free the schedule and plan with their NULL-safe free functions. A schedule
+   retains its plan. Borrowed names, JSON and shapes last until their owning
+   handle is freed. Independent invocations can share immutable handles; freeing
+   a handle concurrently with its use or mutating shared inputs is unsupported.
+
+Options have `struct_size=sizeof(options)` and `version=ME_GRAPH_VERSION` (1).
+NULL options choose the interpreter, a 1024-item tile and ignore FP flags.
+JIT preference and `require_jit` are explicit; required unavailable acceleration
+rejects. Reports name the actual **map kernel** route; reductions still use the
+serial logical accumulator. No expression reassociation/CSE is enabled, whether
+`disable_optimization` is true or false.
+
+A reduction whose map is a plain input can bypass identity-map evaluation for
+native-endian, aligned, contiguous inputs and suffix axes without a mask. This
+also applies to reduction regions inside staged graphs such as `x - sum(x)`.
+Float32/float64 sum and product use typed serial loops with the same initial value
+and per-operation rounding. Boolean and integer sums/products with their default promoted
+64-bit accumulators use dtype-specialized loops with modular accumulation;
+nondefault accumulator conversions retain generic logic. Min/max use typed
+comparisons when the accumulator dtype matches the input, preserving signed-zero
+selection. Any/all use typed truth tests and introduce no early exit. Float
+extrema/truth tiles containing NaNs (or NaN extrema initials) retain generic logic
+to preserve payload selection and signaling-NaN diagnostics.
+Unmasked computed maps also reuse these typed reducers when the map output and
+accumulator signatures match (or integer sums/products use their default promoted
+64-bit accumulator). Map execution still precedes reduction; serial accumulation
+order and per-operation rounding are unchanged. Gathered inputs can benefit once
+their computed map produces a contiguous tile. Masks and nondefault accumulator
+conversions keep the generic reducer.
+No tile partial sums or reassociation are introduced. Scratch queries remain
+conservative bounds; actual reported temporary memory can be zero. Bypassed maps
+do not contribute to `evaluated_tiles` or `jit_stages`, even if the prepared map
+is JIT-capable. The legacy `interpreter_stages` count includes non-JIT native
+reduction stages and does not imply that an identity map was interpreted.
+
+### Bounded storage-reader inputs
+
+`me_graph_execute_sources` and `me_artifact_eval_array_sources` accept a mixture
+of resident `me_array_view` buffers and `me_array_source` readers. A reader's
+view is metadata-only (name, dtype, rank, shape; base/capacity/offset/byte-order
+are zero). The synchronous callback receives C-order source logical indices and
+fills caller-provided native-endian values in that order. Broadcasting can
+repeat indices. A host adapter can translate indices into compressed chunks,
+proxy fetches, field reads or normalized sliced coordinates without materializing
+the entire input. No compression/storage library dependency is added to miniexpr.
+
+Native traversal owns tile bounds, broadcasting, axis grouping and serial
+reduction order. Resident reduction masks suppress inactive reader requests.
+Callbacks run only after binding/shape/output validation, at most `tile_items`
+values per request; empty domains do not call them. A failed callback terminates
+the invocation without retry or interpreter replay. Callback floating flags and
+rounding changes are isolated from numerical graph status and caller state.
+Readers supply values eagerly for map inputs; kernel branch participation remains
+lazy, but this API does not promise branch-specific storage access.
+
+Iterator scratch includes one reusable tile of logical indices and one tile per
+gathered input. Output storage and host callback/decompression caches are outside
+that bound. Readers and storage owners are invocation-borrowed, never retained in
+plans or schedules; shared owners must synchronize their own reads. Direct input
+reductions can bypass the identity map for reader-backed tiles as well.
+
+This initial reader API supports single-region graphs, including mapped/root
+reductions, functions, division and powers, with either JIT or interpretation.
+Reader-backed staged graphs and reader-backed reduction masks reject before
+storage reads. Ordinary execution still rejects output aliases. This is native storage plumbing,
+not automatic Python proxy/table eligibility or nullable/table semantic lowering.
+
+### Explicit resident output aliases
+
+`me_graph_execute_alias` is an opt-in adapter for resident inputs and aligned
+C-order output, including overlapping input/output allocations. It executes once
+into an independent result and publishes only after complete success. Numerical,
+binding and requested-FP-status failures leave the destination unchanged; they
+never trigger replay. The ordinary execution APIs retain their disjoint-output
+contract. A caller-specified staging budget (zero selects 64 MiB) bounds the full
+result allocation before execution. This allocation is separate from iterator
+scratch reports and its size is `me_graph_output_bytes(schedule)`. Strided output
+scatter and storage-backed output publication remain host responsibilities.
+
+For Menudet 0.1 beta JIT maps, immutable weak int64/Boolean captures can specialize
+integer conversions after the same checked range validation used by the
+interpreter. In-range values are emitted as typed integer bit patterns in the
+generated source, allowing expressions such as `x % 7`, `x << 2` and
+`int16(x) * 2` to JIT without turning weak narrowing into modular casts. The
+typed tree, canonical graph and artifact captures remain unchanged. Specialized
+values contribute to the generated-source cache fingerprint. Unknown/computed
+weak operands and out-of-range captures retain interpretation, so errors still
+occur only when participating execution reaches the conversion. Floating weak
+captures are not covered by this specialization; strong integer casts keep their
+existing modular behavior. This changes neither the artifact schema nor the
+private JIT calling convention.
+
+The Menudet interpreter shares the sum/product helpers for plain variables with
+unchanged float accumulator dtype or the default promoted integer accumulator,
+full participation and fully initialized lanes. Its integer sums/products preserve the
+existing checked-overflow behavior (unlike graph modular accumulation), including
+failure on intermediate prefix overflow. Boolean sums count true lanes in int64.
+Min/max and any/all share the typed comparisons/truth tests with the same NaN
+fallback. Mean still uses the existing generic reducer.
+All-one interpreter masks/initialization arrays are checked
+once; partial masks, potentially uninitialized variables and computed operands
+retain generic expression reduction. This is a block-reduction optimization, not
+conversion of DSL programs into graphs, and it does not imply JIT execution.
+
+Menudet 0.1 beta programs containing a single numeric/Boolean scalar `return`, with
+no locals or reserved/context variables, can bypass statement bookkeeping on
+nonempty unmasked blocks. The same scalar expression evaluator executes the
+return, including computed operands, multiple reductions, output conversions
+and checked integer arithmetic. JIT retains precedence; binding/descriptor
+validation and FP status handling remain intact, and numerical errors are never
+retried through another route. Explicit masks (even all-one masks), empty blocks,
+elementwise outputs and more general programs keep the statement interpreter.
+This shortcut removes unnecessary per-lane flow/initialization arrays; it does
+not promise allocation-free execution for every expression (for example, lazy
+conditional reductions can still allocate participation state).
+
+`benchmark_sum_paths [items] [samples] [tile_items] [dtype] [direct|computed]
+[sum|prod|min|max|any|all]` times both warm native APIs on identical inputs, with
+preparation, Python and compression excluded. Each call verifies its result.
+The optional computed DSL operand adds work and is not a historical baseline.
+An A/B measurement disabling only the new product/extrema/truth loops (Apple M4
+Pro, 1,048,576 float64 lanes, 9 samples, 1024-item tiles, JIT off) gave these median
+milliseconds; these are local measurements, not portable speedup guarantees:
+
+| Reduction | DSL before / after | Graph before / after |
+| --- | ---: | ---: |
+| prod | 7.587 / 2.878 | 3.172 / 1.756 |
+| min | 7.664 / 2.458 | 3.962 / 0.731 |
+| max | 7.704 / 2.627 | 3.687 / 0.920 |
+| any | 6.372 / 2.558 | 7.112 / 0.573 |
+| all | 6.491 / 2.390 | 6.588 / 0.583 |
+
+`me_graph_export_json` returns canonical declarative JSON, with sorted object
+keys and preserved node/operand order. Import is preparation and revalidation,
+never deserialization of executable machine code or cached inference. Captures
+retain categories and value bytes. No global native graph/result cache exists.
+`me_graph_export_map_json` additionally exports eligible elementwise graphs as
+ordinary typed Menudet 0.1 beta artifacts; reductions and final conversions are not silently
+changed into block-scalar recipes.
+
+Plans expose borrowed root-reduction metadata (`me_graph_reduction_op`,
+axis count/values, `keepdims`, and initial/where presence) so hosts can make
+scheduling decisions without exporting and reparsing canonical graph JSON.
+Axis count `-1` means every axis; non-reduction graphs report no reduction.
+This metadata carries no operand values or results.
+
+## Format and supported subset
+
+See `native-graph-1.schema.json` and executable fixtures in `tests/graph/fixtures`.
+All root fields are required:
+
+```json
+{"format":"menudet-graph-1","semantics":"menudet-numpy-0.1",
+ "requires":["numeric"],"nodes":[],"root":0,
+ "output":{"dtype":"auto","casting":"unsafe"}}
+```
+
+The empty node array above illustrates fields only; it is not a valid graph.
+Node IDs are exactly their zero-based positions. Edges reference earlier nodes.
+Every node must be reachable from the result or reduction participation binding.
+Duplicate JSON keys, unknown fields/revisions/capabilities/opcodes and malformed
+scalar encodings reject. Binding names are ASCII identifiers of at most 63 bytes;
+names colliding with generated `_me_capture_<node-id>` bindings reject.
+
+| Node `op` | Fields in addition to `id`, `op` |
+| --- | --- |
+| `input` | `name`, numeric `dtype` (strong; zero-dimensional arrays stay inputs) |
+| `constant` | `dtype`, `category`, `encoding`, `value` |
+| Unary `neg`, `pos`, `not`, `invert` | `args`: one node |
+| Binary `add`, `sub`, `mul`, `div`, `floordiv`, `mod`, `pow`, comparisons `eq/ne/lt/le/gt/ge`, bitwise `bitand/bitor/bitxor/lshift/rshift`, lazy `and/or` | `args`: two ordered nodes |
+| `cast` | one `args` node, destination `dtype` |
+| `function` | canonical portable `name`, ordered `args` (up to three) |
+| `select` | three `args`: condition, active-true, active-false |
+| Root `sum/prod/min/max/any/all` | one map `args` node, `axes`, `keepdims`, `dtype`, `initial`, `where` |
+
+Numerical types are bool, signed/unsigned 8/16/32/64-bit integers and float32/64.
+Function arities/signatures/promotions are validated by the existing portable
+compiler, not a graph-owned promotion/function table. See
+`numpy-arithmetic-0.1.md` and `numpy-functions-0.1.md` for exact numerical policies.
+
+Weak constants use bool/int64/float64 transport; typed scalars retain their declared
+dtype. Integers are canonical decimal **strings** (including full uint64 values).
+Booleans use `encoding:"boolean"` and a JSON Boolean. Reals use
+`encoding:"ieee754-hex"` and 8/16 lowercase hexadecimal digits in most-significant
+byte order. Parsing copies bit patterns, including signed zero and typed NaNs,
+without evaluating them. Weak construction errors may occur only at invocation.
+
+Reductions use `axes:null` for every axis or an explicit integer list (including
+empty and negative axes); `keepdims` is Boolean; `dtype:"auto"` selects fixed
+int64/uint64 widening for sum/prod, never deployment C `long`. `initial:null`
+selects the existing default, otherwise it is a scalar descriptor without `id/op`.
+If needed, initial conversion is native and occurs per invocation, not during
+preparation. Any/all forbid initial/dtype overrides. `where:null` selects all
+coordinates, otherwise it references a strong Boolean input. A participation-only
+input may broadcast **to** the map shape but cannot expand it. Computed participation
+masks are not yet admitted. Initial/masked extrema and empty identities follow
+`native-arrays-0.1.md`. Each group accumulates in serial logical C order;
+tile size never changes grouping.
+
+`output.dtype:"auto"` preserves the inferred result. A numeric final dtype with
+`safe`, `same_kind` or `unsafe` casting is checked independently of map precision
+and reduction accumulation. A differing final dtype creates an interpreted
+conversion stage, not a request to widen intermediate arithmetic. The numerical
+result is materialized with a checked budget (64 MiB by default;
+`intermediate_budget` overrides it). Query intermediate bytes separately from
+iterator scratch. Conversion errors leave the output unspecified. This limited
+conversion stage is **not** general multi-stage DAG support.
+
+### Participation, sharing and resource limits
+
+Operand order is retained by bounded textual lowering into the authoritative typed
+Menudet kernel. `select` and Boolean short-circuiting remain lazy. Reduction masks
+gate the map before evaluation. All computed nodes are conservatively treated as
+potentially effectful. Inputs and capture bindings may be shared; **shared computed
+nodes reject**, rather than silently duplicate/hoist work across active domains.
+Intermediate reductions and shared array computations require the separately
+declared [staged subset](native-stages-1.md). Reductions inside conditional domains
+and arbitrary full-DSL/callback nodes still reject.
+
+Limits: 1 MiB JSON/expression/generated-buffer size; 256 nodes; 64 graph/parser
+expression nesting; 16 JSON structural nesting; 32 object fields; `ME_MAX_VARS`
+total map bindings; rank 16; three operands per function node; signed-32-bit tile
+count. Shape/byte/scratch/stride arithmetic is checked against target `size_t`,
+including WASM32. The graph tree cannot grow exponentially during lowering:
+computed sharing is rejected first. This is bounded validation, **not a sandbox**.
+OOM never falls back to another planner or backend.
+
+## Restricted expression convenience grammar
+
+`me_graph_prepare_expression` takes expression text plus named dtype signatures
+(their shapes are ignored until specialization). It builds the identical graph
+in memory and shares validation with the JSON importer. Graph lowering likewise
+passes an in-memory manifest to artifact validation, avoiding intermediate JSON
+encoding and reparsing. JSON exports remain available in the same formats.
+Supported syntax: identifiers; weak decimal integer/finite real/Boolean literals;
+parentheses; the operators above with Python-like precedence; canonical function
+calls; dtype casts such as `float32(x)`; lazy `where(c,a,b)`; a root reduction with
+literal `axis`, `keepdims`, `dtype`, `initial` and an input `where` keyword.
+Negative literals preserve int64 extrema. **Not general Python:** attributes,
+methods, subscripts, tuples as values, chained comparisons, arbitrary callbacks
+and keyword elementwise functions reject. JSON is the lossless capture interface.
+Examples:
+
+```text
+x * 2 + y
+where(x != 0, y / x, y)
+sum(sqrt(x), axis=[-1], keepdims=True, initial=2, where=mask)
+```
+
+## Standalone deployment and Python migration
+
+`tests/graph/host.c` loads a fixture, prepares it, specializes only metadata,
+queries/allocates the result and executes native buffers. It links no Python or
+NumPy. CTest runs all five fixtures, lifecycle/layout/mask/stage tests and corpus-derived
+single-return, constant-free inference cases with original corpus IDs. Node/WASM
+uses the same C hosts with raw host-file access; WASM FP reporting is unavailable
+and requested raise policies reject before execution. Interpretation is the native
+portable route, not a JavaScript numerical fallback.
+
+Python-Blosc2's `native_graph.py` now emits syntactic graph nodes and explicit
+captures. Cython owns prepare/specialize/query/execute/export lifetimes. Python no
+longer generates DSL twice, promotes graph types, or broadcasts graph shapes.
+Storage selection/decompression and output persistence remain Python adapters;
+`_require_native=True` is still opt-in. The 128-entry Python handle cache keys
+declarative graph/captures/backend configuration, never numerical array values.
+Elementwise `native_kernel()` preserves existing Menudet artifact persistence.
+This migration requires a graph-enabled miniexpr build: older dependency revisions
+reject explicitly rather than retaining a second hidden semantic planner.
+For local exact-pair testing build Python with
+`-Ccmake.define.FETCHCONTENT_SOURCE_DIR_MINIEXPR=/path/to/miniexpr`.
+Graph qualification runs must set `MENUDET_REQUIRE_GRAPH_RUNTIME=1`; ordinary
+optional-dependency tests skip if the installed revision lacks graph preparation,
+but qualification may not count those skips as passes. The default Python miniexpr
+pin has not been changed to an unpublished native revision.
+
+## Qualification boundaries and remaining work
+
+The first slice is map plus an optional root logical reduction, with a distinct
+optional final conversion. G5 now has a separate opt-in materialized subset for
+intermediate reductions, shared strong stage values, broadcast consumers and
+trusted validated Menudet 0.1 beta regions. See `native-stages-1.md` for its explicit
+participation, lifetime and resource contracts; it does not broaden the first slice.
+Current platform CI already runs graph hosts/corpus tests wherever artifact tests
+run, including interpreter-only and Node/WASM configurations. Actual publication
+qualification still requires fresh exact-revision Linux/macOS/Windows/WASM jobs
+and exact-revision compiler allocator qualification. Local distribution/install and
+graph/JSON/materialization allocation checks pass; local green tests do not
+certify those platforms or promise a universal speedup/NumPy reduction bit parity.
+
+### Local checkpoint (2026-10-09)
+
+Baseline native revision: `b0541bb54f65cbe8cdb7d9de2601372117a1ffaf`;
+Python baseline: `cf9cf3596708d69f1318c739613e03b6fcb56d84` plus this graph work.
+Reference NumPy 2.5.3 / Python 3.14.4, macOS arm64, interpreter and host JIT.
+Graph inference checks 2,778 arithmetic and 854 function corpus cases; 415/209
+cases outside the single-return/constant-free inference adapter are explicitly
+skipped, not counted as graph conformance. Existing artifact corpora still cover
+their own wider contracts. Graph/yyjson allocation failure tests now exercise
+37 map, 278 automatic-stage, 38 final-conversion and 70 reduction-initial allocation
+checkpoints, including schedule/execution and successful recovery. The additional
+`graph_compiler_allocation` executable instruments every miniexpr compiler, graph,
+artifact, iterator and yyjson translation unit. It sweeps every allocation in the
+baseline map/intermediate-reduction preparation paths, including requested optional
+JIT, checks diagnostic/ownership safety, evaluates any successful fallback, and
+reprepares after every failure. It does not instrument system-library or dynamically
+loaded compiler internals, nor claim every possible allocation branch is covered.
+Standalone Node/WASM32 interpreter hosts pass the five fixtures, lifecycle and
+inference tests; native ASan graph/array/artifact tests also pass.
+
+Latest local G5 qualification: 439 native CTests passed; the paired Python graph,
+array, JIT, Menudet artifact/DSL, persistence and nullable-table regression selection
+passed 919 tests with 17 skips in 149 seconds. Graph runtime was required, so none
+of those skips hide missing graph support. The Node/WASM graph selection passed
+9 tests and the ASan graph/array/artifact selection passed 11. A standalone native
+install linked and executed the staged host using installed headers/libraries; a
+non-editable Python wheel built and its independently installed staged smoke test
+passed. Paired CI now requires graph support and tests the non-editable wheel,
+records both revisions and uploads distribution/configuration evidence. Remote
+Linux/Windows/exact-pair publication qualification has **not** run locally.
+
+`bench/benchmark_graph_preparation.c` reports C-only CPU-time phases and graph-owned
+metadata/schedule bytes, iterator bounds/actual peak and output size separately.
+Compiler/artifact resources and process RSS are **not** included in those metadata
+queries. Python's `bench/ndarray/native-graph-preparation.py` interleaves the old
+export-twice baseline, native JSON and native text preparation, specialization,
+first/warm execution and value rebinding, with revision/configuration metadata.
+One warm-process, interpreter-only float32 sample (10 repetitions, 10,000 items)
+measured preparation medians of 137.0 / 16.8 / 22.8 microseconds respectively;
+specialization 5.8 microseconds. Execution was approximately 22.7 milliseconds
+on all native runs: this is a preparation architecture gain, not a claimed execution
+speedup. Repeated subprocess/cold-compiler and broader workload/RSS studies remain
+publication requirements, not extrapolations from this one sample.
+
+### Materialized stage cost samples
+
+`bench/ndarray/native-graph-stages.py` separates preparation (including requested
+compilation), specialization, first/warm execution, rebinding, graph-owned metadata,
+iterator bounds/actual scratch, output, reserved intermediates, last consumers and
+whole-process peak RSS. Compiler-only memory is not inferred from RSS. It records
+both revision IDs and dirty tracked-tree indicators; measurements below are working
+tree G5 additions on native `5fd1a2b` / Python `225c3596`, not released-pair signoff.
+
+Fresh subprocess samples of `x - sum(x, axis=0)`, warm imports and five execution
+repetitions, on the same macOS arm64/Python 3.14.4/NumPy 2.5.3 environment:
+
+| Input / route | Prepare (us) | Specialize (us) | First (us) | Warm median (us) | Intermediate / output bytes | Process peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| float32 (1000,16), interpreter | 444 | 10.6 | 26674 | 17653 | 64 / 64000 | 79.2 MB |
+| float64 (1000,16), 2 actual JIT regions | 9241 | 13.0 | 294 | 259 | 128 / 128000 | 78.5 MB |
+| int64 (10,16), interpreter | 152 | 10.8 | 226 | 190 | 128 / 1280 | 76.3 MB |
+
+These are workload/route cost examples, **not controlled cross-dtype speedup
+comparisons**. Preparation includes compilation when requested; import cost is
+excluded. Reduction grouping is unchanged. Metadata is roughly 59 KB per two-stage
+plan and 57 KB per specialization because this experimental API currently uses
+fixed bounded stage/input arrays. This overhead is visible and may matter more than
+materialization for tiny graphs; no memory-efficiency superiority is claimed.
+## Integer-power optimization
+
+The optional root field `"optimization": "aggressive"` enables multiplication
+chains for bounded constant integer exponents of real floating bases. Native
+typed lowering evaluates the base once; negative powers invert the base first.
+This policy can change rounding and FP status, but does not enable global
+fast-math, affect integer/complex bases, or rewrite nonconstant exponents.
+It survives serialization and automatic stage splitting. Generated map artifacts
+record it as `"semantics": {"integer_powers": "multiply", ...}`.
+Absent this field, only constant real squares are replaced with multiplication.

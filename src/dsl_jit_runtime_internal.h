@@ -13,6 +13,7 @@
 
 #include "dsl_config.h"
 #include "dsl_jit_ir.h"
+#include "dsl_math_dispatch.h"
 #include "miniexpr.h"
 
 #include <stdbool.h>
@@ -29,16 +30,49 @@
 #endif
 
 #ifndef ME_DSL_JIT_CGEN_VERSION
-#define ME_DSL_JIT_CGEN_VERSION 20
+#define ME_DSL_JIT_CGEN_VERSION 30
 #endif
 
 #ifndef ME_DSL_JIT_BRIDGE_ABI_VERSION
-/* Runtime math bridge ABI for JIT-generated symbols (frozen list v1). */
-#define ME_DSL_JIT_BRIDGE_ABI_VERSION 1
+/* Runtime function-table bridge ABI used by generated TCC entry points. */
+#define ME_DSL_JIT_BRIDGE_ABI_VERSION 2
 #endif
 
 #define ME_DSL_JIT_META_MAGIC 0x4d454a49544d4554ULL
-#define ME_DSL_JIT_META_VERSION 7
+const me_jit_options *dsl_jit_exchange_options(const me_jit_options *options);
+#define ME_DSL_JIT_META_VERSION 8
+
+/* Menudet 1.1 private kernel bridge layout. The kernel receives the mask, then
+ * a dispatcher pointer and up to 128 borrowed typed nodes per family, addressed
+ * as inputs[n_vars + offset]. Slot 0 is the mask; each family spans 129 slots. */
+#define ME_DSL_MENUDET_JIT_BRIDGE_LIMIT 128
+#define ME_DSL_MENUDET_JIT_CMP_OFF 1
+#define ME_DSL_MENUDET_JIT_MATH1_OFF 130
+#define ME_DSL_MENUDET_JIT_MATH2_OFF 259
+#define ME_DSL_MENUDET_JIT_PRED_OFF 388
+#define ME_DSL_MENUDET_JIT_IOP_OFF 517
+/* ND context: one pointer to [ndim, shape[ndim], origin[ndim], extent[ndim]]. */
+#define ME_DSL_MENUDET_JIT_ND_OFF 646
+/* Invocation-local while limit; zero disables the cap, matching interpretation. */
+#define ME_DSL_MENUDET_JIT_CAP_OFF 647
+#define ME_DSL_MENUDET_JIT_CHECKED_OFF 648
+#define ME_DSL_MENUDET_JIT_LOCALS_OFF 777
+/* Pre-resolved libm callbacks; addresses are bound per invocation, never cached
+ * in generated source/artifacts. Generic node/dispatcher families stay intact. */
+#define ME_DSL_MENUDET_JIT_MATH1_FN_OFF 778
+#define ME_DSL_MENUDET_JIT_MATH2_FN_OFF 906
+#define ME_DSL_MENUDET_JIT_MATH3_FN_OFF 1034
+#define ME_DSL_MENUDET_JIT_PRED_FN_OFF 1162
+#define ME_DSL_MENUDET_JIT_ARITH_OFF 1290
+#define ME_DSL_MENUDET_JIT_EXTRA 1291
+
+#if ME_DSL_MENUDET_JIT_MATH2_FN_OFF != ME_DSL_MENUDET_JIT_MATH1_FN_OFF + ME_DSL_MENUDET_JIT_BRIDGE_LIMIT || \
+    ME_DSL_MENUDET_JIT_MATH3_FN_OFF != ME_DSL_MENUDET_JIT_MATH2_FN_OFF + ME_DSL_MENUDET_JIT_BRIDGE_LIMIT || \
+    ME_DSL_MENUDET_JIT_PRED_FN_OFF != ME_DSL_MENUDET_JIT_MATH3_FN_OFF + ME_DSL_MENUDET_JIT_BRIDGE_LIMIT || \
+    ME_DSL_MENUDET_JIT_ARITH_OFF != ME_DSL_MENUDET_JIT_PRED_FN_OFF + ME_DSL_MENUDET_JIT_BRIDGE_LIMIT || \
+    ME_DSL_MENUDET_JIT_EXTRA != ME_DSL_MENUDET_JIT_ARITH_OFF + 1
+#error "menudet JIT callback slot ranges overlap or contain a gap"
+#endif
 
 #if ME_USE_WASM32_JIT
 typedef int (*me_dsl_jit_kernel_fn)(const void **inputs, void *output, int nitems);
@@ -154,20 +188,49 @@ typedef struct {
     bool uses_flat_idx;
     int compile_ndims;
     me_dsl_fp_mode fp_mode;
+    me_dsl_math_backend math_backend;
+    me_dsl_sleef_ulp sleef_ulp;
+    bool fp_explicit;
+    bool math_explicit;
+    bool ulp_explicit;
     me_dsl_semantic_profile semantic_profile;
-    bool portable_reduced_vars[ME_MAX_VARS];
+    bool integer_powers;
+    me_math_dispatch math_dispatch;
+    bool numpy_weak_vars[ME_MAX_VARS];
+    bool menudet_reduced_vars[ME_MAX_VARS];
     me_dsl_compiler compiler;
     me_jit_mode jit_request_mode;
+    bool expression_only;
     bool guaranteed_return;
     bool output_is_scalar;
     me_dtype output_dtype;
     size_t output_itemsize;   /* width bound when output_dtype is a string type */
     me_dsl_jit_ir_program *jit_ir;
     uint64_t jit_ir_fingerprint;
+    /* Distinguishes typed menudet source from legacy wasm-patchable C. */
+    bool jit_menudet_wasm_source;
     int jit_ir_error_line;
     int jit_ir_error_column;
     char jit_ir_error[128];
     char *jit_c_source;
+    const me_expr *menudet_jit_comparisons[128]; /* Borrowed typed nodes. */
+    int menudet_jit_ncomparisons;
+    const me_expr *menudet_jit_math[128]; /* Borrowed unary typed nodes. */
+    const void *menudet_jit_math_fn[128]; /* Native float/double callback ABI. */
+    int menudet_jit_nmath;
+    const me_expr *menudet_jit_math2[128]; /* Borrowed binary typed nodes. */
+    const void *menudet_jit_math2_fn[128];
+    int menudet_jit_nmath2;
+    const me_expr *menudet_jit_math3[128];
+    const void *menudet_jit_math3_fn[128];
+    int menudet_jit_nmath3;
+    const me_expr *menudet_jit_preds[128]; /* Borrowed predicate typed nodes. */
+    const void *menudet_jit_pred_fn[128];
+    int menudet_jit_npreds;
+    const me_expr *menudet_jit_iops[128]; /* Borrowed integer-operator typed nodes. */
+    int menudet_jit_niops;
+    const me_expr *menudet_jit_checked[128]; /* Borrowed checked scalar nodes. */
+    int menudet_jit_nchecked;
     bool jit_use_runtime_math_bridge;
     bool jit_scalar_math_bridge_enabled;
     bool jit_synth_reserved_non_nd;
@@ -188,6 +251,10 @@ typedef struct {
     void *jit_tcc_state;
     uint64_t jit_runtime_key;
     bool jit_dl_handle_cached;
+    bool menudet_jit_has_arith_bridge;
+    bool menudet_jit_has_ramp_bridge;
+    uint8_t menudet_jit_arith_ntemps;
+    uint16_t menudet_jit_arith_nnodes;
 } me_dsl_compiled_program;
 
 size_t dtype_size(me_dtype dtype);  /* functions.h; declared here to avoid the include cycle */
@@ -217,6 +284,8 @@ typedef struct {
     int32_t output_dtype;
     int32_t fp_mode;
     int32_t compiler;
+    int32_t math_backend;
+    int32_t sleef_ulp;
     int32_t nparams;
     int32_t param_dtypes[ME_MAX_VARS];
     int32_t binding_kinds[ME_MAX_VARS];
@@ -284,6 +353,7 @@ bool dsl_jit_cc_promote_self_symbols_global(void);
 #if ME_USE_WASM32_JIT
 bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key);
 bool dsl_jit_wasm_pos_cache_bind_program(me_dsl_compiled_program *program, uint64_t key);
+void dsl_jit_wasm_pos_cache_release_program(me_dsl_compiled_program *program);
 void dsl_jit_wasm_pos_cache_reset_for_tests(void);
 void dsl_wasm_jit_free_dispatch(int idx);
 void dsl_register_wasm_jit_helpers(me_wasm_jit_instantiate_helper instantiate_helper,

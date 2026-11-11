@@ -27,5 +27,17 @@ int main(void) {
     assert(rc == ME_COMPILE_SUCCESS && expr);
     me_free(expr);
     check_restored();
+    expr = NULL;
+    options.math_backend = "bogus";
+    rc = me_compile_nd_jit_options("def k():\n    return sin(1.0)\n", NULL, 0, ME_FLOAT64, 1,
+        shape, chunks, blocks, ME_JIT_OFF, &options, &error, &expr);
+    assert(rc != ME_COMPILE_SUCCESS && !expr);
+    check_restored();
+    options.math_backend = "system";
+    rc = me_compile_nd_jit_options("def k():\n    return sin(1.0)\n", NULL, 0, ME_FLOAT64, 1,
+        shape, chunks, blocks, ME_JIT_OFF, &options, &error, &expr);
+    assert(rc == ME_COMPILE_SUCCESS && expr);
+    me_free(expr);
+    check_restored();
     return 0;
 }

@@ -57,45 +57,16 @@ void test_asinh() {
 }
 
 void test_asinh_alias() {
-    TEST("asinh(x) vs arcsinh(x) - alias test");
-
-    double x[VECTOR_SIZE] = {-2.0, -1.0, 0.0, 0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0};
-    double result_a[VECTOR_SIZE] = {0};
-    double result_arc[VECTOR_SIZE] = {0};
-
+    TEST("arcsinh is not a native builtin");
     me_variable vars[] = {{"x"}};
-
     int err;
-    me_expr *expr_a = NULL;
-    int rc_expr_a = me_compile("asinh(x)", vars, 1, ME_FLOAT64, &err, &expr_a);
-    me_expr *expr_arc = NULL;
-    int rc_expr_arc = me_compile("arcsinh(x)", vars, 1, ME_FLOAT64, &err, &expr_arc);
-
-    if (!expr_a || !expr_arc) {
-        printf("  FAIL: compilation error\n");
+    me_expr *expr = NULL;
+    int rc = me_compile("arcsinh(x)", vars, 1, ME_FLOAT64, &err, &expr);
+    if (rc == ME_COMPILE_SUCCESS || expr != NULL) {
+        printf("  FAIL: removed alias accepted\n");
         tests_failed++;
-        if (rc_expr_a == ME_COMPILE_SUCCESS) me_free(expr_a);
-        if (rc_expr_arc == ME_COMPILE_SUCCESS) me_free(expr_arc);
-        return;
     }
-
-    const void *var_ptrs[] = {x};
-    ME_EVAL_CHECK(expr_a, var_ptrs, 1, result_a, VECTOR_SIZE);
-    ME_EVAL_CHECK(expr_arc, var_ptrs, 1, result_arc, VECTOR_SIZE);
-
-    for (int i = 0; i < VECTOR_SIZE; i++) {
-        if (fabs(result_a[i] - result_arc[i]) > TOLERANCE) {
-            printf("  FAIL at [%d]: asinh=%.10f, arcsinh=%.10f\n", i, result_a[i], result_arc[i]);
-            tests_failed++;
-            me_free(expr_a);
-            me_free(expr_arc);
-            return;
-        }
-    }
-
-    me_free(expr_a);
-    me_free(expr_arc);
-    printf("  PASS\n");
+    me_free(expr);
 }
 
 void test_acosh() {
@@ -130,45 +101,16 @@ void test_acosh() {
 }
 
 void test_acosh_alias() {
-    TEST("acosh(x) vs arccosh(x) - alias test");
-
-    double x[VECTOR_SIZE] = {1.0, 1.1, 1.5, 2.0, 3.0, 5.0, 10.0, 50.0, 100.0, 1000.0};
-    double result_a[VECTOR_SIZE] = {0};
-    double result_arc[VECTOR_SIZE] = {0};
-
+    TEST("arccosh is not a native builtin");
     me_variable vars[] = {{"x"}};
-
     int err;
-    me_expr *expr_a = NULL;
-    int rc_expr_a = me_compile("acosh(x)", vars, 1, ME_FLOAT64, &err, &expr_a);
-    me_expr *expr_arc = NULL;
-    int rc_expr_arc = me_compile("arccosh(x)", vars, 1, ME_FLOAT64, &err, &expr_arc);
-
-    if (!expr_a || !expr_arc) {
-        printf("  FAIL: compilation error\n");
+    me_expr *expr = NULL;
+    int rc = me_compile("arccosh(x)", vars, 1, ME_FLOAT64, &err, &expr);
+    if (rc == ME_COMPILE_SUCCESS || expr != NULL) {
+        printf("  FAIL: removed alias accepted\n");
         tests_failed++;
-        if (rc_expr_a == ME_COMPILE_SUCCESS) me_free(expr_a);
-        if (rc_expr_arc == ME_COMPILE_SUCCESS) me_free(expr_arc);
-        return;
     }
-
-    const void *var_ptrs[] = {x};
-    ME_EVAL_CHECK(expr_a, var_ptrs, 1, result_a, VECTOR_SIZE);
-    ME_EVAL_CHECK(expr_arc, var_ptrs, 1, result_arc, VECTOR_SIZE);
-
-    for (int i = 0; i < VECTOR_SIZE; i++) {
-        if (fabs(result_a[i] - result_arc[i]) > TOLERANCE) {
-            printf("  FAIL at [%d]: acosh=%.10f, arccosh=%.10f\n", i, result_a[i], result_arc[i]);
-            tests_failed++;
-            me_free(expr_a);
-            me_free(expr_arc);
-            return;
-        }
-    }
-
-    me_free(expr_a);
-    me_free(expr_arc);
-    printf("  PASS\n");
+    me_free(expr);
 }
 
 void test_atanh() {
@@ -203,45 +145,16 @@ void test_atanh() {
 }
 
 void test_atanh_alias() {
-    TEST("atanh(x) vs arctanh(x) - alias test");
-
-    double x[VECTOR_SIZE] = {-0.9, -0.5, -0.1, 0.0, 0.1, 0.5, 0.9, 0.99, 0.999, 0.9999};
-    double result_a[VECTOR_SIZE] = {0};
-    double result_arc[VECTOR_SIZE] = {0};
-
+    TEST("arctanh is not a native builtin");
     me_variable vars[] = {{"x"}};
-
     int err;
-    me_expr *expr_a = NULL;
-    int rc_expr_a = me_compile("atanh(x)", vars, 1, ME_FLOAT64, &err, &expr_a);
-    me_expr *expr_arc = NULL;
-    int rc_expr_arc = me_compile("arctanh(x)", vars, 1, ME_FLOAT64, &err, &expr_arc);
-
-    if (!expr_a || !expr_arc) {
-        printf("  FAIL: compilation error\n");
+    me_expr *expr = NULL;
+    int rc = me_compile("arctanh(x)", vars, 1, ME_FLOAT64, &err, &expr);
+    if (rc == ME_COMPILE_SUCCESS || expr != NULL) {
+        printf("  FAIL: removed alias accepted\n");
         tests_failed++;
-        if (rc_expr_a == ME_COMPILE_SUCCESS) me_free(expr_a);
-        if (rc_expr_arc == ME_COMPILE_SUCCESS) me_free(expr_arc);
-        return;
     }
-
-    const void *var_ptrs[] = {x};
-    ME_EVAL_CHECK(expr_a, var_ptrs, 1, result_a, VECTOR_SIZE);
-    ME_EVAL_CHECK(expr_arc, var_ptrs, 1, result_arc, VECTOR_SIZE);
-
-    for (int i = 0; i < VECTOR_SIZE; i++) {
-        if (fabs(result_a[i] - result_arc[i]) > TOLERANCE) {
-            printf("  FAIL at [%d]: atanh=%.10f, arctanh=%.10f\n", i, result_a[i], result_arc[i]);
-            tests_failed++;
-            me_free(expr_a);
-            me_free(expr_arc);
-            return;
-        }
-    }
-
-    me_free(expr_a);
-    me_free(expr_arc);
-    printf("  PASS\n");
+    me_free(expr);
 }
 
 void test_inverse_hyperbolic_roundtrip() {
@@ -291,4 +204,3 @@ int main() {
 
     return (tests_failed == 0) ? 0 : 1;
 }
-

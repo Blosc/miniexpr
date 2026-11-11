@@ -15,6 +15,7 @@
 
 /* Internal signature marker: immutable scalar binding broadcast by the host. */
 #define ME_DSL_UNIFORM_INPUT (1 << 16)
+#define ME_DSL_WEAK_INPUT (1 << 17)
 #include "dsl_parser.h"
 
 #include <stdbool.h>
@@ -28,6 +29,13 @@ int dsl_var_table_add_with_uniform(me_dsl_var_table *table, const char *name, me
 int dsl_var_table_add(me_dsl_var_table *table, const char *name, me_dtype dtype);
 
 extern char synthetic_var_addresses[ME_MAX_VARS];
+/* Function accessor for the synthetic address array: data symbols are not
+ * exported from Windows DLL builds. Returns -1 when bound is not synthetic. */
+int dsl_synthetic_var_index(const void *bound);
+void dsl_menudet_prepare_jit(me_dsl_compiled_program *program);
+void dsl_menudet_prepare_jit_source(me_dsl_compiled_program *program);
+void dsl_menudet_prepare_jit_constants(me_dsl_compiled_program *program,
+    const int64_t *values, const bool *known);
 
 int private_compile_ex(const char *expression, const me_variable *variables, int var_count,
                        void *output, int nitems, me_dtype dtype, int *error, me_expr **out);
@@ -51,6 +59,13 @@ me_dsl_compiled_program *dsl_compile_program_profile(const char *source,
                                                      const me_variable *variables, int var_count,
                                                      me_dtype dtype, int compile_ndims, int jit_mode,
                                                      me_dsl_semantic_profile profile,
+                                                     int *error_pos, bool *is_dsl,
+                                                     char *error_reason, size_t error_reason_cap);
+me_dsl_compiled_program *dsl_compile_program_profile_declared(const char *source,
+                                                     const me_variable *variables, int var_count,
+                                                     me_dtype dtype, int compile_ndims, int jit_mode,
+                                                     me_dsl_semantic_profile profile,
+                                                     const me_dsl_declared_policy *declared,
                                                      int *error_pos, bool *is_dsl,
                                                      char *error_reason, size_t error_reason_cap);
 me_dsl_compiled_program *dsl_compiled_program_alloc(const me_dsl_program *parsed,

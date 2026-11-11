@@ -48,7 +48,7 @@ static void test_arcsinh_int64_to_float64(void) {
     me_variable vars[] = {{"x", ME_INT64}};
     int err;
     me_expr *expr = NULL;
-    int rc = me_compile("arcsinh(x)", vars, 1, ME_FLOAT64, &err, &expr);
+    int rc = me_compile("asinh(x)", vars, 1, ME_FLOAT64, &err, &expr);
     if (rc != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compile error %d at pos %d\n", rc, err);
         failures++;
@@ -153,7 +153,7 @@ static void test_float32_expr_to_float64(void) {
     me_variable vars[] = {{"x", ME_FLOAT32}};
     int err;
     me_expr *expr = NULL;
-    int rc = me_compile("arcsinh(x)", vars, 1, ME_FLOAT64, &err, &expr);
+    int rc = me_compile("asinh(x)", vars, 1, ME_FLOAT64, &err, &expr);
     if (rc != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compile error %d at pos %d\n", rc, err);
         failures++;
@@ -231,7 +231,7 @@ static void test_arcsinh_int64_to_float64_nd(void) {
     me_variable vars[] = {{"x", ME_INT64}};
     int err;
     me_expr *expr = NULL;
-    int rc = me_compile_nd("arcsinh(x)", vars, 1, ME_FLOAT64, 2,
+    int rc = me_compile_nd("asinh(x)", vars, 1, ME_FLOAT64, 2,
                            shape, chunks, blocks, &err, &expr);
     if (rc != ME_COMPILE_SUCCESS) {
         printf("  FAIL: compile error %d at pos %d\n", rc, err);

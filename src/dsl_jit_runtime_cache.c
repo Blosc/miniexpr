@@ -9,6 +9,7 @@
 **********************************************************************/
 
 #include "dsl_jit_runtime_internal.h"
+#include "dsl_menudet_batch.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -83,8 +84,16 @@ uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program) {
         return h;
     }
     h = dsl_jit_hash_u64(h, program->jit_ir_fingerprint);
+    h = dsl_jit_hash_i32(h, (int)program->semantic_profile);
+#if ME_USE_WASM32_JIT
+    h = dsl_jit_hash_i32(h, program->jit_menudet_wasm_source ? 2 : 1);
+    h = dsl_jit_hash_i32(h, program->jit_menudet_wasm_source ? 1 : 0); /* menudet wasm ABI revision */
+#endif
     h = dsl_jit_hash_i32(h, (int)program->output_dtype);
     h = dsl_jit_hash_i32(h, (int)program->fp_mode);
+    h = dsl_jit_hash_i32(h, program->math_backend == ME_DSL_MATH_AUTO ?
+                            (int)ME_DSL_MATH_SYSTEM : (int)program->math_backend);
+    h = dsl_jit_hash_i32(h, (int)program->sleef_ulp);
     h = dsl_jit_hash_i32(h, program->jit_nparams);
     if (program->jit_ir) {
         for (int i = 0; i < program->jit_ir->nparams; i++) {
@@ -116,6 +125,9 @@ uint64_t dsl_jit_runtime_cache_key(const me_dsl_compiled_program *program) {
     h = dsl_jit_hash_i32(h, (int)sizeof(void *));
     h = dsl_jit_hash_i32(h, ME_DSL_JIT_CGEN_VERSION);
     h = dsl_jit_hash_i32(h, ME_DSL_JIT_BRIDGE_ABI_VERSION);
+    h = dsl_jit_hash_i32(h, ME_DSL_MENUDET_JIT_ARITH_ABI_VERSION);
+    h = dsl_jit_hash_i32(h, program->menudet_jit_has_arith_bridge ? 1 : 0);
+    h = dsl_jit_hash_i32(h, program->menudet_jit_has_ramp_bridge ? 1 : 0);
     h = dsl_jit_hash_i32(h, dsl_jit_target_tag());
     h = dsl_jit_hash_i32(h, dsl_jit_backend_tag(program));
     h = dsl_jit_hash_i32(h, program->jit_use_runtime_math_bridge ? 1 : 0);
@@ -146,8 +158,10 @@ static uint64_t dsl_jit_toolchain_hash(const me_dsl_compiled_program *program) {
     }
     if (program->compiler == ME_DSL_COMPILER_LIBTCC) {
         const char *tcc_opts = getenv("ME_DSL_JIT_TCC_OPTIONS");
+        const char *arith_bridge = getenv("ME_DSL_JIT_ARITH_BRIDGE");
         uint64_t h = dsl_jit_hash_cstr(1469598103934665603ULL, "tcc");
-        return dsl_jit_hash_cstr(h, tcc_opts ? tcc_opts : "");
+        h = dsl_jit_hash_cstr(h, tcc_opts ? tcc_opts : "");
+        return dsl_jit_hash_cstr(h, arith_bridge ? arith_bridge : "");
     }
     const char *cc = me_jit_option_value("CC");
     const char *cflags = me_jit_option_value("CFLAGS");
@@ -187,6 +201,9 @@ void dsl_jit_fill_cache_meta(me_dsl_jit_cache_meta *meta,
     meta->output_dtype = (int32_t)program->output_dtype;
     meta->fp_mode = (int32_t)program->fp_mode;
     meta->compiler = (int32_t)program->compiler;
+    meta->math_backend = (int32_t)(program->math_backend == ME_DSL_MATH_AUTO ?
+                                   ME_DSL_MATH_SYSTEM : program->math_backend);
+    meta->sleef_ulp = (int32_t)program->sleef_ulp;
     meta->nparams = (int32_t)program->jit_nparams;
     for (int i = 0; i < ME_MAX_VARS; i++) {
         meta->param_dtypes[i] = -1;

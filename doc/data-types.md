@@ -9,7 +9,7 @@ miniexpr automatically promotes types when necessary. The general promotion hier
 - Lower precision → Higher precision
 - Real types → Complex types (when complex is involved)
 
-**Windows note**: Complex types are not supported on Windows due to C99 complex ABI incompatibilities across MSVC/clang-cl. `me_compile()` will reject expressions that involve complex variables or complex outputs.
+**Windows**: Building requires clang-cl; complex64 and complex128 are supported, including portable interpretation. DSL JIT complex kernels remain unsupported on all platforms.
 
 ## Example 1: Integer Operations
 

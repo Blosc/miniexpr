@@ -30,9 +30,13 @@ set(MINIEXPR_SOURCES
   src/dsl_compile_support.c
   src/dsl_eval.c
   src/dsl_parser.c
-  src/dsl_portable.c
-  src/dsl_portable_types.c
-  src/dsl_portable_expr.c
+  src/dsl_math_policy.c
+  src/dsl_menudet.c
+  src/dsl_menudet_types.c
+  src/dsl_menudet_expr.c
+  src/dsl_menudet_batch.c
+  src/dsl_menudet_batch_complex.c
+  src/dsl_menudet_jit.c
   src/dsl_compare.c
   src/dsl_jit_ir.c
   src/dsl_jit_cgen.c
@@ -45,6 +49,14 @@ set(MINIEXPR_SOURCES
   src/functions.c
   src/functions-simd.c
 )
+
+if(MSVC)
+  set_source_files_properties(src/dsl_menudet_batch.c PROPERTIES
+    COMPILE_OPTIONS "/fp:precise")
+else()
+  set_source_files_properties(src/dsl_menudet_batch.c PROPERTIES
+    COMPILE_OPTIONS "-fno-fast-math;-ffp-contract=off")
+endif()
 
 include(cmake/MiniexprFetchDeps.cmake)
 include(cmake/MiniexprTinyccTargets.cmake)
@@ -98,6 +110,9 @@ function(miniexpr_setup_target target_name)
     target_link_libraries(${target_name} PRIVATE miniexpr_wasm_libtcc)
   endif()
   if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang")
+    # Builtin dispatch uses function addresses as operation identities. Release
+    # ICF must not merge distinct callbacks (e.g. real/conj for Boolean inputs).
+    target_link_options(${target_name} PUBLIC "/OPT:NOICF")
     set(_miniexpr_builtins_names)
     if(CMAKE_VS_PLATFORM_NAME STREQUAL "ARM64"
        OR CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|AARCH64|arm64|aarch64)$")
@@ -134,8 +149,8 @@ function(miniexpr_setup_target target_name)
       if(_miniexpr_builtins_lib)
         target_link_libraries(${target_name} PUBLIC "${_miniexpr_builtins_lib}")
       else()
-        message(STATUS
-          "MiniExpr: clang_rt builtins library not found for ${CMAKE_VS_PLATFORM_NAME}; using default toolchain runtime.")
+        message(WARNING
+          "MiniExpr: clang_rt builtins library not found for ${CMAKE_VS_PLATFORM_NAME}; using default toolchain runtime. Complex arithmetic may fail to link without the compiler runtime helpers.")
       endif()
       unset(_miniexpr_builtins_lib CACHE)
       unset(_miniexpr_builtins_name)
@@ -169,6 +184,10 @@ endif()
 if(MINIEXPR_BUILD_STATIC)
   miniexpr_add_library_target(miniexpr_static STATIC)
   set_target_properties(miniexpr_static PROPERTIES OUTPUT_NAME miniexpr)
+  if(WIN32 AND MINIEXPR_BUILD_SHARED)
+    # A DLL import library and static archive must not overwrite miniexpr.lib.
+    set_target_properties(miniexpr_static PROPERTIES OUTPUT_NAME miniexpr_static)
+  endif()
 endif()
 
 install(FILES
@@ -194,20 +213,51 @@ if(MINIEXPR_BUILD_ARTIFACT)
   if(NOT MINIEXPR_DEFAULT_LIB)
     message(FATAL_ERROR "Artifact support requires a shared or static miniexpr library")
   endif()
-  add_library(miniexpr_artifact STATIC src/dsl_artifact.c "${yyjson_SOURCE_DIR}/src/yyjson.c")
+  add_library(miniexpr_artifact STATIC src/dsl_artifact.c src/dsl_array.c src/dsl_graph.c
+    src/dsl_graph_text.c "${yyjson_SOURCE_DIR}/src/yyjson.c")
   set_target_properties(miniexpr_artifact PROPERTIES POSITION_INDEPENDENT_CODE ON)
-  target_compile_features(miniexpr_artifact PUBLIC c_std_99)
+  target_compile_features(miniexpr_artifact PUBLIC c_std_11)
   target_include_directories(miniexpr_artifact PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
   target_include_directories(miniexpr_artifact PRIVATE "${yyjson_SOURCE_DIR}/src")
   target_compile_definitions(miniexpr_artifact PRIVATE
-    YYJSON_DISABLE_WRITER=1 YYJSON_DISABLE_UTILS=1 YYJSON_DISABLE_FILE=1
+    YYJSON_DISABLE_UTILS=1 YYJSON_DISABLE_FILE=1
     YYJSON_DISABLE_NON_STANDARD=1)
   target_link_libraries(miniexpr_artifact PUBLIC ${MINIEXPR_DEFAULT_LIB})
+  if(NOT WIN32)
+    # The adapter and its consumers use fenv/libm directly, not just through miniexpr.
+    target_link_libraries(miniexpr_artifact PUBLIC m)
+  endif()
   install(FILES "${yyjson_SOURCE_DIR}/LICENSE"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/miniexpr/licenses" RENAME LICENSE-YYJSON)
+  # Standalone distribution only: embedding hosts own their install layout.
+  if(PROJECT_IS_TOP_LEVEL)
+    install(TARGETS miniexpr_artifact ${MINIEXPR_DEFAULT_LIB}
+      ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+      LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+      RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    install(FILES src/miniexpr.h src/miniexpr_artifact.h src/miniexpr_graph.h
+      DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+    install(FILES doc/native-graph-1.schema.json doc/native-staged-graph-1.schema.json
+      doc/native-graphs-1.md doc/native-stages-1.md
+      DESTINATION "${CMAKE_INSTALL_DATADIR}/miniexpr/graphs")
+  endif()
 endif()
 
+function(miniexpr_graph_fault_allocators target_name)
+  if(WIN32)
+    target_compile_options(${target_name} PRIVATE "/FI${PROJECT_SOURCE_DIR}/tests/graph/allocator.h")
+  else()
+    target_compile_options(${target_name} PRIVATE -include "${PROJECT_SOURCE_DIR}/tests/graph/allocator.h")
+  endif()
+endfunction()
+
 if(MINIEXPR_BUILD_TESTS)
+  if(MINIEXPR_BUILD_ARTIFACT)
+    # A separate test-only copy covers compiler allocations without changing the
+    # public allocator ABI or injecting failures into unrelated test executables.
+    miniexpr_add_library_target(miniexpr_graph_fault STATIC)
+    miniexpr_graph_fault_allocators(miniexpr_graph_fault)
+  endif()
   enable_testing()
   add_subdirectory(tests)
 endif()

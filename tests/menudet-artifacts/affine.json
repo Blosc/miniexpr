@@ -1,0 +1,32 @@
+{
+  "schema_version": "0.1",
+  "language": {
+    "name": "menudet",
+    "version": "0.1"
+  },
+  "requires": ["numeric", "control-flow", "block-reductions"],
+  "source": "# me:compiler=tcc\ndef affine(x, scale, bias):\n    return x * scale + bias\n",
+  "entry_point": "affine",
+  "inputs": [
+    {"name": "x", "dtype": "float64"}
+  ],
+  "constants": [
+    {"name": "bias", "dtype": "float64", "encoding": "ieee754-hex", "value": "bff0000000000000", "category": "typed_scalar"},
+    {"name": "scale", "dtype": "float64", "encoding": "ieee754-hex", "value": "4000000000000000", "category": "typed_scalar"}
+  ],
+  "output": {
+    "dtype": "float64",
+    "contract": "elementwise"
+  },
+  "context": {
+    "ndim": 0
+  },
+  "semantics": {
+    "fp": "strict",
+    "numeric": "numpy-2.5",
+    "casting": "unsafe"
+  },
+  "metadata": {
+    "description": "Hand-authored affine kernel: 2*x - 1"
+  }
+}

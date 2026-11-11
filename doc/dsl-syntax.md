@@ -4,7 +4,7 @@ This is the practical reference for the DSL accepted by `me_compile()`.
 It focuses on what works today and the most common gotchas.
 For usage walkthroughs and end-to-end examples, see `doc/dsl-usage.md`.
 
-An experimental [portable profile 1.0](dsl-spec/1.0.md) specifies a versioned
+The [Menudet profile 0.1 (beta)](dsl-spec/0.1.md) specifies a feature-frozen, versioned
 language-independent subset with shared native/Python conformance fixtures.
 This reference continues to describe the full native language.
 
@@ -35,12 +35,22 @@ Supported file-header pragmas:
 
 - `# me:fp=strict|contract|fast`
 - `# me:compiler=tcc|cc`
+- `# me:math=auto|system|sleef|accelerate`
+- `# me:ulp=u10|u35`
 
 Notes:
 
 - Pragma keys must be unique.
 - Unknown `me:*` pragmas are errors.
 - Malformed pragma values are errors.
+- `me:math=auto` and `me:math=system` both select system math; `auto` never
+  consults `ME_SIMD_MATH_BACKEND`. `scalar` is an environment-only spelling.
+- `me:ulp` is meaningful only with `me:math=sleef` (including a SLEEF backend
+  selected by the environment); otherwise it is rejected. Omitted SLEEF
+  accuracy is `u35`.
+- Explicit `sleef` or `accelerate` requests fail during preparation when the
+  backend is unavailable on the build, platform or CPU.
+- `me:fp=contract|fast` requires `# me:compiler=cc`; TCC supports strict only.
 - An explicit compiler pragma overrides the `ME_DSL_JIT_COMPILER` environment
   default. With no compiler pragma, that environment setting selects the default.
   `ME_JIT_OFF` disables JIT independently of compiler selection; unavailable JIT
@@ -159,7 +169,8 @@ Commonly supported:
 - Unary operators: `+`, `-`, logical not (`not` / `!`)
 - Arithmetic and bitwise binary operators
 - Comparisons: `==`, `!=`, `<`, `<=`, `>`, `>=`
-- Function calls to supported miniexpr functions
+- Function calls to supported miniexpr functions (including `conj`, `real`, `imag`, `abs` for complex types)
+- Block reductions: `block_sum`, `block_prod`, `block_mean`, `block_min`, `block_max`, `block_any`, `block_all`
 - User-registered C functions/closures passed in `me_variable`
 
 DSL expressions support Python-style chained comparisons such as `0 <= x < 10`
@@ -194,7 +205,7 @@ Cast rules:
   dtype. Floating `int()` truncates toward zero; `bool()` tests nonzero truth.
   Conversion to the requested output dtype happens after this operation.
   Overflow/non-finite integer conversions and `float()`'s contextual evaluation
-  rules remain part of the experimental portable numeric audit.
+  rules are covered in the Menudet 0.1 beta numeric audit.
 
 ## Temporary variable type inference
 
@@ -202,7 +213,7 @@ In strict mode, leaf `sin(x)`/`cos(x)` calls on float32 variables evaluate with
 scalar float operations at every block size. The float result rounds before
 widening or comparison; approximate SIMD math must not change these strict
 values or branch decisions. This bounded rule does not certify all other math
-functions or nested arithmetic contexts in the experimental portable profile.
+functions or nested arithmetic contexts in the Menudet 0.1 beta profile.
 
 Local temporaries get their dtype from the expression assigned to them.
 
@@ -219,9 +230,13 @@ In this example, `temp` is inferred from `sin(x) ** 2` (typically a floating typ
 Notes:
 
 - You do not need to declare local variable types.
+- Weak-scalar strength is preserved across local variable joins (matching NumPy 2.x).
+  A local initialized from a weak Python literal and later reassigned or updated
+  from a strong operand (such as `z = 0.0; z = z + x_float32`) retains the strong
+  operand's storage type (e.g. `float32`) instead of unnecessarily widening to `float64`.
 - Boolean output does not force numeric temporaries to Boolean: operand types
   are inferred independently, and the return value is converted to Boolean.
-- If you assign a value with an incompatible dtype to the same local later, compilation fails.
+- If you assign a value with an incompatible strong dtype to the same local later, compilation fails.
 
 ## Loops
 

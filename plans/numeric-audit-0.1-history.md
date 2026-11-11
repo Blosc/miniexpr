@@ -2,7 +2,7 @@
 
 **Historical audit only:** this records earlier ordinary full-DSL investigations,
 not public portable support. Current portable semantics are
-[draft 1.0](../doc/dsl-spec/1.0.md).
+[draft 1.0](../doc/dsl-spec/0.1.md).
 Unfinished numeric domains below are excluded or explicit runtime preconditions,
 not an open-ended release queue. The earlier broad feature filter is replaced by
 source and compiled-tree membership checks. These are checked conversions and
@@ -42,7 +42,7 @@ base-prefixed spellings. Typed inputs/constants can transport wider integers.
 
 ## Blocking expression gaps
 
-The fixtures in `tests/portable-dsl/audit/` are reproducers, not passing JIT
+The fixtures in `tests/menudet-dsl/audit/` are reproducers, not passing JIT
 conformance claims. Do not standardize their current backend discrepancies.
 
 ### Division promotion: first correction implemented

@@ -1,0 +1,756 @@
+/* Native logical traversal. Storage/decompression is a host concern, grouping is
+ * not: each reduction visits C logical coordinates in a fixed serial order. */
+#include "miniexpr_artifact.h"
+#include "dsl_graph_internal.h"
+#include "dsl_menudet_fp.h"
+#include "dsl_menudet_reduce.h"
+#include <limits.h>
+#include <math.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+
+static int a_error(me_artifact_error *e, int rc, const char *message) {
+    if (e) { memset(e, 0, sizeof(*e)); snprintf(e->message, sizeof(e->message), "%s", message); }
+    return rc;
+}
+static size_t a_width(me_dtype d) {
+    switch (d) {
+        case ME_BOOL: case ME_INT8: case ME_UINT8: return 1;
+        case ME_INT16: case ME_UINT16: return 2;
+        case ME_INT32: case ME_UINT32: case ME_FLOAT32: return 4;
+        case ME_INT64: case ME_UINT64: case ME_FLOAT64: return 8;
+        case ME_COMPLEX64: return 8;
+        case ME_COMPLEX128: return 16;
+        default: return 0;
+    }
+}
+static bool a_complex(me_dtype d) { return d == ME_COMPLEX64 || d == ME_COMPLEX128; }
+static me_dtype a_component(me_dtype d) {
+    return d == ME_COMPLEX64 ? ME_FLOAT32 : d == ME_COMPLEX128 ? ME_FLOAT64 : ME_AUTO;
+}
+static bool a_unsigned(me_dtype d) {
+    return d == ME_BOOL || d == ME_UINT8 || d == ME_UINT16 || d == ME_UINT32 || d == ME_UINT64;
+}
+static bool a_float(me_dtype d) { return d == ME_FLOAT32 || d == ME_FLOAT64; }
+static bool a_product(int rank, const int64_t *shape, size_t *n) {
+    if (rank < 0 || rank > ME_ARRAY_MAX_RANK || (rank && !shape)) return false;
+    *n = 1;
+    for (int i = 0; i < rank; i++) {
+        if (shape[i] < 0 || (shape[i] && *n > SIZE_MAX / (uint64_t)shape[i])) return false;
+        *n *= (size_t)shape[i];
+    }
+    return true;
+}
+static bool a_add(size_t base, int64_t stride, uint64_t count, size_t *out) {
+    uint64_t magnitude = stride < 0 ? (uint64_t)(-(stride + 1)) + 1 : (uint64_t)stride;
+    if (magnitude && count > SIZE_MAX / magnitude) return false;
+    size_t bytes = (size_t)(magnitude * count);
+    if (stride < 0) { if (bytes > base) return false; *out = base - bytes; }
+    else { if (base > SIZE_MAX - bytes) return false; *out = base + bytes; }
+    return true;
+}
+static bool a_valid(const me_array_view *v) {
+    size_t n, width = a_width(v->dtype), low = v->offset, high = v->offset;
+    if (!width || !a_product(v->rank, v->shape, &n) || v->byte_order > 2 || v->offset > v->capacity) return false;
+    if (v->capacity && (!v->base || (uintptr_t)v->base > UINTPTR_MAX - v->capacity)) return false;
+    if (!n) return true;
+    for (int i = 0; i < v->rank; i++) {
+        if (!a_add(v->strides[i] < 0 ? low : high, v->strides[i], (uint64_t)v->shape[i] - 1,
+                   v->strides[i] < 0 ? &low : &high)) return false;
+    }
+    return v->base && high <= v->capacity && width <= v->capacity - high &&
+           (uintptr_t)v->base <= UINTPTR_MAX - v->capacity;
+}
+static bool a_overlap(const void *a, size_t na, const void *b, size_t nb) {
+    return na && nb && (uintptr_t)a < (uintptr_t)b + nb && (uintptr_t)b < (uintptr_t)a + na;
+}
+static bool a_native(const me_array_view *v) {
+    uint16_t x = 1;
+    return !v->byte_order || v->byte_order == (*(uint8_t *)&x ? 1u : 2u);
+}
+static bool a_contiguous(const me_array_view *v) {
+    size_t stride = a_width(v->dtype);
+    for (int i = v->rank - 1; i >= 0; i--) {
+        if (v->shape[i] > 1 && (v->strides[i] < 0 || (uint64_t)v->strides[i] != stride)) return false;
+        if (v->shape[i] && stride > INT64_MAX / (uint64_t)v->shape[i]) return false;
+        stride *= (size_t)v->shape[i];
+    }
+    return true;
+}
+static me_array_view a_output_view(const me_array_output *output) {
+    me_array_view view = {0};
+    view.dtype = output->dtype; view.base = output->base;
+    view.capacity = output->capacity; view.offset = output->offset;
+    view.rank = output->rank;
+    memcpy(view.shape, output->shape, sizeof(view.shape));
+    memcpy(view.strides, output->strides, sizeof(view.strides));
+    return view;
+}
+me_artifact_status dsl_array_output_validate(const me_array_output *output,
+    int rank, const int64_t *shape, me_dtype dtype, me_artifact_error *error) {
+    if (!output || output->struct_size != sizeof(*output) ||
+        output->version != ME_ARRAY_OUTPUT_VERSION || output->rank != rank ||
+        rank < 0 || rank > ME_ARRAY_MAX_RANK || (rank && !shape) || output->dtype != dtype)
+        return a_error(error, ME_ARTIFACT_ERR_BINDING, "invalid output descriptor or signature");
+    me_array_view view = a_output_view(output);
+    size_t count, width = a_width(dtype);
+    if (!a_valid(&view) || !a_product(rank, shape, &count) ||
+        (rank && memcmp(shape, view.shape, (size_t)rank * sizeof(*shape))))
+        return a_error(error, ME_ARTIFACT_ERR_BINDING, "invalid output bounds or shape");
+    if (!count) return ME_ARTIFACT_SUCCESS;
+    if (((uintptr_t)view.base + view.offset) % width)
+        return a_error(error, ME_ARTIFACT_ERR_BINDING, "unaligned output origin");
+    /* Sort nontrivial axes by absolute stride. Each slower axis must clear the
+     * entire faster footprint. Conservative by design: no overlap solver. */
+    uint64_t strides[ME_ARRAY_MAX_RANK], extents[ME_ARRAY_MAX_RANK];
+    int axes = 0;
+    for (int i = 0; i < rank; i++) if (shape[i] > 1) {
+        int64_t stride = view.strides[i];
+        uint64_t magnitude = stride < 0 ? (uint64_t)(-(stride + 1)) + 1 : (uint64_t)stride;
+        if (!magnitude || magnitude % width)
+            return a_error(error, ME_ARTIFACT_ERR_BINDING, "overlapping or unaligned output strides");
+        int j = axes++;
+        while (j && strides[j - 1] > magnitude) {
+            strides[j] = strides[j - 1]; extents[j] = extents[j - 1]; j--;
+        }
+        strides[j] = magnitude; extents[j] = (uint64_t)shape[i];
+    }
+    size_t span = width;
+    for (int i = 0; i < axes; i++) {
+        if (strides[i] < span || strides[i] > SIZE_MAX ||
+            extents[i] - 1 > (SIZE_MAX - span) / strides[i])
+            return a_error(error, ME_ARTIFACT_ERR_BINDING, "output layout is not provably disjoint");
+        span += (size_t)((extents[i] - 1) * strides[i]);
+    }
+    return ME_ARTIFACT_SUCCESS;
+}
+static bool a_broadcast(const me_array_view *v, int rank, const int64_t *shape) {
+    if (!a_valid(v) || v->rank > rank) return false;
+    for (int i = 0; i < v->rank; i++) {
+        if (v->shape[i] != 1 && v->shape[i] != shape[rank - v->rank + i]) return false;
+    }
+    return true;
+}
+static size_t a_offset(const me_array_view *v, int rank, const int64_t *coordinates) {
+    size_t offset = v->offset;
+    for (int i = 0; i < v->rank; i++) {
+        if (v->shape[i] != 1) a_add(offset, v->strides[i], (uint64_t)coordinates[rank - v->rank + i], &offset);
+    }
+    return offset;
+}
+static void a_coordinates(int rank, const int64_t *shape, const bool *axes,
+    bool reduction, size_t group, size_t lane, int64_t *coordinates) {
+    for (int i = rank - 1; i >= 0; i--) {
+        size_t *index = reduction && !axes[i] ? &group : &lane;
+        coordinates[i] = (int64_t)(*index % (size_t)shape[i]);
+        *index /= (size_t)shape[i];
+    }
+}
+static size_t a_source_index(const me_array_view *v, int rank, const int64_t *coordinates) {
+    size_t index = 0;
+    for (int i = 0; i < v->rank; i++) {
+        index *= (size_t)v->shape[i];
+        if (v->shape[i] != 1) index += (size_t)coordinates[rank - v->rank + i];
+    }
+    return index;
+}
+static bool a_reader_valid(const me_array_view *v, int rank, const int64_t *shape) {
+    size_t count;
+    if (!a_width(v->dtype) || !a_product(v->rank, v->shape, &count) ||
+        v->rank > rank || v->base || v->capacity || v->offset || v->byte_order) return false;
+    for (int i = 0; i < v->rank; i++) {
+        if (v->shape[i] != 1 && v->shape[i] != shape[rank - v->rank + i]) return false;
+    }
+    return true;
+}
+static void a_load(const me_array_view *v, size_t offset, void *out) {
+    size_t width = a_width(v->dtype);
+    const uint8_t *p = (const uint8_t *)v->base + offset;
+    if (a_native(v)) memcpy(out, p, width);
+    else for (size_t i = 0; i < width; i++) ((uint8_t *)out)[i] = p[width - i - 1];
+}
+static bool a_axes(int rank, const me_array_options *o, bool *axes) {
+    memset(axes, 0, ME_ARRAY_MAX_RANK * sizeof(bool));
+    if (!o || o->version != ME_ARTIFACT_ARRAY_VERSION || o->reduction < ME_ARRAY_NONE || o->reduction > ME_ARRAY_ALL ||
+        o->naxes < -1 || o->naxes > rank) return false;
+    if (o->reduction == ME_ARRAY_NONE) return o->naxes == 0 && !o->initial && o->accumulator == ME_AUTO && !o->where;
+    if (o->initial && (o->reduction == ME_ARRAY_ANY || o->reduction == ME_ARRAY_ALL)) return false;
+    if (o->naxes == -1) { for (int i = 0; i < rank; i++) axes[i] = true; }
+    else for (int i = 0; i < o->naxes; i++) {
+        int axis = o->axes[i] < 0 ? o->axes[i] + rank : o->axes[i];
+        if (axis < 0 || axis >= rank || axes[axis]) return false;
+        axes[axis] = true;
+    }
+    return true;
+}
+static me_dtype a_dtype(me_dtype source, const me_array_options *o) {
+    if (o->reduction == ME_ARRAY_ANY || o->reduction == ME_ARRAY_ALL) return o->accumulator == ME_AUTO ? ME_BOOL : ME_AUTO;
+    if (o->accumulator != ME_AUTO) {
+        bool compatible = a_float(source) ? a_float(o->accumulator) :
+                          a_complex(source) ? (a_float(o->accumulator) || a_complex(o->accumulator)) :
+                          true;
+        return a_width(o->accumulator) && compatible ? o->accumulator : ME_AUTO;
+    }
+    if ((o->reduction == ME_ARRAY_SUM || o->reduction == ME_ARRAY_PROD) &&
+        !a_float(source) && !a_complex(source)) {
+        return a_unsigned(source) && source != ME_BOOL ? ME_UINT64 : ME_INT64;
+    }
+    return source;
+}
+me_artifact_status me_array_result_shape(const me_artifact *a, int rank, const int64_t *shape,
+    const me_array_options *o, int *out_rank, int64_t *out_shape, me_dtype *dtype, me_artifact_error *error) {
+    if (error) memset(error,0,sizeof(*error));
+    bool axes[ME_ARRAY_MAX_RANK]; size_t n;
+    if (!a || !out_rank || !out_shape || !dtype || !a_product(rank, shape, &n) || !a_axes(rank, o, axes)) return a_error(error, ME_ARTIFACT_ERR_BINDING, "invalid logical shape, axes or options");
+    if (strcmp(me_artifact_schema_version(a), "0.1") || me_artifact_context_ndim(a) ||
+        me_artifact_result_cardinality(a) != ME_ARTIFACT_ELEMENTWISE || !a_width(me_artifact_output_dtype(a))) return a_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "logical arrays require numeric elementwise rank-zero Menudet 0.1 beta");
+    *dtype = a_dtype(me_artifact_output_dtype(a), o);
+    if (*dtype == ME_AUTO) return a_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported accumulator signature");
+    *out_rank = 0;
+    for (int i = 0; i < rank; i++) {
+        if (!axes[i] || o->keepdims) out_shape[(*out_rank)++] = axes[i] ? 1 : shape[i];
+    }
+    return ME_ARTIFACT_SUCCESS;
+}
+static uint64_t a_integer(me_dtype dtype, const void *p) {
+    switch (dtype) {
+        case ME_BOOL: case ME_UINT8: { uint8_t x; memcpy(&x,p,1); return x; }
+        case ME_INT8: { int8_t x; memcpy(&x,p,1); return (uint64_t)x; }
+        case ME_UINT16: { uint16_t x; memcpy(&x,p,2); return x; }
+        case ME_INT16: { int16_t x; memcpy(&x,p,2); return (uint64_t)x; }
+        case ME_UINT32: { uint32_t x; memcpy(&x,p,4); return x; }
+        case ME_INT32: { int32_t x; memcpy(&x,p,4); return (uint64_t)x; }
+        default: { uint64_t x; memcpy(&x,p,8); return x; }
+    }
+}
+static bool a_extrema_valid(const me_array_options *o, size_t red_count, size_t out_count, bool mask) {
+    return !((o->reduction == ME_ARRAY_MIN || o->reduction == ME_ARRAY_MAX) &&
+        !o->initial && (!red_count || mask) && out_count);
+}
+me_artifact_status dsl_array_validate_domain(const me_artifact *a, int rank,
+    const int64_t *shape, const me_array_options *o, bool participating, me_artifact_error *error) {
+    int out_rank; int64_t out_shape[ME_ARRAY_MAX_RANK]; me_dtype dtype;
+    int rc = me_array_result_shape(a, rank, shape, o, &out_rank, out_shape, &dtype, error);
+    if (rc) return rc;
+    bool axes[ME_ARRAY_MAX_RANK]; a_axes(rank, o, axes);
+    size_t out_count, red_count = 1;
+    if (!a_product(out_rank, out_shape, &out_count)) return a_error(error, ME_ARTIFACT_ERR_BINDING, "output extent overflow");
+    for (int i = 0; i < rank; i++) if (axes[i]) {
+        if (shape[i] && red_count > SIZE_MAX / (uint64_t)shape[i]) return a_error(error, ME_ARTIFACT_ERR_BINDING, "reduction extent overflow");
+        red_count *= (size_t)shape[i];
+    }
+    if (!a_extrema_valid(o, red_count, out_count, participating))
+        return a_error(error, ME_ARTIFACT_ERR_BINDING, "empty/masked extrema require initial");
+    return ME_ARTIFACT_SUCCESS;
+}
+static double a_real(me_dtype d, const void *p) {
+    if (d == ME_FLOAT32) { float x; memcpy(&x,p,4); return x; }
+    if (d == ME_FLOAT64) { double x; memcpy(&x,p,8); return x; }
+    if (a_complex(d)) {
+        /* Explicit real/int casts discard the imaginary component. */
+        if (d == ME_COMPLEX64) { float parts[2]; memcpy(parts,p,sizeof(parts)); return parts[0]; }
+        double parts[2]; memcpy(parts,p,sizeof(parts)); return parts[0];
+    }
+    uint64_t raw = a_integer(d,p);
+    if (a_unsigned(d)) return (double)raw;
+    int64_t x; memcpy(&x,&raw,8); return (double)x;
+}
+static void a_complex_parts(me_dtype d, const void *p, double *real, double *imag) {
+    if (d == ME_COMPLEX64) {
+        float parts[2]; memcpy(parts,p,sizeof(parts));
+        *real = parts[0]; *imag = parts[1];
+    }
+    else {
+        double parts[2]; memcpy(parts,p,sizeof(parts));
+        *real = parts[0]; *imag = parts[1];
+    }
+}
+static void a_complex_store(me_dtype d, double real, double imag, void *out) {
+    if (d == ME_COMPLEX64) {
+        float parts[2] = {(float)real, (float)imag}; memcpy(out,parts,sizeof(parts));
+    }
+    else {
+        double parts[2] = {real, imag}; memcpy(out,parts,sizeof(parts));
+    }
+}
+static void a_cast(me_dtype source, const void *p, me_dtype target, void *out) {
+    if (target == ME_FLOAT32) { float x = (float)a_real(source,p); memcpy(out,&x,4); }
+    else if (target == ME_FLOAT64) { double x = a_real(source,p); memcpy(out,&x,8); }
+    else if (a_complex(target)) {
+        if (a_complex(source)) {
+            double real, imag; a_complex_parts(source,p,&real,&imag);
+            a_complex_store(target,real,imag,out);
+        }
+        else a_complex_store(target,a_real(source,p),0.0,out);
+    }
+    else {
+        uint64_t raw;
+        if (target == ME_BOOL) {
+            if (a_complex(source)) {
+                double real, imag;
+                a_complex_parts(source, p, &real, &imag);
+                raw = real != 0.0 || imag != 0.0;
+            }
+            else raw = a_real(source, p) != 0;
+        }
+        else raw = a_integer(source,p);
+        size_t width = a_width(target); uint16_t little = 1;
+        if (*(uint8_t *)&little) memcpy(out,&raw,width);
+        else memcpy(out,(uint8_t *)&raw + 8 - width,width);
+    }
+}
+static void a_combine(me_dtype dtype, int op, void *acc, const void *value) {
+    if (a_complex(dtype)) {
+        double ar, ai, vr, vi;
+        a_complex_parts(dtype, acc, &ar, &ai);
+        a_complex_parts(dtype, value, &vr, &vi);
+        if (op == ME_ARRAY_SUM) a_complex_store(dtype, ar + vr, ai + vi, acc);
+        else if (op == ME_ARRAY_PROD) a_complex_store(dtype, ar * vr - ai * vi, ar * vi + ai * vr, acc);
+        else if (isnan(vr) || isnan(vi)) a_complex_store(dtype, vr, vi, acc);
+        else if (!(isnan(ar) || isnan(ai))) {
+            bool less = op == ME_ARRAY_MIN ? (vr < ar || (vr == ar && vi < ai)) :
+                                             (vr > ar || (vr == ar && vi > ai));
+            if (less) a_complex_store(dtype, vr, vi, acc);
+        }
+        return;
+    }
+    if (a_float(dtype)) {
+        double x = a_real(dtype,acc), y = a_real(dtype,value), z;
+        if (op == ME_ARRAY_SUM) z = x + y;
+        else if (op == ME_ARRAY_PROD) z = x * y;
+        else if (isnan(x)) z = x;
+        else if (isnan(y)) z = y;
+        else if (x == 0 && y == 0) z = op == ME_ARRAY_MIN ? (signbit(x) || signbit(y) ? -0.0 : 0.0) : (signbit(x) && signbit(y) ? -0.0 : 0.0);
+        else z = op == ME_ARRAY_MIN ? (x < y ? x : y) : (x > y ? x : y);
+        /* A float32 accumulator rounds every step, independent of tile size. */
+        if (dtype == ME_FLOAT32) { float f = (float)z; memcpy(acc,&f,4); }
+        else memcpy(acc,&z,8);
+    }
+    else {
+        uint64_t x = a_integer(dtype,acc), y = a_integer(dtype,value), z;
+        if (op == ME_ARRAY_SUM) z = dtype == ME_BOOL ? x || y : x + y;
+        else if (op == ME_ARRAY_PROD) z = dtype == ME_BOOL ? x && y : x * y;
+        else if (op == ME_ARRAY_ANY) z = x || y;
+        else if (op == ME_ARRAY_ALL) z = x && y;
+        else {
+            bool less;
+            if (a_unsigned(dtype)) less = x < y;
+            else { int64_t sx,sy; memcpy(&sx,&x,8); memcpy(&sy,&y,8); less = sx < sy; }
+            z = (op == ME_ARRAY_MIN ? less : !less) ? x : y;
+        }
+        a_cast(ME_UINT64,&z,dtype,acc);
+    }
+}
+static me_artifact_status a_run(const me_artifact *a, const me_array_view *inputs, int ninputs,
+    int rank, const int64_t *shape, const me_array_options *o, void *output, size_t capacity,
+    me_array_report *report, me_artifact_error *error, bool execute, bool identity_map,
+    const me_array_source *sources, const me_array_output *destination_view) {
+    int out_rank; int64_t out_shape[ME_ARRAY_MAX_RANK]; me_dtype dtype;
+    me_array_report local = {0}; if (!report) report = &local; memset(report,0,sizeof(*report));
+    int rc = me_array_result_shape(a,rank,shape,o,&out_rank,out_shape,&dtype,error);
+    if (rc) return rc;
+    me_array_view destination = {0};
+    bool scatter = false;
+    if (destination_view) {
+        rc = dsl_array_output_validate(destination_view, out_rank, out_shape, dtype, error);
+        if (rc) return rc;
+        destination = a_output_view(destination_view);
+        output = destination_view->base;
+        capacity = destination_view->capacity;
+        scatter = !a_contiguous(&destination);
+    }
+    size_t total, out_count, red_count = 1, width = a_width(dtype), source_width = me_artifact_output_itemsize(a);
+    a_product(rank,shape,&total); a_product(out_rank,out_shape,&out_count);
+    bool axes[ME_ARRAY_MAX_RANK]; a_axes(rank,o,axes);
+    for (int i = 0; i < rank; i++) if (axes[i]) {
+        if (shape[i] && red_count > SIZE_MAX / (uint64_t)shape[i]) return a_error(error,ME_ARTIFACT_ERR_BINDING,"reduction extent overflow");
+        red_count *= (size_t)shape[i];
+    }
+    if (ninputs < 0 || ninputs > 128 || ninputs != me_artifact_ninputs(a) || (ninputs && !inputs) ||
+        out_count > SIZE_MAX / width || capacity < out_count * width ||
+        (capacity && (!output || (uintptr_t)output > UINTPTR_MAX - capacity)) ||
+        (out_count && (!output || (!destination_view && (uintptr_t)output % width)))) return a_error(error,ME_ARTIFACT_ERR_BINDING,"invalid output capacity or bindings");
+    int binding[128]; bool direct[128], source_linear[128]; bool readers = false;
+    bool suffix = true, seen = false;
+    for (int i = 0; i < rank; i++) { if (axes[i]) seen = true; else if (seen) suffix = false; }
+    for (int b = 0; b < ninputs; b++) {
+        binding[b] = -1;
+        for (int i = 0; i < ninputs; i++) if (inputs[i].name && !strcmp(inputs[i].name,me_artifact_input_name(a,b))) {
+            if (binding[b] != -1) return a_error(error,ME_ARTIFACT_ERR_BINDING,"duplicate array input");
+            binding[b] = i;
+        }
+        if (binding[b] < 0) return a_error(error,ME_ARTIFACT_ERR_BINDING,"missing array input");
+        const me_array_view *v = &inputs[binding[b]];
+        bool reader = sources && sources[binding[b]].read;
+        readers |= reader;
+        /* Matching shapes and suffix reductions traverse storage linearly;
+         * broadcasting/non-suffix reductions still require coordinate mapping. */
+        source_linear[b] = suffix && v->rank == rank &&
+            (!rank || !memcmp(v->shape,shape,(size_t)rank*sizeof(int64_t)));
+        if (v->dtype != me_artifact_input_dtype(a,b) ||
+            !(reader ? a_reader_valid(v,rank,shape) : a_broadcast(v,rank,shape)) ||
+            a_overlap(v->base,v->capacity,output,capacity)) return a_error(error,ME_ARTIFACT_ERR_BINDING,"invalid bounds, broadcast, dtype or overlap");
+        direct[b] = !reader && suffix && a_native(v) && a_contiguous(v) && v->rank == rank &&
+                    (!rank || !memcmp(v->shape,shape,(size_t)rank*sizeof(int64_t))) &&
+                    !(((uintptr_t)v->base + v->offset) % a_width(v->dtype));
+    }
+    if (o->where && (o->where->dtype != ME_BOOL || !a_broadcast(o->where,rank,shape) || a_overlap(o->where->base,o->where->capacity,output,capacity))) return a_error(error,ME_ARTIFACT_ERR_BINDING,"invalid participating mask");
+    if (o->initial && a_overlap(o->initial,width,output,capacity)) return a_error(error,ME_ARTIFACT_ERR_BINDING,"initial overlaps output");
+    if (!a_extrema_valid(o, red_count, out_count, o->where != NULL)) return a_error(error,ME_ARTIFACT_ERR_BINDING,"empty/masked extrema require initial");
+    size_t tile = o->tile_items ? o->tile_items : 1024;
+    if (tile > INT32_MAX || tile > SIZE_MAX / source_width) return a_error(error,ME_ARTIFACT_ERR_BINDING,"invalid tile size");
+    if (tile > red_count && o->reduction != ME_ARRAY_NONE) tile = red_count;
+    if (tile > total && o->reduction == ME_ARRAY_NONE) tile = total;
+    if (!tile) tile = 1;
+    if (readers && tile > SIZE_MAX / sizeof(size_t)) return a_error(error,ME_ARTIFACT_ERR_BINDING,"reader index scratch overflow");
+    if (!execute) return ME_ARTIFACT_SUCCESS;
+    /* Identity maps need no interpreter/JIT or floating-state transition.
+     * This shortcut follows the complete shared validation, including bounds,
+     * dtype, shape, overlap and tile options. Hosts can parallelize disjoint
+     * regions through the same native executor regardless of JIT availability. */
+    if (identity_map && o->reduction == ME_ARRAY_NONE && ninputs == 1 &&
+        direct[0] && !scatter && inputs[binding[0]].dtype == dtype) {
+        const me_array_view *input = &inputs[binding[0]];
+        if (total) memcpy((uint8_t *)output + destination.offset,
+            (const uint8_t *)input->base + input->offset,total*width);
+        report->zero_copy_tiles = total ? 1 : 0;
+#ifndef __EMSCRIPTEN__
+        report->fp_supported = 1;
+#endif
+        return ME_ARTIFACT_SUCCESS;
+    }
+    if (identity_map && o->reduction == ME_ARRAY_NONE && ninputs == 1 && destination_view) {
+        const me_array_view *input = &inputs[binding[0]];
+        bool same = !(sources && sources[binding[0]].read) && a_native(input) && input->dtype == dtype && input->rank == out_rank &&
+            (!out_rank || !memcmp(input->shape,out_shape,(size_t)out_rank*sizeof(*out_shape)));
+        size_t low = destination.offset, high = destination.offset, source_low = input->offset;
+        for (int i = 0; same && i < out_rank; i++) if (out_shape[i] > 1) {
+            same = input->strides[i] == destination.strides[i];
+            if (!same) break;
+            int64_t stride = destination.strides[i];
+            a_add(stride < 0 ? low : high,stride,(uint64_t)out_shape[i]-1,stride < 0 ? &low : &high);
+            if (stride < 0) a_add(source_low,stride,(uint64_t)out_shape[i]-1,&source_low);
+        }
+        /* Matching dense permutations/reversals have identical physical value
+         * order. Copy their interval without visiting logical coordinates. */
+        if (same && (!total || high-low+width == total*width)) {
+            if (total) memcpy((uint8_t *)output+low,(const uint8_t *)input->base+source_low,total*width);
+            report->zero_copy_tiles = total ? 1 : 0;
+#ifndef __EMSCRIPTEN__
+            report->fp_supported = 1;
+#endif
+            return ME_ARTIFACT_SUCCESS;
+        }
+    }
+    /* Keep the complete shared preflight above. Only native contiguous tiles
+     * without masks bypass map evaluation; other layouts use the original path. */
+    bool direct_reduction = identity_map && o->reduction != ME_ARRAY_NONE &&
+        ninputs == 1 && (direct[0] || (sources && sources[binding[0]].read)) && !o->where &&
+        inputs[binding[0]].dtype == me_artifact_output_dtype(a);
+    void *owned[128] = {0}; me_artifact_buffer buffers[128];
+    size_t *indices = readers ? malloc(tile * sizeof(size_t)) : NULL;
+    uint8_t *mask = o->where ? malloc(tile) : NULL;
+    bool need_scratch = (o->reduction != ME_ARRAY_NONE && !direct_reduction) || scatter;
+    void *scratch = need_scratch ? malloc(tile * source_width) : NULL;
+    if ((readers && !indices) || (o->where && !mask) || (need_scratch && !scratch)) { rc = ME_ARTIFACT_ERR_OOM; goto cleanup; }
+    report->temporary_bytes = (indices ? tile * sizeof(size_t) : 0) + (mask ? tile : 0) + (scratch ? tile * source_width : 0);
+    for (int b = 0; b < ninputs; b++) {
+        const me_array_view *v = &inputs[binding[b]]; size_t w = a_width(v->dtype);
+        if (!direct[b]) {
+            if (tile > SIZE_MAX / w || !(owned[b] = malloc(tile*w))) { rc = ME_ARTIFACT_ERR_OOM; goto cleanup; }
+            report->temporary_bytes += tile*w;
+        }
+        buffers[b] = (me_artifact_buffer){v->name,v->dtype,w,NULL,0};
+    }
+    fenv_t saved;
+    if (!dsl_menudet_fp_begin(&saved)) { rc = ME_ARTIFACT_ERR_UNSUPPORTED; goto cleanup; }
+    unsigned *previous = dsl_menudet_status_begin(&report->fp_flags);
+#ifndef __EMSCRIPTEN__
+    report->fp_supported = 1;
+#endif
+    size_t groups = o->reduction == ME_ARRAY_NONE ? 1 : out_count;
+    size_t lanes = o->reduction == ME_ARRAY_NONE ? total : red_count;
+    bool gather = mask != NULL;
+    for (int b = 0; b < ninputs; b++) gather |= !direct[b] && !(sources && sources[binding[b]].read);
+    for (size_t g = 0; g < groups && !rc; g++) {
+        uint64_t acc = 0; bool initialized = false;
+        unsigned char acc_complex[16] = {0};
+        if (o->initial) { memcpy(&acc,o->initial,width); initialized = true; }
+        else if (o->reduction != ME_ARRAY_MIN && o->reduction != ME_ARRAY_MAX) {
+            uint64_t identity = o->reduction == ME_ARRAY_PROD || o->reduction == ME_ARRAY_ALL;
+            a_cast(ME_UINT64,&identity,dtype,&acc); initialized = true;
+        }
+        for (size_t begin = 0; begin < lanes && !rc;) {
+            size_t count = lanes - begin < tile ? lanes - begin : tile;
+            for (size_t lane = 0; gather && lane < count; lane++) {
+                int64_t coordinates[ME_ARRAY_MAX_RANK];
+                a_coordinates(rank,shape,axes,o->reduction != ME_ARRAY_NONE,g,begin + lane,coordinates);
+                if (mask) { a_load(o->where,a_offset(o->where,rank,coordinates),&mask[lane]); if (mask[lane] > 1) { rc = ME_ARTIFACT_ERR_BINDING; break; } report->gathered_bytes++; }
+                for (int b = 0; b < ninputs; b++) if (!direct[b] && !(sources && sources[binding[b]].read)) {
+                    const me_array_view *v = &inputs[binding[b]];
+                    a_load(v,a_offset(v,rank,coordinates),(uint8_t *)owned[b] + lane*buffers[b].itemsize);
+                    report->gathered_bytes += buffers[b].itemsize;
+                }
+            }
+            if (rc) break;
+            for (int b = 0; b < ninputs && !rc; b++) if (sources && sources[binding[b]].read) {
+                const me_array_source *source = &sources[binding[b]];
+                if (mask) memset(owned[b],0,count*buffers[b].itemsize);
+                size_t participating = 0;
+                for (size_t lane = 0; lane < count; lane++) {
+                    if (mask && !mask[lane]) continue;
+                    if (source_linear[b]) {
+                        indices[participating++] = g * lanes + begin + lane;
+                        continue;
+                    }
+                    int64_t coordinates[ME_ARRAY_MAX_RANK];
+                    a_coordinates(rank,shape,axes,o->reduction != ME_ARRAY_NONE,g,begin + lane,coordinates);
+                    indices[participating++] = a_source_index(&source->view,rank,coordinates);
+                }
+                if (!participating) continue;
+                /* Storage callbacks do not contribute numerical FP diagnostics. */
+                fenv_t reader_environment;
+                if (fegetenv(&reader_environment)) {
+                    rc = a_error(error,ME_ARTIFACT_ERR_UNSUPPORTED,"cannot save reader floating environment");
+                    break;
+                }
+                unsigned reader_flags = 0;
+                unsigned *reader_previous = dsl_menudet_status_begin(&reader_flags);
+                int read_status = source->read(source->owner,indices,participating,owned[b],participating*buffers[b].itemsize);
+                dsl_menudet_status_end(reader_previous);
+                int restore_status = fesetenv(&reader_environment);
+                if (restore_status) rc = a_error(error,ME_ARTIFACT_ERR_UNSUPPORTED,"cannot restore reader floating environment");
+                else if (read_status) rc = a_error(error,ME_ARTIFACT_ERR_EVAL,"storage reader failed");
+                else {
+                    report->gathered_bytes += participating*buffers[b].itemsize;
+                    /* Scatter backward so compact reads can share the gather
+                     * buffer without overwriting not-yet-scattered values. */
+                    if (mask) for (size_t lane = count; lane-- > 0;) if (mask[lane]) {
+                        participating--;
+                        memmove((uint8_t *)owned[b] + lane*buffers[b].itemsize,
+                            (uint8_t *)owned[b] + participating*buffers[b].itemsize,buffers[b].itemsize);
+                    }
+                }
+            }
+            if (rc) break;
+            for (int b = 0; b < ninputs; b++) {
+                const me_array_view *v = &inputs[binding[b]];
+                buffers[b].data = direct[b] ? (const uint8_t *)v->base + v->offset + (g*lanes + begin)*buffers[b].itemsize : owned[b];
+                buffers[b].capacity = count*buffers[b].itemsize;
+                if (direct[b]) report->zero_copy_tiles++;
+            }
+            if (!direct_reduction) {
+                void *tile_output = scratch ? scratch : (uint8_t *)output + destination.offset + begin*source_width;
+                me_artifact_eval_descriptor descriptor = {sizeof(descriptor),ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,count,count*source_width,mask,mask ? count : 0,0,NULL,NULL,NULL};
+                if (identity_map && o->reduction == ME_ARRAY_NONE && ninputs == 1) {
+                    memcpy(tile_output,buffers[0].data,count*source_width);
+                } else {
+                    rc = me_artifact_eval_ex(a,buffers,ninputs,tile_output,&descriptor,error);
+                    report->evaluated_tiles++;
+                }
+                if (!rc && scatter && o->reduction == ME_ARRAY_NONE) {
+                    for (size_t lane = 0; lane < count; lane++) {
+                        int64_t coordinates[ME_ARRAY_MAX_RANK];
+                        a_coordinates(out_rank,out_shape,axes,false,0,begin + lane,coordinates);
+                        memcpy((uint8_t *)output + a_offset(&destination,out_rank,coordinates),
+                            (uint8_t *)scratch + lane*source_width,source_width);
+                    }
+                }
+            }
+            const void *values = direct_reduction ? buffers[0].data : o->reduction == ME_ARRAY_NONE ? NULL : scratch;
+            bool handled = false;
+            /* Computed maps produce the same typed, contiguous tile as direct
+             * inputs. Without a participation mask, reuse the serial typed
+             * reducers instead of casting/dispatching once per mapped lane. */
+            if (!rc && !mask && values &&
+                (o->reduction == ME_ARRAY_MIN || o->reduction == ME_ARRAY_MAX) &&
+                dtype == me_artifact_output_dtype(a)) {
+                uint64_t normalized = acc, result;
+                if (!a_float(dtype)) normalized = a_integer(dtype, &acc);
+                handled = dsl_menudet_extrema(dtype, values, count, normalized,
+                    initialized, o->reduction == ME_ARRAY_MIN, &result);
+                if (handled) {
+                    if (a_float(dtype)) acc = result;
+                    else a_cast(ME_UINT64, &result, dtype, &acc);
+                    initialized = true;
+                }
+            } else if (!rc && !mask && values && dtype == ME_BOOL &&
+                (o->reduction == ME_ARRAY_ANY || o->reduction == ME_ARRAY_ALL)) {
+                bool truth;
+                handled = dsl_menudet_truth_reduce(me_artifact_output_dtype(a), values,
+                    count, a_integer(dtype, &acc) != 0, o->reduction == ME_ARRAY_ALL, &truth);
+                if (handled) { uint64_t result = truth; a_cast(ME_UINT64, &result, dtype, &acc); }
+            }
+            if (!rc && !handled && !mask && values &&
+                (o->reduction == ME_ARRAY_SUM || o->reduction == ME_ARRAY_PROD) &&
+                dtype == me_artifact_output_dtype(a) && a_float(dtype)) {
+                /* Fixed serial order, with one float32 rounding per operation.
+                 * No reassociation, vector reduction or tile partial sums. */
+                if (dtype == ME_FLOAT64) {
+                    double sum; memcpy(&sum, &acc, sizeof(sum));
+                    sum = o->reduction == ME_ARRAY_PROD ? dsl_menudet_prod_f64(sum, values, count) :
+                        dsl_menudet_sum_f64(sum, values, count);
+                    memcpy(&acc, &sum, sizeof(sum));
+                } else {
+                    float sum; memcpy(&sum, &acc, sizeof(sum));
+                    sum = o->reduction == ME_ARRAY_PROD ? dsl_menudet_prod_f32(sum, values, count) :
+                        dsl_menudet_sum_f32(sum, values, count);
+                    memcpy(&acc, &sum, sizeof(sum));
+                }
+            } else if (!rc && !handled && !mask && values &&
+                (o->reduction == ME_ARRAY_SUM || o->reduction == ME_ARRAY_PROD) &&
+                !a_float(me_artifact_output_dtype(a)) &&
+                ((dtype == ME_UINT64 && a_unsigned(me_artifact_output_dtype(a)) &&
+                  me_artifact_output_dtype(a) != ME_BOOL) ||
+                 (dtype == ME_INT64 && (!a_unsigned(me_artifact_output_dtype(a)) ||
+                  me_artifact_output_dtype(a) == ME_BOOL)))) {
+                bool ok = o->reduction == ME_ARRAY_PROD ?
+                    dsl_menudet_prod_integer(me_artifact_output_dtype(a), values, count, acc, false, &acc) :
+                    dsl_menudet_sum_integer(me_artifact_output_dtype(a), values, count, acc, false, &acc);
+                if (!ok) rc = ME_ARTIFACT_ERR_EVAL;
+            } else if (!rc && !handled && values && a_complex(dtype)) {
+                for (size_t lane = 0; lane < count; lane++) {
+                    if (mask && !mask[lane]) continue;
+                    unsigned char value[16] = {0};
+                    a_cast(me_artifact_output_dtype(a),(const uint8_t *)values + lane*source_width,
+                           dtype,value);
+                    if (!initialized) { memcpy(acc_complex,value,width); initialized = true; }
+                    else a_combine(dtype,o->reduction,acc_complex,value);
+                }
+            } else if (!rc && !handled && values) for (size_t lane = 0; lane < count; lane++) {
+                if (mask && !mask[lane]) continue;
+                uint64_t value = 0; a_cast(me_artifact_output_dtype(a),(const uint8_t *)values + lane*source_width,dtype,&value);
+                if (!initialized) { memcpy(&acc,&value,width); initialized = true; }
+                else a_combine(dtype,o->reduction,&acc,&value);
+            }
+            begin += count;
+        }
+        if (!rc && o->reduction != ME_ARRAY_NONE) {
+            size_t offset = destination.offset + g*width;
+            if (scatter) {
+                int64_t coordinates[ME_ARRAY_MAX_RANK];
+                a_coordinates(out_rank,out_shape,axes,false,0,g,coordinates);
+                offset = a_offset(&destination,out_rank,coordinates);
+            }
+            const void *acc_source = a_complex(dtype) ? (const void *)acc_complex : (const void *)&acc;
+            memcpy((uint8_t *)output + offset, acc_source, width);
+        }
+    }
+    if (!dsl_menudet_fp_end(&saved) && !rc) rc = a_error(error,ME_ARTIFACT_ERR_UNSUPPORTED,"cannot restore floating environment");
+    dsl_menudet_status_end(previous);
+cleanup:
+    for (int b = 0; b < ninputs; b++) free(owned[b]);
+    free(indices); free(mask); free(scratch);
+    if (rc && (!error || !error->message[0])) return a_error(error,rc,"native array traversal failed");
+    return rc;
+}
+me_artifact_status me_artifact_eval_array(const me_artifact *a, const me_array_view *inputs, int ninputs,
+    int rank, const int64_t *shape, const me_array_options *o, void *output, size_t capacity,
+    me_array_report *report, me_artifact_error *error) {
+    return a_run(a, inputs, ninputs, rank, shape, o, output, capacity, report, error, true, false, NULL, NULL);
+}
+me_artifact_status dsl_array_eval_direct_input(const me_artifact *a, const me_array_view *inputs,
+    int ninputs, int rank, const int64_t *shape, const me_array_options *o, void *output,
+    size_t capacity, me_array_report *report, me_artifact_error *error) {
+    return a_run(a, inputs, ninputs, rank, shape, o, output, capacity, report, error, true, true, NULL, NULL);
+}
+me_artifact_status dsl_array_preflight(const me_artifact *a, const me_array_view *inputs, int ninputs,
+    int rank, const int64_t *shape, const me_array_options *o, void *output, size_t capacity,
+    me_artifact_error *error) {
+    return a_run(a, inputs, ninputs, rank, shape, o, output, capacity, NULL, error, false, false, NULL, NULL);
+}
+static me_artifact_status a_run_sources(const me_artifact *a, const me_array_source *sources,
+    int ninputs, int rank, const int64_t *shape, const me_array_options *o,
+    void *output, size_t capacity, me_array_report *report, me_artifact_error *error,
+    bool execute, bool identity_map) {
+    if (report) memset(report,0,sizeof(*report));
+    if (ninputs < 0 || ninputs > 128 || (ninputs && !sources))
+        return a_error(error,ME_ARTIFACT_ERR_BINDING,"invalid source bindings");
+    me_array_view views[128];
+    for (int i = 0; i < ninputs; i++) views[i] = sources[i].view;
+    return a_run(a,views,ninputs,rank,shape,o,output,capacity,report,error,execute,identity_map,sources,NULL);
+}
+me_artifact_status dsl_array_run_into(const me_artifact *a,
+    const me_array_view *inputs, const me_array_source *sources, int ninputs,
+    int rank, const int64_t *shape, const me_array_options *o,
+    const me_array_output *output, me_array_report *report, me_artifact_error *error,
+    bool execute, bool identity_map) {
+    me_array_view views[128];
+    if (report) memset(report,0,sizeof(*report));
+    if (!output || ninputs < 0 || ninputs > 128 || (ninputs && !inputs && !sources))
+        return a_error(error,ME_ARTIFACT_ERR_BINDING,"invalid destination or bindings");
+    if (sources) {
+        for (int i = 0; i < ninputs; i++) views[i] = sources[i].view;
+        inputs = views;
+    }
+    return a_run(a,inputs,ninputs,rank,shape,o,NULL,0,report,error,execute,identity_map,sources,output);
+}
+me_artifact_status me_artifact_eval_array_into(const me_artifact *a,
+    const me_array_view *inputs, int ninputs, int rank, const int64_t *shape,
+    const me_array_options *o, const me_array_output *output,
+    me_array_report *report, me_artifact_error *error) {
+    return dsl_array_run_into(a,inputs,NULL,ninputs,rank,shape,o,output,report,error,true,false);
+}
+me_artifact_status me_artifact_eval_array_sources_into(const me_artifact *a,
+    const me_array_source *inputs, int ninputs, int rank, const int64_t *shape,
+    const me_array_options *o, const me_array_output *output,
+    me_array_report *report, me_artifact_error *error) {
+    return dsl_array_run_into(a,NULL,inputs,ninputs,rank,shape,o,output,report,error,true,false);
+}
+me_artifact_status me_artifact_eval_array_sources(const me_artifact *a,
+    const me_array_source *sources, int ninputs, int rank, const int64_t *shape,
+    const me_array_options *o, void *output, size_t capacity,
+    me_array_report *report, me_artifact_error *error) {
+    return a_run_sources(a,sources,ninputs,rank,shape,o,output,capacity,report,error,true,false);
+}
+me_artifact_status dsl_array_sources_preflight(const me_artifact *a,
+    const me_array_source *sources, int ninputs, int rank, const int64_t *shape,
+    const me_array_options *o, void *output, size_t capacity, me_artifact_error *error) {
+    return a_run_sources(a,sources,ninputs,rank,shape,o,output,capacity,NULL,error,false,false);
+}
+me_artifact_status dsl_array_eval_direct_sources(const me_artifact *a,
+    const me_array_source *sources, int ninputs, int rank, const int64_t *shape,
+    const me_array_options *o, void *output, size_t capacity,
+    me_array_report *report, me_artifact_error *error) {
+    return a_run_sources(a,sources,ninputs,rank,shape,o,output,capacity,report,error,true,true);
+}
+me_artifact_status me_array_reshape(const me_array_view *v, int rank, const int64_t *shape,
+    me_array_view *out, me_artifact_error *e) {
+    size_t old_count,new_count;
+    if (!v || !out || !a_valid(v) || !a_contiguous(v) || !a_product(v->rank,v->shape,&old_count) || !a_product(rank,shape,&new_count) || old_count != new_count) return a_error(e,ME_ARTIFACT_ERR_BINDING,"reshape requires equal extent and C contiguous input");
+    me_array_view result = *v; result.rank = rank; uint64_t stride = a_width(v->dtype);
+    for (int i = rank - 1; i >= 0; i--) {
+        if (stride > INT64_MAX || (shape[i] && stride > SIZE_MAX/(uint64_t)shape[i])) return a_error(e,ME_ARTIFACT_ERR_BINDING,"reshape stride overflow");
+        result.shape[i] = shape[i]; result.strides[i] = (int64_t)stride; stride *= (size_t)shape[i];
+    }
+    *out = result; return ME_ARTIFACT_SUCCESS;
+}
+me_artifact_status me_array_transpose(const me_array_view *v, const int *axes,
+    me_array_view *out, me_artifact_error *e) {
+    if (!v || !out || !a_valid(v) || (v->rank && !axes)) return a_error(e,ME_ARTIFACT_ERR_BINDING,"invalid transpose input");
+    me_array_view result = *v; bool seen[ME_ARRAY_MAX_RANK] = {0};
+    for (int i = 0; i < v->rank; i++) {
+        int axis = axes[i] < 0 ? axes[i] + v->rank : axes[i];
+        if (axis < 0 || axis >= v->rank || seen[axis]) return a_error(e,ME_ARTIFACT_ERR_BINDING,"invalid transpose axes");
+        seen[axis] = true; result.shape[i] = v->shape[axis]; result.strides[i] = v->strides[axis];
+    }
+    *out = result; return ME_ARTIFACT_SUCCESS;
+}
+me_artifact_status me_array_slice(const me_array_view *v, int axis, int64_t start,
+    int64_t count, int64_t step, me_array_view *out, me_artifact_error *e) {
+    if (!v || !out || !a_valid(v)) return a_error(e,ME_ARTIFACT_ERR_BINDING,"invalid slice input");
+    if (axis < 0) axis += v->rank;
+    if (axis < 0 || axis >= v->rank || count < 0 || !step || step == INT64_MIN ||
+        (count && (start < 0 || start >= v->shape[axis]))) return a_error(e,ME_ARTIFACT_ERR_BINDING,"invalid slice bounds");
+    uint64_t magnitude = step < 0 ? (uint64_t)-step : (uint64_t)step;
+    if (count && (uint64_t)(count-1) > (step < 0 ? (uint64_t)start : (uint64_t)(v->shape[axis]-1-start))/magnitude) return a_error(e,ME_ARTIFACT_ERR_BINDING,"slice exceeds extent");
+    me_array_view result = *v;
+    if (count && !a_add(v->offset,v->strides[axis],(uint64_t)start,&result.offset)) return a_error(e,ME_ARTIFACT_ERR_BINDING,"slice offset overflow");
+    int64_t stride = v->strides[axis];
+    uint64_t abs_stride = stride < 0 ? (uint64_t)(-(stride+1))+1 : (uint64_t)stride;
+    if (abs_stride && magnitude > INT64_MAX/abs_stride) return a_error(e,ME_ARTIFACT_ERR_BINDING,"slice stride overflow");
+    result.strides[axis] = stride*step; result.shape[axis] = count;
+    *out = result; return ME_ARTIFACT_SUCCESS;
+}

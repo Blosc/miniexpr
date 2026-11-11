@@ -10,6 +10,7 @@
 
 static void schema1_fixture(void);
 static void schema1_strings_nd_fixture(void);
+static void schema1_string_arena_fixture(void);
 
 static char *read_fixture(void) {
     FILE *file = fopen(MINIEXPR_ARTIFACT_FIXTURE, "rb");
@@ -62,11 +63,11 @@ static void reject(const char *json, const char *old, const char *replacement, m
 }
 
 static char *scalar_manifest(const char *dtype, const char *encoding, const char *value) {
-    const char *format = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\","
-        "\"version\":\"1.0\"},\"requires\":[\"numeric\"],\"source\":\"def k(c):\\n    return c\\n\","
+    const char *format = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\","
+        "\"version\":\"0.1\"},\"requires\":[\"numeric\"],\"source\":\"def k(c):\\n    return c\\n\","
         "\"entry_point\":\"k\",\"inputs\":[],\"constants\":[{\"name\":\"c\",\"dtype\":\"%s\","
-        "\"encoding\":\"%s\",\"value\":%s}],\"output\":{\"dtype\":\"%s\","
-        "\"contract\":\"elementwise\"},\"semantics\":{\"fp\":\"strict\"},\"context\":{\"ndim\":0}}";
+        "\"encoding\":\"%s\",\"value\":%s,\"category\":\"typed_scalar\"}],\"output\":{\"dtype\":\"%s\","
+        "\"contract\":\"elementwise\"},\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":0}}";
     char *json = malloc(2048);
     assert(json);
     assert(snprintf(json, 2048, format, dtype, encoding, value, dtype) < 2048);
@@ -146,13 +147,13 @@ static void scalars(void) {
 }
 
 static void runtime_order(void) {
-    const char *json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\","
-        "\"version\":\"1.0\"},\"requires\":[\"numeric\",\"control-flow\"],"
+    const char *json = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\","
+        "\"version\":\"0.1\"},\"requires\":[\"numeric\",\"control-flow\"],"
         "\"source\":\"# me:fp=strict\\ndef k(x, y):\\n    return x - y\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"},"
         "{\"name\":\"y\",\"dtype\":\"float64\"}],\"constants\":[],"
         "\"output\":{\"dtype\":\"float64\",\"contract\":\"elementwise\"},"
-        "\"semantics\":{\"fp\":\"strict\"},\"context\":{\"ndim\":0}}";
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":0}}";
     me_artifact *artifact = load(json);
     double x = 3, y = 1, output = 0;
     me_artifact_input inputs[] = {{"y", ME_FLOAT64, &y, 1}, {"x", ME_FLOAT64, &x, 1}};
@@ -190,9 +191,51 @@ static void runtime_order(void) {
     free(changed);
 }
 
+static void automatic_execution_fixture(void) {
+    const char *json = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
+        "\"requires\":[\"numeric\"],\"source\":\"def k(x):\\n    return x + 1\\n\","
+        "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"}],\"constants\":[],"
+        "\"output\":{\"dtype\":\"float64\",\"contract\":\"elementwise\"},"
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},"
+        "\"context\":{\"ndim\":0},\"metadata\":{}}";
+    me_artifact *artifact = NULL;
+    me_artifact_error error;
+    assert(me_artifact_load(json, strlen(json), ME_JIT_AUTO, &artifact, &error) == 0);
+    assert(!strcmp(me_artifact_execution_kind(artifact), "expression"));
+    /* Explicit environment policy may enable compilation in this test process. */
+    if (!getenv("ME_DSL_JIT")) assert(!me_artifact_has_jit(artifact));
+    me_artifact_free(artifact);
+    char *program = replace(json, "return x + 1", "y = x + 1\\n    return y");
+    assert(me_artifact_load(program, strlen(program), ME_JIT_OFF, &artifact, &error) == 0);
+    assert(!strcmp(me_artifact_execution_kind(artifact), "program"));
+    assert(!me_artifact_has_jit(artifact));
+    me_artifact_free(artifact);
+    free(program);
+}
+
+static void inferred_output_fixture(void) {
+    const char *json = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
+        "\"requires\":[\"numeric\"],\"source\":\"def k(x):\\n    return x + 1\\n\",\"entry_point\":\"k\","
+        "\"inputs\":[{\"name\":\"x\",\"dtype\":\"float32\"}],\"constants\":[],"
+        "\"output\":{\"dtype\":\"auto\",\"contract\":\"elementwise\"},"
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},"
+        "\"context\":{\"ndim\":0}}";
+    me_artifact *artifact = NULL;
+    me_artifact_error error;
+    assert(me_artifact_load(json, strlen(json), ME_JIT_OFF, &artifact, &error) == ME_ARTIFACT_ERR_UNSUPPORTED);
+    assert(artifact == NULL);
+    assert(me_artifact_load_inferred(json, strlen(json), ME_JIT_OFF, &artifact, &error) == ME_ARTIFACT_SUCCESS);
+    assert(artifact && me_artifact_output_dtype(artifact) == ME_FLOAT32);
+    assert(me_artifact_inferred_dtype(artifact) == ME_FLOAT32);
+    me_artifact_free(artifact);
+}
+
 int main(void) {
+    automatic_execution_fixture();
+    inferred_output_fixture();
     schema1_fixture();
     schema1_strings_nd_fixture();
+    schema1_string_arena_fixture();
     char *json = read_fixture();
     me_artifact *artifact = load(json);
     assert(me_artifact_ninputs(artifact) == 1);
@@ -257,14 +300,14 @@ int main(void) {
     assert(me_artifact_eval(artifact, inputs, 1, NULL, 0, NULL) == ME_ARTIFACT_SUCCESS);
     me_artifact_free(artifact);
 
-    reject(json, "\"schema_version\": \"1.0\"", "\"schema_version\": \"99\"", ME_ARTIFACT_ERR_UNSUPPORTED);
-    reject(json, "\"schema_version\": \"1.0\"", "\"schema_version\": \"0.1\"", ME_ARTIFACT_ERR_UNSUPPORTED);
-    reject(json, "\"version\": \"1.0\"", "\"version\": \"0.1\"", ME_ARTIFACT_ERR_UNSUPPORTED);
-    reject(json, "\"schema_version\": \"1.0\"", "\"schema_version\": 1", ME_ARTIFACT_ERR_FORMAT);
+    reject(json, "\"schema_version\": \"0.1\"", "\"schema_version\": \"99\"", ME_ARTIFACT_ERR_UNSUPPORTED);
+    reject(json, "\"schema_version\": \"0.1\"", "\"schema_version\": \"1.0\"", ME_ARTIFACT_ERR_UNSUPPORTED);
+    reject(json, "\"version\": \"0.1\"", "\"version\": \"1.0\"", ME_ARTIFACT_ERR_UNSUPPORTED);
+    reject(json, "\"schema_version\": \"0.1\"", "\"schema_version\": 1", ME_ARTIFACT_ERR_FORMAT);
     reject(json, "\"dtype\": \"float64\"", "\"dtype\": null", ME_ARTIFACT_ERR_FORMAT);
     reject(json, "\"numeric\"", "null", ME_ARTIFACT_ERR_FORMAT);
-    reject(json, "\"name\": \"miniexpr\"", "\"name\": \"python\"", ME_ARTIFACT_ERR_UNSUPPORTED);
-    reject(json, "\"version\": \"1.0\"", "\"version\": \"99\"", ME_ARTIFACT_ERR_UNSUPPORTED);
+    reject(json, "\"name\": \"menudet\"", "\"name\": \"python\"", ME_ARTIFACT_ERR_UNSUPPORTED);
+    reject(json, "\"version\": \"0.1\"", "\"version\": \"99\"", ME_ARTIFACT_ERR_UNSUPPORTED);
     reject(json, "\"numeric\"", "\"future-feature\"", ME_ARTIFACT_ERR_UNSUPPORTED);
     reject(json, "\"numeric\"", "\"numeric\", \"numeric\"", ME_ARTIFACT_ERR_FORMAT);
     reject(json, "\"numeric\", ", "", ME_ARTIFACT_ERR_FORMAT);
@@ -275,7 +318,8 @@ int main(void) {
     reject(json, "\"name\": \"bias\"", "\"name\": \"x\"", ME_ARTIFACT_ERR_BINDING);
     reject(json, "\"name\": \"bias\"", "\"name\": \"unused\"", ME_ARTIFACT_ERR_BINDING);
     reject(json, "\"name\": \"scale\"", "\"name\": \"bias\"", ME_ARTIFACT_ERR_BINDING);
-    reject(json, "return x * scale + bias", "return sum(x)", ME_ARTIFACT_ERR_BINDING);
+    reject(json, "return x * scale + bias", "return block_sum(x)", ME_ARTIFACT_ERR_BINDING);
+    reject(json, "return x * scale + bias", "return sum(x)", ME_ARTIFACT_ERR_SOURCE);
     reject(json, "return x * scale + bias", "return missing", ME_ARTIFACT_ERR_SOURCE);
     reject(json, "# me:compiler=tcc", "# me:fp=fast\\n# me:compiler=tcc", ME_ARTIFACT_ERR_SOURCE);
     reject(json, "\"schema_version\":", "\"unknown\": 1, \"schema_version\":", ME_ARTIFACT_ERR_FORMAT);
@@ -292,7 +336,7 @@ int main(void) {
     assert(mixed_output == 5);
     me_artifact_free(mixed_artifact);
     free(mixed);
-    reject(json, "\"dtype\": \"float64\"", "\"dtype\": \"complex128\"", ME_ARTIFACT_ERR_UNSUPPORTED);
+    reject(json, "\"dtype\": \"float64\"", "\"dtype\": \"float16\"", ME_ARTIFACT_ERR_UNSUPPORTED);
     char *changed = replace(json, "2*x - 1", "snowman \\u2603");
     artifact = load(changed);
     me_artifact_free(artifact);
@@ -349,15 +393,15 @@ int main(void) {
 }
 
 static void schema1_fixture(void) {
-    const char *json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
-        "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x,c):\\n    a = sum(x)\\n    return a + c\\n\","
+    const char *json = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
+        "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x,c):\\n    a = block_sum(x)\\n    return a + c\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"int64\"}],"
-        "\"constants\":[{\"name\":\"c\",\"dtype\":\"int64\",\"encoding\":\"decimal\",\"value\":\"1\"}],"
-        "\"output\":{\"dtype\":\"int64\",\"contract\":\"block_scalar\"},\"semantics\":{\"fp\":\"strict\"},"
+        "\"constants\":[{\"name\":\"c\",\"dtype\":\"int64\",\"category\":\"typed_scalar\",\"encoding\":\"decimal\",\"value\":\"1\"}],"
+        "\"output\":{\"dtype\":\"int64\",\"contract\":\"block_scalar\"},\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},"
         "\"context\":{\"ndim\":0},\"metadata\":{\"status\":\"implementation-draft\"}}";
     me_artifact *artifact = load(json);
     assert(!me_artifact_has_jit(artifact) && me_artifact_result_cardinality(artifact) == ME_ARTIFACT_BLOCK_SCALAR);
-    assert(!strcmp(me_artifact_schema_version(artifact), "1.0"));
+    assert(!strcmp(me_artifact_schema_version(artifact), ME_ARTIFACT_SCHEMA_VERSION));
     assert(me_artifact_context_ndim(artifact) == 0);
     assert(me_artifact_capabilities(artifact) == (ME_ARTIFACT_CAP_NUMERIC | ME_ARTIFACT_CAP_BLOCK_REDUCTIONS));
     int64_t values[] = {INT64_MAX, 2, 3};
@@ -384,7 +428,7 @@ static void schema1_fixture(void) {
     reject(json, "numeric", "unimplemented", ME_ARTIFACT_ERR_UNSUPPORTED);
     reject(json, "numeric", "jit-required", ME_ARTIFACT_ERR_UNSUPPORTED);
     reject(json, "\"ndim\":0", "\"ndim\":1", ME_ARTIFACT_ERR_BINDING);
-    char *unsigned_json = replace(json, "a = sum(x)\\n    return a + c", "return x + c");
+    char *unsigned_json = replace(json, "a = block_sum(x)\\n    return a + c", "return x + c");
     char *unsigned_types = replace(unsigned_json, "\"name\":\"x\",\"dtype\":\"int64\"", "\"name\":\"x\",\"dtype\":\"uint64\"");
     free(unsigned_json);
     unsigned_json = replace(unsigned_types, "\"name\":\"c\",\"dtype\":\"int64\"", "\"name\":\"c\",\"dtype\":\"uint64\"");
@@ -403,12 +447,51 @@ static void schema1_fixture(void) {
     free(unsigned_json);
 }
 
+static void schema1_string_arena_fixture(void) {
+    /* Cross multiple temporary slabs, keep nested branch/reduction contexts
+     * alive, and exercise UTF-32 alignment and zero padding on reused calls. */
+    const char *json = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
+        "\"requires\":[\"numeric\",\"fixed-strings\",\"block-reductions\"],"
+        "\"source\":\"def k(x):\\n    return where(contains(x, 'a'), where(block_sum(int64(contains(x, 'b'))) > 0, upper(x) + lower(x), x + x), lower(x) + upper(x))\\n\","
+        "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"unicode32\",\"itemsize\":16}],\"constants\":[],"
+        "\"output\":{\"dtype\":\"unicode32\",\"itemsize\":32,\"contract\":\"elementwise\"},"
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":0}}";
+    enum { count = 4097 };
+    const uint32_t subjects[4][4] = {{'a','b',0,0}, {'C','d',0,0}, {0}, {'a',0,0,0}};
+    const uint32_t expected[4][8] = {{'A','B','a','b',0,0,0,0}, {'c','d','C','D',0,0,0,0}, {0}, {'A','a',0,0,0,0,0,0}};
+    uint32_t *input = calloc(count, sizeof(subjects[0]));
+    uint32_t *output = malloc((count * 8 + 2) * sizeof(*output));
+    uint8_t *mask = malloc(count);
+    assert(input && output && mask);
+    for (int i = 0; i < count; i++) {
+        memcpy(input + i * 4, subjects[i % 4], sizeof(subjects[0]));
+        mask[i] = (i % 7) != 0;
+    }
+    me_artifact *artifact = load(json);
+    me_artifact_buffer binding = {"x", ME_STRING, 16, input, count * 16};
+    me_artifact_eval_descriptor descriptor = {.struct_size=sizeof(descriptor), .version=1,
+        .nitems=count, .output_capacity=count * 32, .valid_mask=mask, .valid_mask_capacity=count};
+    for (int repeat = 0; repeat < 2; repeat++) {
+        for (int i = 0; i < count * 8 + 2; i++) output[i] = UINT32_C(0x76543210);
+        assert(me_artifact_eval_ex(artifact, &binding, 1, output + 1, &descriptor, NULL) == ME_ARTIFACT_SUCCESS);
+        assert(output[0] == UINT32_C(0x76543210) && output[count * 8 + 1] == UINT32_C(0x76543210));
+        for (int i = 0; i < count; i++) {
+            if (mask[i]) assert(!memcmp(output + 1 + i * 8, expected[i % 4], sizeof(expected[0])));
+            else for (int j = 0; j < 8; j++) assert(output[1 + i * 8 + j] == UINT32_C(0x76543210));
+        }
+    }
+    me_artifact_free(artifact);
+    free(mask);
+    free(output);
+    free(input);
+}
+
 static void schema1_strings_nd_fixture(void) {
-    const char *format = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+    const char *format = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
         "\"requires\":[\"numeric\",\"fixed-strings\"],\"source\":\"def k(x):\\n    return %s\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"bytes\",\"itemsize\":4}],\"constants\":[],"
         "\"output\":{\"dtype\":\"bytes\",\"itemsize\":%zu,\"contract\":\"elementwise\"},"
-        "\"semantics\":{\"fp\":\"strict\"},\"context\":{\"ndim\":0}}";
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":0}}";
     struct { const char *expr; size_t width; const char *expected; } cases[] = {
         {"upper(x)", 4, " AB "}, {"lower(x)", 4, " ab "}, {"strip(x)", 4, "Ab"},
         {"lstrip(x)", 4, "Ab "}, {"rstrip(x)", 4, " Ab"},
@@ -436,10 +519,10 @@ static void schema1_strings_nd_fixture(void) {
         assert(output[descriptor.output_capacity] == 0x7f);
         me_artifact_free(artifact);
     }
-    const char *nd_json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+    const char *nd_json = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
         "\"requires\":[\"numeric\",\"nd-context\"],\"source\":\"def k():\\n    return _flat_idx + _i0 + _i1 + _n0 + _n1 + _ndim\\n\","
         "\"entry_point\":\"k\",\"inputs\":[],\"constants\":[],\"output\":{\"dtype\":\"int64\",\"contract\":\"elementwise\"},"
-        "\"semantics\":{\"fp\":\"strict\"},\"context\":{\"ndim\":2}}";
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":2}}";
     me_artifact *artifact = load(nd_json);
     int64_t shape[] = {4, 5}, origin[] = {2, 3}, extent[] = {2, 3}, output[6] = {-1,-1,-1,-1,-1,-1};
     uint8_t mask[] = {1, 1, 0, 1, 1, 0};
@@ -455,12 +538,12 @@ static void schema1_strings_nd_fixture(void) {
     assert(me_artifact_eval_ex(artifact, NULL, 0, output, &descriptor, NULL) == ME_ARTIFACT_ERR_BINDING);
     reject(nd_json, "_i1", "_i2", ME_ARTIFACT_ERR_SOURCE);
     me_artifact_free(artifact);
-    const char *unicode_json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+    const char *unicode_json = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
         "\"requires\":[\"numeric\",\"fixed-strings\"],\"source\":\"def k(x,c):\\n    return upper(x) + c\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"unicode32\",\"itemsize\":16}],"
         "\"constants\":[{\"name\":\"c\",\"dtype\":\"unicode32\",\"itemsize\":8,\"encoding\":\"unicode32be-hex\",\"value\":\"0000002100000000\"}],"
         "\"output\":{\"dtype\":\"unicode32\",\"itemsize\":24,\"contract\":\"elementwise\"},"
-        "\"semantics\":{\"fp\":\"strict\"},\"context\":{\"ndim\":0}}";
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":0}}";
     artifact = load(unicode_json);
     uint32_t unicode_input[] = {0xdf, ' ', 'a', 0}, unicode_output[6];
     input = (me_artifact_buffer){"x", ME_STRING, sizeof(unicode_input), unicode_input, sizeof(unicode_input)};
@@ -479,14 +562,14 @@ static void schema1_strings_nd_fixture(void) {
     reject(unicode_json, "\"itemsize\":24", "\"itemsize\":20", ME_ARTIFACT_ERR_BINDING);
     reject(unicode_json, ",\"fixed-strings\"", "", ME_ARTIFACT_ERR_BINDING);
     me_artifact_free(artifact);
-    const char *indexed_json = "{\"schema_version\":\"1.0\",\"language\":{\"name\":\"miniexpr\",\"version\":\"1.0\"},"
+    const char *indexed_json = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
         "\"requires\":[\"numeric\",\"fixed-strings\"],\"source\":\"def k(x,i,n,old,new):\\n    return replace(substr(x,i,n),old,new)\\n\","
         "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"bytes\",\"itemsize\":4},"
         "{\"name\":\"i\",\"dtype\":\"int64\"},{\"name\":\"n\",\"dtype\":\"uint64\"}],"
         "\"constants\":[{\"name\":\"old\",\"dtype\":\"bytes\",\"itemsize\":1,\"encoding\":\"bytes-hex\",\"value\":\"41\"},"
         "{\"name\":\"new\",\"dtype\":\"bytes\",\"itemsize\":2,\"encoding\":\"bytes-hex\",\"value\":\"5858\"}],"
         "\"output\":{\"dtype\":\"bytes\",\"itemsize\":8,\"contract\":\"elementwise\"},"
-        "\"semantics\":{\"fp\":\"strict\"},\"context\":{\"ndim\":0}}";
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":0}}";
     artifact = load(indexed_json);
     char subjects[] = {'A','b','c','d','A','x','y','z'}, indexed_output[16];
     int64_t starts[] = {-2, 0};

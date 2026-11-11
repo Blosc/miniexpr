@@ -14,6 +14,31 @@ Run a specific benchmark (examples below). CMake builds place binaries under `bu
 
 ## Benchmarks
 
+### Menudet/full-DSL profile qualification
+
+`benchmark_profile_parity.c` is an artifact-library worker; build it with
+`MINIEXPR_BUILD_ARTIFACT=ON` and the benchmark targets enabled. The matrix driver
+uses only the Python standard library:
+
+```bash
+python bench/profile_parity.py --runner build/bench/benchmark_profile_parity --output results/profile-parity
+python bench/profile_parity.py --output results/profile-parity --report-only
+```
+
+The default serial matrix covers Boolean, integer widths and float32/64 across
+arithmetic, mixed signatures, casts, captures, control flow, math, reductions,
+coordinates and participation masks. Use `--family`, `--name`, `--dtype`,
+`--backends`, `--sizes` and `--trials` to confirm a finding in fresh processes.
+Use `--resume` only with the same native binary and configuration. Keep the
+machine otherwise idle; do not run independent benchmark processes concurrently.
+
+Reports retain every warm sample, preparation/first-call/allocation-inclusive
+timings, generated C, bridge counts and reproduction argv. Sampled numerical
+agreement on the chosen domain is **not** proof of equivalent profile semantics.
+Unsupported cases, result differences, masks, captures, exceptional domains and
+JIT fallback are classified separately. The existing native numerical and IEEE
+status suites, not this benchmark, own exhaustive semantic qualification.
+
 ### benchmark_reductions.c
 Reductions (sum/prod/min/max/any/all) vs pure C.
 
@@ -173,6 +198,35 @@ Notes:
 ME_BENCH_COMPILER=tcc ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
 ME_BENCH_COMPILER=cc ./build/bench/benchmark_dsl_jit_math_kernels 262144 6
 ```
+
+### benchmark_dsl_interpreter_vs_jit.c
+Portable 1.1 interpreter vs JIT lowering, warm per-evaluation. One reduced
+reproducer per family originally outside the portable JIT
+(`src/dsl_menudet_jit.c`). Math calls, integer arithmetic, locals and simple
+control flow now compile; floating floor division, block reductions and ND context
+still fall back. A final eligible control kernel checks compiled execution.
+
+Families: `A` math-function call, `B` integer dtype, `C` unsupported float
+operator (`//`), `D` local temporaries, `E` control flow, `F` block reduction and
+`G` ND context.
+
+Backends: `interpreter` (always `ME_JIT_OFF`), internal `tcc`, `gcc-16`
+(`ME_DSL_JIT_COMPILER=cc`, `CC=gcc-16`) and `clang` (`CC=clang`). Cold
+load/compile time is excluded; each cell is the best warm run and a per-sample
+batch is auto-sized to about 2 ms. Requires a CMake build with
+`MINIEXPR_BUILD_ARTIFACT=ON`; the top-level Makefile skips this target.
+
+```bash
+./build/bench/benchmark_dsl_interpreter_vs_jit            # nitems=65536 repeats=7
+./build/bench/benchmark_dsl_interpreter_vs_jit 262144 5
+```
+
+A cell is tagged `I` (interpreter), `JIT` (compiled kernel), `fb` (JIT declined,
+interpreter fallback) or `*` (value differs bitwise from the interpreter
+reference).
+
+Fixed backend order and best-of-warm timings are useful for coverage and large
+interpreter speedups, but not reliable fine-grained compiler rankings.
 
 ### benchmark_black-scholes.c
 Notebook-like Black-Scholes DSL kernel benchmark with branches (`if d1 > 0`, `if d2 > 0`) and multiple transcendental calls.

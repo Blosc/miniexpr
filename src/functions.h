@@ -90,16 +90,22 @@ enum {
     ME_EXPR_FLAG_DSL_STRICT_F32_MATH = 1u << 7,
     ME_EXPR_FLAG_DSL_FLOAT_BOOL_ARITH = 1u << 8,
     ME_EXPR_FLAG_DSL_BOOL_NUMERIC_ARITH = 1u << 9,
-    ME_EXPR_FLAG_PORTABLE_1 = 1u << 10,
+    ME_EXPR_FLAG_MENUDET_1 = 1u << 10,
     ME_EXPR_FLAG_WEAK_LITERAL = 1u << 11,
     ME_EXPR_FLAG_INTEGER_LITERAL = 1u << 12,
-    ME_EXPR_FLAG_NEGATIVE_LITERAL = 1u << 13
+    ME_EXPR_FLAG_NEGATIVE_LITERAL = 1u << 13,
+    ME_EXPR_FLAG_NUMPY_1_1 = 1u << 14,
+    ME_EXPR_FLAG_WEAK_SCALAR = 1u << 15,
+    /* Uniform external inputs have scalar storage; locals remain per-lane. */
+    ME_EXPR_FLAG_UNIFORM_INPUT = 1u << 16,
+    ME_EXPR_FLAG_INTEGER_POWERS = 1u << 17
 };
 
 /* Check if a pointer is a synthetic address (used internally for chunked evaluation).
  * Returns non-zero if the pointer was assigned by me_compile for ordinal variable matching.
  */
 int is_synthetic_address(const void* ptr);
+extern char synthetic_var_addresses[ME_MAX_VARS];
 
 #define TYPE_MASK(TYPE) ((TYPE)&0x0000001F)
 #define IS_PURE(TYPE) (((TYPE) & ME_FLAG_PURE) != 0)
@@ -139,8 +145,8 @@ bool is_comparison_node(const me_expr* n);
 const char* me_comparison_operator(const me_expr* n);
 /* Internal operator spelling for typed DSL arithmetic lowering, NULL otherwise. */
 const char* me_arithmetic_operator(const me_expr* n);
-const char* me_portable_operator(const me_expr* n);
-const char* me_portable_math_name(const me_expr* n);
+const char* me_menudet_operator(const me_expr* n);
+const char* me_menudet_math_name(const me_expr* n);
 bool is_float_math_function(const void* func);
 size_t dtype_size(me_dtype dtype);
 bool has_complex_input_types(const me_expr* n);
@@ -149,9 +155,12 @@ me_dtype reduction_output_dtype(me_dtype dt, const void* func);
 double min_reduce(double x);
 double max_reduce(double x);
 bool validate_string_usage(const me_expr* n);
-bool me_portable_string_operation(const me_expr *n);
-bool me_portable_string_validate(me_expr *n);
-bool me_portable_string_execute(const me_expr *n, const void *const *values, void *output);
+bool me_menudet_string_operation(const me_expr *n);
+bool me_menudet_string_validate(me_expr *n);
+bool me_menudet_string_execute(const me_expr *n, const void *const *values, void *output);
+int me_menudet_eval_string_expr_masked(const me_expr *expr, const void *const *vars, int nvars,
+                                       const uint8_t *const *initialized,
+                                       int nitems, const uint8_t *mask, size_t stride, void *out);
 bool me_is_builtin_function_name(const char* name, size_t len);
 
 typedef enum {
@@ -189,11 +198,6 @@ double where_scalar(double c, double x, double y);
 int me_eval_dsl_program(const me_expr* expr, const void** vars_block,
                         int n_vars, void* output_block, int block_nitems,
                         const me_eval_params* params);
-
-#if defined(_WIN32) || defined(_WIN64)
-bool has_complex_node(const me_expr* n);
-bool has_complex_input(const me_expr* n);
-#endif
 
 #endif
 me_cmp_kind comparison_kind(const void* func);

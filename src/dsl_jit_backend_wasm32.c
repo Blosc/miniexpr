@@ -26,6 +26,9 @@
 EM_JS(int, me_wasm_jit_instantiate,
       (const unsigned char *wasm_bytes, int wasm_len, int bridge_lookup_fn_idx,
        int emit_warnings, int force_invalid), {
+    if (typeof addFunction !== "function") {
+        return 0;
+    }
     var src = HEAPU8.subarray(wasm_bytes, wasm_bytes + wasm_len);
     if (force_invalid) {
         src = new Uint8Array([0x00]);
@@ -131,11 +134,19 @@ EM_JS(int, me_wasm_jit_instantiate,
         return sec.concat(body);
     }
     function buildEnvImports() {
-        var bridgeLookup = null;
-        var bridgeCache = Object.create(null);
-        if (bridge_lookup_fn_idx) {
-            bridgeLookup = wasmTable.get(bridge_lookup_fn_idx);
+        if (!bridge_lookup_fn_idx) {
+            return {
+                memory: wasmMemory,
+                memset: function(ptr, value, n) {
+                    if (n > 0) {
+                        HEAPU8.fill(value & 255, ptr, ptr + n);
+                    }
+                    return ptr | 0;
+                }
+            };
         }
+        var bridgeLookup = wasmTable.get(bridge_lookup_fn_idx);
+        var bridgeCache = Object.create(null);
         function lookupBridge(name) {
             if (!bridgeLookup) {
                 return null;
@@ -428,6 +439,17 @@ EM_JS(int, me_wasm_jit_instantiate,
     var patched = new Uint8Array(out);
     try {
         var mod = new WebAssembly.Module(patched);
+        if (!bridge_lookup_fn_idx) {
+            var imports = WebAssembly.Module.imports(mod);
+            for (var ii = 0; ii < imports.length; ii++) {
+                var imp = imports[ii];
+                var allowedMemory = imp.module === "env" && imp.name === "memory" && imp.kind === "memory";
+                var allowedMemset = imp.module === "env" && imp.name === "memset" && imp.kind === "function";
+                if (!allowedMemory && !allowedMemset) {
+                    throw new Error("menudet wasm kernel has unexpected import " + imp.module + "." + imp.name);
+                }
+            }
+        }
         var inst = new WebAssembly.Instance(mod, { env: buildEnvImports() });
     } catch (e) {
         if (emit_warnings) {
@@ -438,10 +460,10 @@ EM_JS(int, me_wasm_jit_instantiate,
         return 0;
     }
     var fn = inst.exports["me_dsl_jit_kernel"];
-    if (!fn) {
+    if (!fn || fn.length !== 3) {
         if (emit_warnings) {
             globalThis.__meJitWarningCount = ((globalThis.__meJitWarningCount | 0) + 1) | 0;
-            globalThis.__meJitLastWarning = "[me-wasm-jit] missing export";
+            globalThis.__meJitLastWarning = "[me-wasm-jit] missing export or wrong kernel arity";
             err(globalThis.__meJitLastWarning);
         }
         return 0;
@@ -450,7 +472,11 @@ EM_JS(int, me_wasm_jit_instantiate,
 });
 
 EM_JS(void, me_wasm_jit_free_fn, (int idx), {
-    if (idx) removeFunction(idx);
+    if (idx && typeof removeFunction === "function") removeFunction(idx);
+});
+
+EM_JS(int, me_wasm_jit_has_add_function, (void), {
+    return typeof addFunction === "function" ? 1 : 0;
 });
 #endif
 
@@ -512,6 +538,7 @@ typedef struct {
     uint64_t key;
     int fn_idx;
     void *scratch;
+    unsigned int ref_count;
 } me_dsl_jit_wasm_pos_cache_entry;
 
 static me_dsl_jit_wasm_pos_cache_entry g_dsl_jit_wasm_pos_cache[ME_DSL_JIT_WASM_POS_CACHE_SLOTS];
@@ -560,7 +587,18 @@ bool dsl_jit_wasm_pos_cache_bind_program(me_dsl_compiled_program *program, uint6
     program->jit_dl_handle = NULL;
     program->jit_runtime_key = key;
     program->jit_dl_handle_cached = true;
+    g_dsl_jit_wasm_pos_cache[slot].ref_count++;
     return true;
+}
+
+void dsl_jit_wasm_pos_cache_release_program(me_dsl_compiled_program *program) {
+    if (!program || !program->jit_dl_handle_cached) {
+        return;
+    }
+    int slot = dsl_jit_wasm_pos_cache_find_slot(program->jit_runtime_key);
+    if (slot >= 0 && g_dsl_jit_wasm_pos_cache[slot].ref_count > 0) {
+        g_dsl_jit_wasm_pos_cache[slot].ref_count--;
+    }
 }
 
 static bool dsl_jit_wasm_pos_cache_store_program(me_dsl_compiled_program *program, uint64_t key,
@@ -579,26 +617,34 @@ static bool dsl_jit_wasm_pos_cache_store_program(me_dsl_compiled_program *progra
         program->jit_dl_handle = NULL;
         program->jit_runtime_key = key;
         program->jit_dl_handle_cached = true;
+        g_dsl_jit_wasm_pos_cache[slot].ref_count++;
         return true;
     }
 
     slot = dsl_jit_wasm_pos_cache_find_free_slot();
     if (slot < 0) {
-        slot = g_dsl_jit_wasm_pos_cache_cursor;
-        g_dsl_jit_wasm_pos_cache_cursor =
-            (g_dsl_jit_wasm_pos_cache_cursor + 1) % ME_DSL_JIT_WASM_POS_CACHE_SLOTS;
-        if (g_dsl_jit_wasm_pos_cache[slot].valid) {
-            if (g_dsl_jit_wasm_pos_cache[slot].fn_idx != 0) {
-                dsl_wasm_jit_free_dispatch(g_dsl_jit_wasm_pos_cache[slot].fn_idx);
+        for (int offset = 0; offset < ME_DSL_JIT_WASM_POS_CACHE_SLOTS; offset++) {
+            int candidate =
+                (g_dsl_jit_wasm_pos_cache_cursor + offset) % ME_DSL_JIT_WASM_POS_CACHE_SLOTS;
+            if (g_dsl_jit_wasm_pos_cache[candidate].ref_count == 0) {
+                slot = candidate;
+                break;
             }
-            free(g_dsl_jit_wasm_pos_cache[slot].scratch);
         }
+        if (slot < 0) {
+            return false;
+        }
+        g_dsl_jit_wasm_pos_cache_cursor = (slot + 1) % ME_DSL_JIT_WASM_POS_CACHE_SLOTS;
+        dsl_wasm_jit_free_dispatch(g_dsl_jit_wasm_pos_cache[slot].fn_idx);
+        free(g_dsl_jit_wasm_pos_cache[slot].scratch);
+        memset(&g_dsl_jit_wasm_pos_cache[slot], 0, sizeof(g_dsl_jit_wasm_pos_cache[slot]));
     }
 
     g_dsl_jit_wasm_pos_cache[slot].valid = true;
     g_dsl_jit_wasm_pos_cache[slot].key = key;
     g_dsl_jit_wasm_pos_cache[slot].fn_idx = fn_idx;
     g_dsl_jit_wasm_pos_cache[slot].scratch = scratch;
+    g_dsl_jit_wasm_pos_cache[slot].ref_count = 1;
 
     program->jit_kernel_fn = (me_dsl_jit_kernel_fn)(uintptr_t)fn_idx;
     program->jit_dl_handle = NULL;
@@ -671,6 +717,44 @@ static char *dsl_wasm32_patch_source(const char *src) {
     }
     *d = '\0';
     return patched;
+}
+
+/* MiniCC's wasm target is intentionally invoked with -nostdinc. Menudet
+ * Menudet source uses standard fixed-width names, so provide the precise wasm32
+ * typedefs locally rather than applying the lossy legacy type substitutions. */
+static char *dsl_wasm32_prepare_menudet_source(const char *src) {
+    static const char preamble[] =
+        "typedef signed char int8_t; typedef unsigned char uint8_t;\n"
+        "typedef signed short int16_t; typedef unsigned short uint16_t;\n"
+        "typedef signed int int32_t; typedef unsigned int uint32_t;\n"
+        "typedef signed long long int64_t; typedef unsigned long long uint64_t;\n"
+        "typedef unsigned int uintptr_t; typedef unsigned int size_t;\n"
+        "typedef char me_assert_i8[(sizeof(int8_t)==1)?1:-1];\n"
+        "typedef char me_assert_i16[(sizeof(int16_t)==2)?1:-1];\n"
+        "typedef char me_assert_i32[(sizeof(int32_t)==4)?1:-1];\n"
+        "typedef char me_assert_i64[(sizeof(int64_t)==8)?1:-1];\n"
+        "typedef char me_assert_ptr[(sizeof(void *)==4)?1:-1];\n"
+        "#define UINT64_C(x) x##ULL\n"
+        "#define UINT64_MAX 0xffffffffffffffffULL\n"
+        "#define INT64_MAX 0x7fffffffffffffffLL\n"
+        "#define INT64_MIN (-0x7fffffffffffffffLL-1LL)\n"
+        "#define INT_MAX 2147483647\n#define INT_MIN (-2147483647-1)\n";
+    if (!src) return NULL;
+    size_t capacity = strlen(src) + sizeof(preamble) + 1;
+    char *out = malloc(capacity);
+    if (!out) return NULL;
+    memcpy(out, preamble, sizeof(preamble)-1);
+    size_t used = sizeof(preamble)-1;
+    const char *p = src;
+    while (*p) {
+        if (strncmp(p, "#include <stdint.h>\n", 20) == 0) p += 20;
+        else if (strncmp(p, "#include <limits.h>\n", 20) == 0) p += 20;
+        else if (strncmp(p, "#include <string.h>\n", 20) == 0) p += 20;
+        else if (strncmp(p, "#include <math.h>\n", 18) == 0) p += 18;
+        else out[used++] = *p++;
+    }
+    out[used] = '\0';
+    return out;
 }
 
 static bool dsl_wasm32_source_calls_symbol(const char *src, const char *name) {
@@ -790,12 +874,23 @@ bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
         dsl_tracef("jit runtime skip: side-module wasm32 helpers are not registered");
         return false;
     }
+#else
+    if (!me_wasm_jit_has_add_function()) {
+        dsl_tracef("jit runtime skip: Emscripten addFunction helper is not exported");
+        return false;
+    }
 #endif
-    char *patched_src = dsl_wasm32_patch_source(program->jit_c_source);
+    /* Menudet Menudet source already has an explicit wasm32 entry ABI and
+     * exact-width scalar types. Never run the legacy 64-to-32-bit rewrite on it. */
+    char *patched_src = program->jit_menudet_wasm_source ?
+        dsl_wasm32_prepare_menudet_source(program->jit_c_source) :
+        dsl_wasm32_patch_source(program->jit_c_source);
     if (!patched_src) {
         return false;
     }
-    dsl_tracef("jit wasm32: source patched (%zu bytes)", strlen(patched_src));
+    dsl_tracef("jit wasm32: %s source prepared (%zu bytes)",
+               program->jit_menudet_wasm_source ? "menudet" : "legacy",
+               strlen(patched_src));
 
     TCCState *state = tcc_new();
     if (!state) {
@@ -822,7 +917,8 @@ bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
     unsigned int jit_base = ((unsigned int)(uintptr_t)jit_scratch + 0xFFFFu) & ~0xFFFFu;
     tcc_set_wasm_data_base(state, jit_base);
 
-    if (!dsl_wasm32_register_required_symbols(state, patched_src)) {
+    if (!program->jit_menudet_wasm_source &&
+        !dsl_wasm32_register_required_symbols(state, patched_src)) {
         tcc_delete(state);
         free(patched_src);
         free(jit_scratch);
@@ -838,7 +934,11 @@ bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
     }
     free(patched_src);
 
-    const char *wasm_path = "/tmp/me_jit_kernel.wasm";
+    char wasm_path[64];
+    /* A live TCCState has a unique wasm32 address, avoiding collisions when
+     * independent compilations overlap in the Emscripten virtual filesystem. */
+    snprintf(wasm_path, sizeof(wasm_path), "/tmp/me_jit_%08x.wasm",
+             (unsigned int)(uintptr_t)state);
     if (tcc_output_file(state, wasm_path) < 0) {
         tcc_delete(state);
         free(jit_scratch);
@@ -849,6 +949,7 @@ bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
 
     FILE *fp = fopen(wasm_path, "rb");
     if (!fp) {
+        remove(wasm_path);
         free(jit_scratch);
         dsl_tracef("jit runtime skip: cannot read wasm file");
         return false;
@@ -858,6 +959,7 @@ bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
     fseek(fp, 0, SEEK_SET);
     if (wasm_len <= 0 || wasm_len > 1024 * 1024) {
         fclose(fp);
+        remove(wasm_path);
         free(jit_scratch);
         dsl_tracef("jit runtime skip: wasm file size %ld unexpected", wasm_len);
         return false;
@@ -865,12 +967,14 @@ bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
     unsigned char *wasm_bytes = (unsigned char *)malloc((size_t)wasm_len);
     if (!wasm_bytes) {
         fclose(fp);
+        remove(wasm_path);
         free(jit_scratch);
         return false;
     }
     if ((long)fread(wasm_bytes, 1, (size_t)wasm_len, fp) != wasm_len) {
         free(wasm_bytes);
         fclose(fp);
+        remove(wasm_path);
         free(jit_scratch);
         return false;
     }
@@ -879,7 +983,8 @@ bool dsl_jit_compile_wasm32(me_dsl_compiled_program *program, uint64_t key) {
 
     int force_invalid = dsl_env_flag_enabled("ME_WASM_JIT_TEST_FORCE_INVALID", false) ? 1 : 0;
     int fn_idx = me_wasm_jit_instantiate_dispatch(wasm_bytes, (int)wasm_len,
-                                                  (int)(uintptr_t)&dsl_wasm32_lookup_bridge_symbol,
+                                                  program->jit_menudet_wasm_source ? 0 :
+                                                      (int)(uintptr_t)&dsl_wasm32_lookup_bridge_symbol,
                                                   dsl_wasm_jit_emit_warnings(program) ? 1 : 0,
                                                   force_invalid);
     free(wasm_bytes);

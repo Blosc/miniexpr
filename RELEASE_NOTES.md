@@ -4,6 +4,43 @@ Release notes for miniexpr
 Changes from 0.2.0 to 0.2.1
 ===========================
 
+* Menudet weak-scalar strength is preserved across local variable joins. A local
+  initialized from a weak Python literal and later reassigned from a strong
+  float32/int operand no longer widens to float64/int64: for example,
+  `z = 0.0; z = z + x_float32` now keeps float32 storage and values, matching
+  NumPy 2.x and the documented local-weak-binding rule. Adds a focused regression
+  test for float32, float64, integer and widening/checking cases.
+
+* Menudet JIT emits same-width typed integer bitwise operations directly instead
+  of calling scalar interpreter helpers. Scalar integer/Boolean local declarations no
+  longer use volatile rounding barriers, reducing stack traffic in hash kernels.
+  Floating-point local barriers and checked-operation error semantics are unchanged.
+
+* Portable interpretation batches complex64/128 addition, subtraction,
+  multiplication, negation and conversions to complex over bounded vectors.
+  Uniform captures are supported; complex division, other unsupported operations
+  and partially masked expressions retain scalar evaluation. Scalar numerical
+  semantics and aggregate IEEE status are preserved; no complex JIT is added.
+  Input-free complex kernels with an immutable final-index return override
+  handle the endpoint once per unmasked block, avoiding per-element condition
+  interpretation while preserving skipped-lane errors and IEEE status.
+
+* Windows (clang-cl) now supports complex64 and complex128 expressions and
+  portable interpretation, using ABI-safe UCRT complex math wrappers.
+  Complex DSL JIT kernels remain unsupported on all platforms.
+  - API change: `ME_COMPILE_ERR_COMPLEX_UNSUPPORTED` has been removed; its
+    numeric value (-4) remains unused. Consumers referencing the enum name
+    must remove that reference when updating miniexpr.
+
+* Flexible math libraries and floating-point modes for Menudet kernels.
+  - New source pragmas `me:math=auto|system|sleef|accelerate` and
+    `me:ulp=u10|u35`; `me:fp=strict|contract|fast` now reaches portable kernels.
+  - Resolution precedence: source pragma, artifact declaration,
+    `ME_SIMD_MATH_BACKEND`/`ME_DSL_FP_MODE`, built-in default.
+  - `auto` no longer prefers SLEEF; it follows the system-math policy.
+  - Explicit unavailable SLEEF/Accelerate requests fail during preparation.
+  - Accelerated math uses a kernel-local immutable callback table and bounded
+    vector interpretation; artifacts declare the `flexible-math` capability.
 * New varlen output for string expressions: `me_eval_varlen()` writes the Arrow
   layout (int64 offsets + a tight byte blob) instead of fixed-width slots.
   - `ME_STRING` yields UTF-8 (`large_string`); `ME_BYTES` copies bytes verbatim

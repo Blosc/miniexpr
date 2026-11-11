@@ -444,8 +444,8 @@ int main(void) {
 
     int rc = 0;
     rc |= test_identity(1024);
-    rc |= run_trig_i32_inverse("arccos", acos, 1024, -1, 1e-12);
-    rc |= run_trig_i32_inverse("arcsin", asin, 1024, -1, 1e-12);
+    rc |= run_trig_i32_inverse("acos", acos, 1024, -1, 1e-12);
+    rc |= run_trig_i32_inverse("asin", asin, 1024, -1, 1e-12);
 
     for (size_t i = 0; i < sizeof(f64_tests) / sizeof(f64_tests[0]); i++) {
         double min_val = (f64_tests[i].func == asin || f64_tests[i].func == acos) ? -1.0 : -0.9;

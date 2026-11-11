@@ -32,10 +32,11 @@
             meJitEmitWarnings = runtime.meJitEmitWarnings;
         }
 
+        var bridgeHelpersAvailable = typeof stackSave === 'function' &&
+            typeof stackAlloc === 'function' && typeof stackRestore === 'function' &&
+            typeof lengthBytesUTF8 === 'function' && typeof stringToUTF8 === 'function';
         if (!HEAPF64 || !HEAPF32 || !wasmMemory || !wasmTable ||
-            typeof stackSave !== 'function' || typeof stackAlloc !== 'function' ||
-            typeof stackRestore !== 'function' || typeof lengthBytesUTF8 !== 'function' ||
-            typeof stringToUTF8 !== 'function' || typeof addFunction !== 'function') {
+            typeof addFunction !== 'function' || (bridgeLookupFnIdx && !bridgeHelpersAvailable)) {
             err('[me-wasm-jit] invalid runtime object');
             return 0;
         }
@@ -143,11 +144,19 @@
         return sec.concat(body);
     }
     function buildEnvImports() {
-        var bridgeLookup = null;
-        var bridgeCache = Object.create(null);
-        if (bridgeLookupFnIdx) {
-            bridgeLookup = wasmTable.get(bridgeLookupFnIdx);
+        if (!bridgeLookupFnIdx) {
+            return {
+                memory: wasmMemory,
+                memset: function(ptr, value, n) {
+                    if (n > 0 && runtime.HEAPU8) {
+                        runtime.HEAPU8.fill(value & 255, ptr, ptr + n);
+                    }
+                    return ptr | 0;
+                }
+            };
         }
+        var bridgeLookup = wasmTable.get(bridgeLookupFnIdx);
+        var bridgeCache = Object.create(null);
         function lookupBridge(name) {
             if (!bridgeLookup) {
                 return null;
@@ -444,6 +453,17 @@
     var patched = new Uint8Array(out);
     try {
         var mod = new WebAssembly.Module(patched);
+        if (!bridgeLookupFnIdx) {
+            var imports = WebAssembly.Module.imports(mod);
+            for (var ii = 0; ii < imports.length; ii++) {
+                var imp = imports[ii];
+                var allowedMemory = imp.module === "env" && imp.name === "memory" && imp.kind === "memory";
+                var allowedMemset = imp.module === "env" && imp.name === "memset" && imp.kind === "function";
+                if (!allowedMemory && !allowedMemset) {
+                    throw new Error("menudet wasm kernel has unexpected import " + imp.module + "." + imp.name);
+                }
+            }
+        }
         var inst = new WebAssembly.Instance(mod, { env: buildEnvImports() });
     } catch (e) {
         if (meJitEmitWarnings) {
@@ -452,9 +472,9 @@
         return 0;
     }
     var fn = inst.exports["me_dsl_jit_kernel"];
-    if (!fn) {
+    if (!fn || fn.length !== 3) {
         if (meJitEmitWarnings) {
-            err("[me-wasm-jit] missing export");
+            err("[me-wasm-jit] missing export or wrong kernel arity");
         }
         return 0;
     }

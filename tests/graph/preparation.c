@@ -1,0 +1,800 @@
+#include "miniexpr_graph.h"
+#include <fenv.h>
+#include <float.h>
+#include <math.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#define CHECK(x) do { if (!(x)) { fprintf(stderr, "%s:%d: %s (%s)\n", __FILE__, __LINE__, #x, error.native.message); exit(1); } } while (0)
+static me_graph_error error;
+static int reverse_executor(void *host, size_t count, me_graph_task_fn task, void *invocation) {
+    size_t *observed=host; *observed=count;
+    for (size_t i=count; i-- > 0;) task(invocation,i);
+    return 0;
+}
+static int failed_executor(void *host, size_t count, me_graph_task_fn task, void *invocation) {
+    (void)host;
+    if (count) task(invocation,0);
+    return 1;
+}
+static int duplicate_executor(void *host, size_t count, me_graph_task_fn task, void *invocation) {
+    reverse_executor(host,count,task,invocation);
+    return reverse_executor(host,count,task,invocation);
+}
+static me_graph_plan *prepare(const char *source, me_graph_input_metadata *inputs, int n, bool jit) {
+    fprintf(stderr, "  prepare jit=%d: %s\n", jit, source); fflush(stderr);
+    me_graph_plan *p = NULL;
+    me_graph_prepare_options options = {sizeof(options), ME_GRAPH_VERSION, jit ? ME_JIT_ON : ME_JIT_OFF, false, true};
+    CHECK(!me_graph_prepare_expression(source, strlen(source), inputs, n, &options, &p, &error));
+    CHECK(p != NULL);
+    return p;
+}
+static me_array_view view(const char *name, me_dtype dtype, void *base, size_t capacity, int rank, int64_t a, int64_t b) {
+    me_array_view v = {0};
+    v.name = name; v.dtype = dtype; v.base = base; v.capacity = capacity; v.rank = rank;
+    v.shape[0] = a; v.shape[1] = b;
+    size_t width = dtype == ME_BOOL || dtype == ME_INT8 || dtype == ME_UINT8 ? 1 :
+        dtype == ME_INT16 || dtype == ME_UINT16 ? 2 :
+        dtype == ME_FLOAT32 || dtype == ME_INT32 || dtype == ME_UINT32 ? 4 : 8;
+    v.strides[1] = (int64_t)width; v.strides[0] = (int64_t)(rank == 2 ? b * width : width);
+    return v;
+}
+static void maps(bool jit) {
+    me_graph_input_metadata inputs[] = {{"x", ME_FLOAT32, 2, {2, 1}}, {"y", ME_FLOAT32, 1, {3}}};
+    float x[] = {1, 2}, y[] = {3, 4, 5}, output[6] = {0};
+    me_graph_plan *p = prepare("x * 2 + y", inputs, 2, jit), *copy = NULL;
+    CHECK(me_graph_inferred_dtype(p) == ME_FLOAT32);
+    CHECK(!me_graph_reduction_op(p) && !me_graph_reduction_axis_count(p) &&
+          !me_graph_reduction_has_initial(p) && !me_graph_reduction_has_where(p));
+    size_t length; const char *json = me_graph_export_json(p, &length);
+    CHECK(!me_graph_prepare_json(json, length, NULL, &copy, &error));
+    CHECK(!strcmp(json, me_graph_export_json(copy, NULL)));
+    me_graph_plan_free(copy);
+    me_graph_schedule *s = NULL;
+    CHECK(!me_graph_specialize(p, inputs, 2, NULL, &s, &error));
+    CHECK(me_graph_output_rank(s) == 2 && me_graph_output_shape(s)[1] == 3);
+    CHECK(me_graph_output_bytes(s) == sizeof(output));
+    unsigned execution_caps=me_graph_execution_capabilities(p);
+    me_graph_plan_free(p); /* The schedule owns retention, not input pointers. */
+    me_array_view bindings[] = {view("y", ME_FLOAT32, y, sizeof(y), 1, 3, 0), view("x", ME_FLOAT32, x, sizeof(x), 2, 2, 1)};
+    me_graph_report report;
+    CHECK(!me_graph_execute(s, bindings, 2, output, sizeof(output), NULL, &report, &error));
+    CHECK(output[0] == 5 && output[5] == 9);
+    float column_major[8] = {-99,-99,-99,-99,-99,-99,-99,-99};
+    me_array_output destination = {.struct_size=sizeof(destination),.version=ME_ARRAY_OUTPUT_VERSION,
+        .dtype=ME_FLOAT32,.base=column_major,.capacity=sizeof(column_major),.offset=4,
+        .rank=2,.shape={2,3},.strides={4,8}};
+    CHECK(!me_graph_execute_into(s,bindings,2,&destination,NULL,&report,&error));
+    CHECK(column_major[0]==-99 && column_major[7]==-99);
+    CHECK(column_major[1]==5 && column_major[2]==7 && column_major[5]==7 && column_major[6]==9);
+    size_t dispatched=0;
+    me_graph_executor executor={sizeof(executor),ME_GRAPH_EXECUTOR_VERSION,4,1024*1024,reverse_executor,&dispatched,1,0};
+    me_graph_parallel_report parallel;
+    CHECK(execution_caps & ME_GRAPH_EXEC_PARTITIONABLE);
+    CHECK(!me_graph_execute_parallel_into(s,bindings,2,&destination,NULL,&executor,&parallel,&error));
+    CHECK(dispatched==3 && parallel.tasks==3);
+    CHECK(column_major[1]==5 && column_major[2]==7 && column_major[5]==7 && column_major[6]==9);
+    executor.fork_join=failed_executor;
+    CHECK(me_graph_execute_parallel_into(s,bindings,2,&destination,NULL,&executor,&parallel,&error)==ME_GRAPH_ERR_EXECUTION);
+    executor.fork_join=reverse_executor; executor.workspace_budget=1;
+    column_major[1]=-77;
+    CHECK(me_graph_execute_parallel_into(s,bindings,2,&destination,NULL,&executor,&parallel,&error)==ME_GRAPH_ERR_BINDING);
+    CHECK(column_major[1]==-77);
+    destination.strides[1]=0;
+    CHECK(me_graph_execute_into(s,bindings,2,&destination,NULL,&report,&error)==ME_GRAPH_ERR_BINDING);
+    CHECK(column_major[0]==-99);
+    x[0] = 10;
+    CHECK(!me_graph_execute(s, bindings, 2, output, sizeof(output), NULL, &report, &error));
+    CHECK(output[0] == 23); /* No result cache. */
+    output[0] = 99; bindings[0].shape[0] = 2;
+    CHECK(me_graph_execute(s, bindings, 2, output, sizeof(output), NULL, &report, &error) == ME_GRAPH_ERR_BINDING);
+    CHECK(output[0] == 99); bindings[0].shape[0] = 3;
+    CHECK(me_graph_execute(s, bindings, 2, output, 1, NULL, NULL, &error) == ME_GRAPH_ERR_BINDING);
+    CHECK(output[0] == 99);
+    CHECK(me_graph_execute(s, bindings, 2, y, sizeof(y), NULL, NULL, &error) == ME_GRAPH_ERR_BINDING);
+    me_graph_schedule_free(s);
+}
+static void lazy(bool jit) {
+    me_graph_input_metadata inputs[] = {{"x", ME_FLOAT64, 1, {3}}, {"y", ME_FLOAT64, 0, {0}}};
+    double x[] = {0, 2, 4}, y = 8, output[3];
+    me_graph_plan *p = prepare("where(x != 0, y / x, y)", inputs, 2, jit);
+    me_graph_schedule *s = NULL; CHECK(!me_graph_specialize(p, inputs, 2, NULL, &s, &error));
+    me_array_view bindings[] = {view("x", ME_FLOAT64, x, sizeof(x), 1, 3, 0), view("y", ME_FLOAT64, &y, sizeof(y), 0, 0, 0)};
+    me_graph_report report;
+    CHECK(!me_graph_execute(s, bindings, 2, output, sizeof(output), NULL, &report, &error));
+    CHECK(output[0] == 8 && output[1] == 4 && output[2] == 2 && report.array.fp_flags == 0);
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+}
+static void dynamic_maps(void) {
+    enum { count=513 };
+    double x[count], y=2, expected[count], output[2*count];
+    for (int i=0; i<count; i++) x[i]=(double)i-256;
+    me_graph_input_metadata metadata[]={{"x",ME_FLOAT64,1,{count}},{"y",ME_FLOAT64,0,{0}}};
+    me_graph_plan *plan=prepare("where(x != 0, y / x, 0.0)",metadata,2,false);
+    me_graph_schedule *schedule=NULL;
+    CHECK(!me_graph_specialize(plan,metadata,2,NULL,&schedule,&error));
+    me_array_view inputs[]={view("x",ME_FLOAT64,x,sizeof(x),1,count,0),
+        view("y",ME_FLOAT64,&y,sizeof(y),0,0,0)};
+    inputs[0].strides[0]=-8; inputs[0].offset=(count-1)*8;
+    me_graph_report serial;
+    CHECK(!me_graph_execute(schedule,inputs,2,expected,sizeof(expected),NULL,&serial,&error));
+    size_t dispatched=0;
+    me_graph_executor executor={sizeof(executor),ME_GRAPH_EXECUTOR_VERSION,4,1024*1024,
+        duplicate_executor,&dispatched,1,31};
+    for (int reverse=0; reverse<2; reverse++) {
+        for (int i=0; i<2*count; i++) output[i]=-999;
+        me_array_output destination={.struct_size=sizeof(destination),.version=ME_ARRAY_OUTPUT_VERSION,
+            .dtype=ME_FLOAT64,.base=output,.capacity=sizeof(output),.rank=1,.shape={count},
+            .offset=reverse ? (count-1)*16 : 0,.strides={reverse ? -16 : 16}};
+        me_graph_parallel_report parallel;
+        CHECK(!me_graph_execute_parallel_into(schedule,inputs,2,&destination,NULL,&executor,&parallel,&error));
+        CHECK(dispatched==4 && parallel.tasks==4);
+        CHECK(parallel.execution.array.evaluated_tiles==17);
+        CHECK(parallel.execution.array.fp_flags==serial.array.fp_flags);
+        CHECK(parallel.execution.array.temporary_bytes <= parallel.iterator_workspace_bound);
+        for (int i=0; i<count; i++) {
+            CHECK(output[2*(reverse ? count-1-i : i)]==expected[i]);
+            CHECK(output[2*i+1]==-999);
+        }
+    }
+    me_graph_schedule_free(schedule); me_graph_plan_free(plan);
+    /* Interleaving must not let four failing workers abandon an unclaimed,
+     * earlier logical failure. Every independent job still executes once. */
+    metadata[0].shape[0]=20;
+    for (int i=0; i<20; i++) x[i]=1;
+    x[3]=x[6]=x[7]=x[11]=x[16]=-1;
+    plan=prepare("sqrt(x)",metadata,1,false);
+    CHECK(!me_graph_specialize(plan,metadata,1,NULL,&schedule,&error));
+    inputs[0]=view("x",ME_FLOAT64,x,sizeof(x),1,20,0);
+    me_array_output destination={.struct_size=sizeof(destination),.version=ME_ARRAY_OUTPUT_VERSION,
+        .dtype=ME_FLOAT64,.base=output,.capacity=sizeof(output),.rank=1,.shape={20},.strides={8}};
+    me_graph_execute_options options={sizeof(options),ME_GRAPH_VERSION,ME_FP_INVALID};
+    executor.tile_items=1;
+    me_graph_parallel_report parallel;
+#ifdef __EMSCRIPTEN__
+    output[0]=-777;
+    CHECK(me_graph_execute_parallel_into(schedule,inputs,1,&destination,&options,&executor,&parallel,&error)==ME_GRAPH_ERR_CAPABILITY);
+    CHECK(output[0]==-777);
+    options.raise_mask=0;
+    CHECK(!me_graph_execute_parallel_into(schedule,inputs,1,&destination,&options,&executor,&parallel,&error));
+#else
+    CHECK(me_graph_execute_parallel_into(schedule,inputs,1,&destination,&options,&executor,&parallel,&error)==ME_GRAPH_ERR_EXECUTION);
+#endif
+    CHECK(parallel.execution.array.evaluated_tiles==20);
+    for (int i=0; i<20; i++) CHECK(x[i] < 0 ? isnan(output[i]) : output[i]==1);
+    me_graph_schedule_free(schedule); me_graph_plan_free(plan);
+}
+static void identity_destinations(bool jit) {
+    me_graph_input_metadata metadata={"x",ME_FLOAT64,2,{2,3}};
+    double values[]={1,4,2,5,3,6}, output[]={-99,-99,-99,-99,-99,-99,-99,-99};
+    me_array_view input=view("x",ME_FLOAT64,values,sizeof(values),2,2,3);
+    input.strides[0]=8; input.strides[1]=16;
+    me_graph_plan *plan=prepare("x",&metadata,1,jit);
+    me_graph_schedule *schedule=NULL;
+    CHECK(!me_graph_specialize(plan,&metadata,1,NULL,&schedule,&error));
+    me_array_output destination={.struct_size=sizeof(destination),.version=ME_ARRAY_OUTPUT_VERSION,
+        .dtype=ME_FLOAT64,.base=output,.capacity=sizeof(output),.offset=8,
+        .rank=2,.shape={2,3},.strides={8,16}};
+    me_graph_report report;
+    CHECK(!me_graph_execute_into(schedule,&input,1,&destination,NULL,&report,&error));
+    CHECK(!memcmp(output+1,values,sizeof(values)) && output[0]==-99 && output[7]==-99);
+    CHECK(report.array.evaluated_tiles==0 && report.array.temporary_bytes==0);
+    input.offset=40; input.strides[0]=-8; input.strides[1]=-16;
+    destination.offset=48; destination.strides[0]=-8; destination.strides[1]=-16;
+    CHECK(!me_graph_execute_into(schedule,&input,1,&destination,NULL,&report,&error));
+    CHECK(!memcmp(output+1,values,sizeof(values)) && output[0]==-99 && output[7]==-99);
+    CHECK(report.array.evaluated_tiles==0 && report.array.temporary_bytes==0);
+    me_graph_schedule_free(schedule); me_graph_plan_free(plan);
+}
+static void partition_policies(void) {
+    me_graph_input_metadata input={"x",ME_INT64,1,{3}};
+    const char *safe[]={"x + 1","x / (x + 1)","sin(x)","sqrt(x * x)","where(x > 0.5, x + 1, x - 1)"};
+    const char *checked[]={"int8(x)","x // 2","x ** 2","x >> 2","x + (2 ** 63)"};
+    for (size_t i=0; i<sizeof(safe)/sizeof(*safe); i++) {
+        me_graph_plan *plan=prepare(safe[i],&input,1,false);
+        CHECK(me_graph_execution_capabilities(plan) & ME_GRAPH_EXEC_PARTITIONABLE);
+        me_graph_plan_free(plan);
+    }
+    for (size_t i=0; i<sizeof(checked)/sizeof(*checked); i++) {
+        me_graph_plan *plan=prepare(checked[i],&input,1,false);
+        CHECK(!(me_graph_execution_capabilities(plan) & ME_GRAPH_EXEC_PARTITIONABLE));
+        me_graph_plan_free(plan);
+    }
+    /* Promotion at the root must not hide a checked weak-scalar conversion in
+     * a narrower subtree. Safe mixed-width/Boolean maps remain partitionable. */
+    struct { const char *source; me_dtype x, y; bool safe; } mixed[] = {
+        {"(x + 300) + y", ME_UINT8, ME_INT16, false},
+        {"y + (x + 300)", ME_UINT8, ME_INT16, false},
+        {"(x + -1) + y", ME_UINT8, ME_INT16, false},
+        {"(x + 128) + y", ME_INT8, ME_INT16, false},
+        {"(x + -129) + y", ME_INT8, ME_INT16, false},
+        {"(x + 32768) + y", ME_INT16, ME_INT32, false},
+        {"(x + 255) + y", ME_UINT8, ME_INT16, true},
+        {"(x + 127) + y", ME_INT8, ME_INT16, true},
+        {"(x + -128) + y", ME_INT8, ME_INT16, true},
+        {"(x + 32767) + y", ME_INT16, ME_INT32, true},
+        {"x + y", ME_INT16, ME_UINT8, true},
+        {"x | y", ME_BOOL, ME_BOOL, true},
+        {"where(x, y + 300, y)", ME_BOOL, ME_INT16, true},
+        /* A conservative decline is allowed even after explicit promotion. */
+        {"(x + y) + 300", ME_UINT8, ME_INT16, false}
+    };
+    for (size_t i = 0; i < sizeof(mixed) / sizeof(*mixed); i++) {
+        me_graph_input_metadata inputs[] = {{"x", mixed[i].x, 1, {3}}, {"y", mixed[i].y, 1, {3}}};
+        me_graph_plan *plan = prepare(mixed[i].source, inputs, 2, false), *copy = NULL;
+        CHECK(!!(me_graph_execution_capabilities(plan) & ME_GRAPH_EXEC_PARTITIONABLE) == mixed[i].safe);
+        size_t length;
+        const char *json = me_graph_export_json(plan, &length);
+        CHECK(!me_graph_prepare_json(json, length, NULL, &copy, &error));
+        CHECK(!!(me_graph_execution_capabilities(copy) & ME_GRAPH_EXEC_PARTITIONABLE) == mixed[i].safe);
+        me_graph_plan_free(copy);
+        me_graph_plan_free(plan);
+    }
+}
+static void integer_extrema(bool jit) {
+    /* Exercise exact signed/unsigned boundaries and generated nested extrema,
+     * not floating transport or the scalar checked-operation interpreter. */
+    uint64_t x[]={0,UINT64_MAX,UINT64_C(1)<<63,7,42};
+    uint64_t y[]={UINT64_MAX,0,INT64_MAX,7,43};
+    for (int unsign=0; unsign<2; unsign++) {
+        me_dtype dtype=unsign ? ME_UINT64 : ME_INT64;
+        me_graph_input_metadata metadata[]={{"x",dtype,1,{5}},{"y",dtype,1,{5}}};
+        const char *expressions[]={"minimum(x,y)","maximum(x,y)","minimum(maximum(x,y),x)"};
+        for (int op=0; op<3; op++) {
+            me_graph_plan *plan=prepare(expressions[op],metadata,2,jit);
+            CHECK(me_graph_execution_capabilities(plan) & ME_GRAPH_EXEC_PARTITIONABLE);
+            me_graph_schedule *schedule=NULL;
+            CHECK(!me_graph_specialize(plan,metadata,2,NULL,&schedule,&error));
+            me_array_view inputs[]={view("x",dtype,x,sizeof(x),1,5,0),view("y",dtype,y,sizeof(y),1,5,0)};
+            uint64_t output[5];
+            CHECK(!me_graph_execute(schedule,inputs,2,output,sizeof(output),NULL,NULL,&error));
+            for (int i=0; i<5; i++) {
+                int64_t sx,sy; memcpy(&sx,x+i,8); memcpy(&sy,y+i,8);
+                bool less=unsign ? x[i]<y[i] : sx<sy;
+                uint64_t expected=op==2 ? x[i] : (op==0 ? less : !less) ? x[i] : y[i];
+                CHECK(output[i]==expected);
+            }
+            me_graph_schedule_free(schedule); me_graph_plan_free(plan);
+        }
+    }
+}
+static void reductions(bool jit) {
+    me_graph_input_metadata inputs[] = {{"x", ME_FLOAT64, 2, {2, 3}}, {"mask", ME_BOOL, 1, {3}}};
+    double x[] = {1, -1, 4, 9, -2, 16}, output[2]; bool mask[] = {true, false, true};
+    me_graph_plan *p = prepare("sum(sqrt(x), axis=-1, keepdims=True, where=mask)", inputs, 2, jit);
+    CHECK(!strcmp(me_graph_reduction_op(p), "sum"));
+    CHECK(me_graph_reduction_axis_count(p) == 1 && me_graph_reduction_axis(p, 0) == -1);
+    CHECK(me_graph_reduction_keepdims(p));
+    CHECK(!me_graph_reduction_has_initial(p));
+    CHECK(me_graph_reduction_has_where(p));
+    me_graph_schedule *s = NULL;
+    me_graph_specialize_options options = {sizeof(options), ME_GRAPH_VERSION, 1, 0};
+    CHECK(!me_graph_specialize(p, inputs, 2, &options, &s, &error));
+    CHECK(me_graph_output_rank(s) == 2 && me_graph_output_shape(s)[1] == 1);
+    me_array_view bindings[] = {view("x", ME_FLOAT64, x, sizeof(x), 2, 2, 3), view("mask", ME_BOOL, mask, sizeof(mask), 1, 3, 0)};
+    me_graph_report report;
+    CHECK(!me_graph_execute(s, bindings, 2, output, sizeof(output), NULL, &report, &error));
+    CHECK(output[0] == 3 && output[1] == 7 && report.array.fp_flags == 0);
+    options.tile_items = 4; me_graph_schedule *other = NULL;
+    CHECK(!me_graph_specialize(p, inputs, 2, &options, &other, &error));
+    double second[2];
+    CHECK(!me_graph_execute(other, bindings, 2, second, sizeof(second), NULL, &report, &error));
+    CHECK(!memcmp(output, second, sizeof(output)));
+    me_graph_schedule_free(s); me_graph_schedule_free(other); me_graph_plan_free(p);
+    const char *ops[] = {"sum(x)", "prod(x)", "min(x)", "max(x)", "any(x)", "all(x)"};
+    inputs[0].dtype = ME_INT64; inputs[0].rank = 1; inputs[0].shape[0] = 3;
+    int64_t integers[] = {2, 3, 4}, expected[] = {9, 24, 2, 4, 1, 1};
+    for (int i = 0; i < 6; i++) {
+        p = prepare(ops[i], inputs, 1, jit);
+        CHECK(!me_graph_specialize(p, inputs, 1, NULL, &s, &error));
+        uint64_t result = 0; bindings[0] = view("x", ME_INT64, integers, sizeof(integers), 1, 3, 0);
+        CHECK(!me_graph_execute(s, bindings, 1, &result, sizeof(result), NULL, &report, &error));
+        CHECK((int64_t)result == expected[i]);
+        me_graph_schedule_free(s); me_graph_plan_free(p);
+    }
+}
+static void validation(void) {
+    me_graph_input_metadata input = {"x", ME_FLOAT64, 1, {0}};
+    const char *bad[] = {"x.thing", "where(x > 0, sum(x), x)", "sum(x, bogus=1)", "where(x, x)", "x < 1 < 2", "x + missing", "x + 9223372036854775808"};
+    for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); i++) {
+        me_graph_plan *p = (void *)1;
+        CHECK(me_graph_prepare_expression(bad[i], strlen(bad[i]), &input, 1, NULL, &p, &error) != 0);
+        CHECK(p == NULL);
+    }
+    me_graph_plan *p = prepare("x + 1", &input, 1, false); me_graph_schedule *s = NULL;
+    CHECK(!me_graph_specialize(p, &input, 1, NULL, &s, &error));
+    me_array_view v = view("x", ME_FLOAT64, NULL, 0, 1, 0, 0);
+    CHECK(!me_graph_execute(s, &v, 1, NULL, 0, NULL, NULL, &error));
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+    int flags = fetestexcept(FE_ALL_EXCEPT); int rounding = fegetround();
+    p = prepare("x + 1e-300", &input, 1, false);
+    CHECK(fetestexcept(FE_ALL_EXCEPT) == flags && fegetround() == rounding);
+    me_graph_plan_free(p);
+    fenv_t saved; fegetenv(&saved);
+#ifndef __EMSCRIPTEN__
+    feraiseexcept(FE_DIVBYZERO); fesetround(FE_DOWNWARD);
+#endif
+    flags = fetestexcept(FE_ALL_EXCEPT); rounding = fegetround();
+    p = prepare("1 / 0", NULL, 0, false);
+    CHECK(fetestexcept(FE_ALL_EXCEPT) == flags && fegetround() == rounding);
+    me_graph_plan_free(p);
+    const char *malformed = "{\"value\":1e999}";
+    CHECK(me_graph_prepare_json(malformed, strlen(malformed), NULL, &p, &error) != 0);
+    CHECK(p == NULL && fetestexcept(FE_ALL_EXCEPT) == flags && fegetround() == rounding);
+    fesetenv(&saved);
+    me_graph_plan_free(NULL); me_graph_schedule_free(NULL);
+}
+static void limits(void) {
+    char json[20000];
+    for (int depth = ME_GRAPH_MAX_DEPTH; depth <= ME_GRAPH_MAX_DEPTH + 1; depth++) {
+        size_t n = (size_t)snprintf(json, sizeof(json), "{\"format\":\"menudet-graph-1\",\"semantics\":\"menudet-numpy-0.1\",\"requires\":[\"numeric\"],\"nodes\":[{\"id\":0,\"op\":\"input\",\"name\":\"x\",\"dtype\":\"float64\"}");
+        for (int i = 1; i <= depth; i++) n += (size_t)snprintf(json + n, sizeof(json) - n, ",{\"id\":%d,\"op\":\"neg\",\"args\":[%d]}", i, i - 1);
+        n += (size_t)snprintf(json + n, sizeof(json) - n, "],\"root\":%d,\"output\":{\"dtype\":\"auto\",\"casting\":\"unsafe\"}}", depth);
+        me_graph_plan *p = NULL;
+        fprintf(stderr, "  graph depth=%d\n", depth); fflush(stderr);
+        int rc = me_graph_prepare_json(json, n, NULL, &p, &error);
+        CHECK(depth == ME_GRAPH_MAX_DEPTH ? rc == 0 : rc == ME_GRAPH_ERR_FORMAT);
+        me_graph_plan_free(p);
+    }
+    me_graph_input_metadata input = {"x", ME_FLOAT64, 2, {INT64_MAX, 2}};
+    me_graph_plan *p = prepare("x", &input, 1, false); me_graph_schedule *s = NULL;
+    CHECK(me_graph_specialize(p, &input, 1, NULL, &s, &error) == ME_GRAPH_ERR_SHAPE && s == NULL);
+    input.rank = 1; input.shape[0] = 3;
+    me_graph_specialize_options options = {sizeof(options), ME_GRAPH_VERSION, (size_t)INT32_MAX + 1, 0};
+    CHECK(me_graph_specialize(p, &input, 1, &options, &s, &error) == ME_GRAPH_ERR_FORMAT && s == NULL);
+    me_graph_plan_free(p);
+}
+static void staged(bool jit) {
+    me_graph_input_metadata input = {"x", ME_FLOAT64, 2, {2, 3}};
+    me_graph_plan *p = prepare("x - sum(x, axis=0)", &input, 1, jit), *copy = NULL;
+    CHECK(me_graph_stage_count(p) == 2);
+    CHECK(me_graph_capabilities(p) & ME_GRAPH_CAP_STAGED);
+    CHECK(me_graph_stage_last_consumer(p, 0) == 1);
+    size_t length;
+    const char *json = me_graph_export_json(p, &length);
+    CHECK(!me_graph_prepare_json(json, length, NULL, &copy, &error));
+    me_graph_plan_free(copy);
+    me_graph_schedule *s = NULL;
+    me_graph_specialize_options options = {sizeof(options), ME_GRAPH_VERSION, 1, 23};
+    CHECK(me_graph_specialize(p, &input, 1, &options, &s, &error) == ME_GRAPH_ERR_SHAPE);
+    CHECK(s == NULL);
+    options.intermediate_budget = 24;
+    CHECK(!me_graph_specialize(p, &input, 1, &options, &s, &error));
+    CHECK(me_graph_intermediate_bytes(s) == 24);
+    CHECK(me_graph_stage_output_rank(s, 0) == 1 && me_graph_stage_output_shape(s, 0)[0] == 3);
+    double x[] = {1, 2, 3, 4, 5, 6}, output[6], expected[] = {-4, -5, -6, -1, -2, -3};
+    me_array_view v = view("x", ME_FLOAT64, x, sizeof(x), 2, 2, 3);
+    me_graph_report report;
+    CHECK(!me_graph_execute(s, &v, 1, output, sizeof(output), NULL, &report, &error));
+    CHECK(!memcmp(output, expected, sizeof(output)) && report.stages == 2);
+    output[0] = 99; v.capacity = 1;
+    CHECK(me_graph_execute(s, &v, 1, output, sizeof(output), NULL, &report, &error) == ME_GRAPH_ERR_BINDING);
+    CHECK(output[0] == 99 && error.stage == 0);
+    v.capacity = sizeof(x);
+    x[0] = 10;
+    CHECK(!me_graph_execute(s, &v, 1, output, sizeof(output), NULL, &report, &error));
+    CHECK(output[0] == -4 && output[3] == -10);
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+}
+/* Compare the optimized graph route against the unchanged artifact-array
+ * reducer, including exact serial rounding and floating status. */
+static void direct_reductions(void) {
+    const char *names[] = {"sum", "prod", "min", "max", "any", "all"};
+    me_dtype types[] = {ME_FLOAT32, ME_FLOAT64, ME_INT32, ME_BOOL, ME_INT8, ME_INT16,
+        ME_INT64, ME_UINT8, ME_UINT16, ME_UINT32, ME_UINT64};
+    float f[] = {1, -2, 3, 0, 5, -6};
+    double d[] = {1, -2, 3, 0, 5, -6};
+    int32_t integers[] = {1, -2, 3, 0, 5, -6};
+    bool booleans[] = {true, false, true, false, true, true};
+    int8_t i8[] = {1, -2, 3, 0, 5, -6}; int16_t i16[] = {1, -2, 3, 0, 5, -6};
+    int64_t i64[] = {INT64_MAX, 1, INT64_MIN, -1, 0, 3};
+    uint8_t u8[] = {1, 2, 3, 0, 5, 6}; uint16_t u16[] = {1, 2, 3, 0, 5, 6};
+    uint32_t u32[] = {1, 2, 3, 0, 5, 6}; uint64_t u64[] = {UINT64_MAX, 1, 0, 1, 2, 3};
+    void *data[] = {f, d, integers, booleans, i8, i16, i64, u8, u16, u32, u64};
+    size_t widths[] = {4, 8, 4, 1, 1, 2, 8, 1, 2, 4, 8};
+    for (int type = 0; type < 11; type++) for (int op = 0; op < 6; op++) {
+        char source[32]; snprintf(source, sizeof(source), "%s(x)", names[op]);
+        me_graph_input_metadata input = {"x", types[type], 1, {6}};
+        me_graph_plan *p = prepare(source, &input, 1, false);
+        size_t width = widths[type];
+        me_array_view v = {0}; v.name = "x"; v.dtype = types[type];
+        v.rank = 1; v.shape[0] = 6; v.strides[0] = (int64_t)width;
+        v.base = data[type]; v.capacity = 6 * width;
+        for (size_t tile = 1; tile <= 9; tile += 4) {
+            me_graph_specialize_options options = {sizeof(options), ME_GRAPH_VERSION, tile, 0};
+            me_graph_schedule *s = NULL;
+            CHECK(!me_graph_specialize(p, &input, 1, &options, &s, &error));
+            me_array_options reduction = {0}; reduction.version = ME_ARTIFACT_ARRAY_VERSION;
+            reduction.reduction = (me_array_reduction)(op + 1); reduction.naxes = -1;
+            reduction.tile_items = tile;
+            uint64_t actual = 0, expected = 0;
+            me_array_report reference; me_graph_report report; me_artifact_error native;
+            CHECK(!me_artifact_eval_array(me_graph_map_artifact(p), &v, 1, 1, input.shape,
+                &reduction, &expected, sizeof(expected), &reference, &native));
+            CHECK(!me_graph_execute(s, &v, 1, &actual, sizeof(actual), NULL, &report, &error));
+            CHECK(!memcmp(&actual, &expected, me_graph_output_bytes(s)));
+            CHECK(report.array.fp_flags == reference.fp_flags);
+            CHECK(report.array.evaluated_tiles == 0 && report.array.temporary_bytes == 0);
+            CHECK(!report.has_jit && report.jit_stages == 0);
+            me_graph_schedule_free(s);
+        }
+        me_graph_plan_free(p);
+    }
+    /* Cancellation-sensitive order, overflow, NaNs and signed zero. */
+    double special[][6] = {{1e16, 1, -1e16, 1, -0.0, 0},
+        {DBL_MAX, DBL_MAX, -DBL_MAX, 1, 2, 3}, {INFINITY, -INFINITY, 1, 2, 3, 4},
+        {NAN, 1, 2, 3, 4, 5}, {-0.0, -0.0, -0.0, -0.0, -0.0, -0.0}};
+    for (size_t i = 0; i < sizeof(special) / sizeof(*special); i++) {
+        me_graph_input_metadata input = {"x", ME_FLOAT64, 1, {6}};
+        me_graph_plan *p = prepare("sum(x)", &input, 1, false);
+        me_graph_schedule *s = NULL;
+        CHECK(!me_graph_specialize(p, &input, 1, NULL, &s, &error));
+        me_array_view v = view("x", ME_FLOAT64, special[i], sizeof(special[i]), 1, 6, 0);
+        me_array_options o = {0}; o.version = ME_ARTIFACT_ARRAY_VERSION;
+        o.reduction = ME_ARRAY_SUM; o.naxes = -1; o.tile_items = 1;
+        double expected, actual; me_array_report reference; me_graph_report report; me_artifact_error native;
+        CHECK(!me_artifact_eval_array(me_graph_map_artifact(p), &v, 1, 1, input.shape,
+            &o, &expected, sizeof(expected), &reference, &native));
+        CHECK(!me_graph_execute(s, &v, 1, &actual, sizeof(actual), NULL, &report, &error));
+        CHECK(!memcmp(&actual, &expected, sizeof(actual)) && report.array.fp_flags == reference.fp_flags);
+        me_graph_schedule_free(s); me_graph_plan_free(p);
+    }
+}
+static void weak_capture_conversions(void) {
+    struct { const char *expression; me_dtype dtype; size_t width; } cases[] = {
+        {"x % 7", ME_INT32, 4}, {"x % 3", ME_INT32, 4}, {"x << 2", ME_INT32, 4},
+        {"int16(x) * 2", ME_INT8, 1}, {"x + 127", ME_INT8, 1},
+        {"x + -128", ME_INT8, 1}, {"x + 255", ME_UINT8, 1},
+        {"x + 9223372036854775807", ME_UINT64, 8}
+    };
+    int32_t i32[] = {-10, 0, 5}; int8_t i8[] = {-3, 0, 5};
+    uint8_t u8[] = {0, 1, 2}; uint64_t u64[] = {0, 1, 2};
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        me_graph_input_metadata input = {"x", cases[i].dtype, 1, {3}};
+        me_graph_plan *oracle = prepare("x + x", &input, 1, true);
+        bool available = me_graph_has_jit(oracle); me_graph_plan_free(oracle);
+        me_graph_plan *p = prepare(cases[i].expression, &input, 1, true);
+        me_graph_plan *reference = prepare(cases[i].expression, &input, 1, false);
+        if (available) CHECK(me_graph_has_jit(p));
+        me_graph_schedule *s = NULL, *r = NULL;
+        CHECK(!me_graph_specialize(p, &input, 1, NULL, &s, &error));
+        CHECK(!me_graph_specialize(reference, &input, 1, NULL, &r, &error));
+        void *data = cases[i].dtype == ME_INT32 ? (void *)i32 : cases[i].dtype == ME_INT8 ?
+            (void *)i8 : cases[i].dtype == ME_UINT8 ? (void *)u8 : (void *)u64;
+        me_array_view v = view("x", cases[i].dtype, data, 3 * cases[i].width, 1, 3, 0);
+        uint64_t output[3] = {0}, expected[3] = {0}; me_graph_report report;
+        CHECK(!me_graph_execute(s, &v, 1, output, sizeof(output), NULL, &report, &error));
+        CHECK(!me_graph_execute(r, &v, 1, expected, sizeof(expected), NULL, NULL, &error));
+        CHECK(me_graph_output_dtype(s) == me_graph_output_dtype(r));
+        CHECK(!memcmp(output, expected, me_graph_output_bytes(s)));
+        if (available) CHECK(report.has_jit && report.jit_stages == 1);
+        me_graph_schedule_free(s); me_graph_schedule_free(r);
+        me_graph_plan_free(p); me_graph_plan_free(reference);
+    }
+    me_graph_input_metadata input = {"x", ME_INT8, 1, {3}};
+    me_graph_plan *p = prepare("where(x == 0, x, x + 128)", &input, 1, true);
+    CHECK(!me_graph_has_jit(p)); /* Never wrap an out-of-range weak capture. */
+    me_graph_schedule *s = NULL; CHECK(!me_graph_specialize(p, &input, 1, NULL, &s, &error));
+    int8_t x[] = {0, 0, 0}, output[3];
+    me_array_view v = view("x", ME_INT8, x, sizeof(x), 1, 3, 0);
+    CHECK(!me_graph_execute(s, &v, 1, output, sizeof(output), NULL, NULL, &error));
+    x[1] = 1;
+    CHECK(me_graph_execute(s, &v, 1, output, sizeof(output), NULL, NULL, &error));
+    x[1] = 0;
+    CHECK(!me_graph_execute(s, &v, 1, output, sizeof(output), NULL, NULL, &error));
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+}
+static void dsl_direct_sum(void) {
+    const char *json =
+        "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
+        "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x):\\n    return block_sum(x)\\n\","
+        "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"}],\"constants\":[],"
+        "\"output\":{\"dtype\":\"float64\",\"contract\":\"block_scalar\"},\"context\":{\"ndim\":0},"
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}";
+    me_artifact *a = NULL; me_artifact_error native;
+    CHECK(!me_artifact_load(json, strlen(json), ME_JIT_OFF, &a, &native));
+    double x[] = {1e16, 1, -1e16, 3}, result;
+    me_artifact_buffer buffer = {"x", ME_FLOAT64, sizeof(double), x, sizeof(x)};
+    me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
+        .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = 4, .output_capacity = sizeof(result)};
+    me_artifact_fp_status status;
+    CHECK(!me_artifact_eval_status(a, &buffer, 1, &result, &descriptor, 0, &status, &native));
+    CHECK(result == 3 && status.flags == 0);
+    uint8_t mask[] = {0, 0, 1, 1};
+    x[0] = INFINITY; x[1] = -INFINITY; x[2] = 2;
+    descriptor.valid_mask = mask; descriptor.valid_mask_capacity = sizeof(mask);
+    CHECK(!me_artifact_eval_status(a, &buffer, 1, &result, &descriptor, 0, &status, &native));
+    CHECK(result == 5 && status.flags == 0);
+    descriptor.valid_mask = NULL; descriptor.valid_mask_capacity = 0;
+    CHECK(!me_artifact_eval_status(a, &buffer, 1, &result, &descriptor, 0, &status, &native));
+    CHECK(isnan(result));
+#ifndef __EMSCRIPTEN__
+    CHECK(status.flags & 1);
+#endif
+    me_artifact_free(a);
+}
+static void dsl_direct_reductions(void) {
+    const char *names[] = {"float32", "float64", "int64", "uint64", "bool"};
+    me_dtype types[] = {ME_FLOAT32, ME_FLOAT64, ME_INT64, ME_UINT64, ME_BOOL};
+    size_t widths[] = {4, 8, 8, 8, sizeof(bool)};
+    const char *ops[] = {"prod", "min", "max", "any", "all"};
+    for (int type = 0; type < 5; type++) for (int op = 0; op < 5; op++) {
+        char json[2048];
+        const char *output = op >= 3 ? "bool" : op == 0 && type == 4 ? "int64" : names[type];
+        snprintf(json, sizeof(json),
+            "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
+            "\"requires\":[\"numeric\",\"block-reductions\"],\"source\":\"def k(x):\\n    return block_%s(x)\\n\","
+            "\"entry_point\":\"k\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"%s\"}],\"constants\":[],"
+            "\"output\":{\"dtype\":\"%s\",\"contract\":\"block_scalar\"},\"context\":{\"ndim\":0},"
+            "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}",
+            ops[op], names[type], output);
+        me_artifact *a = NULL; me_artifact_error native;
+        CHECK(!me_artifact_load(json, strlen(json), ME_JIT_OFF, &a, &native));
+        for (int edge = 0; edge < 3; edge++) {
+            float f[] = {1, -0.0f, 2, 3, 0};
+            double d[] = {1, -0.0, 2, 3, 0};
+            int64_t s[] = {-1, 2, 3, 4, 0};
+            uint64_t u[] = {1, 2, 3, 4, 0};
+            bool b[] = {true, true, false, true, false};
+            if (edge == 1) { f[1] = NAN; d[1] = NAN; s[0] = INT64_MIN; s[1] = -1; u[0] = UINT64_MAX; }
+            if (edge == 2) { f[0] = INFINITY; d[0] = INFINITY; }
+            void *data[] = {f, d, s, u, b};
+            me_artifact_buffer buffer = {"x", types[type], widths[type], data[type], widths[type] * 5};
+            me_artifact_eval_descriptor descriptor = {.struct_size = sizeof(descriptor),
+                .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION, .nitems = 4, .output_capacity = 8};
+            uint64_t direct = 0, generic = 0; me_artifact_fp_status status, reference;
+            int rc = me_artifact_eval_status(a, &buffer, 1, &direct, &descriptor, 0, &status, &native);
+            uint8_t mask[] = {1, 1, 1, 1, 0};
+            descriptor.nitems = 5; descriptor.valid_mask = mask; descriptor.valid_mask_capacity = sizeof(mask);
+            int expected_rc = me_artifact_eval_status(a, &buffer, 1, &generic, &descriptor, 0, &reference, &native);
+            CHECK(rc == expected_rc);
+            if (!rc) { CHECK(direct == generic); CHECK(status.flags == reference.flags); }
+        }
+        me_artifact_free(a);
+    }
+}
+static void trusted(bool jit) {
+    me_graph_input_metadata input = {"x", ME_FLOAT32, 1, {3}};
+    me_graph_plan *map = prepare("x * 2", &input, 1, jit), *p = NULL;
+    const char *artifact = me_graph_export_map_json(map);
+    CHECK(artifact != NULL);
+    size_t capacity = strlen(artifact) + 2048;
+    char *json = malloc(capacity);
+    CHECK(json != NULL);
+    int size = snprintf(json, capacity,
+        "{\"format\":\"menudet-staged-graph-1\",\"semantics\":\"menudet-numpy-0.1\",\"requires\":[\"numeric\",\"staged\"],"
+        "\"inputs\":[{\"name\":\"x\",\"dtype\":\"float32\"}],\"root\":1,\"stages\":["
+        "{\"id\":0,\"kind\":\"menudet\",\"inputs\":{\"x\":{\"input\":\"x\"}},\"artifact\":%s,"
+        "\"contract\":{\"cardinality\":\"elementwise\",\"context\":\"none\",\"effects\":\"ordered-lazy\",\"mask\":\"none\"}},"
+        "{\"id\":1,\"kind\":\"graph\",\"inputs\":{\"y\":{\"stage\":0}},\"graph\":{"
+        "\"format\":\"menudet-graph-1\",\"semantics\":\"menudet-numpy-0.1\",\"requires\":[\"numeric\"],"
+        "\"nodes\":[{\"id\":0,\"op\":\"input\",\"name\":\"y\",\"dtype\":\"auto\"},"
+        "{\"id\":1,\"op\":\"sum\",\"args\":[0],\"axes\":null,\"keepdims\":false,\"dtype\":\"auto\",\"initial\":null,\"where\":null}],"
+        "\"root\":1,\"output\":{\"dtype\":\"auto\",\"casting\":\"unsafe\"}}}]}", artifact);
+    CHECK(size > 0 && (size_t)size < capacity);
+    me_graph_prepare_options options = {sizeof(options), ME_GRAPH_VERSION, jit ? ME_JIT_ON : ME_JIT_OFF, false, true};
+    CHECK(!me_graph_prepare_json(json, (size_t)size, &options, &p, &error));
+    free(json); me_graph_plan_free(map);
+    CHECK(!strcmp(me_graph_stage_kind(p, 0), "menudet"));
+    me_graph_schedule *s = NULL;
+    CHECK(!me_graph_specialize(p, &input, 1, NULL, &s, &error));
+    float x[] = {1, 2, 3}, output = 0;
+    me_array_view v = view("x", ME_FLOAT32, x, sizeof(x), 1, 3, 0);
+    CHECK(!me_graph_execute(s, &v, 1, &output, sizeof(output), NULL, NULL, &error));
+    CHECK(output == 12);
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+}
+typedef struct {
+    double *values;
+    size_t count, calls, maximum, fail_at;
+    bool perturb_fp, reject_negative;
+} reader_owner;
+static int read_values(void *opaque, const size_t *indices, size_t count, void *destination, size_t capacity) {
+    reader_owner *owner = opaque;
+    owner->calls++;
+    if (count > owner->maximum) owner->maximum = count;
+    if (owner->fail_at == owner->calls || capacity != count * sizeof(double)) return 1;
+    for (size_t i = 0; i < count; i++) {
+        if (indices[i] >= owner->count || (owner->reject_negative && owner->values[indices[i]] < 0)) return 1;
+        ((double *)destination)[i] = owner->values[indices[i]];
+    }
+#ifndef __EMSCRIPTEN__
+    /* wasm32 has no observable floating-point exception flags or rounding mode.
+     * Keep the reader/value/failure tests there, but perturb fenv only on hosts. */
+    if (owner->perturb_fp) {
+        feraiseexcept(FE_INVALID);
+        fesetround(FE_DOWNWARD);
+    }
+#endif
+    return 0;
+}
+static void storage_readers(bool jit) {
+    me_graph_input_metadata inputs[] = {{"x", ME_FLOAT64, 2, {2, 3}}, {"y", ME_FLOAT64, 1, {3}}};
+    double x[] = {1, 4, 9, 16, 25, 36}, y[] = {1, 2, 3}, output[6];
+    reader_owner owner = {x, 6, 0, 0, 0, true, false};
+    me_array_source sources[2] = {0};
+    sources[0].view = view("x",ME_FLOAT64,NULL,0,2,2,3);
+    sources[0].read = read_values; sources[0].owner = &owner;
+    sources[1].view = view("y",ME_FLOAT64,y,sizeof(y),1,3,0);
+    const char *expressions[] = {"x + (y - 1)", "sqrt(x) / (y ** 2)", "sum(x * 2 + y, axis=0)"};
+    me_graph_specialize_options options = {sizeof(options), ME_GRAPH_VERSION, 2, 0};
+    for (int k = 0; k < 3; k++) {
+        me_graph_plan *p = prepare(expressions[k],inputs,2,jit);
+        me_graph_schedule *s = NULL;
+        CHECK(!me_graph_specialize(p,inputs,2,&options,&s,&error));
+        CHECK(owner.calls == 0);
+        me_graph_report report;
+        output[0] = 99;
+        CHECK(me_graph_execute_sources(s,sources,2,output,1,NULL,&report,&error) == ME_GRAPH_ERR_BINDING);
+        CHECK(owner.calls == 0 && output[0] == 99);
+        int rounding = fegetround();
+        CHECK(!me_graph_execute_sources(s,sources,2,output,sizeof(output),NULL,&report,&error));
+        CHECK(fegetround() == rounding && report.array.fp_flags == 0);
+        CHECK(report.has_jit == me_graph_has_jit(p));
+        fprintf(stderr,"  reader route requested=%s actual=%s\n",jit ? "jit" : "interpreter",
+            report.has_jit ? "jit" : "interpreter");
+        CHECK(owner.maximum <= 2 && owner.calls > 0);
+        CHECK(report.array.temporary_bytes <= me_graph_scratch_bytes(s));
+        if (k == 0) for (int i = 0; i < 6; i++) CHECK(output[i] == x[i] + y[i % 3] - 1);
+        if (k == 1) for (int i = 0; i < 6; i++) CHECK(output[i] == sqrt(x[i]) / (y[i % 3] * y[i % 3]));
+        if (k == 2) for (int i = 0; i < 3; i++) CHECK(output[i] == 2 * x[i] + 2 * x[i + 3] + 2 * y[i]);
+        owner.calls = 0; owner.fail_at = 2;
+        CHECK(me_graph_execute_sources(s,sources,2,output,sizeof(output),NULL,&report,&error) == ME_GRAPH_ERR_EXECUTION);
+        CHECK(owner.calls == 2 && strstr(error.native.message,"storage reader failed"));
+        owner.calls = 0; owner.fail_at = 0;
+        CHECK(!me_graph_execute_sources(s,sources,2,output,sizeof(output),NULL,&report,&error));
+        owner.calls = 0;
+        me_graph_schedule_free(s); me_graph_plan_free(p);
+    }
+    /* Broadcast reader coordinates repeat source indices, not storage offsets. */
+    sources[0].view.shape[1] = 1; inputs[0].shape[1] = 1;
+    me_graph_plan *p = prepare("x + y",inputs,2,jit);
+    me_graph_schedule *s = NULL;
+    CHECK(!me_graph_specialize(p,inputs,2,&options,&s,&error));
+    CHECK(!me_graph_execute_sources(s,sources,2,output,sizeof(output),NULL,NULL,&error));
+    CHECK(output[0] == 2 && output[5] == 7);
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+    /* Direct reductions do not invoke the identity map, even with readers. */
+    me_graph_input_metadata input = {"x",ME_FLOAT64,1,{6}};
+    sources[0].view = view("x",ME_FLOAT64,NULL,0,1,6,0);
+    p = prepare("sum(x)",&input,1,jit);
+    CHECK(!me_graph_specialize(p,&input,1,&options,&s,&error));
+    me_graph_report report;
+    CHECK(!me_graph_execute_sources(s,sources,1,output,sizeof(output),NULL,&report,&error));
+    CHECK(output[0] == 91 && report.array.evaluated_tiles == 0);
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+    /* Empty domains perform no storage calls. */
+    input.shape[0] = sources[0].view.shape[0] = 0; owner.calls = 0;
+    p = prepare("sum(x)",&input,1,jit);
+    CHECK(!me_graph_specialize(p,&input,1,&options,&s,&error));
+    CHECK(!me_graph_execute_sources(s,sources,1,output,sizeof(output),NULL,NULL,&error));
+    CHECK(output[0] == 0 && owner.calls == 0);
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+    /* Resident masks suppress both numeric participation and reader requests. */
+    double masked[] = {-1, 4, -1, -1, 25, -1};
+    bool mask[] = {false, true, false};
+    owner.values = masked; owner.count = 6; owner.calls = owner.maximum = 0; owner.reject_negative = true;
+    me_graph_input_metadata masked_inputs[] = {{"x",ME_FLOAT64,2,{2,3}}, {"mask",ME_BOOL,1,{3}}};
+    sources[0].view = view("x",ME_FLOAT64,NULL,0,2,2,3);
+    sources[1].view = view("mask",ME_BOOL,mask,sizeof(mask),1,3,0);
+    p = prepare("sum(sqrt(x), axis=1, where=mask)",masked_inputs,2,jit);
+    CHECK(!me_graph_specialize(p,masked_inputs,2,&options,&s,&error));
+    CHECK(!me_graph_execute_sources(s,sources,2,output,sizeof(output),NULL,&report,&error));
+    CHECK(output[0] == 2 && output[1] == 5 && owner.calls == 2 && owner.maximum == 1);
+    CHECK(report.array.fp_flags == 0);
+    owner.calls = 0;
+    mask[1] = false;
+    CHECK(!me_graph_execute_sources(s,sources,2,output,sizeof(output),NULL,&report,&error));
+    CHECK(output[0] == 0 && output[1] == 0 && owner.calls == 0);
+    sources[1].view.base = NULL; sources[1].view.capacity = 0; sources[1].read = read_values;
+    CHECK(me_graph_execute_sources(s,sources,2,output,sizeof(output),NULL,&report,&error) == ME_GRAPH_ERR_UNSUPPORTED);
+    CHECK(owner.calls == 0);
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+    /* Staged streaming is not silently materialized or replayed. */
+    input.shape[0] = 6; sources[0].view = view("x",ME_FLOAT64,NULL,0,1,6,0);
+    p = prepare("sum(x) + x",&input,1,jit);
+    CHECK(!me_graph_specialize(p,&input,1,&options,&s,&error));
+    CHECK(me_graph_execute_sources(s,sources,1,output,sizeof(output),NULL,&report,&error) == ME_GRAPH_ERR_UNSUPPORTED);
+    CHECK(owner.calls == 0);
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+}
+static void output_aliases(bool jit) {
+    me_graph_input_metadata input = {"x",ME_FLOAT64,1,{4}};
+    double x[] = {0, 1, 2, 3};
+    me_array_view binding = view("x",ME_FLOAT64,x,sizeof(x),1,4,0);
+    me_graph_plan *p = prepare("x * 2 + 1",&input,1,jit);
+    me_graph_schedule *s = NULL;
+    CHECK(!me_graph_specialize(p,&input,1,NULL,&s,&error));
+    CHECK(me_graph_execute(s,&binding,1,x,sizeof(x),NULL,NULL,&error) == ME_GRAPH_ERR_BINDING);
+    CHECK(me_graph_execute_alias(s,&binding,1,x,sizeof(x),1,NULL,NULL,&error) == ME_GRAPH_ERR_BINDING);
+    CHECK(x[0] == 0 && x[3] == 3);
+    CHECK(!me_graph_execute_alias(s,&binding,1,x,sizeof(x),sizeof(x),NULL,NULL,&error));
+    CHECK(x[0] == 1 && x[3] == 7);
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+    /* An invocation-local numerical error does not publish a partial result. */
+    x[0] = 0; x[1] = 1; x[2] = 2; x[3] = 3;
+    p = prepare("1 / x",&input,1,jit);
+    CHECK(!me_graph_specialize(p,&input,1,NULL,&s,&error));
+    me_graph_execute_options options = {sizeof(options),ME_GRAPH_VERSION,ME_FP_DIVIDE};
+    CHECK(me_graph_execute_alias(s,&binding,1,x,sizeof(x),0,&options,NULL,&error) != ME_GRAPH_SUCCESS);
+    CHECK(x[0] == 0 && x[1] == 1 && x[2] == 2 && x[3] == 3);
+    me_graph_schedule_free(s); me_graph_plan_free(p);
+}
+static void in_memory_roundtrip(void) {
+    const char *expressions[] = {"x + (y - 1)", "x + -0.0 + y", "x + .5 + y", "where(x != 0, y / x, y)",
+        "float32(x) + y", "x < y", "x ** -2 + y", "x - sum(x) + y", "sum(x + y, axis=0, initial=-2.5)"};
+    me_graph_input_metadata metadata[] = {{"x", ME_FLOAT64, 1, {3}}, {"y", ME_FLOAT64, 1, {3}}};
+    double x[] = {1, 2, 4}, y[] = {3, 2, 1};
+    me_array_view inputs[] = {view("x", ME_FLOAT64, x, sizeof(x), 1, 3, 0),
+        view("y", ME_FLOAT64, y, sizeof(y), 1, 3, 0)};
+    for (size_t i = 0; i < sizeof(expressions)/sizeof(*expressions); i++) {
+        me_graph_plan *direct = prepare(expressions[i], metadata, 2, false), *imported = NULL;
+        size_t length;
+        const char *json = me_graph_export_json(direct, &length);
+        CHECK(!me_graph_prepare_json(json, length, NULL, &imported, &error));
+        CHECK(!strcmp(json, me_graph_export_json(imported, NULL)));
+        CHECK(me_graph_inferred_dtype(direct) == me_graph_inferred_dtype(imported));
+        CHECK(me_graph_execution_capabilities(direct) == me_graph_execution_capabilities(imported));
+        const char *map = me_graph_export_map_json(direct), *copy = me_graph_export_map_json(imported);
+        CHECK((!map && !copy) || (map && copy && !strcmp(map, copy)));
+        me_graph_schedule *a = NULL, *b = NULL;
+        CHECK(!me_graph_specialize(direct, metadata, 2, NULL, &a, &error));
+        CHECK(!me_graph_specialize(imported, metadata, 2, NULL, &b, &error));
+        me_graph_plan_free(direct); me_graph_plan_free(imported);
+        size_t bytes = me_graph_output_bytes(a);
+        CHECK(bytes == me_graph_output_bytes(b));
+        void *actual = malloc(bytes), *expected = malloc(bytes);
+        CHECK(actual && expected);
+        me_graph_report actual_report, expected_report;
+        CHECK(!me_graph_execute(a, inputs, 2, actual, bytes, NULL, &actual_report, &error));
+        CHECK(!me_graph_execute(b, inputs, 2, expected, bytes, NULL, &expected_report, &error));
+        CHECK(!memcmp(actual, expected, bytes));
+        CHECK(actual_report.array.fp_flags == expected_report.array.fp_flags);
+        free(actual); free(expected); me_graph_schedule_free(a); me_graph_schedule_free(b);
+    }
+}
+static void math_policy(void) {
+    me_graph_input_metadata inputs[] = {{"x", ME_FLOAT64, 1, {2}}};
+    const char *source = "sin(x)";
+    me_graph_prepare_options options = {sizeof(options), ME_GRAPH_VERSION, ME_JIT_OFF, false, true, "system"};
+    me_graph_plan *p = NULL;
+    CHECK(!me_graph_prepare_expression(source, strlen(source), inputs, 1, &options, &p, &error));
+    const char *map = me_graph_export_map_json(p);
+    CHECK(map && strstr(map, "\"math\":\"system\"") && strstr(map, "\"flexible-math\""));
+    me_graph_plan_free(p);
+    /* Callers compiled before the appended field keep their original size. */
+    options.struct_size = offsetof(me_graph_prepare_options, math_backend);
+    p = NULL;
+    CHECK(!me_graph_prepare_expression(source, strlen(source), inputs, 1, &options, &p, &error));
+    map = me_graph_export_map_json(p);
+    CHECK(map && !strstr(map, "\"math\":"));
+    me_graph_plan_free(p);
+    options.struct_size = sizeof(options);
+    options.math_backend = "bogus";
+    p = NULL;
+    CHECK(me_graph_prepare_expression(source, strlen(source), inputs, 1, &options, &p, &error) != ME_GRAPH_SUCCESS);
+    CHECK(p == NULL);
+}
+int main(void) {
+#define RUN_CASE(call) do { fprintf(stderr, "graph preparation: %s\n", #call); fflush(stderr); call; } while (0)
+    RUN_CASE(maps(false)); RUN_CASE(lazy(false)); RUN_CASE(reductions(false));
+    RUN_CASE(identity_destinations(false)); RUN_CASE(identity_destinations(true));
+    RUN_CASE(partition_policies());
+    RUN_CASE(dynamic_maps());
+    RUN_CASE(integer_extrema(false)); RUN_CASE(integer_extrema(true));
+    RUN_CASE(validation()); RUN_CASE(limits());
+    RUN_CASE(maps(true)); RUN_CASE(lazy(true)); RUN_CASE(reductions(true));
+    RUN_CASE(staged(false)); RUN_CASE(staged(true));
+    RUN_CASE(direct_reductions());
+    RUN_CASE(weak_capture_conversions());
+    RUN_CASE(dsl_direct_sum());
+    RUN_CASE(dsl_direct_reductions());
+    RUN_CASE(trusted(false)); RUN_CASE(trusted(true));
+    RUN_CASE(storage_readers(false)); RUN_CASE(storage_readers(true));
+    RUN_CASE(output_aliases(false)); RUN_CASE(output_aliases(true));
+    RUN_CASE(in_memory_roundtrip());
+    RUN_CASE(math_policy());
+#undef RUN_CASE
+    puts("native graph preparation/execution passed"); return 0;
+}
