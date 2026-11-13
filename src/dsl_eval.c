@@ -1551,7 +1551,9 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
         else {
             inputs[n_vars+ME_DSL_MENUDET_JIT_ND_OFF] = NULL;
         }
-        int64_t while_cap = dsl_while_max_iters();
+        /* Loop-free blocks cannot observe the cap. Avoid a process-environment
+         * lock on every block when many native workers evaluate one kernel. */
+        int64_t while_cap = program->has_while ? dsl_while_max_iters() : 0;
         if (while_cap < 0) while_cap = 0;
         inputs[n_vars+ME_DSL_MENUDET_JIT_CAP_OFF] = &while_cap;
         /* Scratch ownership stays in the invocation, so every generated early
@@ -1583,7 +1585,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
         for (int i = 0; i < program->n_locals; i++) free(jit_locals[i]);
         return rc == ME_EVAL_SUCCESS || rc == ME_EVAL_ERR_OOM ? rc : ME_EVAL_ERR_INVALID_ARG;
     }
-    int64_t current_cap = dsl_while_max_iters();
+    int64_t current_cap = program->has_while ? dsl_while_max_iters() : 0;
     if (current_cap < 0) current_cap = 0;
     bool jit_cap_matches = !program->jit_ir || !program->jit_ir->has_while ||
         program->jit_ir->while_max_iters == current_cap;

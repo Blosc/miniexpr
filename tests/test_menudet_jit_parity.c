@@ -246,9 +246,10 @@ static void loop_errors(void) {
     environment("ME_DSL_WHILE_MAX_ITERS", "3");
     parity_case tests[] = {
         {"while cap", "i = 0\\n    while i < x:\\n        i = i + 1\\n    return i", "int64", "int64", true},
-        {"zero range step", "s = 0\\n    for i in range(0, x, y):\\n        s = s + i\\n    return s", "int64", "int64", true}
+        {"zero range step", "s = 0\\n    for i in range(0, x, y):\\n        s = s + i\\n    return s", "int64", "int64", true},
+        {"nested while cap", "i = 0\\n    if y > 0:\\n        while i < x:\\n            i = i + 1\\n    return i", "int64", "int64", true}
     };
-    for (int t = 0; t < 2; t++) {
+    for (int t = 0; t < 3; t++) {
         me_artifact *jit = load(&tests[t], ME_JIT_ON);
         me_artifact *reference = load(&tests[t], ME_JIT_OFF);
         me_artifact *oracle = load(&cases[0], ME_JIT_ON);
@@ -264,7 +265,7 @@ static void loop_errors(void) {
         CHECK(!me_artifact_eval_ex(jit, buffers, 2, output, &descriptor, &error));
         CHECK(!me_artifact_eval_ex(reference, buffers, 2, expected, &descriptor, &reference_error));
         CHECK(!memcmp(output, expected, sizeof(output)));
-        if (t == 0) x[1] = 4;
+        if (t != 1) x[1] = 4;
         else y[1] = 0;
         int rc = me_artifact_eval_ex(jit, buffers, 2, output, &descriptor, &error);
         int reference_rc = me_artifact_eval_ex(reference, buffers, 2, expected, &descriptor, &reference_error);
@@ -278,7 +279,7 @@ static void loop_errors(void) {
         descriptor.valid_mask_capacity = 0;
         CHECK(!me_artifact_eval_ex(jit, buffers, 2, output, &descriptor, &error));
         /* The runtime cap is read per invocation, not baked into cached code. */
-        if (t == 0) {
+        if (t != 1) {
             environment("ME_DSL_WHILE_MAX_ITERS", "1");
             CHECK(me_artifact_eval_ex(jit, buffers, 2, output, &descriptor, &error));
             environment("ME_DSL_WHILE_MAX_ITERS", "3");

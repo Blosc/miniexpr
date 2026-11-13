@@ -2751,6 +2751,7 @@ static bool dsl_compile_block(dsl_compile_ctx *ctx, const me_dsl_block *block,
             break;
         }
         case ME_DSL_STMT_WHILE: {
+            ctx->program->has_while = true;
             compiled->as.while_loop.condition_nstmts = stmt->as.while_loop.condition_nstmts;
             if (!dsl_compile_condition_expr(ctx, stmt->as.while_loop.cond, &compiled->as.while_loop.cond)) {
                 dsl_compiled_stmt_free(compiled);

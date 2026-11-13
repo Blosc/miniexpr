@@ -186,6 +186,7 @@ typedef struct {
     int uses_n_mask;
     bool uses_ndim;
     bool uses_flat_idx;
+    bool has_while;  /* Includes nested loops; loop-free blocks need no cap lookup. */
     int compile_ndims;
     me_dsl_fp_mode fp_mode;
     me_dsl_math_backend math_backend;

@@ -4,7 +4,9 @@ Release notes for miniexpr
 Changes from 0.3.1 to 0.3.2
 ===========================
 
-* No changes yet.
+* Avoid per-block runtime loop-limit environment lookups for loop-free Menudet
+  kernels. Kernels containing nested `while` loops still observe invocation-time
+  cap changes. Public APIs and numerical semantics are unchanged.
 
 Changes from 0.3.0 to 0.3.1
 ===========================
