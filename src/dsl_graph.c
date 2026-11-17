@@ -820,8 +820,13 @@ me_graph_status me_graph_specialize(const me_graph_plan *p,
     g_error(error, -1, ME_GRAPH_SUCCESS, "");
     if (!out || !p || ninputs != p->ninputs || (ninputs && !inputs))
         return g_error(error, -1, ME_GRAPH_ERR_BINDING, "input metadata must exactly cover the graph");
-    if (options && (options->struct_size != sizeof(*options) || options->version != ME_GRAPH_VERSION || options->tile_items > INT32_MAX))
+    if (options && ((options->struct_size != sizeof(*options) &&
+                     options->struct_size != offsetof(me_graph_specialize_options, pairwise_sum)) ||
+                    options->version != ME_GRAPH_VERSION || options->tile_items > INT32_MAX))
         return g_error(error, -1, ME_GRAPH_ERR_FORMAT, "invalid specialization options");
+    bool pairwise = options && options->struct_size == sizeof(*options) && options->pairwise_sum;
+    if (pairwise && (p->nstages || p->reduction.reduction != ME_ARRAY_SUM))
+        return g_error(error, -1, ME_GRAPH_ERR_UNSUPPORTED, "pairwise summation requires a single-region sum");
     me_graph_schedule *s = calloc(1, sizeof(*s));
     if (!s) return g_error(error, -1, ME_GRAPH_ERR_OOM, "schedule allocation failed");
     bool found[ME_MAX_VARS] = {0};
@@ -865,6 +870,7 @@ me_graph_status me_graph_specialize(const me_graph_plan *p,
     size_t total;
     if (!g_product(s->rank, s->shape, me_artifact_output_itemsize(p->map), &total)) goto fail;
     s->reduction = p->reduction;
+    if (pairwise) s->reduction.reduction = ME_ARRAY_SUM_PAIRWISE;
     s->reduction.tile_items = options && options->tile_items ? options->tile_items : 1024;
     me_artifact_error native;
     int status = me_array_result_shape(p->map, s->rank, s->shape, &s->reduction,
@@ -887,6 +893,10 @@ me_graph_status me_graph_specialize(const me_graph_plan *p,
     for (int j = 0; j < p->ninputs; j++) if (p->map_indices[j] >= 0) per_item += g_width(p->types[j]);
     if (s->reduction.tile_items > SIZE_MAX / per_item) { message = "iterator scratch overflow"; goto fail; }
     s->scratch = s->reduction.tile_items * per_item;
+    if (pairwise) {
+        if (s->scratch > SIZE_MAX - 1024) { message = "pairwise scratch overflow"; goto fail; }
+        s->scratch += 1024; /* Bounded binary tree plus eight leaf accumulators. */
+    }
     atomic_fetch_add_explicit((atomic_uint *)&p->references, 1, memory_order_relaxed);
     s->plan = (me_graph_plan *)p; *out = s; return ME_GRAPH_SUCCESS;
 fail:

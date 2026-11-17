@@ -173,7 +173,7 @@ static void a_load(const me_array_view *v, size_t offset, void *out) {
 }
 static bool a_axes(int rank, const me_array_options *o, bool *axes) {
     memset(axes, 0, ME_ARRAY_MAX_RANK * sizeof(bool));
-    if (!o || o->version != ME_ARTIFACT_ARRAY_VERSION || o->reduction < ME_ARRAY_NONE || o->reduction > ME_ARRAY_ALL ||
+    if (!o || o->version != ME_ARTIFACT_ARRAY_VERSION || o->reduction < ME_ARRAY_NONE || o->reduction > ME_ARRAY_SUM_PAIRWISE ||
         o->naxes < -1 || o->naxes > rank) return false;
     if (o->reduction == ME_ARRAY_NONE) return o->naxes == 0 && !o->initial && o->accumulator == ME_AUTO && !o->where;
     if (o->initial && (o->reduction == ME_ARRAY_ANY || o->reduction == ME_ARRAY_ALL)) return false;
@@ -193,7 +193,7 @@ static me_dtype a_dtype(me_dtype source, const me_array_options *o) {
                           true;
         return a_width(o->accumulator) && compatible ? o->accumulator : ME_AUTO;
     }
-    if ((o->reduction == ME_ARRAY_SUM || o->reduction == ME_ARRAY_PROD) &&
+    if ((o->reduction == ME_ARRAY_SUM || o->reduction == ME_ARRAY_SUM_PAIRWISE || o->reduction == ME_ARRAY_PROD) &&
         !a_float(source) && !a_complex(source)) {
         return a_unsigned(source) && source != ME_BOOL ? ME_UINT64 : ME_INT64;
     }
@@ -207,6 +207,9 @@ me_artifact_status me_array_result_shape(const me_artifact *a, int rank, const i
     if (strcmp(me_artifact_schema_version(a), "0.1") || me_artifact_context_ndim(a) ||
         me_artifact_result_cardinality(a) != ME_ARTIFACT_ELEMENTWISE || !a_width(me_artifact_output_dtype(a))) return a_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "logical arrays require numeric elementwise rank-zero Menudet 0.1 beta");
     *dtype = a_dtype(me_artifact_output_dtype(a), o);
+    if (o->reduction == ME_ARRAY_SUM_PAIRWISE &&
+        (!a_float(*dtype) || *dtype != me_artifact_output_dtype(a)))
+        return a_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "pairwise sum requires matching floating map and accumulator dtypes");
     if (*dtype == ME_AUTO) return a_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported accumulator signature");
     *out_rank = 0;
     for (int i = 0; i < rank; i++) {
@@ -343,6 +346,151 @@ static void a_combine(me_dtype dtype, int op, void *acc, const void *value) {
         a_cast(ME_UINT64,&z,dtype,acc);
     }
 }
+/* A fixed 128-lane logical leaf, with eight independent accumulators. Iterator
+ * and reader boundaries never reset a leaf. Completed leaves enter a binary
+ * carry tree; its depth is bounded by the number of bits in size_t. */
+typedef me_pairwise_sum_state a_pairwise_sum;
+static void a_pairwise_push(a_pairwise_sum *s, me_dtype dtype, uint64_t value) {
+    size_t level = 0;
+    while (s->occupied & ((size_t)1 << level)) {
+        a_combine(dtype, ME_ARRAY_SUM, &s->tree[level], &value);
+        value = s->tree[level];
+        s->occupied &= ~((size_t)1 << level++);
+    }
+    s->tree[level] = value;
+    s->occupied |= (size_t)1 << level;
+    s->leaves++;
+}
+static void a_pairwise_leaf(a_pairwise_sum *s, me_dtype dtype) {
+    uint64_t value = 0;
+    if (dtype == ME_FLOAT64) {
+        double *v = s->lanes.f64;
+        double sum = ((v[0] + v[1]) + (v[2] + v[3])) +
+                     ((v[4] + v[5]) + (v[6] + v[7]));
+        memcpy(&value, &sum, sizeof(sum));
+    } else {
+        float *v = s->lanes.f32;
+        float sum = ((v[0] + v[1]) + (v[2] + v[3])) +
+                    ((v[4] + v[5]) + (v[6] + v[7]));
+        memcpy(&value, &sum, sizeof(sum));
+    }
+    a_pairwise_push(s, dtype, value);
+    memset(&s->lanes, 0, sizeof(s->lanes));
+    s->used = 0;
+}
+static void a_pairwise_feed(a_pairwise_sum *s, me_dtype dtype, const void *values,
+    const uint8_t *mask, size_t count) {
+    size_t width = a_width(dtype), offset = 0;
+    while (offset < count) {
+        /* Keep full unmasked octets free of dynamic indexing and scalar
+         * memcpy calls. Independent lanes permit ordinary SIMD/SLP without
+         * fast-math or reassociation of any accumulator's additions. */
+        if (!mask && !(s->used % 8) && count - offset >= 8) {
+#define PAIRWISE_OCTETS(type, member) do { \
+    size_t end = count - offset; \
+    if (end > ME_PAIRWISE_SUM_LEAF_ITEMS - s->used) end = ME_PAIRWISE_SUM_LEAF_ITEMS - s->used; \
+    end = offset + (end & ~(size_t)7); \
+    type *acc = s->lanes.member; \
+    for (; offset < end; offset += 8, s->used += 8) { \
+        type v[8]; \
+        memcpy(v, (const uint8_t *)values + offset * sizeof(type), sizeof(v)); \
+        acc[0] += v[0]; acc[1] += v[1]; \
+        acc[2] += v[2]; acc[3] += v[3]; \
+        acc[4] += v[4]; acc[5] += v[5]; \
+        acc[6] += v[6]; acc[7] += v[7]; \
+    } \
+} while (0)
+            if (dtype == ME_FLOAT64) PAIRWISE_OCTETS(double, f64);
+            else PAIRWISE_OCTETS(float, f32);
+#undef PAIRWISE_OCTETS
+            if (s->used == ME_PAIRWISE_SUM_LEAF_ITEMS) a_pairwise_leaf(s, dtype);
+            continue;
+        }
+        size_t n = 8 - s->used % 8;
+        if (n > count - offset) n = count - offset;
+        size_t first = s->used % 8;
+        if (dtype == ME_FLOAT64) {
+            for (size_t k = 0; k < n; k++) {
+                double value = 0;
+                if (!mask || mask[offset + k])
+                    memcpy(&value, (const uint8_t *)values + (offset + k)*width, width);
+                s->lanes.f64[first + k] += value;
+            }
+        } else {
+            for (size_t k = 0; k < n; k++) {
+                float value = 0;
+                if (!mask || mask[offset + k])
+                    memcpy(&value, (const uint8_t *)values + (offset + k)*width, width);
+                s->lanes.f32[first + k] += value;
+            }
+        }
+        offset += n;
+        s->used += n;
+        if (s->used == ME_PAIRWISE_SUM_LEAF_ITEMS) a_pairwise_leaf(s, dtype);
+    }
+}
+static void a_pairwise_finish(a_pairwise_sum *s, me_dtype dtype, void *acc) {
+    if (s->used) a_pairwise_leaf(s, dtype);
+    /* Fold the newest (smallest) suffix into older, larger subtrees. */
+    uint64_t tail = 0;
+    bool found = false;
+    for (size_t level = 0; level < sizeof(size_t)*CHAR_BIT; level++) {
+        if (!(s->occupied & ((size_t)1 << level))) continue;
+        if (found) a_combine(dtype, ME_ARRAY_SUM, &s->tree[level], &tail);
+        tail = s->tree[level];
+        found = true;
+    }
+    if (found) a_combine(dtype, ME_ARRAY_SUM, acc, &tail);
+}
+me_artifact_status me_pairwise_sum_init(me_pairwise_sum_state *s, me_dtype dtype) {
+    if (!s || !a_float(dtype)) return ME_ARTIFACT_ERR_BINDING;
+    memset(s, 0, sizeof(*s));
+    s->dtype = dtype;
+    return ME_ARTIFACT_SUCCESS;
+}
+me_artifact_status me_pairwise_sum_update(me_pairwise_sum_state *s, const void *values, size_t count) {
+    if (!s || !a_float(s->dtype) || (count && !values) ||
+        count > SIZE_MAX / a_width(s->dtype)) return ME_ARTIFACT_ERR_BINDING;
+    if (s->leaves > SIZE_MAX / ME_PAIRWISE_SUM_LEAF_ITEMS || s->used >= ME_PAIRWISE_SUM_LEAF_ITEMS ||
+        count > SIZE_MAX - s->leaves * ME_PAIRWISE_SUM_LEAF_ITEMS - s->used)
+        return ME_ARTIFACT_ERR_BINDING;
+    a_pairwise_feed(s, s->dtype, values, NULL, count);
+    return ME_ARTIFACT_SUCCESS;
+}
+me_artifact_status me_pairwise_sum_append(me_pairwise_sum_state *s, const void *leaves, size_t count) {
+    if (!s || !a_float(s->dtype) || s->used || (count && !leaves)) return ME_ARTIFACT_ERR_BINDING;
+    if (s->leaves > SIZE_MAX / ME_PAIRWISE_SUM_LEAF_ITEMS ||
+        count > SIZE_MAX / ME_PAIRWISE_SUM_LEAF_ITEMS - s->leaves)
+        return ME_ARTIFACT_ERR_BINDING;
+    size_t width = a_width(s->dtype);
+    for (size_t i = 0; i < count; i++) {
+        uint64_t value = 0;
+        memcpy(&value, (const uint8_t *)leaves + i*width, width);
+        a_pairwise_push(s, s->dtype, value);
+    }
+    return ME_ARTIFACT_SUCCESS;
+}
+me_artifact_status me_pairwise_sum_leaves(me_dtype dtype, const void *values,
+    size_t count, void *leaves, size_t capacity) {
+    size_t width = a_width(dtype);
+    if (!a_float(dtype) || count % ME_PAIRWISE_SUM_LEAF_ITEMS || count > SIZE_MAX / width ||
+        count / ME_PAIRWISE_SUM_LEAF_ITEMS > capacity / width ||
+        (count && (!values || !leaves))) return ME_ARTIFACT_ERR_BINDING;
+    a_pairwise_sum s = {0};
+    for (size_t i = 0; i < count; i += ME_PAIRWISE_SUM_LEAF_ITEMS) {
+        a_pairwise_feed(&s, dtype, (const uint8_t *)values + i*width, NULL, ME_PAIRWISE_SUM_LEAF_ITEMS);
+        memcpy((uint8_t *)leaves + (i/ME_PAIRWISE_SUM_LEAF_ITEMS)*width, &s.tree[0], width);
+        s.occupied = 0;
+        s.leaves = 0;
+    }
+    return ME_ARTIFACT_SUCCESS;
+}
+me_artifact_status me_pairwise_sum_finish(me_pairwise_sum_state *s, void *output) {
+    if (!s || !a_float(s->dtype) || !output) return ME_ARTIFACT_ERR_BINDING;
+    memset(output, 0, a_width(s->dtype));
+    a_pairwise_finish(s, s->dtype, output);
+    return ME_ARTIFACT_SUCCESS;
+}
 static me_artifact_status a_run(const me_artifact *a, const me_array_view *inputs, int ninputs,
     int rank, const int64_t *shape, const me_array_options *o, void *output, size_t capacity,
     me_array_report *report, me_artifact_error *error, bool execute, bool identity_map,
@@ -351,6 +499,10 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
     me_array_report local = {0}; if (!report) report = &local; memset(report,0,sizeof(*report));
     int rc = me_array_result_shape(a,rank,shape,o,&out_rank,out_shape,&dtype,error);
     if (rc) return rc;
+    bool pairwise = o->reduction == ME_ARRAY_SUM_PAIRWISE;
+    me_array_options normalized = *o;
+    if (pairwise) normalized.reduction = ME_ARRAY_SUM;
+    o = &normalized;
     me_array_view destination = {0};
     bool scatter = false;
     if (destination_view) {
@@ -456,6 +608,7 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
     void *scratch = need_scratch ? malloc(tile * source_width) : NULL;
     if ((readers && !indices) || (o->where && !mask) || (need_scratch && !scratch)) { rc = ME_ARTIFACT_ERR_OOM; goto cleanup; }
     report->temporary_bytes = (indices ? tile * sizeof(size_t) : 0) + (mask ? tile : 0) + (scratch ? tile * source_width : 0);
+    if (pairwise) report->temporary_bytes += sizeof(a_pairwise_sum);
     for (int b = 0; b < ninputs; b++) {
         const me_array_view *v = &inputs[binding[b]]; size_t w = a_width(v->dtype);
         if (!direct[b]) {
@@ -475,6 +628,8 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
     bool gather = mask != NULL;
     for (int b = 0; b < ninputs; b++) gather |= !direct[b] && !(sources && sources[binding[b]].read);
     for (size_t g = 0; g < groups && !rc; g++) {
+        a_pairwise_sum pairwise_state;
+        if (pairwise) memset(&pairwise_state, 0, sizeof(pairwise_state));
         uint64_t acc = 0; bool initialized = false;
         unsigned char acc_complex[16] = {0};
         if (o->initial) { memcpy(&acc,o->initial,width); initialized = true; }
@@ -561,10 +716,14 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
             }
             const void *values = direct_reduction ? buffers[0].data : o->reduction == ME_ARRAY_NONE ? NULL : scratch;
             bool handled = false;
+            if (!rc && pairwise && values) {
+                a_pairwise_feed(&pairwise_state, dtype, values, mask, count);
+                handled = true;
+            }
             /* Computed maps produce the same typed, contiguous tile as direct
              * inputs. Without a participation mask, reuse the serial typed
              * reducers instead of casting/dispatching once per mapped lane. */
-            if (!rc && !mask && values &&
+            if (!rc && !handled && !mask && values &&
                 (o->reduction == ME_ARRAY_MIN || o->reduction == ME_ARRAY_MAX) &&
                 dtype == me_artifact_output_dtype(a)) {
                 uint64_t normalized = acc, result;
@@ -628,6 +787,7 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
             begin += count;
         }
         if (!rc && o->reduction != ME_ARRAY_NONE) {
+            if (pairwise) a_pairwise_finish(&pairwise_state, dtype, &acc);
             size_t offset = destination.offset + g*width;
             if (scatter) {
                 int64_t coordinates[ME_ARRAY_MAX_RANK];

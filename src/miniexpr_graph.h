@@ -53,7 +53,12 @@ typedef struct {
     unsigned version;
     size_t tile_items; /* 0 = 1024; bounded by INT32_MAX. */
     size_t intermediate_budget; /* 0 = 64 MiB for a requested final conversion. */
+    /* Opt-in for single-region float32/64 sums with matching map/accumulator
+     * dtype. Fixed logical blocks, independent of iterator tile geometry.
+     * Does not authorize callers to split the reduction at arbitrary offsets. */
+    bool pairwise_sum;
 } me_graph_specialize_options;
+#define ME_GRAPH_PAIRWISE_SUM_OPTIONS 1
 typedef struct {
     size_t struct_size;
     unsigned version;

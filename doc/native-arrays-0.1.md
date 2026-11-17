@@ -73,6 +73,45 @@ extrema follow the existing M4 contract, including deterministic signed-zero tie
 Products may overflow/underflow in serial order even where another grouping would
 not; no global relative-error promise is made near zero or overflow.
 
+An explicit performance-oriented alternative is available for real floating sums:
+`ME_ARRAY_SUM_PAIRWISE`, or `me_graph_specialize_options.pairwise_sum = true`.
+The graph option applies only to single-region `sum` graphs; the map and
+accumulator must have the same float32/float64 dtype. Unsupported requests reject
+at specialization rather than silently changing policy. Zero/default options and
+callers using the original specialization-options struct size retain serial sums.
+
+Pairwise mode partitions each reduction group's logical sequence into fixed
+128-element leaves. Each leaf uses eight independent accumulators, combines them
+in a balanced tree, then enters a bounded binary carry tree of leaf partials.
+Incomplete leaves survive iterator and reader boundaries. Masked positions
+contribute zero without loading their mapped value, and `initial` is added once
+to the completed sum. Empty sums preserve the ordinary identity/initial rules.
+Scratch for this tree is bounded independently of the number of elements.
+Axis selection, strided inputs and storage readers retain the same grouping.
+
+This mode deliberately changes rounding, overflow/underflow behavior and floating
+flags relative to serial sums; it is not compensated or guaranteed correctly
+rounded. NaN payload selection is not promised to match serial execution.
+Results are invariant to iterator tile size, not to arbitrary caller partitioning:
+hosts must not split groups at thread-dependent boundaries and expect identical
+bytes. A future parallel adapter must preserve these logical leaves and the
+global tree. Strict graph execution does not enable this policy implicitly.
+
+Block-oriented hosts can use the `ME_PAIRWISE_SUM_API` streaming interface.
+Initialize an invocation-local `me_pairwise_sum_state`, call
+`me_pairwise_sum_leaves` on globally aligned runs of complete 128-element leaves
+in parallel, then append their partials in logical order with
+`me_pairwise_sum_append`. Supply raw boundary fragments with
+`me_pairwise_sum_update`; append rejects a partially filled leaf. Call
+`me_pairwise_sum_finish` once at the end. Leaf output buffers must be disjoint
+from their inputs. State must not be shared concurrently. These helpers do not
+manage floating environments: hosts isolate and aggregate worker/merge flags.
+
+With artifact tests enabled, `graph_pairwise` checks serial compatibility,
+tile-invariant float32/64 results, masks, reversed views, axes and nonfinite
+values. Run `build/tests/graph_pairwise --large` for a bounded-memory billion-lane
+ramp check and an informational resident serial/pairwise timing comparison.
+
 The logical scheduler is serial. Floating flags aggregate through scoped native
 guards and caller fenv restoration; reporting is capability-qualified on WASM.
 Independent calls/buffers on a shared immutable artifact may run concurrently;
