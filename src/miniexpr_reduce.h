@@ -1,4 +1,4 @@
-/* Shared scalar extrema and mergeable arg-extrema for embedding schedulers.
+/* Shared scalar extrema, arg-extrema, and moments for embedding schedulers.
  * Callers validate buffers and own the floating environment. No allocation,
  * alignment requirement, or dependency on the graph executor.
  */
@@ -11,6 +11,96 @@
 #include <math.h>
 
 #define ME_EXTREMA_REDUCE_API 1
+
+#define ME_MOMENTS_REDUCE_API 1
+
+/* Packed doubles (count, origin, mean offset, M2), for embedding schedulers. Counts
+ * must stay exactly representable (<= 2**53). Float32 inputs are widened before
+ * accumulation; callers cast the final result to their requested dtype.
+ * Two centered scans of each already-decoded span avoid Welford's per-lane
+ * division dependency without the cancellation of E[x*x] - E[x]*E[x].
+ */
+static inline bool me_moments_span(me_dtype dtype, const void *values,
+    size_t count, double out[4]) {
+    if ((dtype != ME_FLOAT32 && dtype != ME_FLOAT64) ||
+        count > UINT64_C(9007199254740992)) return false;
+    out[0] = (double)count;
+    out[1] = out[2] = out[3] = 0;
+    if (!count) return true;
+#define ME_MOMENTS_SCAN(TYPE) do { \
+    const unsigned char *data = values; \
+    TYPE first; memcpy(&first, data, sizeof(first)); \
+    double origin = first, sums[8] = {0}; \
+    for (size_t i = 0; i < count; i++) { \
+        TYPE raw; memcpy(&raw, data + i * sizeof(raw), sizeof(raw)); \
+        sums[i % 8] += (double)raw - origin; \
+    } \
+    double total = ((sums[0] + sums[1]) + (sums[2] + sums[3])) + \
+                   ((sums[4] + sums[5]) + (sums[6] + sums[7])); \
+    double offset = total / (double)count; \
+    bool absolute = !isfinite(offset) && isfinite(origin); \
+    if (absolute) { \
+        memset(sums, 0, sizeof(sums)); \
+        for (size_t i = 0; i < count; i++) { \
+            TYPE raw; memcpy(&raw, data + i * sizeof(raw), sizeof(raw)); \
+            sums[i % 8] += (double)raw / (double)count; \
+        } \
+        offset = ((sums[0] + sums[1]) + (sums[2] + sums[3])) + \
+                 ((sums[4] + sums[5]) + (sums[6] + sums[7])); \
+    } \
+    memset(sums, 0, sizeof(sums)); \
+    for (size_t i = 0; i < count; i++) { \
+        TYPE raw; memcpy(&raw, data + i * sizeof(raw), sizeof(raw)); \
+        double deviation = absolute ? (double)raw - offset : ((double)raw - origin) - offset; \
+        sums[i % 8] += deviation * deviation; \
+    } \
+    out[1] = absolute ? 0 : origin; \
+    out[2] = offset; \
+    out[3] = ((sums[0] + sums[1]) + (sums[2] + sums[3])) + \
+             ((sums[4] + sums[5]) + (sums[6] + sums[7])); \
+} while (0)
+    if (dtype == ME_FLOAT32) { ME_MOMENTS_SCAN(float); }
+    else { ME_MOMENTS_SCAN(double); }
+#undef ME_MOMENTS_SCAN
+    return true;
+}
+
+/* Chan's parallel merge. Merge in logical span order for repeatable results.
+ * Non-finite input makes the variance NaN, as in a centered two-pass reducer.
+ */
+static inline bool me_moments_merge(double state[4], const double part[4]) {
+    if (!(part[0] >= 0) || !(state[0] >= 0) ||
+        part[0] > 9007199254740992.0 ||
+        state[0] > 9007199254740992.0 - part[0] ||
+        floor(part[0]) != part[0] || floor(state[0]) != state[0]) return false;
+    if (!part[0]) return true;
+    if (!state[0]) {
+        memcpy(state, part, 4 * sizeof(double));
+        return true;
+    }
+    double count = state[0] + part[0];
+    /* Keep the origin separate: rounding an absolute mean at a large offset
+     * would destroy low bits before the next merge. */
+    double delta = (part[1] - state[1]) + (part[2] - state[2]);
+    state[3] += part[3] + delta * (delta * (state[0] / count)) * part[0];
+    if (isfinite(state[1]) && isfinite(part[1]) && !isfinite(delta)) {
+        state[2] = (state[1] + state[2]) * (state[0] / count) +
+                   (part[1] + part[2]) * (part[0] / count);
+        state[1] = 0;
+    } else {
+        state[2] += delta * (part[0] / count);
+    }
+    state[0] = count;
+    return true;
+}
+
+static inline bool me_moments_finish(const double state[4], double ddof,
+    bool standard_deviation, double *out) {
+    if (!isfinite(ddof) || !(state[0] > ddof) || !state[0]) return false;
+    double variance = state[3] / (state[0] - ddof);
+    *out = standard_deviation ? sqrt(variance) : variance;
+    return true;
+}
 
 typedef struct {
     uint64_t value;

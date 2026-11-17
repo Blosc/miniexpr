@@ -1,9 +1,10 @@
-# Shared extrema primitives
+# Shared reduction primitives
 
-`miniexpr_reduce.h` exposes `ME_EXTREMA_REDUCE_API` (version 1) for embedding
-schedulers. It is a header-only, allocation-free interface; input buffers may be
-unaligned. Callers validate buffer capacities and establish their floating-point
-environment. Compile without fast-math.
+`miniexpr_reduce.h` exposes `ME_EXTREMA_REDUCE_API` (version 1) and
+`ME_MOMENTS_REDUCE_API` (version 1) for embedding schedulers. They are
+header-only, allocation-free interfaces; input buffers may be unaligned. Callers
+validate buffer capacities and establish their floating-point environment.
+Compile without fast-math.
 
 * `me_extrema_float()` reduces float32/float64 spans to raw value bits. It keeps
   the first NaN payload, quiets signaling NaNs and prefers negative zero for min
@@ -25,3 +26,19 @@ unsupported types and out-of-range origins return false.
 Index reductions preserve selected value bits as auxiliary state; their public
 result is the index, not an extrema value with the extrema signed-zero rule.
 The native tests own dtype, NaN, tie-breaking and partition-merge semantics.
+
+## Moments
+
+`me_moments_span()` reduces a float32/float64 span into four doubles: count,
+origin, mean offset and centered sum of squares M2. Float32 inputs widen to
+double. Each span is scanned twice, so large offsets keep their low bits without
+the cancellation of `E[x*x] - E[x]*E[x]` or Welford's per-lane division.
+
+`me_moments_merge()` applies Chan's parallel update in logical order; the origin
+stays separate from the mean offset so rounding cannot discard small variation.
+`me_moments_finish()` applies `ddof` and optionally the square root. Counts must
+be exactly representable, and merging rejects non-integral or overflowing counts.
+
+Non-finite input yields a NaN variance, matching a centered two-pass reducer.
+Callers cast the final result to their public dtype inside their own floating
+environment, since narrowing can overflow.
