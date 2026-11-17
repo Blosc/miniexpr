@@ -10,6 +10,7 @@
 #include <string.h>
 #include <math.h>
 #include "miniexpr.h"
+#include "miniexpr_reduce.h"
 
 static inline float dsl_menudet_sum_f32(float sum, const void *values, size_t count) {
     const unsigned char *data = values;
@@ -137,7 +138,7 @@ static inline bool dsl_menudet_prod_integer(me_dtype source, const void *values,
     return true;
 }
 /* Scan by representation, without quieting signaling NaNs or raising flags.
- * NaN extrema/truth cases retain their original engine-specific behavior. */
+ * Truth cases retain their original engine-specific NaN behavior. */
 static inline bool dsl_menudet_no_nan(me_dtype dtype, const void *values, size_t count) {
     const unsigned char *data = values;
     if (dtype == ME_FLOAT32) {
@@ -177,28 +178,10 @@ static inline bool dsl_menudet_extrema(me_dtype dtype, const void *values, size_
     case ME_UINT32: EXTREMA(uint32_t, uint64_t); break;
     case ME_UINT64: EXTREMA(uint64_t, uint64_t); break;
     case ME_FLOAT32: {
-        if (!dsl_menudet_no_nan(dtype, values, count) ||
-            (initialized && !dsl_menudet_no_nan(dtype, &initial, 1))) return false;
-        float best; memcpy(&best, &initial, sizeof(best));
-        for (size_t i = 0; i < count; i++) {
-            float value; memcpy(&value, data + i * sizeof(value), sizeof(value));
-            if (!initialized || (minimum ? value < best : value > best) ||
-                (value == 0 && best == 0 && (minimum ? signbit(value) : !signbit(value)))) best = value;
-            initialized = true;
-        }
-        *out = 0; memcpy(out, &best, sizeof(best)); break;
+        return me_extrema_float(dtype, values, count, initial, initialized, minimum, out);
     }
     case ME_FLOAT64: {
-        if (!dsl_menudet_no_nan(dtype, values, count) ||
-            (initialized && !dsl_menudet_no_nan(dtype, &initial, 1))) return false;
-        double best; memcpy(&best, &initial, sizeof(best));
-        for (size_t i = 0; i < count; i++) {
-            double value; memcpy(&value, data + i * sizeof(value), sizeof(value));
-            if (!initialized || (minimum ? value < best : value > best) ||
-                (value == 0 && best == 0 && (minimum ? signbit(value) : !signbit(value)))) best = value;
-            initialized = true;
-        }
-        memcpy(out, &best, sizeof(best)); break;
+        return me_extrema_float(dtype, values, count, initial, initialized, minimum, out);
     }
     default: return false;
     }
