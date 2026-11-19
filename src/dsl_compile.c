@@ -1900,13 +1900,17 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
 #endif
 #if !defined(_WIN32) && !defined(_WIN64) && !defined(__EMSCRIPTEN__)
     if (program->jit_dl_handle) {
-        if (!program->jit_dl_handle_cached) {
+        if (program->jit_dl_handle_cached) {
+            dsl_jit_pos_cache_release_program(program);
+        }
+        else {
             dlclose(program->jit_dl_handle);
         }
     }
 #endif
     program->jit_dl_handle = NULL;
     program->jit_runtime_key = 0;
+    program->jit_pos_cache_id = 0;
     program->jit_dl_handle_cached = false;
     free(program->jit_c_source);
     program->jit_c_source = NULL;

@@ -287,7 +287,10 @@ void dsl_compiled_program_free(me_dsl_compiled_program *program) {
 #endif
 #if !defined(_WIN32) && !defined(_WIN64) && !defined(__EMSCRIPTEN__)
     if (program->jit_dl_handle) {
-        if (!program->jit_dl_handle_cached) {
+        if (program->jit_dl_handle_cached) {
+            dsl_jit_pos_cache_release_program(program);
+        }
+        else {
             dlclose(program->jit_dl_handle);
         }
         program->jit_dl_handle = NULL;
@@ -306,6 +309,7 @@ void dsl_compiled_program_free(me_dsl_compiled_program *program) {
 #endif
     program->jit_kernel_fn = NULL;
     program->jit_runtime_key = 0;
+    program->jit_pos_cache_id = 0;
     program->jit_dl_handle_cached = false;
     free(program->jit_c_source);
     free(program->jit_param_bindings);

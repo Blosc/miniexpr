@@ -18,6 +18,24 @@
 #include <stdint.h>
 #include <string.h>
 
+#if defined(_WIN32) || defined(_WIN64)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+static SRWLOCK g_me_simd_init_lock = SRWLOCK_INIT;
+#define ME_SIMD_INIT_LOCK() AcquireSRWLockExclusive(&g_me_simd_init_lock)
+#define ME_SIMD_INIT_UNLOCK() ReleaseSRWLockExclusive(&g_me_simd_init_lock)
+#elif !defined(__EMSCRIPTEN__)
+#include <pthread.h>
+static pthread_mutex_t g_me_simd_init_lock = PTHREAD_MUTEX_INITIALIZER;
+#define ME_SIMD_INIT_LOCK() pthread_mutex_lock(&g_me_simd_init_lock)
+#define ME_SIMD_INIT_UNLOCK() pthread_mutex_unlock(&g_me_simd_init_lock)
+#else
+#define ME_SIMD_INIT_LOCK() ((void)0)
+#define ME_SIMD_INIT_UNLOCK() ((void)0)
+#endif
+
 #ifndef ME_USE_ACCELERATE
 #define ME_USE_ACCELERATE 0
 #endif
@@ -3766,6 +3784,25 @@ static int me_simd_initialized = 0;
 static int me_simd_enabled = 1;
 static const char *me_simd_backend = "scalar";
 
+static inline int me_simd_load_initialized(void) {
+#if defined(__GNUC__) || defined(__clang__)
+    return __atomic_load_n(&me_simd_initialized, __ATOMIC_ACQUIRE);
+#else
+    ME_SIMD_INIT_LOCK();
+    int value = me_simd_initialized;
+    ME_SIMD_INIT_UNLOCK();
+    return value;
+#endif
+}
+
+static inline void me_simd_store_initialized(int value) {
+#if defined(__GNUC__) || defined(__clang__)
+    __atomic_store_n(&me_simd_initialized, value, __ATOMIC_RELEASE);
+#else
+    me_simd_initialized = value;
+#endif
+}
+
 static void me_set_scalar_backend(void) {
     vec_sin_impl = vec_sin_scalar;
     vec_cos_impl = vec_cos_scalar;
@@ -4172,18 +4209,12 @@ static int me_cpu_supports_advsimd(void) {
 }
 #endif
 
-static void me_init_simd(void) {
-    const int use_u35 = me_simd_use_u35_active();
+static void me_init_simd_locked(int use_u35) {
     me_init_simd_backend_preference();
-    if (me_simd_initialized) {
-        return;
-    }
-    me_simd_initialized = 1;
 
     if (!me_simd_enabled || me_simd_backend_preference == ME_SIMD_BACKEND_SCALAR) {
         me_set_scalar_backend();
         me_simd_backend = "scalar";
-        me_dsl_trace_simd_init(use_u35);
         return;
     }
 
@@ -4191,12 +4222,10 @@ static void me_init_simd(void) {
 #if ME_USE_ACCELERATE && defined(__APPLE__)
         me_set_accelerate_backend();
         me_simd_backend = "accelerate";
-        me_dsl_trace_simd_init(use_u35);
         return;
 #else
         me_set_scalar_backend();
         me_simd_backend = "scalar";
-        me_dsl_trace_simd_init(use_u35);
         return;
 #endif
     }
@@ -4308,7 +4337,6 @@ static void me_init_simd(void) {
         vec_sincos_impl = vec_sincos_avx2;
         vec_sincos_f32_impl = vec_sincos_f32_avx2;
         me_simd_backend = use_u35 ? "avx2-u35" : "avx2-u10";
-        me_dsl_trace_simd_init(use_u35);
         return;
     }
 #endif
@@ -4419,7 +4447,6 @@ static void me_init_simd(void) {
         vec_sincos_impl = vec_sincos_advsimd;
         vec_sincos_f32_impl = vec_sincos_f32_advsimd;
         me_simd_backend = use_u35 ? "advsimd-u35" : "advsimd-u10";
-        me_dsl_trace_simd_init(use_u35);
         return;
     }
 #endif
@@ -4428,29 +4455,46 @@ static void me_init_simd(void) {
 #if ME_USE_ACCELERATE && defined(__APPLE__)
         me_set_accelerate_backend();
         me_simd_backend = "accelerate";
-        me_dsl_trace_simd_init(use_u35);
         return;
 #endif
     }
 
     me_set_scalar_backend();
     me_simd_backend = "scalar";
-    me_dsl_trace_simd_init(use_u35);
+}
+
+static void me_init_simd(void) {
+    if (me_simd_load_initialized()) {
+        return;
+    }
+    ME_SIMD_INIT_LOCK();
+    if (!me_simd_initialized) {
+        const int use_u35 = me_simd_use_u35_active();
+        me_init_simd_locked(use_u35);
+        me_dsl_trace_simd_init(use_u35);
+        me_simd_store_initialized(1);
+    }
+    ME_SIMD_INIT_UNLOCK();
 }
 
 int me_simd_initialized_for_tests(void) {
-    return me_simd_initialized;
+    return me_simd_load_initialized();
 }
 
 void me_simd_reset_for_tests(void) {
-    me_simd_initialized = 0;
+    ME_SIMD_INIT_LOCK();
+    me_simd_store_initialized(0);
     me_simd_backend_preference = ME_SIMD_BACKEND_AUTO;
     me_simd_backend_preference_initialized = 0;
     me_simd_backend = "scalar";
+    ME_SIMD_INIT_UNLOCK();
 }
 
 const char *me_simd_backend_for_tests(void) {
-    return me_simd_backend;
+    ME_SIMD_INIT_LOCK();
+    const char *backend = me_simd_backend;
+    ME_SIMD_INIT_UNLOCK();
+    return backend;
 }
 
 /* ------------------------------------------------------------------------- */

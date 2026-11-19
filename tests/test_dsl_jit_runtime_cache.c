@@ -17,12 +17,16 @@
 
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <dirent.h>
+#if !defined(__EMSCRIPTEN__)
+#include <pthread.h>
+#endif
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #endif
 
 #include "../src/miniexpr.h"
+#include "../src/dsl_jit_runtime_internal.h"
 #include "../src/dsl_parser.h"
 #include "../src/dsl_jit_test.h"
 #include "minctest.h"
@@ -3120,6 +3124,343 @@ cleanup:
     }
     return rc;
 }
+
+#if !defined(__EMSCRIPTEN__)
+typedef struct {
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    int waiting;
+    int total;
+    int go;
+} test_start_gate_t;
+
+static void test_start_gate_init(test_start_gate_t *gate, int total) {
+    pthread_mutex_init(&gate->mutex, NULL);
+    pthread_cond_init(&gate->cond, NULL);
+    gate->waiting = 0;
+    gate->total = total;
+    gate->go = 0;
+}
+
+static void test_start_gate_wait(test_start_gate_t *gate) {
+    pthread_mutex_lock(&gate->mutex);
+    gate->waiting++;
+    if (gate->waiting >= gate->total) {
+        gate->go = 1;
+        pthread_cond_broadcast(&gate->cond);
+    }
+    while (!gate->go) {
+        pthread_cond_wait(&gate->cond, &gate->mutex);
+    }
+    pthread_mutex_unlock(&gate->mutex);
+}
+
+static void test_start_gate_destroy(test_start_gate_t *gate) {
+    pthread_cond_destroy(&gate->cond);
+    pthread_mutex_destroy(&gate->mutex);
+}
+
+static int count_tmp_files(const char *dir_path) {
+    if (!dir_path) {
+        return -1;
+    }
+    DIR *dir = opendir(dir_path);
+    if (!dir) {
+        return -1;
+    }
+    int count = 0;
+    struct dirent *ent = NULL;
+    while ((ent = readdir(dir)) != NULL) {
+        if (strncmp(ent->d_name, ".tmp_", 5) == 0) {
+            count++;
+        }
+    }
+    closedir(dir);
+    return count;
+}
+
+typedef struct {
+    test_start_gate_t *gate;
+    const char *src;
+    double offset;
+    bool require_jit;
+    int err;
+} concurrent_jit_arg_t;
+
+static void *concurrent_jit_worker(void *opaque) {
+    concurrent_jit_arg_t *arg = (concurrent_jit_arg_t *)opaque;
+    test_start_gate_wait(arg->gate);
+
+    me_variable vars[] = {{"x", ME_FLOAT64}};
+    int err = 0;
+    me_expr *expr = NULL;
+    if (me_compile(arg->src, vars, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+        arg->err = 1;
+        me_free(expr);
+        return NULL;
+    }
+    if (arg->require_jit && !me_expr_has_jit_kernel(expr)) {
+        arg->err = 2;
+        me_free(expr);
+        return NULL;
+    }
+    double in[4] = {0.0, 1.0, 2.0, 3.0};
+    double out[4] = {0.0, 0.0, 0.0, 0.0};
+    const void *inputs[] = {in};
+    if (me_eval(expr, inputs, 1, out, 4, NULL) != ME_EVAL_SUCCESS) {
+        arg->err = 3;
+        me_free(expr);
+        return NULL;
+    }
+    for (int i = 0; i < 4; i++) {
+        if (out[i] != in[i] + arg->offset) {
+            arg->err = 4;
+            me_free(expr);
+            return NULL;
+        }
+    }
+    me_free(expr);
+    return NULL;
+}
+
+static int run_concurrent_jit_batch(const char *const *srcs, const double *offsets,
+                                    int nthreads, bool require_jit) {
+    test_start_gate_t gate;
+    test_start_gate_init(&gate, nthreads);
+    pthread_t threads[8];
+    concurrent_jit_arg_t args[8];
+    if (nthreads <= 0 || nthreads > 8) {
+        test_start_gate_destroy(&gate);
+        return 1;
+    }
+    for (int i = 0; i < nthreads; i++) {
+        args[i].gate = &gate;
+        args[i].src = srcs[i];
+        args[i].offset = offsets[i];
+        args[i].require_jit = require_jit;
+        args[i].err = 0;
+        if (pthread_create(&threads[i], NULL, concurrent_jit_worker, &args[i]) != 0) {
+            test_start_gate_destroy(&gate);
+            return 1;
+        }
+    }
+    int failed = 0;
+    for (int i = 0; i < nthreads; i++) {
+        (void)pthread_join(threads[i], NULL);
+        if (args[i].err != 0) {
+            printf("  FAILED: concurrent worker %d failed with err=%d\n", i, args[i].err);
+            failed = 1;
+        }
+    }
+    test_start_gate_destroy(&gate);
+    return failed;
+}
+
+static int test_concurrent_jit_cache_and_eviction(void) {
+    printf("\n=== DSL JIT Runtime Cache Test: concurrent compile, cache & live eviction ===\n");
+
+    int rc = 1;
+    char tmp_template[] = "/tmp/me_jit_concurrent_XXXXXX";
+    char *tmp_root = mkdtemp(tmp_template);
+    char cache_dir[1024];
+    cache_dir[0] = '\0';
+    char meta_path[1200];
+    meta_path[0] = '\0';
+    char *saved_tmpdir = dup_env_value("TMPDIR");
+    char *saved_cc = dup_env_value("CC");
+    char *saved_cflags = dup_env_value("CFLAGS");
+    char *saved_pos_cache = dup_env_value("ME_DSL_JIT_POS_CACHE");
+    char *saved_jit = dup_env_value("ME_DSL_JIT");
+    char *saved_stub = dup_env_value("ME_DSL_JIT_TEST_STUB_SO");
+    me_expr *expr1 = NULL;
+    me_expr *expr2 = NULL;
+
+    if (!tmp_root) {
+        printf("  FAILED: mkdtemp failed\n");
+        goto cleanup;
+    }
+    if (snprintf(cache_dir, sizeof(cache_dir), "%s/miniexpr-jit", tmp_root) >= (int)sizeof(cache_dir)) {
+        printf("  FAILED: cache path too long\n");
+        goto cleanup;
+    }
+    if (setenv("TMPDIR", tmp_root, 1) != 0 ||
+        setenv("CC", "cc", 1) != 0 ||
+        setenv("ME_DSL_JIT_POS_CACHE", "1", 1) != 0 ||
+        setenv("ME_DSL_JIT", "1", 1) != 0) {
+        printf("  FAILED: setenv failed\n");
+        goto cleanup;
+    }
+    (void)unsetenv("CFLAGS");
+    if (dsl_jit_c_compiler_available()) {
+        (void)unsetenv("ME_DSL_JIT_TEST_STUB_SO");
+    }
+
+    {
+        const char *same_srcs[4] = {
+            "# me:compiler=cc\ndef kernel(x):\n    y = x + 4100\n    return y\n",
+            "# me:compiler=cc\ndef kernel(x):\n    y = x + 4100\n    return y\n",
+            "# me:compiler=cc\ndef kernel(x):\n    y = x + 4100\n    return y\n",
+            "# me:compiler=cc\ndef kernel(x):\n    y = x + 4100\n    return y\n",
+        };
+        const double same_offsets[4] = {4100.0, 4100.0, 4100.0, 4100.0};
+        if (run_concurrent_jit_batch(same_srcs, same_offsets, 4, true) != 0) {
+            goto cleanup;
+        }
+        if (count_tmp_files(cache_dir) != 0 ||
+            count_kernel_files_with_suffix(cache_dir, ".meta", NULL, 0) != 1) {
+            printf("  FAILED: unexpected cache files after same-expr concurrent cc compile\n");
+            goto cleanup;
+        }
+    }
+
+    remove_files_in_dir(cache_dir);
+    {
+        const char *distinct_srcs[4] = {
+            "# me:compiler=cc\ndef kernel(x):\n    y = x + 4101\n    return y\n",
+            "# me:compiler=cc\ndef kernel(x):\n    y = x + 4102\n    return y\n",
+            "# me:compiler=cc\ndef kernel(x):\n    y = x + 4103\n    return y\n",
+            "# me:compiler=cc\ndef kernel(x):\n    y = x + 4104\n    return y\n",
+        };
+        const double distinct_offsets[4] = {4101.0, 4102.0, 4103.0, 4104.0};
+        if (run_concurrent_jit_batch(distinct_srcs, distinct_offsets, 4, true) != 0) {
+            goto cleanup;
+        }
+        if (count_tmp_files(cache_dir) != 0 ||
+            count_kernel_files_with_suffix(cache_dir, ".meta", NULL, 0) != 4) {
+            printf("  FAILED: unexpected cache files after distinct-expr concurrent cc compile\n");
+            goto cleanup;
+        }
+    }
+
+#if ME_USE_LIBTCC_FALLBACK
+    {
+        const char *probe_src = "# me:compiler=tcc\ndef kernel(x):\n    y = x + 4199\n    return y\n";
+        me_variable probe_vars[] = {{"x", ME_FLOAT64}};
+        int probe_err = 0;
+        me_expr *probe_expr = NULL;
+        bool tcc_available = false;
+        if (me_compile(probe_src, probe_vars, 1, ME_FLOAT64, &probe_err, &probe_expr) == ME_COMPILE_SUCCESS &&
+            probe_expr != NULL) {
+            tcc_available = me_expr_has_jit_kernel(probe_expr);
+        }
+        me_free(probe_expr);
+
+        const char *tcc_same_srcs[4] = {
+            "# me:compiler=tcc\ndef kernel(x):\n    y = x + 4200\n    return y\n",
+            "# me:compiler=tcc\ndef kernel(x):\n    y = x + 4200\n    return y\n",
+            "# me:compiler=tcc\ndef kernel(x):\n    y = x + 4200\n    return y\n",
+            "# me:compiler=tcc\ndef kernel(x):\n    y = x + 4200\n    return y\n",
+        };
+        const double tcc_same_offsets[4] = {4200.0, 4200.0, 4200.0, 4200.0};
+        if (run_concurrent_jit_batch(tcc_same_srcs, tcc_same_offsets, 4, tcc_available) != 0) {
+            goto cleanup;
+        }
+
+        const char *tcc_distinct_srcs[4] = {
+            "# me:compiler=tcc\ndef kernel(x):\n    y = x + 4201\n    return y\n",
+            "# me:compiler=tcc\ndef kernel(x):\n    y = x + 4202\n    return y\n",
+            "# me:compiler=tcc\ndef kernel(x):\n    y = x + 4203\n    return y\n",
+            "# me:compiler=tcc\ndef kernel(x):\n    y = x + 4204\n    return y\n",
+        };
+        const double tcc_distinct_offsets[4] = {4201.0, 4202.0, 4203.0, 4204.0};
+        if (run_concurrent_jit_batch(tcc_distinct_srcs, tcc_distinct_offsets, 4, tcc_available) != 0) {
+            goto cleanup;
+        }
+    }
+#endif
+
+    remove_files_in_dir(cache_dir);
+    {
+        const char *evict_src = "# me:compiler=cc\ndef kernel(x):\n    y = x + 4301\n    return y\n";
+        me_variable vars[] = {{"x", ME_FLOAT64}};
+        double in[4] = {0.0, 1.0, 2.0, 3.0};
+        double out1[4] = {0.0, 0.0, 0.0, 0.0};
+        double out2[4] = {0.0, 0.0, 0.0, 0.0};
+        const void *inputs[] = {in};
+        int err = 0;
+
+        if (me_compile(evict_src, vars, 1, ME_FLOAT64, &err, &expr1) != ME_COMPILE_SUCCESS ||
+            !expr1 || !me_expr_has_jit_kernel(expr1)) {
+            printf("  FAILED: initial compile for live-eviction test\n");
+            goto cleanup;
+        }
+        if (count_kernel_files_with_suffix(cache_dir, ".meta", meta_path, sizeof(meta_path)) != 1 ||
+            meta_path[0] == '\0') {
+            printf("  FAILED: expected one .meta file for live-eviction test\n");
+            goto cleanup;
+        }
+        if (tamper_file_first_byte(meta_path) != 0) {
+            printf("  FAILED: could not tamper .meta file for live-eviction test\n");
+            goto cleanup;
+        }
+        if (setenv("ME_DSL_JIT_POS_CACHE", "0", 1) != 0) {
+            printf("  FAILED: setenv ME_DSL_JIT_POS_CACHE=0 failed\n");
+            goto cleanup;
+        }
+        if (me_compile(evict_src, vars, 1, ME_FLOAT64, &err, &expr2) != ME_COMPILE_SUCCESS ||
+            !expr2 || !me_expr_has_jit_kernel(expr2)) {
+            printf("  FAILED: recompile after stale meta in live-eviction test\n");
+            goto cleanup;
+        }
+        if (me_eval(expr1, inputs, 1, out1, 4, NULL) != ME_EVAL_SUCCESS ||
+            me_eval(expr2, inputs, 1, out2, 4, NULL) != ME_EVAL_SUCCESS) {
+            printf("  FAILED: eval failed after live cache eviction\n");
+            goto cleanup;
+        }
+        for (int i = 0; i < 4; i++) {
+            if (out1[i] != in[i] + 4301.0 || out2[i] != in[i] + 4301.0) {
+                printf("  FAILED: output mismatch after live cache eviction at %d\n", i);
+                goto cleanup;
+            }
+        }
+        me_free(expr1);
+        expr1 = NULL;
+        if (me_eval(expr2, inputs, 1, out2, 4, NULL) != ME_EVAL_SUCCESS) {
+            printf("  FAILED: eval of replacement expr failed after freeing evicted expr\n");
+            goto cleanup;
+        }
+        for (int i = 0; i < 4; i++) {
+            if (out2[i] != in[i] + 4301.0) {
+                printf("  FAILED: replacement output mismatch after freeing evicted expr\n");
+                goto cleanup;
+            }
+        }
+        me_free(expr2);
+        expr2 = NULL;
+        if (count_tmp_files(cache_dir) != 0) {
+            printf("  FAILED: leftover temporary cache files after live-eviction test\n");
+            goto cleanup;
+        }
+    }
+
+    rc = 0;
+    printf("  PASSED\n");
+
+cleanup:
+    me_free(expr1);
+    me_free(expr2);
+    restore_env_value("TMPDIR", saved_tmpdir);
+    restore_env_value("CC", saved_cc);
+    restore_env_value("CFLAGS", saved_cflags);
+    restore_env_value("ME_DSL_JIT_POS_CACHE", saved_pos_cache);
+    restore_env_value("ME_DSL_JIT", saved_jit);
+    restore_env_value("ME_DSL_JIT_TEST_STUB_SO", saved_stub);
+    free(saved_tmpdir);
+    free(saved_cc);
+    free(saved_cflags);
+    free(saved_pos_cache);
+    free(saved_jit);
+    free(saved_stub);
+    if (cache_dir[0] != '\0') {
+        remove_files_in_dir(cache_dir);
+        (void)rmdir(cache_dir);
+    }
+    if (tmp_root) {
+        (void)rmdir(tmp_root);
+    }
+    return rc;
+}
+#endif
 #endif
 
 int main(void) {
@@ -3214,6 +3555,7 @@ int main(void) {
     fail |= test_cc_backend_bridge_path();
     fail |= test_cc_backend_bridge_and_vec_math_gates();
     fail |= test_nonexistent_tmpdir_creates_cache_dir();
+    fail |= test_concurrent_jit_cache_and_eviction();
 #endif
 #if defined(__EMSCRIPTEN__)
     me_register_wasm_jit_helpers(NULL, NULL);

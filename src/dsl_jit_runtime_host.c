@@ -29,6 +29,8 @@
 
 #if !defined(_WIN32) && !defined(_WIN64) && !defined(__EMSCRIPTEN__)
 
+#include <pthread.h>
+
 /* In-process negative cache for recent JIT runtime failures. */
 #define ME_DSL_JIT_NEG_CACHE_SLOTS 64
 #define ME_DSL_JIT_NEG_CACHE_RETRY_BUDGET 2
@@ -56,14 +58,30 @@ typedef struct {
 
 typedef struct {
     bool valid;
+    bool retired;
     uint64_t key;
+    uint64_t cache_id;
     void *handle;
     me_dsl_jit_kernel_fn kernel_fn;
+    unsigned int ref_count;
 } me_dsl_jit_pos_cache_entry;
+
+static pthread_mutex_t g_dsl_jit_cache_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t g_dsl_jit_tmp_seq = 0;
+static uint64_t g_dsl_jit_pos_cache_seq = 0;
+#define ME_JIT_CACHE_LOCK() pthread_mutex_lock(&g_dsl_jit_cache_lock)
+#define ME_JIT_CACHE_UNLOCK() pthread_mutex_unlock(&g_dsl_jit_cache_lock)
 
 static me_dsl_jit_neg_cache_entry g_dsl_jit_neg_cache[ME_DSL_JIT_NEG_CACHE_SLOTS];
 static int g_dsl_jit_neg_cache_cursor = 0;
 static me_dsl_jit_pos_cache_entry g_dsl_jit_pos_cache[ME_DSL_JIT_POS_CACHE_SLOTS];
+
+static uint64_t dsl_jit_next_tmp_seq(void) {
+    ME_JIT_CACHE_LOCK();
+    uint64_t seq = ++g_dsl_jit_tmp_seq;
+    ME_JIT_CACHE_UNLOCK();
+    return seq;
+}
 
 static uint64_t dsl_jit_now_seconds(void) {
     time_t now = time(NULL);
@@ -73,7 +91,7 @@ static uint64_t dsl_jit_now_seconds(void) {
     return (uint64_t)now;
 }
 
-static int dsl_jit_neg_cache_find_slot(uint64_t key) {
+static int dsl_jit_neg_cache_find_slot_locked(uint64_t key) {
     for (int i = 0; i < ME_DSL_JIT_NEG_CACHE_SLOTS; i++) {
         if (g_dsl_jit_neg_cache[i].valid && g_dsl_jit_neg_cache[i].key == key) {
             return i;
@@ -82,7 +100,7 @@ static int dsl_jit_neg_cache_find_slot(uint64_t key) {
     return -1;
 }
 
-static int dsl_jit_neg_cache_alloc_slot(void) {
+static int dsl_jit_neg_cache_alloc_slot_locked(void) {
     for (int i = 0; i < ME_DSL_JIT_NEG_CACHE_SLOTS; i++) {
         if (!g_dsl_jit_neg_cache[i].valid) {
             return i;
@@ -94,25 +112,30 @@ static int dsl_jit_neg_cache_alloc_slot(void) {
 }
 
 static bool dsl_jit_neg_cache_should_skip(uint64_t key) {
-    int slot = dsl_jit_neg_cache_find_slot(key);
+    ME_JIT_CACHE_LOCK();
+    int slot = dsl_jit_neg_cache_find_slot_locked(key);
     if (slot < 0) {
+        ME_JIT_CACHE_UNLOCK();
         return false;
     }
     me_dsl_jit_neg_cache_entry *entry = &g_dsl_jit_neg_cache[slot];
     uint64_t now = dsl_jit_now_seconds();
     if (now < entry->retry_after_at) {
+        ME_JIT_CACHE_UNLOCK();
         return true;
     }
     if (entry->retries_left == 0) {
         entry->retries_left = ME_DSL_JIT_NEG_CACHE_RETRY_BUDGET;
     }
+    ME_JIT_CACHE_UNLOCK();
     return false;
 }
 
 static void dsl_jit_neg_cache_record_failure(uint64_t key, me_dsl_jit_neg_failure_class failure_class) {
-    int slot = dsl_jit_neg_cache_find_slot(key);
+    ME_JIT_CACHE_LOCK();
+    int slot = dsl_jit_neg_cache_find_slot_locked(key);
     if (slot < 0) {
-        slot = dsl_jit_neg_cache_alloc_slot();
+        slot = dsl_jit_neg_cache_alloc_slot_locked();
     }
     me_dsl_jit_neg_cache_entry *entry = &g_dsl_jit_neg_cache[slot];
     if (!entry->valid || entry->key != key) {
@@ -131,17 +154,19 @@ static void dsl_jit_neg_cache_record_failure(uint64_t key, me_dsl_jit_neg_failur
     entry->last_failure_at = now;
     entry->retry_after_at = now + cooldown;
     entry->failure_class = (uint8_t)failure_class;
+    ME_JIT_CACHE_UNLOCK();
 }
 
 static void dsl_jit_neg_cache_clear(uint64_t key) {
-    int slot = dsl_jit_neg_cache_find_slot(key);
-    if (slot < 0) {
-        return;
+    ME_JIT_CACHE_LOCK();
+    int slot = dsl_jit_neg_cache_find_slot_locked(key);
+    if (slot >= 0) {
+        memset(&g_dsl_jit_neg_cache[slot], 0, sizeof(g_dsl_jit_neg_cache[slot]));
     }
-    memset(&g_dsl_jit_neg_cache[slot], 0, sizeof(g_dsl_jit_neg_cache[slot]));
+    ME_JIT_CACHE_UNLOCK();
 }
 
-static int dsl_jit_pos_cache_find_slot(uint64_t key) {
+static int dsl_jit_pos_cache_find_slot_locked(uint64_t key) {
     for (int i = 0; i < ME_DSL_JIT_POS_CACHE_SLOTS; i++) {
         if (g_dsl_jit_pos_cache[i].valid && g_dsl_jit_pos_cache[i].key == key) {
             return i;
@@ -150,9 +175,10 @@ static int dsl_jit_pos_cache_find_slot(uint64_t key) {
     return -1;
 }
 
-static int dsl_jit_pos_cache_find_free_slot(void) {
+static int dsl_jit_pos_cache_find_free_slot_locked(void) {
     for (int i = 0; i < ME_DSL_JIT_POS_CACHE_SLOTS; i++) {
-        if (!g_dsl_jit_pos_cache[i].valid) {
+        if (!g_dsl_jit_pos_cache[i].valid && !g_dsl_jit_pos_cache[i].retired &&
+            g_dsl_jit_pos_cache[i].handle == NULL) {
             return i;
         }
     }
@@ -160,28 +186,43 @@ static int dsl_jit_pos_cache_find_free_slot(void) {
 }
 
 static void dsl_jit_pos_cache_evict(uint64_t key) {
-    int slot = dsl_jit_pos_cache_find_slot(key);
-    if (slot < 0) {
-        return;
+    void *to_close = NULL;
+    ME_JIT_CACHE_LOCK();
+    int slot = dsl_jit_pos_cache_find_slot_locked(key);
+    if (slot >= 0) {
+        if (g_dsl_jit_pos_cache[slot].ref_count == 0) {
+            to_close = g_dsl_jit_pos_cache[slot].handle;
+            memset(&g_dsl_jit_pos_cache[slot], 0, sizeof(g_dsl_jit_pos_cache[slot]));
+        }
+        else {
+            /* Keep the handle loaded while existing programs still execute it. */
+            g_dsl_jit_pos_cache[slot].valid = false;
+            g_dsl_jit_pos_cache[slot].retired = true;
+        }
     }
-    if (g_dsl_jit_pos_cache[slot].handle) {
-        dlclose(g_dsl_jit_pos_cache[slot].handle);
+    ME_JIT_CACHE_UNLOCK();
+    if (to_close) {
+        dlclose(to_close);
     }
-    memset(&g_dsl_jit_pos_cache[slot], 0, sizeof(g_dsl_jit_pos_cache[slot]));
 }
 
 static bool dsl_jit_pos_cache_bind_program(me_dsl_compiled_program *program, uint64_t key) {
     if (!program) {
         return false;
     }
-    int slot = dsl_jit_pos_cache_find_slot(key);
+    ME_JIT_CACHE_LOCK();
+    int slot = dsl_jit_pos_cache_find_slot_locked(key);
     if (slot < 0) {
+        ME_JIT_CACHE_UNLOCK();
         return false;
     }
     program->jit_dl_handle = g_dsl_jit_pos_cache[slot].handle;
     program->jit_kernel_fn = g_dsl_jit_pos_cache[slot].kernel_fn;
     program->jit_runtime_key = key;
+    program->jit_pos_cache_id = g_dsl_jit_pos_cache[slot].cache_id;
     program->jit_dl_handle_cached = true;
+    g_dsl_jit_pos_cache[slot].ref_count++;
+    ME_JIT_CACHE_UNLOCK();
     return true;
 }
 
@@ -190,32 +231,118 @@ static bool dsl_jit_pos_cache_store_program(me_dsl_compiled_program *program, ui
         return false;
     }
 
-    int slot = dsl_jit_pos_cache_find_slot(key);
+    void *dup_handle = NULL;
+    ME_JIT_CACHE_LOCK();
+    int slot = dsl_jit_pos_cache_find_slot_locked(key);
     if (slot >= 0) {
-        if (program->jit_dl_handle != g_dsl_jit_pos_cache[slot].handle) {
-            dlclose(program->jit_dl_handle);
-            program->jit_dl_handle = g_dsl_jit_pos_cache[slot].handle;
-            program->jit_kernel_fn = g_dsl_jit_pos_cache[slot].kernel_fn;
-        }
+        dup_handle = program->jit_dl_handle;
+        program->jit_dl_handle = g_dsl_jit_pos_cache[slot].handle;
+        program->jit_kernel_fn = g_dsl_jit_pos_cache[slot].kernel_fn;
         program->jit_runtime_key = key;
+        program->jit_pos_cache_id = g_dsl_jit_pos_cache[slot].cache_id;
         program->jit_dl_handle_cached = true;
+        g_dsl_jit_pos_cache[slot].ref_count++;
+        ME_JIT_CACHE_UNLOCK();
+        dlclose(dup_handle);
         return true;
     }
 
-    slot = dsl_jit_pos_cache_find_free_slot();
+    slot = dsl_jit_pos_cache_find_free_slot_locked();
     if (slot < 0) {
         program->jit_runtime_key = key;
+        program->jit_pos_cache_id = 0;
         program->jit_dl_handle_cached = false;
+        ME_JIT_CACHE_UNLOCK();
         return false;
     }
 
+    uint64_t cache_id = ++g_dsl_jit_pos_cache_seq;
     g_dsl_jit_pos_cache[slot].valid = true;
+    g_dsl_jit_pos_cache[slot].retired = false;
     g_dsl_jit_pos_cache[slot].key = key;
+    g_dsl_jit_pos_cache[slot].cache_id = cache_id;
     g_dsl_jit_pos_cache[slot].handle = program->jit_dl_handle;
     g_dsl_jit_pos_cache[slot].kernel_fn = program->jit_kernel_fn;
+    g_dsl_jit_pos_cache[slot].ref_count = 1;
     program->jit_runtime_key = key;
+    program->jit_pos_cache_id = cache_id;
     program->jit_dl_handle_cached = true;
+    ME_JIT_CACHE_UNLOCK();
     return true;
+}
+
+void dsl_jit_pos_cache_release_program(me_dsl_compiled_program *program) {
+    if (!program || !program->jit_dl_handle || !program->jit_dl_handle_cached) {
+        return;
+    }
+    void *to_close = NULL;
+    ME_JIT_CACHE_LOCK();
+    for (int i = 0; i < ME_DSL_JIT_POS_CACHE_SLOTS; i++) {
+        me_dsl_jit_pos_cache_entry *entry = &g_dsl_jit_pos_cache[i];
+        if ((entry->valid || entry->retired) &&
+            entry->cache_id == program->jit_pos_cache_id &&
+            entry->handle == program->jit_dl_handle) {
+            if (entry->ref_count > 0) {
+                entry->ref_count--;
+            }
+            if (entry->retired && entry->ref_count == 0) {
+                to_close = entry->handle;
+                memset(entry, 0, sizeof(*entry));
+            }
+            break;
+        }
+    }
+    ME_JIT_CACHE_UNLOCK();
+    if (to_close) {
+        dlclose(to_close);
+    }
+}
+
+static void dsl_jit_publish_and_load(me_dsl_compiled_program *program,
+                                     uint64_t key,
+                                     const me_dsl_jit_cache_meta *expected_meta,
+                                     const char *tmp_so_path,
+                                     const char *so_path,
+                                     const char *tmp_meta_path,
+                                     const char *meta_path,
+                                     const char *trace_label) {
+    if (rename(tmp_so_path, so_path) != 0) {
+        (void)unlink(tmp_so_path);
+        dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
+        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+                 "jit runtime failed to publish shared object");
+        dsl_tracef("jit runtime fallback: interpreter fp=%s reason=%s",
+                   dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
+        return;
+    }
+    if (!dsl_jit_write_meta_file(tmp_meta_path, expected_meta) ||
+        rename(tmp_meta_path, meta_path) != 0) {
+        (void)unlink(tmp_meta_path);
+        dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_METADATA);
+        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+                 "jit runtime failed to write cache metadata");
+        dsl_tracef("jit runtime fallback: interpreter fp=%s reason=%s",
+                   dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
+        return;
+    }
+    char load_detail[256];
+    if (!dsl_jit_load_kernel(program, so_path, load_detail, sizeof(load_detail))) {
+        dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_LOAD);
+        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
+                 "jit runtime shared object load failed");
+        dsl_tracef("jit runtime fallback: interpreter fp=%s reason=%s detail=%s",
+                   dsl_fp_mode_name(program->fp_mode), program->jit_c_error,
+                   load_detail[0] ? load_detail : "-");
+        return;
+    }
+    if (dsl_jit_pos_cache_enabled()) {
+        (void)dsl_jit_pos_cache_store_program(program, key);
+    }
+    dsl_tracef("jit runtime %s: fp=%s key=%016llx",
+               trace_label,
+               dsl_fp_mode_name(program->fp_mode),
+               (unsigned long long)key);
+    dsl_jit_neg_cache_clear(key);
 }
 
 void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
@@ -300,12 +427,29 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
     char src_path[1300];
     char so_path[1300];
     char meta_path[1300];
-    if (snprintf(src_path, sizeof(src_path), "%s/kernel_%016llx.c",
-                 cache_dir, (unsigned long long)key) >= (int)sizeof(src_path) ||
-        snprintf(so_path, sizeof(so_path), "%s/kernel_%016llx.%s",
-                 cache_dir, (unsigned long long)key, ext) >= (int)sizeof(so_path) ||
-        snprintf(meta_path, sizeof(meta_path), "%s/kernel_%016llx.meta",
-                 cache_dir, (unsigned long long)key) >= (int)sizeof(meta_path)) {
+    char tmp_src_path[1400];
+    char tmp_so_path[1400];
+    char tmp_meta_path[1400];
+    unsigned long pid = (unsigned long)getpid();
+    unsigned long long seq = (unsigned long long)dsl_jit_next_tmp_seq();
+    int n_src = snprintf(src_path, sizeof(src_path), "%s/kernel_%016llx.c",
+                         cache_dir, (unsigned long long)key);
+    int n_so = snprintf(so_path, sizeof(so_path), "%s/kernel_%016llx.%s",
+                        cache_dir, (unsigned long long)key, ext);
+    int n_meta = snprintf(meta_path, sizeof(meta_path), "%s/kernel_%016llx.meta",
+                          cache_dir, (unsigned long long)key);
+    int n_tmp_src = snprintf(tmp_src_path, sizeof(tmp_src_path), "%s/.tmp_%016llx_%lu_%llu.c",
+                             cache_dir, (unsigned long long)key, pid, seq);
+    int n_tmp_so = snprintf(tmp_so_path, sizeof(tmp_so_path), "%s/.tmp_%016llx_%lu_%llu.%s",
+                            cache_dir, (unsigned long long)key, pid, seq, ext);
+    int n_tmp_meta = snprintf(tmp_meta_path, sizeof(tmp_meta_path), "%s/.tmp_%016llx_%lu_%llu.meta",
+                              cache_dir, (unsigned long long)key, pid, seq);
+    if (n_src < 0 || n_src >= (int)sizeof(src_path) ||
+        n_so < 0 || n_so >= (int)sizeof(so_path) ||
+        n_meta < 0 || n_meta >= (int)sizeof(meta_path) ||
+        n_tmp_src < 0 || n_tmp_src >= (int)sizeof(tmp_src_path) ||
+        n_tmp_so < 0 || n_tmp_so >= (int)sizeof(tmp_so_path) ||
+        n_tmp_meta < 0 || n_tmp_meta >= (int)sizeof(tmp_meta_path)) {
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_PATH);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime cache path too long");
@@ -317,10 +461,11 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
     dsl_jit_fill_cache_meta(&expected_meta, program, key);
 
     bool so_exists = (access(so_path, F_OK) == 0);
-    bool meta_matches = so_exists && dsl_jit_meta_file_matches(meta_path, &expected_meta);
-    if (so_exists && !meta_matches) {
-        /* Evict stale positive-cache entry so the old dlopen handle is
-           closed before we overwrite the .so file on disk. */
+    bool meta_exists = (access(meta_path, F_OK) == 0);
+    bool meta_matches = so_exists && meta_exists && dsl_jit_meta_file_matches(meta_path, &expected_meta);
+    if (so_exists && meta_exists && !meta_matches) {
+        /* Evict stale positive-cache entry so the old handle is retired or
+           closed before we replace the .so file on disk. */
         dsl_jit_pos_cache_evict(key);
     }
     if (meta_matches) {
@@ -342,7 +487,9 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
                    load_detail[0] ? load_detail : "-");
     }
 
-    if (!dsl_jit_write_text_file(src_path, program->jit_c_source)) {
+    if (!dsl_jit_write_text_file(tmp_src_path, program->jit_c_source) ||
+        rename(tmp_src_path, src_path) != 0) {
+        (void)unlink(tmp_src_path);
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_WRITE);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime failed to write source");
@@ -361,7 +508,8 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
                        dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
             return;
         }
-        if (!dsl_jit_copy_file(jit_stub_path, so_path)) {
+        if (!dsl_jit_copy_file(jit_stub_path, tmp_so_path)) {
+            (void)unlink(tmp_so_path);
             dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
             snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                      "jit runtime stub copy failed");
@@ -369,31 +517,8 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
                        dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
             return;
         }
-        if (!dsl_jit_write_meta_file(meta_path, &expected_meta)) {
-            dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_METADATA);
-            snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
-                     "jit runtime failed to write cache metadata");
-            dsl_tracef("jit runtime fallback: interpreter fp=%s reason=%s",
-                       dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
-            return;
-        }
-        char load_detail[256];
-        if (!dsl_jit_load_kernel(program, so_path, load_detail, sizeof(load_detail))) {
-            dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_LOAD);
-            snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
-                     "jit runtime shared object load failed");
-            dsl_tracef("jit runtime fallback: interpreter fp=%s reason=%s detail=%s",
-                       dsl_fp_mode_name(program->fp_mode), program->jit_c_error,
-                       load_detail[0] ? load_detail : "-");
-            return;
-        }
-        if (dsl_jit_pos_cache_enabled()) {
-            (void)dsl_jit_pos_cache_store_program(program, key);
-        }
-        dsl_tracef("jit runtime stubbed: fp=%s key=%016llx",
-                   dsl_fp_mode_name(program->fp_mode),
-                   (unsigned long long)key);
-        dsl_jit_neg_cache_clear(key);
+        dsl_jit_publish_and_load(program, key, &expected_meta,
+                                 tmp_so_path, so_path, tmp_meta_path, meta_path, "stubbed");
         return;
     }
     if (!dsl_jit_c_compiler_available()) {
@@ -406,7 +531,8 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
                    program->jit_c_error);
         return;
     }
-    if (!dsl_jit_compile_shared(program, src_path, so_path)) {
+    if (!dsl_jit_compile_shared(program, src_path, tmp_so_path)) {
+        (void)unlink(tmp_so_path);
         dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_COMPILE);
         snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
                  "jit runtime compilation failed");
@@ -414,31 +540,8 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
                    dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
         return;
     }
-    if (!dsl_jit_write_meta_file(meta_path, &expected_meta)) {
-        dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_METADATA);
-        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
-                 "jit runtime failed to write cache metadata");
-        dsl_tracef("jit runtime fallback: interpreter fp=%s reason=%s",
-                   dsl_fp_mode_name(program->fp_mode), program->jit_c_error);
-        return;
-    }
-    char load_detail[256];
-    if (!dsl_jit_load_kernel(program, so_path, load_detail, sizeof(load_detail))) {
-        dsl_jit_neg_cache_record_failure(key, ME_DSL_JIT_NEG_FAIL_LOAD);
-        snprintf(program->jit_c_error, sizeof(program->jit_c_error), "%s",
-                 "jit runtime shared object load failed");
-        dsl_tracef("jit runtime fallback: interpreter fp=%s reason=%s detail=%s",
-                   dsl_fp_mode_name(program->fp_mode), program->jit_c_error,
-                   load_detail[0] ? load_detail : "-");
-        return;
-    }
-    if (dsl_jit_pos_cache_enabled()) {
-        (void)dsl_jit_pos_cache_store_program(program, key);
-    }
-    dsl_tracef("jit runtime built: fp=%s key=%016llx",
-               dsl_fp_mode_name(program->fp_mode),
-               (unsigned long long)key);
-    dsl_jit_neg_cache_clear(key);
+    dsl_jit_publish_and_load(program, key, &expected_meta,
+                             tmp_so_path, so_path, tmp_meta_path, meta_path, "built");
 }
 
 #endif

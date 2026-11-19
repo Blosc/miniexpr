@@ -251,6 +251,7 @@ typedef struct {
     void *jit_dl_handle;
     void *jit_tcc_state;
     uint64_t jit_runtime_key;
+    uint64_t jit_pos_cache_id;
     bool jit_dl_handle_cached;
     bool menudet_jit_has_arith_bridge;
     bool menudet_jit_has_ramp_bridge;
@@ -346,6 +347,7 @@ bool dsl_jit_compile_shared(const me_dsl_compiled_program *program,
                             const char *src_path, const char *so_path);
 bool dsl_jit_load_kernel(me_dsl_compiled_program *program, const char *shared_path,
                          char *detail, size_t detail_cap);
+void dsl_jit_pos_cache_release_program(me_dsl_compiled_program *program);
 #if defined(__linux__)
 bool dsl_jit_cc_promote_self_symbols_global(void);
 #endif

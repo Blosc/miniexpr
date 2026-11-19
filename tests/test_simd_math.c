@@ -7,6 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__EMSCRIPTEN__)
+#include <pthread.h>
+#endif
 #include "functions-simd.h"
 #include "minctest.h"
 #include "miniexpr.h"
@@ -1783,12 +1786,137 @@ static int test_simd_auto_backend_selection(void) {
     return 0;
 }
 
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__EMSCRIPTEN__)
+typedef struct {
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    int waiting;
+    int total;
+    int go;
+} simd_start_gate_t;
+
+static void simd_start_gate_init(simd_start_gate_t *gate, int total) {
+    pthread_mutex_init(&gate->mutex, NULL);
+    pthread_cond_init(&gate->cond, NULL);
+    gate->waiting = 0;
+    gate->total = total;
+    gate->go = 0;
+}
+
+static void simd_start_gate_wait(simd_start_gate_t *gate) {
+    pthread_mutex_lock(&gate->mutex);
+    gate->waiting++;
+    if (gate->waiting >= gate->total) {
+        gate->go = 1;
+        pthread_cond_broadcast(&gate->cond);
+    }
+    while (!gate->go) {
+        pthread_cond_wait(&gate->cond, &gate->mutex);
+    }
+    pthread_mutex_unlock(&gate->mutex);
+}
+
+static void simd_start_gate_destroy(simd_start_gate_t *gate) {
+    pthread_cond_destroy(&gate->cond);
+    pthread_mutex_destroy(&gate->mutex);
+}
+
+typedef struct {
+    simd_start_gate_t *gate;
+    const me_expr *expr;
+    const double *in;
+    const double *expected;
+    int nitems;
+    int err;
+} simd_concurrent_arg_t;
+
+static void *simd_concurrent_worker(void *opaque) {
+    simd_concurrent_arg_t *arg = (simd_concurrent_arg_t *)opaque;
+    double out[128];
+    const void *vars[] = {arg->in};
+
+    simd_start_gate_wait(arg->gate);
+    if (me_eval(arg->expr, vars, 1, out, arg->nitems, NULL) != ME_EVAL_SUCCESS) {
+        arg->err = 1;
+        return NULL;
+    }
+    for (int i = 0; i < arg->nitems; i++) {
+        if (!nearly_equal(out[i], arg->expected[i], 1e-12)) {
+            arg->err = 2;
+            return NULL;
+        }
+    }
+    return NULL;
+}
+
+static int test_simd_concurrent_cold_init(void) {
+    enum { NITEMS = 128, NTHREADS = 8, NROUNDS = 8 };
+    double in[NITEMS];
+    double expected[NITEMS];
+    for (int i = 0; i < NITEMS; i++) {
+        in[i] = -1.0 + 0.02 * i;
+        expected[i] = sin(in[i]) + cos(in[i]) + exp(in[i]);
+    }
+
+    me_variable v[] = {{"x", ME_FLOAT64, in}};
+    me_expr *expr = NULL;
+    int err = 0;
+    if (me_compile("sin(x) + cos(x) + exp(x)", v, 1, ME_FLOAT64, &err, &expr) != ME_COMPILE_SUCCESS || !expr) {
+        printf("Failed to compile simd concurrent init test (err=%d)\n", err);
+        return 1;
+    }
+
+    int failures = 0;
+    for (int round = 0; round < NROUNDS; round++) {
+        me_simd_reset_for_tests();
+        simd_start_gate_t gate;
+        simd_start_gate_init(&gate, NTHREADS);
+        pthread_t threads[NTHREADS];
+        simd_concurrent_arg_t args[NTHREADS];
+        for (int t = 0; t < NTHREADS; t++) {
+            args[t].gate = &gate;
+            args[t].expr = expr;
+            args[t].in = in;
+            args[t].expected = expected;
+            args[t].nitems = NITEMS;
+            args[t].err = 0;
+            if (pthread_create(&threads[t], NULL, simd_concurrent_worker, &args[t]) != 0) {
+                printf("Failed to create thread %d in simd concurrent init test\n", t);
+                failures++;
+                simd_start_gate_destroy(&gate);
+                me_free(expr);
+                return failures;
+            }
+        }
+        for (int t = 0; t < NTHREADS; t++) {
+            (void)pthread_join(threads[t], NULL);
+            if (args[t].err != 0) {
+                printf("Worker %d failed in simd concurrent init test round %d (err=%d)\n",
+                       t, round, args[t].err);
+                failures++;
+            }
+        }
+        simd_start_gate_destroy(&gate);
+        if (me_simd_initialized_for_tests() != 1) {
+            printf("Expected SIMD initialized flag == 1 after round %d\n", round);
+            failures++;
+        }
+    }
+
+    me_free(expr);
+    return failures;
+}
+#endif
+
 int main(void) {
     int failures = 0;
     const int n = 1024;
 
     failures += test_simd_init();
     failures += test_simd_auto_backend_selection();
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__EMSCRIPTEN__)
+    failures += test_simd_concurrent_cold_init();
+#endif
     failures += run_unary_pair_f64("abs", fabs, n, -10.0, 10.0, 1e-12);
     failures += run_unary_pair_f64("exp", exp, n, -5.0, 5.0, 1e-12);
     failures += run_unary_pair_f64("expm1", expm1, n, -3.0, 3.0, 1e-12);
