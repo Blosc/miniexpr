@@ -2699,13 +2699,12 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
             }
             continue;
         }
-        if (!pj_type(p->vars.dtypes[index]) ||
-#ifdef __EMSCRIPTEN__
-            !pj_append(&body,"%s local_%d;\n",pj_type(p->vars.dtypes[index]),index)) {
-#else
-            !pj_append(&body,"%s local_%d;\n",
-                pj_type(p->vars.dtypes[index]),index)) {
-#endif
+        /* A dead floating-point assignment can still raise observable FP
+         * flags. Force the store so optimizing host compilers keep its RHS. */
+        me_dtype dtype = p->vars.dtypes[index];
+        const char *qualifier = pj_float(dtype) ? "volatile " : "";
+        if (!pj_type(dtype) ||
+            !pj_append(&body,"%s%s local_%d;\n",qualifier,pj_type(dtype),index)) {
             free(body.text);
             dsl_tracef("menudet jit ineligible: local declaration");
             return;
