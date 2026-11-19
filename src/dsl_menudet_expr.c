@@ -1778,6 +1778,9 @@ static int p_eval(const me_expr *n, p_eval_context *ctx, int item, me_scalar *ou
     me_menudet_numeric_status status = p_unsigned(n->dtype) ?
         p_unsigned_op(n, integer_op, a.u64, b.u64, &out->u64) :
         p_signed_op(n, integer_op, a.i64, b.i64, &out->i64);
+    if (status != 0 && !p_unsigned(n->dtype) && integer_op == ME_MENUDET_POW && b.i64 < 0) {
+        return ME_DSL_MENUDET_ERR_NEG_INT_POW;
+    }
     return status == 0 ? 0 : ME_EVAL_ERR_INVALID_ARG;
 }
 

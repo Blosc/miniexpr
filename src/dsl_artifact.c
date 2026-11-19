@@ -1075,8 +1075,13 @@ me_artifact_status me_artifact_eval_ex(const me_artifact *artifact,
             descriptor->ndim, descriptor->logical_shape, descriptor->block_origin, descriptor->block_extent};
         int rc = dsl_eval_program_menudet(artifact->program, data, artifact->nbindings, output, &native);
         if (rc) {
+            const char *message = "menudet interpreter evaluation failed";
+            if (rc == ME_DSL_MENUDET_ERR_NEG_INT_POW) {
+                rc = ME_EVAL_ERR_INVALID_ARG;
+                message = "Integers to negative integer powers are not allowed.";
+            }
             if (error) error->native_status = rc;
-            result = artifact_error(error, ME_ARTIFACT_ERR_EVAL, "menudet interpreter evaluation failed");
+            result = artifact_error(error, ME_ARTIFACT_ERR_EVAL, message);
         }
     }
     return result;

@@ -1583,7 +1583,8 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
             if (!dsl_menudet_fp_end(&saved)) rc = ME_EVAL_ERR_INVALID_ARG;
         }
         for (int i = 0; i < program->n_locals; i++) free(jit_locals[i]);
-        return rc == ME_EVAL_SUCCESS || rc == ME_EVAL_ERR_OOM ? rc : ME_EVAL_ERR_INVALID_ARG;
+        return rc == ME_EVAL_SUCCESS || rc == ME_EVAL_ERR_OOM ||
+               rc == ME_DSL_MENUDET_ERR_NEG_INT_POW ? rc : ME_EVAL_ERR_INVALID_ARG;
     }
     int64_t current_cap = program->has_while ? dsl_while_max_iters() : 0;
     if (current_cap < 0) current_cap = 0;
@@ -2121,7 +2122,7 @@ int dsl_eval_program(const me_dsl_compiled_program *program,
                                    nd_synth_ctx_buffer);
     me_simd_accuracy_pop(&accuracy);
     me_math_dispatch_set(previous);
-    return rc;
+    return rc == ME_DSL_MENUDET_ERR_NEG_INT_POW ? ME_EVAL_ERR_INVALID_ARG : rc;
 }
 
 static int dsl_eval_program_menudet_body(const me_dsl_compiled_program *program,

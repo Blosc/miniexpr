@@ -7,6 +7,8 @@
 
 #include "functions.h"
 
+#define ME_DSL_MENUDET_ERR_NEG_INT_POW (-100)
+
 /* Internal typed 1.0 path shared by source validation and artifact import.
  * Reuses the native parser's me_expr tree; no source execution or callbacks. */
 bool dsl_menudet_type_expr(me_expr **expr, me_dtype output_dtype,

@@ -928,7 +928,7 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
             int id = (*next_temp)++;
             bool ok = pj_append(target,"uint64_t pj_power_base_%d = (uint64_t)(%s), pj_power_exp_%d = (uint64_t)(%s), pj_power_result_%d = 1;\n",
                 id,args[0],id,args[1],id);
-            if (!pj_unsigned(n->dtype)) ok = ok && pj_append(target,"if ((%s) < 0) return -5;\n",args[1]);
+            if (!pj_unsigned(n->dtype)) ok = ok && pj_append(target,"if ((%s) < 0) return %d;\n",args[1],ME_DSL_MENUDET_ERR_NEG_INT_POW);
             ok = ok && pj_append(target,"while (pj_power_exp_%d) { if (pj_power_exp_%d & 1) pj_power_result_%d *= pj_power_base_%d;\n"
                 "pj_power_exp_%d >>= 1; if (pj_power_exp_%d) pj_power_base_%d *= pj_power_base_%d; }\n",
                 id,id,id,id,id,id,id,id);

@@ -230,10 +230,52 @@ static void inferred_output_fixture(void) {
     me_artifact_free(artifact);
 }
 
+static void negative_integer_power_fixture(void) {
+    const char *binary_json = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
+        "\"requires\":[\"numeric\"],\"source\":\"def k(x, y):\\n    return x ** y\\n\",\"entry_point\":\"k\","
+        "\"inputs\":[{\"name\":\"x\",\"dtype\":\"int64\"},{\"name\":\"y\",\"dtype\":\"int64\"}],\"constants\":[],"
+        "\"output\":{\"dtype\":\"int64\",\"contract\":\"elementwise\"},"
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":0}}";
+    const char *const_json = "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
+        "\"requires\":[\"numeric\"],\"source\":\"def k(x):\\n    return x ** -1\\n\",\"entry_point\":\"k\","
+        "\"inputs\":[{\"name\":\"x\",\"dtype\":\"int64\"}],\"constants\":[],"
+        "\"output\":{\"dtype\":\"int64\",\"contract\":\"elementwise\"},"
+        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"},\"context\":{\"ndim\":0}}";
+    me_jit_mode modes[] = {ME_JIT_OFF, ME_JIT_ON};
+    for (int m = 0; m < 2; m++) {
+        me_artifact *artifact = NULL;
+        me_artifact_error error;
+        assert(me_artifact_load(binary_json, strlen(binary_json), modes[m], &artifact, &error) == ME_ARTIFACT_SUCCESS && artifact);
+        int64_t x[2] = {2, -1};
+        int64_t y_neg[2] = {3, -1};
+        int64_t y_pos[2] = {3, 2};
+        int64_t output[2] = {0, 0};
+        me_artifact_input bad_inputs[] = {{"x", ME_INT64, x, 2}, {"y", ME_INT64, y_neg, 2}};
+        assert(me_artifact_eval(artifact, bad_inputs, 2, output, 2, &error) == ME_ARTIFACT_ERR_EVAL);
+        assert(error.native_status == ME_EVAL_ERR_INVALID_ARG);
+        assert(strcmp(error.message, "Integers to negative integer powers are not allowed.") == 0);
+        me_artifact_input good_inputs[] = {{"x", ME_INT64, x, 2}, {"y", ME_INT64, y_pos, 2}};
+        assert(me_artifact_eval(artifact, good_inputs, 2, output, 2, &error) == ME_ARTIFACT_SUCCESS);
+        assert(output[0] == 8 && output[1] == 1);
+        me_artifact_free(artifact);
+
+        artifact = NULL;
+        assert(me_artifact_load(const_json, strlen(const_json), modes[m], &artifact, &error) == ME_ARTIFACT_SUCCESS && artifact);
+        int64_t one = 2;
+        int64_t out_one = 0;
+        me_artifact_input const_inputs[] = {{"x", ME_INT64, &one, 1}};
+        assert(me_artifact_eval(artifact, const_inputs, 1, &out_one, 1, &error) == ME_ARTIFACT_ERR_EVAL);
+        assert(error.native_status == ME_EVAL_ERR_INVALID_ARG);
+        assert(strcmp(error.message, "Integers to negative integer powers are not allowed.") == 0);
+        me_artifact_free(artifact);
+    }
+}
+
 int main(void) {
     automatic_execution_fixture();
     inferred_output_fixture();
     schema1_fixture();
+    negative_integer_power_fixture();
     schema1_strings_nd_fixture();
     schema1_string_arena_fixture();
     char *json = read_fixture();
