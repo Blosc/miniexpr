@@ -25,6 +25,9 @@
 #include <intrin.h>
 #endif
 #endif
+#elif defined(__aarch64__) || defined(_M_ARM64)
+#define ME_BATCH_ARM64 1
+#include <arm_neon.h>
 #endif
 
 #define ME_BATCH_KERNEL_VV(OP,T,S,EXPR) \
@@ -67,7 +70,7 @@ ME_BATCH_NOINLINE void dsl_menudet_batch_fill_##S(T a, T *restrict out, int coun
 
 /* Contiguous ramp kernels.  On x86_64, baseline SSE2 lacks packed int64->float
  * conversions, so the plain C loops compile to scalar instructions.  Explicit
- * SSE2 and runtime-dispatched AVX2 kernels vectorize them while preserving
+ * SSE2, AVX2, and ARM64 NEON kernels vectorize them while preserving
  * bit-for-bit IEEE-754 results (unfused mul+add, exact integer bounds so no
  * spurious FE_INEXACT is raised) and exact modulo-2^64 integer arithmetic. */
 ME_BATCH_NOINLINE void dsl_menudet_batch_ramp_i64(int64_t base, int64_t start, int64_t step,
@@ -91,6 +94,33 @@ ME_BATCH_NOINLINE void dsl_menudet_batch_ramp_i64(int64_t base, int64_t start, i
         if (i + 2 <= count) {
             _mm_storeu_si128((__m128i *)(out + i), cur0);
             i += 2;
+        }
+    }
+#elif defined(ME_BATCH_ARM64)
+    if (count >= 2) {
+        /* Step four 128-bit lanes (8 int64s / 64B per iter) in exact modulo-2^64 arithmetic */
+        uint64x2_t cur0 = vsetq_lane_u64(v0 + ustep, vdupq_n_u64(v0), 1);
+        const uint64x2_t inc2 = vdupq_n_u64(2 * ustep);
+        if (count >= 8) {
+            uint64x2_t cur1 = vaddq_u64(cur0, inc2);
+            const uint64x2_t inc4 = vdupq_n_u64(4 * ustep);
+            uint64x2_t cur2 = vaddq_u64(cur0, inc4);
+            uint64x2_t cur3 = vaddq_u64(cur1, inc4);
+            const uint64x2_t inc8 = vdupq_n_u64(8 * ustep);
+            for (; i + 8 <= count; i += 8) {
+                vst1q_u64((uint64_t *)(out + i), cur0);
+                vst1q_u64((uint64_t *)(out + i + 2), cur1);
+                vst1q_u64((uint64_t *)(out + i + 4), cur2);
+                vst1q_u64((uint64_t *)(out + i + 6), cur3);
+                cur0 = vaddq_u64(cur0, inc8);
+                cur1 = vaddq_u64(cur1, inc8);
+                cur2 = vaddq_u64(cur2, inc8);
+                cur3 = vaddq_u64(cur3, inc8);
+            }
+        }
+        for (; i + 2 <= count; i += 2) {
+            vst1q_u64((uint64_t *)(out + i), cur0);
+            cur0 = vaddq_u64(cur0, inc2);
         }
     }
 #endif
@@ -121,6 +151,41 @@ ME_BATCH_NOINLINE void dsl_menudet_batch_ramp_f32(int64_t base, float start, flo
             i += 4;
         }
     }
+#elif defined(ME_BATCH_ARM64)
+    if (count >= 4 && base >= 0 && base <= (int64_t)INT32_MAX - (int64_t)count - 16) {
+        /* Base + i fits in signed int32, so vcvtq_f32_s32 matches (float)(int64_t) bit-for-bit */
+        static const int32_t offs[4] = {0, 1, 2, 3};
+        int32x4_t idx0 = vaddq_s32(vdupq_n_s32((int32_t)base), vld1q_s32(offs));
+        const int32x4_t inc4 = vdupq_n_s32(4);
+        const float32x4_t vstart = vdupq_n_f32(start);
+        const float32x4_t vstep = vdupq_n_f32(step);
+        if (count >= 16) {
+            int32x4_t idx1 = vaddq_s32(idx0, inc4);
+            const int32x4_t inc8 = vdupq_n_s32(8);
+            int32x4_t idx2 = vaddq_s32(idx0, inc8);
+            int32x4_t idx3 = vaddq_s32(idx1, inc8);
+            const int32x4_t inc16 = vdupq_n_s32(16);
+            for (; i + 16 <= count; i += 16) {
+                float32x4_t f0 = vcvtq_f32_s32(idx0);
+                float32x4_t f1 = vcvtq_f32_s32(idx1);
+                float32x4_t f2 = vcvtq_f32_s32(idx2);
+                float32x4_t f3 = vcvtq_f32_s32(idx3);
+                vst1q_f32(out + i, vaddq_f32(vstart, vmulq_f32(f0, vstep)));
+                vst1q_f32(out + i + 4, vaddq_f32(vstart, vmulq_f32(f1, vstep)));
+                vst1q_f32(out + i + 8, vaddq_f32(vstart, vmulq_f32(f2, vstep)));
+                vst1q_f32(out + i + 12, vaddq_f32(vstart, vmulq_f32(f3, vstep)));
+                idx0 = vaddq_s32(idx0, inc16);
+                idx1 = vaddq_s32(idx1, inc16);
+                idx2 = vaddq_s32(idx2, inc16);
+                idx3 = vaddq_s32(idx3, inc16);
+            }
+        }
+        for (; i + 4 <= count; i += 4) {
+            float32x4_t f0 = vcvtq_f32_s32(idx0);
+            vst1q_f32(out + i, vaddq_f32(vstart, vmulq_f32(f0, vstep)));
+            idx0 = vaddq_s32(idx0, inc4);
+        }
+    }
 #endif
     for (; i < count; i++) out[i] = start + (float)(base + i) * step;
 }
@@ -144,6 +209,35 @@ ME_BATCH_NOINLINE void dsl_menudet_batch_ramp_f64(int64_t base, double start, do
         if (i + 2 <= count) {
             _mm_storeu_pd(out + i, _mm_add_pd(vstart, _mm_mul_pd(idx0, vstep)));
             i += 2;
+        }
+    }
+#elif defined(ME_BATCH_ARM64)
+    if (count >= 2 && base >= 0 && base <= (INT64_C(1) << 53) - (int64_t)count - 8) {
+        /* All indices (including trailing +8.0) stay <= 2^53, so double stepping is exact */
+        float64x2_t idx0 = vsetq_lane_f64((double)(base + 1), vdupq_n_f64((double)base), 1);
+        const float64x2_t inc2 = vdupq_n_f64(2.0);
+        const float64x2_t vstart = vdupq_n_f64(start);
+        const float64x2_t vstep = vdupq_n_f64(step);
+        if (count >= 8) {
+            float64x2_t idx1 = vaddq_f64(idx0, inc2);
+            const float64x2_t inc4 = vdupq_n_f64(4.0);
+            float64x2_t idx2 = vaddq_f64(idx0, inc4);
+            float64x2_t idx3 = vaddq_f64(idx1, inc4);
+            const float64x2_t inc8 = vdupq_n_f64(8.0);
+            for (; i + 8 <= count; i += 8) {
+                vst1q_f64(out + i, vaddq_f64(vstart, vmulq_f64(idx0, vstep)));
+                vst1q_f64(out + i + 2, vaddq_f64(vstart, vmulq_f64(idx1, vstep)));
+                vst1q_f64(out + i + 4, vaddq_f64(vstart, vmulq_f64(idx2, vstep)));
+                vst1q_f64(out + i + 6, vaddq_f64(vstart, vmulq_f64(idx3, vstep)));
+                idx0 = vaddq_f64(idx0, inc8);
+                idx1 = vaddq_f64(idx1, inc8);
+                idx2 = vaddq_f64(idx2, inc8);
+                idx3 = vaddq_f64(idx3, inc8);
+            }
+        }
+        for (; i + 2 <= count; i += 2) {
+            vst1q_f64(out + i, vaddq_f64(vstart, vmulq_f64(idx0, vstep)));
+            idx0 = vaddq_f64(idx0, inc2);
         }
     }
 #endif
