@@ -424,9 +424,16 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
 
     uint64_t key = dsl_jit_runtime_cache_key(program);
     if (dsl_jit_pos_cache_enabled() && dsl_jit_pos_cache_bind_program(program, key)) {
-        dsl_tracef("jit runtime hit: fp=%s source=process-cache key=%016llx",
-                   dsl_fp_mode_name(program->fp_mode),
-                   (unsigned long long)key);
+        if (program->compiler == ME_DSL_COMPILER_LIBTCC) {
+            dsl_tracef("jit runtime built: fp=%s compiler=tcc source=process-cache key=%016llx",
+                       dsl_fp_mode_name(program->fp_mode),
+                       (unsigned long long)key);
+        }
+        else {
+            dsl_tracef("jit runtime hit: fp=%s source=process-cache key=%016llx",
+                       dsl_fp_mode_name(program->fp_mode),
+                       (unsigned long long)key);
+        }
         dsl_jit_neg_cache_clear(key);
         return;
     }
