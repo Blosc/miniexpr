@@ -2526,13 +2526,19 @@ static bool pj_emit_ramp_bridge(const me_dsl_compiled_program *p, const char *st
     if (p->compile_ndims <= 1) {
         return pj_append(out,
             "int64_t pj_origin = nd ? nd[2] : 0;\n"
+            "if (nd && (pj_origin > nd[1] || count > nd[1] - pj_origin)) return -2;\n"
             "%s *out = (%s *)output;\n"
-            "for (int64_t s=0; s<count; s+=256) {\n"
-            "int n = (int)(count-s < 256 ? count-s : 256);\n"
-            "if (nd && (s > nd[1]-pj_origin || n > nd[1]-pj_origin-s)) return -2;\n"
-            "pj_t->%s(pj_origin+s, (%s)(%s), (%s)(%s), out+s, n);\n"
+            "%s pj_start = (%s)(%s);\n"
+            "%s pj_step = (%s)(%s);\n"
+            "for (int64_t s = 0; s < count; ) {\n"
+            "int n = (int)(count - s < 1073741824 ? count - s : 1073741824);\n"
+            "pj_t->%s(pj_origin + s, pj_start, pj_step, out + s, n);\n"
+            "s += n;\n"
             "}\nreturn 0;\n}\n",
-            type, type, fn, type, start, type, step);
+            type, type,
+            type, type, start,
+            type, type, step,
+            fn);
     }
     return pj_append(out,
         "int64_t pj_origin = 0, pj_stride = 1;\n"
@@ -2548,13 +2554,18 @@ static bool pj_emit_ramp_bridge(const me_dsl_compiled_program *p, const char *st
         "}\n"
         "%s *out = (%s *)output;\n"
         "if (pj_contig) {\n"
-        "for (int64_t s=0; s<count; s+=256) {\n"
-        "int n = (int)(count-s < 256 ? count-s : 256);\n"
-        "pj_t->%s(pj_origin+s, (%s)(%s), (%s)(%s), out+s, n);\n"
+        "%s pj_start = (%s)(%s);\n"
+        "%s pj_step = (%s)(%s);\n"
+        "for (int64_t s = 0; s < count; ) {\n"
+        "int n = (int)(count - s < 1073741824 ? count - s : 1073741824);\n"
+        "pj_t->%s(pj_origin + s, pj_start, pj_step, out + s, n);\n"
+        "s += n;\n"
         "}\nreturn 0;\n}\n"
         /* Traverse compact output one innermost row at a time. Decode outer
          * coordinates once per row, not once per lane, for every logical rank. */
         "if (nd && nd[0] >= 2) {\n"
+        "%s pj_start = (%s)(%s);\n"
+        "%s pj_step = (%s)(%s);\n"
         "int64_t rank = nd[0], cols = nd[1 + 3*rank - 1], rows = count / cols;\n"
         "for (int64_t r = 0; r < rows; r++) {\n"
         "int64_t row_origin = pj_origin, offset = r, stride = nd[rank];\n"
@@ -2564,13 +2575,15 @@ static bool pj_emit_ramp_bridge(const me_dsl_compiled_program *p, const char *st
         "offset /= extent; stride *= nd[1 + d];\n"
         "}\n"
         "%s *row_out = out + r * cols;\n"
-        "for (int64_t s = 0; s < cols; s += 256) {\n"
-        "int n = (int)(cols - s < 256 ? cols - s : 256);\n"
-        "pj_t->%s(row_origin + s, (%s)(%s), (%s)(%s), row_out + s, n);\n"
+        "for (int64_t s = 0; s < cols; ) {\n"
+        "int n = (int)(cols - s < 1073741824 ? cols - s : 1073741824);\n"
+        "pj_t->%s(row_origin + s, pj_start, pj_step, row_out + s, n);\n"
+        "s += n;\n"
         "}\n}\nreturn 0;\n}\n"
         "return -1;\n}\n",
-        type, type, fn, type, start, type, step,
-        type, fn, type, start, type, step);
+        type, type,
+        type, type, start, type, type, step, fn,
+        type, type, start, type, type, step, type, fn);
 }
 
 #endif
