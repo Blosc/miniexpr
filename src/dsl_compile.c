@@ -3501,7 +3501,7 @@ me_dsl_compiled_program *dsl_compile_program_profile_declared(const char *source
                                                      const me_dsl_declared_policy *declared,
                                                      int *error_pos, bool *is_dsl,
                                                      char *error_reason, size_t error_reason_cap) {
-    fenv_t saved;
+    dsl_menudet_fp_state saved;
     bool strict = dsl_menudet_typed_profile(profile);
     if (strict && !dsl_menudet_fp_begin(&saved)) {
         if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap, "cannot establish menudet nearest rounding");

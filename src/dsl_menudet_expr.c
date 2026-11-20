@@ -76,6 +76,12 @@ void dsl_menudet_status_capture(void) {
 #endif
 }
 
+void dsl_menudet_status_record(unsigned flags) {
+    if (p_status_collector) {
+        *p_status_collector |= flags;
+    }
+}
+
 static bool p_unsigned(me_dtype d) {
     return d == ME_UINT8 || d == ME_UINT16 || d == ME_UINT32 || d == ME_UINT64;
 }
@@ -2377,7 +2383,7 @@ int dsl_menudet_eval_expr(const me_expr *expr, const void *const *vars, int nvar
                            int item, int nitems, const uint8_t *mask, void *out) {
     if (!expr || !out || item < 0 || nitems < 0 || nvars < 0 || (!vars && nvars)) return ME_EVAL_ERR_INVALID_ARG;
     p_eval_context ctx = {.vars = vars, .initialized = initialized, .nvars = nvars, .nitems = nitems, .mask = mask};
-    fenv_t saved;
+    dsl_menudet_fp_state saved;
     if (!dsl_menudet_fp_begin(&saved)) return ME_EVAL_ERR_INVALID_ARG;
     me_scalar value;
     int rc = p_eval(expr, &ctx, item, &value);
@@ -3086,7 +3092,7 @@ int dsl_menudet_eval_expr_masked(const me_expr *expr, const void *const *vars, i
     int str_rc = me_menudet_eval_string_expr_masked(expr, vars, nvars, initialized, nitems, mask, stride, out);
     if (str_rc <= 0) return str_rc;
     p_eval_context ctx = {.vars = vars, .initialized = initialized, .nvars = nvars, .nitems = nitems, .mask = mask};
-    fenv_t saved;
+    dsl_menudet_fp_state saved;
     if (!dsl_menudet_fp_begin(&saved)) return ME_EVAL_ERR_INVALID_ARG;
     int status = ME_EVAL_SUCCESS;
     if (p_batch_eval(expr,&ctx,nitems,stride,out)) {

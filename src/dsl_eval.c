@@ -1576,7 +1576,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
             }
         }
         inputs[n_vars+ME_DSL_MENUDET_JIT_LOCALS_OFF] = jit_locals;
-        fenv_t saved;
+        dsl_menudet_fp_state saved;
         int rc = ME_EVAL_ERR_INVALID_ARG;
         if (dsl_menudet_fp_begin(&saved)) {
             rc = program->jit_kernel_fn(inputs,output_block,(int64_t)jit_nitems);

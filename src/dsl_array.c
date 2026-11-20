@@ -617,7 +617,7 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
         }
         buffers[b] = (me_artifact_buffer){v->name,v->dtype,w,NULL,0};
     }
-    fenv_t saved;
+    dsl_menudet_fp_state saved;
     if (!dsl_menudet_fp_begin(&saved)) { rc = ME_ARTIFACT_ERR_UNSUPPORTED; goto cleanup; }
     unsigned *previous = dsl_menudet_status_begin(&report->fp_flags);
 #ifndef __EMSCRIPTEN__
