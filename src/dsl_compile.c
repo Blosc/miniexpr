@@ -1894,7 +1894,16 @@ static void dsl_try_build_jit_ir(dsl_compile_ctx *ctx, const me_dsl_program *par
     program->jit_kernel_fn = NULL;
 #if ME_USE_LIBTCC_FALLBACK
     if (program->jit_tcc_state) {
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__EMSCRIPTEN__)
+        if (program->jit_dl_handle_cached) {
+            dsl_jit_pos_cache_release_program(program);
+        }
+        else {
+            dsl_jit_libtcc_delete_state(program->jit_tcc_state);
+        }
+#else
         dsl_jit_libtcc_delete_state(program->jit_tcc_state);
+#endif
         program->jit_tcc_state = NULL;
     }
 #endif

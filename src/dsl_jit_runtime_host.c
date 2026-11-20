@@ -59,12 +59,28 @@ typedef struct {
 typedef struct {
     bool valid;
     bool retired;
+    bool is_tcc;
     uint64_t key;
     uint64_t cache_id;
     void *handle;
     me_dsl_jit_kernel_fn kernel_fn;
     unsigned int ref_count;
 } me_dsl_jit_pos_cache_entry;
+
+static void dsl_jit_pos_cache_close_handle(void *handle, bool is_tcc) {
+    if (!handle) {
+        return;
+    }
+#if ME_USE_LIBTCC_FALLBACK
+    if (is_tcc) {
+        dsl_jit_libtcc_delete_state(handle);
+        return;
+    }
+#else
+    (void)is_tcc;
+#endif
+    dlclose(handle);
+}
 
 static pthread_mutex_t g_dsl_jit_cache_lock = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t g_dsl_jit_tmp_seq = 0;
@@ -187,11 +203,13 @@ static int dsl_jit_pos_cache_find_free_slot_locked(void) {
 
 static void dsl_jit_pos_cache_evict(uint64_t key) {
     void *to_close = NULL;
+    bool to_close_is_tcc = false;
     ME_JIT_CACHE_LOCK();
     int slot = dsl_jit_pos_cache_find_slot_locked(key);
     if (slot >= 0) {
         if (g_dsl_jit_pos_cache[slot].ref_count == 0) {
             to_close = g_dsl_jit_pos_cache[slot].handle;
+            to_close_is_tcc = g_dsl_jit_pos_cache[slot].is_tcc;
             memset(&g_dsl_jit_pos_cache[slot], 0, sizeof(g_dsl_jit_pos_cache[slot]));
         }
         else {
@@ -202,7 +220,7 @@ static void dsl_jit_pos_cache_evict(uint64_t key) {
     }
     ME_JIT_CACHE_UNLOCK();
     if (to_close) {
-        dlclose(to_close);
+        dsl_jit_pos_cache_close_handle(to_close, to_close_is_tcc);
     }
 }
 
@@ -210,13 +228,20 @@ static bool dsl_jit_pos_cache_bind_program(me_dsl_compiled_program *program, uin
     if (!program) {
         return false;
     }
+    bool want_tcc = (program->compiler == ME_DSL_COMPILER_LIBTCC);
     ME_JIT_CACHE_LOCK();
     int slot = dsl_jit_pos_cache_find_slot_locked(key);
-    if (slot < 0) {
+    if (slot < 0 || g_dsl_jit_pos_cache[slot].is_tcc != want_tcc) {
         ME_JIT_CACHE_UNLOCK();
         return false;
     }
-    program->jit_dl_handle = g_dsl_jit_pos_cache[slot].handle;
+    if (want_tcc) {
+        program->jit_tcc_state = g_dsl_jit_pos_cache[slot].handle;
+        program->jit_dl_handle = NULL;
+    }
+    else {
+        program->jit_dl_handle = g_dsl_jit_pos_cache[slot].handle;
+    }
     program->jit_kernel_fn = g_dsl_jit_pos_cache[slot].kernel_fn;
     program->jit_runtime_key = key;
     program->jit_pos_cache_id = g_dsl_jit_pos_cache[slot].cache_id;
@@ -227,7 +252,9 @@ static bool dsl_jit_pos_cache_bind_program(me_dsl_compiled_program *program, uin
 }
 
 static bool dsl_jit_pos_cache_store_program(me_dsl_compiled_program *program, uint64_t key) {
-    if (!program || !program->jit_dl_handle || !program->jit_kernel_fn) {
+    bool is_tcc = (program && program->jit_tcc_state != NULL);
+    void *handle = is_tcc ? program->jit_tcc_state : (program ? program->jit_dl_handle : NULL);
+    if (!program || !handle || !program->jit_kernel_fn) {
         return false;
     }
 
@@ -235,15 +262,25 @@ static bool dsl_jit_pos_cache_store_program(me_dsl_compiled_program *program, ui
     ME_JIT_CACHE_LOCK();
     int slot = dsl_jit_pos_cache_find_slot_locked(key);
     if (slot >= 0) {
-        dup_handle = program->jit_dl_handle;
-        program->jit_dl_handle = g_dsl_jit_pos_cache[slot].handle;
+        if (g_dsl_jit_pos_cache[slot].is_tcc != is_tcc) {
+            ME_JIT_CACHE_UNLOCK();
+            return false;
+        }
+        dup_handle = handle;
+        if (is_tcc) {
+            program->jit_tcc_state = g_dsl_jit_pos_cache[slot].handle;
+            program->jit_dl_handle = NULL;
+        }
+        else {
+            program->jit_dl_handle = g_dsl_jit_pos_cache[slot].handle;
+        }
         program->jit_kernel_fn = g_dsl_jit_pos_cache[slot].kernel_fn;
         program->jit_runtime_key = key;
         program->jit_pos_cache_id = g_dsl_jit_pos_cache[slot].cache_id;
         program->jit_dl_handle_cached = true;
         g_dsl_jit_pos_cache[slot].ref_count++;
         ME_JIT_CACHE_UNLOCK();
-        dlclose(dup_handle);
+        dsl_jit_pos_cache_close_handle(dup_handle, is_tcc);
         return true;
     }
 
@@ -259,9 +296,10 @@ static bool dsl_jit_pos_cache_store_program(me_dsl_compiled_program *program, ui
     uint64_t cache_id = ++g_dsl_jit_pos_cache_seq;
     g_dsl_jit_pos_cache[slot].valid = true;
     g_dsl_jit_pos_cache[slot].retired = false;
+    g_dsl_jit_pos_cache[slot].is_tcc = is_tcc;
     g_dsl_jit_pos_cache[slot].key = key;
     g_dsl_jit_pos_cache[slot].cache_id = cache_id;
-    g_dsl_jit_pos_cache[slot].handle = program->jit_dl_handle;
+    g_dsl_jit_pos_cache[slot].handle = handle;
     g_dsl_jit_pos_cache[slot].kernel_fn = program->jit_kernel_fn;
     g_dsl_jit_pos_cache[slot].ref_count = 1;
     program->jit_runtime_key = key;
@@ -272,21 +310,27 @@ static bool dsl_jit_pos_cache_store_program(me_dsl_compiled_program *program, ui
 }
 
 void dsl_jit_pos_cache_release_program(me_dsl_compiled_program *program) {
-    if (!program || !program->jit_dl_handle || !program->jit_dl_handle_cached) {
+    if (!program || !program->jit_dl_handle_cached) {
+        return;
+    }
+    void *handle = program->jit_tcc_state ? program->jit_tcc_state : program->jit_dl_handle;
+    if (!handle) {
         return;
     }
     void *to_close = NULL;
+    bool to_close_is_tcc = false;
     ME_JIT_CACHE_LOCK();
     for (int i = 0; i < ME_DSL_JIT_POS_CACHE_SLOTS; i++) {
         me_dsl_jit_pos_cache_entry *entry = &g_dsl_jit_pos_cache[i];
         if ((entry->valid || entry->retired) &&
             entry->cache_id == program->jit_pos_cache_id &&
-            entry->handle == program->jit_dl_handle) {
+            entry->handle == handle) {
             if (entry->ref_count > 0) {
                 entry->ref_count--;
             }
             if (entry->retired && entry->ref_count == 0) {
                 to_close = entry->handle;
+                to_close_is_tcc = entry->is_tcc;
                 memset(entry, 0, sizeof(*entry));
             }
             break;
@@ -294,7 +338,7 @@ void dsl_jit_pos_cache_release_program(me_dsl_compiled_program *program) {
     }
     ME_JIT_CACHE_UNLOCK();
     if (to_close) {
-        dlclose(to_close);
+        dsl_jit_pos_cache_close_handle(to_close, to_close_is_tcc);
     }
 }
 
@@ -399,6 +443,9 @@ void dsl_try_prepare_jit_runtime(me_dsl_compiled_program *program) {
        An unusable TMPDIR must not prevent in-memory JIT execution. */
     if (program->compiler == ME_DSL_COMPILER_LIBTCC) {
         if (dsl_jit_compile_libtcc_in_memory(program)) {
+            if (dsl_jit_pos_cache_enabled()) {
+                (void)dsl_jit_pos_cache_store_program(program, key);
+            }
             dsl_tracef("jit runtime built: fp=%s compiler=tcc key=%016llx",
                        dsl_fp_mode_name(program->fp_mode), (unsigned long long)key);
             dsl_jit_neg_cache_clear(key);

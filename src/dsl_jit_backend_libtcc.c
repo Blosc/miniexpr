@@ -560,6 +560,7 @@ static bool dsl_jit_compile_libtcc_impl(me_dsl_compiled_program *program) {
                  "tcc_get_symbol failed");
         return false;
     }
+    g_dsl_tcc_api.tcc_set_error_func_fn(state, NULL, dsl_jit_tcc_diagnostic);
 
     if (program->jit_tcc_state) {
         g_dsl_tcc_api.tcc_delete_fn((me_tcc_state *)program->jit_tcc_state);
