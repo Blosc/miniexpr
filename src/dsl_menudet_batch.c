@@ -1,6 +1,7 @@
 #include "dsl_menudet_batch.h"
 #include "dsl_menudet_powi.h"
 #include <float.h>
+#include <limits.h>
 #include <string.h>
 
 #if !defined(FLT_EVAL_METHOD) || FLT_EVAL_METHOD != 0
@@ -11,6 +12,19 @@
 #define ME_BATCH_NOINLINE __declspec(noinline)
 #else
 #define ME_BATCH_NOINLINE __attribute__((noinline))
+#endif
+
+#if (defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)) && !defined(_M_ARM64EC)
+#define ME_BATCH_X86_64 1
+#include <emmintrin.h>
+#if defined(__GNUC__) || defined(__clang__)
+#include <immintrin.h>
+#define ME_BATCH_HAVE_AVX2_DISPATCH 1
+#define ME_BATCH_AVX2_TARGET __attribute__((target("avx2")))
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
+#endif
 #endif
 
 #define ME_BATCH_KERNEL_VV(OP,T,S,EXPR) \
@@ -51,21 +65,220 @@ ME_BATCH_NOINLINE void dsl_menudet_batch_fill_##S(T a, T *restrict out, int coun
     for (int i=0; i<count; i++) out[i]=a; \
 }
 
-/* The compiler for this translation unit vectorizes these contiguous ramps;
- * TCC only emits the strip loop and calls the selected AOT kernel. */
+/* Contiguous ramp kernels.  On x86_64, baseline SSE2 lacks packed int64->float
+ * conversions, so the plain C loops compile to scalar instructions.  Explicit
+ * SSE2 and runtime-dispatched AVX2 kernels vectorize them while preserving
+ * bit-for-bit IEEE-754 results (unfused mul+add, exact integer bounds so no
+ * spurious FE_INEXACT is raised) and exact modulo-2^64 integer arithmetic. */
 ME_BATCH_NOINLINE void dsl_menudet_batch_ramp_i64(int64_t base, int64_t start, int64_t step,
                                                     int64_t *restrict out, int count) {
     uint64_t ustart = (uint64_t)start, ustep = (uint64_t)step;
-    for (int i=0; i<count; i++) out[i] = (int64_t)(ustart + (uint64_t)(base + i) * ustep);
+    uint64_t v0 = ustart + (uint64_t)base * ustep;
+    int i = 0;
+#if defined(ME_BATCH_X86_64)
+    if (count >= 4) {
+        /* Step two 128-bit lanes (4 int64s/iter) in exact modulo-2^64 arithmetic */
+        __m128i cur0 = _mm_set_epi64x((int64_t)(v0 + ustep), (int64_t)v0);
+        __m128i inc2 = _mm_set1_epi64x((int64_t)(2 * ustep));
+        __m128i cur1 = _mm_add_epi64(cur0, inc2);
+        __m128i inc4 = _mm_set1_epi64x((int64_t)(4 * ustep));
+        for (; i + 4 <= count; i += 4) {
+            _mm_storeu_si128((__m128i *)(out + i), cur0);
+            _mm_storeu_si128((__m128i *)(out + i + 2), cur1);
+            cur0 = _mm_add_epi64(cur0, inc4);
+            cur1 = _mm_add_epi64(cur1, inc4);
+        }
+        if (i + 2 <= count) {
+            _mm_storeu_si128((__m128i *)(out + i), cur0);
+            i += 2;
+        }
+    }
+#endif
+    for (; i < count; i++) out[i] = (int64_t)(v0 + (uint64_t)i * ustep);
 }
 ME_BATCH_NOINLINE void dsl_menudet_batch_ramp_f32(int64_t base, float start, float step,
                                                     float *restrict out, int count) {
-    for (int i=0; i<count; i++) out[i] = start + (float)(base + i) * step;
+    int i = 0;
+#if defined(ME_BATCH_X86_64)
+    if (count >= 4 && base >= 0 && base <= (int64_t)INT32_MAX - (int64_t)count - 8) {
+        /* Base + i fits in signed int32, so cvtepi32_ps matches (float)(int64_t) bit-for-bit */
+        __m128i idx0 = _mm_add_epi32(_mm_set1_epi32((int32_t)base), _mm_setr_epi32(0, 1, 2, 3));
+        __m128i idx1 = _mm_add_epi32(idx0, _mm_set1_epi32(4));
+        const __m128i inc8 = _mm_set1_epi32(8);
+        const __m128 vstart = _mm_set1_ps(start);
+        const __m128 vstep = _mm_set1_ps(step);
+        for (; i + 8 <= count; i += 8) {
+            __m128 f0 = _mm_cvtepi32_ps(idx0);
+            __m128 f1 = _mm_cvtepi32_ps(idx1);
+            _mm_storeu_ps(out + i, _mm_add_ps(vstart, _mm_mul_ps(f0, vstep)));
+            _mm_storeu_ps(out + i + 4, _mm_add_ps(vstart, _mm_mul_ps(f1, vstep)));
+            idx0 = _mm_add_epi32(idx0, inc8);
+            idx1 = _mm_add_epi32(idx1, inc8);
+        }
+        if (i + 4 <= count) {
+            __m128 f0 = _mm_cvtepi32_ps(idx0);
+            _mm_storeu_ps(out + i, _mm_add_ps(vstart, _mm_mul_ps(f0, vstep)));
+            i += 4;
+        }
+    }
+#endif
+    for (; i < count; i++) out[i] = start + (float)(base + i) * step;
 }
 ME_BATCH_NOINLINE void dsl_menudet_batch_ramp_f64(int64_t base, double start, double step,
                                                     double *restrict out, int count) {
-    for (int i=0; i<count; i++) out[i] = start + (double)(base + i) * step;
+    int i = 0;
+#if defined(ME_BATCH_X86_64)
+    if (count >= 2 && base >= 0 && base <= (INT64_C(1) << 53) - (int64_t)count - 4) {
+        /* All indices (including trailing +4.0) stay <= 2^53, so double stepping is exact */
+        __m128d idx0 = _mm_set_pd((double)(base + 1), (double)base);
+        __m128d idx1 = _mm_add_pd(idx0, _mm_set1_pd(2.0));
+        const __m128d inc4 = _mm_set1_pd(4.0);
+        const __m128d vstart = _mm_set1_pd(start);
+        const __m128d vstep = _mm_set1_pd(step);
+        for (; i + 4 <= count; i += 4) {
+            _mm_storeu_pd(out + i, _mm_add_pd(vstart, _mm_mul_pd(idx0, vstep)));
+            _mm_storeu_pd(out + i + 2, _mm_add_pd(vstart, _mm_mul_pd(idx1, vstep)));
+            idx0 = _mm_add_pd(idx0, inc4);
+            idx1 = _mm_add_pd(idx1, inc4);
+        }
+        if (i + 2 <= count) {
+            _mm_storeu_pd(out + i, _mm_add_pd(vstart, _mm_mul_pd(idx0, vstep)));
+            i += 2;
+        }
+    }
+#endif
+    for (; i < count; i++) out[i] = start + (double)(base + i) * step;
 }
+
+#if defined(ME_BATCH_HAVE_AVX2_DISPATCH)
+static int me_batch_cpu_supports_avx2(void) {
+    static int cached = -1;
+    int val = __atomic_load_n(&cached, __ATOMIC_RELAXED);
+    if (val >= 0) {
+        return val;
+    }
+    int supported = 0;
+#if defined(_MSC_VER)
+    int info[4] = {0, 0, 0, 0};
+    __cpuidex(info, 0, 0);
+    if (info[0] >= 7) {
+        __cpuidex(info, 1, 0);
+        int osxsave = (info[2] & (1 << 27)) != 0;
+        int avx = (info[2] & (1 << 28)) != 0;
+        if (osxsave && avx && ((_xgetbv(0) & 0x6) == 0x6)) {
+            __cpuidex(info, 7, 0);
+            supported = (info[1] & (1 << 5)) != 0;
+        }
+    }
+#else
+    unsigned int a = 0, b = 0, c = 0, d = 0;
+    __asm__ __volatile__("cpuid"
+                         : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
+                         : "a"(0), "c"(0));
+    if (a >= 7) {
+        __asm__ __volatile__("cpuid"
+                             : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
+                             : "a"(1), "c"(0));
+        int osxsave = (c & (1u << 27)) != 0;
+        int avx = (c & (1u << 28)) != 0;
+        if (osxsave && avx) {
+            unsigned int xcr0_lo = 0, xcr0_hi = 0;
+            __asm__ __volatile__("xgetbv"
+                                 : "=a"(xcr0_lo), "=d"(xcr0_hi)
+                                 : "c"(0));
+            if ((xcr0_lo & 0x6u) == 0x6u) {
+                __asm__ __volatile__("cpuid"
+                                     : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
+                                     : "a"(7), "c"(0));
+                supported = (b & (1u << 5)) != 0;
+            }
+        }
+    }
+#endif
+    __atomic_store_n(&cached, supported, __ATOMIC_RELAXED);
+    return supported;
+}
+
+static ME_BATCH_NOINLINE ME_BATCH_AVX2_TARGET void dsl_menudet_batch_ramp_i64_avx2(
+        int64_t base, int64_t start, int64_t step, int64_t *restrict out, int count) {
+    uint64_t ustart = (uint64_t)start, ustep = (uint64_t)step;
+    uint64_t v0 = ustart + (uint64_t)base * ustep;
+    int i = 0;
+    if (count >= 4) {
+        /* Step two 256-bit vectors (8 int64s / 64B per iter) in exact modulo-2^64 arithmetic */
+        __m256i cur0 = _mm256_set_epi64x(
+            (int64_t)(v0 + 3 * ustep), (int64_t)(v0 + 2 * ustep),
+            (int64_t)(v0 + 1 * ustep), (int64_t)v0);
+        __m256i inc4 = _mm256_set1_epi64x((int64_t)(4 * ustep));
+        __m256i cur1 = _mm256_add_epi64(cur0, inc4);
+        __m256i inc8 = _mm256_set1_epi64x((int64_t)(8 * ustep));
+        for (; i + 8 <= count; i += 8) {
+            _mm256_storeu_si256((__m256i *)(out + i), cur0);
+            _mm256_storeu_si256((__m256i *)(out + i + 4), cur1);
+            cur0 = _mm256_add_epi64(cur0, inc8);
+            cur1 = _mm256_add_epi64(cur1, inc8);
+        }
+        if (i + 4 <= count) {
+            _mm256_storeu_si256((__m256i *)(out + i), cur0);
+            i += 4;
+        }
+    }
+    for (; i < count; i++) out[i] = (int64_t)(v0 + (uint64_t)i * ustep);
+}
+
+static ME_BATCH_NOINLINE ME_BATCH_AVX2_TARGET void dsl_menudet_batch_ramp_f32_avx2(
+        int64_t base, float start, float step, float *restrict out, int count) {
+    int i = 0;
+    if (count >= 8 && base >= 0 && base <= (int64_t)INT32_MAX - (int64_t)count - 16) {
+        /* Convert 16 exact int32 indices per iter via cvtepi32_ps (unfused mul + add) */
+        __m256i idx0 = _mm256_add_epi32(
+            _mm256_set1_epi32((int32_t)base), _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
+        __m256i idx1 = _mm256_add_epi32(idx0, _mm256_set1_epi32(8));
+        const __m256i inc16 = _mm256_set1_epi32(16);
+        const __m256 vstart = _mm256_set1_ps(start);
+        const __m256 vstep = _mm256_set1_ps(step);
+        for (; i + 16 <= count; i += 16) {
+            __m256 f0 = _mm256_cvtepi32_ps(idx0);
+            __m256 f1 = _mm256_cvtepi32_ps(idx1);
+            _mm256_storeu_ps(out + i, _mm256_add_ps(vstart, _mm256_mul_ps(f0, vstep)));
+            _mm256_storeu_ps(out + i + 8, _mm256_add_ps(vstart, _mm256_mul_ps(f1, vstep)));
+            idx0 = _mm256_add_epi32(idx0, inc16);
+            idx1 = _mm256_add_epi32(idx1, inc16);
+        }
+        if (i + 8 <= count) {
+            __m256 f0 = _mm256_cvtepi32_ps(idx0);
+            _mm256_storeu_ps(out + i, _mm256_add_ps(vstart, _mm256_mul_ps(f0, vstep)));
+            i += 8;
+        }
+    }
+    for (; i < count; i++) out[i] = start + (float)(base + i) * step;
+}
+
+static ME_BATCH_NOINLINE ME_BATCH_AVX2_TARGET void dsl_menudet_batch_ramp_f64_avx2(
+        int64_t base, double start, double step, double *restrict out, int count) {
+    int i = 0;
+    if (count >= 4 && base >= 0 && base <= (INT64_C(1) << 53) - (int64_t)count - 8) {
+        /* Step 8 exact double indices (64B) per iter; unfused mul + add preserves IEEE-754 */
+        __m256d idx0 = _mm256_set_pd(
+            (double)(base + 3), (double)(base + 2), (double)(base + 1), (double)base);
+        __m256d idx1 = _mm256_add_pd(idx0, _mm256_set1_pd(4.0));
+        const __m256d inc8 = _mm256_set1_pd(8.0);
+        const __m256d vstart = _mm256_set1_pd(start);
+        const __m256d vstep = _mm256_set1_pd(step);
+        for (; i + 8 <= count; i += 8) {
+            _mm256_storeu_pd(out + i, _mm256_add_pd(vstart, _mm256_mul_pd(idx0, vstep)));
+            _mm256_storeu_pd(out + i + 4, _mm256_add_pd(vstart, _mm256_mul_pd(idx1, vstep)));
+            idx0 = _mm256_add_pd(idx0, inc8);
+            idx1 = _mm256_add_pd(idx1, inc8);
+        }
+        if (i + 4 <= count) {
+            _mm256_storeu_pd(out + i, _mm256_add_pd(vstart, _mm256_mul_pd(idx0, vstep)));
+            i += 4;
+        }
+    }
+    for (; i < count; i++) out[i] = start + (double)(base + i) * step;
+}
+#endif
 
 #define ME_BATCH_FLOAT_OPS(T,S) \
     ME_BATCH_KERNEL_VV(add,T,S,a[i]+b[i]) \
@@ -228,50 +441,63 @@ ME_BATCH_INT_CAST(uint64_t,u64,uint8_t,u8) ME_BATCH_INT_CAST(uint64_t,u64,uint16
 ME_BATCH_INT_CAST(uint64_t,u64,uint32_t,u32)
 #undef ME_BATCH_INT_CAST
 
+#define ME_BATCH_COMMON_TABLE_FIELDS \
+    .f64_vv = { dsl_menudet_batch_add_f64, dsl_menudet_batch_sub_f64, dsl_menudet_batch_mul_f64, dsl_menudet_batch_div_f64 }, \
+    .f64_vs = { dsl_menudet_batch_add_vs_f64, dsl_menudet_batch_sub_vs_f64, dsl_menudet_batch_mul_vs_f64, dsl_menudet_batch_div_vs_f64 }, \
+    .f64_sv = { dsl_menudet_batch_add_sv_f64, dsl_menudet_batch_sub_sv_f64, dsl_menudet_batch_mul_sv_f64, dsl_menudet_batch_div_sv_f64 }, \
+    .f64_neg = dsl_menudet_batch_neg_f64, \
+    .f64_fill = dsl_menudet_batch_fill_f64, \
+    .f32_vv = { dsl_menudet_batch_add_f32, dsl_menudet_batch_sub_f32, dsl_menudet_batch_mul_f32, dsl_menudet_batch_div_f32 }, \
+    .f32_vs = { dsl_menudet_batch_add_vs_f32, dsl_menudet_batch_sub_vs_f32, dsl_menudet_batch_mul_vs_f32, dsl_menudet_batch_div_vs_f32 }, \
+    .f32_sv = { dsl_menudet_batch_add_sv_f32, dsl_menudet_batch_sub_sv_f32, dsl_menudet_batch_mul_sv_f32, dsl_menudet_batch_div_sv_f32 }, \
+    .f32_neg = dsl_menudet_batch_neg_f32, \
+    .f32_fill = dsl_menudet_batch_fill_f32, \
+    .u8_vv = { dsl_menudet_batch_add_u8, dsl_menudet_batch_sub_u8, dsl_menudet_batch_mul_u8 }, \
+    .u8_vs = { dsl_menudet_batch_add_vs_u8, dsl_menudet_batch_sub_vs_u8, dsl_menudet_batch_mul_vs_u8 }, \
+    .u8_sv = { dsl_menudet_batch_add_sv_u8, dsl_menudet_batch_sub_sv_u8, dsl_menudet_batch_mul_sv_u8 }, \
+    .u8_neg = dsl_menudet_batch_neg_u8, \
+    .u8_fill = dsl_menudet_batch_fill_u8, \
+    .u16_vv = { dsl_menudet_batch_add_u16, dsl_menudet_batch_sub_u16, dsl_menudet_batch_mul_u16 }, \
+    .u16_vs = { dsl_menudet_batch_add_vs_u16, dsl_menudet_batch_sub_vs_u16, dsl_menudet_batch_mul_vs_u16 }, \
+    .u16_sv = { dsl_menudet_batch_add_sv_u16, dsl_menudet_batch_sub_sv_u16, dsl_menudet_batch_mul_sv_u16 }, \
+    .u16_neg = dsl_menudet_batch_neg_u16, \
+    .u16_fill = dsl_menudet_batch_fill_u16, \
+    .u32_vv = { dsl_menudet_batch_add_u32, dsl_menudet_batch_sub_u32, dsl_menudet_batch_mul_u32 }, \
+    .u32_vs = { dsl_menudet_batch_add_vs_u32, dsl_menudet_batch_sub_vs_u32, dsl_menudet_batch_mul_vs_u32 }, \
+    .u32_sv = { dsl_menudet_batch_add_sv_u32, dsl_menudet_batch_sub_sv_u32, dsl_menudet_batch_mul_sv_u32 }, \
+    .u32_neg = dsl_menudet_batch_neg_u32, \
+    .u32_fill = dsl_menudet_batch_fill_u32, \
+    .u64_vv = { dsl_menudet_batch_add_u64, dsl_menudet_batch_sub_u64, dsl_menudet_batch_mul_u64 }, \
+    .u64_vs = { dsl_menudet_batch_add_vs_u64, dsl_menudet_batch_sub_vs_u64, dsl_menudet_batch_mul_vs_u64 }, \
+    .u64_sv = { dsl_menudet_batch_add_sv_u64, dsl_menudet_batch_sub_sv_u64, dsl_menudet_batch_mul_sv_u64 }, \
+    .u64_neg = dsl_menudet_batch_neg_u64, \
+    .u64_fill = dsl_menudet_batch_fill_u64, \
+    .f32_compare = dsl_menudet_batch_compare_f32, \
+    .f64_compare = dsl_menudet_batch_compare_f64
+
 static const me_pj_arith_table s_arith_table = {
-    .f64_vv = { dsl_menudet_batch_add_f64, dsl_menudet_batch_sub_f64, dsl_menudet_batch_mul_f64, dsl_menudet_batch_div_f64 },
-    .f64_vs = { dsl_menudet_batch_add_vs_f64, dsl_menudet_batch_sub_vs_f64, dsl_menudet_batch_mul_vs_f64, dsl_menudet_batch_div_vs_f64 },
-    .f64_sv = { dsl_menudet_batch_add_sv_f64, dsl_menudet_batch_sub_sv_f64, dsl_menudet_batch_mul_sv_f64, dsl_menudet_batch_div_sv_f64 },
-    .f64_neg = dsl_menudet_batch_neg_f64,
-    .f64_fill = dsl_menudet_batch_fill_f64,
-
-    .f32_vv = { dsl_menudet_batch_add_f32, dsl_menudet_batch_sub_f32, dsl_menudet_batch_mul_f32, dsl_menudet_batch_div_f32 },
-    .f32_vs = { dsl_menudet_batch_add_vs_f32, dsl_menudet_batch_sub_vs_f32, dsl_menudet_batch_mul_vs_f32, dsl_menudet_batch_div_vs_f32 },
-    .f32_sv = { dsl_menudet_batch_add_sv_f32, dsl_menudet_batch_sub_sv_f32, dsl_menudet_batch_mul_sv_f32, dsl_menudet_batch_div_sv_f32 },
-    .f32_neg = dsl_menudet_batch_neg_f32,
-    .f32_fill = dsl_menudet_batch_fill_f32,
-
-    .u8_vv = { dsl_menudet_batch_add_u8, dsl_menudet_batch_sub_u8, dsl_menudet_batch_mul_u8 },
-    .u8_vs = { dsl_menudet_batch_add_vs_u8, dsl_menudet_batch_sub_vs_u8, dsl_menudet_batch_mul_vs_u8 },
-    .u8_sv = { dsl_menudet_batch_add_sv_u8, dsl_menudet_batch_sub_sv_u8, dsl_menudet_batch_mul_sv_u8 },
-    .u8_neg = dsl_menudet_batch_neg_u8,
-    .u8_fill = dsl_menudet_batch_fill_u8,
-
-    .u16_vv = { dsl_menudet_batch_add_u16, dsl_menudet_batch_sub_u16, dsl_menudet_batch_mul_u16 },
-    .u16_vs = { dsl_menudet_batch_add_vs_u16, dsl_menudet_batch_sub_vs_u16, dsl_menudet_batch_mul_vs_u16 },
-    .u16_sv = { dsl_menudet_batch_add_sv_u16, dsl_menudet_batch_sub_sv_u16, dsl_menudet_batch_mul_sv_u16 },
-    .u16_neg = dsl_menudet_batch_neg_u16,
-    .u16_fill = dsl_menudet_batch_fill_u16,
-
-    .u32_vv = { dsl_menudet_batch_add_u32, dsl_menudet_batch_sub_u32, dsl_menudet_batch_mul_u32 },
-    .u32_vs = { dsl_menudet_batch_add_vs_u32, dsl_menudet_batch_sub_vs_u32, dsl_menudet_batch_mul_vs_u32 },
-    .u32_sv = { dsl_menudet_batch_add_sv_u32, dsl_menudet_batch_sub_sv_u32, dsl_menudet_batch_mul_sv_u32 },
-    .u32_neg = dsl_menudet_batch_neg_u32,
-    .u32_fill = dsl_menudet_batch_fill_u32,
-
-    .u64_vv = { dsl_menudet_batch_add_u64, dsl_menudet_batch_sub_u64, dsl_menudet_batch_mul_u64 },
-    .u64_vs = { dsl_menudet_batch_add_vs_u64, dsl_menudet_batch_sub_vs_u64, dsl_menudet_batch_mul_vs_u64 },
-    .u64_sv = { dsl_menudet_batch_add_sv_u64, dsl_menudet_batch_sub_sv_u64, dsl_menudet_batch_mul_sv_u64 },
-    .u64_neg = dsl_menudet_batch_neg_u64,
-    .u64_fill = dsl_menudet_batch_fill_u64,
-
+    ME_BATCH_COMMON_TABLE_FIELDS,
     .ramp_i64 = dsl_menudet_batch_ramp_i64,
     .ramp_f32 = dsl_menudet_batch_ramp_f32,
     .ramp_f64 = dsl_menudet_batch_ramp_f64,
-    .f32_compare = dsl_menudet_batch_compare_f32,
-    .f64_compare = dsl_menudet_batch_compare_f64,
 };
 
+#if defined(ME_BATCH_HAVE_AVX2_DISPATCH)
+static const me_pj_arith_table s_arith_table_avx2 = {
+    ME_BATCH_COMMON_TABLE_FIELDS,
+    .ramp_i64 = dsl_menudet_batch_ramp_i64_avx2,
+    .ramp_f32 = dsl_menudet_batch_ramp_f32_avx2,
+    .ramp_f64 = dsl_menudet_batch_ramp_f64_avx2,
+};
+#endif
+
+#undef ME_BATCH_COMMON_TABLE_FIELDS
+
 const me_pj_arith_table *dsl_menudet_batch_arith_table(void) {
+#if defined(ME_BATCH_HAVE_AVX2_DISPATCH)
+    if (me_batch_cpu_supports_avx2()) {
+        return &s_arith_table_avx2;
+    }
+#endif
     return &s_arith_table;
 }
