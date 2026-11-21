@@ -173,6 +173,7 @@ if(MINIEXPR_BUILD_ARTIFACT)
   if(EMSCRIPTEN)
     target_link_options(graph_corpus PRIVATE "-sNODERAWFS=1" "-sALLOW_MEMORY_GROWTH=1"
       "-sSTACK_SIZE=1048576" "-sEXIT_RUNTIME=1")
+    target_link_options(graph_pairwise PRIVATE "-sALLOW_MEMORY_GROWTH=1" "-sSTACK_SIZE=1048576")
     target_link_options(graph_preparation PRIVATE "-sALLOW_MEMORY_GROWTH=1" "-sSTACK_SIZE=1048576")
     target_link_options(graph_allocation PRIVATE "-sALLOW_MEMORY_GROWTH=1" "-sSTACK_SIZE=1048576")
     target_link_options(graph_compiler_allocation PRIVATE "-sALLOW_MEMORY_GROWTH=1" "-sSTACK_SIZE=1048576")

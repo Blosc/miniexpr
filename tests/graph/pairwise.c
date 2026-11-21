@@ -294,8 +294,8 @@ static void streaming_interface(void) {
         assert(!me_pairwise_sum_init(&state, dtype));
         assert(me_pairwise_sum_append(&state, &values, SIZE_MAX) == ME_ARTIFACT_ERR_BINDING);
         /* Exercise all 1/8/16-leaf append alignments and tail lengths against serial update. */
-        double dense_f64[48 * 128];
-        float dense_f32[48 * 128];
+        static double dense_f64[48 * 128];
+        static float dense_f32[48 * 128];
         for (size_t i = 0; i < 48 * 128; i++) {
             double v = ((int)(i % 19) - 9) * 1.125 + (i % 5 == 0 ? 1e6 : i % 5 == 1 ? -1e6 : 0.00390625);
             dense_f64[i] = v;
