@@ -350,31 +350,67 @@ static void a_combine(me_dtype dtype, int op, void *acc, const void *value) {
  * and reader boundaries never reset a leaf. Completed leaves enter a binary
  * carry tree; its depth is bounded by the number of bits in size_t. */
 typedef me_pairwise_sum_state a_pairwise_sum;
-static void a_pairwise_push(a_pairwise_sum *s, me_dtype dtype, uint64_t value) {
-    size_t level = 0;
-    while (s->occupied & ((size_t)1 << level)) {
-        a_combine(dtype, ME_ARRAY_SUM, &s->tree[level], &value);
-        value = s->tree[level];
-        s->occupied &= ~((size_t)1 << level++);
+static inline void a_pairwise_push_f64_level(a_pairwise_sum *s, double value,
+    size_t level, size_t delta_leaves) {
+    size_t occupied = s->occupied;
+    size_t bit = (size_t)1 << level;
+    while (occupied & bit) {
+        double prev;
+        memcpy(&prev, &s->tree[level], sizeof(prev));
+        value = prev + value;
+        occupied &= ~bit;
+        level++;
+        bit <<= 1;
     }
-    s->tree[level] = value;
-    s->occupied |= (size_t)1 << level;
-    s->leaves++;
+    memcpy(&s->tree[level], &value, sizeof(value));
+    s->occupied = occupied | bit;
+    s->leaves += delta_leaves;
+}
+static inline float a_pairwise_add_f32(float a, float b) {
+    /* Match a_combine(ME_FLOAT32, ME_ARRAY_SUM) rounding and FP flags. */
+    return (float)((double)a + (double)b);
+}
+static inline void a_pairwise_push_f32_level(a_pairwise_sum *s, float value,
+    size_t level, size_t delta_leaves) {
+    size_t occupied = s->occupied;
+    size_t bit = (size_t)1 << level;
+    while (occupied & bit) {
+        float prev;
+        memcpy(&prev, &s->tree[level], sizeof(prev));
+        value = a_pairwise_add_f32(prev, value);
+        occupied &= ~bit;
+        level++;
+        bit <<= 1;
+    }
+    uint64_t slot = 0;
+    memcpy(&slot, &value, sizeof(value));
+    s->tree[level] = slot;
+    s->occupied = occupied | bit;
+    s->leaves += delta_leaves;
+}
+static inline double a_pairwise_fold8_f64(const double v[8]) {
+    return ((v[0] + v[1]) + (v[2] + v[3])) +
+           ((v[4] + v[5]) + (v[6] + v[7]));
+}
+static inline float a_pairwise_fold8_f32(const float v[8]) {
+    float p0 = a_pairwise_add_f32(v[0], v[1]);
+    float p1 = a_pairwise_add_f32(v[2], v[3]);
+    float p2 = a_pairwise_add_f32(v[4], v[5]);
+    float p3 = a_pairwise_add_f32(v[6], v[7]);
+    return a_pairwise_add_f32(a_pairwise_add_f32(p0, p1), a_pairwise_add_f32(p2, p3));
 }
 static void a_pairwise_leaf(a_pairwise_sum *s, me_dtype dtype) {
-    uint64_t value = 0;
     if (dtype == ME_FLOAT64) {
         double *v = s->lanes.f64;
         double sum = ((v[0] + v[1]) + (v[2] + v[3])) +
                      ((v[4] + v[5]) + (v[6] + v[7]));
-        memcpy(&value, &sum, sizeof(sum));
+        a_pairwise_push_f64_level(s, sum, 0, 1);
     } else {
         float *v = s->lanes.f32;
         float sum = ((v[0] + v[1]) + (v[2] + v[3])) +
                     ((v[4] + v[5]) + (v[6] + v[7]));
-        memcpy(&value, &sum, sizeof(sum));
+        a_pairwise_push_f32_level(s, sum, 0, 1);
     }
-    a_pairwise_push(s, dtype, value);
     memset(&s->lanes, 0, sizeof(s->lanes));
     s->used = 0;
 }
@@ -390,15 +426,24 @@ static void a_pairwise_feed(a_pairwise_sum *s, me_dtype dtype, const void *value
     size_t end = count - offset; \
     if (end > ME_PAIRWISE_SUM_LEAF_ITEMS - s->used) end = ME_PAIRWISE_SUM_LEAF_ITEMS - s->used; \
     end = offset + (end & ~(size_t)7); \
-    type *acc = s->lanes.member; \
-    for (; offset < end; offset += 8, s->used += 8) { \
+    type a0 = s->lanes.member[0], a1 = s->lanes.member[1]; \
+    type a2 = s->lanes.member[2], a3 = s->lanes.member[3]; \
+    type a4 = s->lanes.member[4], a5 = s->lanes.member[5]; \
+    type a6 = s->lanes.member[6], a7 = s->lanes.member[7]; \
+    size_t used = s->used; \
+    for (; offset < end; offset += 8, used += 8) { \
         type v[8]; \
         memcpy(v, (const uint8_t *)values + offset * sizeof(type), sizeof(v)); \
-        acc[0] += v[0]; acc[1] += v[1]; \
-        acc[2] += v[2]; acc[3] += v[3]; \
-        acc[4] += v[4]; acc[5] += v[5]; \
-        acc[6] += v[6]; acc[7] += v[7]; \
+        a0 += v[0]; a1 += v[1]; \
+        a2 += v[2]; a3 += v[3]; \
+        a4 += v[4]; a5 += v[5]; \
+        a6 += v[6]; a7 += v[7]; \
     } \
+    s->lanes.member[0] = a0; s->lanes.member[1] = a1; \
+    s->lanes.member[2] = a2; s->lanes.member[3] = a3; \
+    s->lanes.member[4] = a4; s->lanes.member[5] = a5; \
+    s->lanes.member[6] = a6; s->lanes.member[7] = a7; \
+    s->used = used; \
 } while (0)
             if (dtype == ME_FLOAT64) PAIRWISE_OCTETS(double, f64);
             else PAIRWISE_OCTETS(float, f32);
@@ -462,11 +507,75 @@ me_artifact_status me_pairwise_sum_append(me_pairwise_sum_state *s, const void *
     if (s->leaves > SIZE_MAX / ME_PAIRWISE_SUM_LEAF_ITEMS ||
         count > SIZE_MAX / ME_PAIRWISE_SUM_LEAF_ITEMS - s->leaves)
         return ME_ARTIFACT_ERR_BINDING;
-    size_t width = a_width(s->dtype);
-    for (size_t i = 0; i < count; i++) {
-        uint64_t value = 0;
-        memcpy(&value, (const uint8_t *)leaves + i*width, width);
-        a_pairwise_push(s, s->dtype, value);
+    if (s->dtype == ME_FLOAT64) {
+        const uint8_t *src = (const uint8_t *)leaves;
+        size_t i = 0;
+        while (i < count && (s->occupied & (size_t)7)) {
+            double v;
+            memcpy(&v, src + i * sizeof(double), sizeof(v));
+            a_pairwise_push_f64_level(s, v, 0, 1);
+            i++;
+        }
+        if ((s->occupied & (size_t)8) && count - i >= 8) {
+            double v[8];
+            memcpy(v, src + i * sizeof(double), sizeof(v));
+            a_pairwise_push_f64_level(s, a_pairwise_fold8_f64(v), 3, 8);
+            i += 8;
+        }
+        while (count - i >= 16) {
+            double v0[8], v1[8];
+            memcpy(v0, src + i * sizeof(double), sizeof(v0));
+            memcpy(v1, src + (i + 8) * sizeof(double), sizeof(v1));
+            a_pairwise_push_f64_level(s, a_pairwise_fold8_f64(v0) + a_pairwise_fold8_f64(v1), 4, 16);
+            i += 16;
+        }
+        if (count - i >= 8) {
+            double v[8];
+            memcpy(v, src + i * sizeof(double), sizeof(v));
+            a_pairwise_push_f64_level(s, a_pairwise_fold8_f64(v), 3, 8);
+            i += 8;
+        }
+        while (i < count) {
+            double v;
+            memcpy(&v, src + i * sizeof(double), sizeof(v));
+            a_pairwise_push_f64_level(s, v, 0, 1);
+            i++;
+        }
+        return ME_ARTIFACT_SUCCESS;
+    }
+    const uint8_t *src = (const uint8_t *)leaves;
+    size_t i = 0;
+    while (i < count && (s->occupied & (size_t)7)) {
+        float v;
+        memcpy(&v, src + i * sizeof(float), sizeof(v));
+        a_pairwise_push_f32_level(s, v, 0, 1);
+        i++;
+    }
+    if ((s->occupied & (size_t)8) && count - i >= 8) {
+        float v[8];
+        memcpy(v, src + i * sizeof(float), sizeof(v));
+        a_pairwise_push_f32_level(s, a_pairwise_fold8_f32(v), 3, 8);
+        i += 8;
+    }
+    while (count - i >= 16) {
+        float v0[8], v1[8];
+        memcpy(v0, src + i * sizeof(float), sizeof(v0));
+        memcpy(v1, src + (i + 8) * sizeof(float), sizeof(v1));
+        a_pairwise_push_f32_level(s,
+            a_pairwise_add_f32(a_pairwise_fold8_f32(v0), a_pairwise_fold8_f32(v1)), 4, 16);
+        i += 16;
+    }
+    if (count - i >= 8) {
+        float v[8];
+        memcpy(v, src + i * sizeof(float), sizeof(v));
+        a_pairwise_push_f32_level(s, a_pairwise_fold8_f32(v), 3, 8);
+        i += 8;
+    }
+    while (i < count) {
+        float v;
+        memcpy(&v, src + i * sizeof(float), sizeof(v));
+        a_pairwise_push_f32_level(s, v, 0, 1);
+        i++;
     }
     return ME_ARTIFACT_SUCCESS;
 }
@@ -476,12 +585,43 @@ me_artifact_status me_pairwise_sum_leaves(me_dtype dtype, const void *values,
     if (!a_float(dtype) || count % ME_PAIRWISE_SUM_LEAF_ITEMS || count > SIZE_MAX / width ||
         count / ME_PAIRWISE_SUM_LEAF_ITEMS > capacity / width ||
         (count && (!values || !leaves))) return ME_ARTIFACT_ERR_BINDING;
-    a_pairwise_sum s = {0};
-    for (size_t i = 0; i < count; i += ME_PAIRWISE_SUM_LEAF_ITEMS) {
-        a_pairwise_feed(&s, dtype, (const uint8_t *)values + i*width, NULL, ME_PAIRWISE_SUM_LEAF_ITEMS);
-        memcpy((uint8_t *)leaves + (i/ME_PAIRWISE_SUM_LEAF_ITEMS)*width, &s.tree[0], width);
-        s.occupied = 0;
-        s.leaves = 0;
+    size_t nleaves = count / ME_PAIRWISE_SUM_LEAF_ITEMS;
+    if (dtype == ME_FLOAT64) {
+        const uint8_t *src = (const uint8_t *)values;
+        uint8_t *dst = (uint8_t *)leaves;
+        for (size_t leaf = 0; leaf < nleaves; leaf++) {
+            double a0 = 0, a1 = 0, a2 = 0, a3 = 0, a4 = 0, a5 = 0, a6 = 0, a7 = 0;
+            for (size_t k = 0; k < ME_PAIRWISE_SUM_LEAF_ITEMS; k += 8) {
+                double v[8];
+                memcpy(v, src, sizeof(v));
+                src += sizeof(v);
+                a0 += v[0]; a1 += v[1];
+                a2 += v[2]; a3 += v[3];
+                a4 += v[4]; a5 += v[5];
+                a6 += v[6]; a7 += v[7];
+            }
+            double sum = ((a0 + a1) + (a2 + a3)) + ((a4 + a5) + (a6 + a7));
+            memcpy(dst, &sum, sizeof(sum));
+            dst += sizeof(sum);
+        }
+        return ME_ARTIFACT_SUCCESS;
+    }
+    const uint8_t *src = (const uint8_t *)values;
+    uint8_t *dst = (uint8_t *)leaves;
+    for (size_t leaf = 0; leaf < nleaves; leaf++) {
+        float a0 = 0, a1 = 0, a2 = 0, a3 = 0, a4 = 0, a5 = 0, a6 = 0, a7 = 0;
+        for (size_t k = 0; k < ME_PAIRWISE_SUM_LEAF_ITEMS; k += 8) {
+            float v[8];
+            memcpy(v, src, sizeof(v));
+            src += sizeof(v);
+            a0 += v[0]; a1 += v[1];
+            a2 += v[2]; a3 += v[3];
+            a4 += v[4]; a5 += v[5];
+            a6 += v[6]; a7 += v[7];
+        }
+        float sum = ((a0 + a1) + (a2 + a3)) + ((a4 + a5) + (a6 + a7));
+        memcpy(dst, &sum, sizeof(sum));
+        dst += sizeof(sum);
     }
     return ME_ARTIFACT_SUCCESS;
 }

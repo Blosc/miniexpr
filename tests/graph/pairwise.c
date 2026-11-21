@@ -293,6 +293,33 @@ static void streaming_interface(void) {
         assert(me_pairwise_sum_leaves(dtype, &values, 128, &values, 0) == ME_ARTIFACT_ERR_BINDING);
         assert(!me_pairwise_sum_init(&state, dtype));
         assert(me_pairwise_sum_append(&state, &values, SIZE_MAX) == ME_ARTIFACT_ERR_BINDING);
+        /* Exercise all 1/8/16-leaf append alignments and tail lengths against serial update. */
+        double dense_f64[48 * 128];
+        float dense_f32[48 * 128];
+        for (size_t i = 0; i < 48 * 128; i++) {
+            double v = ((int)(i % 19) - 9) * 1.125 + (i % 5 == 0 ? 1e6 : i % 5 == 1 ? -1e6 : 0.00390625);
+            dense_f64[i] = v;
+            dense_f32[i] = (float)v;
+        }
+        const void *dense = f32 ? (const void *)dense_f32 : (const void *)dense_f64;
+        double all_leaves[48];
+        assert(!me_pairwise_sum_leaves(dtype, dense, 48 * 128, all_leaves, sizeof(all_leaves)));
+        for (size_t first_n = 0; first_n <= 19; first_n++) {
+            for (size_t second_n = 0; second_n <= 48 - first_n; second_n++) {
+                size_t total_leaves = first_n + second_n;
+                me_pairwise_sum_state ref_state, fast_state;
+                uint64_t ref_out = 0, fast_out = 0;
+                assert(!me_pairwise_sum_init(&ref_state, dtype));
+                assert(!me_pairwise_sum_update(&ref_state, dense, total_leaves * 128));
+                assert(!me_pairwise_sum_finish(&ref_state, &ref_out));
+                assert(!me_pairwise_sum_init(&fast_state, dtype));
+                if (first_n) assert(!me_pairwise_sum_append(&fast_state, all_leaves, first_n));
+                if (second_n) assert(!me_pairwise_sum_append(&fast_state,
+                    (const unsigned char *)all_leaves + first_n * width, second_n));
+                assert(!me_pairwise_sum_finish(&fast_state, &fast_out));
+                assert(fast_out == ref_out);
+            }
+        }
     }
 }
 
