@@ -25,6 +25,9 @@ typedef struct {
 #if defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
     uint64_t fpsr;
     bool fast;
+#elif defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+    uint32_t mxcsr;
+    bool fast;
 #endif
 } dsl_menudet_fp_state;
 
@@ -47,6 +50,22 @@ static inline bool dsl_menudet_fp_begin(dsl_menudet_fp_state *saved) {
         saved->fast = true;
         if (fpsr != 0) {
             __asm__ __volatile__("msr fpsr, %0" :: "r"((uint64_t)0) : "memory");
+        }
+        return true;
+    }
+    saved->fast = false;
+#elif defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+    /* Read SSE control/status register to avoid costly feholdexcept/fldenv on default IEEE state. */
+    uint32_t mxcsr = 0;
+    __asm__ __volatile__("stmxcsr %0" : "=m"(mxcsr) :: "memory");
+    /* Fast path when FTZ=0, RC=nearest(0), all 6 SSE traps masked (0x1F80), DAZ=0. */
+    if ((mxcsr & 0xFFC0u) == 0x1F80u) {
+        saved->mxcsr = mxcsr;
+        saved->fast = true;
+        /* Clear any pre-existing sticky SSE exception flags before evaluation. */
+        if ((mxcsr & 0x3Fu) != 0) {
+            uint32_t cleared = mxcsr & ~0x3Fu;
+            __asm__ __volatile__("ldmxcsr %0" :: "m"(cleared) : "memory");
         }
         return true;
     }
@@ -84,6 +103,25 @@ static inline bool dsl_menudet_fp_end(const dsl_menudet_fp_state *saved) {
         }
         if (cur_fpsr != saved->fpsr) {
             __asm__ __volatile__("msr fpsr, %0" :: "r"(saved->fpsr) : "memory");
+        }
+        return true;
+    }
+#elif defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+    if (saved->fast) {
+        /* Map SSE sticky bits (IE/ZE/OE/UE) into Menudet's 1/2/4/8 status encoding. */
+        uint32_t cur_mxcsr = 0;
+        __asm__ __volatile__("stmxcsr %0" : "=m"(cur_mxcsr) :: "memory");
+        unsigned flags = ((cur_mxcsr & 0x01u) ? 1u : 0u) |
+                         ((cur_mxcsr & 0x04u) ? 2u : 0u) |
+                         ((cur_mxcsr & 0x08u) ? 4u : 0u) |
+                         ((cur_mxcsr & 0x10u) ? 8u : 0u);
+        if (flags != 0) {
+            dsl_menudet_status_record(flags);
+        }
+        /* Restore original MXCSR only if evaluation modified any sticky flags. */
+        if (cur_mxcsr != saved->mxcsr) {
+            uint32_t orig = saved->mxcsr;
+            __asm__ __volatile__("ldmxcsr %0" :: "m"(orig) : "memory");
         }
         return true;
     }

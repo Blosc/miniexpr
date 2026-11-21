@@ -11,6 +11,21 @@
 #include <string.h>
 #include <stdio.h>
 
+/* Enable SSE2 baseline kernels and runtime-dispatched AVX2 kernels on x86-64. */
+#if (defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)) && !defined(_M_ARM64EC)
+#define ME_PAIRWISE_X86_64 1
+#include <emmintrin.h>
+#if defined(__GNUC__) || defined(__clang__)
+#include <immintrin.h>
+#define ME_PAIRWISE_HAVE_AVX2_DISPATCH 1
+#define ME_PAIRWISE_AVX2_TARGET __attribute__((target("avx2")))
+#define ME_PAIRWISE_NOINLINE __attribute__((noinline))
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
+#endif
+#endif
+
 static int a_error(me_artifact_error *e, int rc, const char *message) {
     if (e) { memset(e, 0, sizeof(*e)); snprintf(e->message, sizeof(e->message), "%s", message); }
     return rc;
@@ -414,6 +429,294 @@ static void a_pairwise_leaf(a_pairwise_sum *s, me_dtype dtype) {
     memset(&s->lanes, 0, sizeof(s->lanes));
     s->used = 0;
 }
+#if defined(ME_PAIRWISE_HAVE_AVX2_DISPATCH)
+/* Probe CPUID/OSXSAVE/XGETBV once and cache whether AVX2 is usable at runtime. */
+static int me_pairwise_cpu_supports_avx2(void) {
+    /* Fast path: return cached detection result without re-running CPUID. */
+    static int cached = -1;
+    int val = __atomic_load_n(&cached, __ATOMIC_RELAXED);
+    if (val >= 0) {
+        return val;
+    }
+    int supported = 0;
+#if defined(_MSC_VER)
+    /* Check leaf 7 support, OS XSAVE/YMM state (XCR0 bits 1:2), and AVX2 bit. */
+    int info[4] = {0, 0, 0, 0};
+    __cpuidex(info, 0, 0);
+    if (info[0] >= 7) {
+        __cpuidex(info, 1, 0);
+        int osxsave = (info[2] & (1 << 27)) != 0;
+        int avx = (info[2] & (1 << 28)) != 0;
+        if (osxsave && avx && ((_xgetbv(0) & 0x6) == 0x6)) {
+            __cpuidex(info, 7, 0);
+            supported = (info[1] & (1 << 5)) != 0;
+        }
+    }
+#else
+    /* Query max CPUID leaf, then verify OSXSAVE, AVX, XCR0 YMM state, and AVX2. */
+    unsigned int a = 0, b = 0, c = 0, d = 0;
+    __asm__ __volatile__("cpuid"
+                         : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
+                         : "a"(0), "c"(0));
+    if (a >= 7) {
+        __asm__ __volatile__("cpuid"
+                             : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
+                             : "a"(1), "c"(0));
+        int osxsave = (c & (1u << 27)) != 0;
+        int avx = (c & (1u << 28)) != 0;
+        if (osxsave && avx) {
+            unsigned int xcr0_lo = 0, xcr0_hi = 0;
+            __asm__ __volatile__("xgetbv"
+                                 : "=a"(xcr0_lo), "=d"(xcr0_hi)
+                                 : "c"(0));
+            if ((xcr0_lo & 0x6u) == 0x6u) {
+                __asm__ __volatile__("cpuid"
+                                     : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
+                                     : "a"(7), "c"(0));
+                supported = (b & (1u << 5)) != 0;
+            }
+        }
+    }
+#endif
+    __atomic_store_n(&cached, supported, __ATOMIC_RELAXED);
+    return supported;
+}
+
+/* Accumulate full 8-double octets into the 8 independent lanes with AVX2. */
+static ME_PAIRWISE_NOINLINE ME_PAIRWISE_AVX2_TARGET void a_pairwise_feed_octets_f64_avx2(
+    double lanes[8], const uint8_t *src, size_t n_octets) {
+    __m256d acc0 = _mm256_loadu_pd(lanes);
+    __m256d acc1 = _mm256_loadu_pd(lanes + 4);
+    for (size_t i = 0; i < n_octets; i++, src += 8 * sizeof(double)) {
+        acc0 = _mm256_add_pd(acc0, _mm256_loadu_pd((const double *)src));
+        acc1 = _mm256_add_pd(acc1, _mm256_loadu_pd((const double *)(src + 4 * sizeof(double))));
+    }
+    _mm256_storeu_pd(lanes, acc0);
+    _mm256_storeu_pd(lanes + 4, acc1);
+}
+
+/* Accumulate full 8-float octets into the 8 independent lanes with AVX2. */
+static ME_PAIRWISE_NOINLINE ME_PAIRWISE_AVX2_TARGET void a_pairwise_feed_octets_f32_avx2(
+    float lanes[8], const uint8_t *src, size_t n_octets) {
+    __m256 acc = _mm256_loadu_ps(lanes);
+    for (size_t i = 0; i < n_octets; i++, src += 8 * sizeof(float)) {
+        acc = _mm256_add_ps(acc, _mm256_loadu_ps((const float *)src));
+    }
+    _mm256_storeu_ps(lanes, acc);
+}
+
+/* Reduce contiguous 128-double leaves using AVX2 with exact pairwise order. */
+static ME_PAIRWISE_NOINLINE ME_PAIRWISE_AVX2_TARGET void a_pairwise_leaves_f64_avx2(
+    const uint8_t *src, uint8_t *dst, size_t nleaves) {
+    /* Interleave two 128-item leaves in parallel (4 independent vaddpd chains)
+     * to hide FP add latency while preserving exact per-leaf IEEE-754 order. */
+    size_t leaf = 0;
+    const size_t leaf_bytes = ME_PAIRWISE_SUM_LEAF_ITEMS * sizeof(double);
+    for (; leaf + 2 <= nleaves; leaf += 2) {
+        /* Accumulate 8 lanes per leaf across two leaves simultaneously. */
+        const uint8_t *s0 = src;
+        const uint8_t *s1 = src + leaf_bytes;
+        __m256d a0 = _mm256_setzero_pd();
+        __m256d a1 = _mm256_setzero_pd();
+        __m256d b0 = _mm256_setzero_pd();
+        __m256d b1 = _mm256_setzero_pd();
+#if defined(__GNUC__) && !defined(__clang__)
+        /* Keep the 2-leaf loop rolled so GCC does not serialize leaf 0 before leaf 1. */
+        #pragma GCC unroll 2
+#endif
+        for (size_t k = 0; k < ME_PAIRWISE_SUM_LEAF_ITEMS; k += 8) {
+            a0 = _mm256_add_pd(a0, _mm256_loadu_pd((const double *)(s0 + 0)));
+            a1 = _mm256_add_pd(a1, _mm256_loadu_pd((const double *)(s0 + 32)));
+            b0 = _mm256_add_pd(b0, _mm256_loadu_pd((const double *)(s1 + 0)));
+            b1 = _mm256_add_pd(b1, _mm256_loadu_pd((const double *)(s1 + 32)));
+            s0 += 64;
+            s1 += 64;
+        }
+        /* Fold both leaves in exact ((0+1)+(2+3))+((4+5)+(6+7)) order and store 2 sums. */
+        __m256d ap = _mm256_add_pd(_mm256_unpacklo_pd(a0, a1), _mm256_unpackhi_pd(a0, a1));
+        __m256d bp = _mm256_add_pd(_mm256_unpacklo_pd(b0, b1), _mm256_unpackhi_pd(b0, b1));
+        __m128d aq = _mm_add_pd(_mm256_castpd256_pd128(ap), _mm256_extractf128_pd(ap, 1));
+        __m128d bq = _mm_add_pd(_mm256_castpd256_pd128(bp), _mm256_extractf128_pd(bp, 1));
+        __m128d sums = _mm_add_pd(_mm_unpacklo_pd(aq, bq), _mm_unpackhi_pd(aq, bq));
+        _mm_storeu_pd((double *)dst, sums);
+        src += 2 * leaf_bytes;
+        dst += 2 * sizeof(double);
+    }
+    /* Handle a single trailing leaf when nleaves is odd. */
+    for (; leaf < nleaves; leaf++) {
+        __m256d acc0 = _mm256_setzero_pd();
+        __m256d acc1 = _mm256_setzero_pd();
+        for (size_t k = 0; k < ME_PAIRWISE_SUM_LEAF_ITEMS; k += 16) {
+            acc0 = _mm256_add_pd(acc0, _mm256_loadu_pd((const double *)(src + 0)));
+            acc1 = _mm256_add_pd(acc1, _mm256_loadu_pd((const double *)(src + 32)));
+            acc0 = _mm256_add_pd(acc0, _mm256_loadu_pd((const double *)(src + 64)));
+            acc1 = _mm256_add_pd(acc1, _mm256_loadu_pd((const double *)(src + 96)));
+            src += 128;
+        }
+        /* Fold in exact ((a0 + a1) + (a2 + a3)) + ((a4 + a5) + (a6 + a7)) order. */
+        __m256d lo2 = _mm256_unpacklo_pd(acc0, acc1); /* [a0, a4, a2, a6] */
+        __m256d hi2 = _mm256_unpackhi_pd(acc0, acc1); /* [a1, a5, a3, a7] */
+        __m256d p = _mm256_add_pd(lo2, hi2);          /* [a0+a1, a4+a5, a2+a3, a6+a7] */
+        __m128d q = _mm_add_pd(_mm256_castpd256_pd128(p), _mm256_extractf128_pd(p, 1));
+        double sum = _mm_cvtsd_f64(q) + _mm_cvtsd_f64(_mm_unpackhi_pd(q, q));
+        memcpy(dst, &sum, sizeof(sum));
+        dst += sizeof(sum);
+    }
+}
+
+/* Reduce contiguous 128-float leaves using AVX2 with exact pairwise order. */
+static ME_PAIRWISE_NOINLINE ME_PAIRWISE_AVX2_TARGET void a_pairwise_leaves_f32_avx2(
+    const uint8_t *src, uint8_t *dst, size_t nleaves) {
+    /* Interleave four 128-item leaves in parallel (4 independent vaddps chains). */
+    size_t leaf = 0;
+    const size_t leaf_bytes = ME_PAIRWISE_SUM_LEAF_ITEMS * sizeof(float);
+    for (; leaf + 4 <= nleaves; leaf += 4) {
+        /* Accumulate 8 float lanes per leaf across four leaves simultaneously. */
+        const uint8_t *s0 = src;
+        const uint8_t *s1 = src + leaf_bytes;
+        const uint8_t *s2 = src + 2 * leaf_bytes;
+        const uint8_t *s3 = src + 3 * leaf_bytes;
+        __m256 a0 = _mm256_setzero_ps();
+        __m256 a1 = _mm256_setzero_ps();
+        __m256 a2 = _mm256_setzero_ps();
+        __m256 a3 = _mm256_setzero_ps();
+        for (size_t k = 0; k < ME_PAIRWISE_SUM_LEAF_ITEMS; k += 8) {
+            a0 = _mm256_add_ps(a0, _mm256_loadu_ps((const float *)s0));
+            a1 = _mm256_add_ps(a1, _mm256_loadu_ps((const float *)s1));
+            a2 = _mm256_add_ps(a2, _mm256_loadu_ps((const float *)s2));
+            a3 = _mm256_add_ps(a3, _mm256_loadu_ps((const float *)s3));
+            s0 += 32;
+            s1 += 32;
+            s2 += 32;
+            s3 += 32;
+        }
+        /* Fold each leaf via even/odd pairs and scalar final adds to avoid extra FP flags. */
+        __m256 accs[4] = {a0, a1, a2, a3};
+        for (int j = 0; j < 4; j++) {
+            __m128 lo = _mm256_castps256_ps128(accs[j]);
+            __m128 hi = _mm256_extractf128_ps(accs[j], 1);
+            __m128 p = _mm_add_ps(_mm_shuffle_ps(lo, hi, 0x88), _mm_shuffle_ps(lo, hi, 0xDD));
+            float t0 = _mm_cvtss_f32(p);
+            float t1 = _mm_cvtss_f32(_mm_shuffle_ps(p, p, 0x01));
+            float t2 = _mm_cvtss_f32(_mm_shuffle_ps(p, p, 0x02));
+            float t3 = _mm_cvtss_f32(_mm_shuffle_ps(p, p, 0x03));
+            float sum = (t0 + t1) + (t2 + t3);
+            memcpy(dst + j * sizeof(float), &sum, sizeof(sum));
+        }
+        src += 4 * leaf_bytes;
+        dst += 4 * sizeof(float);
+    }
+    /* Handle the remaining 0..3 trailing leaves one by one. */
+    for (; leaf < nleaves; leaf++) {
+        __m256 acc = _mm256_setzero_ps();
+        for (size_t k = 0; k < ME_PAIRWISE_SUM_LEAF_ITEMS; k += 16) {
+            acc = _mm256_add_ps(acc, _mm256_loadu_ps((const float *)(src + 0)));
+            acc = _mm256_add_ps(acc, _mm256_loadu_ps((const float *)(src + 32)));
+            src += 64;
+        }
+        /* Fold 8 lanes into 4 even+odd pairs, then finish in exact scalar tree order. */
+        __m128 lo = _mm256_castps256_ps128(acc);
+        __m128 hi = _mm256_extractf128_ps(acc, 1);
+        __m128 ev = _mm_shuffle_ps(lo, hi, 0x88); /* [a0, a2, a4, a6] */
+        __m128 od = _mm_shuffle_ps(lo, hi, 0xDD); /* [a1, a3, a5, a7] */
+        __m128 p = _mm_add_ps(ev, od);            /* [a0+a1, a2+a3, a4+a5, a6+a7] */
+        float t0 = _mm_cvtss_f32(p);
+        float t1 = _mm_cvtss_f32(_mm_shuffle_ps(p, p, 0x01));
+        float t2 = _mm_cvtss_f32(_mm_shuffle_ps(p, p, 0x02));
+        float t3 = _mm_cvtss_f32(_mm_shuffle_ps(p, p, 0x03));
+        float sum = (t0 + t1) + (t2 + t3);
+        memcpy(dst, &sum, sizeof(sum));
+        dst += sizeof(sum);
+    }
+}
+#endif /* ME_PAIRWISE_HAVE_AVX2_DISPATCH */
+
+#if defined(ME_PAIRWISE_X86_64)
+/* Baseline SSE2 fallback: accumulate 8-double octets across 4 XMM registers. */
+static void a_pairwise_feed_octets_f64_sse2(
+    double lanes[8], const uint8_t *src, size_t n_octets) {
+    __m128d a0 = _mm_loadu_pd(lanes + 0);
+    __m128d a1 = _mm_loadu_pd(lanes + 2);
+    __m128d a2 = _mm_loadu_pd(lanes + 4);
+    __m128d a3 = _mm_loadu_pd(lanes + 6);
+    for (size_t i = 0; i < n_octets; i++, src += 8 * sizeof(double)) {
+        a0 = _mm_add_pd(a0, _mm_loadu_pd((const double *)(src + 0)));
+        a1 = _mm_add_pd(a1, _mm_loadu_pd((const double *)(src + 16)));
+        a2 = _mm_add_pd(a2, _mm_loadu_pd((const double *)(src + 32)));
+        a3 = _mm_add_pd(a3, _mm_loadu_pd((const double *)(src + 48)));
+    }
+    _mm_storeu_pd(lanes + 0, a0);
+    _mm_storeu_pd(lanes + 2, a1);
+    _mm_storeu_pd(lanes + 4, a2);
+    _mm_storeu_pd(lanes + 6, a3);
+}
+
+/* Baseline SSE2 fallback: accumulate 8-float octets across 2 XMM registers. */
+static void a_pairwise_feed_octets_f32_sse2(
+    float lanes[8], const uint8_t *src, size_t n_octets) {
+    __m128 a0 = _mm_loadu_ps(lanes + 0);
+    __m128 a1 = _mm_loadu_ps(lanes + 4);
+    for (size_t i = 0; i < n_octets; i++, src += 8 * sizeof(float)) {
+        a0 = _mm_add_ps(a0, _mm_loadu_ps((const float *)(src + 0)));
+        a1 = _mm_add_ps(a1, _mm_loadu_ps((const float *)(src + 16)));
+    }
+    _mm_storeu_ps(lanes + 0, a0);
+    _mm_storeu_ps(lanes + 4, a1);
+}
+
+/* Baseline SSE2 fallback: reduce 128-double leaves in exact pairwise order. */
+static void a_pairwise_leaves_f64_sse2(
+    const uint8_t *src, uint8_t *dst, size_t nleaves) {
+    for (size_t leaf = 0; leaf < nleaves; leaf++) {
+        /* Accumulate 8 lanes in 4 XMM vectors across the 128-item leaf. */
+        __m128d a0 = _mm_setzero_pd();
+        __m128d a1 = _mm_setzero_pd();
+        __m128d a2 = _mm_setzero_pd();
+        __m128d a3 = _mm_setzero_pd();
+        for (size_t k = 0; k < ME_PAIRWISE_SUM_LEAF_ITEMS; k += 8) {
+            a0 = _mm_add_pd(a0, _mm_loadu_pd((const double *)(src + 0)));
+            a1 = _mm_add_pd(a1, _mm_loadu_pd((const double *)(src + 16)));
+            a2 = _mm_add_pd(a2, _mm_loadu_pd((const double *)(src + 32)));
+            a3 = _mm_add_pd(a3, _mm_loadu_pd((const double *)(src + 48)));
+            src += 64;
+        }
+        /* Fold in exact ((0+1)+(2+3))+((4+5)+(6+7)) pairwise tree order. */
+        __m128d p01 = _mm_add_pd(_mm_unpacklo_pd(a0, a1), _mm_unpackhi_pd(a0, a1));
+        __m128d p23 = _mm_add_pd(_mm_unpacklo_pd(a2, a3), _mm_unpackhi_pd(a2, a3));
+        __m128d q = _mm_add_pd(_mm_unpacklo_pd(p01, p23), _mm_unpackhi_pd(p01, p23));
+        double sum = _mm_cvtsd_f64(q) + _mm_cvtsd_f64(_mm_unpackhi_pd(q, q));
+        memcpy(dst, &sum, sizeof(sum));
+        dst += sizeof(sum);
+    }
+}
+
+/* Baseline SSE2 fallback: reduce 128-float leaves in exact pairwise order. */
+static void a_pairwise_leaves_f32_sse2(
+    const uint8_t *src, uint8_t *dst, size_t nleaves) {
+    for (size_t leaf = 0; leaf < nleaves; leaf++) {
+        /* Accumulate 8 lanes in 2 XMM vectors across the 128-item leaf. */
+        __m128 lo = _mm_setzero_ps();
+        __m128 hi = _mm_setzero_ps();
+        for (size_t k = 0; k < ME_PAIRWISE_SUM_LEAF_ITEMS; k += 8) {
+            lo = _mm_add_ps(lo, _mm_loadu_ps((const float *)(src + 0)));
+            hi = _mm_add_ps(hi, _mm_loadu_ps((const float *)(src + 16)));
+            src += 32;
+        }
+        /* Fold even+odd pairs and finish with scalar adds to avoid unused-lane FP flags. */
+        __m128 ev = _mm_shuffle_ps(lo, hi, 0x88);
+        __m128 od = _mm_shuffle_ps(lo, hi, 0xDD);
+        __m128 p = _mm_add_ps(ev, od);
+        float t0 = _mm_cvtss_f32(p);
+        float t1 = _mm_cvtss_f32(_mm_shuffle_ps(p, p, 0x01));
+        float t2 = _mm_cvtss_f32(_mm_shuffle_ps(p, p, 0x02));
+        float t3 = _mm_cvtss_f32(_mm_shuffle_ps(p, p, 0x03));
+        float sum = (t0 + t1) + (t2 + t3);
+        memcpy(dst, &sum, sizeof(sum));
+        dst += sizeof(sum);
+    }
+}
+#endif /* ME_PAIRWISE_X86_64 */
+
 static void a_pairwise_feed(a_pairwise_sum *s, me_dtype dtype, const void *values,
     const uint8_t *mask, size_t count) {
     size_t width = a_width(dtype), offset = 0;
@@ -422,6 +725,34 @@ static void a_pairwise_feed(a_pairwise_sum *s, me_dtype dtype, const void *value
          * memcpy calls. Independent lanes permit ordinary SIMD/SLP without
          * fast-math or reassociation of any accumulator's additions. */
         if (!mask && !(s->used % 8) && count - offset >= 8) {
+#if defined(ME_PAIRWISE_X86_64)
+            /* Dispatch full aligned octets up to the leaf boundary to AVX2 or SSE2. */
+            size_t end = count - offset;
+            if (end > ME_PAIRWISE_SUM_LEAF_ITEMS - s->used) end = ME_PAIRWISE_SUM_LEAF_ITEMS - s->used;
+            size_t n_octets = end / 8;
+            const uint8_t *src = (const uint8_t *)values + offset * width;
+            if (dtype == ME_FLOAT64) {
+#if defined(ME_PAIRWISE_HAVE_AVX2_DISPATCH)
+                if (me_pairwise_cpu_supports_avx2()) {
+                    a_pairwise_feed_octets_f64_avx2(s->lanes.f64, src, n_octets);
+                } else
+#endif
+                {
+                    a_pairwise_feed_octets_f64_sse2(s->lanes.f64, src, n_octets);
+                }
+            } else {
+#if defined(ME_PAIRWISE_HAVE_AVX2_DISPATCH)
+                if (me_pairwise_cpu_supports_avx2()) {
+                    a_pairwise_feed_octets_f32_avx2(s->lanes.f32, src, n_octets);
+                } else
+#endif
+                {
+                    a_pairwise_feed_octets_f32_sse2(s->lanes.f32, src, n_octets);
+                }
+            }
+            offset += n_octets * 8;
+            s->used += n_octets * 8;
+#else
 #define PAIRWISE_OCTETS(type, member) do { \
     size_t end = count - offset; \
     if (end > ME_PAIRWISE_SUM_LEAF_ITEMS - s->used) end = ME_PAIRWISE_SUM_LEAF_ITEMS - s->used; \
@@ -448,6 +779,7 @@ static void a_pairwise_feed(a_pairwise_sum *s, me_dtype dtype, const void *value
             if (dtype == ME_FLOAT64) PAIRWISE_OCTETS(double, f64);
             else PAIRWISE_OCTETS(float, f32);
 #undef PAIRWISE_OCTETS
+#endif
             if (s->used == ME_PAIRWISE_SUM_LEAF_ITEMS) a_pairwise_leaf(s, dtype);
             continue;
         }
@@ -589,6 +921,18 @@ me_artifact_status me_pairwise_sum_leaves(me_dtype dtype, const void *values,
     if (dtype == ME_FLOAT64) {
         const uint8_t *src = (const uint8_t *)values;
         uint8_t *dst = (uint8_t *)leaves;
+#if defined(ME_PAIRWISE_HAVE_AVX2_DISPATCH)
+        /* Prefer AVX2 leaf kernel at runtime when supported by CPU and OS. */
+        if (me_pairwise_cpu_supports_avx2()) {
+            a_pairwise_leaves_f64_avx2(src, dst, nleaves);
+            return ME_ARTIFACT_SUCCESS;
+        }
+#endif
+#if defined(ME_PAIRWISE_X86_64)
+        /* Fall back to baseline SSE2 leaf kernel on x86-64 without AVX2. */
+        a_pairwise_leaves_f64_sse2(src, dst, nleaves);
+        return ME_ARTIFACT_SUCCESS;
+#else
         for (size_t leaf = 0; leaf < nleaves; leaf++) {
             double a0 = 0, a1 = 0, a2 = 0, a3 = 0, a4 = 0, a5 = 0, a6 = 0, a7 = 0;
             for (size_t k = 0; k < ME_PAIRWISE_SUM_LEAF_ITEMS; k += 8) {
@@ -605,9 +949,22 @@ me_artifact_status me_pairwise_sum_leaves(me_dtype dtype, const void *values,
             dst += sizeof(sum);
         }
         return ME_ARTIFACT_SUCCESS;
+#endif
     }
     const uint8_t *src = (const uint8_t *)values;
     uint8_t *dst = (uint8_t *)leaves;
+#if defined(ME_PAIRWISE_HAVE_AVX2_DISPATCH)
+    /* Prefer AVX2 float32 leaf kernel at runtime when supported by CPU and OS. */
+    if (me_pairwise_cpu_supports_avx2()) {
+        a_pairwise_leaves_f32_avx2(src, dst, nleaves);
+        return ME_ARTIFACT_SUCCESS;
+    }
+#endif
+#if defined(ME_PAIRWISE_X86_64)
+    /* Fall back to baseline SSE2 float32 leaf kernel on x86-64 without AVX2. */
+    a_pairwise_leaves_f32_sse2(src, dst, nleaves);
+    return ME_ARTIFACT_SUCCESS;
+#else
     for (size_t leaf = 0; leaf < nleaves; leaf++) {
         float a0 = 0, a1 = 0, a2 = 0, a3 = 0, a4 = 0, a5 = 0, a6 = 0, a7 = 0;
         for (size_t k = 0; k < ME_PAIRWISE_SUM_LEAF_ITEMS; k += 8) {
@@ -624,6 +981,7 @@ me_artifact_status me_pairwise_sum_leaves(me_dtype dtype, const void *values,
         dst += sizeof(sum);
     }
     return ME_ARTIFACT_SUCCESS;
+#endif
 }
 me_artifact_status me_pairwise_sum_finish(me_pairwise_sum_state *s, void *output) {
     if (!s || !a_float(s->dtype) || !output) return ME_ARTIFACT_ERR_BINDING;
