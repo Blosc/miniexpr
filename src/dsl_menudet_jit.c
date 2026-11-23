@@ -2417,71 +2417,6 @@ static bool pj_emit_arith_bridge(const pj_arith_dag *dag, me_dsl_compiled_progra
     return true;
 }
 
-static bool pj_flat_index_node(const me_dsl_compiled_program *p, const me_expr *n) {
-    if (!n || TYPE_MASK(n->type) != ME_VARIABLE || !is_synthetic_address(n->bound)) return false;
-    return (int)((const char *)n->bound - synthetic_var_addresses) == p->idx_flat_idx;
-}
-
-static bool pj_flat_index_expr(const me_dsl_compiled_program *p, const me_expr *n, int depth) {
-    if (pj_flat_index_node(p, n)) return true;
-    if (!n || depth > 8 || !IS_FUNCTION(n->type) || ARITY(n->type) != 1 ||
-        me_menudet_operator(n) != NULL) return false;
-    return pj_flat_index_expr(p, n->parameters[0], depth+1);
-}
-
-/* Match only the affine form used by the ramp constructors. Restricting the
- * initial bridge to unmasked strict kernels keeps global-index semantics
- * and fallback behavior straightforward. */
-static bool pj_match_ramp(const me_dsl_compiled_program *p, const me_expr *root,
-                          const me_expr **start, const me_expr **step) {
-    if (!root || p->output_is_scalar || !p->uses_flat_idx || p->compile_ndims < 1 ||
-        p->uses_i_mask || p->uses_n_mask || p->uses_ndim || p->fp_mode != ME_DSL_FP_STRICT ||
-        p->block.nstmts != 1 || p->block.stmts[0]->kind != ME_DSL_STMT_RETURN) return false;
-    /* Unwrap outer conversion to output_dtype if present (e.g. float32 conversion from float64 promotion). */
-    if (!root->function && ARITY(root->type) == 1 && root->dtype == p->output_dtype) {
-        root = (const me_expr *)root->parameters[0];
-        if (!root) return false;
-    }
-    const char *root_op = me_menudet_operator(root);
-    if (!root_op || strcmp(root_op, "+") || ARITY(root->type) != 2) return false;
-    const me_expr *base = root->parameters[0];
-    const me_expr *product = root->parameters[1];
-    const char *product_op = me_menudet_operator(product);
-    if (!product_op || strcmp(product_op, "*") || ARITY(product->type) != 2) {
-        base = root->parameters[1];
-        product = root->parameters[0];
-        product_op = me_menudet_operator(product);
-        if (!product_op || strcmp(product_op, "*") || ARITY(product->type) != 2) return false;
-    }
-    const me_expr *index = product->parameters[0];
-    const me_expr *stride = product->parameters[1];
-    if (!pj_flat_index_expr(p, index, 0)) {
-        index = product->parameters[1];
-        stride = product->parameters[0];
-    }
-    bool flat_index = pj_flat_index_expr(p, index, 0);
-    bool uniform_base = pj_uniform_tree(p, base, 0);
-    bool uniform_stride = pj_uniform_tree(p, stride, 0);
-    if (!flat_index || !uniform_base || !uniform_stride) return false;
-    if (p->output_dtype == ME_INT64) {
-        if (root->dtype != ME_INT64 || product->dtype != ME_INT64 ||
-            base->dtype != ME_INT64 || stride->dtype != ME_INT64) return false;
-    } else if (p->output_dtype == ME_FLOAT64) {
-        if (root->dtype != ME_FLOAT64 || product->dtype != ME_FLOAT64 ||
-            (base->dtype != ME_FLOAT64 && base->dtype != ME_INT64) ||
-            (stride->dtype != ME_FLOAT64 && stride->dtype != ME_INT64)) return false;
-    } else if (p->output_dtype == ME_FLOAT32) {
-        /* The f32 AOT routine rounds intermediates to float. A final f32 cast
-         * of an f64 expression must retain its f64 arithmetic in generic JIT. */
-        if (root->dtype != ME_FLOAT32 || product->dtype != ME_FLOAT32 ||
-            (base->dtype != ME_FLOAT32 && base->dtype != ME_INT64) ||
-            (stride->dtype != ME_FLOAT32 && stride->dtype != ME_INT64)) return false;
-    } else return false;
-    *start = base;
-    *step = stride;
-    return true;
-}
-
 static bool pj_emit_ramp_bridge(const me_dsl_compiled_program *p, const char *start,
                                 const char *step, const char *setup, pj_text *out) {
     const char *fn, *type;
@@ -2852,8 +2787,11 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     if ((p->compiler == ME_DSL_COMPILER_LIBTCC || p->compiler == ME_DSL_COMPILER_CC) && !scalar &&
         p->block.nstmts == 1 && p->block.stmts[0]->kind == ME_DSL_STMT_RETURN) {
         const me_expr *ramp_start = NULL, *ramp_step = NULL;
+        me_dsl_ramp_kind ramp_kind = ME_DSL_RAMP_NONE;
         const me_expr *root = p->block.stmts[0]->as.return_stmt.expr.expr;
-        if (pj_match_ramp(p, root, &ramp_start, &ramp_step)) {
+        if (dsl_menudet_match_ramp(p, root, &ramp_start, &ramp_step, &ramp_kind) &&
+            ((ramp_kind == ME_DSL_RAMP_I64 && p->output_dtype == ME_INT64) ||
+             ramp_kind == ME_DSL_RAMP_F32 || ramp_kind == ME_DSL_RAMP_F64)) {
             pj_text scalar_setup = {0};
             int scalar_temp = 0;
             char *start_expr = pj_expr(p, ramp_start, defined, 0, constants, &scalar_setup, &scalar_temp);

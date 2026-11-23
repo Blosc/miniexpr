@@ -2125,6 +2125,184 @@ int dsl_eval_program(const me_dsl_compiled_program *program,
     return rc == ME_DSL_MENUDET_ERR_NEG_INT_POW ? ME_EVAL_ERR_INVALID_ARG : rc;
 }
 
+typedef union {
+    int64_t i64;
+    float f32;
+    double f64;
+} dsl_ramp_scalar;
+
+static inline void dsl_call_menudet_ramp(const me_ramp_table *tbl, me_dsl_ramp_kind kind,
+                                         int64_t base, const dsl_ramp_scalar *start,
+                                         const dsl_ramp_scalar *step, void *out, int count) {
+    switch (kind) {
+    case ME_DSL_RAMP_I64:
+        tbl->ramp_i64(base, start->i64, step->i64, (int64_t *)out, count);
+        break;
+    case ME_DSL_RAMP_U32:
+        tbl->ramp_u32(base, start->i64, step->i64, (uint32_t *)out, count);
+        break;
+    case ME_DSL_RAMP_U16:
+        tbl->ramp_u16(base, start->i64, step->i64, (uint16_t *)out, count);
+        break;
+    case ME_DSL_RAMP_U8:
+        tbl->ramp_u8(base, start->i64, step->i64, (uint8_t *)out, count);
+        break;
+    case ME_DSL_RAMP_F32:
+        tbl->ramp_f32(base, start->f32, step->f32, (float *)out, count);
+        break;
+    case ME_DSL_RAMP_F64:
+        tbl->ramp_f64(base, start->f64, step->f64, (double *)out, count);
+        break;
+    case ME_DSL_RAMP_F64_TO_F32:
+        tbl->ramp_f64_to_f32(base, start->f64, step->f64, (float *)out, count);
+        break;
+    default:
+        break;
+    }
+}
+
+static bool dsl_ramp_read_fast_scalar(const me_dsl_compiled_program *program,
+                                      const me_expr *expr, const void **inputs, int ninputs,
+                                      dsl_ramp_scalar *out, me_dtype *out_dtype) {
+    if (!expr) return false;
+    me_dtype target = expr->dtype;
+    if (target != ME_INT64 && target != ME_FLOAT32 && target != ME_FLOAT64) return false;
+    const me_expr *leaf = expr;
+    if (IS_FUNCTION(leaf->type) && !leaf->function && ARITY(leaf->type) == 1) {
+        leaf = (const me_expr *)leaf->parameters[0];
+        if (!leaf) return false;
+        if (leaf->dtype != target &&
+            !(leaf->dtype == ME_INT64 && (target == ME_FLOAT32 || target == ME_FLOAT64))) {
+            return false;
+        }
+    }
+    dsl_ramp_scalar raw = {0};
+    int kind = TYPE_MASK(leaf->type);
+    if (kind == ME_VARIABLE && is_synthetic_address(leaf->bound)) {
+        int idx = (int)((const char *)leaf->bound - synthetic_var_addresses);
+        if (idx < 0 || idx >= ninputs || !inputs[idx]) return false;
+        if (!program->vars.uniform[idx] && !(leaf->flags & ME_EXPR_FLAG_UNIFORM_INPUT)) return false;
+        if (leaf->dtype == ME_INT64) memcpy(&raw.i64, inputs[idx], sizeof(int64_t));
+        else if (leaf->dtype == ME_FLOAT32) memcpy(&raw.f32, inputs[idx], sizeof(float));
+        else if (leaf->dtype == ME_FLOAT64) memcpy(&raw.f64, inputs[idx], sizeof(double));
+        else return false;
+    }
+    else if (kind == ME_CONSTANT) {
+        if (leaf->dtype == ME_INT64) {
+            if (!(leaf->flags & ME_EXPR_FLAG_INTEGER_LITERAL)) return false;
+            if (leaf->flags & ME_EXPR_FLAG_NEGATIVE_LITERAL) {
+                if (leaf->integer_magnitude > (uint64_t)INT64_MAX + 1ULL) return false;
+                raw.i64 = (leaf->integer_magnitude == (uint64_t)INT64_MAX + 1ULL)
+                    ? INT64_MIN : -(int64_t)leaf->integer_magnitude;
+            }
+            else {
+                if (leaf->integer_magnitude > (uint64_t)INT64_MAX) return false;
+                raw.i64 = (int64_t)leaf->integer_magnitude;
+            }
+        }
+        else if (leaf->dtype == ME_FLOAT32) {
+            raw.f32 = leaf->literal_f32;
+        }
+        else if (leaf->dtype == ME_FLOAT64) {
+            raw.f64 = leaf->value;
+        }
+        else {
+            return false;
+        }
+    }
+    else {
+        return false;
+    }
+    *out = raw;
+    *out_dtype = leaf->dtype;
+    return true;
+}
+
+/* Direct interpreter-side dispatch to the AOT SIMD ramp kernels, matching the
+ * JIT ramp bridge without requiring runtime compilation or per-block index buffers. */
+static int dsl_eval_menudet_direct_ramp(const me_dsl_compiled_program *program,
+                                        const void **inputs, int ninputs, void *output,
+                                        const me_dsl_menudet_eval_descriptor *descriptor,
+                                        const int64_t *strides) {
+    int ndim = descriptor->ndim;
+    int64_t origin_flat = 0;
+    bool contiguous = true;
+    for (int d = ndim - 1; d >= 0; d--) {
+        int64_t size = descriptor->logical_shape[d];
+        int64_t origin = descriptor->block_origin[d];
+        int64_t extent = descriptor->block_extent[d];
+        if (extent > size - origin) return ME_EVAL_ERR_INVALID_ARG;
+        origin_flat += origin * strides[d];
+        if (d > 0 && extent != size) contiguous = false;
+    }
+    for (int i = 0; i < ninputs; i++) {
+        if (!inputs[i]) return ME_EVAL_ERR_VAR_MISMATCH;
+    }
+    const me_expr *start_expr = program->menudet_ramp_start;
+    const me_expr *step_expr = program->menudet_ramp_step;
+    dsl_ramp_scalar raw_start = {0}, raw_step = {0};
+    me_dtype start_dtype = start_expr->dtype;
+    me_dtype step_dtype = step_expr->dtype;
+    if (!dsl_ramp_read_fast_scalar(program, start_expr, inputs, ninputs, &raw_start, &start_dtype)) {
+        int rc = dsl_menudet_eval_expr_masked(start_expr, inputs, ninputs, NULL, 1, NULL,
+                                              dtype_size(start_expr->dtype), &raw_start);
+        if (rc != ME_EVAL_SUCCESS) return rc;
+    }
+    if (!dsl_ramp_read_fast_scalar(program, step_expr, inputs, ninputs, &raw_step, &step_dtype)) {
+        int rc = dsl_menudet_eval_expr_masked(step_expr, inputs, ninputs, NULL, 1, NULL,
+                                              dtype_size(step_expr->dtype), &raw_step);
+        if (rc != ME_EVAL_SUCCESS) return rc;
+    }
+
+    dsl_menudet_fp_state saved;
+    if (!dsl_menudet_fp_begin(&saved)) return ME_EVAL_ERR_INVALID_ARG;
+    dsl_ramp_scalar start_val = {0}, step_val = {0};
+    me_dsl_ramp_kind ramp_kind = program->menudet_ramp_kind;
+    if (ramp_kind == ME_DSL_RAMP_I64 || ramp_kind == ME_DSL_RAMP_U32 ||
+        ramp_kind == ME_DSL_RAMP_U16 || ramp_kind == ME_DSL_RAMP_U8) {
+        start_val.i64 = raw_start.i64;
+        step_val.i64 = raw_step.i64;
+    }
+    else if (ramp_kind == ME_DSL_RAMP_F32) {
+        start_val.f32 = (start_dtype == ME_INT64) ? (float)raw_start.i64 : raw_start.f32;
+        step_val.f32 = (step_dtype == ME_INT64) ? (float)raw_step.i64 : raw_step.f32;
+    }
+    else {
+        start_val.f64 = (start_dtype == ME_INT64) ? (double)raw_start.i64 : raw_start.f64;
+        step_val.f64 = (step_dtype == ME_INT64) ? (double)raw_step.i64 : raw_step.f64;
+    }
+    const me_ramp_table *tbl = dsl_menudet_batch_ramp_table();
+    int nitems = descriptor->nitems;
+    if (contiguous) {
+        dsl_call_menudet_ramp(tbl, ramp_kind, origin_flat, &start_val, &step_val,
+                              output, nitems);
+    }
+    else {
+        int cols = (int)descriptor->block_extent[ndim - 1];
+        int64_t rows = (int64_t)nitems / cols;
+        size_t itemsize = program->output_itemsize;
+        int64_t coords[ME_DSL_MAX_NDIM] = {0};
+        int64_t row_origin = origin_flat;
+        for (int64_t r = 0; r < rows; r++) {
+            dsl_call_menudet_ramp(tbl, ramp_kind, row_origin, &start_val, &step_val,
+                                  (unsigned char *)output + (size_t)r * (size_t)cols * itemsize, cols);
+            if (r + 1 < rows) {
+                for (int d = ndim - 2; d >= 0; d--) {
+                    if (coords[d] + 1 < descriptor->block_extent[d]) {
+                        coords[d]++;
+                        row_origin += strides[d];
+                        break;
+                    }
+                    row_origin -= coords[d] * strides[d];
+                    coords[d] = 0;
+                }
+            }
+        }
+    }
+    if (!dsl_menudet_fp_end(&saved)) return ME_EVAL_ERR_INVALID_ARG;
+    return ME_EVAL_SUCCESS;
+}
+
 static int dsl_eval_program_menudet_body(const me_dsl_compiled_program *program,
                                const void **inputs, int ninputs, void *output,
                                const me_dsl_menudet_eval_descriptor *descriptor) {
@@ -2169,6 +2347,9 @@ static int dsl_eval_program_menudet_body(const me_dsl_compiled_program *program,
      * coordinates in-kernel; building interpreter index buffers here would be
      * pure overhead (and duplicate the same range validation). */
     bool jit_direct = program->jit_kernel_fn != NULL;
+    if (!jit_direct && !descriptor->valid_mask && program->menudet_direct_ramp && ndim >= 1) {
+        return dsl_eval_menudet_direct_ramp(program, inputs, ninputs, output, descriptor, strides);
+    }
     if (!jit_direct) {
         for (int d = 0; d < ndim; d++) {
             if (program->uses_i_mask & (1 << d)) {

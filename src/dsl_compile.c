@@ -503,6 +503,116 @@ bool dsl_compiled_expr_uniform(const me_expr *n, const bool *uniform, int nvars)
     }
 }
 
+static bool dsl_ramp_flat_index_node(const me_dsl_compiled_program *p, const me_expr *n) {
+    if (!n || TYPE_MASK(n->type) != ME_VARIABLE || !is_synthetic_address(n->bound)) return false;
+    return (int)((const char *)n->bound - synthetic_var_addresses) == p->idx_flat_idx;
+}
+
+static bool dsl_ramp_flat_index_expr(const me_dsl_compiled_program *p, const me_expr *n,
+                                     me_dtype target_dtype) {
+    if (dsl_ramp_flat_index_node(p, n)) return true;
+    if (!n || !IS_FUNCTION(n->type) || n->function != NULL || ARITY(n->type) != 1 ||
+        n->dtype != target_dtype) return false;
+    return dsl_ramp_flat_index_node(p, n->parameters[0]);
+}
+
+static bool dsl_ramp_uniform_tree(const me_dsl_compiled_program *p, const me_expr *n, int depth) {
+    if (!n || depth > 128) return false;
+    int kind = TYPE_MASK(n->type);
+    if (kind == ME_CONSTANT) return true;
+    if (kind == ME_VARIABLE && is_synthetic_address(n->bound)) {
+        int index = (int)((const char *)n->bound - synthetic_var_addresses);
+        return index >= 0 && index < p->n_inputs &&
+            (p->vars.uniform[index] || (n->flags & ME_EXPR_FLAG_UNIFORM_INPUT));
+    }
+    if (!IS_FUNCTION(n->type) || is_reduction_node(n)) return false;
+    const char *op = me_menudet_operator(n);
+    if (op && (!strcmp(op, "where") || !strcmp(op, "and") || !strcmp(op, "or"))) return false;
+    for (int i = 0; i < ARITY(n->type); i++) {
+        if (!dsl_ramp_uniform_tree(p, n->parameters[i], depth + 1)) return false;
+    }
+    return true;
+}
+
+/* Match only the affine form used by the ramp constructors. Restricting the
+ * fast path to unmasked strict kernels keeps global-index semantics and
+ * fallback behavior identical across both interpreter and JIT paths. */
+bool dsl_menudet_match_ramp(const me_dsl_compiled_program *p, const me_expr *root,
+                            const me_expr **start, const me_expr **step,
+                            me_dsl_ramp_kind *kind) {
+    if (!p || !root || p->semantic_profile != ME_DSL_PROFILE_MENUDET_0_1 ||
+        p->output_is_scalar || p->n_locals != 0 || !p->uses_flat_idx || p->idx_flat_idx < 0 ||
+        p->compile_ndims < 1 || p->uses_i_mask || p->uses_n_mask || p->uses_ndim ||
+        p->fp_mode != ME_DSL_FP_STRICT || p->block.nstmts != 1 ||
+        p->block.stmts[0]->kind != ME_DSL_STMT_RETURN) return false;
+    /* Unwrap outer conversion to output_dtype if present (e.g. float64 -> float32 or int64 -> int32). */
+    const me_expr *outer = NULL;
+    if (!root->function && ARITY(root->type) == 1 && root->dtype == p->output_dtype) {
+        outer = root;
+        root = (const me_expr *)root->parameters[0];
+        if (!root) return false;
+    }
+    const char *root_op = me_menudet_operator(root);
+    if (!root_op || strcmp(root_op, "+") || ARITY(root->type) != 2) return false;
+    const me_expr *base = root->parameters[0];
+    const me_expr *product = root->parameters[1];
+    const char *product_op = me_menudet_operator(product);
+    if (!product_op || strcmp(product_op, "*") || ARITY(product->type) != 2) {
+        base = root->parameters[1];
+        product = root->parameters[0];
+        product_op = me_menudet_operator(product);
+        if (!product_op || strcmp(product_op, "*") || ARITY(product->type) != 2) return false;
+    }
+    const me_expr *index = product->parameters[0];
+    const me_expr *stride = product->parameters[1];
+    if (!dsl_ramp_flat_index_expr(p, index, root->dtype)) {
+        index = product->parameters[1];
+        stride = product->parameters[0];
+    }
+    bool flat_index = dsl_ramp_flat_index_expr(p, index, root->dtype);
+    bool uniform_base = dsl_ramp_uniform_tree(p, base, 0);
+    bool uniform_stride = dsl_ramp_uniform_tree(p, stride, 0);
+    if (!flat_index || !uniform_base || !uniform_stride) return false;
+    me_dsl_ramp_kind matched = ME_DSL_RAMP_NONE;
+    if (p->output_dtype == ME_INT64) {
+        if (root->dtype != ME_INT64 || product->dtype != ME_INT64 ||
+            base->dtype != ME_INT64 || stride->dtype != ME_INT64) return false;
+        matched = ME_DSL_RAMP_I64;
+    } else if (p->output_dtype == ME_UINT64 ||
+               p->output_dtype == ME_INT32 || p->output_dtype == ME_UINT32 ||
+               p->output_dtype == ME_INT16 || p->output_dtype == ME_UINT16 ||
+               p->output_dtype == ME_INT8 || p->output_dtype == ME_UINT8) {
+        /* Modular integer narrowing applies only to non-weak NumPy output casts. */
+        if (!outer || !(outer->flags & ME_EXPR_FLAG_NUMPY_1_1) ||
+            (root->flags & (ME_EXPR_FLAG_WEAK_SCALAR | ME_EXPR_FLAG_WEAK_LITERAL)) != 0 ||
+            root->dtype != ME_INT64 || product->dtype != ME_INT64 ||
+            base->dtype != ME_INT64 || stride->dtype != ME_INT64) return false;
+        if (p->output_dtype == ME_UINT64) matched = ME_DSL_RAMP_I64;
+        else if (p->output_dtype == ME_INT32 || p->output_dtype == ME_UINT32) matched = ME_DSL_RAMP_U32;
+        else if (p->output_dtype == ME_INT16 || p->output_dtype == ME_UINT16) matched = ME_DSL_RAMP_U16;
+        else matched = ME_DSL_RAMP_U8;
+    } else if (p->output_dtype == ME_FLOAT64) {
+        if (root->dtype != ME_FLOAT64 || product->dtype != ME_FLOAT64 ||
+            (base->dtype != ME_FLOAT64 && base->dtype != ME_INT64) ||
+            (stride->dtype != ME_FLOAT64 && stride->dtype != ME_INT64)) return false;
+        matched = ME_DSL_RAMP_F64;
+    } else if (p->output_dtype == ME_FLOAT32) {
+        if (root->dtype == ME_FLOAT32 && product->dtype == ME_FLOAT32 &&
+            (base->dtype == ME_FLOAT32 || base->dtype == ME_INT64) &&
+            (stride->dtype == ME_FLOAT32 || stride->dtype == ME_INT64)) {
+            matched = ME_DSL_RAMP_F32;
+        } else if (outer && root->dtype == ME_FLOAT64 && product->dtype == ME_FLOAT64 &&
+                   (base->dtype == ME_FLOAT64 || base->dtype == ME_INT64) &&
+                   (stride->dtype == ME_FLOAT64 || stride->dtype == ME_INT64)) {
+            matched = ME_DSL_RAMP_F64_TO_F32;
+        } else return false;
+    } else return false;
+    *start = base;
+    *step = stride;
+    if (kind) *kind = matched;
+    return true;
+}
+
 static bool dsl_menudet_reduced_value(const me_expr *n, const me_dsl_compiled_program *program) {
     if (is_reduction_node(n)) return true;
     if (TYPE_MASK(n->type) == ME_VARIABLE && is_synthetic_address(n->bound)) {
@@ -3483,6 +3593,17 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
         dsl_try_build_jit_ir(&ctx, parsed, program, jit_mode != ME_JIT_OFF);
     }
     else {
+        const me_expr *ramp_start = NULL, *ramp_step = NULL;
+        me_dsl_ramp_kind ramp_kind = ME_DSL_RAMP_NONE;
+        if (program->block.nstmts == 1 &&
+            program->block.stmts[0]->kind == ME_DSL_STMT_RETURN &&
+            dsl_menudet_match_ramp(program, program->block.stmts[0]->as.return_stmt.expr.expr,
+                                   &ramp_start, &ramp_step, &ramp_kind)) {
+            program->menudet_direct_ramp = true;
+            program->menudet_ramp_kind = ramp_kind;
+            program->menudet_ramp_start = ramp_start;
+            program->menudet_ramp_step = ramp_step;
+        }
         dsl_menudet_prepare_jit(program);
     }
 

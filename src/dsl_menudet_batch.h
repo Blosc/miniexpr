@@ -53,6 +53,18 @@ typedef struct me_pj_arith_table {
 } me_pj_arith_table;
 
 const me_pj_arith_table *dsl_menudet_batch_arith_table(void);
+
+typedef struct me_ramp_table {
+    void (*ramp_i64)(int64_t, int64_t, int64_t, int64_t *restrict, int);
+    void (*ramp_u32)(int64_t, int64_t, int64_t, uint32_t *restrict, int);
+    void (*ramp_u16)(int64_t, int64_t, int64_t, uint16_t *restrict, int);
+    void (*ramp_u8)(int64_t, int64_t, int64_t, uint8_t *restrict, int);
+    void (*ramp_f32)(int64_t, float, float, float *restrict, int);
+    void (*ramp_f64)(int64_t, double, double, double *restrict, int);
+    void (*ramp_f64_to_f32)(int64_t, double, double, float *restrict, int);
+} me_ramp_table;
+
+const me_ramp_table *dsl_menudet_batch_ramp_table(void);
 void dsl_menudet_batch_compare_f32(const void *, const float *, int, const float *, int, uint8_t *restrict, int);
 void dsl_menudet_batch_compare_f64(const void *, const double *, int, const double *, int, uint8_t *restrict, int);
 void dsl_menudet_batch_powi_f32(const float *a, int64_t exponent, float *restrict out, int count);

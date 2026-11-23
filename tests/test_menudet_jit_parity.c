@@ -2746,6 +2746,8 @@ static void flat_index_1d_lowering(void) {
         CHECK(!me_artifact_load(json, strlen(json), ME_JIT_OFF, &reference, &error));
         program = dsl_artifact_program_for_tests(artifact);
         CHECK(program && program->menudet_jit_has_ramp_bridge);
+        me_dsl_compiled_program *ref_program = dsl_artifact_program_for_tests(reference);
+        CHECK(ref_program && ref_program->menudet_direct_ramp && !me_artifact_has_jit(reference));
         const int64_t shape[] = {5, 6, 7, 8};
         const int64_t origin[] = {1, 2, 3, 4};
         const int64_t extent[] = {2, 2, 2, 2};
@@ -2760,6 +2762,207 @@ static void flat_index_1d_lowering(void) {
         CHECK(!memcmp(actual, expected, desc.nitems * sizeof(double)));
         me_artifact_free(reference);
         me_artifact_free(artifact);
+    }
+
+    /* Direct interpreter AOT ramp coverage (ME_JIT_OFF): wide vector lengths,
+     * commuted forms, float32, masked fallback, bounds errors, FP status, and
+     * non-affine rejection (e.g. unary math on _flat_idx). */
+    {
+        /* 1D int64 ramp across AVX2 8-wide + 4-wide + scalar tails, with negative step */
+        const char *i64_json =
+            "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
+            "\"requires\":[\"numeric\",\"nd-context\"],"
+            "\"source\":\"def ramp(start, step):\\n    return step * _flat_idx + start\\n\","
+            "\"entry_point\":\"ramp\",\"inputs\":[],\"constants\":["
+            "{\"name\":\"start\",\"dtype\":\"int64\",\"category\":\"typed_scalar\",\"encoding\":\"decimal\",\"value\":\"100\"},"
+            "{\"name\":\"step\",\"dtype\":\"int64\",\"category\":\"typed_scalar\",\"encoding\":\"decimal\",\"value\":\"-3\"}],"
+            "\"output\":{\"dtype\":\"int64\",\"contract\":\"elementwise\"},"
+            "\"context\":{\"ndim\":1},\"semantics\":{\"fp\":\"strict\","
+            "\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}";
+        me_artifact *interp = NULL;
+        CHECK(!me_artifact_load(i64_json, strlen(i64_json), ME_JIT_OFF, &interp, &error));
+        CHECK(interp && !me_artifact_has_jit(interp));
+        me_dsl_compiled_program *p = dsl_artifact_program_for_tests(interp);
+        CHECK(p && p->menudet_direct_ramp);
+        int64_t out_i64[29];
+        const int64_t sh = 100, orig = 7, ext = 29;
+        me_artifact_eval_descriptor d = {
+            .struct_size=sizeof(d), .version=ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,
+            .nitems=29, .output_capacity=sizeof(out_i64), .ndim=1,
+            .logical_shape=&sh, .block_origin=&orig, .block_extent=&ext
+        };
+        CHECK(!me_artifact_eval_ex(interp, NULL, 0, out_i64, &d, &error));
+        for (int i = 0; i < 29; i++) {
+            CHECK(out_i64[i] == 100 + (orig + i) * (-3));
+        }
+        /* Out-of-bounds block must fail cleanly */
+        const int64_t bad_orig = 80;
+        d.block_origin = &bad_orig;
+        CHECK(me_artifact_eval_ex(interp, NULL, 0, out_i64, &d, &error) != ME_ARTIFACT_SUCCESS);
+        /* Partial mask must fall back to generic interpreter and preserve masked-out lanes */
+        uint8_t mask[29];
+        for (int i = 0; i < 29; i++) {
+            mask[i] = (uint8_t)(i & 1);
+            out_i64[i] = -999999;
+        }
+        d.block_origin = &orig;
+        d.valid_mask = mask;
+        d.valid_mask_capacity = sizeof(mask);
+        CHECK(!me_artifact_eval_ex(interp, NULL, 0, out_i64, &d, &error));
+        for (int i = 0; i < 29; i++) {
+            CHECK(out_i64[i] == (mask[i] ? (100 + (orig + i) * (-3)) : -999999));
+        }
+        me_artifact_free(interp);
+
+        /* 1D float32 ramp (float32 intermediates) across AVX2 16-wide + 8-wide + tail */
+        const char *f32_json =
+            "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
+            "\"requires\":[\"numeric\",\"nd-context\"],"
+            "\"source\":\"def ramp(start, step):\\n    return start + float32(_flat_idx) * step\\n\","
+            "\"entry_point\":\"ramp\",\"inputs\":[],\"constants\":["
+            "{\"name\":\"start\",\"dtype\":\"float32\",\"category\":\"typed_scalar\",\"encoding\":\"ieee754-hex\",\"value\":\"3f000000\"},"
+            "{\"name\":\"step\",\"dtype\":\"float32\",\"category\":\"typed_scalar\",\"encoding\":\"ieee754-hex\",\"value\":\"3e000000\"}],"
+            "\"output\":{\"dtype\":\"float32\",\"contract\":\"elementwise\"},"
+            "\"context\":{\"ndim\":1},\"semantics\":{\"fp\":\"strict\","
+            "\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}";
+        interp = NULL;
+        CHECK(!me_artifact_load(f32_json, strlen(f32_json), ME_JIT_OFF, &interp, &error));
+        CHECK(interp && !me_artifact_has_jit(interp));
+        p = dsl_artifact_program_for_tests(interp);
+        CHECK(p && p->menudet_direct_ramp);
+        float out_f32[37];
+        const int64_t f32_ext = 37;
+        me_artifact_eval_descriptor fd = {
+            .struct_size=sizeof(fd), .version=ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,
+            .nitems=37, .output_capacity=sizeof(out_f32), .ndim=1,
+            .logical_shape=&sh, .block_origin=&orig, .block_extent=&f32_ext
+        };
+        CHECK(!me_artifact_eval_ex(interp, NULL, 0, out_f32, &fd, &error));
+        for (int i = 0; i < 37; i++) {
+            float exp_v = 0.5f + (float)(orig + i) * 0.125f;
+            CHECK(!memcmp(&out_f32[i], &exp_v, sizeof(float)));
+        }
+        me_artifact_free(interp);
+
+        /* Non-affine unary math on _flat_idx must NOT match direct ramp */
+        const char *sin_json =
+            "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
+            "\"requires\":[\"numeric\",\"nd-context\"],"
+            "\"source\":\"def ramp():\\n    return 1.5 + sin(_flat_idx) * 0.25\\n\","
+            "\"entry_point\":\"ramp\",\"inputs\":[],\"constants\":[],"
+            "\"output\":{\"dtype\":\"float64\",\"contract\":\"elementwise\"},"
+            "\"context\":{\"ndim\":1},\"semantics\":{\"fp\":\"strict\","
+            "\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}";
+        interp = NULL;
+        CHECK(!me_artifact_load(sin_json, strlen(sin_json), ME_JIT_OFF, &interp, &error));
+        p = dsl_artifact_program_for_tests(interp);
+        CHECK(p && !p->menudet_direct_ramp);
+        double out_sin[4];
+        const int64_t sin_sh = 4, sin_orig = 0, sin_ext = 4;
+        me_artifact_eval_descriptor sd = {
+            .struct_size=sizeof(sd), .version=ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,
+            .nitems=4, .output_capacity=sizeof(out_sin), .ndim=1,
+            .logical_shape=&sin_sh, .block_origin=&sin_orig, .block_extent=&sin_ext
+        };
+        CHECK(!me_artifact_eval_ex(interp, NULL, 0, out_sin, &sd, &error));
+        CHECK(fabs(out_sin[1] - (1.5 + sin(1.0) * 0.25)) < 1e-12);
+        me_artifact_free(interp);
+
+        /* Direct interpreter ramp must preserve IEEE FP status (0 * inf -> INVALID) */
+        const char *inf_json =
+            "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
+            "\"requires\":[\"numeric\",\"nd-context\"],"
+            "\"source\":\"def ramp(start, step):\\n    return start + _flat_idx * step\\n\","
+            "\"entry_point\":\"ramp\",\"inputs\":[],\"constants\":["
+            "{\"name\":\"start\",\"dtype\":\"float64\",\"category\":\"typed_scalar\",\"encoding\":\"ieee754-hex\",\"value\":\"0000000000000000\"},"
+            "{\"name\":\"step\",\"dtype\":\"float64\",\"category\":\"typed_scalar\",\"encoding\":\"ieee754-hex\",\"value\":\"7ff0000000000000\"}],"
+            "\"output\":{\"dtype\":\"float64\",\"contract\":\"elementwise\"},"
+            "\"context\":{\"ndim\":1},\"semantics\":{\"fp\":\"strict\","
+            "\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}";
+        interp = NULL;
+        CHECK(!me_artifact_load(inf_json, strlen(inf_json), ME_JIT_OFF, &interp, &error));
+        p = dsl_artifact_program_for_tests(interp);
+        CHECK(p && p->menudet_direct_ramp);
+        double out_inf[4];
+        me_artifact_fp_status fp_status = {0};
+        CHECK(!me_artifact_eval_status(interp, NULL, 0, out_inf, &sd, 0, &fp_status, &error));
+        CHECK(isnan(out_inf[0]) && isinf(out_inf[1]));
+        if (fp_status.supported) {
+            CHECK((fp_status.flags & 1u) != 0); /* FE_INVALID from 0.0 * inf */
+        }
+        me_artifact_free(interp);
+
+        /* Float64-to-float32 narrowing ramp preserves exact float64 intermediates across wide AVX2 lengths */
+        const char *f64_f32_json =
+            "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
+            "\"requires\":[\"numeric\",\"nd-context\"],"
+            "\"source\":\"def ramp():\\n    return 0.0 + _flat_idx * 0.7777777777777778\\n\","
+            "\"entry_point\":\"ramp\",\"inputs\":[],\"constants\":[],"
+            "\"output\":{\"dtype\":\"float32\",\"contract\":\"elementwise\"},"
+            "\"context\":{\"ndim\":1},\"semantics\":{\"fp\":\"strict\","
+            "\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}";
+        interp = NULL;
+        CHECK(!me_artifact_load(f64_f32_json, strlen(f64_f32_json), ME_JIT_OFF, &interp, &error));
+        p = dsl_artifact_program_for_tests(interp);
+        CHECK(p && p->menudet_direct_ramp && p->menudet_ramp_kind == ME_DSL_RAMP_F64_TO_F32);
+        float out_f64_f32[37];
+        CHECK(!me_artifact_eval_ex(interp, NULL, 0, out_f64_f32, &fd, &error));
+        for (int i = 0; i < 37; i++) {
+            float exp_v = (float)(0.0 + (double)(orig + i) * 0.7777777777777778);
+            CHECK(!memcmp(&out_f64_f32[i], &exp_v, sizeof(float)));
+        }
+        me_artifact_free(interp);
+
+        /* Narrow & unsigned integer ramps: modular wrap-around across 64B AVX2 + tail lengths */
+        const char *int_dtypes[] = {"uint64", "int32", "uint32", "int16", "uint16", "int8", "uint8"};
+        const size_t int_widths[] = {8, 4, 4, 2, 2, 1, 1};
+        const me_dsl_ramp_kind int_kinds[] = {
+            ME_DSL_RAMP_I64, ME_DSL_RAMP_U32, ME_DSL_RAMP_U32,
+            ME_DSL_RAMP_U16, ME_DSL_RAMP_U16, ME_DSL_RAMP_U8, ME_DSL_RAMP_U8
+        };
+        for (int t = 0; t < 7; t++) {
+            char int_json[1024];
+            int jn = snprintf(int_json, sizeof(int_json),
+                "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
+                "\"requires\":[\"numeric\",\"nd-context\"],"
+                "\"source\":\"def ramp(start, step):\\n    return start + _flat_idx * step\\n\","
+                "\"entry_point\":\"ramp\",\"inputs\":[],\"constants\":["
+                "{\"name\":\"start\",\"dtype\":\"int64\",\"category\":\"typed_scalar\",\"encoding\":\"decimal\",\"value\":\"120\"},"
+                "{\"name\":\"step\",\"dtype\":\"int64\",\"category\":\"typed_scalar\",\"encoding\":\"decimal\",\"value\":\"-7\"}],"
+                "\"output\":{\"dtype\":\"%s\",\"contract\":\"elementwise\"},"
+                "\"context\":{\"ndim\":1},\"semantics\":{\"fp\":\"strict\","
+                "\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}",
+                int_dtypes[t]);
+            CHECK(jn > 0 && (size_t)jn < sizeof(int_json));
+            interp = NULL;
+            CHECK(!me_artifact_load(int_json, (size_t)jn, ME_JIT_OFF, &interp, &error));
+            p = dsl_artifact_program_for_tests(interp);
+            CHECK(p && p->menudet_direct_ramp && p->menudet_ramp_kind == int_kinds[t]);
+            uint8_t out_buf[105 * 8];
+            const int64_t ish = 200, iorig = 13, iext = 105;
+            me_artifact_eval_descriptor id = {
+                .struct_size=sizeof(id), .version=ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,
+                .nitems=105, .output_capacity=105 * int_widths[t], .ndim=1,
+                .logical_shape=&ish, .block_origin=&iorig, .block_extent=&iext
+            };
+            CHECK(!me_artifact_eval_ex(interp, NULL, 0, out_buf, &id, &error));
+            for (int i = 0; i < 105; i++) {
+                uint64_t expected_u64 = (uint64_t)(int64_t)120 + (uint64_t)(iorig + i) * (uint64_t)(int64_t)(-7);
+                if (int_widths[t] == 8) {
+                    uint64_t got; memcpy(&got, out_buf + (size_t)i * 8, 8);
+                    CHECK(got == expected_u64);
+                } else if (int_widths[t] == 4) {
+                    uint32_t got; memcpy(&got, out_buf + (size_t)i * 4, 4);
+                    CHECK(got == (uint32_t)expected_u64);
+                } else if (int_widths[t] == 2) {
+                    uint16_t got; memcpy(&got, out_buf + (size_t)i * 2, 2);
+                    CHECK(got == (uint16_t)expected_u64);
+                } else {
+                    CHECK(out_buf[i] == (uint8_t)expected_u64);
+                }
+            }
+            me_artifact_free(interp);
+        }
     }
 }
 

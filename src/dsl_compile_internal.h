@@ -45,6 +45,9 @@ int private_compile_profile_ex(const char *expression, const me_variable *variab
 bool contains_reduction(const me_expr *n);
 bool output_is_scalar(const me_expr *n);
 bool dsl_compiled_expr_uniform(const me_expr *n, const bool *uniform, int nvars);
+bool dsl_menudet_match_ramp(const me_dsl_compiled_program *p, const me_expr *root,
+                            const me_expr **start, const me_expr **step,
+                            me_dsl_ramp_kind *kind);
 me_dsl_compiled_program *dsl_compile_program(const char *source,
                                              const me_variable *variables,
                                              int var_count,

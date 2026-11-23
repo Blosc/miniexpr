@@ -171,6 +171,17 @@ typedef struct {
     me_dsl_jit_param_binding_kind kind;
 } me_dsl_jit_param_binding;
 
+typedef enum {
+    ME_DSL_RAMP_NONE = 0,
+    ME_DSL_RAMP_I64,
+    ME_DSL_RAMP_U32,
+    ME_DSL_RAMP_U16,
+    ME_DSL_RAMP_U8,
+    ME_DSL_RAMP_F32,
+    ME_DSL_RAMP_F64,
+    ME_DSL_RAMP_F64_TO_F32
+} me_dsl_ramp_kind;
+
 typedef struct {
     me_dsl_compiled_block block;
     me_dsl_var_table vars;
@@ -255,6 +266,10 @@ typedef struct {
     bool jit_dl_handle_cached;
     bool menudet_jit_has_arith_bridge;
     bool menudet_jit_has_ramp_bridge;
+    bool menudet_direct_ramp;
+    me_dsl_ramp_kind menudet_ramp_kind;
+    const me_expr *menudet_ramp_start;
+    const me_expr *menudet_ramp_step;
     uint8_t menudet_jit_arith_ntemps;
     uint16_t menudet_jit_arith_nnodes;
 } me_dsl_compiled_program;

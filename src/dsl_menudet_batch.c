@@ -244,6 +244,191 @@ ME_BATCH_NOINLINE void dsl_menudet_batch_ramp_f64(int64_t base, double start, do
     for (; i < count; i++) out[i] = start + (double)(base + i) * step;
 }
 
+static ME_BATCH_NOINLINE void dsl_menudet_batch_ramp_f64_to_f32(
+        int64_t base, double start, double step, float *restrict out, int count) {
+    int i = 0;
+#if defined(ME_BATCH_X86_64)
+    if (count >= 4 && base >= 0 && base <= (INT64_C(1) << 53) - (int64_t)count - 4) {
+        __m128d idx0 = _mm_set_pd((double)(base + 1), (double)base);
+        __m128d idx1 = _mm_add_pd(idx0, _mm_set1_pd(2.0));
+        const __m128d inc4 = _mm_set1_pd(4.0);
+        const __m128d vstart = _mm_set1_pd(start);
+        const __m128d vstep = _mm_set1_pd(step);
+        for (; i + 4 <= count; i += 4) {
+            __m128 f0 = _mm_cvtpd_ps(_mm_add_pd(vstart, _mm_mul_pd(idx0, vstep)));
+            __m128 f1 = _mm_cvtpd_ps(_mm_add_pd(vstart, _mm_mul_pd(idx1, vstep)));
+            _mm_storeu_ps(out + i, _mm_movelh_ps(f0, f1));
+            idx0 = _mm_add_pd(idx0, inc4);
+            idx1 = _mm_add_pd(idx1, inc4);
+        }
+    }
+#elif defined(ME_BATCH_ARM64)
+    if (count >= 4 && base >= 0 && base <= (INT64_C(1) << 53) - (int64_t)count - 4) {
+        float64x2_t idx0 = vsetq_lane_f64((double)(base + 1), vdupq_n_f64((double)base), 1);
+        const float64x2_t inc2 = vdupq_n_f64(2.0);
+        float64x2_t idx1 = vaddq_f64(idx0, inc2);
+        const float64x2_t inc4 = vdupq_n_f64(4.0);
+        const float64x2_t vstart = vdupq_n_f64(start);
+        const float64x2_t vstep = vdupq_n_f64(step);
+        for (; i + 4 <= count; i += 4) {
+            float32x2_t f0 = vcvt_f32_f64(vaddq_f64(vstart, vmulq_f64(idx0, vstep)));
+            float32x2_t f1 = vcvt_f32_f64(vaddq_f64(vstart, vmulq_f64(idx1, vstep)));
+            vst1q_f32(out + i, vcombine_f32(f0, f1));
+            idx0 = vaddq_f64(idx0, inc4);
+            idx1 = vaddq_f64(idx1, inc4);
+        }
+    }
+#endif
+    for (; i < count; i++) out[i] = (float)(start + (double)(base + i) * step);
+}
+
+static ME_BATCH_NOINLINE void dsl_menudet_batch_ramp_u32(
+        int64_t base, int64_t start, int64_t step, uint32_t *restrict out, int count) {
+    uint32_t ustep = (uint32_t)(uint64_t)step;
+    uint32_t v0 = (uint32_t)((uint64_t)start + (uint64_t)base * (uint64_t)step);
+    int i = 0;
+#if defined(ME_BATCH_X86_64)
+    if (count >= 4) {
+        uint32_t init[4];
+        for (int k = 0; k < 4; k++) init[k] = v0 + (uint32_t)k * ustep;
+        __m128i cur0 = _mm_loadu_si128((const __m128i *)init);
+        __m128i inc4 = _mm_set1_epi32((int32_t)(4u * ustep));
+        __m128i cur1 = _mm_add_epi32(cur0, inc4);
+        __m128i inc8 = _mm_set1_epi32((int32_t)(8u * ustep));
+        for (; i + 8 <= count; i += 8) {
+            _mm_storeu_si128((__m128i *)(out + i), cur0);
+            _mm_storeu_si128((__m128i *)(out + i + 4), cur1);
+            cur0 = _mm_add_epi32(cur0, inc8);
+            cur1 = _mm_add_epi32(cur1, inc8);
+        }
+        if (i + 4 <= count) {
+            _mm_storeu_si128((__m128i *)(out + i), cur0);
+            i += 4;
+        }
+    }
+#elif defined(ME_BATCH_ARM64)
+    if (count >= 4) {
+        uint32_t init[4];
+        for (int k = 0; k < 4; k++) init[k] = v0 + (uint32_t)k * ustep;
+        uint32x4_t cur0 = vld1q_u32(init);
+        const uint32x4_t inc4 = vdupq_n_u32(4u * ustep);
+        if (count >= 8) {
+            uint32x4_t cur1 = vaddq_u32(cur0, inc4);
+            const uint32x4_t inc8 = vdupq_n_u32(8u * ustep);
+            for (; i + 8 <= count; i += 8) {
+                vst1q_u32(out + i, cur0);
+                vst1q_u32(out + i + 4, cur1);
+                cur0 = vaddq_u32(cur0, inc8);
+                cur1 = vaddq_u32(cur1, inc8);
+            }
+        }
+        if (i + 4 <= count) {
+            vst1q_u32(out + i, cur0);
+            i += 4;
+        }
+    }
+#endif
+    for (; i < count; i++) out[i] = v0 + (uint32_t)i * ustep;
+}
+
+static ME_BATCH_NOINLINE void dsl_menudet_batch_ramp_u16(
+        int64_t base, int64_t start, int64_t step, uint16_t *restrict out, int count) {
+    uint16_t ustep = (uint16_t)(uint64_t)step;
+    uint16_t v0 = (uint16_t)((uint64_t)start + (uint64_t)base * (uint64_t)step);
+    int i = 0;
+#if defined(ME_BATCH_X86_64)
+    if (count >= 8) {
+        uint16_t init[8];
+        for (int k = 0; k < 8; k++) init[k] = (uint16_t)(v0 + (uint16_t)k * ustep);
+        __m128i cur0 = _mm_loadu_si128((const __m128i *)init);
+        __m128i inc8 = _mm_set1_epi16((int16_t)(uint16_t)(8u * ustep));
+        __m128i cur1 = _mm_add_epi16(cur0, inc8);
+        __m128i inc16 = _mm_set1_epi16((int16_t)(uint16_t)(16u * ustep));
+        for (; i + 16 <= count; i += 16) {
+            _mm_storeu_si128((__m128i *)(out + i), cur0);
+            _mm_storeu_si128((__m128i *)(out + i + 8), cur1);
+            cur0 = _mm_add_epi16(cur0, inc16);
+            cur1 = _mm_add_epi16(cur1, inc16);
+        }
+        if (i + 8 <= count) {
+            _mm_storeu_si128((__m128i *)(out + i), cur0);
+            i += 8;
+        }
+    }
+#elif defined(ME_BATCH_ARM64)
+    if (count >= 8) {
+        uint16_t init[8];
+        for (int k = 0; k < 8; k++) init[k] = (uint16_t)(v0 + (uint16_t)k * ustep);
+        uint16x8_t cur0 = vld1q_u16(init);
+        const uint16x8_t inc8 = vdupq_n_u16((uint16_t)(8u * ustep));
+        if (count >= 16) {
+            uint16x8_t cur1 = vaddq_u16(cur0, inc8);
+            const uint16x8_t inc16 = vdupq_n_u16((uint16_t)(16u * ustep));
+            for (; i + 16 <= count; i += 16) {
+                vst1q_u16(out + i, cur0);
+                vst1q_u16(out + i + 8, cur1);
+                cur0 = vaddq_u16(cur0, inc16);
+                cur1 = vaddq_u16(cur1, inc16);
+            }
+        }
+        if (i + 8 <= count) {
+            vst1q_u16(out + i, cur0);
+            i += 8;
+        }
+    }
+#endif
+    for (; i < count; i++) out[i] = (uint16_t)(v0 + (uint16_t)i * ustep);
+}
+
+static ME_BATCH_NOINLINE void dsl_menudet_batch_ramp_u8(
+        int64_t base, int64_t start, int64_t step, uint8_t *restrict out, int count) {
+    uint8_t ustep = (uint8_t)(uint64_t)step;
+    uint8_t v0 = (uint8_t)((uint64_t)start + (uint64_t)base * (uint64_t)step);
+    int i = 0;
+#if defined(ME_BATCH_X86_64)
+    if (count >= 16) {
+        uint8_t init[16];
+        for (int k = 0; k < 16; k++) init[k] = (uint8_t)(v0 + (uint8_t)k * ustep);
+        __m128i cur0 = _mm_loadu_si128((const __m128i *)init);
+        __m128i inc16 = _mm_set1_epi8((int8_t)(uint8_t)(16u * ustep));
+        __m128i cur1 = _mm_add_epi8(cur0, inc16);
+        __m128i inc32 = _mm_set1_epi8((int8_t)(uint8_t)(32u * ustep));
+        for (; i + 32 <= count; i += 32) {
+            _mm_storeu_si128((__m128i *)(out + i), cur0);
+            _mm_storeu_si128((__m128i *)(out + i + 16), cur1);
+            cur0 = _mm_add_epi8(cur0, inc32);
+            cur1 = _mm_add_epi8(cur1, inc32);
+        }
+        if (i + 16 <= count) {
+            _mm_storeu_si128((__m128i *)(out + i), cur0);
+            i += 16;
+        }
+    }
+#elif defined(ME_BATCH_ARM64)
+    if (count >= 16) {
+        uint8_t init[16];
+        for (int k = 0; k < 16; k++) init[k] = (uint8_t)(v0 + (uint8_t)k * ustep);
+        uint8x16_t cur0 = vld1q_u8(init);
+        const uint8x16_t inc16 = vdupq_n_u8((uint8_t)(16u * ustep));
+        if (count >= 32) {
+            uint8x16_t cur1 = vaddq_u8(cur0, inc16);
+            const uint8x16_t inc32 = vdupq_n_u8((uint8_t)(32u * ustep));
+            for (; i + 32 <= count; i += 32) {
+                vst1q_u8(out + i, cur0);
+                vst1q_u8(out + i + 16, cur1);
+                cur0 = vaddq_u8(cur0, inc32);
+                cur1 = vaddq_u8(cur1, inc32);
+            }
+        }
+        if (i + 16 <= count) {
+            vst1q_u8(out + i, cur0);
+            i += 16;
+        }
+    }
+#endif
+    for (; i < count; i++) out[i] = (uint8_t)(v0 + (uint8_t)i * ustep);
+}
+
 #if defined(ME_BATCH_HAVE_AVX2_DISPATCH)
 static int me_batch_cpu_supports_avx2(void) {
     static int cached = -1;
@@ -371,6 +556,111 @@ static ME_BATCH_NOINLINE ME_BATCH_AVX2_TARGET void dsl_menudet_batch_ramp_f64_av
         }
     }
     for (; i < count; i++) out[i] = start + (double)(base + i) * step;
+}
+
+static ME_BATCH_NOINLINE ME_BATCH_AVX2_TARGET void dsl_menudet_batch_ramp_f64_to_f32_avx2(
+        int64_t base, double start, double step, float *restrict out, int count) {
+    int i = 0;
+    if (count >= 4 && base >= 0 && base <= (INT64_C(1) << 53) - (int64_t)count - 8) {
+        __m256d idx0 = _mm256_set_pd(
+            (double)(base + 3), (double)(base + 2), (double)(base + 1), (double)base);
+        __m256d idx1 = _mm256_add_pd(idx0, _mm256_set1_pd(4.0));
+        const __m256d inc8 = _mm256_set1_pd(8.0);
+        const __m256d vstart = _mm256_set1_pd(start);
+        const __m256d vstep = _mm256_set1_pd(step);
+        for (; i + 8 <= count; i += 8) {
+            __m256d d0 = _mm256_add_pd(vstart, _mm256_mul_pd(idx0, vstep));
+            __m256d d1 = _mm256_add_pd(vstart, _mm256_mul_pd(idx1, vstep));
+            _mm_storeu_ps(out + i, _mm256_cvtpd_ps(d0));
+            _mm_storeu_ps(out + i + 4, _mm256_cvtpd_ps(d1));
+            idx0 = _mm256_add_pd(idx0, inc8);
+            idx1 = _mm256_add_pd(idx1, inc8);
+        }
+        if (i + 4 <= count) {
+            __m256d d0 = _mm256_add_pd(vstart, _mm256_mul_pd(idx0, vstep));
+            _mm_storeu_ps(out + i, _mm256_cvtpd_ps(d0));
+            i += 4;
+        }
+    }
+    for (; i < count; i++) out[i] = (float)(start + (double)(base + i) * step);
+}
+
+static ME_BATCH_NOINLINE ME_BATCH_AVX2_TARGET void dsl_menudet_batch_ramp_u32_avx2(
+        int64_t base, int64_t start, int64_t step, uint32_t *restrict out, int count) {
+    uint32_t ustep = (uint32_t)(uint64_t)step;
+    uint32_t v0 = (uint32_t)((uint64_t)start + (uint64_t)base * (uint64_t)step);
+    int i = 0;
+    if (count >= 8) {
+        uint32_t init[8];
+        for (int k = 0; k < 8; k++) init[k] = v0 + (uint32_t)k * ustep;
+        __m256i cur0 = _mm256_loadu_si256((const __m256i *)init);
+        __m256i inc8 = _mm256_set1_epi32((int32_t)(8u * ustep));
+        __m256i cur1 = _mm256_add_epi32(cur0, inc8);
+        __m256i inc16 = _mm256_set1_epi32((int32_t)(16u * ustep));
+        for (; i + 16 <= count; i += 16) {
+            _mm256_storeu_si256((__m256i *)(out + i), cur0);
+            _mm256_storeu_si256((__m256i *)(out + i + 8), cur1);
+            cur0 = _mm256_add_epi32(cur0, inc16);
+            cur1 = _mm256_add_epi32(cur1, inc16);
+        }
+        if (i + 8 <= count) {
+            _mm256_storeu_si256((__m256i *)(out + i), cur0);
+            i += 8;
+        }
+    }
+    for (; i < count; i++) out[i] = v0 + (uint32_t)i * ustep;
+}
+
+static ME_BATCH_NOINLINE ME_BATCH_AVX2_TARGET void dsl_menudet_batch_ramp_u16_avx2(
+        int64_t base, int64_t start, int64_t step, uint16_t *restrict out, int count) {
+    uint16_t ustep = (uint16_t)(uint64_t)step;
+    uint16_t v0 = (uint16_t)((uint64_t)start + (uint64_t)base * (uint64_t)step);
+    int i = 0;
+    if (count >= 16) {
+        uint16_t init[16];
+        for (int k = 0; k < 16; k++) init[k] = (uint16_t)(v0 + (uint16_t)k * ustep);
+        __m256i cur0 = _mm256_loadu_si256((const __m256i *)init);
+        __m256i inc16 = _mm256_set1_epi16((int16_t)(uint16_t)(16u * ustep));
+        __m256i cur1 = _mm256_add_epi16(cur0, inc16);
+        __m256i inc32 = _mm256_set1_epi16((int16_t)(uint16_t)(32u * ustep));
+        for (; i + 32 <= count; i += 32) {
+            _mm256_storeu_si256((__m256i *)(out + i), cur0);
+            _mm256_storeu_si256((__m256i *)(out + i + 16), cur1);
+            cur0 = _mm256_add_epi16(cur0, inc32);
+            cur1 = _mm256_add_epi16(cur1, inc32);
+        }
+        if (i + 16 <= count) {
+            _mm256_storeu_si256((__m256i *)(out + i), cur0);
+            i += 16;
+        }
+    }
+    for (; i < count; i++) out[i] = (uint16_t)(v0 + (uint16_t)i * ustep);
+}
+
+static ME_BATCH_NOINLINE ME_BATCH_AVX2_TARGET void dsl_menudet_batch_ramp_u8_avx2(
+        int64_t base, int64_t start, int64_t step, uint8_t *restrict out, int count) {
+    uint8_t ustep = (uint8_t)(uint64_t)step;
+    uint8_t v0 = (uint8_t)((uint64_t)start + (uint64_t)base * (uint64_t)step);
+    int i = 0;
+    if (count >= 32) {
+        uint8_t init[32];
+        for (int k = 0; k < 32; k++) init[k] = (uint8_t)(v0 + (uint8_t)k * ustep);
+        __m256i cur0 = _mm256_loadu_si256((const __m256i *)init);
+        __m256i inc32 = _mm256_set1_epi8((int8_t)(uint8_t)(32u * ustep));
+        __m256i cur1 = _mm256_add_epi8(cur0, inc32);
+        __m256i inc64 = _mm256_set1_epi8((int8_t)(uint8_t)(64u * ustep));
+        for (; i + 64 <= count; i += 64) {
+            _mm256_storeu_si256((__m256i *)(out + i), cur0);
+            _mm256_storeu_si256((__m256i *)(out + i + 32), cur1);
+            cur0 = _mm256_add_epi8(cur0, inc64);
+            cur1 = _mm256_add_epi8(cur1, inc64);
+        }
+        if (i + 32 <= count) {
+            _mm256_storeu_si256((__m256i *)(out + i), cur0);
+            i += 32;
+        }
+    }
+    for (; i < count; i++) out[i] = (uint8_t)(v0 + (uint8_t)i * ustep);
 }
 #endif
 
@@ -594,4 +884,35 @@ const me_pj_arith_table *dsl_menudet_batch_arith_table(void) {
     }
 #endif
     return &s_arith_table;
+}
+
+static const me_ramp_table s_ramp_table = {
+    .ramp_i64 = dsl_menudet_batch_ramp_i64,
+    .ramp_u32 = dsl_menudet_batch_ramp_u32,
+    .ramp_u16 = dsl_menudet_batch_ramp_u16,
+    .ramp_u8 = dsl_menudet_batch_ramp_u8,
+    .ramp_f32 = dsl_menudet_batch_ramp_f32,
+    .ramp_f64 = dsl_menudet_batch_ramp_f64,
+    .ramp_f64_to_f32 = dsl_menudet_batch_ramp_f64_to_f32,
+};
+
+#if defined(ME_BATCH_HAVE_AVX2_DISPATCH)
+static const me_ramp_table s_ramp_table_avx2 = {
+    .ramp_i64 = dsl_menudet_batch_ramp_i64_avx2,
+    .ramp_u32 = dsl_menudet_batch_ramp_u32_avx2,
+    .ramp_u16 = dsl_menudet_batch_ramp_u16_avx2,
+    .ramp_u8 = dsl_menudet_batch_ramp_u8_avx2,
+    .ramp_f32 = dsl_menudet_batch_ramp_f32_avx2,
+    .ramp_f64 = dsl_menudet_batch_ramp_f64_avx2,
+    .ramp_f64_to_f32 = dsl_menudet_batch_ramp_f64_to_f32_avx2,
+};
+#endif
+
+const me_ramp_table *dsl_menudet_batch_ramp_table(void) {
+#if defined(ME_BATCH_HAVE_AVX2_DISPATCH)
+    if (me_batch_cpu_supports_avx2()) {
+        return &s_ramp_table_avx2;
+    }
+#endif
+    return &s_ramp_table;
 }
