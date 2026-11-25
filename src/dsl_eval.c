@@ -39,6 +39,40 @@ static ME_DSL_THREAD_LOCAL uint8_t *dsl_tls_arena = NULL;
 static ME_DSL_THREAD_LOCAL size_t dsl_tls_arena_cap = 0;
 static ME_DSL_THREAD_LOCAL int dsl_tls_arena_in_use = 0;
 
+#if !defined(__EMSCRIPTEN__) && !defined(_WIN32)
+#include <pthread.h>
+/* The scratch arena is a per-thread cache. A joined worker must release it at
+ * thread exit rather than retaining storage until process termination. */
+static pthread_key_t dsl_tls_arena_key;
+static pthread_once_t dsl_tls_arena_once = PTHREAD_ONCE_INIT;
+static int dsl_tls_arena_key_ready = 0;
+
+static void dsl_tls_arena_release(void *value) {
+    free(value);
+}
+
+static void dsl_tls_arena_exit(void) {
+    void *value = pthread_getspecific(dsl_tls_arena_key);
+    if (value) {
+        pthread_setspecific(dsl_tls_arena_key, NULL);
+        if (value == dsl_tls_arena) dsl_tls_arena = NULL;
+        free(value);
+    }
+}
+
+static void dsl_tls_arena_init(void) {
+    dsl_tls_arena_key_ready = pthread_key_create(&dsl_tls_arena_key, dsl_tls_arena_release) == 0;
+    if (dsl_tls_arena_key_ready) atexit(dsl_tls_arena_exit);
+}
+
+static void dsl_tls_arena_publish(void) {
+    pthread_once(&dsl_tls_arena_once, dsl_tls_arena_init);
+    if (dsl_tls_arena_key_ready) pthread_setspecific(dsl_tls_arena_key, dsl_tls_arena);
+}
+#else
+static void dsl_tls_arena_publish(void) {}
+#endif
+
 typedef struct {
     const me_dsl_compiled_program *program;
     void **var_buffers;
@@ -1752,6 +1786,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
             if (new_arena) {
                 dsl_tls_arena = new_arena;
                 dsl_tls_arena_cap = total_arena_bytes;
+                dsl_tls_arena_publish();
             }
         }
         if (dsl_tls_arena_cap >= total_arena_bytes) {

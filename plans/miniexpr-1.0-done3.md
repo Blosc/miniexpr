@@ -49,5 +49,13 @@ refactor. Export visibility does not make private helper symbols a stable ABI.
 The core contract is ready for the 1.0 freeze; this work does not publish a
 release tag or promise compatibility with alpha-pilot layouts.
 
+Hosted sanitizer qualification found one thread-lifetime issue in the temporary
+evaluation arena: workers retained their last scratch buffer after being joined.
+POSIX builds now associate the per-thread arena with a pthread key whose
+destructor frees it at thread exit; the main thread is released at process exit.
+This is scratch-cache ownership, not a semantic change. The focused GCC
+ASan/UBSan suite (14 checks, including portable interpreter, grid, recipe peer
+and allocation-failure tests) passes with leak detection enabled.
+
 Raw logs, build trees and generated fixture payloads remain outside the source
 trees. The reusable qualification fixtures and concise results belong here.
