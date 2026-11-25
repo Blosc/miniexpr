@@ -57,5 +57,29 @@ This is scratch-cache ownership, not a semantic change. The focused GCC
 ASan/UBSan suite (14 checks, including portable interpreter, grid, recipe peer
 and allocation-failure tests) passes with leak detection enabled.
 
+## Final local qualification for `87de2f0`
+
+| Configuration | Result |
+| --- | --- |
+| Linux GCC 13, artifact enabled | 377/377 |
+| Linux Clang 18, including host-CC JIT | 377/377 |
+| Linux GCC, SLEEF and bundled libtcc | 470/470 |
+| Linux ASan/UBSan, leak detection | 14/14 focused |
+| macOS artifact-enabled | 377/377 |
+| macOS ASan/UBSan focused | 11/11 |
+| WASM32 side-module focused | 8/8 |
+| WASM32 standalone JIT/interpreter | 5/5 |
+| Embedded core-only and artifact consumers | 2/2 |
+| Installed core-only C99 consumer | Passed |
+| C-Blosc2 constructors against core-only library | Passed |
+| C-Blosc2 `sum_linspace`, exact sum | Correct |
+| Python Menudet/recipe/DSL/table/graph selection | 3002 passed, 24 skipped, 3 xfailed |
+
+Python's ordinary formula prefilter owns a typed kernel/grid handle. Explicit
+source plus formula reductions/ND coordinates stay on the compatibility
+evaluator, so no formula-reduction semantics are selected by migration.
+Rejected preparation no longer installs a callback, and attempts to overwrite an
+existing prefilter are rejected before compile or allocation.
+
 Raw logs, build trees and generated fixture payloads remain outside the source
 trees. The reusable qualification fixtures and concise results belong here.
