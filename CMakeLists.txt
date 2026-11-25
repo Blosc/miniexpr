@@ -224,7 +224,7 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
     endif()
   endforeach()
-  install(FILES src/miniexpr.h src/miniexpr_kernel.h src/miniexpr_grid.h src/miniexpr_reduce.h
+  install(FILES src/miniexpr.h src/miniexpr_types.h src/miniexpr_kernel.h src/miniexpr_grid.h src/miniexpr_reduce.h
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 endif()
 

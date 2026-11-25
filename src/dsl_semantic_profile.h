@@ -8,15 +8,13 @@
 /* Per-compilation semantics, never a mutable process-wide switch. */
 typedef enum {
     ME_DSL_PROFILE_FULL = 0,
-    /* Historical checked-arithmetic test profile; no public artifact selects it. */
-    ME_DSL_PROFILE_MENUDET_CHECKED = 2,
     /* NumPy-style implementation used by public Menudet 0.1 beta. */
-    ME_DSL_PROFILE_MENUDET_0_1
+    ME_DSL_PROFILE_MENUDET_0_1 = 3
 } me_dsl_semantic_profile;
 
 /* Shared typed infrastructure, but never shared numerical policy. */
 static inline int dsl_menudet_typed_profile(me_dsl_semantic_profile profile) {
-    return profile == ME_DSL_PROFILE_MENUDET_CHECKED || profile == ME_DSL_PROFILE_MENUDET_0_1;
+    return profile == ME_DSL_PROFILE_MENUDET_0_1;
 }
 
 #endif

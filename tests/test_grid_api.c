@@ -8,6 +8,9 @@
 #include <stdio.h>
 #include <string.h>
 #include "miniexpr_grid.h"
+#ifdef MINIEXPR_H
+#error "Stable grid headers must not expose the callback-bearing compatibility API"
+#endif
 
 static me_kernel *prepare(bool scalar) {
     me_input_spec input = {"x", ME_FLOAT64, 0};

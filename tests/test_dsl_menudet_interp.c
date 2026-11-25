@@ -31,10 +31,10 @@ static me_dsl_compiled_program *compile(const char *source, me_variable *vars, i
     bool is_dsl;
     int error;
     me_dsl_compiled_program *p = dsl_compile_program_profile(source, vars, nvars, out, 0,
-        ME_JIT_ON, ME_DSL_PROFILE_MENUDET_CHECKED, &error, &is_dsl, reason, sizeof(reason));
+        ME_JIT_OFF, ME_DSL_PROFILE_MENUDET_0_1, &error, &is_dsl, reason, sizeof(reason));
     if (!p) fprintf(stderr, "compile failure: %s at %d\n%s\n", reason, error, source);
     assert(p && is_dsl);
-    assert(p->semantic_profile == ME_DSL_PROFILE_MENUDET_CHECKED);
+    assert(p->semantic_profile == ME_DSL_PROFILE_MENUDET_0_1);
     assert(p->jit_request_mode == ME_JIT_OFF && !p->jit_ir && !p->jit_kernel_fn);
     return p;
 }
@@ -50,7 +50,7 @@ static void rejected(const char *source, me_variable *vars, int nvars, const cha
     int error;
     bool is_dsl;
     me_dsl_compiled_program *p = dsl_compile_program_profile(source, vars, nvars, ME_AUTO, 0,
-        ME_JIT_DEFAULT, ME_DSL_PROFILE_MENUDET_CHECKED, &error, &is_dsl, reason, sizeof(reason));
+        ME_JIT_OFF, ME_DSL_PROFILE_MENUDET_0_1, &error, &is_dsl, reason, sizeof(reason));
     assert(!p && is_dsl && strstr(reason, message));
 }
 
@@ -74,7 +74,8 @@ int main(void) {
     assert(eval(p, inputs, 1, result, 2) == 0 && result[0] == 0 && result[1] == INT64_C(9214364837600034814));
     dsl_compiled_program_free(p);
     p = compile("def kernel(x):\n    return x + 1\n", &x, 1, ME_INT64);
-    assert(eval(p, inputs, 1, result, 2) != 0);
+    assert(eval(p, inputs, 1, result, 2) == 0 &&
+        result[0] == ints[0] + 1 && result[1] == INT64_MIN);
     dsl_compiled_program_free(p);
     p = compile("def kernel(x):\n    return where(x < 9223372036854775807, x + 1, x)\n", &x, 1, ME_INT64);
     assert(eval(p, inputs, 1, result, 2) == 0 && result[0] == ints[0] + 1 && result[1] == INT64_MAX);
@@ -91,11 +92,11 @@ int main(void) {
     int8_t narrow[] = {126, 127};
     inputs[0] = narrow;
     p = compile("def kernel(x):\n    return x + 1\n", &x, 1, ME_INT64);
-    assert(eval(p, inputs, 1, result, 2) != 0); /* Output widening must not hide int8 overflow. */
+    assert(eval(p, inputs, 1, result, 2) == 0 && result[0] == 127 && result[1] == -128);
     dsl_compiled_program_free(p);
     rejected("def kernel(x):\n    return x + 128\n", &x, 1, "literal");
     p = compile("def kernel(x):\n    return x * 2\n", &x, 1, ME_INT64);
-    assert(eval(p, inputs, 1, result, 2) != 0);
+    assert(eval(p, inputs, 1, result, 2) == 0 && result[0] == -4 && result[1] == -2);
     dsl_compiled_program_free(p);
     narrow[0] = -7;
     narrow[1] = 7;
@@ -103,7 +104,7 @@ int main(void) {
     assert(eval(p, inputs, 1, result, 2) == 0 && result[0] == -4 && result[1] == 3);
     dsl_compiled_program_free(p);
     p = compile("def kernel(x):\n    return x << 8\n", &x, 1, ME_INT64);
-    assert(eval(p, inputs, 1, result, 2) != 0);
+    assert(eval(p, inputs, 1, result, 2) == 0 && result[0] == 0 && result[1] == 0);
     dsl_compiled_program_free(p);
     p = compile("def kernel(x):\n    return ~x\n", &x, 1, ME_INT64);
     assert(eval(p, inputs, 1, result, 2) == 0 && result[0] == 6 && result[1] == -8);
@@ -112,7 +113,7 @@ int main(void) {
     assert(eval(p, inputs, 1, result, 2) == 0 && result[0] == 49 && result[1] == 49);
     dsl_compiled_program_free(p);
     p = compile("def kernel(x):\n    return x ** 3\n", &x, 1, ME_INT64);
-    assert(eval(p, inputs, 1, result, 2) != 0);
+    assert(eval(p, inputs, 1, result, 2) == 0 && result[0] == -87 && result[1] == 87);
     dsl_compiled_program_free(p);
 
     x.dtype = ME_BOOL;
@@ -126,7 +127,7 @@ int main(void) {
     assert(eval(p, inputs, 1, bool_out, 2) == 0 && bool_out[0] && !bool_out[1]);
     dsl_compiled_program_free(p);
     p = compile("def kernel(x):\n    return int(x + x)\n", &x, 1, ME_INT64);
-    assert(eval(p, inputs, 1, result, 2) == 0 && result[0] == 2 && result[1] == 0);
+    assert(eval(p, inputs, 1, result, 2) == 0 && result[0] == 1 && result[1] == 0);
     dsl_compiled_program_free(p);
 
     x.dtype = ME_FLOAT64;
@@ -153,11 +154,11 @@ int main(void) {
     assert(eval(p, inputs, 1, result, 2) == 0 && result[0] == 2 && result[1] == 1);
     dsl_compiled_program_free(p);
     p = compile("def kernel(x):\n    return x // 0\n", &x, 1, ME_INT64);
-    assert(eval(p, inputs, 1, result, 2) != 0);
+    assert(eval(p, inputs, 1, result, 2) == 0 && result[0] == 0 && result[1] == 0);
     dsl_compiled_program_free(p);
     p = compile("def kernel(x):\n    return x < 0 or x // 0 > 1\n", &x, 1, ME_BOOL);
     assert(eval(p, inputs, 1, bool_out, 1) == 0 && bool_out[0]);
-    assert(eval(p, inputs, 1, bool_out, 2) != 0);
+    assert(eval(p, inputs, 1, bool_out, 2) == 0 && bool_out[0] && !bool_out[1]);
     dsl_compiled_program_free(p);
     p = compile("def kernel(x):\n    a = x\n    for i in range(3):\n        a = a + 1\n    return a\n", &x, 1, ME_INT64);
     assert(eval(p, inputs, 1, result, 2) == 0 && result[0] == -4 && result[1] == 10);
@@ -178,7 +179,7 @@ int main(void) {
     p = compile("def kernel(x):\n    return abs(x)\n", &x, 1, ME_INT64);
     assert(eval(p, inputs, 1, result, 2) == 0 && result[0] == 7 && result[1] == 7);
     signs[0] = INT64_MIN;
-    assert(eval(p, inputs, 1, result, 2) != 0);
+    assert(eval(p, inputs, 1, result, 2) == 0 && result[0] == INT64_MIN && result[1] == 7);
     dsl_compiled_program_free(p);
 
     x.dtype = ME_FLOAT32;
@@ -197,12 +198,16 @@ int main(void) {
 
     me_variable pair[] = {{.name = "x", .dtype = ME_INT64, .type = ME_VARIABLE},
                           {.name = "y", .dtype = ME_UINT64, .type = ME_VARIABLE}};
-    rejected("def kernel(x, y):\n    return x + y\n", pair, 2, "promotion");
     p = compile("def kernel(x, y):\n    return x < y\n", pair, 2, ME_BOOL);
     int64_t signed_values[] = {-1, INT64_MAX};
     uint64_t unsigned_values[] = {0, UINT64_MAX};
     const void *mixed_inputs[] = {signed_values, unsigned_values};
     assert(eval(p, mixed_inputs, 2, bool_out, 2) == 0 && bool_out[0] && bool_out[1]);
+    dsl_compiled_program_free(p);
+    p = compile("def kernel(x, y):\n    return x + y\n", pair, 2, ME_AUTO);
+    assert(p->output_dtype == ME_FLOAT64);
+    assert(eval(p, mixed_inputs, 2, out, 2) == 0 && out[0] == -1.0 &&
+        out[1] == 0x1.8p64);
     dsl_compiled_program_free(p);
 
     rejected("def kernel(x):\n    print(x)\n    return x\n", &x, 1, "print");
@@ -250,7 +255,7 @@ int main(void) {
     assert(p->output_is_scalar);
     assert(eval(p, inputs, 1, three_result, 3) == 0 && three_result[0] == INT64_MIN + 5);
     masked[0] = INT64_MAX;
-    assert(eval(p, inputs, 1, three_result, 3) != 0);
+    assert(eval(p, inputs, 1, three_result, 3) != 0); /* Ordered reduction overflow still rejects. */
     dsl_compiled_program_free(p);
     rejected("def kernel(x):\n    if x > 0:\n        return block_sum(x)\n    return 0\n", &x, 1, "reductions");
 
@@ -301,10 +306,12 @@ int main(void) {
     assert(eval(p, inputs, 1, bool_out, 2) == 0 && !bool_out[0] && bool_out[1]);
     dsl_compiled_program_free(p);
     p = compile("def kernel(x):\n    return x + 1\n", &x, 1, ME_UINT64);
-    assert(eval(p, inputs, 1, unsigned_out, 2) != 0);
+    assert(eval(p, inputs, 1, unsigned_out, 2) == 0 && unsigned_out[0] == wide[0] + 1 &&
+        unsigned_out[1] == 0);
     dsl_compiled_program_free(p);
     p = compile("def kernel(x):\n    return x\n", &x, 1, ME_INT64);
-    assert(eval(p, inputs, 1, result, 2) != 0);
+    assert(eval(p, inputs, 1, result, 2) == 0 && result[0] == INT64_C(9007199254740993) &&
+        result[1] == -1);
     dsl_compiled_program_free(p);
 
     x.dtype = ME_FLOAT64;
@@ -330,7 +337,7 @@ int main(void) {
     assert(eval(p, inputs, 1, out, 2) == 0 && out[0] == 2.0 && out[1] == -2.0);
     dsl_compiled_program_free(p);
     p = compile("def kernel(x):\n    return round(x)\n", &x, 1, ME_FLOAT64);
-    assert(eval(p, inputs, 1, out, 2) == 0 && out[0] == 3.0 && out[1] == -3.0);
+    assert(eval(p, inputs, 1, out, 2) == 0 && out[0] == 2.0 && out[1] == -2.0);
     dsl_compiled_program_free(p);
     x.name = "log";
     p = compile("def kernel(log):\n    return log\n", &x, 1, ME_FLOAT64);
@@ -672,8 +679,8 @@ static void independent_anchor_fixture(void) {
         {"lgamma", 1, 0}, {"tgamma", 5, 24}, {"sinpi", 0.5, 1}, {"cospi", 1, -1},
         {"abs", -2, 2}, {"square", -2, 4}, {"sign", -2, -1},
         {"ceil", -2.5, -2}, {"floor", -2.5, -3}, {"trunc", -2.5, -2},
-        {"rint", 2.5, 2}, {"round", 2.5, 3}, {"conj", -2, -2}, {"real", -2, -2}, {"imag", -2, 0},
-        {"rint", -0.5, -0.0}, {"round", -0.25, -0.0}, {"sqrt", -0.0, -0.0}, {"sign", -0.0, -0.0},
+        {"rint", 2.5, 2}, {"round", 2.5, 2}, {"conj", -2, -2}, {"real", -2, -2}, {"imag", -2, 0},
+        {"rint", -0.5, -0.0}, {"round", -0.25, -0.0}, {"sqrt", -0.0, -0.0}, {"sign", -0.0, 0.0},
         {"acos", 1, 0}, {"acosh", 1, 0}, {"asin", 0, 0},
         {"asinh", 0, 0}, {"atan", 0, 0}, {"atanh", 0, 0}
     };
@@ -681,7 +688,7 @@ static void independent_anchor_fixture(void) {
         {"atan2", 0, 1, 0}, {"atan2", 0, -1, 0x1.921fb54442d18p+1},
         {"atan2", 0, 1, 0}, {"copysign", 1, -1, -1}, {"fdim", 5, 3, 2},
         {"fmin", 5, 3, 3}, {"fmax", 5, 3, 5}, {"hypot", 3, 4, 5},
-        {"fmod", 7, 2, 1}, {"remainder", 7, 2, -1}, {"ldexp", 1.5, 2, 6},
+        {"fmod", 7, 2, 1}, {"remainder", 7, 2, 1}, {"ldexp", 1.5, 2, 6},
         {"logaddexp", 0, 0, 0x1.62e42fefa39efp-1}, {"pow", 2, 3, 8}, {"power", 2, 3, 8}
     };
     struct { const char *name; double x, y, expected; } specials[] = {

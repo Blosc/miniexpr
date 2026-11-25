@@ -345,14 +345,15 @@ jobs:
             '-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address,undefined'
           cmake --build build-asan --target menudet_jit_parity grid_allocation \
             graph_pairwise graph_compiler_allocation test_dsl_artifact test_grid_api \
-            test_kernel_api test_logical_operands test_nd test_pairwise_sum_core --parallel 4
+            test_kernel_api test_logical_operands test_nd test_pairwise_sum_core \
+            test_dsl_menudet_interp recipe_v2_peer --parallel 4
       - name: Qualify sanitized bridges and interpretation
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: |
           ctest --test-dir build-asan \
-            -R '^(menudet_jit_parity.*|grid_allocation|graph_pairwise|graph_compiler_allocation|test_dsl_artifact|test_grid_api|test_kernel_api|test_logical_operands|test_nd|test_pairwise_sum_core)$' \
+            -R '^(menudet_jit_parity.*|grid_allocation|graph_pairwise|graph_compiler_allocation|test_dsl_artifact|test_grid_api|test_kernel_api|test_logical_operands|test_nd|test_pairwise_sum_core|test_dsl_menudet_interp|recipe_v2_peer)$' \
             --output-on-failure
 
   qualification-evidence:

@@ -36,7 +36,7 @@ typedef struct {
 #define ME_GRID_BLOCK_INFO_INITIALIZER { sizeof(me_grid_block_info), 0, 0, 0, {0}, {0} }
 #define ME_GRID_BLOCK_INFO_V1_SIZE (offsetof(me_grid_block_info, extent) + sizeof(int64_t) * ME_GRID_MAX_NDIM)
 
-/* Provisional storage-neutral padded-grid adapter. Copies C-order geometry.
+/* Storage-neutral 1.0 padded-grid adapter. Copies C-order geometry.
  * Rank zero denotes one scalar block. Nonzero rank requires positive physical
  * chunk/block extents, even for an empty logical domain. */
 me_status me_grid_create(const me_grid_spec *spec, me_grid **out, me_error *error);

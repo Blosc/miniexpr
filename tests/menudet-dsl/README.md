@@ -1,6 +1,6 @@
-# Draft portable DSL 1.0 conformance
+# Menudet 0.1 source conformance
 
-These raw native sources exercise [draft 1.0](../../doc/dsl-spec/0.1.md),
+These raw native sources exercise [Menudet 0.1](../../doc/dsl-spec/0.1.md),
 not Python authoring and not exported artifacts. The typed interpreter is the
 admission and execution baseline. Optional compiler/JIT preferences must fall
 back before execution; they are not required-JIT certification.
@@ -23,8 +23,9 @@ checked. This transport subset is not the complete language dtype matrix.
 
 The identity conversion fixtures cover output conversions; arithmetic/cast,
 predicate, local, masked control-flow, loop cap and missing-return cases exercise
-operand-driven computation followed by checked output conversion. Checked
-overflow/domain, mixed signed/unsigned typing, reductions, fixed strings and ND
+operand-driven computation followed by final output conversion. Modular strong
+integer arithmetic, checked weak/range conversion, mixed signed/unsigned typing,
+reductions, fixed strings and ND
 coverage also live in the native portable type/interpreter/artifact unit tests.
 The `audit/` fixtures intentionally exercise different ordinary full-DSL behavior
 and run separately with the final `native` argument; they are not portable gates.
@@ -33,8 +34,11 @@ and run separately with the final `native` argument; they are not portable gates
 build/tests/menudet_dsl_runner tests/menudet-dsl/affine.dsl tests/menudet-dsl/affine.txt off
 ```
 
-Policies `off`, `on` and `default` are preferences. Draft execution reports
-`jit=0`. The runner links native miniexpr, never libpython. CTest supplies loop
+Policies `off`, `on` and `default` are preferences. Portable cases use
+`me_prepare_menudet` and `me_eval_block`; only the explicitly labelled native
+audit cases use compatibility compilation. The `jit` diagnostic describes the
+compatibility handle, not certification of a portable backend. The runner links
+native miniexpr, never libpython. CTest supplies loop
 caps and isolated caches; Python may opt into these fixtures with
 `MINIEXPR_MENUDET_CORPUS` and `MINIEXPR_MENUDET_RUNNER`, never sibling inference.
 Local results do not certify other platforms or universal numeric accuracy.

@@ -1,5 +1,12 @@
 # miniexpr 1.0: proposed stable C core
 
+Current contract and compatibility decisions are now in
+[`doc/core-api.md`](../doc/core-api.md) and
+[`doc/c-api-1.md`](../doc/c-api-1.md). The pilot chronology below is retained as
+historical design/review context, not as the current supported-header inventory.
+The checked-arithmetic profile has been retired, invocation-local interpreter
+selection is implemented, and structured C/Python recipe fixtures are available.
+
 Provisional design, now piloted in `src/miniexpr_kernel.h`. Design around one unit of work:
 specialize source against a known signature, then repeatedly execute that
 immutable specialization on logical blocks supplied by the caller.

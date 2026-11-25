@@ -5,14 +5,15 @@
 #ifndef MINIEXPR_KERNEL_H
 #define MINIEXPR_KERNEL_H
 
-#include "miniexpr.h"
+#include "miniexpr_types.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Provisional 1.0 API: qualify downstream callers before freezing this ABI.
- * No JSON dependency. Existing miniexpr.h entry points remain unchanged. */
+/* 1.0 embedding contract. No JSON dependency. Existing miniexpr.h entry points
+ * remain compatibility interfaces with their original source-language routing. */
+#define ME_KERNEL_API_VERSION 1
 typedef struct me_kernel me_kernel;
 
 typedef enum {
@@ -144,21 +145,29 @@ typedef struct {
     bool supported;
 } me_fp_status;
 
+typedef enum {
+    ME_RUN_PREPARED = 0,
+    ME_RUN_INTERPRET = 1
+} me_run_execution;
+
 typedef struct {
     size_t struct_size;
     unsigned raise_mask;
     me_fp_status *fp_status; /* Optional invocation-local report. */
+    me_run_execution execution; /* Invocation override; never mutates the kernel. */
+    uint8_t reserved[4];
 } me_run_options;
 
-#define ME_RUN_OPTIONS_INITIALIZER { sizeof(me_run_options), 0, NULL }
+#define ME_RUN_OPTIONS_INITIALIZER { sizeof(me_run_options), 0, NULL, ME_RUN_PREPARED, {0} }
 #define ME_RUN_OPTIONS_V1_SIZE (offsetof(me_run_options, fp_status) + sizeof(me_fp_status *))
+#define ME_RUN_OPTIONS_EXECUTION_SIZE (offsetof(me_run_options, execution) + sizeof(me_run_execution))
 
 /* Source is NUL-terminated. Inputs must have concrete dtypes. Captures and all
  * retained metadata are copied. On failure *out is NULL; error may be NULL.
  * Formulas currently admit elementwise expressions only: reductions are
  * deliberately unsupported until their 1.0 contract is settled. Formula JIT
  * preference never changes syntax or typing; require-JIT reports unsupported.
- * Menudet accepts "0.1" and the provisional annotated "0.2" language.
+ * Menudet accepts "0.1" and the annotated "0.2" language.
  * Input annotations require exact dtypes; return annotations convert last. */
 me_status me_prepare_formula(const char *source, const me_signature *signature,
     const me_prepare_options *options, me_kernel **out, me_error *error);
@@ -176,7 +185,10 @@ me_status me_describe(const me_kernel *kernel, me_kernel_info *out);
  * one output item, even for nitems=0; empty elementwise calls need none.
  * Independent calls may share a kernel, never invocation buffers or status.
  * FP state is restored; failure does not replay execution. Output on failure
- * is unspecified. No pointer supplied here survives the call. */
+ * is unspecified. No pointer supplied here survives the call.
+ * ME_RUN_INTERPRET bypasses a prepared JIT, even after REQUIRE_JIT preparation.
+ * Absent execution fields default to ME_RUN_PREPARED. No compilation or replay
+ * occurs during evaluation; the interpreter implements the same semantics. */
 me_status me_eval_block(const me_kernel *kernel, const me_buffer *inputs,
     size_t ninputs, me_mut_buffer output, const me_block *block,
     const me_run_options *options, me_error *error);

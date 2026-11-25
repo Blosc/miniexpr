@@ -4,7 +4,7 @@
  */
 #ifndef MINIEXPR_REDUCE_H
 #define MINIEXPR_REDUCE_H
-#include "miniexpr.h"
+#include "miniexpr_types.h"
 #include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>

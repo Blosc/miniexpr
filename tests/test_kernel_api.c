@@ -322,6 +322,18 @@ static void scalar_and_errors(void) {
     me_kernel_free(kernel);
 }
 
+#ifdef __EMSCRIPTEN__
+static int forbidden_jit(const void **inputs, void *output, int count) {
+#else
+static int forbidden_jit(const void **inputs, void *output, int64_t count) {
+#endif
+    (void)inputs;
+    (void)output;
+    (void)count;
+    assert(!"invocation-local interpreter selection reached JIT");
+    return -1;
+}
+
 static void execution_options(bool require_jit, bool tcc) {
     me_input_spec input = {"x", ME_FLOAT32, 0};
     me_signature sig = ME_SIGNATURE_INITIALIZER;
@@ -357,6 +369,15 @@ static void execution_options(bool require_jit, bool tcc) {
     block.nitems = 3;
     assert(me_eval_block(kernel, &buffer, 1, (me_mut_buffer){out, sizeof(out)}, &block, NULL, NULL) == ME_SUCCESS);
     assert(out[0] == 4 && out[1] == 8 && out[2] == 16);
+    me_run_options run = ME_RUN_OPTIONS_INITIALIZER;
+    run.execution = ME_RUN_INTERPRET;
+    me_dsl_jit_kernel_fn saved_jit = kernel->program->jit_kernel_fn;
+    kernel->program->jit_kernel_fn = forbidden_jit;
+    memset(out, 0, sizeof(out));
+    assert(me_eval_block(kernel, &buffer, 1, (me_mut_buffer){out, sizeof(out)},
+        &block, &run, NULL) == ME_SUCCESS);
+    assert(out[0] == 4 && out[1] == 8 && out[2] == 16);
+    kernel->program->jit_kernel_fn = saved_jit;
     uint8_t mask[] = {1, 1, 1};
     block.valid_mask = mask;
     block.valid_mask_capacity = sizeof(mask);
@@ -392,6 +413,26 @@ static void execution_options(bool require_jit, bool tcc) {
     sig.captures = NULL;
     sig.ncaptures = 0;
     assert(me_prepare_formula("2 * x", &sig, &options, &kernel, &error) == ME_ERR_UNSUPPORTED && !kernel);
+    sig.context_ndim = 1;
+    snprintf(source, sizeof(source), "# me:compiler=%s\ndef k(x):\n    return x + _flat_idx\n",
+        tcc ? "tcc" : "cc");
+    /* Restore the caller's original optional policy for builds without a JIT. */
+    if (!require_jit) options.execution = ME_EXEC_PREFER_JIT;
+    assert(me_prepare_menudet("0.2", source, &sig, &options, &kernel, &error) == ME_SUCCESS);
+    int64_t shape = 3, origin = 0, extent = 3;
+    block.ndim = 1;
+    block.logical_shape = &shape;
+    block.origin = &origin;
+    block.extent = &extent;
+    mask[1] = 0;
+    saved_jit = kernel->program->jit_kernel_fn;
+    kernel->program->jit_kernel_fn = forbidden_jit;
+    double indexed[3] = {0};
+    assert(me_eval_block(kernel, &buffer, 1, (me_mut_buffer){indexed, sizeof(indexed)},
+        &block, &run, NULL) == ME_SUCCESS);
+    assert(indexed[0] == 2 && indexed[2] == 10);
+    kernel->program->jit_kernel_fn = saved_jit;
+    me_kernel_free(kernel);
 }
 
 static void rejected_jit_contracts(void) {
@@ -506,7 +547,7 @@ static void descriptor_prefixes(void) {
     assert(ME_PREPARE_OPTIONS_V1_SIZE == sizeof(me_prepare_options));
     assert(ME_KERNEL_INFO_V1_SIZE == sizeof(me_kernel_info));
     assert(ME_BLOCK_V1_SIZE == sizeof(me_block));
-    assert(ME_RUN_OPTIONS_V1_SIZE == sizeof(me_run_options));
+    assert(ME_RUN_OPTIONS_V1_SIZE == offsetof(me_run_options, execution));
     assert(ME_GRID_SPEC_V1_SIZE == sizeof(me_grid_spec));
     assert(ME_GRID_BLOCK_INFO_V1_SIZE == sizeof(me_grid_block_info));
     struct { me_signature value; uint64_t suffix; } sig = {ME_SIGNATURE_INITIALIZER, UINT64_MAX};
@@ -525,7 +566,11 @@ static void descriptor_prefixes(void) {
     me_run_options run = ME_RUN_OPTIONS_INITIALIZER;
     block.struct_size = ME_BLOCK_V1_SIZE;
     run.struct_size = ME_RUN_OPTIONS_V1_SIZE;
+    run.execution = (me_run_execution)12345; /* An absent suffix is not read. */
     assert(me_eval_block(kernel, NULL, 0, (me_mut_buffer){0}, &block, &run, NULL) == ME_SUCCESS);
+    run.struct_size = sizeof(run);
+    assert(me_eval_block(kernel, NULL, 0, (me_mut_buffer){0}, &block, &run, NULL) == ME_ERR_INVALID_ARG);
+    run.execution = ME_RUN_PREPARED;
     block.struct_size--;
     assert(me_eval_block(kernel, NULL, 0, (me_mut_buffer){0}, &block, &run, NULL) == ME_ERR_INVALID_ARG);
     me_kernel_free(kernel);

@@ -216,10 +216,6 @@ static me_dtype p_numpy_math_dtype(me_dtype dtype) {
     return ME_FLOAT64;
 }
 
-static me_dtype p_promote(bool numpy, me_dtype left, me_dtype right) {
-    return numpy ? dsl_numpy_numeric_promote(left, right) : dsl_menudet_numeric_promote(left, right);
-}
-
 static me_menudet_numeric_status p_signed_op(const me_expr *n, me_menudet_integer_op op,
                                               int64_t left, int64_t right, int64_t *out) {
     return p_numpy(n) && !(n->flags & ME_EXPR_FLAG_WEAK_SCALAR) ? dsl_numpy_signed_op(n->dtype, op, left, right, out) :
@@ -425,11 +421,11 @@ bool dsl_menudet_convert_range_expr(me_expr **expr) {
     return true;
 }
 
-static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool numpy) {
+static bool p_type(me_expr **slot, char *reason, size_t cap, int depth) {
     me_expr *n = *slot;
     if (!n || depth > 128) return p_fail(reason, cap, "menudet expression nesting limit exceeded");
     n->flags |= ME_EXPR_FLAG_MENUDET_1;
-    if (numpy) n->flags |= ME_EXPR_FLAG_NUMPY_1_1;
+    n->flags |= ME_EXPR_FLAG_NUMPY_1_1;
     int kind = TYPE_MASK(n->type);
     if (kind == ME_VARIABLE || kind == ME_CONSTANT || kind == ME_STRING_CONSTANT) {
         if (is_string_dtype(n->dtype) || kind == ME_STRING_CONSTANT) {
@@ -447,11 +443,7 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
     }
     const char *op = me_menudet_operator(n);
     const char *math_name = me_menudet_math_name(n);
-    if (numpy && op && !strcmp(op, "%")) math_name = NULL;
-    if (!numpy && math_name && (p_predicate(math_name) || !strcmp(math_name, "minimum") ||
-        !strcmp(math_name, "maximum") || !strcmp(math_name, "floating_abs"))) {
-        return p_fail(reason, cap, "function requires menudet profile 1.1");
-    }
+    if (op && !strcmp(op, "%")) math_name = NULL;
     me_reduce_kind reduce = reduction_kind(n->function);
     me_dtype cast = dsl_menudet_cast_dtype(n);
     if (!op && !math_name && !reduce && cast == ME_AUTO && !me_menudet_string_operation(n)) {
@@ -459,7 +451,7 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
     }
     int arity = ARITY(n->type);
     for (int i = 0; i < arity; i++) {
-        if (!p_type((me_expr **)&n->parameters[i], reason, cap, depth + 1, numpy)) return false;
+        if (!p_type((me_expr **)&n->parameters[i], reason, cap, depth + 1)) return false;
     }
     if (op && !strcmp(op, "+") && is_string_dtype(((me_expr *)n->parameters[0])->dtype)) retag_string_concat(n);
     if (me_menudet_string_operation(n)) {
@@ -479,14 +471,14 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
         return true;
     }
     me_expr *a = n->parameters[0];
-    if (numpy && p_predicate(math_name)) {
+    if (p_predicate(math_name)) {
         if (p_complex(a->dtype) && !strcmp(math_name, "signbit")) {
             return p_fail(reason, cap, "signbit is not defined for complex operands");
         }
         n->dtype = ME_BOOL;
         return true;
     }
-    if (numpy && op && arity == 1 && !strcmp(op, "+")) {
+    if (op && arity == 1 && !strcmp(op, "+")) {
         if (a->dtype == ME_BOOL) return p_fail(reason, cap, "Boolean unary plus is unsupported");
         n->parameters[0] = NULL;
         me_free(n);
@@ -520,7 +512,7 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
         if (p_complex(a->dtype) && cast != ME_BOOL && !p_complex(cast)) {
             return p_fail(reason, cap, "explicit complex to real or integer cast is unsupported");
         }
-        if (numpy && !(n->flags & ME_EXPR_FLAG_EXPLICIT_DTYPE) && cast == ME_FLOAT64 && p_weak(a)) {
+        if (!(n->flags & ME_EXPR_FLAG_EXPLICIT_DTYPE) && cast == ME_FLOAT64 && p_weak(a)) {
             n->flags |= ME_EXPR_FLAG_WEAK_SCALAR;
         }
         n->function = NULL;
@@ -542,7 +534,7 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
             const me_expr *arg = n->parameters[i];
             if (p_complex(arg->dtype)) return p_fail(reason, cap, "fma is not supported for complex operands");
             if (arg->flags & ME_EXPR_FLAG_WEAK_LITERAL) continue;
-            common = common == ME_AUTO ? arg->dtype : p_promote(numpy, common, arg->dtype);
+            common = common == ME_AUTO ? arg->dtype : dsl_numpy_numeric_promote(common, arg->dtype);
             if (common == ME_AUTO) return p_fail(reason, cap, "unsupported fma operand promotion");
         }
         if (common == ME_AUTO) common = ME_FLOAT64;
@@ -559,8 +551,8 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
         const me_expr *exponent = n->parameters[1];
         if (p_complex(a->dtype)) return p_fail(reason, cap, "ldexp is not supported for complex operands");
         if (p_float(exponent->dtype)) return p_fail(reason, cap, "ldexp exponent must be integral");
-        if (numpy && exponent->dtype == ME_UINT64) return p_fail(reason, cap, "ldexp uint64 exponent is unsupported");
-        n->dtype = numpy ? p_numpy_math_dtype(a->dtype) : a->dtype == ME_FLOAT32 ? ME_FLOAT32 : ME_FLOAT64;
+        if (exponent->dtype == ME_UINT64) return p_fail(reason, cap, "ldexp uint64 exponent is unsupported");
+        n->dtype = p_numpy_math_dtype(a->dtype);
         if (n->dtype == ME_AUTO) return p_fail(reason, cap, "NumPy ldexp loop requires unsupported float16");
         return p_wrap((me_expr **)&n->parameters[0], n->dtype) &&
                p_wrap((me_expr **)&n->parameters[1], ME_INT64);
@@ -577,21 +569,15 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
                           !strcmp(math_name, "square") || !strcmp(math_name, "sign") ||
                           !strcmp(math_name, "conj") || !strcmp(math_name, "real") ||
                             !strcmp(math_name, "imag");
-        if (numpy) {
-            if (!strcmp(math_name, "sign") && a->dtype == ME_BOOL) return p_fail(reason, cap, "Boolean sign is unsupported");
-            if ((!strcmp(math_name, "square") || !strcmp(math_name, "conj")) && a->dtype == ME_BOOL) {
-                n->dtype = ME_INT8;
-                return p_wrap((me_expr **)&n->parameters[0], ME_INT8);
-            }
-            if (!strcmp(math_name, "rint") || !strcmp(math_name, "floating_abs")) preserving = false;
-            if (!strcmp(math_name, "round") && a->dtype == ME_BOOL) preserving = false;
-            n->dtype = preserving ? a->dtype : p_numpy_math_dtype(a->dtype);
-            if (n->dtype == ME_AUTO) return p_fail(reason, cap, "NumPy function loop requires unsupported float16");
-            return p_wrap((me_expr **)&n->parameters[0], n->dtype);
+        if (!strcmp(math_name, "sign") && a->dtype == ME_BOOL) return p_fail(reason, cap, "Boolean sign is unsupported");
+        if ((!strcmp(math_name, "square") || !strcmp(math_name, "conj")) && a->dtype == ME_BOOL) {
+            n->dtype = ME_INT8;
+            return p_wrap((me_expr **)&n->parameters[0], ME_INT8);
         }
-        if (numpy && preserving && p_weak(a)) n->flags |= ME_EXPR_FLAG_WEAK_SCALAR;
-        n->dtype = preserving ? (a->dtype == ME_BOOL && !numpy ? ME_INT64 : a->dtype) :
-                   a->dtype == ME_FLOAT32 ? ME_FLOAT32 : ME_FLOAT64;
+        if (!strcmp(math_name, "rint") || !strcmp(math_name, "floating_abs")) preserving = false;
+        if (!strcmp(math_name, "round") && a->dtype == ME_BOOL) preserving = false;
+        n->dtype = preserving ? a->dtype : p_numpy_math_dtype(a->dtype);
+        if (n->dtype == ME_AUTO) return p_fail(reason, cap, "NumPy function loop requires unsupported float16");
         return p_wrap((me_expr **)&n->parameters[0], n->dtype);
     }
     if (!op) op = math_name;
@@ -600,8 +586,8 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
         return true;
     }
     if (arity == 1) {
-        if (numpy && p_weak(a)) n->flags |= ME_EXPR_FLAG_WEAK_SCALAR;
-        if (numpy && a->dtype == ME_BOOL && !strcmp(op, "-")) return p_fail(reason, cap, "Boolean negation is unsupported; use logical not");
+        if (p_weak(a)) n->flags |= ME_EXPR_FLAG_WEAK_SCALAR;
+        if (a->dtype == ME_BOOL && !strcmp(op, "-")) return p_fail(reason, cap, "Boolean negation is unsupported; use logical not");
         n->dtype = a->dtype == ME_BOOL && strcmp(op, "~") ? ME_INT64 : a->dtype;
         if (!strcmp(op, "~") && (p_float(n->dtype) || p_complex(n->dtype))) return p_fail(reason, cap, "bitwise operand must be integral");
         return p_wrap((me_expr **)&n->parameters[0], n->dtype);
@@ -624,18 +610,14 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
     }
     bool weak_a = p_weak(a);
     bool weak_b = p_weak(b);
-    bool numeric_bool = math_name || (strcmp(op, "where") && !is_comparison_node(n) &&
-                        strcmp(op, "&") && strcmp(op, "|") && strcmp(op, "^"));
-    me_dtype context_a = !numpy && numeric_bool && b->dtype == ME_BOOL ? ME_INT64 : b->dtype;
-    me_dtype context_b = !numpy && numeric_bool && a->dtype == ME_BOOL ? ME_INT64 : a->dtype;
     me_dtype original_a = a->dtype, original_b = b->dtype;
     bool literal_ok = true;
-    if (weak_a && !weak_b && !p_context_literal(a, context_a)) {
-        if (numpy && is_comparison_node(n)) a->dtype = original_a;
+    if (weak_a && !weak_b && !p_context_literal(a, b->dtype)) {
+        if (is_comparison_node(n)) a->dtype = original_a;
         else literal_ok = false;
     }
-    if (weak_b && !weak_a && !p_context_literal(b, context_b)) {
-        if (numpy && is_comparison_node(n)) b->dtype = original_b;
+    if (weak_b && !weak_a && !p_context_literal(b, a->dtype)) {
+        if (is_comparison_node(n)) b->dtype = original_b;
         else literal_ok = false;
     }
     if (!literal_ok) {
@@ -646,20 +628,15 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
         n->dtype = ME_BOOL; /* Mixed int64/uint64 comparison stays exact. */
         return true;
     }
-    if (!numpy && (!strcmp(op, "<<") || !strcmp(op, ">>"))) {
-        if (p_float(a->dtype) || p_float(b->dtype)) return p_fail(reason, cap, "shift operands must be integral");
-        n->dtype = a->dtype == ME_BOOL ? ME_INT64 : a->dtype;
-        return p_wrap((me_expr **)&n->parameters[0], n->dtype);
-    }
-    me_dtype common = p_promote(numpy, a->dtype, b->dtype);
-    if (numpy && weak_a != weak_b) {
+    me_dtype common = dsl_numpy_numeric_promote(a->dtype, b->dtype);
+    if (weak_a != weak_b) {
         const me_expr *weak = weak_a ? a : b, *strong = weak_a ? b : a;
         if (weak->flags & ME_EXPR_FLAG_WEAK_SCALAR) {
             common = p_float(weak->dtype) && !p_float(strong->dtype) ? ME_FLOAT64 :
                      strong->dtype == ME_BOOL && weak->dtype != ME_BOOL ? weak->dtype : strong->dtype;
         }
     }
-    if (numpy && weak_a && weak_b) n->flags |= ME_EXPR_FLAG_WEAK_SCALAR;
+    if (weak_a && weak_b) n->flags |= ME_EXPR_FLAG_WEAK_SCALAR;
     bool complex_operands = p_complex(a->dtype) || p_complex(b->dtype);
     if (complex_operands) {
         if (math_name && !p_complex_binary_math(math_name)) {
@@ -670,7 +647,7 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
             return p_fail(reason, cap, "operation is not supported for complex operands");
         }
     }
-    if (numpy && math_name && !complex_operands &&
+    if (math_name && !complex_operands &&
         (strcmp(math_name, "minimum") && strcmp(math_name, "maximum") &&
         strcmp(math_name, "fmin") && strcmp(math_name, "fmax") && strcmp(math_name, "fmod") && strcmp(math_name, "ncr") && strcmp(math_name, "npr"))) {
         common = p_numpy_math_dtype(common);
@@ -678,11 +655,11 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
     }
     bool combinatoric = math_name && (!strcmp(math_name, "ncr") || !strcmp(math_name, "npr"));
     if (combinatoric && p_float(common)) return p_fail(reason, cap, "combinatoric operands must be integral");
-    if (numpy && combinatoric && common == ME_BOOL) common = ME_INT64;
+    if (combinatoric && common == ME_BOOL) common = ME_INT64;
     bool ordered = math_name && (!strcmp(math_name, "minimum") || !strcmp(math_name, "maximum") ||
                                   !strcmp(math_name, "fmin") || !strcmp(math_name, "fmax") || !strcmp(math_name, "fmod"));
-    if (numpy && math_name && !strcmp(math_name, "fmod") && common == ME_BOOL) common = ME_INT8;
-    if (math_name && !combinatoric && common != ME_AUTO && !(numpy && ordered)) {
+    if (math_name && !strcmp(math_name, "fmod") && common == ME_BOOL) common = ME_INT8;
+    if (math_name && !combinatoric && common != ME_AUTO && !ordered) {
         if (p_complex(common)) common = p_complex_math_dtype(common);
         else common = common == ME_FLOAT32 ? ME_FLOAT32 : ME_FLOAT64;
     }
@@ -690,18 +667,17 @@ static bool p_type(me_expr **slot, char *reason, size_t cap, int depth, bool num
         if (a->dtype == ME_BOOL && b->dtype == ME_BOOL) common = ME_BOOL;
         if (p_float(common) || p_complex(common)) return p_fail(reason, cap, "bitwise operands must be integral");
     }
-    if (numpy && (!strcmp(op, "<<") || !strcmp(op, ">>")) && (p_float(common) || p_complex(common) || common == ME_BOOL)) {
+    if ((!strcmp(op, "<<") || !strcmp(op, ">>")) && (p_float(common) || p_complex(common) || common == ME_BOOL)) {
         if (common == ME_BOOL) common = ME_INT8;
         else return p_fail(reason, cap, "shift operands require an integral common dtype");
     }
-    if (numpy && common == ME_BOOL) {
+    if (common == ME_BOOL) {
         if (!strcmp(op, "-")) return p_fail(reason, cap, "Boolean subtraction is unsupported");
         if (!strcmp(op, "//") || !strcmp(op, "%") || !strcmp(op, "**")) common = ME_INT8;
     }
     if (!strcmp(op, "/")) {
         if (p_complex(common)) common = dsl_menudet_division_dtype(a->dtype, b->dtype);
-        else common = numpy ? (p_float(common) ? common : ME_FLOAT64) :
-                     dsl_menudet_division_dtype(a->dtype, b->dtype);
+        else common = p_float(common) ? common : ME_FLOAT64;
     }
     if (common == ME_AUTO) return p_fail(reason, cap, "unsupported implicit numeric promotion; use an explicit cast");
     n->input_dtype = common;
@@ -721,14 +697,11 @@ static bool p_validate_literals(const me_expr *n) {
     return true;
 }
 
-bool dsl_menudet_type_expr(me_expr **expr, me_dtype output_dtype, char *reason, size_t cap) {
-    return dsl_menudet_type_expr_profile(expr, output_dtype, ME_DSL_PROFILE_MENUDET_CHECKED, reason, cap);
-}
-
 bool dsl_menudet_type_expr_profile(me_expr **expr, me_dtype output_dtype, me_dsl_semantic_profile profile,
                                     char *reason, size_t cap) {
     if (!expr || !*expr) return p_fail(reason, cap, "missing menudet expression");
-    if (!p_type(expr, reason, cap, 0, profile == ME_DSL_PROFILE_MENUDET_0_1)) return false;
+    if (profile != ME_DSL_PROFILE_MENUDET_0_1) return p_fail(reason, cap, "unsupported typed profile");
+    if (!p_type(expr, reason, cap, 0)) return false;
     if (!p_validate_literals(*expr)) return p_fail(reason, cap, "source literal is outside its computation dtype");
     if (output_dtype != ME_AUTO) {
         if (is_string_dtype(output_dtype)) return p_context_string_literal(*expr, output_dtype) || p_fail(reason, cap, "incompatible string output family");

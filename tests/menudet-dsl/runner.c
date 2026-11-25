@@ -6,12 +6,22 @@
 #include <stdlib.h>
 #include <string.h>
 #include "miniexpr.h"
-#include "../../src/dsl_compile_internal.h"
-#include "../../src/dsl_eval_internal.h"
+#include "miniexpr_kernel.h"
 
 #define MAX_ITEMS 4096
 #define MAX_INPUTS 32
 #define MAX_SOURCE 65536
+
+static size_t dtype_size(me_dtype dtype) {
+    switch (dtype) {
+    case ME_BOOL: return sizeof(bool);
+    case ME_INT32: return sizeof(int32_t);
+    case ME_INT64: return sizeof(int64_t);
+    case ME_FLOAT32: return sizeof(float);
+    case ME_FLOAT64: return sizeof(double);
+    default: return 0;
+    }
+}
 
 static me_dtype parse_dtype(const char *name) {
     if (!strcmp(name, "bool")) {
@@ -121,7 +131,7 @@ int main(int argc, char **argv) {
     int result = 1, count = 0, nvars = 0, error = 0;
     FILE *file = NULL;
     me_expr *expr = NULL;
-    me_dsl_compiled_program *program = NULL;
+    me_kernel *kernel = NULL;
     char *source = NULL;
     unsigned char *data = NULL;
     void *output = NULL, *expected = NULL;
@@ -129,6 +139,8 @@ int main(int argc, char **argv) {
     me_dtype input_dtype = ME_AUTO, output_dtype = ME_AUTO;
     char names[MAX_INPUTS][128];
     me_variable variables[MAX_INPUTS] = {0};
+    me_input_spec specs[MAX_INPUTS] = {0};
+    me_buffer buffers[MAX_INPUTS] = {0};
     const void *inputs[MAX_INPUTS] = {0};
     me_jit_mode mode = ME_JIT_DEFAULT;
 
@@ -190,7 +202,9 @@ int main(int argc, char **argv) {
         }
         variables[v].name = names[v];
         variables[v].dtype = input_dtype;
+        specs[v] = (me_input_spec){names[v], input_dtype, 0};
         inputs[v] = data + v * MAX_ITEMS * sizeof(double);
+        buffers[v] = (me_buffer){inputs[v], (size_t)count * dtype_size(input_dtype)};
     }
     for (int i = 0; i < count; i++) {
         for (int v = 0; v < nvars; v++) {
@@ -211,15 +225,22 @@ int main(int argc, char **argv) {
     }
     int64_t shape[] = {count};
     int32_t grid[] = {count};
-    bool expect_compile_error = !strcmp(outcome, "compile_error");
     int rc;
     if (argc == 4) {
-        /* Historical checked-arithmetic fixtures use only the private profile. */
-        bool is_dsl;
-        char reason[256];
-        program = dsl_compile_program_profile(source, variables, nvars, output_dtype,
-            0, mode, ME_DSL_PROFILE_MENUDET_CHECKED, &error, &is_dsl, reason, sizeof(reason));
-        rc = program ? ME_COMPILE_SUCCESS : ME_COMPILE_ERR_INVALID_ARG;
+        me_signature signature = ME_SIGNATURE_INITIALIZER;
+        signature.inputs = specs;
+        signature.ninputs = (size_t)nvars;
+        signature.output_dtype = output_dtype;
+        signature.cardinality = ME_ELEMENTWISE;
+        me_prepare_options options = ME_PREPARE_OPTIONS_INITIALIZER;
+        options.execution = mode == ME_JIT_OFF ? ME_EXEC_INTERPRET : ME_EXEC_PREFER_JIT;
+        me_error diagnostic;
+        me_status status = me_prepare_menudet("0.1", source, &signature, &options, &kernel, &diagnostic);
+        if (status != ME_SUCCESS && strcmp(outcome, "compile_error")) {
+            fprintf(stderr, "portable compilation failed: %s\n", diagnostic.message);
+        }
+        rc = status == ME_SUCCESS ? ME_COMPILE_SUCCESS :
+            status == ME_ERR_OOM ? ME_COMPILE_ERR_OOM : ME_COMPILE_ERR_INVALID_ARG;
     } else {
         rc = me_compile_nd_jit(source, variables, nvars, output_dtype,
                               1, shape, grid, grid, mode, &error, &expr);
@@ -247,10 +268,12 @@ int main(int argc, char **argv) {
     }
     me_eval_params params = ME_EVAL_PARAMS_DEFAULTS;
     params.jit_mode = mode;
-    if (program) {
-        me_dsl_menudet_eval_descriptor descriptor = {
-            .nitems = count, .output_capacity = (size_t)count * dtype_size(output_dtype)};
-        rc = dsl_eval_program_menudet(program, inputs, nvars, output, &descriptor);
+    if (kernel) {
+        me_block block = ME_BLOCK_INITIALIZER;
+        block.nitems = (size_t)count;
+        me_status status = me_eval_block(kernel, buffers, (size_t)nvars,
+            (me_mut_buffer){output, (size_t)count * dtype_size(output_dtype)}, &block, NULL, NULL);
+        rc = status == ME_SUCCESS ? ME_EVAL_SUCCESS : ME_EVAL_ERR_INVALID_ARG;
     } else {
         rc = me_eval(expr, inputs, nvars, output, count, &params);
     }
@@ -281,7 +304,7 @@ cleanup:
         fclose(file);
     }
     me_free(expr);
-    dsl_compiled_program_free(program);
+    me_kernel_free(kernel);
     free(source);
     free(data);
     free(output);

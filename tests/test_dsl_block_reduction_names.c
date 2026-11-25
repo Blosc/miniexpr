@@ -20,7 +20,7 @@ int main(void) {
     const double values[] = {1, 2, 3};
     const void *inputs[] = {values};
     const me_dsl_semantic_profile profiles[] = {
-        ME_DSL_PROFILE_MENUDET_CHECKED, ME_DSL_PROFILE_MENUDET_0_1};
+        ME_DSL_PROFILE_MENUDET_0_1};
     for (size_t j = 0; j < 2; j++) {
         for (size_t i = 0; i < 7; i++) {
             char source[128];

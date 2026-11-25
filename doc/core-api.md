@@ -1,9 +1,12 @@
-# Direct kernel preparation (1.0 pilot)
+# Direct kernel preparation (1.0 contract)
 
-The provisional `miniexpr_kernel.h` interface implements the proposed stable
-core. It is not ABI-frozen: downstream migration and formula reduction
-semantics remain to be qualified. Old entry points remain during migration.
-No new dependencies are required.
+`miniexpr_kernel.h`, `miniexpr_grid.h` and `miniexpr_types.h` define the supported
+1.0 embedding contract. `ME_KERNEL_API_VERSION` is 1. The library remains an
+alpha release; a supported 1.x ABI begins at the 1.0 release, not at a 0.x or
+alpha pilot. Classic/full-DSL entry points remain compatibility interfaces in
+`miniexpr.h` through 1.x, preserving their existing routing rather than silently
+reinterpreting source. New input signatures do not expose C callbacks.
+No new dependencies are required. See [the API boundary audit](c-api-1.md).
 
 The lifecycle is:
 
@@ -68,8 +71,8 @@ me_kernel_free(kernel);
 ```
 
 Formula evaluation uses typed numerical semantics, not the full-DSL route.
-Execution preference never wraps a formula as a different language. For this
-pilot, formula reductions and ND context are unsupported pending the contract
+Execution preference never wraps a formula as a different language.
+Formula reductions and ND context are unsupported pending the contract
 discussion. Prefer-JIT may interpret; require-JIT fails for a formula until its
 lowering is implemented.
 
@@ -102,7 +105,7 @@ required context automatically. Legacy fixed JSON descriptors retain their
 declared rank; the new core does not change that reader's contract.
 
 Menudet source uses an explicit version. `"0.1"` preserves the unannotated
-language; `"0.2"` enables proposed [annotations](dsl-spec/0.2.md).
+language; `"0.2"` enables [annotations](dsl-spec/0.2.md).
 Unannotated inputs specialize to their bindings. Output dtype `ME_AUTO` infers;
 a concrete result specification or return annotation converts only the final
 result. Conflicting declarations reject. Casting policy checks the inferred
@@ -120,6 +123,10 @@ dtype before final conversion.
 - Run options collect stable floating-status bits or raise selected flags.
   FP state is restored. WASM reports collection unavailable and rejects a
   nonempty raise mask before execution.
+- `run.execution = ME_RUN_INTERPRET` selects the interpreter for that call,
+  including a handle prepared with `ME_EXEC_REQUIRE_JIT`. It never recompiles,
+  mutates a shared handle, or retries after execution. `ME_RUN_PREPARED` (zero,
+  also the default for an absent appended field) uses the prepared backend.
 - Preparation defaults to interpretation, strict FP and system math. Source
   pragmas can explicitly request another supported mathematical policy.
   `inherit_environment` is an explicit preparation opt-in for hosts that own
@@ -166,7 +173,7 @@ ownership of compression, exact endpoints and endian conversion. Legacy ND
 block evaluators (`me_eval_nd` / `me_nd_valid_nitems`) share the same underlying
 window/run helpers, and `miniexpr_reduce.h` provides streaming pairwise sums
 (`me_pairwise_sum_*`) without requiring the JSON adapter. A standalone
-core-only installation installs `miniexpr.h`, `miniexpr_kernel.h`,
+core-only installation installs `miniexpr.h`, `miniexpr_types.h`, `miniexpr_kernel.h`,
 `miniexpr_grid.h` and `miniexpr_reduce.h` without JSON support.
 
 ## Build integration

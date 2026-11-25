@@ -1,4 +1,7 @@
 if(NOT EMSCRIPTEN)
+  add_executable(recipe_v2_peer interop/recipe-v2.c)
+  target_link_libraries(recipe_v2_peer PRIVATE ${MINIEXPR_DEFAULT_LIB})
+  add_test(NAME recipe_v2_peer COMMAND recipe_v2_peer)
   # The first portable runner uses host files; wasm corpus adapters are follow-up work.
   add_executable(menudet_dsl_runner menudet-dsl/runner.c)
   target_link_libraries(menudet_dsl_runner PRIVATE ${MINIEXPR_DEFAULT_LIB})
@@ -39,22 +42,21 @@ if(NOT EMSCRIPTEN)
     else()
       set(source_path "${CMAKE_CURRENT_SOURCE_DIR}/menudet-dsl/${case_name}.dsl")
     endif()
-    set(profile_mode "")
     set(test_prefix menudet_dsl)
     foreach(policy off default)
       add_test(NAME ${test_prefix}_${case_name}_${policy}
         COMMAND menudet_dsl_runner
           "${source_path}"
-          "${CMAKE_CURRENT_SOURCE_DIR}/menudet-dsl/${case_name}.txt" "${policy}" ${profile_mode})
+          "${CMAKE_CURRENT_SOURCE_DIR}/menudet-dsl/${case_name}.txt" "${policy}")
       set_tests_properties(${test_prefix}_${case_name}_${policy} PROPERTIES TIMEOUT 30
         ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/menudet-jit-cache")
     endforeach()
-    # Optional JIT preference must still use the draft typed interpreter.
+    # Backend preference never changes portable language semantics.
     if(MINIEXPR_ENABLE_TCC_JIT)
       add_test(NAME ${test_prefix}_${case_name}_on
         COMMAND menudet_dsl_runner
           "${source_path}"
-          "${CMAKE_CURRENT_SOURCE_DIR}/menudet-dsl/${case_name}.txt" on ${profile_mode})
+          "${CMAKE_CURRENT_SOURCE_DIR}/menudet-dsl/${case_name}.txt" on)
       set_tests_properties(${test_prefix}_${case_name}_on PROPERTIES TIMEOUT 30
         ENVIRONMENT "ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/menudet-jit-cache")
     endif()
@@ -67,7 +69,7 @@ if(NOT EMSCRIPTEN)
       file(WRITE "${cc_path}" "# me:compiler=cc\n${cc_source}")
       add_test(NAME ${test_prefix}_${case_name}_cc
         COMMAND menudet_dsl_runner "${cc_path}"
-          "${CMAKE_CURRENT_SOURCE_DIR}/menudet-dsl/${case_name}.txt" on ${profile_mode})
+          "${CMAKE_CURRENT_SOURCE_DIR}/menudet-dsl/${case_name}.txt" on)
       set_tests_properties(${test_prefix}_${case_name}_cc PROPERTIES TIMEOUT 30
         ENVIRONMENT "CC=${MINIEXPR_MENUDET_CC};ME_DSL_JIT_CACHE_DIR=${CMAKE_CURRENT_BINARY_DIR}/menudet-jit-cache")
     endif()

@@ -25,6 +25,7 @@ typedef struct {
     const int64_t *logical_shape;
     const int64_t *block_origin;
     const int64_t *block_extent;
+    bool force_interpreter;
 } me_dsl_menudet_eval_descriptor;
 
 /* Internal capacity-aware 1.0 evaluation; legacy nitems-output ABI is unchanged. */

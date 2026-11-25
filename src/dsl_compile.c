@@ -3152,10 +3152,6 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
             if (error_pos) *error_pos = -1;
             return NULL;
         }
-        if (dsl_menudet_typed_profile(profile)) {
-            /* Optional acceleration falls back before building any uncertified IR. */
-            if (profile != ME_DSL_PROFILE_MENUDET_0_1) jit_mode = ME_JIT_OFF;
-        }
     }
     program->integer_powers=declared && declared->integer_powers;
     if (jit_mode == ME_JIT_ON || jit_mode == ME_JIT_OFF) {

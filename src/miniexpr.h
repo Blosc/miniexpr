@@ -40,6 +40,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "miniexpr_types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -47,11 +48,10 @@ extern "C" {
 
 #endif
 
-/* Version information */
-#define ME_VERSION_MAJOR 1
-#define ME_VERSION_MINOR 0
-#define ME_VERSION_PATCH 0
-#define ME_VERSION_STRING "1.0.0.alpha1"
+/* Compatibility interface: classic formulas, callback declarations and legacy
+ * full-DSL/ND routing. New embedding code uses miniexpr_kernel.h and
+ * miniexpr_grid.h; those headers do not expose callback-bearing declarations.
+ * Kept through 1.x for existing callers, without changing their language. */
 
 /* Internal eval block size (elements). Compile-time fixed. */
 #ifndef ME_EVAL_BLOCK_NITEMS
@@ -69,45 +69,8 @@ extern "C" {
 #endif
 
 
-/* Data type enumeration - Full C99 support */
-typedef enum {
-    /* Automatic type inference */
-    ME_AUTO,
-
-    /* Boolean */
-    ME_BOOL,
-
-    /* Signed integers */
-    ME_INT8,
-    ME_INT16,
-    ME_INT32,
-    ME_INT64,
-
-    /* Unsigned integers */
-    ME_UINT8,
-    ME_UINT16,
-    ME_UINT32,
-    ME_UINT64,
-
-    /* Floating point */
-    ME_FLOAT32,
-    ME_FLOAT64,
-
-    /* Complex (C99) */
-    ME_COMPLEX64, /* float complex */
-    ME_COMPLEX128, /* double complex */
-
-    /* Fixed-width strings, NumPy `<Un` layout: NUL-padded, never NUL-terminated
-     * when the value fills the slot, and no embedded NULs. */
-    ME_STRING,   /* 4-byte UCS4 code units (numpy 'U') */
-    ME_BYTES     /* 1-byte code units (numpy 'S'); ASCII-only case mapping */
-} me_dtype;
-
 /* Opaque type for compiled expressions */
 typedef struct me_expr me_expr;
-
-/* Floating status flags, independent of platform FE_* constants. */
-enum { ME_FP_INVALID = 1u, ME_FP_DIVIDE = 2u, ME_FP_OVERFLOW = 4u, ME_FP_UNDERFLOW = 8u };
 
 
 enum {

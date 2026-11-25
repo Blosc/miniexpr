@@ -2346,7 +2346,7 @@ static int dsl_eval_program_menudet_body(const me_dsl_compiled_program *program,
     /* When the JIT kernel will run, it recomputes and validates the logical
      * coordinates in-kernel; building interpreter index buffers here would be
      * pure overhead (and duplicate the same range validation). */
-    bool jit_direct = program->jit_kernel_fn != NULL;
+    bool jit_direct = program->jit_kernel_fn != NULL && !descriptor->force_interpreter;
     if (!jit_direct && !descriptor->valid_mask && program->menudet_direct_ramp && ndim >= 1) {
         return dsl_eval_menudet_direct_ramp(program, inputs, ninputs, output, descriptor, strides);
     }
@@ -2381,7 +2381,9 @@ static int dsl_eval_program_menudet_body(const me_dsl_compiled_program *program,
             if (flat) flat[lane] = linear;
         }
     }
-    if (rc == ME_EVAL_SUCCESS) rc = dsl_eval_program_impl(program, inputs, ninputs, output, descriptor->nitems, NULL,
+    me_eval_params params = ME_EVAL_PARAMS_DEFAULTS;
+    if (descriptor->force_interpreter) params.jit_mode = ME_JIT_OFF;
+    if (rc == ME_EVAL_SUCCESS) rc = dsl_eval_program_impl(program, inputs, ninputs, output, descriptor->nitems, &params,
         ndim, descriptor->logical_shape, indices, flat, NULL, descriptor);
     if (!jit_direct) {
         for (int d = 0; d < ndim; d++) free(indices[d]);
