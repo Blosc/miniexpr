@@ -548,7 +548,7 @@ static void descriptor_prefixes(void) {
     assert(ME_PREPARE_OPTIONS_V1_SIZE == sizeof(me_prepare_options));
     assert(ME_KERNEL_INFO_V1_SIZE == sizeof(me_kernel_info));
     assert(ME_BLOCK_V1_SIZE == sizeof(me_block));
-    assert(ME_RUN_OPTIONS_V1_SIZE == offsetof(me_run_options, execution));
+    assert(ME_RUN_OPTIONS_V1_SIZE == sizeof(me_run_options));
     assert(ME_GRID_SPEC_V1_SIZE == sizeof(me_grid_spec));
     assert(ME_GRID_BLOCK_INFO_V1_SIZE == sizeof(me_grid_block_info));
     struct { me_signature value; uint64_t suffix; } sig = {ME_SIGNATURE_INITIALIZER, UINT64_MAX};
@@ -564,16 +564,19 @@ static void descriptor_prefixes(void) {
     assert(me_describe(kernel, &info.value) == ME_SUCCESS);
     assert(info.value.struct_size == sizeof(info) && info.suffix == UINT64_MAX);
     me_block block = ME_BLOCK_INITIALIZER;
-    me_run_options run = ME_RUN_OPTIONS_INITIALIZER;
+    struct { me_run_options value; uint64_t suffix; } run = {ME_RUN_OPTIONS_INITIALIZER, UINT64_MAX};
+    for (size_t i = 0; i < sizeof(run.value.reserved); i++) assert(run.value.reserved[i] == 0);
     block.struct_size = ME_BLOCK_V1_SIZE;
-    run.struct_size = ME_RUN_OPTIONS_V1_SIZE;
-    run.execution = (me_run_execution)12345; /* An absent suffix is not read. */
-    assert(me_eval_block(kernel, NULL, 0, (me_mut_buffer){0}, &block, &run, NULL) == ME_SUCCESS);
-    run.struct_size = sizeof(run);
-    assert(me_eval_block(kernel, NULL, 0, (me_mut_buffer){0}, &block, &run, NULL) == ME_ERR_INVALID_ARG);
-    run.execution = ME_RUN_PREPARED;
+    run.value.struct_size = sizeof(run);
+    assert(me_eval_block(kernel, NULL, 0, (me_mut_buffer){0}, &block, &run.value, NULL) == ME_SUCCESS);
+    run.value.execution = (me_run_execution)12345;
+    assert(me_eval_block(kernel, NULL, 0, (me_mut_buffer){0}, &block, &run.value, NULL) == ME_ERR_INVALID_ARG);
+    run.value.execution = ME_RUN_PREPARED;
+    run.value.struct_size = ME_RUN_OPTIONS_V1_SIZE - 1;
+    assert(me_eval_block(kernel, NULL, 0, (me_mut_buffer){0}, &block, &run.value, NULL) == ME_ERR_INVALID_ARG);
+    run.value.struct_size = ME_RUN_OPTIONS_V1_SIZE;
     block.struct_size--;
-    assert(me_eval_block(kernel, NULL, 0, (me_mut_buffer){0}, &block, &run, NULL) == ME_ERR_INVALID_ARG);
+    assert(me_eval_block(kernel, NULL, 0, (me_mut_buffer){0}, &block, &run.value, NULL) == ME_ERR_INVALID_ARG);
     me_kernel_free(kernel);
     sig.value.struct_size = ME_SIGNATURE_V1_SIZE;
     options.value.struct_size = ME_PREPARE_OPTIONS_V1_SIZE;
@@ -607,6 +610,15 @@ typedef struct {
     uint8_t new_flag;
 } prepare_options_next;
 
+typedef struct {
+    size_t struct_size;
+    unsigned raise_mask;
+    me_fp_status *fp_status;
+    me_run_execution execution;
+    uint8_t reserved[4];
+    uint8_t new_flag;
+} run_options_next;
+
 static uint8_t optional_flag(const void *descriptor, size_t offset) {
     size_t size;
     uint8_t flag = 0;
@@ -615,34 +627,45 @@ static uint8_t optional_flag(const void *descriptor, size_t offset) {
     return flag;
 }
 
-static void receive_v1_descriptors(const void *signature, const void *options) {
+static void receive_v1_descriptors(const void *signature, const void *options, const void *run_options) {
     assert(offsetof(signature_next, new_flag) == ME_SIGNATURE_V1_SIZE);
     assert(offsetof(prepare_options_next, new_flag) == ME_PREPARE_OPTIONS_V1_SIZE);
+    assert(offsetof(run_options_next, new_flag) == ME_RUN_OPTIONS_V1_SIZE);
     assert(optional_flag(signature, offsetof(signature_next, new_flag)) == 0);
     assert(optional_flag(options, offsetof(prepare_options_next, new_flag)) == 0);
-    /* Exercise the real preparation API with the independently compiled v1
-     * bytes as well as the simulated future reader's absent-field defaults. */
+    assert(optional_flag(run_options, offsetof(run_options_next, new_flag)) == 0);
+    /* Exercise the real preparation and evaluation APIs with the independently
+     * compiled v1 bytes as well as simulated future absent-field defaults. */
     me_signature sig = ME_SIGNATURE_INITIALIZER;
     me_prepare_options prepare = ME_PREPARE_OPTIONS_INITIALIZER;
-    size_t sig_size, options_size;
+    me_run_options run = ME_RUN_OPTIONS_INITIALIZER;
+    size_t sig_size, options_size, run_size;
     memcpy(&sig_size, signature, sizeof(sig_size));
     memcpy(&options_size, options, sizeof(options_size));
-    assert(sig_size == ME_SIGNATURE_V1_SIZE && options_size == ME_PREPARE_OPTIONS_V1_SIZE);
+    memcpy(&run_size, run_options, sizeof(run_size));
+    assert(sig_size == ME_SIGNATURE_V1_SIZE && options_size == ME_PREPARE_OPTIONS_V1_SIZE &&
+        run_size == ME_RUN_OPTIONS_V1_SIZE);
     memcpy(&sig, signature, sig_size);
     memcpy(&prepare, options, options_size);
+    memcpy(&run, run_options, run_size);
     me_kernel *kernel = NULL;
     assert(me_prepare_formula("1", &sig, &prepare, &kernel, NULL) == ME_SUCCESS);
+    me_block block = ME_BLOCK_INITIALIZER;
+    assert(me_eval_block(kernel, NULL, 0, (me_mut_buffer){0}, &block, &run, NULL) == ME_SUCCESS);
     me_kernel_free(kernel);
     signature_next future_sig = {0};
     prepare_options_next future_options = {0};
+    run_options_next future_run = {0};
     future_sig.struct_size = sizeof(future_sig);
     future_options.struct_size = sizeof(future_options);
-    future_sig.new_flag = future_options.new_flag = 1;
+    future_run.struct_size = sizeof(future_run);
+    future_sig.new_flag = future_options.new_flag = future_run.new_flag = 1;
     assert(optional_flag(&future_sig, offsetof(signature_next, new_flag)) == 1);
     assert(optional_flag(&future_options, offsetof(prepare_options_next, new_flag)) == 1);
+    assert(optional_flag(&future_run, offsetof(run_options_next, new_flag)) == 1);
 }
 
-void me_test_kernel_v1_caller(void (*receive)(const void *, const void *));
+void me_test_kernel_v1_caller(void (*receive)(const void *, const void *, const void *));
 
 static void accuracy_probe(const double *input, double *output, int nitems) {
     /* Deterministic dispatch probe: inspect active accuracy without relying on

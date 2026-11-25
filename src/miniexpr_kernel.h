@@ -159,8 +159,7 @@ typedef struct {
 } me_run_options;
 
 #define ME_RUN_OPTIONS_INITIALIZER { sizeof(me_run_options), 0, NULL, ME_RUN_PREPARED, {0} }
-#define ME_RUN_OPTIONS_V1_SIZE (offsetof(me_run_options, fp_status) + sizeof(me_fp_status *))
-#define ME_RUN_OPTIONS_EXECUTION_SIZE (offsetof(me_run_options, execution) + sizeof(me_run_execution))
+#define ME_RUN_OPTIONS_V1_SIZE (offsetof(me_run_options, reserved) + sizeof(((me_run_options *)0)->reserved))
 
 /* Source is NUL-terminated. Inputs must have concrete dtypes. Captures and all
  * retained metadata are copied. On failure *out is NULL; error may be NULL.

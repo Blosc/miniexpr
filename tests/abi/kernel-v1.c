@@ -29,9 +29,18 @@ typedef struct {
     uint8_t reserved[3];
 } prepare_options_v1;
 
-void me_test_kernel_v1_caller(void (*receive)(const void *, const void *)) {
+typedef struct {
+    size_t struct_size;
+    unsigned raise_mask;
+    void *fp_status;
+    int execution;
+    uint8_t reserved[4];
+} run_options_v1;
+
+void me_test_kernel_v1_caller(void (*receive)(const void *, const void *, const void *)) {
     signature_v1 signature;
     prepare_options_v1 options;
+    run_options_v1 run_options;
     /* Poison unnamed padding, then initialize every declared field. This
      * catches a future reader mistaking old padding for an appended option. */
     memset(&signature, 0xa5, sizeof(signature));
@@ -48,5 +57,11 @@ void me_test_kernel_v1_caller(void (*receive)(const void *, const void *)) {
     options.execution = 0; /* ME_EXEC_INTERPRET */
     options.inherit_environment = false;
     memset(options.reserved, 0, sizeof(options.reserved));
-    receive(&signature, &options);
+    memset(&run_options, 0xa5, sizeof(run_options));
+    run_options.struct_size = sizeof(run_options);
+    run_options.raise_mask = 0;
+    run_options.fp_status = NULL;
+    run_options.execution = 0; /* ME_RUN_PREPARED */
+    memset(run_options.reserved, 0, sizeof(run_options.reserved));
+    receive(&signature, &options, &run_options);
 }

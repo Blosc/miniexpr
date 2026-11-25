@@ -1,9 +1,10 @@
 cmake_minimum_required(VERSION 3.16.3)
-project(miniexpr LANGUAGES C)
+project(miniexpr VERSION 1.0.0 LANGUAGES C)
 if(NOT EMSCRIPTEN)
   find_package(Threads REQUIRED)
 endif()
 include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 if(WIN32 AND NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
   message(FATAL_ERROR "Windows builds require clang-cl.")
@@ -69,7 +70,9 @@ function(miniexpr_setup_target target_name)
     target_link_libraries(${target_name} PRIVATE Threads::Threads)
   endif()
   target_sources(${target_name} PRIVATE ${MINIEXPR_SOURCES})
-  target_include_directories(${target_name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_include_directories(${target_name} PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
   target_compile_features(${target_name} PUBLIC c_std_99)
   if(MINIEXPR_USE_SLEEF)
     target_compile_definitions(${target_name} PRIVATE ME_USE_SLEEF=1)
@@ -218,10 +221,18 @@ endif()
 if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
   foreach(_miniexpr_install_target miniexpr miniexpr_static)
     if(TARGET ${_miniexpr_install_target})
-      install(TARGETS ${_miniexpr_install_target}
-        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+      if(NOT EMSCRIPTEN)
+        install(TARGETS ${_miniexpr_install_target}
+          EXPORT miniexprTargets
+          ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+          LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+          RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+      else()
+        install(TARGETS ${_miniexpr_install_target}
+          ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+          LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+          RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+      endif()
     endif()
   endforeach()
   install(FILES src/miniexpr.h src/miniexpr_types.h src/miniexpr_kernel.h src/miniexpr_grid.h src/miniexpr_reduce.h
@@ -235,9 +246,13 @@ if(MINIEXPR_BUILD_ARTIFACT)
   add_library(miniexpr_artifact STATIC src/dsl_artifact.c src/dsl_array.c src/dsl_graph.c
     src/dsl_graph_text.c "${yyjson_SOURCE_DIR}/src/yyjson.c")
   add_library(miniexpr::artifact ALIAS miniexpr_artifact)
-  set_target_properties(miniexpr_artifact PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  set_target_properties(miniexpr_artifact PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    EXPORT_NAME artifact)
   target_compile_features(miniexpr_artifact PUBLIC c_std_11)
-  target_include_directories(miniexpr_artifact PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_include_directories(miniexpr_artifact PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
   target_include_directories(miniexpr_artifact PRIVATE "${yyjson_SOURCE_DIR}/src")
   target_compile_definitions(miniexpr_artifact PRIVATE
     YYJSON_DISABLE_UTILS=1 YYJSON_DISABLE_FILE=1
@@ -251,16 +266,43 @@ if(MINIEXPR_BUILD_ARTIFACT)
     DESTINATION "${CMAKE_INSTALL_DATADIR}/miniexpr/licenses" RENAME LICENSE-YYJSON)
   # Standalone distribution only: embedding hosts own their install layout.
   if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
-    install(TARGETS miniexpr_artifact
-      ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-      LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-      RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    if(NOT EMSCRIPTEN)
+      install(TARGETS miniexpr_artifact
+        EXPORT miniexprTargets
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    else()
+      install(TARGETS miniexpr_artifact
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    endif()
     install(FILES src/miniexpr_artifact.h src/miniexpr_graph.h
       DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
     install(FILES doc/native-graph-1.schema.json doc/native-staged-graph-1.schema.json
       doc/native-graphs-1.md doc/native-stages-1.md
       DESTINATION "${CMAKE_INSTALL_DATADIR}/miniexpr/graphs")
   endif()
+endif()
+
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR AND NOT EMSCRIPTEN AND MINIEXPR_DEFAULT_LIB)
+  install(EXPORT miniexprTargets
+    FILE miniexprTargets.cmake
+    NAMESPACE miniexpr::
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/miniexpr")
+  configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/miniexprConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/miniexprConfig.cmake"
+    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/miniexpr")
+  write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/miniexprConfigVersion.cmake"
+    VERSION "${PROJECT_VERSION}"
+    COMPATIBILITY SameMajorVersion)
+  install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/miniexprConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/miniexprConfigVersion.cmake"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/miniexpr")
 endif()
 
 function(miniexpr_graph_fault_allocators target_name)

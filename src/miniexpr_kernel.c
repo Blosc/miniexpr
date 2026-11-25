@@ -415,8 +415,7 @@ me_status me_kernel_run_begin(const me_run_options *options, me_fp_status *statu
     if (options && (options->struct_size < ME_RUN_OPTIONS_V1_SIZE || (options->raise_mask & ~15u))) {
         return kernel_error(error, ME_ERR_INVALID_ARG, "invalid run options");
     }
-    if (options && options->struct_size >= ME_RUN_OPTIONS_EXECUTION_SIZE &&
-        options->execution != ME_RUN_PREPARED && options->execution != ME_RUN_INTERPRET) {
+    if (options && options->execution != ME_RUN_PREPARED && options->execution != ME_RUN_INTERPRET) {
         return kernel_error(error, ME_ERR_INVALID_ARG, "invalid run execution policy");
     }
     *status = (me_fp_status){0};
@@ -462,8 +461,7 @@ me_status me_eval_block(const me_kernel *kernel, const me_buffer *inputs,
             .output_capacity = output.capacity, .ndim = block->ndim,
             .logical_shape = block->logical_shape, .block_origin = block->origin,
             .block_extent = block->extent,
-            .force_interpreter = options && options->struct_size >= ME_RUN_OPTIONS_EXECUTION_SIZE &&
-                options->execution == ME_RUN_INTERPRET};
+            .force_interpreter = options && options->execution == ME_RUN_INTERPRET};
         rc = dsl_eval_program_menudet(kernel->program, data, (int)kernel->nbindings, output.data, &native);
     }
     dsl_menudet_status_end(previous);

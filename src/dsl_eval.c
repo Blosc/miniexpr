@@ -55,6 +55,20 @@ static void dsl_tls_arena_release(void *value) {
     free(value);
 }
 
+#if defined(__GNUC__) || defined(__clang__)
+static __attribute__((destructor)) void dsl_tls_arena_fini(void) {
+    if (!dsl_tls_arena_key_ready) {
+        return;
+    }
+    void *value = pthread_getspecific(dsl_tls_arena_key);
+    if (value) {
+        pthread_setspecific(dsl_tls_arena_key, NULL);
+        dsl_tls_arena_release(value);
+    }
+    pthread_key_delete(dsl_tls_arena_key);
+    dsl_tls_arena_key_ready = 0;
+}
+#else
 static void dsl_tls_arena_exit(void) {
     void *value = pthread_getspecific(dsl_tls_arena_key);
     if (value) {
@@ -62,15 +76,65 @@ static void dsl_tls_arena_exit(void) {
         dsl_tls_arena_release(value);
     }
 }
+#endif
 
 static void dsl_tls_arena_init(void) {
     dsl_tls_arena_key_ready = pthread_key_create(&dsl_tls_arena_key, dsl_tls_arena_release) == 0;
+#if !defined(__GNUC__) && !defined(__clang__)
     if (dsl_tls_arena_key_ready) atexit(dsl_tls_arena_exit);
+#endif
 }
 
 static void dsl_tls_arena_publish(void) {
     pthread_once(&dsl_tls_arena_once, dsl_tls_arena_init);
     if (dsl_tls_arena_key_ready) pthread_setspecific(dsl_tls_arena_key, dsl_tls_arena);
+}
+#elif defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+
+static DWORD dsl_tls_arena_fls = FLS_OUT_OF_INDEXES;
+static INIT_ONCE dsl_tls_arena_once = INIT_ONCE_STATIC_INIT;
+
+static void WINAPI dsl_tls_arena_release(PVOID value) {
+    if (value == dsl_tls_arena) {
+        dsl_tls_arena = NULL;
+        dsl_tls_arena_cap = 0;
+    }
+    free(value);
+}
+
+static void dsl_tls_arena_exit(void) {
+    if (dsl_tls_arena_fls == FLS_OUT_OF_INDEXES) {
+        return;
+    }
+    PVOID value = FlsGetValue(dsl_tls_arena_fls);
+    if (value) {
+        FlsSetValue(dsl_tls_arena_fls, NULL);
+        dsl_tls_arena_release(value);
+    }
+    FlsFree(dsl_tls_arena_fls);
+    dsl_tls_arena_fls = FLS_OUT_OF_INDEXES;
+}
+
+static BOOL CALLBACK dsl_tls_arena_init(PINIT_ONCE once, PVOID param, PVOID *ctx) {
+    (void)once;
+    (void)param;
+    (void)ctx;
+    dsl_tls_arena_fls = FlsAlloc(dsl_tls_arena_release);
+    if (dsl_tls_arena_fls != FLS_OUT_OF_INDEXES) {
+        atexit(dsl_tls_arena_exit);
+    }
+    return TRUE;
+}
+
+static void dsl_tls_arena_publish(void) {
+    InitOnceExecuteOnce(&dsl_tls_arena_once, dsl_tls_arena_init, NULL, NULL);
+    if (dsl_tls_arena_fls != FLS_OUT_OF_INDEXES) {
+        FlsSetValue(dsl_tls_arena_fls, dsl_tls_arena);
+    }
 }
 #else
 static void dsl_tls_arena_publish(void) {}

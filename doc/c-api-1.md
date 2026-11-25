@@ -24,8 +24,8 @@ value have fixed pointer/size layouts. Extensible descriptors cross the ABI by
 pointer, retain fixed minimum prefixes and default absent suffixes. Reserved
 bytes must be initialized to zero and may not be reused as future fields.
 Current and frozen-caller tests cover these rules on native and WASM32 builds.
-Invocation-local interpreter selection is appended beyond the entire original
-run-options prefix, with an explicit reserved tail.
+Invocation-local interpreter selection and its explicit reserved tail are part
+of the v1 `me_run_options` prefix.
 
 ## Compatibility is deliberate, not dead code
 
