@@ -9,14 +9,11 @@
 **********************************************************************/
 
 #include "miniexpr_internal.h"
+#include "miniexpr_grid_internal.h"
 #include <limits.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-
-static int64_t ceil_div64(int64_t a, int64_t b) {
-    return (b == 0) ? 0 : (a + b - 1) / b;
-}
 
 static double _Complex me_nd_cmplx(double re, double im) {
 #if defined(_MSC_VER)
@@ -41,93 +38,11 @@ int me_nd_compute_valid_items(const me_expr *expr, int64_t nchunk, int64_t nbloc
     }
 
     const int nd = info->ndims;
-    if (nd > 64) {
-        return ME_EVAL_ERR_INVALID_ARG;
-    }
     const int64_t *shape = info->data;
     const int64_t *chunkshape = shape + nd;
     const int64_t *blockshape = chunkshape + nd;
-
-    int64_t total_chunks = 1;
-    int64_t total_blocks = 1;
-    int64_t padded = 1;
-
-    for (int i = 0; i < nd; i++) {
-        if (chunkshape[i] <= 0 || blockshape[i] <= 0) {
-            return ME_EVAL_ERR_INVALID_ARG;
-        }
-        const int64_t nchunks_d = ceil_div64(shape[i], chunkshape[i]);
-        const int64_t nblocks_d = ceil_div64(chunkshape[i], blockshape[i]);
-        if (nchunks_d <= 0 || nblocks_d <= 0) {
-            return ME_EVAL_ERR_INVALID_ARG;
-        }
-        if (total_chunks > LLONG_MAX / nchunks_d || total_blocks > LLONG_MAX / nblocks_d) {
-            return ME_EVAL_ERR_INVALID_ARG;
-        }
-        total_chunks *= nchunks_d;
-        total_blocks *= nblocks_d;
-        if (padded > LLONG_MAX / blockshape[i]) {
-            return ME_EVAL_ERR_INVALID_ARG;
-        }
-        padded *= blockshape[i];
-    }
-
-    if (nchunk < 0 || nchunk >= total_chunks || nblock < 0 || nblock >= total_blocks) {
-        return ME_EVAL_ERR_INVALID_ARG;
-    }
-    if (chunk_nitems > 0 && (int64_t)chunk_nitems < padded) {
-        return ME_EVAL_ERR_INVALID_ARG;
-    }
-
-    int64_t chunk_idx[64];
-    int64_t block_idx[64];
-
-    int64_t tmp = nchunk;
-    for (int i = nd - 1; i >= 0; i--) {
-        const int64_t nchunks_d = ceil_div64(shape[i], chunkshape[i]);
-        chunk_idx[i] = (nchunks_d == 0) ? 0 : (tmp % nchunks_d);
-        tmp /= nchunks_d;
-    }
-
-    tmp = nblock;
-    for (int i = nd - 1; i >= 0; i--) {
-        const int64_t nblocks_d = ceil_div64(chunkshape[i], blockshape[i]);
-        block_idx[i] = (nblocks_d == 0) ? 0 : (tmp % nblocks_d);
-        tmp /= nblocks_d;
-    }
-
-    int64_t valid = 1;
-    for (int i = 0; i < nd; i++) {
-        const int64_t chunk_start = chunk_idx[i] * chunkshape[i];
-        if (shape[i] <= chunk_start) {
-            valid = 0;
-            break;
-        }
-        int64_t chunk_len = shape[i] - chunk_start;
-        if (chunk_len > chunkshape[i]) {
-            chunk_len = chunkshape[i];
-        }
-
-        const int64_t block_start = block_idx[i] * blockshape[i];
-        if (block_start >= chunk_len) {
-            valid = 0;
-            break;
-        }
-        const int64_t remain = chunk_len - block_start;
-        const int64_t len = (remain < blockshape[i]) ? remain : blockshape[i];
-        if (valid > LLONG_MAX / len) {
-            return ME_EVAL_ERR_INVALID_ARG;
-        }
-        valid *= len;
-    }
-
-    if (chunk_nitems > 0 && valid > (int64_t)chunk_nitems) {
-        return ME_EVAL_ERR_INVALID_ARG;
-    }
-
-    *valid_items = valid;
-    *padded_items = padded;
-    return ME_EVAL_SUCCESS;
+    return me_nd_locate_block(nd, shape, chunkshape, blockshape,
+        nchunk, nblock, chunk_nitems, valid_items, padded_items, NULL, NULL, NULL);
 }
 
 static int collect_var_sizes(const me_expr *expr, size_t *var_sizes, int n_vars) {
@@ -185,9 +100,22 @@ int me_eval_nd_classic(const me_expr *expr, const void **vars_block,
         return ME_EVAL_ERR_INVALID_ARG;
     }
 
+    const me_nd_info *info = (const me_nd_info *)expr->bytecode;
+    if (!info || info->ndims <= 0) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
+    const int nd = info->ndims;
+    const int64_t *shape = info->data;
+    const int64_t *chunkshape = shape + nd;
+    const int64_t *blockshape = chunkshape + nd;
+
     int64_t valid_items = 0;
     int64_t padded_items = 0;
-    int rc = me_nd_compute_valid_items(expr, nchunk, nblock, block_nitems, &valid_items, &padded_items);
+    int64_t valid_len[ME_ND_MAX_DIMS];
+    size_t block_strides[ME_ND_MAX_DIMS];
+    int rc = me_nd_locate_block(nd, shape, chunkshape, blockshape,
+        nchunk, nblock, block_nitems, &valid_items, &padded_items,
+        NULL, valid_len, block_strides);
     if (rc != ME_EVAL_SUCCESS) {
         return rc;
     }
@@ -216,62 +144,15 @@ int me_eval_nd_classic(const me_expr *expr, const void **vars_block,
         return me_eval(expr, vars_block, n_vars, output_block, (int)valid_items, params);
     }
 
-    const me_nd_info *info = (const me_nd_info *)expr->bytecode;
-    const int nd = info->ndims;
-    const int64_t *shape = info->data;
-    const int64_t *chunkshape = shape + nd;
-    const int64_t *blockshape = chunkshape + nd;
-
     size_t var_sizes[ME_MAX_VARS];
     rc = collect_var_sizes(expr, var_sizes, n_vars);
     if (rc != ME_EVAL_SUCCESS) {
         return rc;
     }
 
-    int64_t chunk_idx[64];
-    int64_t block_idx[64];
-    int64_t valid_len[64];
-    if (nd > 64) {
-        return ME_EVAL_ERR_INVALID_ARG;
-    }
-
-    int64_t tmp = nchunk;
-    for (int i = nd - 1; i >= 0; i--) {
-        const int64_t nchunks_d = ceil_div64(shape[i], chunkshape[i]);
-        chunk_idx[i] = (nchunks_d == 0) ? 0 : (tmp % nchunks_d);
-        tmp /= nchunks_d;
-    }
-
-    tmp = nblock;
-    for (int i = nd - 1; i >= 0; i--) {
-        const int64_t nblocks_d = ceil_div64(chunkshape[i], blockshape[i]);
-        block_idx[i] = (nblocks_d == 0) ? 0 : (tmp % nblocks_d);
-        tmp /= nblocks_d;
-    }
-
+    int64_t stride[ME_ND_MAX_DIMS];
     for (int i = 0; i < nd; i++) {
-        const int64_t chunk_start = chunk_idx[i] * chunkshape[i];
-        int64_t chunk_len = shape[i] - chunk_start;
-        if (chunk_len > chunkshape[i]) {
-            chunk_len = chunkshape[i];
-        }
-        const int64_t block_start = block_idx[i] * blockshape[i];
-        if (block_start >= chunk_len) {
-            valid_len[i] = 0;
-        }
-        else {
-            int64_t len = chunk_len - block_start;
-            if (len > blockshape[i]) {
-                len = blockshape[i];
-            }
-            valid_len[i] = len;
-        }
-    }
-
-    int64_t stride[64];
-    stride[nd - 1] = 1;
-    for (int i = nd - 2; i >= 0; i--) {
-        stride[i] = stride[i + 1] * blockshape[i + 1];
+        stride[i] = (int64_t)block_strides[i];
     }
 
     if (valid_items == 0) {
@@ -618,29 +499,9 @@ int me_eval_nd_classic(const me_expr *expr, const void **vars_block,
         }
     }
 
-    int64_t indices[64] = {0};
-    int64_t write_idx = 0;
-    int64_t total_iters = 1;
-    for (int i = 0; i < nd; i++) {
-        total_iters *= valid_len[i];
-    }
-    for (int64_t it = 0; it < total_iters; it++) {
-        int64_t off = 0;
-        for (int i = 0; i < nd; i++) {
-            off += indices[i] * stride[i];
-        }
-        for (int v = 0; v < n_vars; v++) {
-            const unsigned char *src = (const unsigned char *)vars_block[v] + (size_t)off * var_sizes[v];
-            memcpy((unsigned char *)packed_vars[v] + (size_t)write_idx * var_sizes[v], src, var_sizes[v]);
-        }
-        write_idx++;
-        for (int i = nd - 1; i >= 0; i--) {
-            indices[i]++;
-            if (indices[i] < valid_len[i]) {
-                break;
-            }
-            indices[i] = 0;
-        }
+    for (int v = 0; v < n_vars; v++) {
+        me_grid_copy_runs(nd, blockshape, valid_len, block_strides, (size_t)valid_items,
+            packed_vars[v], (void *)vars_block[v], var_sizes[v], true);
     }
 
     if (is_reduction_output) {
@@ -663,27 +524,8 @@ int me_eval_nd_classic(const me_expr *expr, const void **vars_block,
         }
 
         memset(output_block, 0, (size_t)padded_items * item_size);
-        indices[0] = 0;
-        for (int i = 1; i < nd; i++) {
-            indices[i] = 0;
-        }
-        write_idx = 0;
-        for (int64_t it = 0; it < total_iters; it++) {
-            int64_t off = 0;
-            for (int i = 0; i < nd; i++) {
-                off += indices[i] * stride[i];
-            }
-            unsigned char *dst = (unsigned char *)output_block + (size_t)off * item_size;
-            memcpy(dst, (unsigned char *)packed_out + (size_t)write_idx * item_size, item_size);
-            write_idx++;
-            for (int i = nd - 1; i >= 0; i--) {
-                indices[i]++;
-                if (indices[i] < valid_len[i]) {
-                    break;
-                }
-                indices[i] = 0;
-            }
-        }
+        me_grid_copy_runs(nd, blockshape, valid_len, block_strides, (size_t)valid_items,
+            packed_out, output_block, item_size, false);
     }
 
     for (int v = 0; v < n_vars; v++) {

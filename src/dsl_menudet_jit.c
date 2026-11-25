@@ -1331,12 +1331,12 @@ static char *pj_expr_impl(me_dsl_compiled_program *p, const me_expr *n, const bo
     if (!ok) return NULL;
     snprintf(leaf,sizeof(leaf),"pj_expr_%d",id);
     if (cse_slot) {
-        snprintf(cse_slot->value,sizeof(cse_slot->value),"%s",leaf);
+        snprintf(cse_slot->value,sizeof(cse_slot->value),"pj_expr_%d",id);
     }
     else if (cse_eligible && cse->count < (int)(sizeof(cse->entries)/sizeof(cse->entries[0]))) {
         pj_cse_entry *entry = &cse->entries[cse->count++];
         entry->node = n; entry->hash = cse_hash; entry->uses = 1;
-        snprintf(entry->value,sizeof(entry->value),"%s",leaf);
+        snprintf(entry->value,sizeof(entry->value),"pj_expr_%d",id);
     }
     return strdup(leaf);
 }
@@ -2685,6 +2685,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         p->menudet_jit_ncomparisons || p->menudet_jit_npreds || p->menudet_jit_nmath ||
         p->menudet_jit_nmath2 || p->menudet_jit_nmath3) {
         free(body.text);
+        free(uniform_setup.text);
         dsl_tracef("menudet jit ineligible: wasm32 first slice requires bridge-free elementwise kernel");
         return;
     }
@@ -2737,6 +2738,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
             dsl_tracef("menudet jit ineligible: ND preamble");
             free(preamble.text);
             free(body.text);
+            free(uniform_setup.text);
             return;
         }
     }
@@ -2842,7 +2844,8 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     p->menudet_jit_arith_nnodes = 0;
 #endif
 
-    size_t capacity = 2*(body.used + preamble.used + input_declarations.used + unmasked_bridge.used) + 32768;
+    size_t capacity = 2*(body.used + preamble.used + input_declarations.used +
+        uniform_setup.used + unmasked_bridge.used) + 32768;
     char *source = malloc(capacity);
     me_dsl_jit_ir_program *ir = calloc(1,sizeof(*ir));
     if (!source || !ir) {
@@ -2853,6 +2856,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         free(input_declarations.text);
         free(unmasked_body.text);
         free(unmasked_bridge.text);
+        free(uniform_setup.text);
         return;
     }
     ir->nparams = p->n_inputs;
@@ -2866,6 +2870,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
         free(input_declarations.text);
         free(unmasked_body.text);
         free(unmasked_bridge.text);
+        free(uniform_setup.text);
         return;
     }
     for (int i = 0; i < p->n_inputs; i++) ir->param_dtypes[i] = p->vars.dtypes[i];
@@ -3023,7 +3028,7 @@ static void pj_prepare_source(me_dsl_compiled_program *p, const pj_constants *co
     free(unmasked_body.text);
     free(unmasked_func.text);
     free(unmasked_bridge.text);
-    if (used < 0) {
+    if (used < 0 || (size_t)used >= capacity) {
         dsl_tracef("menudet jit ineligible: generated source exceeds capacity");
         free(source); me_dsl_jit_ir_free(ir); return;
     }

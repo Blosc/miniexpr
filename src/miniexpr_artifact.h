@@ -7,6 +7,7 @@
 
 #include "miniexpr.h"
 #include "miniexpr_kernel.h"
+#include "miniexpr_reduce.h"
 #include <limits.h>
 
 #ifdef __cplusplus
@@ -192,25 +193,6 @@ typedef enum { ME_ARRAY_NONE, ME_ARRAY_SUM, ME_ARRAY_PROD, ME_ARRAY_MIN,
                 /* Opt-in fixed-block pairwise sum; same floating map/accumulator
                  * dtype required. Existing SUM retains strict serial order. */
                 ME_ARRAY_SUM_PAIRWISE } me_array_reduction;
-#define ME_PAIRWISE_SUM_API 1
-#define ME_PAIRWISE_SUM_LEAF_ITEMS 128
-/* Invocation-local streaming state. No FP environment management: hosts scope
- * their own arithmetic diagnostics. Append complete logical leaves in order;
- * update accepts raw boundary fragments. Never merge arbitrary storage sums. */
-typedef struct {
-    union { float f32[8]; double f64[8]; } lanes;
-    uint64_t tree[sizeof(size_t) * CHAR_BIT];
-    size_t used, occupied, leaves;
-    me_dtype dtype;
-} me_pairwise_sum_state;
-me_artifact_status me_pairwise_sum_init(me_pairwise_sum_state *state, me_dtype dtype);
-me_artifact_status me_pairwise_sum_update(me_pairwise_sum_state *state,
-    const void *values, size_t count);
-me_artifact_status me_pairwise_sum_append(me_pairwise_sum_state *state,
-    const void *leaves, size_t count);
-me_artifact_status me_pairwise_sum_leaves(me_dtype dtype, const void *values,
-    size_t count, void *leaves, size_t capacity);
-me_artifact_status me_pairwise_sum_finish(me_pairwise_sum_state *state, void *output);
 typedef struct {
     unsigned version;
     me_array_reduction reduction;

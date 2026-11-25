@@ -9,15 +9,12 @@
 **********************************************************************/
 
 #include "miniexpr_internal.h"
+#include "miniexpr_grid_internal.h"
 #include "dsl_eval_internal.h"
 
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
-
-static int64_t ceil_div64(int64_t a, int64_t b) {
-    return (b == 0) ? 0 : (a + b - 1) / b;
-}
 
 static int64_t dsl_i64_mul_wrap_local(int64_t a, int64_t b) {
     return (int64_t)((uint64_t)a * (uint64_t)b);
@@ -88,16 +85,6 @@ int me_eval_nd_dsl(const me_expr *expr, const void **vars_block,
         return ME_EVAL_ERR_INVALID_ARG;
     }
 
-    int64_t valid_items = 0;
-    int64_t padded_items = 0;
-    int rc = me_nd_compute_valid_items(expr, nchunk, nblock, block_nitems, &valid_items, &padded_items);
-    if (rc != ME_EVAL_SUCCESS) {
-        return rc;
-    }
-    if (valid_items > INT_MAX) {
-        return ME_EVAL_ERR_INVALID_ARG;
-    }
-
     const me_nd_info *info = (const me_nd_info *)expr->bytecode;
     if (!info || info->ndims <= 0) {
         return ME_EVAL_ERR_INVALID_ARG;
@@ -106,6 +93,21 @@ int me_eval_nd_dsl(const me_expr *expr, const void **vars_block,
     const int64_t *shape = info->data;
     const int64_t *chunkshape = shape + nd;
     const int64_t *blockshape = chunkshape + nd;
+
+    int64_t valid_items = 0;
+    int64_t padded_items = 0;
+    int64_t base_idx[ME_ND_MAX_DIMS];
+    int64_t valid_len[ME_ND_MAX_DIMS];
+    size_t block_strides[ME_ND_MAX_DIMS];
+    int rc = me_nd_locate_block(nd, shape, chunkshape, blockshape,
+        nchunk, nblock, block_nitems, &valid_items, &padded_items,
+        base_idx, valid_len, block_strides);
+    if (rc != ME_EVAL_SUCCESS) {
+        return rc;
+    }
+    if (valid_items > INT_MAX) {
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
 
     /* me_get_itemsize, not dtype_size: strings carry their width in the node. */
     const size_t item_size = me_get_itemsize(expr);
@@ -123,32 +125,7 @@ int me_eval_nd_dsl(const me_expr *expr, const void **vars_block,
         return ME_EVAL_SUCCESS;
     }
 
-    int64_t chunk_idx[64];
-    int64_t block_idx[64];
-    if (nd > 64) {
-        return ME_EVAL_ERR_INVALID_ARG;
-    }
-
-    int64_t tmp = nchunk;
-    for (int i = nd - 1; i >= 0; i--) {
-        const int64_t nchunks_d = ceil_div64(shape[i], chunkshape[i]);
-        chunk_idx[i] = (nchunks_d == 0) ? 0 : (tmp % nchunks_d);
-        tmp /= nchunks_d;
-    }
-
-    tmp = nblock;
-    for (int i = nd - 1; i >= 0; i--) {
-        const int64_t nblocks_d = ceil_div64(chunkshape[i], blockshape[i]);
-        block_idx[i] = (nblocks_d == 0) ? 0 : (tmp % nblocks_d);
-        tmp /= nblocks_d;
-    }
-
-    int64_t base_idx[64];
-    for (int i = 0; i < nd; i++) {
-        int64_t chunk_term = dsl_i64_mul_wrap_local(chunk_idx[i], chunkshape[i]);
-        base_idx[i] = dsl_i64_addmul_wrap(chunk_term, block_idx[i], blockshape[i]);
-    }
-    int64_t shape_stride[64];
+    int64_t shape_stride[ME_ND_MAX_DIMS];
     shape_stride[nd - 1] = 1;
     for (int i = nd - 2; i >= 0; i--) {
         shape_stride[i] = dsl_i64_mul_wrap_local(shape_stride[i + 1], shape[i + 1]);
@@ -251,32 +228,6 @@ int me_eval_nd_dsl(const me_expr *expr, const void **vars_block,
         return rc;
     }
 
-    int64_t valid_len[64];
-    for (int i = 0; i < nd; i++) {
-        const int64_t chunk_start = chunk_idx[i] * chunkshape[i];
-        int64_t chunk_len = shape[i] - chunk_start;
-        if (chunk_len > chunkshape[i]) {
-            chunk_len = chunkshape[i];
-        }
-        const int64_t block_start = block_idx[i] * blockshape[i];
-        if (block_start >= chunk_len) {
-            valid_len[i] = 0;
-        }
-        else {
-            int64_t len = chunk_len - block_start;
-            if (len > blockshape[i]) {
-                len = blockshape[i];
-            }
-            valid_len[i] = len;
-        }
-    }
-
-    int64_t stride[64];
-    stride[nd - 1] = 1;
-    for (int i = nd - 2; i >= 0; i--) {
-        stride[i] = stride[i + 1] * blockshape[i + 1];
-    }
-
     size_t var_sizes[ME_MAX_VARS];
     for (int v = 0; v < n_vars; v++) {
         var_sizes[v] = dsl_var_item_size(program, v);
@@ -347,41 +298,34 @@ int me_eval_nd_dsl(const me_expr *expr, const void **vars_block,
         }
     }
 
-    int64_t indices[64] = {0};
-    int64_t write_idx = 0;
-    int64_t total_iters = 1;
-    for (int i = 0; i < nd; i++) {
-        total_iters *= valid_len[i];
+    for (int v = 0; v < n_vars; v++) {
+        me_grid_copy_runs(nd, blockshape, valid_len, block_strides, (size_t)valid_items,
+            packed_vars[v], (void *)vars_block[v], var_sizes[v], true);
     }
-    for (int64_t it = 0; it < total_iters; it++) {
-        int64_t off = 0;
-        for (int i = 0; i < nd; i++) {
-            off += indices[i] * stride[i];
-        }
-        for (int v = 0; v < n_vars; v++) {
-            const unsigned char *src = (const unsigned char *)vars_block[v] + (size_t)off * var_sizes[v];
-            memcpy((unsigned char *)packed_vars[v] + (size_t)write_idx * var_sizes[v], src, var_sizes[v]);
-        }
-        for (int d = 0; d < ME_DSL_MAX_NDIM && d < nd; d++) {
-            if (idx_buffers[d]) {
-                idx_buffers[d][write_idx] = base_idx[d] + indices[d];
+
+    if (!use_nd_synth_fast && ((program->uses_i_mask != 0) || program->uses_flat_idx)) {
+        int64_t indices[ME_ND_MAX_DIMS] = {0};
+        for (int64_t write_idx = 0; write_idx < valid_items; write_idx++) {
+            for (int d = 0; d < ME_DSL_MAX_NDIM && d < nd; d++) {
+                if (idx_buffers[d]) {
+                    idx_buffers[d][write_idx] = base_idx[d] + indices[d];
+                }
             }
-        }
-        if (global_linear_idx_buffer) {
-            int64_t global_idx = 0;
-            for (int d = 0; d < nd; d++) {
-                int64_t coord = dsl_i64_add_wrap(base_idx[d], indices[d]);
-                global_idx = dsl_i64_addmul_wrap(global_idx, coord, shape_stride[d]);
+            if (global_linear_idx_buffer) {
+                int64_t global_idx = 0;
+                for (int d = 0; d < nd; d++) {
+                    int64_t coord = dsl_i64_add_wrap(base_idx[d], indices[d]);
+                    global_idx = dsl_i64_addmul_wrap(global_idx, coord, shape_stride[d]);
+                }
+                global_linear_idx_buffer[write_idx] = global_idx;
             }
-            global_linear_idx_buffer[write_idx] = global_idx;
-        }
-        write_idx++;
-        for (int i = nd - 1; i >= 0; i--) {
-            indices[i]++;
-            if (indices[i] < valid_len[i]) {
-                break;
+            for (int i = nd - 1; i >= 0; i--) {
+                indices[i]++;
+                if (indices[i] < valid_len[i]) {
+                    break;
+                }
+                indices[i] = 0;
             }
-            indices[i] = 0;
         }
     }
 
@@ -433,24 +377,8 @@ int me_eval_nd_dsl(const me_expr *expr, const void **vars_block,
     }
     else {
         memset(output_block, 0, (size_t)padded_items * item_size);
-        memset(indices, 0, sizeof(indices));
-        write_idx = 0;
-        for (int64_t it = 0; it < total_iters; it++) {
-            int64_t off = 0;
-            for (int i = 0; i < nd; i++) {
-                off += indices[i] * stride[i];
-            }
-            unsigned char *dst = (unsigned char *)output_block + (size_t)off * item_size;
-            memcpy(dst, (unsigned char *)packed_out + (size_t)write_idx * item_size, item_size);
-            write_idx++;
-            for (int i = nd - 1; i >= 0; i--) {
-                indices[i]++;
-                if (indices[i] < valid_len[i]) {
-                    break;
-                }
-                indices[i] = 0;
-            }
-        }
+        me_grid_copy_runs(nd, blockshape, valid_len, block_strides, (size_t)valid_items,
+            packed_out, output_block, item_size, false);
     }
 
     for (int v = 0; v < n_vars; v++) {

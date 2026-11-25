@@ -198,10 +198,32 @@ Embedded core-only and artifact consumers and an installed C99 core-only
 consumer are exercised separately.
 
 Still separate work: migrate/retire the checked-profile corpus and live full-DSL
-callers; extract streaming pairwise sums; consolidate legacy ND geometry; settle
-per-call interpreter override; qualify Linux/Windows and WASM JIT; complete C
-`b2o` cross-language fixtures. Formula reductions remain deliberately deferred.
+callers; settle per-call interpreter override; qualify Linux and Windows
+clang-cl; complete C `b2o` cross-language fixtures. Formula reductions remain
+deliberately deferred.
 No ABI freeze or Windows linker-workaround removal is implied by this follow-up.
+
+## WASM32 JIT & Step 4 update
+
+- **WASM32 JIT qualified locally** (Emscripten + Node): both side-module mode
+  (`MINIEXPR_WASM32_SIDE_MODULE=ON`, 9/9 initially and 12/12 after Step 4) and
+  standalone mode (`MINIEXPR_WASM32_SIDE_MODULE=OFF`, 3/3 including
+  `kernel_api_require_wasm_jit`) pass with eligible cases routing to `route=jit`.
+  `tests/test_dsl_jit_menudet_wasm32.c` now also covers `me_prepare_menudet("0.2", ...)`
+  with annotations, a weak capture, and `ME_EXEC_REQUIRE_JIT`.
+- **JSON-free streaming pairwise sums extracted to core:** moved the
+  `me_pairwise_sum_*` declarations/implementation out of `miniexpr_artifact.h` /
+  `src/dsl_array.c` into `src/miniexpr_reduce.h` and `src/miniexpr_pairwise_sum.c`
+  (compiled with strict FP flags and installed unconditionally with core headers).
+  Updated `../c-blosc2.codeberg` (`bench/sum_linspace.c`, `bench/CMakeLists.txt`,
+  `README_DEVELOPERS.md`) so `sum_linspace` builds and runs against a
+  JSON-disabled `miniexpr` core installation (`test_b2nd_constructors` and
+  `sum_linspace` both pass).
+- **Shared ND grid geometry:** added `src/miniexpr_grid_internal.h`
+  (`me_grid_div_ceil`, `me_grid_axis_window`, `me_grid_copy_runs`, and
+  `me_nd_locate_block`) and routed `src/miniexpr_grid.c`,
+  `src/miniexpr_eval_nd.c`, and `src/miniexpr_eval_dsl_nd.c` through it,
+  replacing duplicated chunk/block decomposition and per-element gather/scatter loops.
 
 ## Review 2 follow-up
 

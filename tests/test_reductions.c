@@ -9,6 +9,7 @@
 #include <limits.h>
 #include <math.h>
 #include <complex.h>
+#include <string.h>
 #include "../src/miniexpr.h"
 #include "minctest.h"
 
@@ -52,10 +53,25 @@ static inline double cimag_compat(double _Complex z) {
 #define CREAL(z) creal_compat((z))
 #define CIMAG(z) cimag_compat((z))
 #else
-#define MAKE_C64(real, imag) CMPLXF((real), (imag))
+/* glibc does not expose CMPLX[F] for every Clang/C99 configuration. Construct
+ * components by representation, preserving infinities, NaNs and signed zeros
+ * without the extra arithmetic in real + I * imag. */
+static inline float _Complex make_c64(float real, float imag) {
+    float parts[2] = {real, imag};
+    float _Complex result;
+    memcpy(&result, parts, sizeof(result));
+    return result;
+}
+static inline double _Complex make_c128(double real, double imag) {
+    double parts[2] = {real, imag};
+    double _Complex result;
+    memcpy(&result, parts, sizeof(result));
+    return result;
+}
+#define MAKE_C64(real, imag) make_c64((real), (imag))
 #define CREALF(z) crealf(z)
 #define CIMAGF(z) cimagf(z)
-#define MAKE_C128(real, imag) CMPLX((real), (imag))
+#define MAKE_C128(real, imag) make_c128((real), (imag))
 #define CREAL(z) creal((z))
 #define CIMAG(z) cimag((z))
 #endif

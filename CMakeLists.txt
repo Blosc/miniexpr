@@ -24,6 +24,7 @@ set(MINIEXPR_SOURCES
   src/miniexpr.c
   src/miniexpr_kernel.c
   src/miniexpr_grid.c
+  src/miniexpr_pairwise_sum.c
   src/miniexpr_eval_nd.c
   src/miniexpr_eval_dsl_nd.c
   src/miniexpr_eval_reduce.c
@@ -53,10 +54,10 @@ set(MINIEXPR_SOURCES
 )
 
 if(MSVC)
-  set_source_files_properties(src/dsl_menudet_batch.c PROPERTIES
+  set_source_files_properties(src/dsl_menudet_batch.c src/miniexpr_pairwise_sum.c PROPERTIES
     COMPILE_OPTIONS "/fp:precise")
 else()
-  set_source_files_properties(src/dsl_menudet_batch.c PROPERTIES
+  set_source_files_properties(src/dsl_menudet_batch.c src/miniexpr_pairwise_sum.c PROPERTIES
     COMPILE_OPTIONS "-fno-fast-math;-ffp-contract=off")
 endif()
 
@@ -223,7 +224,7 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
     endif()
   endforeach()
-  install(FILES src/miniexpr.h src/miniexpr_kernel.h src/miniexpr_grid.h
+  install(FILES src/miniexpr.h src/miniexpr_kernel.h src/miniexpr_grid.h src/miniexpr_reduce.h
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 endif()
 
@@ -254,7 +255,7 @@ if(MINIEXPR_BUILD_ARTIFACT)
       ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
       LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
       RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-    install(FILES src/miniexpr_artifact.h src/miniexpr_graph.h src/miniexpr_reduce.h
+    install(FILES src/miniexpr_artifact.h src/miniexpr_graph.h
       DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
     install(FILES doc/native-graph-1.schema.json doc/native-staged-graph-1.schema.json
       doc/native-graphs-1.md doc/native-stages-1.md

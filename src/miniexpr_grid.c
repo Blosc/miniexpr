@@ -3,6 +3,7 @@
   License: BSD 3-Clause (see LICENSE.txt)
 **********************************************************************/
 #include "miniexpr_grid.h"
+#include "miniexpr_grid_internal.h"
 #include "miniexpr_kernel_internal.h"
 
 #include <limits.h>
@@ -56,8 +57,8 @@ me_status me_grid_create(const me_grid_spec *spec, me_grid **out, me_error *erro
             (shape && logical_items > INT64_MAX / shape) ||
             grid->padded > (size_t)INT_MAX / (size_t)block) goto invalid;
         logical_items *= shape;
-        int64_t chunks = shape / chunk + (shape % chunk != 0);
-        int64_t blocks = chunk / block + (chunk % block != 0);
+        int64_t chunks = me_grid_div_ceil(shape, chunk);
+        int64_t blocks = me_grid_div_ceil(chunk, block);
         if ((chunks && grid->nchunks > INT64_MAX / chunks) ||
             grid->nblocks > INT64_MAX / blocks) goto invalid;
         grid->shape[d] = shape;
@@ -95,44 +96,12 @@ me_status me_grid_describe_block(const me_grid *grid, int64_t nchunk, int64_t nb
         int64_t block = nblock % grid->block_grid[d];
         nchunk /= grid->chunk_grid[d];
         nblock /= grid->block_grid[d];
-        int64_t start = chunk * grid->chunks[d];
-        int64_t relative = block * grid->blocks[d];
-        int64_t remaining = grid->shape[d] - start;
-        out->origin[d] = relative > remaining ? grid->shape[d] : start + relative;
-        int64_t valid = remaining > relative ? remaining - relative : 0;
-        int64_t chunk_valid = grid->chunks[d] > relative ? grid->chunks[d] - relative : 0;
-        if (valid > chunk_valid) valid = chunk_valid;
-        if (valid > grid->blocks[d]) valid = grid->blocks[d];
+        int64_t valid = me_grid_axis_window(grid->shape[d], grid->chunks[d], grid->blocks[d],
+            chunk, block, &out->origin[d]);
         out->extent[d] = valid;
         out->valid_nitems *= (size_t)valid;
     }
     return ME_SUCCESS;
-}
-
-static void grid_copy_runs(const me_grid *grid, const me_grid_block_info *info,
-    void *compact, void *physical, size_t width, bool gather) {
-    if (!info->valid_nitems) return;
-    int axis = grid->ndim - 1;
-    size_t run = (size_t)info->extent[axis];
-    /* Merge a contiguous suffix, then advance outer coordinates as an odometer.
-     * No per-lane division/modulo, and one memcpy per contiguous run. */
-    while (axis > 0 && info->extent[axis] == grid->blocks[axis]) {
-        run *= (size_t)info->extent[--axis];
-    }
-    size_t coordinates[ME_GRID_MAX_NDIM] = {0};
-    size_t physical_offset = 0;
-    for (size_t offset = 0; offset < info->valid_nitems; offset += run) {
-        unsigned char *packed = (unsigned char *)compact + offset * width;
-        unsigned char *padded = (unsigned char *)physical + physical_offset * width;
-        if (gather) memcpy(packed, padded, run * width);
-        else memcpy(padded, packed, run * width);
-        for (int d = axis - 1; d >= 0; d--) {
-            physical_offset += grid->strides[d];
-            if (++coordinates[d] < (size_t)info->extent[d]) break;
-            physical_offset -= coordinates[d] * grid->strides[d];
-            coordinates[d] = 0;
-        }
-    }
 }
 
 static bool grid_reserve_scratch(size_t *total, size_t bytes, size_t alignment, size_t *offset) {
@@ -209,14 +178,16 @@ me_status me_grid_eval_block(const me_grid *grid, const me_kernel *kernel,
         size_t input_width = kernel->widths[i];
         size_t bytes = info.valid_nitems * input_width;
         packed[i] = (me_buffer){(unsigned char *)scratch + offsets[i], bytes};
-        grid_copy_runs(grid, &info, (void *)packed[i].data, (void *)inputs[i].data, input_width, true);
+        me_grid_copy_runs(grid->ndim, grid->blocks, info.extent, grid->strides,
+            info.valid_nitems, (void *)packed[i].data, (void *)inputs[i].data, input_width, true);
     }
     status = me_eval_block(kernel, packed, ninputs, (me_mut_buffer){scratch, result_bytes}, &block, options, error);
     if (status == ME_SUCCESS) {
         if (scalar) memcpy(output.data, scratch, width);
         else {
             memset(output.data, 0, output_bytes);
-            grid_copy_runs(grid, &info, scratch, output.data, width, false);
+            me_grid_copy_runs(grid->ndim, grid->blocks, info.extent, grid->strides,
+                info.valid_nitems, scratch, output.data, width, false);
         }
     }
     free(scratch);

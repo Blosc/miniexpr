@@ -458,6 +458,10 @@ if(NOT EMSCRIPTEN AND NOT WIN32 AND MINIEXPR_ENABLE_TCC_JIT AND MINIEXPR_BUILD_B
   add_test(NAME kernel_api_require_tcc COMMAND test_kernel_api --require-tcc)
   set_tests_properties(kernel_api_require_tcc PROPERTIES TIMEOUT 120)
 endif()
+if(EMSCRIPTEN AND MINIEXPR_USE_WASM32_JIT AND NOT MINIEXPR_WASM32_SIDE_MODULE)
+  add_test(NAME kernel_api_require_wasm_jit COMMAND test_kernel_api --require-tcc)
+  set_tests_properties(kernel_api_require_wasm_jit PROPERTIES TIMEOUT 120)
+endif()
 if(UNIX AND NOT EMSCRIPTEN)
   add_test(NAME kernel_rejects_before_compiler COMMAND "${CMAKE_COMMAND}"
     "-DTEST_EXE=$<TARGET_FILE:test_kernel_api>"

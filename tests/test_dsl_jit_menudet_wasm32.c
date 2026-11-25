@@ -5,6 +5,7 @@
  * kernel; unsupported cases must fall back without changing values. The file
  * also compiles natively, where it doubles as the JIT benchmark driver. */
 #include "miniexpr_artifact.h"
+#include "miniexpr_kernel.h"
 #include "dsl_jit_test.h"
 #undef NDEBUG
 #include <assert.h>
@@ -854,12 +855,54 @@ static void benchmark_reuse(void) {
     free(x); free(y); free(out);
 }
 
+static void check_direct_kernel_api(void) {
+    const char *source =
+        "def k(x: float32, n) -> float64:\n"
+        "    v = x\n"
+        "    for i in range(n):\n"
+        "        v = v + 1\n"
+        "    return v\n";
+    int64_t n = 3;
+    me_input_spec input = {"x", ME_FLOAT32, 0};
+    me_capture capture = {{"n", ME_INT64, 0}, &n, ME_CAPTURE_WEAK};
+    me_signature sig = ME_SIGNATURE_INITIALIZER;
+    sig.inputs = &input;
+    sig.ninputs = 1;
+    sig.captures = &capture;
+    sig.ncaptures = 1;
+    me_prepare_options options = ME_PREPARE_OPTIONS_INITIALIZER;
+#if defined(__EMSCRIPTEN__)
+    options.execution = ME_EXEC_REQUIRE_JIT;
+#else
+    options.execution = ME_EXEC_PREFER_JIT;
+#endif
+    me_kernel *kernel = NULL;
+    me_error error;
+    me_status rc = me_prepare_menudet("0.2", source, &sig, &options, &kernel, &error);
+    if (rc != ME_SUCCESS) {
+        fprintf(stderr, "direct kernel prepare failed (%d): %s\n", rc, error.message);
+    }
+    assert(rc == ME_SUCCESS && kernel);
+    me_kernel_info info = ME_KERNEL_INFO_INITIALIZER;
+    assert(me_describe(kernel, &info) == ME_SUCCESS);
+    assert(info.output_dtype == ME_FLOAT64 && info.output_itemsize == sizeof(double));
+    float x[] = {1.5f, -2.0f, 4.25f};
+    double out[3] = {0};
+    me_buffer buffer = {x, sizeof(x)};
+    me_block block = ME_BLOCK_INITIALIZER;
+    block.nitems = 3;
+    assert(me_eval_block(kernel, &buffer, 1, (me_mut_buffer){out, sizeof(out)}, &block, NULL, &error) == ME_SUCCESS);
+    assert(out[0] == 4.5 && out[1] == 1.0 && out[2] == 7.25);
+    me_kernel_free(kernel);
+}
+
 int main(void) {
 #if defined(__EMSCRIPTEN__)
 #if ME_WASM32_SIDE_MODULE
     me_register_wasm_jit_helpers(menudet_wasm32_instantiate, menudet_wasm32_free);
 #endif
 #endif
+    check_direct_kernel_api();
     check_integer_boundaries();
     check_float_values();
     check_control_flow();

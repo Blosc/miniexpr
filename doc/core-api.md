@@ -162,8 +162,12 @@ execute their defined reduction. Both block and grid calls initialize FP reports
 before geometry/buffer preflight, so such failures cannot leave stale flags.
 
 The C-Blosc2 constructor branch uses this shared adapter while retaining host
-ownership of compression, exact endpoints and endian conversion. A standalone
-core-only installation now installs both public headers without JSON support.
+ownership of compression, exact endpoints and endian conversion. Legacy ND
+block evaluators (`me_eval_nd` / `me_nd_valid_nitems`) share the same underlying
+window/run helpers, and `miniexpr_reduce.h` provides streaming pairwise sums
+(`me_pairwise_sum_*`) without requiring the JSON adapter. A standalone
+core-only installation installs `miniexpr.h`, `miniexpr_kernel.h`,
+`miniexpr_grid.h` and `miniexpr_reduce.h` without JSON support.
 
 ## Build integration
 
@@ -174,7 +178,8 @@ benchmarks OFF; explicit cache settings still win. Standalone builds retain
 their previous defaults. The Makefile is now a thin CMake shortcut rather than
 a separate, incomplete source list.
 
-The embedded consumer fixture checks the defaults and exercises the grid API:
+The embedded consumer fixture checks the defaults and exercises the grid and
+pairwise-sum APIs:
 
 ```sh
 cmake -S tests/cmake/embedded -B build-embedded \

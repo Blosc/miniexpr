@@ -5,14 +5,47 @@
 #ifndef MINIEXPR_REDUCE_H
 #define MINIEXPR_REDUCE_H
 #include "miniexpr.h"
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define ME_EXTREMA_REDUCE_API 1
 
 #define ME_MOMENTS_REDUCE_API 1
+
+#define ME_PAIRWISE_SUM_API 1
+#define ME_PAIRWISE_SUM_LEAF_ITEMS 128
+
+enum {
+    ME_PAIRWISE_SUM_SUCCESS = 0,
+    ME_PAIRWISE_SUM_ERR_INVALID_ARG = -4
+};
+
+/* Invocation-local streaming state. No FP environment management: hosts scope
+ * their own arithmetic diagnostics. Append complete logical leaves in order;
+ * update accepts raw boundary fragments. Never merge arbitrary storage sums.
+ * finish consumes the state; reinitialize before another reduction. */
+typedef struct {
+    union { float f32[8]; double f64[8]; } lanes;
+    uint64_t tree[sizeof(size_t) * CHAR_BIT];
+    size_t used, occupied, leaves;
+    me_dtype dtype;
+} me_pairwise_sum_state;
+
+int me_pairwise_sum_init(me_pairwise_sum_state *state, me_dtype dtype);
+int me_pairwise_sum_update(me_pairwise_sum_state *state,
+    const void *values, size_t count);
+int me_pairwise_sum_append(me_pairwise_sum_state *state,
+    const void *leaves, size_t count);
+int me_pairwise_sum_leaves(me_dtype dtype, const void *values,
+    size_t count, void *leaves, size_t capacity);
+int me_pairwise_sum_finish(me_pairwise_sum_state *state, void *output);
 
 /* Packed doubles (count, origin, mean offset, M2), for embedding schedulers. Counts
  * must stay exactly representable (<= 2**53). Float32 inputs are widened before
@@ -23,12 +56,12 @@
 static inline bool me_moments_span(me_dtype dtype, const void *values,
     size_t count, double out[4]) {
     if ((dtype != ME_FLOAT32 && dtype != ME_FLOAT64) ||
-        count > UINT64_C(9007199254740992)) return false;
+        (uint64_t)count > UINT64_C(9007199254740992)) return false;
     out[0] = (double)count;
     out[1] = out[2] = out[3] = 0;
     if (!count) return true;
 #define ME_MOMENTS_SCAN(TYPE) do { \
-    const unsigned char *data = values; \
+    const unsigned char *data = (const unsigned char *)values; \
     TYPE first; memcpy(&first, data, sizeof(first)); \
     double origin = first, sums[8] = {0}; \
     for (size_t i = 0; i < count; i++) { \
@@ -185,7 +218,7 @@ static inline bool me_argextrema_update(me_dtype dtype, const void *values,
     size_t width = me_extrema_itemsize(dtype);
     if (!width || origin < 0 || count > (uint64_t)(INT64_MAX - origin)) return false;
     if (!count) return true;
-    const unsigned char *data = values;
+    const unsigned char *data = (const unsigned char *)values;
 #define ME_ARG_SCAN(TYPE, FLOATING) do { \
     TYPE best; \
     size_t begin = 0; \
@@ -243,7 +276,7 @@ static inline bool me_argextrema_update(me_dtype dtype, const void *values,
  */
 static inline bool me_extrema_float(me_dtype dtype, const void *values,
     size_t count, uint64_t initial, bool initialized, bool minimum, uint64_t *out) {
-    const unsigned char *data = values;
+    const unsigned char *data = (const unsigned char *)values;
     double best = 0;
     if (initialized) {
         if (dtype == ME_FLOAT32) {
@@ -278,4 +311,8 @@ static inline bool me_extrema_float(me_dtype dtype, const void *values,
     } else memcpy(out, &best, sizeof(best));
     return true;
 }
+
+#ifdef __cplusplus
+}
+#endif
 #endif

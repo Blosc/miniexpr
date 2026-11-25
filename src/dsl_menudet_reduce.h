@@ -12,6 +12,10 @@
 #include "miniexpr.h"
 #include "miniexpr_reduce.h"
 
+void dsl_pairwise_sum_feed(me_pairwise_sum_state *state, me_dtype dtype,
+    const void *values, const uint8_t *mask, size_t count);
+void dsl_pairwise_sum_accumulate(me_pairwise_sum_state *state, me_dtype dtype, void *acc);
+
 static inline float dsl_menudet_sum_f32(float sum, const void *values, size_t count) {
     const unsigned char *data = values;
     for (size_t i = 0; i < count; i++) {
