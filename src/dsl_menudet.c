@@ -61,9 +61,10 @@ me_menudet_status me_validate_menudet_ex(const char *source, const char *version
     const me_variable *inputs, int ninputs, me_dtype output_dtype,
     const me_menudet_validation_descriptor *descriptor, me_menudet_error *error) {
     if (error) memset(error, 0, sizeof(*error));
-    if (!version || strcmp(version, ME_MENUDET_DSL_VERSION)) {
+    bool annotations = version && !strcmp(version, ME_MENUDET_DSL_ANNOTATED_VERSION);
+    if (!version || (strcmp(version, ME_MENUDET_DSL_VERSION) && !annotations)) {
         return menudet_error(error, ME_MENUDET_ERR_VERSION, 0, 0,
-                              "unsupported menudet DSL version; expected Menudet 0.1 beta");
+                              "unsupported menudet DSL version; expected 0.1 or 0.2");
     }
     me_menudet_validation_descriptor defaults = {
         .struct_size = sizeof(defaults), .version = ME_MENUDET_DSL_VALIDATION_DESCRIPTOR_VERSION};
@@ -102,7 +103,8 @@ me_menudet_status me_validate_menudet_ex(const char *source, const char *version
     me_dsl_error parse_error;
     /* The public beta uses the NumPy-style semantic profile. */
     me_dsl_semantic_profile profile = ME_DSL_PROFILE_MENUDET_0_1;
-    me_dsl_program *parsed = me_dsl_parse_profile(source, profile, &parse_error);
+    me_dsl_program *parsed = annotations ? me_dsl_parse_menudet02(source, &parse_error) :
+        me_dsl_parse_profile(source, profile, &parse_error);
     if (!parsed) {
         return menudet_error(error, strstr(parse_error.message, "out of memory")
                               ? ME_MENUDET_ERR_OOM : ME_MENUDET_ERR_SOURCE,
@@ -119,9 +121,12 @@ me_menudet_status me_validate_menudet_ex(const char *source, const char *version
     int position = -1;
     bool is_dsl = false;
     char reason[256] = {0};
-    me_dsl_compiled_program *program = dsl_compile_program_profile(source, inputs, ninputs,
-        output_dtype, descriptor->ndim, ME_JIT_OFF, profile,
-        &position, &is_dsl, reason, sizeof(reason));
+    me_dsl_compiled_program *program = annotations ?
+        dsl_compile_program_menudet02(source, inputs, ninputs, output_dtype,
+            descriptor->ndim, ME_JIT_OFF, NULL, &position, &is_dsl, reason, sizeof(reason)) :
+        dsl_compile_program_profile(source, inputs, ninputs,
+            output_dtype, descriptor->ndim, ME_JIT_OFF, profile,
+            &position, &is_dsl, reason, sizeof(reason));
     if (!program) {
         int line = 0, column = 0;
         if (position >= 0) {

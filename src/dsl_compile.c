@@ -3036,6 +3036,7 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
                                                      me_dtype dtype, int compile_ndims, int jit_mode,
                                                      me_dsl_semantic_profile profile,
                                                      const me_dsl_declared_policy *declared,
+                                                     bool annotations,
                                                      int *error_pos, bool *is_dsl,
                                                      char *error_reason, size_t error_reason_cap) {
     me_dsl_error parse_error;
@@ -3045,7 +3046,8 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
     if (is_dsl) {
         *is_dsl = false;
     }
-    me_dsl_program *parsed = me_dsl_parse_profile(source, profile, &parse_error);
+    me_dsl_program *parsed = annotations ? me_dsl_parse_menudet02(source, &parse_error) :
+        me_dsl_parse_profile(source, profile, &parse_error);
     if (!parsed) {
         if (error_reason && error_reason_cap > 0) {
             snprintf(error_reason, error_reason_cap, "dsl parse error: %s",
@@ -3066,6 +3068,32 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
     }
     if (is_dsl) {
         *is_dsl = true;
+    }
+
+    if (annotations) {
+        for (int p = 0; p < parsed->nparams; p++) {
+            if (parsed->param_dtypes[p] == ME_AUTO) continue;
+            for (int i = 0; i < var_count; i++) {
+                if (variables[i].name && !strcmp(parsed->params[p], variables[i].name) &&
+                    variables[i].dtype != parsed->param_dtypes[p]) {
+                    if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap,
+                        "input '%s' does not match its dtype annotation", parsed->params[p]);
+                    if (error_pos) *error_pos = -1;
+                    me_dsl_program_free(parsed);
+                    return NULL;
+                }
+            }
+        }
+        if (parsed->return_dtype != ME_AUTO) {
+            if (dtype != ME_AUTO && dtype != parsed->return_dtype) {
+                if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap,
+                    "output dtype conflicts with return annotation");
+                if (error_pos) *error_pos = -1;
+                me_dsl_program_free(parsed);
+                return NULL;
+            }
+            dtype = parsed->return_dtype;
+        }
     }
 
     me_dsl_compiled_program *program = dsl_compiled_program_alloc(parsed, source, compile_ndims,
@@ -3316,7 +3344,15 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
         }
         int idx = dsl_var_table_add_with_uniform(&program->vars, name, vtype, itemsize,
             dsl_menudet_typed_profile(profile) && (entry->type & ME_DSL_UNIFORM_INPUT));
-        if (idx >= 0 && profile == ME_DSL_PROFILE_MENUDET_0_1) program->numpy_weak_vars[idx] = (entry->type & ME_DSL_WEAK_INPUT) != 0;
+        if (idx >= 0 && profile == ME_DSL_PROFILE_MENUDET_0_1) {
+            bool weak = (entry->type & ME_DSL_WEAK_INPUT) != 0;
+            /* A 0.2 authored dtype makes even a weak captured parameter strong.
+             * Its native representation was checked against the annotation. */
+            for (int p = 0; annotations && p < parsed->nparams; p++) {
+                if (parsed->param_dtypes[p] != ME_AUTO && !strcmp(name, parsed->params[p])) weak = false;
+            }
+            program->numpy_weak_vars[idx] = weak;
+        }
         if (idx < 0) {
             if (error_reason && error_reason_cap > 0) {
                 snprintf(error_reason, error_reason_cap,
@@ -3527,6 +3563,7 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
             ctx.has_return = false;
             ctx.return_dtype = ME_AUTO;
             if (stable) {
+                program->inferred_dtype = inferred_output;
                 if (dtype == ME_AUTO && inferred_output != ME_AUTO) {
                     ctx.output_dtype = inferred_output;
                     ctx.output_dtype_auto = false;
@@ -3624,11 +3661,12 @@ me_dsl_compiled_program *dsl_compile_program_profile(const char *source,
                                                 error_reason, error_reason_cap);
 }
 
-me_dsl_compiled_program *dsl_compile_program_profile_declared(const char *source,
+static me_dsl_compiled_program *dsl_compile_declared_impl(const char *source,
                                                      const me_variable *variables, int var_count,
                                                      me_dtype dtype, int compile_ndims, int jit_mode,
                                                      me_dsl_semantic_profile profile,
                                                      const me_dsl_declared_policy *declared,
+                                                     bool annotations,
                                                      int *error_pos, bool *is_dsl,
                                                      char *error_reason, size_t error_reason_cap) {
     dsl_menudet_fp_state saved;
@@ -3640,11 +3678,29 @@ me_dsl_compiled_program *dsl_compile_program_profile_declared(const char *source
         return NULL;
     }
     me_dsl_compiled_program *program = dsl_compile_program_profile_impl(source, variables, var_count,
-        dtype, compile_ndims, jit_mode, profile, declared, error_pos, is_dsl, error_reason, error_reason_cap);
+        dtype, compile_ndims, jit_mode, profile, declared, annotations,
+        error_pos, is_dsl, error_reason, error_reason_cap);
     if (strict && !dsl_menudet_fp_end(&saved)) {
         dsl_compiled_program_free(program);
         if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap, "cannot restore caller floating environment");
         return NULL;
     }
     return program;
+}
+
+me_dsl_compiled_program *dsl_compile_program_profile_declared(const char *source,
+    const me_variable *variables, int var_count, me_dtype dtype, int compile_ndims,
+    int jit_mode, me_dsl_semantic_profile profile, const me_dsl_declared_policy *declared,
+    int *error_pos, bool *is_dsl, char *error_reason, size_t error_reason_cap) {
+    return dsl_compile_declared_impl(source, variables, var_count, dtype, compile_ndims,
+        jit_mode, profile, declared, false, error_pos, is_dsl, error_reason, error_reason_cap);
+}
+
+me_dsl_compiled_program *dsl_compile_program_menudet02(const char *source,
+    const me_variable *variables, int var_count, me_dtype dtype, int compile_ndims,
+    int jit_mode, const me_dsl_declared_policy *declared, int *error_pos,
+    bool *is_dsl, char *error_reason, size_t error_reason_cap) {
+    return dsl_compile_declared_impl(source, variables, var_count, dtype, compile_ndims,
+        jit_mode, ME_DSL_PROFILE_MENUDET_0_1, declared, true, error_pos, is_dsl,
+        error_reason, error_reason_cap);
 }

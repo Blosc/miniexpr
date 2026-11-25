@@ -8,6 +8,12 @@ This document collects developer-facing build options, internal execution semant
 
 The primary user-facing API reference lives in [README.md](README.md) and [src/miniexpr.h](src/miniexpr.h).
 
+The provisional 1.0 direct preparation API is in
+[`src/miniexpr_kernel.h`](src/miniexpr_kernel.h); see
+[`doc/core-api.md`](doc/core-api.md) and the
+[Menudet 0.2 annotation draft](doc/dsl-spec/0.2.md). It is JSON-independent;
+existing entry points remain available during downstream migration.
+
 ### `dtype` Compilation Modes
 The `dtype` argument to `me_compile()` has two mutually exclusive modes:
 1. **Uniform Type**: Provide an explicit type (e.g. `ME_FLOAT64`). All variables must use `ME_AUTO`.

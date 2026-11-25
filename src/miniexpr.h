@@ -106,6 +106,9 @@ typedef enum {
 /* Opaque type for compiled expressions */
 typedef struct me_expr me_expr;
 
+/* Floating status flags, independent of platform FE_* constants. */
+enum { ME_FP_INVALID = 1u, ME_FP_DIVIDE = 2u, ME_FP_OVERFLOW = 4u, ME_FP_UNDERFLOW = 8u };
+
 
 enum {
     ME_VARIABLE = 0,
@@ -241,6 +244,7 @@ const char *me_get_last_error_message(void);
 
 /* Menudet 0.1 beta kernel profile, independent of package/JIT versions. */
 #define ME_MENUDET_DSL_VERSION "0.1"
+#define ME_MENUDET_DSL_ANNOTATED_VERSION "0.2"
 #define ME_NUMPY_MENUDET_DSL_VERSION ME_MENUDET_DSL_VERSION
 #define ME_MENUDET_DSL_VALIDATION_DESCRIPTOR_VERSION 1
 
@@ -289,7 +293,9 @@ typedef struct {
  * width (Unicode multiples of four), numeric itemsize may be zero or dtype width.
  * No input buffers/callbacks are accepted. A NULL descriptor means rank zero,
  * inferred cardinality and numeric output width; string output requires a descriptor.
- * The original entry point also dispatches numeric, rank-zero 0.1 with this default. */
+ * The original entry point also dispatches numeric, rank-zero with this default.
+ * Version "0.2" additionally accepts canonical parameter and return annotations;
+ * "0.1" continues to reject them. Input annotations require exact dtypes. */
 me_menudet_status me_validate_menudet_ex(const char *source, const char *version,
     const me_variable *inputs, int ninputs, me_dtype output_dtype,
     const me_menudet_validation_descriptor *descriptor, me_menudet_error *error);

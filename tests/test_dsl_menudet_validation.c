@@ -200,7 +200,7 @@ int main(void) {
     check("def k(x):\n    return (x + 1.0) - x\n", x, 1, ME_FLOAT32, ME_MENUDET_SUCCESS);
     x[0].dtype = ME_INT64;
     me_menudet_error error;
-    assert(me_validate_menudet("def k(x):\n    return x\n", "0.2", x, 1,
+    assert(me_validate_menudet("def k(x):\n    return x\n", "0.3", x, 1,
                                    ME_INT64, &error) == ME_MENUDET_ERR_VERSION);
     assert(error.line == 0 && strstr(error.message, ME_MENUDET_DSL_VERSION));
     x[0].dtype = ME_FLOAT64;

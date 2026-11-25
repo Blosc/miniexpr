@@ -252,7 +252,6 @@ me_artifact_status me_array_transpose(const me_array_view *input, const int *axe
     me_array_view *output, me_artifact_error *error);
 me_artifact_status me_array_slice(const me_array_view *input, int axis, int64_t start,
     int64_t count, int64_t step, me_array_view *output, me_artifact_error *error);
-enum { ME_FP_INVALID = 1u, ME_FP_DIVIDE = 2u, ME_FP_OVERFLOW = 4u, ME_FP_UNDERFLOW = 8u };
 typedef struct {
     unsigned flags; /* OR of active evaluated operations; cleared per call. */
     unsigned supported; /* 1 if host IEEE flags are observable, 0 on WASM. */

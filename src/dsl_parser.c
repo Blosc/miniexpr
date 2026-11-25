@@ -26,6 +26,7 @@ typedef struct {
     int indent_depth;      /* Current depth in indent stack */
     bool allow_docstring;  /* Only the first statement of the function body */
     me_dsl_semantic_profile semantic_profile;
+    bool allow_annotations;
 } me_dsl_lexer;
 
 static void dsl_set_error(me_dsl_error *error, int line, int column, const char *message) {
@@ -1924,6 +1925,10 @@ static bool dsl_program_add_param(me_dsl_program *program, const char *start, si
         dsl_set_error(error, line, column, "expected parameter name");
         return false;
     }
+    if (program->nparams >= ME_MAX_VARS) {
+        dsl_set_error(error, line, column, "too many kernel parameters");
+        return false;
+    }
     if (program->nparams == program->param_capacity) {
         int new_cap = program->param_capacity ? program->param_capacity * 2 : 4;
         char **next = realloc(program->params, (size_t)new_cap * sizeof(*next));
@@ -1948,6 +1953,29 @@ static bool dsl_program_add_param(me_dsl_program *program, const char *start, si
     }
     program->params[program->nparams++] = name;
     return true;
+}
+
+static bool parse_dtype_annotation(me_dsl_lexer *lex, me_dtype *dtype, me_dsl_error *error) {
+    static const struct { const char *name; me_dtype dtype; } types[] = {
+        {"bool", ME_BOOL}, {"int8", ME_INT8}, {"int16", ME_INT16},
+        {"int32", ME_INT32}, {"int64", ME_INT64}, {"uint8", ME_UINT8},
+        {"uint16", ME_UINT16}, {"uint32", ME_UINT32}, {"uint64", ME_UINT64},
+        {"float32", ME_FLOAT32}, {"float64", ME_FLOAT64},
+        {"complex64", ME_COMPLEX64}, {"complex128", ME_COMPLEX128}
+    };
+    lexer_skip_space(lex);
+    const char *start = NULL;
+    size_t length = 0;
+    if (lexer_read_identifier(lex, &start, &length)) {
+        for (size_t i = 0; i < sizeof(types) / sizeof(types[0]); i++) {
+            if (strlen(types[i].name) == length && !strncmp(start, types[i].name, length)) {
+                *dtype = types[i].dtype;
+                return true;
+            }
+        }
+    }
+    dsl_set_error(error, lex->line, lex->column, "expected a canonical numeric dtype annotation");
+    return false;
 }
 
 static bool parse_def(me_dsl_lexer *lex, me_dsl_program *program, me_dsl_error *error) {
@@ -1991,6 +2019,12 @@ static bool parse_def(me_dsl_lexer *lex, me_dsl_program *program, me_dsl_error *
                 return false;
             }
             lexer_skip_space(lex);
+            if (lex->allow_annotations && consume_char(lex, ':')) {
+                if (!parse_dtype_annotation(lex, &program->param_dtypes[program->nparams - 1], error)) {
+                    return false;
+                }
+                lexer_skip_space(lex);
+            }
             if (*lex->current == ',') {
                 lexer_advance(lex);
                 lexer_skip_space(lex);
@@ -2008,6 +2042,12 @@ static bool parse_def(me_dsl_lexer *lex, me_dsl_program *program, me_dsl_error *
         return false;
     }
     lexer_skip_space(lex);
+    if (lex->allow_annotations && *lex->current == '-' && lex->current[1] == '>') {
+        lexer_advance(lex);
+        lexer_advance(lex);
+        if (!parse_dtype_annotation(lex, &program->return_dtype, error)) return false;
+        lexer_skip_space(lex);
+    }
     if (!consume_char(lex, ':')) {
         dsl_set_error(error, line, column, "expected ':' after signature");
         return false;
@@ -2063,8 +2103,8 @@ me_dsl_program *me_dsl_parse(const char *source, me_dsl_error *error) {
     return me_dsl_parse_profile(source, ME_DSL_PROFILE_FULL, error);
 }
 
-me_dsl_program *me_dsl_parse_profile(const char *source, me_dsl_semantic_profile profile,
-                                     me_dsl_error *error) {
+static me_dsl_program *dsl_parse_impl(const char *source, me_dsl_semantic_profile profile,
+                                     bool annotations, me_dsl_error *error) {
     if (error) {
         error->line = 0;
         error->column = 0;
@@ -2079,12 +2119,22 @@ me_dsl_program *me_dsl_parse_profile(const char *source, me_dsl_semantic_profile
     me_dsl_lexer lex;
     lexer_init(&lex, source);
     lex.semantic_profile = profile;
+    lex.allow_annotations = annotations;
     if (!parse_program(&lex, program, error) || !dsl_lower_comparisons(program, source, error)) {
         me_dsl_program_free(program);
         return NULL;
     }
 
     return program;
+}
+
+me_dsl_program *me_dsl_parse_profile(const char *source, me_dsl_semantic_profile profile,
+                                     me_dsl_error *error) {
+    return dsl_parse_impl(source, profile, false, error);
+}
+
+me_dsl_program *me_dsl_parse_menudet02(const char *source, me_dsl_error *error) {
+    return dsl_parse_impl(source, ME_DSL_PROFILE_MENUDET_0_1, true, error);
 }
 
 void me_dsl_program_free(me_dsl_program *program) {

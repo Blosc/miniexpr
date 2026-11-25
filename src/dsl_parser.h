@@ -11,6 +11,7 @@
 #ifndef MINIEXPR_DSL_PARSER_H
 #define MINIEXPR_DSL_PARSER_H
 #include "dsl_semantic_profile.h"
+#include "miniexpr.h"
 
 #include <stddef.h>
 #include <stdbool.h>
@@ -136,6 +137,9 @@ typedef struct {
     char **params;
     int nparams;
     int param_capacity;
+    /* Menudet 0.2 only. ME_AUTO means no authored annotation. */
+    me_dtype param_dtypes[ME_MAX_VARS];
+    me_dtype return_dtype;
     me_dsl_fp_mode fp_mode;
     me_dsl_compiler compiler;
     me_dsl_math_backend math;
@@ -156,6 +160,7 @@ typedef struct {
 me_dsl_program *me_dsl_parse(const char *source, me_dsl_error *error);
 me_dsl_program *me_dsl_parse_profile(const char *source, me_dsl_semantic_profile profile,
                                      me_dsl_error *error);
+me_dsl_program *me_dsl_parse_menudet02(const char *source, me_dsl_error *error);
 void me_dsl_program_free(me_dsl_program *program);
 
 #endif

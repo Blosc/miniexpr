@@ -22,6 +22,7 @@ include(cmake/MiniexprOptions.cmake)
 
 set(MINIEXPR_SOURCES
   src/miniexpr.c
+  src/miniexpr_kernel.c
   src/miniexpr_eval_nd.c
   src/miniexpr_eval_dsl_nd.c
   src/miniexpr_eval_reduce.c
@@ -235,7 +236,7 @@ if(MINIEXPR_BUILD_ARTIFACT)
       ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
       LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
       RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-    install(FILES src/miniexpr.h src/miniexpr_artifact.h src/miniexpr_graph.h src/miniexpr_reduce.h
+    install(FILES src/miniexpr.h src/miniexpr_kernel.h src/miniexpr_artifact.h src/miniexpr_graph.h src/miniexpr_reduce.h
       DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
     install(FILES doc/native-graph-1.schema.json doc/native-staged-graph-1.schema.json
       doc/native-graphs-1.md doc/native-stages-1.md

@@ -216,6 +216,7 @@ typedef struct {
     bool guaranteed_return;
     bool output_is_scalar;
     me_dtype output_dtype;
+    me_dtype inferred_dtype; /* Before final output conversion. */
     size_t output_itemsize;   /* width bound when output_dtype is a string type */
     me_dsl_jit_ir_program *jit_ir;
     uint64_t jit_ir_fingerprint;

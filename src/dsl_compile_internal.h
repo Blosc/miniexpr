@@ -70,7 +70,11 @@ me_dsl_compiled_program *dsl_compile_program_profile_declared(const char *source
                                                      me_dsl_semantic_profile profile,
                                                      const me_dsl_declared_policy *declared,
                                                      int *error_pos, bool *is_dsl,
-                                                     char *error_reason, size_t error_reason_cap);
+                                                      char *error_reason, size_t error_reason_cap);
+me_dsl_compiled_program *dsl_compile_program_menudet02(const char *source,
+    const me_variable *variables, int var_count, me_dtype dtype, int compile_ndims,
+    int jit_mode, const me_dsl_declared_policy *declared, int *error_pos,
+    bool *is_dsl, char *error_reason, size_t error_reason_cap);
 me_dsl_compiled_program *dsl_compiled_program_alloc(const me_dsl_program *parsed,
                                                     const char *source,
                                                     int compile_ndims,
