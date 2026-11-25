@@ -39,7 +39,7 @@ void me_grid_free(me_grid *grid) {
 me_status me_grid_create(const me_grid_spec *spec, me_grid **out, me_error *error) {
     if (out) *out = NULL;
     if (error) memset(error, 0, sizeof(*error));
-    if (!out || !spec || spec->struct_size < sizeof(*spec) || spec->ndim < 0 ||
+    if (!out || !spec || spec->struct_size < ME_GRID_SPEC_V1_SIZE || spec->ndim < 0 ||
         spec->ndim > ME_GRID_MAX_NDIM ||
         (spec->ndim && (!spec->shape || !spec->chunkshape || !spec->blockshape))) {
         return grid_error(error, ME_ERR_INVALID_ARG, "invalid grid descriptor");
@@ -80,12 +80,12 @@ invalid:
 me_status me_grid_describe_block(const me_grid *grid, int64_t nchunk, int64_t nblock,
     me_grid_block_info *out, me_error *error) {
     if (error) memset(error, 0, sizeof(*error));
-    if (!grid || !out || out->struct_size < sizeof(*out) ||
+    if (!grid || !out || out->struct_size < ME_GRID_BLOCK_INFO_V1_SIZE ||
         nchunk < 0 || nchunk >= grid->nchunks || nblock < 0 || nblock >= grid->nblocks) {
         return grid_error(error, ME_ERR_INVALID_ARG, "invalid grid block index or descriptor");
     }
     size_t size = out->struct_size;
-    memset(out, 0, sizeof(*out));
+    memset(out, 0, size < sizeof(*out) ? size : sizeof(*out));
     out->struct_size = size;
     out->ndim = grid->ndim;
     out->padded_nitems = grid->padded;
@@ -109,41 +109,48 @@ me_status me_grid_describe_block(const me_grid *grid, int64_t nchunk, int64_t nb
     return ME_SUCCESS;
 }
 
-static bool grid_range(const void *data, size_t bytes, size_t alignment) {
-    uintptr_t address = (uintptr_t)data;
-    return !bytes || (data && address % alignment == 0 && bytes <= UINTPTR_MAX - address);
-}
-
-static size_t grid_alignment(me_dtype dtype) {
-    if (dtype == ME_STRING) return 4;
-    if (dtype == ME_BYTES) return 1;
-    if (dtype == ME_COMPLEX64) return sizeof(float);
-    if (dtype == ME_COMPLEX128) return sizeof(double);
-    return dtype_size(dtype);
-}
-
-static bool grid_overlap(const void *a, size_t na, const void *b, size_t nb) {
-    if (!na || !nb) return false;
-    uintptr_t x = (uintptr_t)a, y = (uintptr_t)b;
-    return x <= y ? y - x < na : x - y < nb;
-}
-
-static size_t grid_physical_index(const me_grid *grid, const me_grid_block_info *info,
-                                  size_t compact) {
-    size_t index = 0;
-    for (int d = grid->ndim - 1; d >= 0; d--) {
-        size_t extent = (size_t)info->extent[d];
-        index += (compact % extent) * grid->strides[d];
-        compact /= extent;
+static void grid_copy_runs(const me_grid *grid, const me_grid_block_info *info,
+    void *compact, void *physical, size_t width, bool gather) {
+    if (!info->valid_nitems) return;
+    int axis = grid->ndim - 1;
+    size_t run = (size_t)info->extent[axis];
+    /* Merge a contiguous suffix, then advance outer coordinates as an odometer.
+     * No per-lane division/modulo, and one memcpy per contiguous run. */
+    while (axis > 0 && info->extent[axis] == grid->blocks[axis]) {
+        run *= (size_t)info->extent[--axis];
     }
-    return index;
+    size_t coordinates[ME_GRID_MAX_NDIM] = {0};
+    size_t physical_offset = 0;
+    for (size_t offset = 0; offset < info->valid_nitems; offset += run) {
+        unsigned char *packed = (unsigned char *)compact + offset * width;
+        unsigned char *padded = (unsigned char *)physical + physical_offset * width;
+        if (gather) memcpy(packed, padded, run * width);
+        else memcpy(padded, packed, run * width);
+        for (int d = axis - 1; d >= 0; d--) {
+            physical_offset += grid->strides[d];
+            if (++coordinates[d] < (size_t)info->extent[d]) break;
+            physical_offset -= coordinates[d] * grid->strides[d];
+            coordinates[d] = 0;
+        }
+    }
+}
+
+static bool grid_reserve_scratch(size_t *total, size_t bytes, size_t alignment, size_t *offset) {
+    size_t padding = (alignment - *total % alignment) % alignment;
+    if (padding > SIZE_MAX - *total || bytes > SIZE_MAX - *total - padding) return false;
+    *offset = *total + padding;
+    *total = *offset + bytes;
+    return true;
 }
 
 me_status me_grid_eval_block(const me_grid *grid, const me_kernel *kernel,
     int64_t nchunk, int64_t nblock, const me_buffer *inputs, size_t ninputs,
     me_mut_buffer output, const me_run_options *options, me_error *error) {
+    me_fp_status fp;
+    me_status status = me_kernel_run_begin(options, &fp, error);
+    if (status != ME_SUCCESS) return status;
     me_grid_block_info info = ME_GRID_BLOCK_INFO_INITIALIZER;
-    me_status status = me_grid_describe_block(grid, nchunk, nblock, &info, error);
+    status = me_grid_describe_block(grid, nchunk, nblock, &info, error);
     if (status != ME_SUCCESS) return status;
     if (!kernel || ninputs != kernel->ninputs || (ninputs && !inputs) ||
         (kernel->info.context_ndim && kernel->info.context_ndim != grid->ndim)) {
@@ -153,7 +160,7 @@ me_status me_grid_eval_block(const me_grid *grid, const me_kernel *kernel,
     size_t width = kernel->info.output_itemsize;
     size_t count = scalar ? 1 : info.padded_nitems;
     if (count > SIZE_MAX / width || output.capacity < count * width ||
-        !grid_range(output.data, count * width, grid_alignment(kernel->info.output_dtype))) {
+        !me_kernel_range(output.data, count * width, me_kernel_alignment(kernel->info.output_dtype))) {
         return grid_error(error, ME_ERR_INVALID_ARG, "invalid physical output buffer");
     }
     size_t output_bytes = count * width;
@@ -161,10 +168,16 @@ me_status me_grid_eval_block(const me_grid *grid, const me_kernel *kernel,
         size_t input_width = kernel->widths[i];
         if (info.padded_nitems > SIZE_MAX / input_width ||
             inputs[i].capacity < info.padded_nitems * input_width ||
-            !grid_range(inputs[i].data, info.padded_nitems * input_width, grid_alignment(kernel->dtypes[i])) ||
-            grid_overlap(inputs[i].data, info.padded_nitems * input_width, output.data, output_bytes)) {
+            !me_kernel_range(inputs[i].data, info.padded_nitems * input_width, me_kernel_alignment(kernel->dtypes[i])) ||
+            me_kernel_overlap(inputs[i].data, info.padded_nitems * input_width, output.data, output_bytes)) {
             return grid_error(error, ME_ERR_INVALID_ARG, "invalid or overlapping physical input buffer");
         }
+    }
+    /* Physical buffers and run options have still been validated. Empty scalar
+     * groups must execute, but elementwise groups have no numerical work. */
+    if (!scalar && !info.valid_nitems) {
+        memset(output.data, 0, output_bytes);
+        return ME_SUCCESS;
     }
     me_block block = ME_BLOCK_INITIALIZER;
     block.nitems = info.valid_nitems;
@@ -178,45 +191,34 @@ me_status me_grid_eval_block(const me_grid *grid, const me_kernel *kernel,
         return me_eval_block(kernel, inputs, ninputs, output, &block, options, error);
     }
     me_buffer packed[ME_MAX_VARS] = {{0}};
-    void *scratch[ME_MAX_VARS] = {0};
-    void *result = NULL;
+    size_t offsets[ME_MAX_VARS];
     size_t result_count = scalar ? 1 : info.valid_nitems;
     size_t result_bytes = result_count * width; /* Physical capacity already checked. */
-    if (result_bytes) {
-        result = malloc(result_bytes);
-        if (!result) goto oom;
+    size_t total = result_bytes;
+    for (size_t i = 0; i < ninputs; i++) {
+        if (!grid_reserve_scratch(&total, info.valid_nitems * kernel->widths[i],
+            me_kernel_alignment(kernel->dtypes[i]), &offsets[i])) {
+            return grid_error(error, ME_ERR_INVALID_ARG, "padded scratch byte extent overflows");
+        }
     }
+    /* malloc supplies the maximum native alignment; each region preserves its
+     * own dtype alignment even after an odd-width string/byte region. */
+    void *scratch = malloc(total);
+    if (!scratch) return grid_error(error, ME_ERR_OOM, "out of memory gathering padded block");
     for (size_t i = 0; i < ninputs; i++) {
         size_t input_width = kernel->widths[i];
         size_t bytes = info.valid_nitems * input_width;
-        if (bytes) {
-            scratch[i] = malloc(bytes);
-            if (!scratch[i]) goto oom;
-        }
-        packed[i] = (me_buffer){scratch[i], bytes};
-        for (size_t lane = 0; lane < info.valid_nitems; lane++) {
-            size_t physical = grid_physical_index(grid, &info, lane);
-            memcpy((unsigned char *)scratch[i] + lane * input_width,
-                (const unsigned char *)inputs[i].data + physical * input_width, input_width);
-        }
+        packed[i] = (me_buffer){(unsigned char *)scratch + offsets[i], bytes};
+        grid_copy_runs(grid, &info, (void *)packed[i].data, (void *)inputs[i].data, input_width, true);
     }
-    status = me_eval_block(kernel, packed, ninputs, (me_mut_buffer){result, result_bytes}, &block, options, error);
+    status = me_eval_block(kernel, packed, ninputs, (me_mut_buffer){scratch, result_bytes}, &block, options, error);
     if (status == ME_SUCCESS) {
-        if (scalar) memcpy(output.data, result, width);
+        if (scalar) memcpy(output.data, scratch, width);
         else {
             memset(output.data, 0, output_bytes);
-            for (size_t lane = 0; lane < info.valid_nitems; lane++) {
-                size_t physical = grid_physical_index(grid, &info, lane);
-                memcpy((unsigned char *)output.data + physical * width,
-                    (const unsigned char *)result + lane * width, width);
-            }
+            grid_copy_runs(grid, &info, scratch, output.data, width, false);
         }
     }
-    goto cleanup;
-oom:
-    status = grid_error(error, ME_ERR_OOM, "out of memory gathering padded block");
-cleanup:
-    for (size_t i = 0; i < ninputs; i++) free(scratch[i]);
-    free(result);
+    free(scratch);
     return status;
 }

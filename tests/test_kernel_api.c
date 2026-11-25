@@ -2,6 +2,9 @@
   Copyright (c) 2026 Blosc Development Team
   License: BSD 3-Clause (see LICENSE.txt)
 **********************************************************************/
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
 #undef NDEBUG
 #include <assert.h>
 #include <fenv.h>
@@ -9,8 +12,12 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "miniexpr_kernel.h"
+#include "miniexpr_grid.h"
+#include "miniexpr_kernel_internal.h"
+#include "functions-simd.h"
 #ifndef _WIN32
 #ifndef __EMSCRIPTEN__
 #include <pthread.h>
@@ -108,7 +115,7 @@ static void annotations(void) {
     inputs[1].dtype = ME_UINT32;
     me_error error;
     kernel = (me_kernel *)(uintptr_t)1;
-    assert(me_prepare_menudet("0.2", source, &sig, NULL, &kernel, &error) != ME_SUCCESS);
+    assert(me_prepare_menudet("0.2", source, &sig, NULL, &kernel, &error) == ME_ERR_SIGNATURE);
     assert(!kernel && strstr(error.message, "word"));
     inputs[1].dtype = ME_UINT16;
     assert(me_prepare_menudet("0.1", source, &sig, NULL, &kernel, &error) == ME_ERR_SOURCE);
@@ -122,7 +129,7 @@ static void annotations(void) {
     me_kernel_free(kernel);
     sig.output_dtype = ME_FLOAT32;
     assert(me_prepare_menudet("0.2", "def k(reading) -> float64:\n    return reading\n",
-        &sig, NULL, &kernel, &error) != ME_SUCCESS && !kernel);
+        &sig, NULL, &kernel, &error) == ME_ERR_SIGNATURE && !kernel);
     sig.output_dtype = ME_BOOL;
     sig.casting = ME_CAST_SAFE;
     assert(me_prepare_menudet("0.1", "def k(reading):\n    return reading\n",
@@ -315,7 +322,7 @@ static void scalar_and_errors(void) {
     me_kernel_free(kernel);
 }
 
-static void execution_options(bool require_jit) {
+static void execution_options(bool require_jit, bool tcc) {
     me_input_spec input = {"x", ME_FLOAT32, 0};
     me_signature sig = ME_SIGNATURE_INITIALIZER;
     sig.inputs = &input;
@@ -324,9 +331,23 @@ static void execution_options(bool require_jit) {
     options.execution = ME_EXEC_PREFER_JIT;
     me_kernel *kernel = NULL;
     me_error error;
-    const char *source = "# me:compiler=cc\ndef k(x: float32) -> float64:\n    return 2 * x\n";
+    char source[512];
+    snprintf(source, sizeof(source), "# me:compiler=%s\ndef k(x: float32) -> float64:\n    return 2 * x\n",
+        tcc ? "tcc" : "cc");
     if (require_jit) options.execution = ME_EXEC_REQUIRE_JIT;
+#ifndef __EMSCRIPTEN__
+    fenv_t caller_environment;
+    assert(fegetenv(&caller_environment) == 0);
+    assert(fesetround(FE_UPWARD) == 0);
+    feclearexcept(FE_ALL_EXCEPT);
+    feraiseexcept(FE_INVALID);
+    int caller_flags = fetestexcept(FE_ALL_EXCEPT);
+#endif
     me_status rc = me_prepare_menudet("0.2", source, &sig, &options, &kernel, &error);
+#ifndef __EMSCRIPTEN__
+    assert(fegetround() == FE_UPWARD && fetestexcept(FE_ALL_EXCEPT) == caller_flags);
+    assert(fesetenv(&caller_environment) == 0);
+#endif
     if (rc) fprintf(stderr, "execution policy failed: %s\n", error.message);
     assert(rc == ME_SUCCESS);
     float x[] = {2, 4, 8};
@@ -336,9 +357,305 @@ static void execution_options(bool require_jit) {
     block.nitems = 3;
     assert(me_eval_block(kernel, &buffer, 1, (me_mut_buffer){out, sizeof(out)}, &block, NULL, NULL) == ME_SUCCESS);
     assert(out[0] == 4 && out[1] == 8 && out[2] == 16);
+    uint8_t mask[] = {1, 1, 1};
+    block.valid_mask = mask;
+    block.valid_mask_capacity = sizeof(mask);
+    memset(out, 0, sizeof(out));
+    assert(me_eval_block(kernel, &buffer, 1, (me_mut_buffer){out, sizeof(out)}, &block, NULL, NULL) == ME_SUCCESS);
+    assert(out[0] == 4 && out[1] == 8 && out[2] == 16);
     me_kernel_free(kernel);
+
+    int64_t n = 3;
+    bool enabled = true;
+    me_capture captures[] = {
+        {{"n", ME_INT64, 0}, &n, ME_CAPTURE_WEAK},
+        {{"enabled", ME_BOOL, 0}, &enabled, ME_CAPTURE_WEAK}
+    };
+    sig.captures = captures;
+    sig.ncaptures = 2;
+    snprintf(source, sizeof(source), "# me:compiler=%s\ndef k(x, n, enabled):\n"
+        "    value = x\n"
+        "    for i in range(n):\n"
+        "        if enabled:\n"
+        "            value = value + 1\n"
+        "    return value\n", tcc ? "tcc" : "cc");
+    for (int version = 0; version < 2; version++) {
+        assert(me_prepare_menudet(version ? "0.2" : "0.1", source, &sig,
+            &options, &kernel, &error) == ME_SUCCESS);
+        float result[3];
+        assert(me_eval_block(kernel, &buffer, 1, (me_mut_buffer){result, sizeof(result)},
+            &block, NULL, NULL) == ME_SUCCESS);
+        assert(result[0] == 5 && result[1] == 7 && result[2] == 11);
+        me_kernel_free(kernel);
+    }
     options.execution = ME_EXEC_REQUIRE_JIT;
+    sig.captures = NULL;
+    sig.ncaptures = 0;
     assert(me_prepare_formula("2 * x", &sig, &options, &kernel, &error) == ME_ERR_UNSUPPORTED && !kernel);
+}
+
+static void rejected_jit_contracts(void) {
+    me_input_spec input = {"x", ME_FLOAT64, 0};
+    me_signature sig = ME_SIGNATURE_INITIALIZER;
+    sig.inputs = &input;
+    sig.ninputs = 1;
+    sig.output_dtype = ME_BOOL;
+    sig.casting = ME_CAST_SAFE;
+    me_prepare_options options = ME_PREPARE_OPTIONS_INITIALIZER;
+    options.execution = ME_EXEC_REQUIRE_JIT;
+    me_kernel *kernel = NULL;
+    me_error error;
+    const char *source = "# me:compiler=cc\ndef k(x):\n    return x + 1\n";
+    assert(me_prepare_menudet("0.1", source, &sig, &options, &kernel, &error) == ME_ERR_SIGNATURE);
+    assert(!kernel && error.status == ME_ERR_SIGNATURE);
+    sig.casting = ME_CAST_UNSAFE;
+    sig.output_dtype = ME_AUTO;
+    sig.cardinality = ME_BLOCK_SCALAR;
+    assert(me_prepare_menudet("0.1", source, &sig, &options, &kernel, &error) == ME_ERR_SIGNATURE);
+    assert(!kernel);
+#ifdef ME_TEST_HAS_ARTIFACT
+    /* The fixed v1 reader must reject the same contracts before backend/cache
+     * activity; the compiler-invocation probe exercises both entry routes. */
+    for (int contract = 0; contract < 3; contract++) {
+        char json[1024];
+        snprintf(json, sizeof(json),
+            "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
+            "\"requires\":[\"numeric\"],\"source\":\"# me:compiler=cc\\ndef reject_json(x):\\n    return x + 1\\n\","
+            "\"entry_point\":\"reject_json\",\"inputs\":[{\"name\":\"x\",\"dtype\":\"float64\"}],"
+            "\"constants\":[],\"output\":{\"dtype\":\"%s\",\"contract\":\"%s\"},\"context\":{\"ndim\":0},"
+            "\"semantics\":{\"numeric\":\"numpy-2.5\",\"casting\":\"%s\"}}",
+            contract ? "float64" : "bool", contract == 1 ? "block_scalar" : "elementwise",
+            contract ? "unsafe" : "safe");
+        me_artifact *artifact = NULL;
+        if (contract == 2) {
+            assert(me_artifact_load(json, strlen(json), ME_JIT_OFF, &artifact, NULL) == ME_ARTIFACT_SUCCESS);
+            assert(artifact && !me_artifact_has_jit(artifact));
+            me_artifact_free(artifact);
+        }
+        else {
+            assert(me_artifact_load(json, strlen(json), ME_JIT_ON, &artifact, NULL) == ME_ARTIFACT_ERR_BINDING);
+            assert(!artifact);
+        }
+    }
+#endif
+}
+
+static void signature_errors(void) {
+    me_input_spec input = {"x", ME_FLOAT64, 0};
+    me_signature sig = ME_SIGNATURE_INITIALIZER;
+    sig.inputs = &input;
+    sig.ninputs = 1;
+    me_kernel *kernel = NULL;
+    me_error error;
+    const char *sources[] = {
+        "def k(x, y):\n    return x\n",
+        "def k(y):\n    return y\n",
+        "def k(x):\n    return x + _i0\n"
+    };
+    for (size_t i = 0; i < sizeof(sources) / sizeof(sources[0]); i++) {
+        assert(me_prepare_menudet("0.1", sources[i], &sig, NULL, &kernel, &error) == ME_ERR_SIGNATURE);
+        assert(!kernel && error.status == ME_ERR_SIGNATURE);
+    }
+    me_prepare_options options = ME_PREPARE_OPTIONS_INITIALIZER;
+    options.struct_size = ME_PREPARE_OPTIONS_V1_SIZE - 1;
+    assert(me_prepare_formula("x", &sig, &options, &kernel, &error) == ME_ERR_INVALID_ARG);
+    options.struct_size = sizeof(options);
+    options.execution = (me_execution_policy)99;
+    assert(me_prepare_formula("x", &sig, &options, &kernel, &error) == ME_ERR_INVALID_ARG);
+}
+
+static void set_math_environment(const char *backend) {
+#ifdef _WIN32
+    assert(_putenv_s("ME_SIMD_MATH_BACKEND", backend) == 0);
+#else
+    /* Set libc's environment too: Node process.env is not Emscripten's ENV. */
+    assert(setenv("ME_SIMD_MATH_BACKEND", backend, 1) == 0);
+#endif
+}
+
+static void formula_environment(void) {
+    /* Defaults ignore an invalid backend; opt-in validates
+     * it during preparation rather than silently consulting it at evaluation. */
+    set_math_environment("invalid");
+    me_signature sig = ME_SIGNATURE_INITIALIZER;
+    me_prepare_options options = ME_PREPARE_OPTIONS_INITIALIZER;
+    me_kernel *kernel = NULL;
+    me_error error;
+    assert(me_prepare_formula("1", &sig, &options, &kernel, &error) == ME_SUCCESS);
+    me_kernel_free(kernel);
+    options.inherit_environment = true;
+    assert(me_prepare_formula("1", &sig, &options, &kernel, &error) == ME_ERR_UNSUPPORTED);
+    assert(!kernel && strstr(error.message, "ME_SIMD_MATH_BACKEND"));
+    set_math_environment("scalar");
+    me_input_spec input = {"x", ME_FLOAT64, 0};
+    sig.inputs = &input;
+    sig.ninputs = 1;
+    assert(me_prepare_formula("sin(x)", &sig, &options, &kernel, &error) == ME_SUCCESS);
+    set_math_environment("invalid");
+    double x = 0.25, out = 0;
+    me_buffer buffer = {&x, sizeof(x)};
+    me_block block = ME_BLOCK_INITIALIZER;
+    block.nitems = 1;
+    assert(me_eval_block(kernel, &buffer, 1, (me_mut_buffer){&out, sizeof(out)}, &block, NULL, &error) == ME_SUCCESS);
+    assert(fabs(out - sin(x)) <= DBL_EPSILON);
+    me_kernel_free(kernel);
+}
+
+static void descriptor_prefixes(void) {
+    assert(ME_SIGNATURE_V1_SIZE == sizeof(me_signature));
+    assert(ME_PREPARE_OPTIONS_V1_SIZE == sizeof(me_prepare_options));
+    assert(ME_KERNEL_INFO_V1_SIZE == sizeof(me_kernel_info));
+    assert(ME_BLOCK_V1_SIZE == sizeof(me_block));
+    assert(ME_RUN_OPTIONS_V1_SIZE == sizeof(me_run_options));
+    assert(ME_GRID_SPEC_V1_SIZE == sizeof(me_grid_spec));
+    assert(ME_GRID_BLOCK_INFO_V1_SIZE == sizeof(me_grid_block_info));
+    struct { me_signature value; uint64_t suffix; } sig = {ME_SIGNATURE_INITIALIZER, UINT64_MAX};
+    struct { me_prepare_options value; uint64_t suffix; } options = {ME_PREPARE_OPTIONS_INITIALIZER, UINT64_MAX};
+    sig.value.struct_size = sizeof(sig);
+    options.value.struct_size = sizeof(options);
+    for (size_t i = 0; i < sizeof(sig.value.reserved); i++) assert(sig.value.reserved[i] == 0);
+    for (size_t i = 0; i < sizeof(options.value.reserved); i++) assert(options.value.reserved[i] == 0);
+    me_kernel *kernel = NULL;
+    assert(me_prepare_formula("1", &sig.value, &options.value, &kernel, NULL) == ME_SUCCESS);
+    struct { me_kernel_info value; uint64_t suffix; } info = {ME_KERNEL_INFO_INITIALIZER, UINT64_MAX};
+    info.value.struct_size = sizeof(info);
+    assert(me_describe(kernel, &info.value) == ME_SUCCESS);
+    assert(info.value.struct_size == sizeof(info) && info.suffix == UINT64_MAX);
+    me_block block = ME_BLOCK_INITIALIZER;
+    me_run_options run = ME_RUN_OPTIONS_INITIALIZER;
+    block.struct_size = ME_BLOCK_V1_SIZE;
+    run.struct_size = ME_RUN_OPTIONS_V1_SIZE;
+    assert(me_eval_block(kernel, NULL, 0, (me_mut_buffer){0}, &block, &run, NULL) == ME_SUCCESS);
+    block.struct_size--;
+    assert(me_eval_block(kernel, NULL, 0, (me_mut_buffer){0}, &block, &run, NULL) == ME_ERR_INVALID_ARG);
+    me_kernel_free(kernel);
+    sig.value.struct_size = ME_SIGNATURE_V1_SIZE;
+    options.value.struct_size = ME_PREPARE_OPTIONS_V1_SIZE;
+    assert(me_prepare_formula("1", &sig.value, &options.value, &kernel, NULL) == ME_SUCCESS);
+    me_kernel_free(kernel);
+}
+
+/* Flat future layouts, not nested v1 structs: a nested prefix would itself
+ * hide a trailing-padding bug by forcing the new flag past sizeof(v1). */
+typedef struct {
+    size_t struct_size;
+    const me_input_spec *inputs;
+    size_t ninputs;
+    const me_capture *captures;
+    size_t ncaptures;
+    me_dtype output_dtype;
+    size_t output_itemsize;
+    me_cardinality cardinality;
+    int context_ndim;
+    me_casting casting;
+    bool integer_powers;
+    uint8_t reserved[3];
+    uint8_t new_flag;
+} signature_next;
+
+typedef struct {
+    size_t struct_size;
+    me_execution_policy execution;
+    bool inherit_environment;
+    uint8_t reserved[3];
+    uint8_t new_flag;
+} prepare_options_next;
+
+static uint8_t optional_flag(const void *descriptor, size_t offset) {
+    size_t size;
+    uint8_t flag = 0;
+    memcpy(&size, descriptor, sizeof(size));
+    if (size >= offset + sizeof(flag)) memcpy(&flag, (const unsigned char *)descriptor + offset, sizeof(flag));
+    return flag;
+}
+
+static void receive_v1_descriptors(const void *signature, const void *options) {
+    assert(offsetof(signature_next, new_flag) == ME_SIGNATURE_V1_SIZE);
+    assert(offsetof(prepare_options_next, new_flag) == ME_PREPARE_OPTIONS_V1_SIZE);
+    assert(optional_flag(signature, offsetof(signature_next, new_flag)) == 0);
+    assert(optional_flag(options, offsetof(prepare_options_next, new_flag)) == 0);
+    /* Exercise the real preparation API with the independently compiled v1
+     * bytes as well as the simulated future reader's absent-field defaults. */
+    me_signature sig = ME_SIGNATURE_INITIALIZER;
+    me_prepare_options prepare = ME_PREPARE_OPTIONS_INITIALIZER;
+    size_t sig_size, options_size;
+    memcpy(&sig_size, signature, sizeof(sig_size));
+    memcpy(&options_size, options, sizeof(options_size));
+    assert(sig_size == ME_SIGNATURE_V1_SIZE && options_size == ME_PREPARE_OPTIONS_V1_SIZE);
+    memcpy(&sig, signature, sig_size);
+    memcpy(&prepare, options, options_size);
+    me_kernel *kernel = NULL;
+    assert(me_prepare_formula("1", &sig, &prepare, &kernel, NULL) == ME_SUCCESS);
+    me_kernel_free(kernel);
+    signature_next future_sig = {0};
+    prepare_options_next future_options = {0};
+    future_sig.struct_size = sizeof(future_sig);
+    future_options.struct_size = sizeof(future_options);
+    future_sig.new_flag = future_options.new_flag = 1;
+    assert(optional_flag(&future_sig, offsetof(signature_next, new_flag)) == 1);
+    assert(optional_flag(&future_options, offsetof(prepare_options_next, new_flag)) == 1);
+}
+
+void me_test_kernel_v1_caller(void (*receive)(const void *, const void *));
+
+static void accuracy_probe(const double *input, double *output, int nitems) {
+    /* Deterministic dispatch probe: inspect active accuracy without relying on
+     * an architecture-specific input where SLEEF u10 and u35 differ in bits. */
+    me_simd_accuracy_state active;
+    me_simd_accuracy_push(ME_DSL_ULP_OMIT, &active);
+    assert(active.override_u35 == 1);
+    me_simd_accuracy_pop(&active);
+    for (int i = 0; i < nitems; i++) output[i] = input[i];
+}
+
+static void check_formula_accuracy(const me_kernel *kernel) {
+    me_simd_accuracy_state outer, after;
+    me_simd_accuracy_push(ME_DSL_ULP_U10, &outer);
+    double x = 0.25, out;
+    me_buffer input = {&x, sizeof(x)};
+    me_block block = ME_BLOCK_INITIALIZER;
+    block.nitems = 1;
+    assert(me_eval_block(kernel, &input, 1, (me_mut_buffer){&out, sizeof(out)},
+        &block, NULL, NULL) == ME_SUCCESS);
+    assert(out == x + 1 / x);
+#ifndef __EMSCRIPTEN__
+    me_run_options run = ME_RUN_OPTIONS_INITIALIZER;
+    run.raise_mask = ME_FP_DIVIDE;
+    x = 0;
+    assert(me_eval_block(kernel, &input, 1, (me_mut_buffer){&out, sizeof(out)},
+        &block, &run, NULL) == ME_ERR_EVAL);
+#endif
+    me_simd_accuracy_push(ME_DSL_ULP_OMIT, &after);
+    assert(after.override_u35 == 0);
+    me_simd_accuracy_pop(&after);
+    me_simd_accuracy_pop(&outer);
+}
+
+#ifdef TEST_THREADS
+static void *accuracy_worker(void *arg) {
+    check_formula_accuracy(arg);
+    return NULL;
+}
+#endif
+
+static void formula_accuracy(void) {
+    me_input_spec input = {"x", ME_FLOAT64, 0};
+    me_signature sig = ME_SIGNATURE_INITIALIZER;
+    sig.inputs = &input;
+    sig.ninputs = 1;
+    me_kernel *kernel = prepare(NULL, "sin(x) + 1 / x", &sig);
+    /* Test-only private dispatch injection works even in SLEEF-disabled builds;
+     * production policy resolution already stores the prepared ULP in this table. */
+    kernel->formula_math.ulp = ME_DSL_ULP_U35;
+    kernel->formula_math.accelerated = true;
+    kernel->formula_math.unary_f64[ME_MATHOP_SIN] = accuracy_probe;
+    check_formula_accuracy(kernel);
+#ifdef TEST_THREADS
+    pthread_t ids[4];
+    for (int i = 0; i < 4; i++) assert(!pthread_create(&ids[i], NULL, accuracy_worker, kernel));
+    for (int i = 0; i < 4; i++) assert(!pthread_join(ids[i], NULL));
+#endif
+    me_kernel_free(kernel);
 }
 
 #ifdef ME_TEST_HAS_ARTIFACT
@@ -359,6 +676,7 @@ static void direct_scheduler_adapter(void) {
     assert(me_artifact_input_dtype(artifact, 0) == ME_FLOAT32);
     assert(me_artifact_output_dtype(artifact) == ME_FLOAT64);
     assert(me_artifact_inferred_dtype(artifact) == ME_FLOAT32);
+    assert(me_artifact_capabilities(artifact) == ME_ARTIFACT_CAP_NUMERIC);
     assert(!strcmp(me_artifact_source(artifact), source));
     float x[] = {1, 2, 3};
     double output[3];
@@ -371,6 +689,9 @@ static void direct_scheduler_adapter(void) {
     me_artifact_free(artifact);
     assert(me_artifact_prepare_menudet("0.1", source, &sig, ME_JIT_OFF,
         NULL, &artifact, &error) == ME_ARTIFACT_ERR_SOURCE && !artifact);
+    input.dtype = ME_FLOAT64;
+    assert(me_artifact_prepare_menudet("0.2", source, &sig, ME_JIT_OFF,
+        NULL, &artifact, &error) == ME_ARTIFACT_ERR_BINDING && !artifact);
     char prefix[] = {'x', 'y'};
     capture = (me_capture){{"prefix", ME_BYTES, sizeof(prefix)}, prefix, ME_CAPTURE_TYPED};
     sig = (me_signature)ME_SIGNATURE_INITIALIZER;
@@ -384,7 +705,28 @@ static void direct_scheduler_adapter(void) {
     d.output_capacity = sizeof(strings);
     assert(me_artifact_eval_ex(artifact, NULL, 0, strings, &d, &error) == ME_ARTIFACT_SUCCESS);
     assert(!memcmp(strings, "xyxy", sizeof(strings)));
+    assert(me_artifact_capabilities(artifact) == (ME_ARTIFACT_CAP_NUMERIC | ME_ARTIFACT_CAP_FIXED_STRINGS));
     me_artifact_free(artifact);
+
+    sig = (me_signature)ME_SIGNATURE_INITIALIZER;
+    sig.inputs = &input;
+    sig.ninputs = 1;
+    sig.context_ndim = 1;
+    static const struct { const char *source; unsigned capabilities; } cases[] = {
+        {"def k(x):\n    return x\n", ME_ARTIFACT_CAP_NUMERIC},
+        {"def k(x):\n    return x + _flat_idx\n", ME_ARTIFACT_CAP_NUMERIC | ME_ARTIFACT_CAP_ND_CONTEXT},
+        {"def k(x):\n    return block_sum(x)\n", ME_ARTIFACT_CAP_NUMERIC | ME_ARTIFACT_CAP_BLOCK_REDUCTIONS},
+        {"def k(x):\n    if x > 0:\n        return x\n    return -x\n",
+            ME_ARTIFACT_CAP_NUMERIC | ME_ARTIFACT_CAP_CONTROL_FLOW},
+        {"# me:math=system\ndef k(x):\n    return x\n",
+            ME_ARTIFACT_CAP_NUMERIC | ME_ARTIFACT_CAP_FLEXIBLE_MATH}
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        assert(me_artifact_prepare_menudet("0.2", cases[i].source, &sig, ME_JIT_OFF,
+            NULL, &artifact, &error) == ME_ARTIFACT_SUCCESS);
+        assert(me_artifact_capabilities(artifact) == cases[i].capabilities);
+        me_artifact_free(artifact);
+    }
 }
 #endif
 #ifdef TEST_THREADS
@@ -418,12 +760,26 @@ static void threads(void) {
 #endif
 
 int main(int argc, char **argv) {
+    if (argc > 1 && !strcmp(argv[1], "--formula-environment")) {
+        formula_environment();
+        return 0;
+    }
+    if (argc > 1 && !strcmp(argv[1], "--reject-jit-contracts")) {
+        rejected_jit_contracts();
+        return 0;
+    }
     formula();
     annotations();
     captures_and_ramp();
     scalar_and_errors();
     fixed_bytes();
-    execution_options(argc > 1 && !strcmp(argv[1], "--require-jit"));
+    bool tcc = argc > 1 && !strcmp(argv[1], "--require-tcc");
+    execution_options(tcc || (argc > 1 && !strcmp(argv[1], "--require-jit")), tcc);
+    signature_errors();
+    descriptor_prefixes();
+    me_test_kernel_v1_caller(receive_v1_descriptors);
+    formula_accuracy();
+    rejected_jit_contracts();
 #ifdef ME_TEST_HAS_ARTIFACT
     direct_scheduler_adapter();
 #endif

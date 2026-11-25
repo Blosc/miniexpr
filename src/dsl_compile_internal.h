@@ -36,6 +36,8 @@ void dsl_menudet_prepare_jit(me_dsl_compiled_program *program);
 void dsl_menudet_prepare_jit_source(me_dsl_compiled_program *program);
 void dsl_menudet_prepare_jit_constants(me_dsl_compiled_program *program,
     const int64_t *values, const bool *known);
+void dsl_menudet_prepare_jit_constants_source(me_dsl_compiled_program *program,
+    const int64_t *values, const bool *known);
 
 int private_compile_ex(const char *expression, const me_variable *variables, int var_count,
                        void *output, int nitems, me_dtype dtype, int *error, me_expr **out);
@@ -75,6 +77,15 @@ me_dsl_compiled_program *dsl_compile_program_menudet02(const char *source,
     const me_variable *variables, int var_count, me_dtype dtype, int compile_ndims,
     int jit_mode, const me_dsl_declared_policy *declared, int *error_pos,
     bool *is_dsl, char *error_reason, size_t error_reason_cap);
+/* Typed preparation without invoking a JIT backend. On success transfers the
+ * parsed entry name to *entry_point; binding failures are classified directly,
+ * not by matching diagnostic strings. Callers validate their result contract
+ * before dsl_try_prepare_jit_runtime(). */
+me_dsl_compiled_program *dsl_compile_menudet_deferred(const char *source,
+    bool annotations, const me_variable *variables, int var_count, me_dtype dtype,
+    int compile_ndims, int jit_mode, const me_dsl_declared_policy *declared,
+    int *error_pos, bool *binding_error, char **entry_point,
+    char *error_reason, size_t error_reason_cap);
 me_dsl_compiled_program *dsl_compiled_program_alloc(const me_dsl_program *parsed,
                                                     const char *source,
                                                     int compile_ndims,

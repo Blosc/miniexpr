@@ -9,6 +9,8 @@
 #include "dsl_menudet_expr.h"
 #include "dsl_menudet_fp.h"
 #include "dsl_menudet_types.h"
+#include "dsl_math_policy.h"
+#include "functions-simd.h"
 
 #include <limits.h>
 #include <stdio.h>
@@ -49,30 +51,10 @@ static size_t kernel_width(me_dtype dtype, size_t itemsize) {
     return !itemsize || itemsize == width ? width : 0;
 }
 
-static size_t kernel_alignment(me_dtype dtype) {
-    if (dtype == ME_BYTES) return 1;
-    if (dtype == ME_STRING) return 4;
-    if (dtype == ME_COMPLEX64) return sizeof(float);
-    if (dtype == ME_COMPLEX128) return sizeof(double);
-    return dtype_size(dtype);
-}
-
 static bool kernel_output_type(me_dtype dtype, size_t itemsize) {
     if (dtype == ME_AUTO) return itemsize == 0;
     if ((dtype == ME_STRING || dtype == ME_BYTES) && !itemsize) return true;
     return kernel_width(dtype, itemsize) != 0;
-}
-
-static bool kernel_range(const void *data, size_t bytes, size_t alignment) {
-    if (!bytes) return true;
-    uintptr_t address = (uintptr_t)data;
-    return data && address % alignment == 0 && bytes <= UINTPTR_MAX - address;
-}
-
-static bool kernel_overlap(const void *a, size_t na, const void *b, size_t nb) {
-    if (!na || !nb) return false;
-    uintptr_t x = (uintptr_t)a, y = (uintptr_t)b;
-    return x <= y ? y - x < na : x - y < nb;
 }
 
 static bool kernel_identifier(const char *name) {
@@ -109,21 +91,24 @@ void me_kernel_free(me_kernel *kernel) {
     me_free(kernel->formula);
     dsl_compiled_program_free(kernel->program);
     for (size_t i = 0; i < kernel->nbindings; i++) free(kernel->captures[i]);
+    free(kernel->entry_point);
     free(kernel);
 }
 
 static me_status kernel_signature(const me_signature *sig, const me_prepare_options *options,
                                   me_kernel **out, me_variable *variables, me_error *error) {
-    if (!sig || sig->struct_size < sizeof(*sig) ||
+    if (!sig || sig->struct_size < ME_SIGNATURE_V1_SIZE ||
         sig->ninputs > ME_MAX_VARS || sig->ncaptures > ME_MAX_VARS - sig->ninputs ||
         (sig->ninputs && !sig->inputs) || (sig->ncaptures && !sig->captures) ||
         sig->context_ndim < 0 || sig->context_ndim > ME_DSL_MAX_NDIM ||
         sig->cardinality < ME_CARDINALITY_INFER || sig->cardinality > ME_BLOCK_SCALAR ||
         sig->casting < ME_CAST_UNSAFE || sig->casting > ME_CAST_SAFE ||
-        !kernel_output_type(sig->output_dtype, sig->output_itemsize) ||
-        (options && (options->struct_size < sizeof(*options) ||
-         options->execution < ME_EXEC_INTERPRET || options->execution > ME_EXEC_REQUIRE_JIT))) {
-        return kernel_error(error, ME_ERR_SIGNATURE, "invalid signature or preparation options");
+        !kernel_output_type(sig->output_dtype, sig->output_itemsize)) {
+        return kernel_error(error, ME_ERR_SIGNATURE, "invalid signature");
+    }
+    if (options && (options->struct_size < ME_PREPARE_OPTIONS_V1_SIZE ||
+        options->execution < ME_EXEC_INTERPRET || options->execution > ME_EXEC_REQUIRE_JIT)) {
+        return kernel_error(error, ME_ERR_INVALID_ARG, "invalid preparation options");
     }
     me_kernel *kernel = calloc(1, sizeof(*kernel));
     if (!kernel) return kernel_error(error, ME_ERR_OOM, "out of memory preparing kernel");
@@ -202,7 +187,7 @@ static me_status kernel_result(me_kernel *kernel, const me_signature *sig,
 
 static me_status kernel_prepare(const char *version, const char *source,
     const me_signature *sig, const me_prepare_options *options,
-    me_kernel **out, me_error *error) {
+    int jit_mode, me_kernel **out, me_error *error) {
     if (error) memset(error, 0, sizeof(*error));
     if (out) *out = NULL;
     if (!out || !source) return kernel_error(error, ME_ERR_INVALID_ARG, "source and output handle are required");
@@ -224,6 +209,18 @@ static me_status kernel_prepare(const char *version, const char *source,
     if (formula) {
         if (sig->context_ndim || sig->cardinality == ME_BLOCK_SCALAR || sig->integer_powers) {
             status = kernel_error(error, ME_ERR_UNSUPPORTED, "formula context and reductions are not yet supported");
+            goto cleanup;
+        }
+        me_dsl_program parsed = {0};
+        me_dsl_declared_policy policy = {
+            .has_fp = !options || !options->inherit_environment, .fp = ME_DSL_FP_STRICT,
+            .has_math = !options || !options->inherit_environment, .math = ME_DSL_MATH_SYSTEM};
+        me_dsl_fp_mode fp;
+        me_dsl_math_backend math;
+        me_dsl_sleef_ulp ulp;
+        if (!dsl_math_policy_resolve(&parsed, &policy, ME_DSL_COMPILER_CC,
+            &fp, &math, &ulp, &kernel->formula_math, reason, sizeof(reason))) {
+            status = kernel_error(error, ME_ERR_UNSUPPORTED, reason);
             goto cleanup;
         }
         dsl_menudet_fp_state saved;
@@ -271,24 +268,15 @@ static me_status kernel_prepare(const char *version, const char *source,
             .has_fp = !options || !options->inherit_environment, .fp = ME_DSL_FP_STRICT,
             .has_math = !options || !options->inherit_environment, .math = ME_DSL_MATH_SYSTEM,
             .integer_powers = sig->integer_powers};
-        bool is_dsl = false;
-        int jit = execution == ME_EXEC_INTERPRET ? ME_JIT_OFF : ME_JIT_ON;
-        if (!strcmp(version, "0.2")) {
-            kernel->program = dsl_compile_program_menudet02(source, variables, (int)kernel->nbindings,
-                sig->output_dtype, sig->context_ndim, jit, &policy,
-                &position, &is_dsl, reason, sizeof(reason));
-        }
-        else {
-            kernel->program = dsl_compile_program_profile_declared(source, variables, (int)kernel->nbindings,
-                sig->output_dtype, sig->context_ndim, jit, ME_DSL_PROFILE_MENUDET_0_1, &policy,
-                &position, &is_dsl, reason, sizeof(reason));
-        }
+        bool binding_error = false;
+        int jit = jit_mode == ME_JIT_DEFAULT ?
+            (execution == ME_EXEC_INTERPRET ? ME_JIT_OFF : ME_JIT_ON) : jit_mode;
+        kernel->program = dsl_compile_menudet_deferred(source, !strcmp(version, "0.2"),
+            variables, (int)kernel->nbindings, sig->output_dtype, sig->context_ndim, jit,
+            &policy, &position, &binding_error, &kernel->entry_point, reason, sizeof(reason));
         if (!kernel->program) {
-            status = kernel_source_error(error, source, position, reason[0] ? reason : "invalid Menudet kernel");
-            goto cleanup;
-        }
-        if (execution == ME_EXEC_REQUIRE_JIT && !kernel->program->jit_kernel_fn) {
-            status = kernel_error(error, ME_ERR_UNSUPPORTED, "JIT is required but unavailable for this kernel");
+            status = binding_error ? kernel_error(error, ME_ERR_SIGNATURE, reason) :
+                kernel_source_error(error, source, position, reason[0] ? reason : "invalid Menudet kernel");
             goto cleanup;
         }
         inferred = kernel->program->inferred_dtype;
@@ -300,6 +288,38 @@ static me_status kernel_prepare(const char *version, const char *source,
         kernel->info.context_ndim = nd ? sig->context_ndim : 0;
     }
     status = kernel_result(kernel, sig, inferred, error);
+    if (status == ME_SUCCESS && kernel->program && kernel->program->jit_request_mode == ME_JIT_ON) {
+        dsl_menudet_fp_state saved;
+        if (!dsl_menudet_fp_begin(&saved)) {
+            status = kernel_error(error, ME_ERR_UNSUPPORTED, "cannot establish nearest rounding preparing JIT");
+            goto cleanup;
+        }
+        /* Capture specialization follows typing: an annotated formerly weak
+         * capture may now be strong. Never invoke a compiler for a rejected
+         * result contract. */
+        if (!kernel->program->jit_c_source) {
+            int64_t values[ME_MAX_VARS] = {0};
+            bool known[ME_MAX_VARS] = {false};
+            bool any = false;
+            for (size_t i = kernel->ninputs; i < kernel->nbindings; i++) {
+                if (!kernel->program->numpy_weak_vars[i]) continue;
+                if (kernel->dtypes[i] == ME_INT64) memcpy(&values[i], kernel->captures[i], sizeof(int64_t));
+                else if (kernel->dtypes[i] == ME_BOOL) values[i] = *(const bool *)kernel->captures[i];
+                else continue;
+                known[i] = true;
+                any = true;
+            }
+            if (any) dsl_menudet_prepare_jit_constants_source(kernel->program, values, known);
+        }
+        if (!kernel->program->jit_kernel_fn) dsl_try_prepare_jit_runtime(kernel->program);
+        if (!dsl_menudet_fp_end(&saved)) {
+            status = kernel_error(error, ME_ERR_UNSUPPORTED, "cannot restore floating environment after JIT preparation");
+        }
+    }
+    if (status == ME_SUCCESS && !formula && execution == ME_EXEC_REQUIRE_JIT &&
+        !kernel->program->jit_kernel_fn) {
+        status = kernel_error(error, ME_ERR_UNSUPPORTED, "JIT is required but unavailable for this kernel");
+    }
 cleanup:
     if (status == ME_SUCCESS) *out = kernel;
     else me_kernel_free(kernel);
@@ -308,7 +328,7 @@ cleanup:
 
 me_status me_prepare_formula(const char *source, const me_signature *signature,
     const me_prepare_options *options, me_kernel **out, me_error *error) {
-    return kernel_prepare(NULL, source, signature, options, out, error);
+    return kernel_prepare(NULL, source, signature, options, ME_JIT_DEFAULT, out, error);
 }
 
 me_status me_prepare_menudet(const char *version, const char *source,
@@ -319,20 +339,26 @@ me_status me_prepare_menudet(const char *version, const char *source,
         if (out) *out = NULL;
         return kernel_error(error, ME_ERR_INVALID_ARG, "Menudet version is required");
     }
-    return kernel_prepare(version, source, signature, options, out, error);
+    return kernel_prepare(version, source, signature, options, ME_JIT_DEFAULT, out, error);
+}
+
+me_status me_kernel_prepare_menudet(const char *version, const char *source,
+    const me_signature *signature, const me_prepare_options *options, int jit_mode,
+    me_kernel **out, me_error *error) {
+    return kernel_prepare(version, source, signature, options, jit_mode, out, error);
 }
 
 me_status me_describe(const me_kernel *kernel, me_kernel_info *out) {
-    if (!kernel || !out || out->struct_size < sizeof(*out)) return ME_ERR_INVALID_ARG;
+    if (!kernel || !out || out->struct_size < ME_KERNEL_INFO_V1_SIZE) return ME_ERR_INVALID_ARG;
     size_t size = out->struct_size;
-    *out = kernel->info;
+    memcpy(out, &kernel->info, size < sizeof(*out) ? size : sizeof(*out));
     out->struct_size = size;
     return ME_SUCCESS;
 }
 
 static me_status kernel_preflight(const me_kernel *kernel, const me_buffer *inputs,
-    size_t ninputs, me_mut_buffer output, const me_block *block, me_error *error) {
-    if (!kernel || !block || block->struct_size < sizeof(*block) ||
+    size_t ninputs, me_mut_buffer output, const me_block *block, bool *all_active, me_error *error) {
+    if (!kernel || !block || block->struct_size < ME_BLOCK_V1_SIZE ||
         ninputs != kernel->ninputs || (ninputs && !inputs) || block->nitems > INT_MAX ||
         block->ndim != kernel->info.context_ndim) {
         return kernel_error(error, ME_ERR_INVALID_ARG, "invalid block, context rank or input count");
@@ -341,18 +367,19 @@ static me_status kernel_preflight(const me_kernel *kernel, const me_buffer *inpu
     size_t count = kernel->info.cardinality == ME_BLOCK_SCALAR ? 1 : n;
     size_t width = kernel->info.output_itemsize;
     if (!width || count > SIZE_MAX / width || output.capacity < count * width ||
-        !kernel_range(output.data, count * width, kernel_alignment(kernel->info.output_dtype))) {
+        !me_kernel_range(output.data, count * width, me_kernel_alignment(kernel->info.output_dtype))) {
         return kernel_error(error, ME_ERR_INVALID_ARG, "invalid output capacity, alignment or byte extent");
     }
     size_t bytes = count * width;
     if ((!block->valid_mask && block->valid_mask_capacity) ||
         (block->valid_mask && (block->valid_mask_capacity < n ||
-         !kernel_range(block->valid_mask, n, 1) ||
-         kernel_overlap(block->valid_mask, n, output.data, bytes)))) {
+          !me_kernel_range(block->valid_mask, n, 1) ||
+          me_kernel_overlap(block->valid_mask, n, output.data, bytes)))) {
         return kernel_error(error, ME_ERR_INVALID_ARG, "invalid or overlapping mask");
     }
     for (size_t i = 0; block->valid_mask && i < n; i++) {
         if (block->valid_mask[i] > 1) return kernel_error(error, ME_ERR_INVALID_ARG, "mask values must be zero or one");
+        if (!block->valid_mask[i]) *all_active = false;
     }
     if (!block->ndim && (block->logical_shape || block->origin || block->extent)) {
         return kernel_error(error, ME_ERR_INVALID_ARG, "unexpected coordinate pointers");
@@ -361,8 +388,8 @@ static me_status kernel_preflight(const me_kernel *kernel, const me_buffer *inpu
         const int64_t *context[] = {block->logical_shape, block->origin, block->extent};
         for (size_t i = 0; i < 3; i++) {
             size_t length = (size_t)block->ndim * sizeof(int64_t);
-            if (!kernel_range(context[i], length, sizeof(int64_t)) ||
-                kernel_overlap(context[i], length, output.data, bytes)) {
+            if (!me_kernel_range(context[i], length, sizeof(int64_t)) ||
+                me_kernel_overlap(context[i], length, output.data, bytes)) {
                 return kernel_error(error, ME_ERR_INVALID_ARG, "invalid or overlapping coordinates");
             }
         }
@@ -370,8 +397,8 @@ static me_status kernel_preflight(const me_kernel *kernel, const me_buffer *inpu
     for (size_t i = 0; i < ninputs; i++) {
         width = kernel->widths[i];
         if (n > SIZE_MAX / width || inputs[i].capacity < n * width ||
-            !kernel_range(inputs[i].data, n * width, kernel_alignment(kernel->dtypes[i])) ||
-            kernel_overlap(inputs[i].data, n * width, output.data, bytes)) {
+            !me_kernel_range(inputs[i].data, n * width, me_kernel_alignment(kernel->dtypes[i])) ||
+            me_kernel_overlap(inputs[i].data, n * width, output.data, bytes)) {
             return kernel_error(error, ME_ERR_INVALID_ARG, "invalid or overlapping input buffer");
         }
         if (kernel->dtypes[i] == ME_STRING &&
@@ -382,22 +409,31 @@ static me_status kernel_preflight(const me_kernel *kernel, const me_buffer *inpu
     return ME_SUCCESS;
 }
 
+me_status me_kernel_run_begin(const me_run_options *options, me_fp_status *status,
+    me_error *error) {
+    if (error) memset(error, 0, sizeof(*error));
+    if (options && (options->struct_size < ME_RUN_OPTIONS_V1_SIZE || (options->raise_mask & ~15u))) {
+        return kernel_error(error, ME_ERR_INVALID_ARG, "invalid run options");
+    }
+    *status = (me_fp_status){0};
+#ifndef __EMSCRIPTEN__
+    status->supported = true;
+#endif
+    if (options && options->fp_status) *options->fp_status = *status;
+    if (options && options->raise_mask && !status->supported) {
+        return kernel_error(error, ME_ERR_UNSUPPORTED, "floating exception reporting is unavailable");
+    }
+    return ME_SUCCESS;
+}
+
 me_status me_eval_block(const me_kernel *kernel, const me_buffer *inputs,
     size_t ninputs, me_mut_buffer output, const me_block *block,
     const me_run_options *options, me_error *error) {
-    if (error) memset(error, 0, sizeof(*error));
-    if (options && (options->struct_size < sizeof(*options) || (options->raise_mask & ~15u))) {
-        return kernel_error(error, ME_ERR_INVALID_ARG, "invalid run options");
-    }
-    me_fp_status status = {0};
-#ifndef __EMSCRIPTEN__
-    status.supported = true;
-#endif
-    if (options && options->fp_status) *options->fp_status = status;
-    if (options && options->raise_mask && !status.supported) {
-        return kernel_error(error, ME_ERR_UNSUPPORTED, "floating exception reporting is unavailable");
-    }
-    me_status result = kernel_preflight(kernel, inputs, ninputs, output, block, error);
+    me_fp_status status;
+    me_status result = me_kernel_run_begin(options, &status, error);
+    if (result != ME_SUCCESS) return result;
+    bool all_active = true;
+    result = kernel_preflight(kernel, inputs, ninputs, output, block, &all_active, error);
     if (result != ME_SUCCESS) return result;
     if (kernel->formula && block->nitems == 0) return ME_SUCCESS;
     const void *data[ME_MAX_VARS];
@@ -407,14 +443,18 @@ me_status me_eval_block(const me_kernel *kernel, const me_buffer *inputs,
     unsigned *previous = dsl_menudet_status_begin(&status.flags);
     int rc;
     if (kernel->formula) {
-        const me_math_dispatch *math = me_math_dispatch_set(NULL);
+        const me_math_dispatch *math = me_math_dispatch_set(&kernel->formula_math);
+        me_simd_accuracy_state accuracy;
+        me_simd_accuracy_push(kernel->formula_math.ulp, &accuracy);
         rc = dsl_menudet_eval_expr_masked(kernel->formula, data, (int)kernel->nbindings,
-            NULL, (int)block->nitems, block->valid_mask, kernel->info.output_itemsize, output.data);
+            NULL, (int)block->nitems, all_active ? NULL : block->valid_mask,
+            kernel->info.output_itemsize, output.data);
+        me_simd_accuracy_pop(&accuracy);
         me_math_dispatch_set(math);
     }
     else {
         me_dsl_menudet_eval_descriptor native = {
-            .nitems = (int)block->nitems, .valid_mask = block->valid_mask,
+            .nitems = (int)block->nitems, .valid_mask = all_active ? NULL : block->valid_mask,
             .output_capacity = output.capacity, .ndim = block->ndim,
             .logical_shape = block->logical_shape, .block_origin = block->origin,
             .block_extent = block->extent};

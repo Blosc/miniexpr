@@ -6,6 +6,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include "miniexpr_grid.h"
 
 static me_kernel *prepare(bool scalar) {
@@ -25,7 +26,54 @@ static me_kernel *prepare(bool scalar) {
     return kernel;
 }
 
+static void mixed_width_runs(void) {
+    int32_t dimensions[] = {4, 4, 4};
+    char tags[64 * 3];
+    double x[64], output[64];
+    int16_t y[64];
+    for (int i = 0; i < 64; i++) {
+        memcpy(tags + 3 * i, "tag", 3);
+        x[i] = i;
+        y[i] = 2;
+    }
+    me_input_spec inputs[] = {{"tag", ME_BYTES, 3}, {"x", ME_FLOAT64, 0}, {"y", ME_INT16, 0}};
+    me_buffer buffers[] = {{tags, sizeof(tags)}, {x, sizeof(x)}, {y, sizeof(y)}};
+    me_signature sig = ME_SIGNATURE_INITIALIZER;
+    sig.inputs = inputs;
+    sig.ninputs = 3;
+    sig.context_ndim = 3;
+    me_kernel *kernel = NULL;
+    assert(me_prepare_menudet("0.2", "def k(tag, x, y):\n    return x + y + _flat_idx\n",
+        &sig, NULL, &kernel, NULL) == ME_SUCCESS);
+    for (int edge = 0; edge < 4; edge++) {
+        int64_t shape[] = {4, 4, 4};
+        if (edge < 3) shape[edge] = 3;
+        else shape[0] = shape[1] = shape[2] = 3;
+        me_grid_spec spec = ME_GRID_SPEC_INITIALIZER;
+        spec.ndim = 3;
+        spec.shape = shape;
+        spec.chunkshape = spec.blockshape = dimensions;
+        me_grid *grid = NULL;
+        assert(me_grid_create(&spec, &grid, NULL) == ME_SUCCESS);
+        assert(me_grid_eval_block(grid, kernel, 0, 0, buffers, 3,
+            (me_mut_buffer){output, sizeof(output)}, NULL, NULL) == ME_SUCCESS);
+        for (int i = 0; i < 4; i++) {
+            for (int j = 0; j < 4; j++) {
+                for (int k = 0; k < 4; k++) {
+                    int physical = i * 16 + j * 4 + k;
+                    double expected = i < shape[0] && j < shape[1] && k < shape[2] ?
+                        x[physical] + 2 + (i * shape[1] + j) * shape[2] + k : 0;
+                    assert(output[physical] == expected);
+                }
+            }
+        }
+        me_grid_free(grid);
+    }
+    me_kernel_free(kernel);
+}
+
 int main(void) {
+    mixed_width_runs();
     int64_t shape[] = {3, 5};
     int32_t chunks[] = {2, 4}, blocks[] = {2, 3};
     me_grid_spec spec = ME_GRID_SPEC_INITIALIZER;
@@ -44,6 +92,22 @@ int main(void) {
     me_buffer input = {x, sizeof(x)};
     me_mut_buffer output = {out, sizeof(out)};
     me_kernel *kernel = prepare(false);
+    me_fp_status fp = {15, false};
+    me_run_options run = ME_RUN_OPTIONS_INITIALIZER;
+    run.fp_status = &fp;
+    assert(me_grid_eval_block(grid, kernel, -1, 0, &input, 1, output, &run, NULL) == ME_ERR_INVALID_ARG);
+    assert(fp.flags == 0);
+#ifndef __EMSCRIPTEN__
+    assert(fp.supported);
+#else
+    assert(!fp.supported);
+#endif
+    run.struct_size = ME_RUN_OPTIONS_V1_SIZE - 1;
+    assert(me_grid_eval_block(grid, kernel, 3, 1, &input, 1, output, &run, NULL) == ME_ERR_INVALID_ARG);
+    run.struct_size = sizeof(run);
+    run.raise_mask = 16;
+    assert(me_grid_eval_block(grid, kernel, 3, 1, &input, 1, output, &run, NULL) == ME_ERR_INVALID_ARG);
+    run.raise_mask = 0;
     assert(me_grid_eval_block(grid, kernel, 0, 0, &input, 1, output, NULL, NULL) == ME_SUCCESS);
     const double offsets[] = {0, 1, 2, 5, 6, 7};
     for (int i = 0; i < 6; i++) assert(out[i] == x[i] + offsets[i]);
@@ -59,11 +123,16 @@ int main(void) {
     assert(me_grid_eval_block(grid, kernel, 0, 1, &input, 1, output, NULL, NULL) == ME_ERR_INVALID_ARG);
     output.data = out;
     input.capacity--;
+    assert(me_grid_eval_block(grid, kernel, 3, 1, &input, 1, output, NULL, NULL) == ME_ERR_INVALID_ARG);
     assert(me_grid_eval_block(grid, kernel, 0, 1, &input, 1, output, NULL, NULL) == ME_ERR_INVALID_ARG);
     input.capacity++;
     assert(me_grid_describe_block(grid, -1, 0, &info, NULL) == ME_ERR_INVALID_ARG);
     assert(me_grid_describe_block(grid, 4, 0, &info, NULL) == ME_ERR_INVALID_ARG);
     assert(me_grid_describe_block(grid, 0, 2, &info, NULL) == ME_ERR_INVALID_ARG);
+    struct { me_grid_block_info value; uint64_t suffix; } extended = {ME_GRID_BLOCK_INFO_INITIALIZER, UINT64_MAX};
+    extended.value.struct_size = sizeof(extended);
+    assert(me_grid_describe_block(grid, 0, 0, &extended.value, NULL) == ME_SUCCESS);
+    assert(extended.value.struct_size == sizeof(extended) && extended.suffix == UINT64_MAX);
     me_kernel_free(kernel);
     kernel = prepare(true);
     double total = -1;
@@ -83,6 +152,7 @@ int main(void) {
     assert(me_grid_describe_block(grid, 0, 0, &info, NULL) == ME_ERR_INVALID_ARG);
     me_grid_free(grid);
     spec = (me_grid_spec)ME_GRID_SPEC_INITIALIZER;
+    spec.struct_size = ME_GRID_SPEC_V1_SIZE;
     assert(me_grid_create(&spec, &grid, NULL) == ME_SUCCESS);
     assert(me_grid_describe_block(grid, 0, 0, &info, NULL) == ME_SUCCESS);
     assert(info.ndim == 0 && info.valid_nitems == 1 && info.padded_nitems == 1);

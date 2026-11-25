@@ -1,183 +1,43 @@
-# MiniExpr Makefile
-# Organized structure: src/, bench/, tests/
+# Convenience entry points only: CMake owns all source lists and dependencies.
+# Override BUILDDIR, JOBS, CMAKE_ARGS or CTEST_ARGS as needed.
+CMAKE ?= cmake
+CTEST ?= ctest
+BUILDDIR ?= build
+JOBS ?= 8
+CMAKE_ARGS ?=
+CTEST_ARGS ?=
+ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
-CC ?= gcc
-SLEEF_DIR ?= ../sleef
-ifneq ("$(wildcard $(SLEEF_DIR)/src)","")
-  SLEEF_CFLAGS = -Isrc -Isrc/sleef_compat -I$(SLEEF_DIR) -I$(SLEEF_DIR)/src -I$(SLEEF_DIR)/src/common -I$(SLEEF_DIR)/src/arch
-  SLEEF_DEFS =
-else
-  SLEEF_CFLAGS = -Isrc
-  SLEEF_DEFS = -DME_USE_SLEEF=0
-endif
-ifeq ($(OS),Windows_NT)
-  # Check if we are using clang-cl
-  ifneq (,$(findstring clang-cl,$(CC)))
-    CFLAGS = -O2 -DNDEBUG $(SLEEF_CFLAGS) $(SLEEF_DEFS)
-    DEBUG_CFLAGS = -O0 -g $(SLEEF_CFLAGS) $(SLEEF_DEFS)
-    LDFLAGS = clang_rt.builtins-x86_64.lib
-  else
-    CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG $(SLEEF_CFLAGS) $(SLEEF_DEFS)
-    DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g $(SLEEF_CFLAGS) $(SLEEF_DEFS)
-    LDFLAGS = -lm
-  endif
-else
-  CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O2 -DNDEBUG $(SLEEF_CFLAGS) $(SLEEF_DEFS)
-  DEBUG_CFLAGS = -Wall -Wshadow -Wno-unknown-pragmas -Wno-unused-function -O0 -g $(SLEEF_CFLAGS) $(SLEEF_DEFS)
-  ifeq ($(shell uname -s),Linux)
-    LDFLAGS = -lm -ldl
-  else
-    LDFLAGS = -lm
-  endif
-endif
+.PHONY: all lib bench examples configure test debug debug-test clean help
 
-# Directories
-SRCDIR = src
-BENCHDIR = bench
-TESTDIR = tests
-EXAMPLEDIR = examples
-BUILDDIR = build
+all lib bench examples: configure
+	$(CMAKE) --build "$(BUILDDIR)" --parallel $(JOBS)
 
-# Source files
-LIB_SRCS = $(SRCDIR)/miniexpr.c $(SRCDIR)/dsl_parser.c $(SRCDIR)/dsl_jit_ir.c $(SRCDIR)/dsl_jit_cgen.c $(SRCDIR)/functions.c $(SRCDIR)/functions-simd.c
-LIB_OBJS = $(BUILDDIR)/miniexpr.o $(BUILDDIR)/dsl_parser.o $(BUILDDIR)/dsl_jit_ir.o $(BUILDDIR)/dsl_jit_cgen.o $(BUILDDIR)/functions.o $(BUILDDIR)/functions-simd.o
-LIB_HDR = $(SRCDIR)/miniexpr.h
+configure:
+	$(CMAKE) -S "$(ROOT)" -B "$(BUILDDIR)" $(CMAKE_ARGS)
 
-ifeq ($(OS),Windows_NT)
-  EXE = .exe
-else
-  EXE =
-endif
+test: all
+	$(CMAKE) -E chdir "$(BUILDDIR)" $(CTEST) --output-on-failure $(CTEST_ARGS)
 
-# Benchmark sources
-BENCH_SRCS = $(wildcard $(BENCHDIR)/*.c)
-# Needs the artifact loader/JSON library; build it through CMake with
-# MINIEXPR_BUILD_ARTIFACT=ON instead of this Makefile.
-BENCH_SRCS := $(filter-out $(BENCHDIR)/benchmark_dsl_interpreter_vs_jit.c,$(BENCH_SRCS))
-BENCH_SRCS := $(filter-out $(BENCHDIR)/benchmark_graph_preparation.c,$(BENCH_SRCS))
-BENCH_BINS = $(patsubst $(BENCHDIR)/%.c,$(BUILDDIR)/%$(EXE),$(BENCH_SRCS))
+debug:
+	$(CMAKE) -S "$(ROOT)" -B "$(BUILDDIR)-debug" $(CMAKE_ARGS) -DCMAKE_BUILD_TYPE=Debug
+	$(CMAKE) --build "$(BUILDDIR)-debug" --parallel $(JOBS)
 
-# Test sources
-TEST_SRCS = $(wildcard $(TESTDIR)/*.c)
-# Exclude tests with pthreads on windows
-ifeq ($(OS),Windows_NT)
-  TEST_SRCS := $(filter-out $(TESTDIR)/test_threadsafe_chunk.c,$(TEST_SRCS))
-endif
-TEST_BINS = $(patsubst $(TESTDIR)/%.c,$(BUILDDIR)/%$(EXE),$(TEST_SRCS))
-TEST_DEFS = -DMINIEXPR_SOURCE_DIR=\"$(abspath .)\"
+debug-test: debug
+	$(CMAKE) -E chdir "$(BUILDDIR)-debug" $(CTEST) --output-on-failure $(CTEST_ARGS)
 
-# Example sources
-EXAMPLE_SRCS = $(wildcard $(EXAMPLEDIR)/*.c)
-EXAMPLE_BINS = $(patsubst $(EXAMPLEDIR)/%.c,$(BUILDDIR)/%$(EXE),$(EXAMPLE_SRCS))
+# Keep old individual-target spellings, with executable placement owned by CMake.
+$(BUILDDIR)/%: configure
+	$(CMAKE) --build "$(BUILDDIR)" --parallel $(JOBS) --target "$*"
 
-.PHONY: all lib bench test examples clean help debug debug-test
-
-# Default target
-all: lib bench
-
-# Help target
-help:
-	@echo "MiniExpr Build System"
-	@echo "====================="
-	@echo ""
-	@echo "Targets:"
-	@echo "  make lib          - Build library object file (release mode)"
-	@echo "  make bench        - Build all benchmarks"
-	@echo "  make test         - Build and run all tests"
-	@echo "  make examples     - Build all examples"
-	@echo "  make debug        - Build library in debug mode (-g -O0, asserts enabled)"
-	@echo "  make debug-test   - Build and run tests in debug mode"
-	@echo "  make clean        - Remove all build artifacts"
-	@echo "  make help         - Show this help"
-	@echo ""
-	@echo "Environment overrides:"
-	@echo "  SLEEF_DIR=../sleef  - Path to SLEEF source tree (optional)"
-	@echo ""
-	@echo "Individual benchmarks:"
-	@echo "  make $(BUILDDIR)/benchmark_all_types"
-	@echo "  make $(BUILDDIR)/benchmark_types"
-	@echo ""
-	@echo "Individual tests:"
-	@echo "  make $(BUILDDIR)/test_all_types"
-	@echo "  make $(BUILDDIR)/test_bytecode"
-
-# Create build directory
-$(BUILDDIR):
-	@mkdir -p $(BUILDDIR)
-
-# Build library object
-lib: $(LIB_OBJS)
-
-$(LIB_OBJS): $(LIB_SRCS) $(LIB_HDR) | $(BUILDDIR)
-	@echo "Building library..."
-	$(CC) $(CFLAGS) -c $(SRCDIR)/miniexpr.c -o $(BUILDDIR)/miniexpr.o
-	$(CC) $(CFLAGS) -c $(SRCDIR)/dsl_parser.c -o $(BUILDDIR)/dsl_parser.o
-	$(CC) $(CFLAGS) -c $(SRCDIR)/dsl_jit_ir.c -o $(BUILDDIR)/dsl_jit_ir.o
-	$(CC) $(CFLAGS) -c $(SRCDIR)/dsl_jit_cgen.c -o $(BUILDDIR)/dsl_jit_cgen.o
-	$(CC) $(CFLAGS) -c $(SRCDIR)/functions.c -o $(BUILDDIR)/functions.o
-	$(CC) $(CFLAGS) -c $(SRCDIR)/functions-simd.c -o $(BUILDDIR)/functions-simd.o
-	@echo "✓ Library built: $(LIB_OBJS)"
-
-# Build library in debug mode
-debug: CFLAGS = $(DEBUG_CFLAGS)
-debug: clean lib
-	@echo "✓ Debug build complete (asserts enabled, -g -O0)"
-
-# Build and run tests in debug mode
-debug-test: CFLAGS = $(DEBUG_CFLAGS)
-debug-test: clean test
-	@echo "✓ Debug tests complete"
-
-# Build all benchmarks
-bench: $(BENCH_BINS)
-
-$(BUILDDIR)/%$(EXE): $(BENCHDIR)/%.c $(LIB_OBJS) | $(BUILDDIR)
-	@echo "Building benchmark: $@"
-	$(CC) $(CFLAGS) -I$(SRCDIR) $< $(LIB_OBJS) -o $@ $(LDFLAGS)
-	@echo "✓ Built: $@"
-
-# Build and run all tests
-test: $(TEST_BINS)
-	@echo ""
-	@echo "Running tests..."
-	@echo "================"
-	@for test in $(TEST_BINS); do \
-		echo ""; \
-		echo "Running $$test..."; \
-		echo "-----------------------------------"; \
-		./$$test || exit 1; \
-	done
-	@echo ""
-	@echo "✅ All tests passed!"
-
-$(BUILDDIR)/%$(EXE): $(TESTDIR)/%.c $(LIB_OBJS) | $(BUILDDIR)
-	@echo "Building test: $@"
-	$(CC) $(CFLAGS) $(TEST_DEFS) -I$(SRCDIR) $< $(LIB_OBJS) -o $@ $(LDFLAGS)
-	@echo "✓ Built: $@"
-
-# Build all examples
-examples: $(EXAMPLE_BINS)
-
-$(BUILDDIR)/%$(EXE): $(EXAMPLEDIR)/%.c $(LIB_OBJS) | $(BUILDDIR)
-	@echo "Building example: $@"
-	$(CC) $(CFLAGS) -I$(SRCDIR) $< $(LIB_OBJS) -o $@ $(LDFLAGS) -lpthread
-	@echo "✓ Built: $@"
-
-# Clean build artifacts
+# Clean configured targets without discarding the cache or downloaded sources.
 clean:
-	@echo "Cleaning build artifacts..."
-	rm -rf $(BUILDDIR)
-	rm -f *.o *.exe
-	@echo "✓ Clean complete"
+	@if test -f "$(BUILDDIR)/CMakeCache.txt"; then \
+	  $(CMAKE) --build "$(BUILDDIR)" --target clean; \
+	fi
 
-# Pattern rule for object files (if needed for future extensions)
-$(BUILDDIR)/%.o: $(SRCDIR)/%.c $(LIB_HDR) | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-# Check for trailing whitespace
-check-whitespace:
-	@./check-whitespace.sh
-
-# Fix trailing whitespace
-fix-whitespace:
-	@./check-whitespace.sh --fix
+help:
+	@echo "CMake shortcuts: all lib bench examples test debug debug-test clean"
+	@echo "all/lib/bench/examples build the targets enabled by CMake configuration."
+	@echo "Use CMAKE_ARGS to select features; BUILDDIR and JOBS select build location and parallelism."
+	@echo "Individual targets: make build/test_kernel_api (executables live under build/tests)."

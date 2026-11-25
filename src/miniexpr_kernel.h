@@ -73,10 +73,18 @@ typedef struct {
     int context_ndim;
     me_casting casting;
     bool integer_powers; /* Authored multiply-chain policy for integer exponents. */
+    uint8_t reserved[3]; /* Zero-initialize; explicit storage, never ABI padding. */
 } me_signature;
 
 #define ME_SIGNATURE_INITIALIZER { sizeof(me_signature), NULL, 0, NULL, 0, \
-    ME_AUTO, 0, ME_CARDINALITY_INFER, 0, ME_CAST_UNSAFE, false }
+    ME_AUTO, 0, ME_CARDINALITY_INFER, 0, ME_CAST_UNSAFE, false, {0} }
+/* Fixed 1.x baseline prefixes, including explicit reserved storage. Append-only future
+ * fields must default when absent; never replace these minima with sizeof.
+ * New fields must follow the entire previously released layout, not reuse
+ * reserved storage. Each released revision must avoid unnamed tail padding.
+ * Unknown input suffixes are ignored and output suffixes are left untouched. */
+#define ME_SIGNATURE_V1_SIZE \
+    (offsetof(me_signature, reserved) + sizeof(((me_signature *)0)->reserved))
 
 typedef enum {
     ME_EXEC_INTERPRET = 0,
@@ -88,9 +96,12 @@ typedef struct {
     size_t struct_size;
     me_execution_policy execution;
     bool inherit_environment; /* False: deterministic strict/system defaults. */
+    uint8_t reserved[3]; /* Zero-initialize; new fields must follow this storage. */
 } me_prepare_options;
 
-#define ME_PREPARE_OPTIONS_INITIALIZER { sizeof(me_prepare_options), ME_EXEC_INTERPRET, false }
+#define ME_PREPARE_OPTIONS_INITIALIZER { sizeof(me_prepare_options), ME_EXEC_INTERPRET, false, {0} }
+#define ME_PREPARE_OPTIONS_V1_SIZE \
+    (offsetof(me_prepare_options, reserved) + sizeof(((me_prepare_options *)0)->reserved))
 
 typedef struct {
     size_t struct_size;
@@ -102,6 +113,7 @@ typedef struct {
 
 #define ME_KERNEL_INFO_INITIALIZER { sizeof(me_kernel_info), ME_AUTO, 0, \
     ME_CARDINALITY_INFER, 0 }
+#define ME_KERNEL_INFO_V1_SIZE (offsetof(me_kernel_info, context_ndim) + sizeof(int))
 
 typedef struct {
     const void *data;
@@ -125,6 +137,7 @@ typedef struct {
 } me_block;
 
 #define ME_BLOCK_INITIALIZER { sizeof(me_block), 0, NULL, 0, 0, NULL, NULL, NULL }
+#define ME_BLOCK_V1_SIZE (offsetof(me_block, extent) + sizeof(const int64_t *))
 
 typedef struct {
     unsigned flags;
@@ -138,6 +151,7 @@ typedef struct {
 } me_run_options;
 
 #define ME_RUN_OPTIONS_INITIALIZER { sizeof(me_run_options), 0, NULL }
+#define ME_RUN_OPTIONS_V1_SIZE (offsetof(me_run_options, fp_status) + sizeof(me_fp_status *))
 
 /* Source is NUL-terminated. Inputs must have concrete dtypes. Captures and all
  * retained metadata are copied. On failure *out is NULL; error may be NULL.

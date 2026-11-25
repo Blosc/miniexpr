@@ -1,4 +1,4 @@
-file(GLOB MINIEXPR_BENCH_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
+file(GLOB MINIEXPR_BENCH_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
 # This one needs the artifact library and a dedicated link line; handled below.
 list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_dsl_interpreter_vs_jit\\.c$")
 list(FILTER MINIEXPR_BENCH_SOURCES EXCLUDE REGEX "benchmark_graph_preparation\\.c$")

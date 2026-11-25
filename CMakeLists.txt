@@ -210,6 +210,9 @@ if(MINIEXPR_BUILD_SHARED)
 elseif(MINIEXPR_BUILD_STATIC)
   set(MINIEXPR_DEFAULT_LIB miniexpr_static)
 endif()
+if(MINIEXPR_DEFAULT_LIB)
+  add_library(miniexpr::core ALIAS ${MINIEXPR_DEFAULT_LIB})
+endif()
 
 if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
   foreach(_miniexpr_install_target miniexpr miniexpr_static)
@@ -230,6 +233,7 @@ if(MINIEXPR_BUILD_ARTIFACT)
   endif()
   add_library(miniexpr_artifact STATIC src/dsl_artifact.c src/dsl_array.c src/dsl_graph.c
     src/dsl_graph_text.c "${yyjson_SOURCE_DIR}/src/yyjson.c")
+  add_library(miniexpr::artifact ALIAS miniexpr_artifact)
   set_target_properties(miniexpr_artifact PROPERTIES POSITION_INDEPENDENT_CODE ON)
   target_compile_features(miniexpr_artifact PUBLIC c_std_11)
   target_include_directories(miniexpr_artifact PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -245,7 +249,7 @@ if(MINIEXPR_BUILD_ARTIFACT)
   install(FILES "${yyjson_SOURCE_DIR}/LICENSE"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/miniexpr/licenses" RENAME LICENSE-YYJSON)
   # Standalone distribution only: embedding hosts own their install layout.
-  if(PROJECT_IS_TOP_LEVEL)
+  if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     install(TARGETS miniexpr_artifact
       ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
       LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"

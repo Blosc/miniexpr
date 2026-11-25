@@ -182,7 +182,7 @@ typedef struct me_variable {
  *
  *   // Later, provide data in same order as variable definitions
  *   const void *data[] = {x_array, y_array};  // x first, y second
- *   if (me_eval(expr, data, 2, output, nitems) != ME_EVAL_SUCCESS) { return; }
+ *   if (me_eval(expr, data, 2, output, nitems, NULL) != ME_EVAL_SUCCESS) { return; }
  */
 int me_compile(const char *expression, const me_variable *variables,
                int var_count, me_dtype dtype, int *error, me_expr **out);

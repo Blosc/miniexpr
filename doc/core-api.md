@@ -19,6 +19,23 @@ Preparation copies retained metadata and captures, not runtime array addresses.
 Evaluation is synchronous; independent calls may share a kernel. Never free
 a kernel concurrently with its use.
 
+### Descriptor compatibility
+
+Initialize each size-tagged descriptor with its initializer. The documented
+`*_V1_SIZE` prefix is the minimum accepted size throughout 1.x. On qualified
+ABIs it equals the complete v1 descriptor size: signatures and preparation
+options end in explicit zero-initialized reserved bytes rather than unnamed
+trailing padding. New fields must follow the entire v1 layout and must not reuse
+its reserved bytes, otherwise old callers advertising `sizeof(v1)` could appear
+to supply a new field. Every later released revision must likewise avoid unnamed
+tail padding before advertising its size. Smaller descriptors reject without
+accessing missing fields.
+Larger input descriptors are accepted and unknown trailing bytes are ignored.
+Output functions preserve `struct_size` and leave unknown trailing bytes
+untouched. Any future appended fields must be read only when present, default
+when absent, and retain these baseline minima rather than requiring a new
+`sizeof`. This is not binary compatibility with the pre-1.0 APIs.
+
 ## Example
 
 ```c
@@ -78,6 +95,12 @@ and extent. The compiler copies binary constants: no float printing, locale
 conversion or JSON. Weak captures instead use `ME_CAPTURE_WEAK` and canonical
 bool/int64/float64/complex128 representations. Scalar category affects promotion.
 
+`me_describe().context_ndim` is the **required** coordinate rank, not necessarily
+the rank supplied at preparation. Source without coordinate references reports
+zero and must be evaluated with `block.ndim == 0`. The grid adapter supplies the
+required context automatically. Legacy fixed JSON descriptors retain their
+declared rank; the new core does not change that reader's contract.
+
 Menudet source uses an explicit version. `"0.1"` preserves the unannotated
 language; `"0.2"` enables proposed [annotations](dsl-spec/0.2.md).
 Unannotated inputs specialize to their bindings. Output dtype `ME_AUTO` infers;
@@ -102,8 +125,20 @@ dtype before final conversion.
   `inherit_environment` is an explicit preparation opt-in for hosts that own
   process/scoped defaults. `integer_powers` in the signature preserves an
   authored multiply-chain policy; it is not inferred from input types.
+  Formulas also snapshot the inherited math backend at preparation; later
+  environment changes do not change their dispatch. Their interpreter may
+  retain strict arithmetic even when relaxed FP optimizations are permitted.
+  Evaluation scopes SIMD accuracy to the prepared policy and restores the caller's
+  thread-local accuracy on success or failure. Backend inheritance uses
+  `ME_SIMD_MATH_BACKEND`; this does not add a ULP environment variable.
   Optional JIT falls back before execution; required JIT rejects unavailable
   lowering. Numerical failures never cause execution replay.
+- Invalid preparation/run options report `ME_ERR_INVALID_ARG`. Input-count,
+  annotation, context-coverage and result-contract mismatches report
+  `ME_ERR_SIGNATURE`; source-language errors remain `ME_ERR_SOURCE`.
+  Contract checks precede runtime compiler/cache activity, including when JIT
+  is required. Weak integer/Boolean capture specialization uses the capture's
+  post-annotation scalar category.
 
 Blosc2 recipes, JSON import, array/graph scheduling, varlen output and physical
 padded-grid adaptation remain separate. Existing v1 JSON artifact loading is
@@ -120,6 +155,35 @@ including all its rows. The adapter never implements a reduction by summing row
 results. Rank-zero geometry denotes one scalar physical block; empty logical
 domains contain no chunks.
 
+Padded copies use contiguous runs and one invocation-local, alignment-checked
+scratch allocation. Empty elementwise blocks validate physical buffers and run
+options, then zero output without executing a kernel. Empty scalar groups still
+execute their defined reduction. Both block and grid calls initialize FP reports
+before geometry/buffer preflight, so such failures cannot leave stale flags.
+
 The C-Blosc2 constructor branch uses this shared adapter while retaining host
 ownership of compression, exact endpoints and endian conversion. A standalone
 core-only installation now installs both public headers without JSON support.
+
+## Build integration
+
+Build-tree consumers can link `miniexpr::core` or `miniexpr::artifact` (the latter
+includes the former transitively). These aliases do not yet provide an installed
+`find_package` configuration. Embedded builds default tests, examples and
+benchmarks OFF; explicit cache settings still win. Standalone builds retain
+their previous defaults. The Makefile is now a thin CMake shortcut rather than
+a separate, incomplete source list.
+
+The embedded consumer fixture checks the defaults and exercises the grid API:
+
+```sh
+cmake -S tests/cmake/embedded -B build-embedded \
+  -DMINIEXPR_SOURCE="$PWD" -DMINIEXPR_USE_SLEEF=OFF \
+  -DMINIEXPR_ENABLE_TCC_JIT=OFF
+cmake --build build-embedded
+ctest --test-dir build-embedded --output-on-failure
+```
+
+Repeat with `-DMINIEXPR_BUILD_ARTIFACT=ON` to exercise the transitive adapter
+target. `bench/benchmark_grid_api.c` measures full and partial blocks with
+preparation excluded; retain timing output outside the source tree.

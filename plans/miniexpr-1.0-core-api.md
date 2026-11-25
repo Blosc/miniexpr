@@ -141,7 +141,7 @@ Five focused tests passed with ASan/UBSan and artifact support disabled.
 The C-Blosc2 constructor suite passed with its existing ByteDelta plugin enabled,
 using only the JSON-disabled core library. C99 warning-as-error syntax checking
 and C++11 header inclusion also passed. No compiler warnings were reported.
-Windows, Linux, WASM and bundled-TCC qualification remain outstanding.
+At pilot time, Windows, Linux, WASM and bundled-TCC qualification remained outstanding.
 
 The integration revision passes all 371 native tests and six focused
 artifact-enabled ASan/UBSan tests. A core-only installation was also consumed
@@ -158,3 +158,78 @@ logical coordinates, and a Python-authored partly annotated kernel specialized
 in C and evaluated concurrently on independent blocks. Also qualify the padded
 adapter with non-contiguous live rows and a block-scalar kernel; splitting that
 logical group by row would give the wrong result.
+
+## Review 1 follow-up
+
+The [implementation review](miniexpr-1.0-review1.md) identified real parity and
+contract gaps. The follow-up addresses these without freezing the ABI:
+
+- Direct Menudet and fixed JSON preparation now share deferred backend
+  preparation. Casting, width and cardinality checks happen before runtime
+  compiler/cache activity. JSON no longer compiles a throwaway inference
+  program; dead `numpy_profile` branches are removed after version validation.
+- Weak int64/Boolean capture specialization runs after annotation typing.
+  Required host-CC and bundled-TCC tests cover captured loop bounds. Backend
+  preparation still preserves caller rounding mode and exception flags.
+- Signature/annotation/context mismatches have binding status, invalid options
+  have argument status, and the adapter reports required capabilities rather
+  than every supported capability. Entry-point ownership and AUTO policy no
+  longer require a second parse.
+- All-active masks use the unmasked evaluator path. Formulas snapshot inherited
+  math policy when requested. Grid preflight/OOM failures initialize FP reports.
+- Partial grids copy contiguous runs with an outer-axis odometer and one
+  alignment-checked allocation. Tests cover multiple inputs with mixed widths,
+  3D padding on each axis, whole-group scalar reductions and injected allocation
+  failures. `bench/benchmark_grid_api.c` retains a reproducible timing harness,
+  not machine-specific timing output.
+- Size-tagged descriptors have fixed `*_V1_SIZE` baseline prefixes, ignored
+  input suffixes and untouched output suffixes. Future fields must default when
+  absent; future libraries must not reject the 1.x baseline using a new sizeof.
+- CMake consistently uses a 3.16-compatible top-level check, defaults auxiliary
+  targets OFF when embedded, and supplies build-tree `miniexpr::core` and
+  `miniexpr::artifact` aliases. The Makefile delegates to CMake; stale API/fixture
+  documentation is corrected. A checked-in embedded consumer tests the defaults.
+
+Qualification: 375 native tests, eight focused ASan/UBSan tests, four Emscripten
+tests (interpreter configuration), and nine SLEEF/bundled-TCC checks pass.
+Python's Menudet/persistence/table/graph selection passes 1503 tests; the real
+C-Blosc2 constructor suite also passes against the rebuilt JSON-free library.
+Embedded core-only and artifact consumers and an installed C99 core-only
+consumer are exercised separately.
+
+Still separate work: migrate/retire the checked-profile corpus and live full-DSL
+callers; extract streaming pairwise sums; consolidate legacy ND geometry; settle
+per-call interpreter override; qualify Linux/Windows and WASM JIT; complete C
+`b2o` cross-language fixtures. Formula reductions remain deliberately deferred.
+No ABI freeze or Windows linker-workaround removal is implied by this follow-up.
+
+## Review 2 follow-up
+
+- Close the tail-padding ambiguity: `me_signature` and `me_prepare_options`
+  have explicit zero-initialized reserved bytes, and their fixed v1 prefix
+  includes that storage. Every new field must follow the entire previously
+  released layout; reserved bytes are not new option slots. All size-tagged
+  descriptor baseline sizes equal their current full sizes on qualified ABIs.
+- An independent `tests/abi/kernel-v1.c` caller deliberately avoids current
+  headers. Its bytes are checked against flat hypothetical extended layouts
+  (not nested-prefix structs, which could hide the bug), including absent
+  option defaults and actual preparation with the frozen representation.
+- Formula evaluation pushes/pops the accuracy already retained in
+  `formula_math.ulp`; no redundant policy field or new environment variable is
+  introduced. A deterministic private dispatch probe tests conflicting ambient
+  accuracy, successful/error returns and shared-kernel concurrent evaluation,
+  including builds without SLEEF.
+- JSON imports only enter the deferred backend/FP guard when the resolved JIT
+  request is ON. Typed discovery still retains its own strict FP guard. The
+  compiler-invocation probe also covers a valid explicitly JIT-OFF import.
+- The grid benchmark was already discovered by the benchmark source glob.
+  `CONFIGURE_DEPENDS` now refreshes that discovery when files are added, without
+  registering another target; a fresh benchmark-enabled build exercises it.
+
+These are pre-freeze corrections, not an ABI declaration for the alpha pilots.
+
+Requalification passes the same 375 native tests, eight focused ASan/UBSan
+tests, four WASM interpreter checks and nine SLEEF/bundled-TCC checks. The
+independent caller/layout regression runs on both native 64-bit and WASM32.
+The downstream selection again passes 1503 Python tests and the C-Blosc2
+constructor suite; the benchmark builds/runs via its CMake target.

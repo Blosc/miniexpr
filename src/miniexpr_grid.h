@@ -22,6 +22,7 @@ typedef struct {
 } me_grid_spec;
 
 #define ME_GRID_SPEC_INITIALIZER { sizeof(me_grid_spec), 0, NULL, NULL, NULL }
+#define ME_GRID_SPEC_V1_SIZE (offsetof(me_grid_spec, blockshape) + sizeof(const int32_t *))
 
 typedef struct {
     size_t struct_size;
@@ -33,6 +34,7 @@ typedef struct {
 } me_grid_block_info;
 
 #define ME_GRID_BLOCK_INFO_INITIALIZER { sizeof(me_grid_block_info), 0, 0, 0, {0}, {0} }
+#define ME_GRID_BLOCK_INFO_V1_SIZE (offsetof(me_grid_block_info, extent) + sizeof(int64_t) * ME_GRID_MAX_NDIM)
 
 /* Provisional storage-neutral padded-grid adapter. Copies C-order geometry.
  * Rank zero denotes one scalar block. Nonzero rank requires positive physical

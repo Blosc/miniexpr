@@ -3037,9 +3037,13 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
                                                      me_dsl_semantic_profile profile,
                                                      const me_dsl_declared_policy *declared,
                                                      bool annotations,
+                                                     bool defer_jit, bool *binding_error,
+                                                     char **entry_point,
                                                      int *error_pos, bool *is_dsl,
                                                      char *error_reason, size_t error_reason_cap) {
     me_dsl_error parse_error;
+    if (binding_error) *binding_error = false;
+    if (entry_point) *entry_point = NULL;
     if (error_reason && error_reason_cap > 0) {
         error_reason[0] = '\0';
     }
@@ -3079,6 +3083,7 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
                     if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap,
                         "input '%s' does not match its dtype annotation", parsed->params[p]);
                     if (error_pos) *error_pos = -1;
+                    if (binding_error) *binding_error = true;
                     me_dsl_program_free(parsed);
                     return NULL;
                 }
@@ -3089,6 +3094,7 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
                 if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap,
                     "output dtype conflicts with return annotation");
                 if (error_pos) *error_pos = -1;
+                if (binding_error) *binding_error = true;
                 me_dsl_program_free(parsed);
                 return NULL;
             }
@@ -3369,6 +3375,7 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
         input_count++;
     }
     if (input_count != parsed->nparams) {
+        if (binding_error) *binding_error = true;
         if (error_reason && error_reason_cap > 0) {
             snprintf(error_reason, error_reason_cap,
                      "DSL input count mismatch: function expects %d parameter(s), got %d",
@@ -3384,6 +3391,7 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
     }
     for (int i = 0; i < parsed->nparams; i++) {
         if (dsl_var_table_find(&program->vars, parsed->params[i]) < 0) {
+            if (binding_error) *binding_error = true;
             if (error_reason && error_reason_cap > 0) {
                 snprintf(error_reason, error_reason_cap,
                          "missing DSL input for parameter '%s'", parsed->params[i]);
@@ -3433,6 +3441,7 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
         (uses_i_mask || uses_n_mask || uses_ndim || uses_flat_idx) &&
         (compile_ndims <= 0 || compile_ndims > ME_DSL_MAX_NDIM ||
          ((unsigned)(uses_i_mask | uses_n_mask) >> compile_ndims))) {
+        if (binding_error) *binding_error = true;
         if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap,
                                                        "menudet ND context descriptors require a covering logical rank");
         if (error_pos) *error_pos = -1;
@@ -3641,9 +3650,14 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
             program->menudet_ramp_start = ramp_start;
             program->menudet_ramp_step = ramp_step;
         }
-        dsl_menudet_prepare_jit(program);
+        if (defer_jit) dsl_menudet_prepare_jit_source(program);
+        else dsl_menudet_prepare_jit(program);
     }
 
+    if (entry_point) {
+        *entry_point = parsed->name;
+        parsed->name = NULL;
+    }
     me_dsl_program_free(parsed);
     free(funcs);
 
@@ -3667,6 +3681,8 @@ static me_dsl_compiled_program *dsl_compile_declared_impl(const char *source,
                                                      me_dsl_semantic_profile profile,
                                                      const me_dsl_declared_policy *declared,
                                                      bool annotations,
+                                                     bool defer_jit, bool *binding_error,
+                                                     char **entry_point,
                                                      int *error_pos, bool *is_dsl,
                                                      char *error_reason, size_t error_reason_cap) {
     dsl_menudet_fp_state saved;
@@ -3679,9 +3695,14 @@ static me_dsl_compiled_program *dsl_compile_declared_impl(const char *source,
     }
     me_dsl_compiled_program *program = dsl_compile_program_profile_impl(source, variables, var_count,
         dtype, compile_ndims, jit_mode, profile, declared, annotations,
+        defer_jit, binding_error, entry_point,
         error_pos, is_dsl, error_reason, error_reason_cap);
     if (strict && !dsl_menudet_fp_end(&saved)) {
         dsl_compiled_program_free(program);
+        if (entry_point) {
+            free(*entry_point);
+            *entry_point = NULL;
+        }
         if (error_reason && error_reason_cap) snprintf(error_reason, error_reason_cap, "cannot restore caller floating environment");
         return NULL;
     }
@@ -3693,7 +3714,8 @@ me_dsl_compiled_program *dsl_compile_program_profile_declared(const char *source
     int jit_mode, me_dsl_semantic_profile profile, const me_dsl_declared_policy *declared,
     int *error_pos, bool *is_dsl, char *error_reason, size_t error_reason_cap) {
     return dsl_compile_declared_impl(source, variables, var_count, dtype, compile_ndims,
-        jit_mode, profile, declared, false, error_pos, is_dsl, error_reason, error_reason_cap);
+        jit_mode, profile, declared, false, false, NULL, NULL,
+        error_pos, is_dsl, error_reason, error_reason_cap);
 }
 
 me_dsl_compiled_program *dsl_compile_program_menudet02(const char *source,
@@ -3701,6 +3723,16 @@ me_dsl_compiled_program *dsl_compile_program_menudet02(const char *source,
     int jit_mode, const me_dsl_declared_policy *declared, int *error_pos,
     bool *is_dsl, char *error_reason, size_t error_reason_cap) {
     return dsl_compile_declared_impl(source, variables, var_count, dtype, compile_ndims,
-        jit_mode, ME_DSL_PROFILE_MENUDET_0_1, declared, true, error_pos, is_dsl,
+        jit_mode, ME_DSL_PROFILE_MENUDET_0_1, declared, true, false, NULL, NULL, error_pos, is_dsl,
         error_reason, error_reason_cap);
+}
+
+me_dsl_compiled_program *dsl_compile_menudet_deferred(const char *source,
+    bool annotations, const me_variable *variables, int var_count, me_dtype dtype,
+    int compile_ndims, int jit_mode, const me_dsl_declared_policy *declared,
+    int *error_pos, bool *binding_error, char **entry_point,
+    char *error_reason, size_t error_reason_cap) {
+    return dsl_compile_declared_impl(source, variables, var_count, dtype, compile_ndims,
+        jit_mode, ME_DSL_PROFILE_MENUDET_0_1, declared, annotations, true,
+        binding_error, entry_point, error_pos, NULL, error_reason, error_reason_cap);
 }

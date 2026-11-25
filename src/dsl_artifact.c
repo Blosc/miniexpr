@@ -501,22 +501,22 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
     }
     yyjson_val *schema = yyjson_obj_get(root, "schema_version");
     yyjson_val *language_version = yyjson_obj_get(yyjson_obj_get(root, "language"), "version");
-    bool numpy_profile = artifact_equal(schema, ME_ARTIFACT_SCHEMA_VERSION) &&
-        artifact_equal(language_version, ME_MENUDET_DSL_VERSION);
-    if (!numpy_profile && ((artifact_string(schema) && !artifact_equal(schema, ME_ARTIFACT_SCHEMA_VERSION)) ||
-        (artifact_string(language_version) && !artifact_equal(language_version, ME_MENUDET_DSL_VERSION)))) {
+    if (!artifact_string(schema) || !artifact_string(language_version)) {
+        artifact_error(error, status, "artifact versions must be strings");
+        goto cleanup;
+    }
+    if (!artifact_equal(schema, ME_ARTIFACT_SCHEMA_VERSION) ||
+        !artifact_equal(language_version, ME_MENUDET_DSL_VERSION)) {
         status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED,
                                 "unsupported menudet artifact version pair; expected Menudet 0.1/0.1");
         goto cleanup;
     }
     const char *const language_fields[] = {"name", "version"};
     const char *const output_fields[] = {"dtype", "contract"};
-    const char *const semantics_fields[] = {"fp"};
-    const char *const numpy_semantics_fields[] = {"numeric", "casting"};
+    const char *const semantics_fields[] = {"numeric", "casting"};
     const char *const flexible_semantics_fields[] = {"fp", "math", "ulp", "integer_powers"};
     const char *const input_fields[] = {"name", "dtype"};
-    const char *const constant_fields[] = {"name", "dtype", "encoding", "value"};
-    const char *const numpy_constant_fields[] = {"name", "dtype", "encoding", "value", "category"};
+    const char *const constant_fields[] = {"name", "dtype", "encoding", "value", "category"};
     const char *const string_output_fields[] = {"dtype", "contract", "itemsize"};
     const char *const string_input_fields[] = {"name", "dtype", "itemsize"};
     const char *const string_constant_fields[] = {"name", "dtype", "encoding", "value", "itemsize"};
@@ -543,10 +543,7 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
     bool has_ulp_field = yyjson_obj_get(semantics, "ulp") != NULL;
     if (!artifact_fields(language, language_fields, 2, false) ||
         !artifact_fields(output, string_output ? string_output_fields : output_fields, string_output ? 3 : 2, false) ||
-        !(numpy_profile ?
-          artifact_fields_optional(semantics, numpy_semantics_fields, 2,
-                                   flexible_semantics_fields, 4, false) :
-          artifact_fields(semantics, semantics_fields, 1, false)) ||
+        !artifact_fields_optional(semantics, semantics_fields, 2, flexible_semantics_fields, 4, false) ||
         !yyjson_is_arr(requires) || !yyjson_is_arr(inputs) || !yyjson_is_arr(constants) ||
         !source || !entry || !*entry) {
         artifact_error(error, status, "invalid manifest structure");
@@ -557,22 +554,19 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
         !artifact_string(yyjson_obj_get(language, "version")) ||
         !artifact_string(yyjson_obj_get(output, "contract")) ||
         !artifact_string(yyjson_obj_get(output, "dtype")) ||
-        (numpy_profile && !artifact_string(yyjson_obj_get(semantics, "numeric"))) ||
-        (numpy_profile && !artifact_string(yyjson_obj_get(semantics, "casting"))) ||
+        !artifact_string(yyjson_obj_get(semantics, "numeric")) ||
+        !artifact_string(yyjson_obj_get(semantics, "casting")) ||
         (has_fp_field && !fp_text) || (has_math_field && !math_text) ||
         (has_ulp_field && !ulp_text)) {
         artifact_error(error, status, "versions, semantic requirements, and dtypes must be strings");
         goto cleanup;
     }
-    if ((!numpy_profile && !artifact_equal(yyjson_obj_get(root, "schema_version"), ME_ARTIFACT_SCHEMA_VERSION)) ||
-        !artifact_equal(yyjson_obj_get(language, "name"), "menudet") ||
-        (!numpy_profile && !artifact_equal(yyjson_obj_get(language, "version"), ME_MENUDET_DSL_VERSION)) ||
+    if (!artifact_equal(yyjson_obj_get(language, "name"), "menudet") ||
         !(artifact_equal(yyjson_obj_get(output, "contract"), "elementwise") ||
           artifact_equal(yyjson_obj_get(output, "contract"), "block_scalar")) ||
         (has_fp_field && !(artifact_equal(yyjson_obj_get(semantics, "fp"), "strict") ||
                            artifact_equal(yyjson_obj_get(semantics, "fp"), "contract") ||
                            artifact_equal(yyjson_obj_get(semantics, "fp"), "fast"))) ||
-        (!numpy_profile && !artifact_equal(yyjson_obj_get(semantics, "fp"), "strict")) ||
         (has_math_field && !(artifact_equal(yyjson_obj_get(semantics, "math"), "auto") ||
                              artifact_equal(yyjson_obj_get(semantics, "math"), "system") ||
                              artifact_equal(yyjson_obj_get(semantics, "math"), "sleef") ||
@@ -587,10 +581,10 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
         status=artifact_error(error,ME_ARTIFACT_ERR_UNSUPPORTED,"unsupported integer_powers policy");
         goto cleanup;
     }
-    if (numpy_profile && (!artifact_equal(yyjson_obj_get(semantics, "numeric"), "numpy-2.5") ||
+    if (!artifact_equal(yyjson_obj_get(semantics, "numeric"), "numpy-2.5") ||
         !(artifact_equal(yyjson_obj_get(semantics, "casting"), "unsafe") ||
           artifact_equal(yyjson_obj_get(semantics, "casting"), "same_kind") ||
-          artifact_equal(yyjson_obj_get(semantics, "casting"), "safe")))) {
+          artifact_equal(yyjson_obj_get(semantics, "casting"), "safe"))) {
         status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported Menudet 0.1 beta numerical or casting policy");
         goto cleanup;
     }
@@ -662,7 +656,7 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
         status = artifact_error(error, ME_ARTIFACT_ERR_OOM, "out of memory");
         goto cleanup;
     }
-    bool infer_output = graph_infer && numpy_profile && artifact_equal(yyjson_obj_get(output, "dtype"), "auto");
+    bool infer_output = graph_infer && artifact_equal(yyjson_obj_get(output, "dtype"), "auto");
     if (artifact->output_dtype == ME_AUTO && !infer_output) {
         status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "unsupported output dtype");
         goto cleanup;
@@ -677,8 +671,8 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
             me_dtype binding_dtype = artifact_dtype1(yyjson_obj_get(value, "dtype"));
             bool string_binding = is_string_dtype(binding_dtype);
             if (!artifact_fields(value, string_binding ? (kind ? string_constant_fields : string_input_fields) :
-                (kind ? (numpy_profile ? numpy_constant_fields : constant_fields) : input_fields),
-                (kind ? (numpy_profile && !string_binding ? 5 : 4) : 2) + string_binding, false)) {
+                (kind ? constant_fields : input_fields),
+                (kind ? (!string_binding ? 5 : 4) : 2) + string_binding, false)) {
                 artifact_error(error, status, "invalid binding fields");
                 goto cleanup;
             }
@@ -701,7 +695,7 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
             binding->variable.name = artifact_copy(name);
             binding->variable.dtype = binding_dtype;
             binding->constant = kind != 0;
-            if (kind && numpy_profile && !string_binding) {
+            if (kind && !string_binding) {
                 yyjson_val *category = yyjson_obj_get(value, "category");
                 binding->weak = artifact_equal(category, "weak");
                 if (!(binding->weak || artifact_equal(category, "typed_scalar")) ||
@@ -801,28 +795,11 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
     {
         char reason[256];
         int position = 0;
-        bool is_dsl;
-        if (numpy_profile && !infer_output) {
-            /* Metadata-only inference: output policy cannot drive intermediates. */
-            me_dsl_compiled_program *inferred = dsl_compile_program_profile_declared(source, variables, artifact->nbindings,
-                ME_AUTO, artifact->context_ndim, ME_JIT_OFF, artifact->profile, &declared,
-                &position, &is_dsl, reason, sizeof(reason));
-            if (!inferred) {
-                status = artifact_error(error, strstr(reason, "out of memory") ? ME_ARTIFACT_ERR_OOM : ME_ARTIFACT_ERR_SOURCE, reason);
-                goto cleanup;
-            }
-            bool allowed = is_string_dtype(inferred->output_dtype) ? inferred->output_dtype == artifact->output_dtype :
-                dsl_numpy_can_cast(inferred->output_dtype, artifact->output_dtype, artifact_string(yyjson_obj_get(semantics, "casting")));
-            artifact->inferred_dtype = inferred->output_dtype;
-            dsl_compiled_program_free(inferred);
-            if (!allowed) {
-                status = artifact_error(error, ME_ARTIFACT_ERR_BINDING, "inferred result cannot be converted under the declared cast policy");
-                goto cleanup;
-            }
-        }
-        artifact->program = dsl_compile_program_profile_declared(source, variables, artifact->nbindings,
-            artifact->output_dtype, artifact->context_ndim, jit_mode, artifact->profile, &declared,
-            &position, &is_dsl, reason, sizeof(reason));
+        /* Discover intermediate types once, retaining them before final output
+         * conversion. Validate the fixed contract before invoking any backend. */
+        artifact->program = dsl_compile_menudet_deferred(source, false, variables, artifact->nbindings,
+            artifact->output_dtype, artifact->context_ndim, jit_mode, &declared,
+            &position, NULL, NULL, reason, sizeof(reason));
         if (!artifact->program) {
             status = artifact_error(error, strstr(reason, "out of memory") ? ME_ARTIFACT_ERR_OOM : ME_ARTIFACT_ERR_SOURCE, reason);
             goto cleanup;
@@ -831,6 +808,18 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
             artifact->output_dtype = artifact->program->output_dtype;
             artifact->inferred_dtype = artifact->output_dtype;
             artifact->output_itemsize = artifact->program->output_itemsize;
+        }
+        else {
+            artifact->inferred_dtype = artifact->program->inferred_dtype;
+            bool allowed = is_string_dtype(artifact->inferred_dtype) ?
+                artifact->inferred_dtype == artifact->output_dtype :
+                dsl_numpy_can_cast(artifact->inferred_dtype, artifact->output_dtype,
+                    artifact_string(yyjson_obj_get(semantics, "casting")));
+            if (!allowed) {
+                status = artifact_error(error, ME_ARTIFACT_ERR_BINDING,
+                    "inferred result cannot be converted under the declared cast policy");
+                goto cleanup;
+            }
         }
         if (artifact->program->uses_i_mask || artifact->program->uses_n_mask ||
             artifact->program->uses_ndim || artifact->program->uses_flat_idx) {
@@ -852,19 +841,31 @@ static me_artifact_status artifact_load(const char *json, size_t length, me_jit_
             status = artifact_error(error, ME_ARTIFACT_ERR_BINDING, "declared output width disagrees with source");
             goto cleanup;
         }
-        if (jit_mode == ME_JIT_ON && numpy_profile && !artifact->program->jit_c_source) {
-            int64_t values[ME_MAX_VARS] = {0};
-            bool known[ME_MAX_VARS] = {false};
-            bool any = false;
-            for (int b = 0; b < artifact->nbindings; b++) {
-                const artifact_binding *binding = &artifact->bindings[b];
-                if (!binding->constant || !binding->weak) continue;
-                if (binding->variable.dtype == ME_INT64) values[b] = binding->value.i64;
-                else if (binding->variable.dtype == ME_BOOL) values[b] = binding->value.boolean;
-                else continue;
-                known[b] = true; any = true;
+        if (artifact->program->jit_request_mode == ME_JIT_ON) {
+            dsl_menudet_fp_state saved;
+            if (!dsl_menudet_fp_begin(&saved)) {
+                status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "cannot establish nearest rounding preparing JIT");
+                goto cleanup;
             }
-            if (any) dsl_menudet_prepare_jit_constants(artifact->program, values, known);
+            if (!artifact->program->jit_c_source) {
+                int64_t values[ME_MAX_VARS] = {0};
+                bool known[ME_MAX_VARS] = {false};
+                bool any = false;
+                for (int b = 0; b < artifact->nbindings; b++) {
+                    const artifact_binding *binding = &artifact->bindings[b];
+                    if (!binding->constant || !binding->weak) continue;
+                    if (binding->variable.dtype == ME_INT64) values[b] = binding->value.i64;
+                    else if (binding->variable.dtype == ME_BOOL) values[b] = binding->value.boolean;
+                    else continue;
+                    known[b] = true; any = true;
+                }
+                if (any) dsl_menudet_prepare_jit_constants_source(artifact->program, values, known);
+            }
+            if (!artifact->program->jit_kernel_fn) dsl_try_prepare_jit_runtime(artifact->program);
+            if (!dsl_menudet_fp_end(&saved)) {
+                status = artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "cannot restore floating environment after JIT preparation");
+                goto cleanup;
+            }
         }
         *out = artifact;
         artifact = NULL;
@@ -1492,33 +1493,16 @@ me_artifact_status me_artifact_prepare_menudet(const char *version, const char *
          jit_mode != ME_JIT_ON && jit_mode != ME_JIT_OFF)) {
         return artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "invalid direct preparation version or options");
     }
-    me_dsl_error parse_error;
-    me_dsl_program *parsed = !strcmp(version, "0.2") ? me_dsl_parse_menudet02(source, &parse_error) :
-        me_dsl_parse_profile(source, ME_DSL_PROFILE_MENUDET_0_1, &parse_error);
-    if (!parsed) {
-        if (error) {
-            error->line = parse_error.line;
-            error->column = parse_error.column;
-        }
-        return artifact_error(error, ME_ARTIFACT_ERR_SOURCE, parse_error.message);
-    }
-    bool prefer = jit_mode == ME_JIT_ON;
-    if (jit_mode == ME_JIT_AUTO || jit_mode == ME_JIT_DEFAULT) {
-        const char *env = getenv("ME_DSL_JIT");
-        prefer = env && *env ? strcmp(env, "0") != 0 :
-            parsed->compiler_explicit || parsed->block.nstmts != 1 ||
-            parsed->block.stmts[0]->kind != ME_DSL_STMT_RETURN;
-    }
     me_prepare_options prepare = ME_PREPARE_OPTIONS_INITIALIZER;
     prepare.inherit_environment = true;
-    prepare.execution = prefer ? ME_EXEC_PREFER_JIT : ME_EXEC_INTERPRET;
+    prepare.execution = ME_EXEC_PREFER_JIT;
     me_kernel *core = NULL;
     me_error diagnostic;
     const me_jit_options *previous = dsl_jit_exchange_options(options);
-    me_status rc = me_prepare_menudet(version, source, signature, &prepare, &core, &diagnostic);
+    me_status rc = me_kernel_prepare_menudet(version, source, signature, &prepare,
+        jit_mode == ME_JIT_DEFAULT ? ME_JIT_AUTO : jit_mode, &core, &diagnostic);
     dsl_jit_exchange_options(previous);
     if (rc != ME_SUCCESS) {
-        me_dsl_program_free(parsed);
         if (error) {
             error->native_status = rc;
             error->line = diagnostic.line;
@@ -1531,16 +1515,14 @@ me_artifact_status me_artifact_prepare_menudet(const char *version, const char *
     }
     me_artifact *artifact = calloc(1, sizeof(*artifact));
     if (!artifact) {
-        me_dsl_program_free(parsed);
         me_kernel_free(core);
         return artifact_error(error, ME_ARTIFACT_ERR_OOM, "out of memory adapting prepared kernel");
     }
     artifact->core_owner = core;
     artifact->program = core->program;
     artifact->source = malloc(strlen(source) + 1);
-    artifact->entry_point = parsed->name;
-    parsed->name = NULL;
-    me_dsl_program_free(parsed);
+    artifact->entry_point = core->entry_point;
+    core->entry_point = NULL;
     if (!artifact->source) {
         me_artifact_free(artifact);
         return artifact_error(error, ME_ARTIFACT_ERR_OOM, "out of memory copying kernel source");
@@ -1555,15 +1537,22 @@ me_artifact_status me_artifact_prepare_menudet(const char *version, const char *
     artifact->cardinality = core->info.cardinality == ME_BLOCK_SCALAR ?
         ME_ARTIFACT_BLOCK_SCALAR : ME_ARTIFACT_ELEMENTWISE;
     artifact->profile = ME_DSL_PROFILE_MENUDET_0_1;
-    artifact->capabilities = ME_ARTIFACT_CAP_NUMERIC | ME_ARTIFACT_CAP_CONTROL_FLOW |
-        ME_ARTIFACT_CAP_BLOCK_REDUCTIONS | ME_ARTIFACT_CAP_ND_CONTEXT |
-        ME_ARTIFACT_CAP_FIXED_STRINGS | ME_ARTIFACT_CAP_FLEXIBLE_MATH;
+    artifact->capabilities = artifact_block_capabilities(&core->program->block);
+    if (artifact->context_ndim) artifact->capabilities |= ME_ARTIFACT_CAP_ND_CONTEXT;
+    if (core->program->fp_mode != ME_DSL_FP_STRICT ||
+        (core->program->math_backend != ME_DSL_MATH_SYSTEM &&
+         core->program->math_backend != ME_DSL_MATH_AUTO) ||
+        core->program->math_explicit || core->program->ulp_explicit ||
+        core->program->sleef_ulp != ME_DSL_ULP_OMIT) {
+        artifact->capabilities |= ME_ARTIFACT_CAP_FLEXIBLE_MATH;
+    }
     for (int i = 0; i < artifact->nbindings; i++) {
         artifact_binding *binding = &artifact->bindings[i];
         binding->variable = (me_variable){.name = core->program->vars.names[i],
             .dtype = core->dtypes[i], .itemsize = core->widths[i]};
         binding->constant = i >= artifact->ninputs;
         binding->weak = core->program->numpy_weak_vars[i];
+        if (is_string_dtype(binding->variable.dtype)) artifact->capabilities |= ME_ARTIFACT_CAP_FIXED_STRINGS;
         if (binding->constant) {
             if (is_string_dtype(binding->variable.dtype)) binding->string_value = core->captures[i];
             else memcpy(&binding->value, core->captures[i], core->widths[i]);

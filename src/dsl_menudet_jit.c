@@ -3046,13 +3046,19 @@ void dsl_menudet_prepare_jit_source(me_dsl_compiled_program *p) {
     me_math_dispatch_set(previous);
 }
 
-void dsl_menudet_prepare_jit_constants(me_dsl_compiled_program *p,
+void dsl_menudet_prepare_jit_constants_source(me_dsl_compiled_program *p,
     const int64_t *values, const bool *known) {
     if (!p || !values || !known || p->jit_c_source || p->jit_ir) return;
     pj_constants constants = {.values = values, .known = known, .count = p->n_inputs};
     const me_math_dispatch *previous = me_math_dispatch_set(&p->math_dispatch);
     pj_prepare_source(p, &constants);
     me_math_dispatch_set(previous);
+}
+
+void dsl_menudet_prepare_jit_constants(me_dsl_compiled_program *p,
+    const int64_t *values, const bool *known) {
+    if (!p || !values || !known || p->jit_c_source || p->jit_ir) return;
+    dsl_menudet_prepare_jit_constants_source(p, values, known);
     dsl_try_prepare_jit_runtime(p);
 }
 
