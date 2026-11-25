@@ -326,7 +326,6 @@ jobs:
       - name: Test Clang library and host-CC JIT
         env:
           CC: clang
-          ME_DSL_JIT_COMPILER: cc
         run: ctest --test-dir build-clang -LE jit-full --output-on-failure
 
   sanitizer-qualification:
