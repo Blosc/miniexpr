@@ -35,9 +35,20 @@
 #define ME_DSL_ALLOW_STACK_ARENA 1
 #endif
 
-static ME_DSL_THREAD_LOCAL uint8_t *dsl_tls_arena = NULL;
-static ME_DSL_THREAD_LOCAL size_t dsl_tls_arena_cap = 0;
-static ME_DSL_THREAD_LOCAL int dsl_tls_arena_in_use = 0;
+typedef struct {
+    uint8_t *data;
+    size_t capacity;
+    bool busy;
+} dsl_scratch;
+
+#ifndef __EMSCRIPTEN__
+static void dsl_scratch_free(dsl_scratch *scratch) {
+    if (scratch) {
+        free(scratch->data);
+        free(scratch);
+    }
+}
+#endif
 
 #if !defined(__EMSCRIPTEN__) && !defined(_WIN32)
 #include <pthread.h>
@@ -48,11 +59,7 @@ static pthread_once_t dsl_tls_arena_once = PTHREAD_ONCE_INIT;
 static int dsl_tls_arena_key_ready = 0;
 
 static void dsl_tls_arena_release(void *value) {
-    if (value == dsl_tls_arena) {
-        dsl_tls_arena = NULL;
-        dsl_tls_arena_cap = 0;
-    }
-    free(value);
+    dsl_scratch_free(value);
 }
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -85,9 +92,18 @@ static void dsl_tls_arena_init(void) {
 #endif
 }
 
-static void dsl_tls_arena_publish(void) {
+static dsl_scratch *dsl_scratch_get(void) {
     pthread_once(&dsl_tls_arena_once, dsl_tls_arena_init);
-    if (dsl_tls_arena_key_ready) pthread_setspecific(dsl_tls_arena_key, dsl_tls_arena);
+    if (!dsl_tls_arena_key_ready) return NULL;
+    dsl_scratch *scratch = pthread_getspecific(dsl_tls_arena_key);
+    if (!scratch) {
+        scratch = calloc(1, sizeof(*scratch));
+        if (scratch && pthread_setspecific(dsl_tls_arena_key, scratch)) {
+            free(scratch);
+            return NULL;
+        }
+    }
+    return scratch;
 }
 #elif defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -99,22 +115,14 @@ static DWORD dsl_tls_arena_fls = FLS_OUT_OF_INDEXES;
 static INIT_ONCE dsl_tls_arena_once = INIT_ONCE_STATIC_INIT;
 
 static void WINAPI dsl_tls_arena_release(PVOID value) {
-    if (value == dsl_tls_arena) {
-        dsl_tls_arena = NULL;
-        dsl_tls_arena_cap = 0;
-    }
-    free(value);
+    dsl_scratch_free(value);
 }
 
 static void dsl_tls_arena_exit(void) {
     if (dsl_tls_arena_fls == FLS_OUT_OF_INDEXES) {
         return;
     }
-    PVOID value = FlsGetValue(dsl_tls_arena_fls);
-    if (value) {
-        FlsSetValue(dsl_tls_arena_fls, NULL);
-        dsl_tls_arena_release(value);
-    }
+    /* FlsFree invokes the callback for all fibers with a non-NULL value. */
     FlsFree(dsl_tls_arena_fls);
     dsl_tls_arena_fls = FLS_OUT_OF_INDEXES;
 }
@@ -130,15 +138,34 @@ static BOOL CALLBACK dsl_tls_arena_init(PINIT_ONCE once, PVOID param, PVOID *ctx
     return TRUE;
 }
 
-static void dsl_tls_arena_publish(void) {
+static dsl_scratch *dsl_scratch_get(void) {
     InitOnceExecuteOnce(&dsl_tls_arena_once, dsl_tls_arena_init, NULL, NULL);
-    if (dsl_tls_arena_fls != FLS_OUT_OF_INDEXES) {
-        FlsSetValue(dsl_tls_arena_fls, dsl_tls_arena);
+    if (dsl_tls_arena_fls == FLS_OUT_OF_INDEXES) return NULL;
+    dsl_scratch *scratch = FlsGetValue(dsl_tls_arena_fls);
+    if (!scratch) {
+        scratch = calloc(1, sizeof(*scratch));
+        if (scratch && !FlsSetValue(dsl_tls_arena_fls, scratch)) {
+            free(scratch);
+            return NULL;
+        }
     }
+    return scratch;
 }
 #else
-static void dsl_tls_arena_publish(void) {}
+static dsl_scratch *dsl_scratch_get(void) {
+    static ME_DSL_THREAD_LOCAL dsl_scratch scratch;
+    return &scratch;
+}
 #endif
+
+/* Reserve an aligned local/defined-mask region without wrapping size_t. */
+static bool dsl_scratch_region(size_t *total, size_t count, size_t width) {
+    if (count && width > (SIZE_MAX - 15u) / count) return false;
+    size_t padded = (count * width + 15u) & ~(size_t)15u;
+    if (padded > SIZE_MAX - *total) return false;
+    *total += padded;
+    return true;
+}
 
 typedef struct {
     const me_dsl_compiled_program *program;
@@ -1834,30 +1861,34 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
     for (int i = 0; i < program->n_locals; i++) {
         int var_index = program->local_var_indices[i];
         size_t sz = dsl_var_item_size(program, var_index);
-        if (sz == 0) {
+        if (sz == 0 || !dsl_scratch_region(&total_local_bytes, (size_t)nitems, sz)) {
             if (var_buffers != var_stack) free(var_buffers);
             if (local_buffers != local_stack) free(local_buffers);
             return ME_EVAL_ERR_INVALID_ARG;
         }
-        size_t bytes = (size_t)nitems * sz;
-        total_local_bytes += (bytes + 15u) & ~(size_t)15u;
     }
 
     size_t lane_count = nitems ? (size_t)nitems : 1;
-    size_t defined_bytes = dsl_menudet_typed_profile(program->semantic_profile) ? (lcount * lane_count) : 0;
-    size_t total_arena_bytes = total_local_bytes + ((defined_bytes + 15u) & ~(size_t)15u);
+    size_t total_arena_bytes = total_local_bytes;
+    if (dsl_menudet_typed_profile(program->semantic_profile) &&
+        !dsl_scratch_region(&total_arena_bytes, lcount, lane_count)) {
+        if (var_buffers != var_stack) free(var_buffers);
+        if (local_buffers != local_stack) free(local_buffers);
+        return ME_EVAL_ERR_INVALID_ARG;
+    }
     bool used_tls_arena = false;
-    if (ME_DSL_ALLOW_STACK_ARENA && !dsl_tls_arena_in_use && total_arena_bytes > 0 && total_arena_bytes <= 64u * 1024u * 1024u) {
-        if (!dsl_tls_arena || dsl_tls_arena_cap < total_arena_bytes) {
-            uint8_t *new_arena = (uint8_t *)realloc(dsl_tls_arena, total_arena_bytes);
+    dsl_scratch *scratch = ME_DSL_ALLOW_STACK_ARENA && total_arena_bytes > 0 &&
+        total_arena_bytes <= 64u * 1024u * 1024u ? dsl_scratch_get() : NULL;
+    if (scratch && !scratch->busy) {
+        if (scratch->capacity < total_arena_bytes) {
+            uint8_t *new_arena = realloc(scratch->data, total_arena_bytes);
             if (new_arena) {
-                dsl_tls_arena = new_arena;
-                dsl_tls_arena_cap = total_arena_bytes;
-                dsl_tls_arena_publish();
+                scratch->data = new_arena;
+                scratch->capacity = total_arena_bytes;
             }
         }
-        if (dsl_tls_arena && dsl_tls_arena_cap >= total_arena_bytes) {
-            dsl_tls_arena_in_use = 1;
+        if (scratch->capacity >= total_arena_bytes) {
+            scratch->busy = true;
             used_tls_arena = true;
         }
     }
@@ -1868,7 +1899,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
         size_t sz = dsl_var_item_size(program, var_index);
         size_t bytes = (size_t)nitems * sz;
         if (used_tls_arena) {
-            local_buffers[i] = dsl_tls_arena + arena_offset;
+            local_buffers[i] = scratch->data + arena_offset;
             arena_offset += (bytes + 15u) & ~(size_t)15u;
         }
         else {
@@ -1988,7 +2019,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
             free(reserved_buffers[i]);
         }
         if (used_tls_arena) {
-            dsl_tls_arena_in_use = 0;
+            scratch->busy = false;
         }
         else {
             for (int i = 0; i < program->n_locals; i++) {
@@ -2114,7 +2145,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
                         free(reserved_buffers[i]);
                     }
                     if (used_tls_arena) {
-                        dsl_tls_arena_in_use = 0;
+                        scratch->busy = false;
                     }
                     else {
                         for (int i = 0; i < program->n_locals; i++) {
@@ -2162,7 +2193,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
         if (ctx.initialized == init_stack) memset(ctx.initialized, 0, vcount * sizeof(*ctx.initialized));
         if (storage_count > SIZE_MAX / lane_count) rc = ME_EVAL_ERR_OOM;
         else if (used_tls_arena) {
-            defined_storage = dsl_tls_arena + arena_offset;
+            defined_storage = scratch->data + arena_offset;
             memset(defined_storage, 0, storage_count * lane_count);
         }
         else defined_storage = calloc(storage_count * lane_count, 1);
@@ -2183,7 +2214,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
         free(reserved_buffers[i]);
     }
     if (used_tls_arena) {
-        dsl_tls_arena_in_use = 0;
+        scratch->busy = false;
     }
     else {
         for (int i = 0; i < program->n_locals; i++) {

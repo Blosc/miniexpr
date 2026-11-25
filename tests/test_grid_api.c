@@ -161,6 +161,14 @@ int main(void) {
     assert(me_grid_create(&spec, &grid, NULL) == ME_SUCCESS);
     assert(me_grid_describe_block(grid, 0, 0, &info, NULL) == ME_ERR_INVALID_ARG);
     me_grid_free(grid);
+    int64_t empty_shape[] = {0, INT64_MAX, 2};
+    int32_t unit[] = {1, 1, 1};
+    spec.ndim = 3;
+    spec.shape = empty_shape;
+    spec.chunkshape = spec.blockshape = unit;
+    assert(me_grid_create(&spec, &grid, NULL) == ME_SUCCESS);
+    assert(me_grid_describe_block(grid, 0, 0, &info, NULL) == ME_ERR_INVALID_ARG);
+    me_grid_free(grid);
     spec = (me_grid_spec)ME_GRID_SPEC_INITIALIZER;
     spec.struct_size = ME_GRID_SPEC_V1_SIZE;
     assert(me_grid_create(&spec, &grid, NULL) == ME_SUCCESS);

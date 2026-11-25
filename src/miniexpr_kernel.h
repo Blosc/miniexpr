@@ -186,7 +186,7 @@ me_status me_describe(const me_kernel *kernel, me_kernel_info *out);
  * FP state is restored; failure does not replay execution. Output on failure
  * is unspecified. No pointer supplied here survives the call.
  * ME_RUN_INTERPRET bypasses a prepared JIT, even after REQUIRE_JIT preparation.
- * Absent execution fields default to ME_RUN_PREPARED. No compilation or replay
+ * NULL options or a zero execution field select ME_RUN_PREPARED. No compilation or replay
  * occurs during evaluation; the interpreter implements the same semantics. */
 me_status me_eval_block(const me_kernel *kernel, const me_buffer *inputs,
     size_t ninputs, me_mut_buffer output, const me_block *block,

@@ -51,6 +51,14 @@ me_status me_grid_create(const me_grid_spec *spec, me_grid **out, me_error *erro
     grid->padded = 1;
     grid->nchunks = grid->nblocks = 1;
     int64_t logical_items = 1;
+    /* A zero anywhere makes both logical products zero, independently of
+     * axis order. Still validate every physical extent and product below. */
+    for (int d = 0; d < grid->ndim; d++) {
+        if (!spec->shape[d]) {
+            logical_items = grid->nchunks = 0;
+            break;
+        }
+    }
     for (int d = grid->ndim - 1; d >= 0; d--) {
         int64_t shape = spec->shape[d], chunk = spec->chunkshape[d], block = spec->blockshape[d];
         if (shape < 0 || chunk <= 0 || block <= 0 ||

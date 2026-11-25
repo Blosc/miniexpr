@@ -23,6 +23,8 @@
 #include <pthread.h>
 #define TEST_THREADS 1
 #endif
+#else
+#include <windows.h>
 #endif
 #ifdef ME_TEST_HAS_ARTIFACT
 #include "miniexpr_artifact.h"
@@ -828,6 +830,49 @@ static void threads(void) {
 }
 #endif
 
+#ifdef _WIN32
+typedef struct {
+    void *parent;
+    me_kernel *kernel;
+    size_t lanes;
+} fiber_call;
+
+static VOID WINAPI eval_fiber(void *arg) {
+    fiber_call *call = arg;
+    double x[128] = {0}, y[128];
+    me_buffer input = {x, sizeof(x)};
+    me_block block = ME_BLOCK_INITIALIZER;
+    block.nitems = call->lanes;
+    for (;;) {
+        assert(me_eval_block(call->kernel, &input, 1, (me_mut_buffer){y, sizeof(y)},
+            &block, NULL, NULL) == ME_SUCCESS);
+        assert(y[block.nitems - 1] == 2);
+        SwitchToFiber(call->parent);
+    }
+}
+
+static void fiber_scratch(void) {
+    me_input_spec input = {"x", ME_FLOAT64, 0};
+    me_signature sig = ME_SIGNATURE_INITIALIZER;
+    sig.inputs = &input;
+    sig.ninputs = 1;
+    me_kernel *kernel = prepare("0.2", "def k(x):\n    a = x + 1\n    return a + a\n", &sig);
+    void *parent = ConvertThreadToFiber(NULL);
+    assert(parent);
+    fiber_call small = {parent, kernel, 2}, large = {parent, kernel, 128};
+    void *a = CreateFiber(0, eval_fiber, &small);
+    void *b = CreateFiber(0, eval_fiber, &large);
+    assert(a && b);
+    SwitchToFiber(a);
+    SwitchToFiber(b);
+    DeleteFiber(a);
+    SwitchToFiber(b);
+    DeleteFiber(b);
+    assert(ConvertFiberToThread());
+    me_kernel_free(kernel);
+}
+#endif
+
 int main(int argc, char **argv) {
     if (argc > 1 && !strcmp(argv[1], "--formula-environment")) {
         formula_environment();
@@ -854,6 +899,9 @@ int main(int argc, char **argv) {
 #endif
 #ifdef TEST_THREADS
     threads();
+#endif
+#ifdef _WIN32
+    fiber_scratch();
 #endif
     puts("Core kernel API passed");
     return 0;

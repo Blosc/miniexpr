@@ -26,8 +26,8 @@ a kernel concurrently with its use.
 
 Initialize each size-tagged descriptor with its initializer. The documented
 `*_V1_SIZE` prefix is the minimum accepted size throughout 1.x. On qualified
-ABIs it equals the complete v1 descriptor size: signatures and preparation
-options end in explicit zero-initialized reserved bytes rather than unnamed
+ABIs it equals the complete v1 descriptor size: signatures, preparation options
+and run options end in explicit zero-initialized reserved bytes rather than unnamed
 trailing padding. New fields must follow the entire v1 layout and must not reuse
 its reserved bytes, otherwise old callers advertising `sizeof(v1)` could appear
 to supply a new field. Every later released revision must likewise avoid unnamed
@@ -125,8 +125,8 @@ dtype before final conversion.
   nonempty raise mask before execution.
 - `run.execution = ME_RUN_INTERPRET` selects the interpreter for that call,
   including a handle prepared with `ME_EXEC_REQUIRE_JIT`. It never recompiles,
-  mutates a shared handle, or retries after execution. `ME_RUN_PREPARED` (zero,
-  also the default for an absent appended field) uses the prepared backend.
+  mutates a shared handle, or retries after execution. `ME_RUN_PREPARED` (zero)
+  or NULL run options use the prepared backend. `execution` is in the v1 prefix.
 - Preparation defaults to interpretation, strict FP and system math. Source
   pragmas can explicitly request another supported mathematical policy.
   `inherit_environment` is an explicit preparation opt-in for hosts that own
@@ -179,8 +179,10 @@ core-only installation installs `miniexpr.h`, `miniexpr_types.h`, `miniexpr_kern
 ## Build integration
 
 Build-tree consumers can link `miniexpr::core` or `miniexpr::artifact` (the latter
-includes the former transitively). These aliases do not yet provide an installed
-`find_package` configuration. Embedded builds default tests, examples and
+includes the former transitively). Standalone native installs expose the same
+targets with `find_package(miniexpr CONFIG REQUIRED COMPONENTS core)`. Add the
+`artifact` component if the consumer needs the optional JSON adapter.
+Embedded builds default tests, examples and
 benchmarks OFF; explicit cache settings still win. Standalone builds retain
 their previous defaults. The Makefile is now a thin CMake shortcut rather than
 a separate, incomplete source list.
