@@ -57,6 +57,16 @@ This is scratch-cache ownership, not a semantic change. The focused GCC
 ASan/UBSan suite (14 checks, including portable interpreter, grid, recipe peer
 and allocation-failure tests) passes with leak detection enabled.
 
+## Hosted qualification
+
+GitHub Actions full qualification for `next` at `377917c`
+([run 45668692529](https://github.com/Blosc/miniexpr/actions/runs/45668692529))
+passed every job: Linux x86-64 GCC, Linux x86-64 Clang, Linux ARM64
+JIT/interpreter, macOS GCC, Windows x64 ClangCL, Windows ARM64, WASM32
+side-module, WASM32 standalone JIT, ASan/UBSan and qualification evidence.
+The initial hosted run exposed two portability/lifetime issues, both corrected
+above; the final run has no failures or skipped qualification jobs.
+
 ## Final local qualification for `87de2f0`
 
 | Configuration | Result |
