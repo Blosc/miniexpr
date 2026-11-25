@@ -111,6 +111,13 @@ int main(void) {
     run.raise_mask = 16;
     assert(me_grid_eval_block(grid, kernel, 3, 1, &input, 1, output, &run, NULL) == ME_ERR_INVALID_ARG);
     run.raise_mask = 0;
+    run.execution = (me_run_execution)99;
+    assert(me_grid_eval_block(grid, kernel, 3, 1, &input, 1, output, &run, NULL) == ME_ERR_INVALID_ARG);
+    run.execution = ME_RUN_INTERPRET;
+    assert(me_grid_eval_block(grid, kernel, 0, 1, &input, 1, output, &run, NULL) == ME_SUCCESS);
+    assert(out[0] == 13 && out[3] == 28);
+    assert(out[1] == 0 && out[2] == 0 && out[4] == 0 && out[5] == 0);
+    run.execution = ME_RUN_PREPARED;
     assert(me_grid_eval_block(grid, kernel, 0, 0, &input, 1, output, NULL, NULL) == ME_SUCCESS);
     const double offsets[] = {0, 1, 2, 5, 6, 7};
     for (int i = 0; i < 6; i++) assert(out[i] == x[i] + offsets[i]);

@@ -193,7 +193,7 @@ static int evaluate(value record, double out[4], int depth) {
     CHECK(rc == ME_SUCCESS);
     me_kernel_info info = ME_KERNEL_INFO_INITIALIZER;
     rc = me_describe(kernel, &info);
-    if (rc || info.output_dtype != ME_FLOAT64) {
+    if (rc || info.output_dtype != ME_FLOAT64 || info.context_ndim > ndim) {
         me_kernel_free(kernel);
         CHECK(0);
     }
@@ -203,10 +203,10 @@ static int evaluate(value record, double out[4], int depth) {
         for (size_t i = 0; i < names.count; i++) buffers[i] = (me_buffer){input[i] + origin, 2 * sizeof(double)};
         me_block block = ME_BLOCK_INITIALIZER;
         block.nitems = 2;
-        block.ndim = ndim;
-        block.logical_shape = ndim ? &shape : NULL;
-        block.origin = ndim ? &origin : NULL;
-        block.extent = ndim ? &extent : NULL;
+        block.ndim = info.context_ndim;
+        block.logical_shape = info.context_ndim ? &shape : NULL;
+        block.origin = info.context_ndim ? &origin : NULL;
+        block.extent = info.context_ndim ? &extent : NULL;
         rc = me_eval_block(kernel, buffers, names.count,
             (me_mut_buffer){out + origin, 2 * sizeof(double)}, &block, NULL, &error);
     }
@@ -233,6 +233,16 @@ static void str(writer *w, const char *s) {
 static void pair(writer *w, const char *key, const char *v) {
     str(w, key);
     str(w, v);
+}
+
+static void wrap_ext43(writer *w, const writer *child) {
+    byte(w, 0xc8);
+    byte(w, (unsigned char)(child->size >> 8));
+    byte(w, (unsigned char)child->size);
+    byte(w, 43);
+    for (size_t i = 0; i < child->size; i++) {
+        byte(w, child->data[i]);
+    }
 }
 
 static void encode(writer *w, int nested) {
@@ -269,11 +279,7 @@ static void encode(writer *w, int nested) {
         if (nested == 2) {
             writer child = {{0}, 0};
             encode(&child, 0);
-            byte(w, 0xc8);
-            byte(w, (unsigned char)(child.size >> 8));
-            byte(w, (unsigned char)child.size);
-            byte(w, 43);
-            for (size_t i = 0; i < child.size; i++) byte(w, child.data[i]);
+            wrap_ext43(w, &child);
         }
         else encode(w, 0);
     }
@@ -281,9 +287,14 @@ static void encode(writer *w, int nested) {
 
 int main(int argc, char **argv) {
     if (argc == 1) {
-        for (int mode = 0; mode < 2; mode++) {
+        for (int mode = 0; mode < 4; mode++) {
             writer w = {{0}, 0};
-            encode(&w, mode);
+            if (mode == 3) {
+                writer child = {{0}, 0};
+                encode(&child, 1);
+                wrap_ext43(&w, &child);
+            }
+            else encode(&w, mode);
             const unsigned char *p = w.data;
             value record;
             double out[4];
@@ -300,11 +311,7 @@ int main(int argc, char **argv) {
         if (mode == 2) {
             writer child = {{0}, 0};
             encode(&child, 1);
-            byte(&w, 0xc8);
-            byte(&w, (unsigned char)(child.size >> 8));
-            byte(&w, (unsigned char)child.size);
-            byte(&w, 43);
-            for (size_t i = 0; i < child.size; i++) byte(&w, child.data[i]);
+            wrap_ext43(&w, &child);
         }
         else encode(&w, mode);
         FILE *file = fopen(argv[2], "wb");

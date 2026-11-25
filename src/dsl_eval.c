@@ -48,6 +48,10 @@ static pthread_once_t dsl_tls_arena_once = PTHREAD_ONCE_INIT;
 static int dsl_tls_arena_key_ready = 0;
 
 static void dsl_tls_arena_release(void *value) {
+    if (value == dsl_tls_arena) {
+        dsl_tls_arena = NULL;
+        dsl_tls_arena_cap = 0;
+    }
     free(value);
 }
 
@@ -55,8 +59,7 @@ static void dsl_tls_arena_exit(void) {
     void *value = pthread_getspecific(dsl_tls_arena_key);
     if (value) {
         pthread_setspecific(dsl_tls_arena_key, NULL);
-        if (value == dsl_tls_arena) dsl_tls_arena = NULL;
-        free(value);
+        dsl_tls_arena_release(value);
     }
 }
 
@@ -1781,7 +1784,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
     size_t total_arena_bytes = total_local_bytes + ((defined_bytes + 15u) & ~(size_t)15u);
     bool used_tls_arena = false;
     if (ME_DSL_ALLOW_STACK_ARENA && !dsl_tls_arena_in_use && total_arena_bytes > 0 && total_arena_bytes <= 64u * 1024u * 1024u) {
-        if (dsl_tls_arena_cap < total_arena_bytes) {
+        if (!dsl_tls_arena || dsl_tls_arena_cap < total_arena_bytes) {
             uint8_t *new_arena = (uint8_t *)realloc(dsl_tls_arena, total_arena_bytes);
             if (new_arena) {
                 dsl_tls_arena = new_arena;
@@ -1789,7 +1792,7 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
                 dsl_tls_arena_publish();
             }
         }
-        if (dsl_tls_arena_cap >= total_arena_bytes) {
+        if (dsl_tls_arena && dsl_tls_arena_cap >= total_arena_bytes) {
             dsl_tls_arena_in_use = 1;
             used_tls_arena = true;
         }
