@@ -74,6 +74,7 @@ and allocation-failure tests) passes with leak detection enabled.
 | C-Blosc2 constructors against core-only library | Passed |
 | C-Blosc2 `sum_linspace`, exact sum | Correct |
 | Python Menudet/recipe/DSL/table/graph selection | 3002 passed, 24 skipped, 3 xfailed |
+| Python wheel built against pinned `87de2f0` | 3003 passed, 23 skipped, 3 xfailed |
 
 Python's ordinary formula prefilter owns a typed kernel/grid handle. Explicit
 source plus formula reductions/ND coordinates stay on the compatibility
