@@ -859,9 +859,9 @@ static void fiber_scratch(void) {
     me_kernel *kernel = prepare("0.2", "def k(x):\n    a = x + 1\n    return a + a\n", &sig);
     void *parent = ConvertThreadToFiber(NULL);
     assert(parent);
-    fiber_call small = {parent, kernel, 2}, large = {parent, kernel, 128};
-    void *a = CreateFiber(0, eval_fiber, &small);
-    void *b = CreateFiber(0, eval_fiber, &large);
+    fiber_call calls[] = {{parent, kernel, 2}, {parent, kernel, 128}};
+    void *a = CreateFiber(0, eval_fiber, &calls[0]);
+    void *b = CreateFiber(0, eval_fiber, &calls[1]);
     assert(a && b);
     SwitchToFiber(a);
     SwitchToFiber(b);
