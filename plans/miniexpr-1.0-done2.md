@@ -45,6 +45,21 @@ before applying the corrections. These results do not claim Linux x86-64 or
 Windows qualification. Raw logs, VM images and timing output remain outside
 the repository.
 
-Next: ensure CI covers `next`, full Linux Clang builds and leak detection;
-then continue checked-profile/full-DSL caller migration, per-call interpreter
+## Follow-up CI coverage
+
+CI now includes push/PR coverage for `next`, a full Linux Clang library/test
+build (not only Clang compiling generated JIT code), and routine ASan/UBSan
+allocation-failure checks with explicit leak detection. Full qualification
+evidence also depends on the Clang build. Workflow YAML was parsed locally;
+hosted x86-64 and Windows results still require an actual CI run.
+
+The expanded Clang sanitizer selection additionally exposed incompatible
+conversion callback types in the legacy evaluator. Conversion functions now
+accept the exact `const void *, void *, int` callback signature and recover
+their typed data pointers inside the function. No arithmetic or public API
+changes; removing callback casts makes future mismatches compiler-visible.
+The corrected callbacks pass 11/11 Linux Clang ASan/UBSan checks with leak
+detection and halt-on-error enabled, plus the 376-test macOS suite.
+
+Next: continue checked-profile/full-DSL caller migration, per-call interpreter
 selection and cross-language recipe fixtures before freezing the ABI.

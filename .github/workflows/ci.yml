@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main, numpy-compat, graph-preparation, portable-jit-improvements ]
+    branches: [ main, next, numpy-compat, graph-preparation, portable-jit-improvements ]
   workflow_dispatch:
     inputs:
       full_qualification:
@@ -12,7 +12,7 @@ on:
   schedule:
     - cron: '23 3 * * 0'
   pull_request:
-    branches: [ main ]
+    branches: [ main, next ]
 
 concurrency:
   group: native-ci-${{ github.workflow }}-${{ github.ref }}-${{ (github.event_name == 'schedule' || inputs.full_qualification == true) && 'full' || 'gate' }}
@@ -311,8 +311,27 @@ jobs:
         fi
         echo "=== End Summary ==="
 
+  linux-clang:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build all targets with Clang
+        run: |
+          CC=clang cmake -S . -B build-clang -DCMAKE_BUILD_TYPE=Release \
+            -DMINIEXPR_BUILD_ARTIFACT=ON -DMINIEXPR_USE_SLEEF=OFF \
+            -DMINIEXPR_BUILD_BUNDLED_LIBTCC=OFF -DMINIEXPR_ENABLE_TCC_JIT=OFF
+          cmake --build build-clang --parallel 4
+      - name: Test Clang library and host-CC JIT
+        env:
+          CC: clang
+          ME_DSL_JIT_COMPILER: cc
+        run: ctest --test-dir build-clang -LE jit-full --output-on-failure
+
   sanitizer-qualification:
-    if: github.event_name == 'schedule' || inputs.full_qualification == true
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -320,20 +339,27 @@ jobs:
         run: |
           CC=clang cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug \
             -DMINIEXPR_BUILD_ARTIFACT=ON -DMINIEXPR_BUILD_BUNDLED_LIBTCC=OFF \
+            -DMINIEXPR_USE_SLEEF=OFF \
             -DMINIEXPR_ENABLE_TCC_JIT=OFF -DMINIEXPR_BUILD_EXAMPLES=OFF -DMINIEXPR_BUILD_BENCH=OFF \
             '-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
             '-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined' \
             '-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address,undefined'
-          # Only this executable is exercised below; do not build unrelated
-          # legacy tests under the sanitizer job's Clang configuration.
-          cmake --build build-asan --target menudet_jit_parity --parallel 4
+          cmake --build build-asan --target menudet_jit_parity grid_allocation \
+            graph_pairwise graph_compiler_allocation test_dsl_artifact test_grid_api \
+            test_kernel_api test_logical_operands test_nd test_pairwise_sum_core --parallel 4
       - name: Qualify sanitized bridges and interpretation
-        run: ctest --test-dir build-asan -R menudet_jit_parity --output-on-failure
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          ctest --test-dir build-asan \
+            -R '^(menudet_jit_parity.*|grid_allocation|graph_pairwise|graph_compiler_allocation|test_dsl_artifact|test_grid_api|test_kernel_api|test_logical_operands|test_nd|test_pairwise_sum_core)$' \
+            --output-on-failure
 
   qualification-evidence:
     name: Publish full native qualification
     if: github.event_name == 'schedule' || inputs.full_qualification == true
-    needs: [build-and-test, linux-arm64-jit, linux-arm64-interpreter, windows-arm64, miniexpr-wasm32, sanitizer-qualification]
+    needs: [build-and-test, linux-clang, linux-arm64-jit, linux-arm64-interpreter, windows-arm64, miniexpr-wasm32, sanitizer-qualification]
     runs-on: ubuntu-latest
     steps:
       - name: Record qualified revision

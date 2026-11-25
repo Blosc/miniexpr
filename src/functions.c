@@ -5868,8 +5868,12 @@ static void vec_imag_c128(const double _Complex* a, double* out, int n) {
  * These functions convert between different data types for mixed-type expressions.
  */
 
+/* Match convert_func_t exactly; casting typed function pointers is undefined
+ * behavior even when the platform passes all object pointers identically. */
 #define DEFINE_VEC_CONVERT(FROM_SUFFIX, TO_SUFFIX, FROM_TYPE, TO_TYPE) \
-static void vec_convert_##FROM_SUFFIX##_to_##TO_SUFFIX(const FROM_TYPE *in, TO_TYPE *out, int n) { \
+static void vec_convert_##FROM_SUFFIX##_to_##TO_SUFFIX(const void *input, void *output, int n) { \
+    const FROM_TYPE *in = (const FROM_TYPE *)input; \
+    TO_TYPE *out = (TO_TYPE *)output; \
     int i; \
     IVDEP \
     for (i = 0; i < n; i++) out[i] = TO_TYPE_##TO_SUFFIX(in[i]); \
@@ -5904,27 +5908,35 @@ DEFINE_VEC_CONVERT(f32, bool, float, bool)
 DEFINE_VEC_CONVERT(f64, bool, double, bool)
 DEFINE_VEC_CONVERT(f64, f32, double, float)
 
-static void vec_convert_c64_to_bool(const float _Complex *in, bool *out, int n) {
+static void vec_convert_c64_to_bool(const void *input, void *output, int n) {
+    const float _Complex *in = (const float _Complex *)input;
+    bool *out = (bool *)output;
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = IS_NONZERO_c64(in[i]);
 }
 
-static void vec_convert_c128_to_bool(const double _Complex *in, bool *out, int n) {
+static void vec_convert_c128_to_bool(const void *input, void *output, int n) {
+    const double _Complex *in = (const double _Complex *)input;
+    bool *out = (bool *)output;
     int i;
     IVDEP
     for (i = 0; i < n; i++) out[i] = IS_NONZERO_c128(in[i]);
 }
 
 #define DEFINE_VEC_CONVERT_C64_TO(TO_SFX, TO_TYPE) \
-static void vec_convert_c64_to_##TO_SFX(const float _Complex *in, TO_TYPE *out, int n) { \
+static void vec_convert_c64_to_##TO_SFX(const void *input, void *output, int n) { \
+    const float _Complex *in = (const float _Complex *)input; \
+    TO_TYPE *out = (TO_TYPE *)output; \
     int i; \
     IVDEP \
     for (i = 0; i < n; i++) out[i] = (TO_TYPE)me_crealf(in[i]); \
 }
 
 #define DEFINE_VEC_CONVERT_C128_TO(TO_SFX, TO_TYPE) \
-static void vec_convert_c128_to_##TO_SFX(const double _Complex *in, TO_TYPE *out, int n) { \
+static void vec_convert_c128_to_##TO_SFX(const void *input, void *output, int n) { \
+    const double _Complex *in = (const double _Complex *)input; \
+    TO_TYPE *out = (TO_TYPE *)output; \
     int i; \
     IVDEP \
     for (i = 0; i < n; i++) out[i] = (TO_TYPE)me_creal(in[i]); \
@@ -5952,7 +5964,9 @@ DEFINE_VEC_CONVERT_C128_TO(u64, uint64_t)
 DEFINE_VEC_CONVERT_C128_TO(f32, float)
 DEFINE_VEC_CONVERT_C128_TO(f64, double)
 
-static void vec_convert_c128_to_c64(const double _Complex *in, float _Complex *out, int n) {
+static void vec_convert_c128_to_c64(const void *input, void *output, int n) {
+    const double _Complex *in = (const double _Complex *)input;
+    float _Complex *out = (float _Complex *)output;
     int i;
     IVDEP
     for (i = 0; i < n; i++) {
@@ -6091,7 +6105,7 @@ static convert_func_t get_convert_func(me_dtype from, me_dtype to) {
     if (is_string_dtype(from) || is_string_dtype(to)) return NULL;
 
 #define CONV_CASE(FROM, TO, FROM_S, TO_S) \
-        if (from == FROM && to == TO) return (convert_func_t)vec_convert_##FROM_S##_to_##TO_S;
+        if (from == FROM && to == TO) return vec_convert_##FROM_S##_to_##TO_S;
 
     CONV_CASE(ME_BOOL, ME_INT8, bool, i8)
     CONV_CASE(ME_BOOL, ME_INT16, bool, i16)
@@ -6116,8 +6130,8 @@ static convert_func_t get_convert_func(me_dtype from, me_dtype to) {
     CONV_CASE(ME_UINT64, ME_BOOL, u64, bool)
     CONV_CASE(ME_FLOAT32, ME_BOOL, f32, bool)
     CONV_CASE(ME_FLOAT64, ME_BOOL, f64, bool)
-    if (from == ME_COMPLEX64 && to == ME_BOOL) return (convert_func_t)vec_convert_c64_to_bool;
-    if (from == ME_COMPLEX128 && to == ME_BOOL) return (convert_func_t)vec_convert_c128_to_bool;
+    if (from == ME_COMPLEX64 && to == ME_BOOL) return vec_convert_c64_to_bool;
+    if (from == ME_COMPLEX128 && to == ME_BOOL) return vec_convert_c128_to_bool;
 
     CONV_CASE(ME_INT8, ME_INT16, i8, i16)
     CONV_CASE(ME_INT8, ME_INT32, i8, i32)
