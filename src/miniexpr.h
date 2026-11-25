@@ -48,10 +48,10 @@ extern "C" {
 #endif
 
 /* Version information */
-#define ME_VERSION_MAJOR 0
-#define ME_VERSION_MINOR 3
-#define ME_VERSION_PATCH 2
-#define ME_VERSION_STRING "0.3.2.dev"
+#define ME_VERSION_MAJOR 1
+#define ME_VERSION_MINOR 0
+#define ME_VERSION_PATCH 0
+#define ME_VERSION_STRING "1.0.0.alpha1"
 
 /* Internal eval block size (elements). Compile-time fixed. */
 #ifndef ME_EVAL_BLOCK_NITEMS
