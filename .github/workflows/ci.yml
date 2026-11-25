@@ -311,6 +311,35 @@ jobs:
         fi
         echo "=== End Summary ==="
 
+  miniexpr-wasm32-standalone:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+      - name: Build standalone wasm32 JIT embedding clients
+        run: |
+          emcmake cmake -S . -B build-wasm32-standalone -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_CROSSCOMPILING_EMULATOR=node \
+            -DMINIEXPR_BUILD_SHARED=OFF -DMINIEXPR_BUILD_STATIC=ON \
+            -DMINIEXPR_BUILD_ARTIFACT=ON -DMINIEXPR_USE_SLEEF=OFF \
+            -DMINIEXPR_BUILD_BUNDLED_LIBTCC=OFF -DMINIEXPR_ENABLE_TCC_JIT=ON \
+            -DMINIEXPR_WASM32_SIDE_MODULE=OFF \
+            -DMINIEXPR_BUILD_BENCH=OFF -DMINIEXPR_BUILD_EXAMPLES=OFF
+          cmake --build build-wasm32-standalone --parallel 4 --target \
+            test_dsl_jit_menudet_wasm32 test_kernel_api test_grid_api test_pairwise_sum_core
+      - name: Qualify standalone JIT and per-call interpreter selection
+        run: |
+          ctest --test-dir build-wasm32-standalone \
+            -R '^(test_dsl_jit_menudet_wasm32|test_kernel_api|test_grid_api|test_pairwise_sum_core|kernel_api_require_wasm_jit)$' \
+            --output-on-failure
+
   linux-clang:
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
@@ -359,7 +388,7 @@ jobs:
   qualification-evidence:
     name: Publish full native qualification
     if: github.event_name == 'schedule' || inputs.full_qualification == true
-    needs: [build-and-test, linux-clang, linux-arm64-jit, linux-arm64-interpreter, windows-arm64, miniexpr-wasm32, sanitizer-qualification]
+    needs: [build-and-test, linux-clang, linux-arm64-jit, linux-arm64-interpreter, windows-arm64, miniexpr-wasm32, miniexpr-wasm32-standalone, sanitizer-qualification]
     runs-on: ubuntu-latest
     steps:
       - name: Record qualified revision

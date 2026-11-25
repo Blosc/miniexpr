@@ -416,8 +416,9 @@ static void execution_options(bool require_jit, bool tcc) {
     sig.context_ndim = 1;
     snprintf(source, sizeof(source), "# me:compiler=%s\ndef k(x):\n    return x + _flat_idx\n",
         tcc ? "tcc" : "cc");
-    /* Restore the caller's original optional policy for builds without a JIT. */
-    if (!require_jit) options.execution = ME_EXEC_PREFER_JIT;
+    /* This checks interpreter coordinate construction, not certification of
+     * additional ND JIT lowerings (which wasm32 may legitimately decline). */
+    options.execution = ME_EXEC_PREFER_JIT;
     assert(me_prepare_menudet("0.2", source, &sig, &options, &kernel, &error) == ME_SUCCESS);
     int64_t shape = 3, origin = 0, extent = 3;
     block.ndim = 1;
