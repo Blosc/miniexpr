@@ -6,6 +6,7 @@
 #define MINIEXPR_ARTIFACT_H
 
 #include "miniexpr.h"
+#include "miniexpr_kernel.h"
 #include <limits.h>
 
 #ifdef __cplusplus
@@ -95,6 +96,13 @@ typedef struct {
  * Only Menudet schema/language pair 0.1/0.1 is accepted, with NumPy numerical semantics.
  * On any failure *out is NULL. error may be NULL. */
 #define ME_ARTIFACT_LOAD_OPTIONS_VERSION 1
+#define ME_ARTIFACT_DIRECT_PREPARE_VERSION 1
+/* Transition adapter: direct typed preparation plus the existing array/graph
+ * scheduling interface. No JSON encoding or decoding occurs. Ownership remains
+ * internal; callers free the result with me_artifact_free(). */
+me_artifact_status me_artifact_prepare_menudet(const char *version, const char *source,
+    const me_signature *signature, int jit_mode, const me_jit_options *options,
+    me_artifact **out, me_artifact_error *error);
 #define ME_ARTIFACT_INFER_OUTPUT_VERSION 1
 me_artifact_status me_artifact_load_options(const char *json, size_t length, me_jit_mode jit_mode,
     const me_jit_options *options, me_artifact **out, me_artifact_error *error);

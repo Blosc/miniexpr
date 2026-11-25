@@ -3,6 +3,7 @@
   License: BSD 3-Clause (see LICENSE)
 **********************************************************************/
 #include "miniexpr_artifact.h"
+#include "miniexpr_kernel_internal.h"
 #include "dsl_graph_internal.h"
 #include "dsl_parser.h"
 #include "dsl_eval_internal.h"
@@ -52,6 +53,7 @@ typedef struct {
 } artifact_binding;
 
 struct me_artifact {
+    me_kernel *core_owner; /* Direct-prepared adapter owns this specialization. */
     char *source;
     char *entry_point;
     artifact_binding bindings[ME_MAX_VARS];
@@ -1480,12 +1482,108 @@ const char *me_artifact_execution_kind(const me_artifact *artifact) {
     if (!artifact || !artifact->program) return NULL;
     return artifact->program->expression_only ? "expression" : "program";
 }
+me_artifact_status me_artifact_prepare_menudet(const char *version, const char *source,
+    const me_signature *signature, int jit_mode, const me_jit_options *options,
+    me_artifact **out, me_artifact_error *error) {
+    artifact_clear_error(error);
+    if (out) *out = NULL;
+    if (!out || !source || !version || (strcmp(version, "0.1") && strcmp(version, "0.2")) ||
+        (jit_mode != ME_JIT_DEFAULT && jit_mode != ME_JIT_AUTO &&
+         jit_mode != ME_JIT_ON && jit_mode != ME_JIT_OFF)) {
+        return artifact_error(error, ME_ARTIFACT_ERR_UNSUPPORTED, "invalid direct preparation version or options");
+    }
+    me_dsl_error parse_error;
+    me_dsl_program *parsed = !strcmp(version, "0.2") ? me_dsl_parse_menudet02(source, &parse_error) :
+        me_dsl_parse_profile(source, ME_DSL_PROFILE_MENUDET_0_1, &parse_error);
+    if (!parsed) {
+        if (error) {
+            error->line = parse_error.line;
+            error->column = parse_error.column;
+        }
+        return artifact_error(error, ME_ARTIFACT_ERR_SOURCE, parse_error.message);
+    }
+    bool prefer = jit_mode == ME_JIT_ON;
+    if (jit_mode == ME_JIT_AUTO || jit_mode == ME_JIT_DEFAULT) {
+        const char *env = getenv("ME_DSL_JIT");
+        prefer = env && *env ? strcmp(env, "0") != 0 :
+            parsed->compiler_explicit || parsed->block.nstmts != 1 ||
+            parsed->block.stmts[0]->kind != ME_DSL_STMT_RETURN;
+    }
+    me_prepare_options prepare = ME_PREPARE_OPTIONS_INITIALIZER;
+    prepare.inherit_environment = true;
+    prepare.execution = prefer ? ME_EXEC_PREFER_JIT : ME_EXEC_INTERPRET;
+    me_kernel *core = NULL;
+    me_error diagnostic;
+    const me_jit_options *previous = dsl_jit_exchange_options(options);
+    me_status rc = me_prepare_menudet(version, source, signature, &prepare, &core, &diagnostic);
+    dsl_jit_exchange_options(previous);
+    if (rc != ME_SUCCESS) {
+        me_dsl_program_free(parsed);
+        if (error) {
+            error->native_status = rc;
+            error->line = diagnostic.line;
+            error->column = diagnostic.column;
+        }
+        return artifact_error(error, rc == ME_ERR_OOM ? ME_ARTIFACT_ERR_OOM :
+            rc == ME_ERR_SIGNATURE ? ME_ARTIFACT_ERR_BINDING :
+            rc == ME_ERR_UNSUPPORTED ? ME_ARTIFACT_ERR_UNSUPPORTED : ME_ARTIFACT_ERR_SOURCE,
+            diagnostic.message);
+    }
+    me_artifact *artifact = calloc(1, sizeof(*artifact));
+    if (!artifact) {
+        me_dsl_program_free(parsed);
+        me_kernel_free(core);
+        return artifact_error(error, ME_ARTIFACT_ERR_OOM, "out of memory adapting prepared kernel");
+    }
+    artifact->core_owner = core;
+    artifact->program = core->program;
+    artifact->source = malloc(strlen(source) + 1);
+    artifact->entry_point = parsed->name;
+    parsed->name = NULL;
+    me_dsl_program_free(parsed);
+    if (!artifact->source) {
+        me_artifact_free(artifact);
+        return artifact_error(error, ME_ARTIFACT_ERR_OOM, "out of memory copying kernel source");
+    }
+    strcpy(artifact->source, source);
+    artifact->ninputs = (int)core->ninputs;
+    artifact->nbindings = (int)core->nbindings;
+    artifact->output_dtype = core->info.output_dtype;
+    artifact->inferred_dtype = core->program->inferred_dtype;
+    artifact->output_itemsize = core->info.output_itemsize;
+    artifact->context_ndim = core->info.context_ndim;
+    artifact->cardinality = core->info.cardinality == ME_BLOCK_SCALAR ?
+        ME_ARTIFACT_BLOCK_SCALAR : ME_ARTIFACT_ELEMENTWISE;
+    artifact->profile = ME_DSL_PROFILE_MENUDET_0_1;
+    artifact->capabilities = ME_ARTIFACT_CAP_NUMERIC | ME_ARTIFACT_CAP_CONTROL_FLOW |
+        ME_ARTIFACT_CAP_BLOCK_REDUCTIONS | ME_ARTIFACT_CAP_ND_CONTEXT |
+        ME_ARTIFACT_CAP_FIXED_STRINGS | ME_ARTIFACT_CAP_FLEXIBLE_MATH;
+    for (int i = 0; i < artifact->nbindings; i++) {
+        artifact_binding *binding = &artifact->bindings[i];
+        binding->variable = (me_variable){.name = core->program->vars.names[i],
+            .dtype = core->dtypes[i], .itemsize = core->widths[i]};
+        binding->constant = i >= artifact->ninputs;
+        binding->weak = core->program->numpy_weak_vars[i];
+        if (binding->constant) {
+            if (is_string_dtype(binding->variable.dtype)) binding->string_value = core->captures[i];
+            else memcpy(&binding->value, core->captures[i], core->widths[i]);
+        }
+    }
+    *out = artifact;
+    return ME_ARTIFACT_SUCCESS;
+}
+
 void me_artifact_free(me_artifact *artifact) {
     if (!artifact) return;
-    dsl_compiled_program_free(artifact->program);
-    for (int b = 0; b < artifact->nbindings; b++) {
-        free((void *)artifact->bindings[b].variable.name);
-        free(artifact->bindings[b].string_value);
+    if (artifact->core_owner) {
+        me_kernel_free(artifact->core_owner);
+    }
+    else {
+        dsl_compiled_program_free(artifact->program);
+        for (int b = 0; b < artifact->nbindings; b++) {
+            free((void *)artifact->bindings[b].variable.name);
+            free(artifact->bindings[b].string_value);
+        }
     }
     free(artifact->source);
     free(artifact->entry_point);

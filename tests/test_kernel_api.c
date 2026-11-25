@@ -341,6 +341,52 @@ static void execution_options(bool require_jit) {
     assert(me_prepare_formula("2 * x", &sig, &options, &kernel, &error) == ME_ERR_UNSUPPORTED && !kernel);
 }
 
+#ifdef ME_TEST_HAS_ARTIFACT
+static void direct_scheduler_adapter(void) {
+    me_input_spec input = {"x", ME_FLOAT32, 0};
+    double gain = 2;
+    me_capture capture = {{"gain", ME_FLOAT64, 0}, &gain, ME_CAPTURE_WEAK};
+    me_signature sig = ME_SIGNATURE_INITIALIZER;
+    sig.inputs = &input;
+    sig.ninputs = sig.ncaptures = 1;
+    sig.captures = &capture;
+    me_artifact *artifact = NULL;
+    me_artifact_error error;
+    const char *source = "def k(x: float32, gain) -> float64:\n    return x * gain\n";
+    assert(me_artifact_prepare_menudet("0.2", source, &sig, ME_JIT_OFF,
+        NULL, &artifact, &error) == ME_ARTIFACT_SUCCESS);
+    gain = 999;
+    assert(me_artifact_input_dtype(artifact, 0) == ME_FLOAT32);
+    assert(me_artifact_output_dtype(artifact) == ME_FLOAT64);
+    assert(me_artifact_inferred_dtype(artifact) == ME_FLOAT32);
+    assert(!strcmp(me_artifact_source(artifact), source));
+    float x[] = {1, 2, 3};
+    double output[3];
+    me_artifact_buffer buffer = {"x", ME_FLOAT32, sizeof(float), x, sizeof(x)};
+    me_artifact_eval_descriptor d = {
+        .struct_size = sizeof(d), .version = ME_ARTIFACT_EVAL_DESCRIPTOR_VERSION,
+        .nitems = 3, .output_capacity = sizeof(output)};
+    assert(me_artifact_eval_ex(artifact, &buffer, 1, output, &d, &error) == ME_ARTIFACT_SUCCESS);
+    assert(output[0] == 2 && output[1] == 4 && output[2] == 6);
+    me_artifact_free(artifact);
+    assert(me_artifact_prepare_menudet("0.1", source, &sig, ME_JIT_OFF,
+        NULL, &artifact, &error) == ME_ARTIFACT_ERR_SOURCE && !artifact);
+    char prefix[] = {'x', 'y'};
+    capture = (me_capture){{"prefix", ME_BYTES, sizeof(prefix)}, prefix, ME_CAPTURE_TYPED};
+    sig = (me_signature)ME_SIGNATURE_INITIALIZER;
+    sig.captures = &capture;
+    sig.ncaptures = 1;
+    assert(me_artifact_prepare_menudet("0.2", "def k(prefix):\n    return prefix\n",
+        &sig, ME_JIT_OFF, NULL, &artifact, &error) == ME_ARTIFACT_SUCCESS);
+    prefix[0] = 'z';
+    char strings[4];
+    d.nitems = 2;
+    d.output_capacity = sizeof(strings);
+    assert(me_artifact_eval_ex(artifact, NULL, 0, strings, &d, &error) == ME_ARTIFACT_SUCCESS);
+    assert(!memcmp(strings, "xyxy", sizeof(strings)));
+    me_artifact_free(artifact);
+}
+#endif
 #ifdef TEST_THREADS
 static void *worker(void *arg) {
     const me_kernel *kernel = arg;
@@ -378,6 +424,9 @@ int main(int argc, char **argv) {
     scalar_and_errors();
     fixed_bytes();
     execution_options(argc > 1 && !strcmp(argv[1], "--require-jit"));
+#ifdef ME_TEST_HAS_ARTIFACT
+    direct_scheduler_adapter();
+#endif
 #ifdef TEST_THREADS
     threads();
 #endif

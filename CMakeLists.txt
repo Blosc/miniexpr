@@ -23,6 +23,7 @@ include(cmake/MiniexprOptions.cmake)
 set(MINIEXPR_SOURCES
   src/miniexpr.c
   src/miniexpr_kernel.c
+  src/miniexpr_grid.c
   src/miniexpr_eval_nd.c
   src/miniexpr_eval_dsl_nd.c
   src/miniexpr_eval_reduce.c
@@ -210,6 +211,19 @@ elseif(MINIEXPR_BUILD_STATIC)
   set(MINIEXPR_DEFAULT_LIB miniexpr_static)
 endif()
 
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+  foreach(_miniexpr_install_target miniexpr miniexpr_static)
+    if(TARGET ${_miniexpr_install_target})
+      install(TARGETS ${_miniexpr_install_target}
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    endif()
+  endforeach()
+  install(FILES src/miniexpr.h src/miniexpr_kernel.h src/miniexpr_grid.h
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+endif()
+
 if(MINIEXPR_BUILD_ARTIFACT)
   if(NOT MINIEXPR_DEFAULT_LIB)
     message(FATAL_ERROR "Artifact support requires a shared or static miniexpr library")
@@ -232,11 +246,11 @@ if(MINIEXPR_BUILD_ARTIFACT)
     DESTINATION "${CMAKE_INSTALL_DATADIR}/miniexpr/licenses" RENAME LICENSE-YYJSON)
   # Standalone distribution only: embedding hosts own their install layout.
   if(PROJECT_IS_TOP_LEVEL)
-    install(TARGETS miniexpr_artifact ${MINIEXPR_DEFAULT_LIB}
+    install(TARGETS miniexpr_artifact
       ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
       LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
       RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-    install(FILES src/miniexpr.h src/miniexpr_kernel.h src/miniexpr_artifact.h src/miniexpr_graph.h src/miniexpr_reduce.h
+    install(FILES src/miniexpr_artifact.h src/miniexpr_graph.h src/miniexpr_reduce.h
       DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
     install(FILES doc/native-graph-1.schema.json doc/native-staged-graph-1.schema.json
       doc/native-graphs-1.md doc/native-stages-1.md

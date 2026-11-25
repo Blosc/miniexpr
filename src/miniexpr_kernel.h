@@ -72,10 +72,11 @@ typedef struct {
     me_cardinality cardinality;
     int context_ndim;
     me_casting casting;
+    bool integer_powers; /* Authored multiply-chain policy for integer exponents. */
 } me_signature;
 
 #define ME_SIGNATURE_INITIALIZER { sizeof(me_signature), NULL, 0, NULL, 0, \
-    ME_AUTO, 0, ME_CARDINALITY_INFER, 0, ME_CAST_UNSAFE }
+    ME_AUTO, 0, ME_CARDINALITY_INFER, 0, ME_CAST_UNSAFE, false }
 
 typedef enum {
     ME_EXEC_INTERPRET = 0,
@@ -86,9 +87,10 @@ typedef enum {
 typedef struct {
     size_t struct_size;
     me_execution_policy execution;
+    bool inherit_environment; /* False: deterministic strict/system defaults. */
 } me_prepare_options;
 
-#define ME_PREPARE_OPTIONS_INITIALIZER { sizeof(me_prepare_options), ME_EXEC_INTERPRET }
+#define ME_PREPARE_OPTIONS_INITIALIZER { sizeof(me_prepare_options), ME_EXEC_INTERPRET, false }
 
 typedef struct {
     size_t struct_size;

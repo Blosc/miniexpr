@@ -99,9 +99,27 @@ dtype before final conversion.
   nonempty raise mask before execution.
 - Preparation defaults to interpretation, strict FP and system math. Source
   pragmas can explicitly request another supported mathematical policy.
+  `inherit_environment` is an explicit preparation opt-in for hosts that own
+  process/scoped defaults. `integer_powers` in the signature preserves an
+  authored multiply-chain policy; it is not inferred from input types.
   Optional JIT falls back before execution; required JIT rejects unavailable
   lowering. Numerical failures never cause execution replay.
 
 Blosc2 recipes, JSON import, array/graph scheduling, varlen output and physical
 padded-grid adaptation remain separate. Existing v1 JSON artifact loading is
 unchanged; its schema remains 0.1.
+
+## Padded grids
+
+`miniexpr_grid.h` supplies an independent geometry adapter: create an immutable
+grid, describe a physical `(nchunk, nblock)`, evaluate it, then free the grid.
+Geometry and byte-capacity checks precede numerical execution. Partial blocks
+gather live lanes in logical C order and scatter elementwise results back into
+zero-padded physical output. Scalar kernels evaluate the entire live group once,
+including all its rows. The adapter never implements a reduction by summing row
+results. Rank-zero geometry denotes one scalar physical block; empty logical
+domains contain no chunks.
+
+The C-Blosc2 constructor branch uses this shared adapter while retaining host
+ownership of compression, exact endpoints and endian conversion. A standalone
+core-only installation now installs both public headers without JSON support.

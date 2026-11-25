@@ -119,6 +119,21 @@ The new formula API deliberately rejects reductions and context; it does not
 resolve the deferred formula reduction question by silently inheriting old
 behavior. Existing APIs and v1 readers still work.
 
+Integration update:
+
+- Python's `next` checkout now prepares reusable recipes through the typed
+  core, retains canonical annotations, writes Menudet `b2o` v2, reads v1,
+  and preserves existing graph/resident scheduling and provenance checks.
+  Computed/generated table recipes have an analogous v2 field.
+- `miniexpr_grid.h` now supplies the shared padded-grid adapter. The C-Blosc2
+  constructor branch uses it for ND ramps. Native tests explicitly cover
+  holes between live rows, context coordinates, completely padded groups,
+  and a nonlinear scalar post-reduction that must see the whole group.
+- Removed the unused draft semantic-profile selector and Python's obsolete
+  float64-probe/JSON fallback for source preparation. Live legacy C paths are
+  still being migrated; they have not been deleted merely because the new API
+  exists. C-Blosc2 full b2o reference-closure import/export remains outstanding.
+
 Local qualification (macOS arm64): the pre-change artifact-enabled baseline
 passed 369 tests; the pilot passed all 370 tests, including the new core API
 suite, with SLEEF/TCC disabled. Explicit host-CC required-JIT execution passed.
@@ -127,6 +142,10 @@ The C-Blosc2 constructor suite passed with its existing ByteDelta plugin enabled
 using only the JSON-disabled core library. C99 warning-as-error syntax checking
 and C++11 header inclusion also passed. No compiler warnings were reported.
 Windows, Linux, WASM and bundled-TCC qualification remain outstanding.
+
+The integration revision passes all 371 native tests and six focused
+artifact-enabled ASan/UBSan tests. A core-only installation was also consumed
+by a separate C99 grid test using installed public headers and no JSON library.
 
 Before ABI freeze, fix the status numbering, descriptor field widths, layouts,
 initializers, extension rules and lifetimes. Extensible structs cross the ABI

@@ -3,6 +3,7 @@
   License: BSD 3-Clause (see LICENSE.txt)
 **********************************************************************/
 #include "miniexpr_kernel.h"
+#include "miniexpr_kernel_internal.h"
 #include "dsl_compile_internal.h"
 #include "dsl_eval_internal.h"
 #include "dsl_menudet_expr.h"
@@ -13,17 +14,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-struct me_kernel {
-    me_expr *formula;
-    me_dsl_compiled_program *program;
-    size_t ninputs;
-    size_t nbindings;
-    me_dtype dtypes[ME_MAX_VARS];
-    size_t widths[ME_MAX_VARS];
-    void *captures[ME_MAX_VARS];
-    me_kernel_info info;
-};
 
 static me_status kernel_error(me_error *error, me_status status, const char *message) {
     if (error) {
@@ -197,12 +187,15 @@ static me_status kernel_result(me_kernel *kernel, const me_signature *sig,
     static const char *casting[] = {"unsafe", "same_kind", "safe"};
     me_dtype output = kernel->info.output_dtype;
     if (inferred != output && !dsl_numpy_can_cast(inferred, output, casting[sig->casting])) {
-        return kernel_error(error, ME_ERR_SIGNATURE, "result conversion violates casting policy");
+        return kernel_error(error, ME_ERR_SIGNATURE, "result conversion violates declared cast policy");
     }
-    if ((sig->output_itemsize && sig->output_itemsize != kernel->info.output_itemsize) ||
-        (sig->cardinality != ME_CARDINALITY_INFER &&
-         sig->cardinality != kernel->info.cardinality)) {
-        return kernel_error(error, ME_ERR_SIGNATURE, "output width or cardinality disagrees with source");
+    if (sig->output_itemsize && sig->output_itemsize != kernel->info.output_itemsize) {
+        return kernel_error(error, ME_ERR_SIGNATURE, "output width disagrees with source");
+    }
+    if (sig->cardinality != ME_CARDINALITY_INFER && sig->cardinality != kernel->info.cardinality) {
+        return kernel_error(error, ME_ERR_SIGNATURE, kernel->info.cardinality == ME_BLOCK_SCALAR ?
+            "declared elementwise result disagrees with block scalar source" :
+            "declared block scalar result disagrees with elementwise source");
     }
     return ME_SUCCESS;
 }
@@ -229,7 +222,7 @@ static me_status kernel_prepare(const char *version, const char *source,
     char reason[256] = {0};
     int position = -1;
     if (formula) {
-        if (sig->context_ndim || sig->cardinality == ME_BLOCK_SCALAR) {
+        if (sig->context_ndim || sig->cardinality == ME_BLOCK_SCALAR || sig->integer_powers) {
             status = kernel_error(error, ME_ERR_UNSUPPORTED, "formula context and reductions are not yet supported");
             goto cleanup;
         }
@@ -275,8 +268,9 @@ static me_status kernel_prepare(const char *version, const char *source,
         /* Direct preparation defaults are deterministic; source pragmas remain
          * explicit authored policy. Legacy import retains its own defaults. */
         me_dsl_declared_policy policy = {
-            .has_fp = true, .fp = ME_DSL_FP_STRICT,
-            .has_math = true, .math = ME_DSL_MATH_SYSTEM};
+            .has_fp = !options || !options->inherit_environment, .fp = ME_DSL_FP_STRICT,
+            .has_math = !options || !options->inherit_environment, .math = ME_DSL_MATH_SYSTEM,
+            .integer_powers = sig->integer_powers};
         bool is_dsl = false;
         int jit = execution == ME_EXEC_INTERPRET ? ME_JIT_OFF : ME_JIT_ON;
         if (!strcmp(version, "0.2")) {
