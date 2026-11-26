@@ -377,6 +377,35 @@ static void staged(bool jit) {
     CHECK(output[0] == -4 && output[3] == -10);
     me_graph_schedule_free(s); me_graph_plan_free(p);
 }
+
+static void staged_shared_node(void) {
+    const char *json =
+        "{\"format\":\"" ME_GRAPH_FORMAT "\",\"semantics\":\"" ME_GRAPH_SEMANTICS "\","
+        "\"requires\":[\"numeric\",\"staged\"],\"nodes\":["
+        "{\"id\":0,\"op\":\"input\",\"name\":\"x\",\"dtype\":\"int32\"},"
+        "{\"id\":1,\"op\":\"constant\",\"dtype\":\"int64\",\"category\":\"weak\","
+        "\"encoding\":\"decimal\",\"value\":\"2\"},"
+        "{\"id\":2,\"op\":\"add\",\"args\":[0,1]},"
+        "{\"id\":3,\"op\":\"mul\",\"args\":[2,2]}],\"root\":3,"
+        "\"output\":{\"dtype\":\"auto\",\"casting\":\"safe\"}}";
+    me_graph_plan *plan = NULL, *imported = NULL;
+    CHECK(!me_graph_prepare_json(json, strlen(json), NULL, &plan, &error));
+    CHECK(me_graph_stage_count(plan) == 2);
+    size_t length;
+    const char *wire = me_graph_export_json(plan, &length);
+    CHECK(!me_graph_prepare_json(wire, length, NULL, &imported, &error));
+    me_graph_input_metadata input = {"x", ME_INT32, 1, {2}};
+    me_graph_schedule *a = NULL, *b = NULL;
+    CHECK(!me_graph_specialize(plan, &input, 1, NULL, &a, &error));
+    CHECK(!me_graph_specialize(imported, &input, 1, NULL, &b, &error));
+    int32_t x[] = {-1, 3}, actual[2], expected[2];
+    me_array_view binding = view("x", ME_INT32, x, sizeof(x), 1, 2, 0);
+    CHECK(!me_graph_execute(a, &binding, 1, actual, sizeof(actual), NULL, NULL, &error));
+    CHECK(!me_graph_execute(b, &binding, 1, expected, sizeof(expected), NULL, NULL, &error));
+    CHECK(actual[0] == 1 && actual[1] == 25 && !memcmp(actual, expected, sizeof(actual)));
+    me_graph_schedule_free(a); me_graph_schedule_free(b);
+    me_graph_plan_free(plan); me_graph_plan_free(imported);
+}
 /* Compare the optimized graph route against the unchanged artifact-array
  * reducer, including exact serial rounding and floating status. */
 static void direct_reductions(void) {
@@ -725,6 +754,7 @@ static void in_memory_roundtrip(void) {
     const char *expressions[] = {"x + (y - 1)", "x + -0.0 + y", "x + .5 + y", "where(x != 0, y / x, y)",
         "float32(x) + y", "x < y", "x ** -2 + y", "x - sum(x) + y", "sum(x + y, axis=0, initial=-2.5)",
         "x - sum(x + sum(y, axis=0, initial=-2.5), axis=-1)",
+        "x + sum(float32(y), axis=-1, dtype=float32, keepdims=True, initial=-0.0)",
         "x ** 2.0 + y", "where(True, x + 9223372036854775807, y)"};
     me_graph_input_metadata metadata[] = {{"x", ME_FLOAT64, 1, {3}}, {"y", ME_FLOAT64, 1, {3}}};
     double x[] = {1, 2, 4}, y[] = {3, 2, 1};
@@ -845,6 +875,7 @@ int main(void) {
     RUN_CASE(validation()); RUN_CASE(limits());
     RUN_CASE(maps(true)); RUN_CASE(lazy(true)); RUN_CASE(reductions(true));
     RUN_CASE(staged(false)); RUN_CASE(staged(true));
+    RUN_CASE(staged_shared_node());
     RUN_CASE(direct_reductions());
     RUN_CASE(weak_capture_conversions());
     RUN_CASE(dsl_direct_sum());

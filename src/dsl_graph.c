@@ -52,7 +52,15 @@ struct me_graph_schedule {
     me_array_options reduction;
     me_graph_schedule *stages[ME_GRAPH_MAX_STAGES];
 };
-static me_graph_status g_prepare_staged(yyjson_val *root, const me_graph_prepare_options *options,
+typedef struct {
+    const graph_node *nodes;
+    const int *stage_ids;
+    int indices[ME_GRAPH_MAX_STAGES][ME_GRAPH_MAX_NODES];
+    int sizes[ME_GRAPH_MAX_STAGES];
+    bool aggressive;
+} graph_split_nodes;
+static me_graph_status g_prepare_staged(yyjson_val *root, const graph_split_nodes *split,
+    const me_graph_prepare_options *options,
     me_graph_plan **out, me_graph_error *error);
 static me_graph_status g_split_graph(yyjson_val *root, graph_node *nodes, int count, int result,
     const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error);
@@ -617,7 +625,7 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
     const char *message = "invalid graph schema, fields, keys or nesting";
     if (!root) root = yyjson_doc_get_root(doc);
     if (g_tree(root, 0) && g_equal(yyjson_obj_get(root, "format"), ME_GRAPH_STAGED_FORMAT)) {
-        rc = g_prepare_staged(root, options, out, error);
+        rc = g_prepare_staged(root, NULL, options, out, error);
         yyjson_doc_free(doc);
         return rc;
     }
@@ -822,7 +830,7 @@ static me_graph_status g_prepare_nodes(yyjson_val *root, graph_node *nodes, int 
         if (id == mask_node && nodes[id].uses == 1) continue;
         p->map_indices[j] = map_index++;
     }
-    g_json(&canonical, root);
+    if (root) g_json(&canonical, root);
     if (source.failed || canonical.failed) {
         rc = source.oom || canonical.oom ? ME_GRAPH_ERR_OOM : ME_GRAPH_ERR_FORMAT;
         message = "lowering allocation or byte limit exceeded"; goto done;
@@ -833,7 +841,7 @@ static me_graph_status g_prepare_nodes(yyjson_val *root, graph_node *nodes, int 
         aggressive, math_backend, options ? options->jit : ME_JIT_OFF, &p->map, &native);
     if (status) { rc = g_native(error, map_root, status, &native); message = NULL; goto done; }
     p->inferred = me_artifact_inferred_dtype(p->map);
-    if (!reduction && final_dtype == ME_AUTO) {
+    if (root && !reduction && final_dtype == ME_AUTO) {
         map_doc = g_map_root(source.data, nodes, array, input_nodes, ni, constant_nodes, nc, mask_node,
             aggressive, math_backend);
         if (!map_doc) { rc = ME_GRAPH_ERR_OOM; message = "map export allocation failed"; goto done; }
@@ -1728,6 +1736,8 @@ static me_graph_status g_split_graph(yyjson_val *root, graph_node *nodes, int co
         return g_error(error, result, ME_GRAPH_ERR_UNSUPPORTED, "staged results require auto output; use explicit cast nodes");
     yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
     if (!doc) return g_error(error, -1, ME_GRAPH_ERR_OOM, "automatic stage allocation failed");
+    graph_split_nodes split = {.nodes = nodes, .stage_ids = stage_ids,
+        .aggressive = g_equal(yyjson_obj_get(root, "optimization"), "aggressive")};
     yyjson_mut_val *staged = yyjson_mut_obj(doc), *requires = yyjson_mut_arr(doc);
     yyjson_mut_val *inputs = yyjson_mut_arr(doc), *stages = yyjson_mut_arr(doc);
     bool ok = yyjson_mut_obj_add_str(doc, staged, "format", ME_GRAPH_STAGED_FORMAT) &&
@@ -1762,7 +1772,7 @@ static me_graph_status g_split_graph(yyjson_val *root, graph_node *nodes, int co
             yyjson_mut_arr_add_str(doc, region_requires, "numeric") &&
             yyjson_mut_obj_add_val(doc, graph, "requires", region_requires) &&
             yyjson_mut_obj_add_val(doc, graph, "nodes", region_nodes);
-        if (ok && g_equal(yyjson_obj_get(root, "optimization"), "aggressive"))
+        if (ok && split.aggressive)
             ok = yyjson_mut_obj_add_str(doc, graph, "optimization", "aggressive");
         for (int i = 0; ok && i <= stage_root; i++) if (needed[i]) {
             bool intermediate = boundary[i] && i != stage_root;
@@ -1786,7 +1796,8 @@ static me_graph_status g_split_graph(yyjson_val *root, graph_node *nodes, int co
         }
         int n = 0;
         for (int i = 0; ok && i <= stage_root; i++) if (needed[i]) {
-            mapped[i] = n++;
+            mapped[i] = n;
+            split.indices[stage][n++] = i;
             yyjson_mut_val *node;
             if (boundary[i] && i != stage_root) {
                 char name[32];
@@ -1809,11 +1820,12 @@ static me_graph_status g_split_graph(yyjson_val *root, graph_node *nodes, int co
         }
         ok = ok && yyjson_mut_obj_add_uint(doc, graph, "root", (uint64_t)mapped[stage_root]) &&
             yyjson_mut_obj_add_val(doc, graph, "output", yyjson_val_mut_copy(doc, yyjson_obj_get(root, "output")));
+        split.sizes[stage] = n;
     }
     yyjson_mut_doc_set_root(doc, staged);
     yyjson_doc *lowered = ok ? yyjson_mut_doc_imut_copy(doc, NULL) : NULL;
     yyjson_mut_doc_free(doc);
-    me_graph_status rc = lowered ? dsl_graph_prepare_root(yyjson_doc_get_root(lowered), options, out, error) :
+    me_graph_status rc = lowered ? g_prepare_staged(yyjson_doc_get_root(lowered), &split, options, out, error) :
         g_error(error, -1, ME_GRAPH_ERR_OOM, "automatic stage allocation failed");
     yyjson_doc_free(lowered);
     return rc;
@@ -1831,6 +1843,52 @@ static int g_source(const me_graph_plan *p, yyjson_val *binding, int stage) {
 }
 static me_dtype g_source_dtype(const me_graph_plan *p, int source) {
     return source < 0 ? p->types[-1 - source] : g_result_dtype(p->stages[source]);
+}
+
+/* Automatic regions reuse validated frontend nodes. Only bindings at a
+ * stage boundary are synthesized, using the already prepared producer dtype.
+ * The enclosing plan owns the interchange export; child plans are private. */
+static me_graph_status g_prepare_split_region(me_graph_plan *parent, const graph_split_nodes *split,
+    int stage, const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error) {
+    graph_node nodes[ME_GRAPH_MAX_NODES];
+    char names[ME_MAX_VARS][32];
+    int mapped[ME_GRAPH_MAX_NODES];
+    int inputs[ME_MAX_VARS], constants[ME_MAX_VARS], ni = 0, nc = 0;
+    int count = split->sizes[stage], result = count - 1;
+    for (int i = 0; i < count; i++) {
+        int id = split->indices[stage][i];
+        mapped[id] = i;
+        int producer = split->stage_ids[id];
+        bool intermediate = producer >= 0 && producer != stage;
+        graph_node *n = &nodes[i];
+        if (intermediate) {
+            if (ni + nc == ME_MAX_VARS)
+                return g_error(error, i, ME_GRAPH_ERR_FORMAT, "binding limit exceeded");
+            snprintf(names[ni], sizeof(names[ni]), "_me_stage_%d", id);
+            *n = (graph_node){.op = "input", .name = names[ni], .mask = -1,
+                .dtype = g_source_dtype(parent, producer)};
+        } else {
+            *n = split->nodes[id];
+            n->uses = n->depth = 0;
+            n->reachable = false;
+            for (int j = 0; j < n->nargs; j++) n->args[j] = mapped[n->args[j]];
+        }
+        bool input = !strcmp(n->op, "input"), constant = !strcmp(n->op, "constant");
+        if ((input || constant) && ni + nc == ME_MAX_VARS)
+            return g_error(error, i, ME_GRAPH_ERR_FORMAT, "binding limit exceeded");
+        if (input) {
+            int source = intermediate ? producer : -1 - g_find(parent, n->name);
+            if ((intermediate && source >= stage) || (!intermediate && source == 0))
+                return g_error(error, i, ME_GRAPH_ERR_BINDING, "invalid automatic stage binding");
+            parent->sources[stage][ni] = source;
+            inputs[ni++] = i;
+        }
+        if (constant) constants[nc++] = i;
+        const char *invalid = g_link_arguments(nodes, i);
+        if (invalid) return g_error(error, i, ME_GRAPH_ERR_FORMAT, invalid);
+    }
+    return g_prepare_nodes(NULL, nodes, count, result, inputs, ni, constants, nc, -1,
+        false, false, split->aggressive, ME_AUTO, "unsafe", options, out, error);
 }
 static me_graph_status g_prepare_menudet(yyjson_val *stage, const me_graph_prepare_options *options,
     me_graph_plan **out, me_graph_error *error) {
@@ -1877,7 +1935,8 @@ static me_graph_status g_prepare_menudet(yyjson_val *stage, const me_graph_prepa
     else *out = p;
     return rc;
 }
-static me_graph_status g_prepare_staged(yyjson_val *root, const me_graph_prepare_options *options,
+static me_graph_status g_prepare_staged(yyjson_val *root, const graph_split_nodes *split,
+    const me_graph_prepare_options *options,
     me_graph_plan **out, me_graph_error *error) {
     const char *const fields[] = {"format", "semantics", "requires", "inputs", "stages", "root"};
     yyjson_val *requires = yyjson_obj_get(root, "requires"), *inputs = yyjson_obj_get(root, "inputs");
@@ -1936,10 +1995,14 @@ static me_graph_status g_prepare_staged(yyjson_val *root, const me_graph_prepare
             !yyjson_is_uint(id) || yyjson_get_uint(id) != (uint64_t)i || !yyjson_is_obj(bindings) ||
             yyjson_obj_size(bindings) > ME_MAX_VARS) goto failure;
         size_t j, count; yyjson_val *key, *binding;
-        yyjson_obj_foreach(bindings, j, count, key, binding) {
-            if (!g_name(g_str(key)) || g_source(p, binding, i) == INT_MIN) goto failure;
+        if (!split) {
+            yyjson_obj_foreach(bindings, j, count, key, binding) {
+                if (!g_name(g_str(key)) || g_source(p, binding, i) == INT_MIN) goto failure;
+            }
         }
-        if (menudet) {
+        if (split) {
+            rc = g_prepare_split_region(p, split, i, options, &p->stages[i], error);
+        } else if (menudet) {
             rc = g_prepare_menudet(stage, options, &p->stages[i], error);
         } else {
             yyjson_val *graph = yyjson_obj_get(stage, "graph");
@@ -1979,9 +2042,9 @@ static me_graph_status g_prepare_staged(yyjson_val *root, const me_graph_prepare
             g_error(error, -1, rc, "staged regions must be nonnested with auto result dtype; express conversion as a cast node");
             goto nested_failure;
         }
-        if (yyjson_obj_size(bindings) != (size_t)child->ninputs) { rc = ME_GRAPH_ERR_BINDING; goto failure; }
+        if (!split && yyjson_obj_size(bindings) != (size_t)child->ninputs) { rc = ME_GRAPH_ERR_BINDING; goto failure; }
         for (int j = 0; j < child->ninputs; j++) {
-            int source = g_source(p, yyjson_obj_get(bindings, child->names[j]), i);
+            int source = split ? p->sources[i][j] : g_source(p, yyjson_obj_get(bindings, child->names[j]), i);
             if (source == INT_MIN) { rc = ME_GRAPH_ERR_BINDING; goto failure; }
             if (child->types[j] != g_source_dtype(p, source)) { rc = ME_GRAPH_ERR_SIGNATURE; goto failure; }
             p->sources[i][j] = source;

@@ -58,7 +58,9 @@ storage format and will not change `b2o`.
     instead of serializing and reparsing JSON text. The text frontend passes
     typed nodes directly to the shared planner, including reduction axes,
     accumulator dtype, masks and initial scalars. Its compatibility tree
-    still supplies exports and staged region construction. Keep
+    still supplies interchange exports. Automatic stage preparation remaps
+    typed nodes and connects producer outputs directly; explicit staged JSON
+    imports still resolve child inputs through yyjson. Keep
     explicit graph interchange and canonical cache identity as separate
     compatibility concerns.
 3. Run the Python v1 importer in differential tests against the native adapter
