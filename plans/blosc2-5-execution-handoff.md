@@ -56,7 +56,10 @@ storage format and will not change `b2o`.
    exposes a private Python probe for a context-free float64 elementwise
    map over a compressed 1-D array. It prepares the typed core kernel,
    uses C-Blosc2 callbacks for block reads and a NumPy result sink, and agrees
-   with the existing adapter on full and padded grids. An undersized scratch
+   with the existing adapter on full and padded grids. The pilot also now
+   executes 1-D logical partitions with block-scalar outputs: a persisted
+   three-item partition recipe produces the same results on two different
+   physical layouts, including a short final group. An undersized scratch
    budget is rejected. Default Python execution still uses the adapter.
 2. Replace the scheduler's **input** with a typed, bounded, topologically
    ordered node array: operand slots, exact scalar captures and typed operation
