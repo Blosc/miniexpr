@@ -760,6 +760,10 @@ static void in_memory_roundtrip(void) {
     CHECK(me_graph_prepare_expression(overflow, strlen(overflow), metadata, 2, NULL,
         &rejected, &error) == ME_GRAPH_ERR_SIGNATURE);
     CHECK(!rejected && strstr(error.native.message, "invalid graph scalar encoding"));
+    const char *bad_initial = "sum(x + y, initial=9223372036854775808)";
+    CHECK(me_graph_prepare_expression(bad_initial, strlen(bad_initial), metadata, 2, NULL,
+        &rejected, &error) == ME_GRAPH_ERR_FORMAT);
+    CHECK(!rejected && strstr(error.native.message, "initial scalar decode failed"));
 }
 static void math_policy(void) {
     me_graph_input_metadata inputs[] = {{"x", ME_FLOAT64, 1, {2}}};

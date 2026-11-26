@@ -1,5 +1,5 @@
 /* Expression frontend. Typed nodes drive preparation; the accompanying
- * interchange tree still supplies export and staged/reduction metadata. */
+ * interchange tree supplies export and staged compatibility metadata. */
 #include "miniexpr_graph.h"
 #include "dsl_graph_internal.h"
 #include "yyjson.h"
@@ -180,13 +180,25 @@ static int t_literal(text_parser *p, bool negative) {
     }
     t_next(p); return id;
 }
-static bool t_reduction(const char *s) {
-    return !strcmp(s, "sum") || !strcmp(s, "prod") || !strcmp(s, "min") || !strcmp(s, "max") || !strcmp(s, "any") || !strcmp(s, "all");
+static me_array_reduction t_reduction(const char *s) {
+    const char *names[] = {"sum", "prod", "min", "max", "any", "all"};
+    const me_array_reduction ops[] = {ME_ARRAY_SUM, ME_ARRAY_PROD, ME_ARRAY_MIN, ME_ARRAY_MAX, ME_ARRAY_ANY, ME_ARRAY_ALL};
+    for (int i = 0; i < 6; i++) if (!strcmp(s, names[i])) return ops[i];
+    return 0;
+}
+static me_dtype t_parse_dtype(const char *name) {
+    const me_dtype types[] = {ME_BOOL, ME_INT8, ME_INT16, ME_INT32, ME_INT64, ME_UINT8,
+        ME_UINT16, ME_UINT32, ME_UINT64, ME_FLOAT32, ME_FLOAT64};
+    for (int i = 0; i < 11; i++) if (!strcmp(name, t_dtype(types[i]))) return types[i];
+    return ME_AUTO;
 }
 static int t_call(text_parser *p, const char *name) {
-    if (t_reduction(name)) {
+    me_array_reduction op = t_reduction(name);
+    if (op) {
         int map = t_expr(p, 0), where = -1;
         yyjson_mut_val *axes = yyjson_mut_null(p->doc), *initial = yyjson_mut_null(p->doc);
+        graph_reduction reduced = {.options = {.version = ME_ARTIFACT_ARRAY_VERSION,
+            .reduction = op, .naxes = -1, .accumulator = ME_AUTO}};
         char dtype[64] = "auto";
         bool keepdims = false; unsigned keywords = 0;
         while (t_take(p, ",") && !p->error) {
@@ -205,10 +217,12 @@ static int t_call(text_parser *p, const char *name) {
                         if (p->kind != 2 || strspn(p->token, "0123456789") != strlen(p->token) || strlen(p->token) > 2 || count == ME_ARRAY_MAX_RANK) { p->error = "invalid reduction axis"; break; }
                         int axis = atoi(p->token) * (neg ? -1 : 1);
                         if (axis < -ME_ARRAY_MAX_RANK || axis >= ME_ARRAY_MAX_RANK) { p->error = "axis exceeds maximum rank"; break; }
-                        t_append(p, axes, yyjson_mut_sint(p->doc, axis)); count++;
+                        t_append(p, axes, yyjson_mut_sint(p->doc, axis));
+                        reduced.options.axes[count++] = axis;
                         t_next(p); if (!close || !t_take(p, ",")) break;
                     }
                     if (close) { char end[2] = {close, 0}; t_expect(p, end); }
+                    reduced.options.naxes = count;
                 }
             } else if (bit == 2) {
                 if (t_take(p, "True") || t_take(p, "true")) keepdims = true;
@@ -226,6 +240,12 @@ static int t_call(text_parser *p, const char *name) {
                 const char *op = literal ? p->typed[id].op : NULL;
                 if (!op || strcmp(op, "constant")) p->error = "initial requires a scalar literal";
                 else {
+                    const graph_node *value = &p->typed[id];
+                    reduced.has_initial = true;
+                    reduced.initial = value->scalar;
+                    reduced.initial_dtype = value->dtype;
+                    reduced.initial_weak = true;
+                    if (!value->scalar_valid) reduced.invalid = "initial scalar decode failed";
                     initial = yyjson_mut_val_mut_copy(p->doc, p->nodes[id]);
                     if (!initial) { p->oom = true; p->error = "literal allocation failed"; }
                     yyjson_mut_obj_remove_key(initial, "id");
@@ -240,6 +260,11 @@ static int t_call(text_parser *p, const char *name) {
         yyjson_mut_val *node = p->nodes[id];
         p->typed[id].op = yyjson_mut_get_str(yyjson_mut_obj_get(node, "op"));
         p->typed[id].mask = where;
+        reduced.options.keepdims = keepdims;
+        reduced.options.accumulator = t_parse_dtype(dtype);
+        if (reduced.options.accumulator == ME_AUTO && strcmp(dtype, "auto"))
+            reduced.invalid = "invalid graph schema, fields, keys or nesting";
+        p->typed[id].reduction = reduced;
         t_add(p, node, "axes", axes);
         t_add(p, node, "keepdims", yyjson_mut_bool(p->doc, keepdims));
         t_string(p, node, "dtype", dtype);
@@ -254,9 +279,7 @@ static int t_call(text_parser *p, const char *name) {
             args[n++] = t_expr(p, 0);
         } while (t_take(p, ","));
         t_expect(p, ")");
-        me_dtype cast = ME_AUTO;
-        me_dtype types[] = {ME_BOOL, ME_INT8, ME_INT16, ME_INT32, ME_INT64, ME_UINT8, ME_UINT16, ME_UINT32, ME_UINT64, ME_FLOAT32, ME_FLOAT64};
-        for (int i = 0; i < 11; i++) if (!strcmp(name, t_dtype(types[i]))) cast = types[i];
+        me_dtype cast = t_parse_dtype(name);
         int id = t_arguments(p, cast != ME_AUTO ? "cast" : !strcmp(name, "where") ? "select" : "function", args, n);
         if (id >= 0 && cast != ME_AUTO) {
             p->typed[id].dtype = cast;

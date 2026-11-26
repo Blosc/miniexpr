@@ -17,12 +17,6 @@ typedef struct {
     size_t size, capacity;
     bool failed, oom;
 } graph_buffer;
-typedef struct {
-    me_array_options options;
-    me_dtype initial_dtype;
-    uint64_t initial;
-    bool has_initial, initial_weak;
-} graph_reduction;
 struct me_graph_plan {
     atomic_uint references;
     me_artifact *map;
@@ -699,6 +693,9 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
             if (reduction) {
                 if (i != result) needs_stages = true;
                 if (!g_fields(wire, reduction_fields, 8, 8)) goto done;
+                const char *invalid = "invalid graph schema, fields, keys or nesting";
+                if (!g_decode_reduction(wire, reduction, &n->reduction, &invalid))
+                    n->reduction.invalid = invalid;
                 arity = 1;
                 yyjson_val *where = yyjson_obj_get(wire, "where");
                 if (!yyjson_is_null(where)) {
@@ -792,14 +789,17 @@ static me_graph_status g_prepare_nodes(yyjson_val *root, graph_node *nodes, int 
         for (size_t j=0; name && j<sizeof(costly)/sizeof(*costly); j++)
             p->costly_map |= !strcmp(name,costly[j]);
     }
-    graph_reduction reduced = {0};
-    if (reduction) current = result;
-    if (!g_decode_reduction(yyjson_arr_get(array, (size_t)result), reduction, &reduced, &message)) goto done;
-    p->reduction = reduced.options;
-    if (reduced.has_initial) {
-        p->initial = reduced.initial;
-        p->initial_dtype = reduced.initial_dtype;
-        p->reduction.initial = &p->initial;
+    p->reduction.version = ME_ARTIFACT_ARRAY_VERSION;
+    const graph_reduction *reduced = &nodes[result].reduction;
+    if (reduction) {
+        current = result;
+        if (reduced->invalid) { message = reduced->invalid; goto done; }
+        p->reduction = reduced->options;
+        if (reduced->has_initial) {
+            p->initial = reduced->initial;
+            p->initial_dtype = reduced->initial_dtype;
+            p->reduction.initial = &p->initial;
+        }
     }
     g_add(&source, "def graph_map(");
     int binding = 0;
@@ -860,7 +860,7 @@ static me_graph_status g_prepare_nodes(yyjson_val *root, graph_node *nodes, int 
             rc = ME_GRAPH_ERR_SIGNATURE; message = "invalid accumulator, axes or initial dtype"; goto done;
         }
         if (p->reduction.initial && p->initial_dtype != dtype) {
-            status = g_initial_conversion(&p->initial, p->initial_dtype, reduced.initial_weak, dtype, &p->initial_conversion, &native);
+            status = g_initial_conversion(&p->initial, p->initial_dtype, reduced->initial_weak, dtype, &p->initial_conversion, &native);
             if (status) { rc = g_native(error, result, status, &native); message = NULL; goto done; }
         }
         p->inferred = dtype;
@@ -914,7 +914,7 @@ static me_graph_status g_prepare(const char *json, size_t length, yyjson_val *ro
 }
 
 /* The text parser supplies typed nodes; its tree is used for export and the
- * remaining staged/reduction compatibility paths, not for node validation. */
+ * remaining staged compatibility path, not for single-region preparation. */
 me_graph_status dsl_graph_prepare_nodes(graph_node *nodes, int count, int result, bool staged,
     yyjson_val *interchange, const me_graph_prepare_options *options, me_graph_plan **out,
     me_graph_error *error) {

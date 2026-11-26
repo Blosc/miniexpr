@@ -56,8 +56,9 @@ storage format and will not change `b2o`.
     and partitionability checks no longer consult the wire nodes. Automatic
     stage construction and child dtype resolution now pass in-memory trees
     instead of serializing and reparsing JSON text. The text frontend passes
-    typed nodes directly to the shared planner. Its compatibility tree still
-    supplies exports and metadata for reductions and staged regions. Keep
+    typed nodes directly to the shared planner, including reduction axes,
+    accumulator dtype, masks and initial scalars. Its compatibility tree
+    still supplies exports and staged region construction. Keep
     explicit graph interchange and canonical cache identity as separate
     compatibility concerns.
 3. Run the Python v1 importer in differential tests against the native adapter

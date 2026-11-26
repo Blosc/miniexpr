@@ -3,6 +3,14 @@
 #include "miniexpr_artifact.h"
 #include "miniexpr_graph.h"
 #include "yyjson.h"
+typedef struct {
+    me_array_options options;
+    me_dtype initial_dtype;
+    uint64_t initial;
+    bool has_initial, initial_weak;
+    const char *invalid;
+} graph_reduction;
+
 /* Private frontend descriptor. Strings are borrowed only during prepare;
  * wire nodes are kept separately for compatibility exports. */
 typedef struct {
@@ -11,6 +19,7 @@ typedef struct {
     uint64_t scalar;
     int args[3], nargs, uses, depth, mask;
     bool reachable, weak, scalar_valid;
+    graph_reduction reduction;
 } graph_node;
 
 me_graph_status dsl_graph_prepare_nodes(graph_node *nodes, int count, int result, bool staged,
