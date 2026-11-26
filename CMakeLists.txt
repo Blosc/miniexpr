@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16.3)
-project(miniexpr VERSION 1.0.0 LANGUAGES C)
+project(miniexpr VERSION 0.4.0 LANGUAGES C)
 if(NOT EMSCRIPTEN)
   find_package(Threads REQUIRED)
 endif()

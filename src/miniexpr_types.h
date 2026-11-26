@@ -9,10 +9,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define ME_VERSION_MAJOR 1
-#define ME_VERSION_MINOR 0
+#define ME_VERSION_MAJOR 0
+#define ME_VERSION_MINOR 4
 #define ME_VERSION_PATCH 0
-#define ME_VERSION_STRING "1.0.0.alpha1"
+#define ME_VERSION_STRING "0.4.0"
 
 /* Stable 1.x dtype numbers. Source, storage and library versions are independent.
  * Strings use native NUL-padded fixed slots; Unicode slots contain UCS4 units. */
