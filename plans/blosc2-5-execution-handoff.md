@@ -61,7 +61,11 @@ storage format and will not change `b2o`.
    executes 1-D logical partitions with block-scalar outputs: a persisted
    three-item partition recipe produces the same results on two different
    physical layouts, including a short final group. An undersized scratch
-   budget is rejected. Default Python execution still uses the adapter.
+   budget is rejected. In the opt-in build, full lazy reads of eligible
+   interpreter-only 1-D float64 block-scalar kernels now select the pilot
+   through ordinary `group_sum(x)[:]` syntax. Partial reads, legacy handles,
+   and partitions over the pilot's 64 KiB scheduler buffer limit retain the
+   old route. Standard builds still use the adapter.
 2. Replace the scheduler's **input** with a typed, bounded, topologically
    ordered node array: operand slots, exact scalar captures and typed operation
    parameters; root and staged reduction references are node IDs. Copy the
