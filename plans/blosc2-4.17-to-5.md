@@ -1,6 +1,7 @@
 # Python-Blosc2 4.17 to 5.x: storage first, execution second
 
-Status: the storage backport is under release-candidate qualification. The
+Status: the storage backport passed candidate qualification. The final
+4.17.0 build is undergoing release qualification. The
 execution handoff is in development, not enabled in standard 5.x builds.
 
 ## Local checkout convention
@@ -96,10 +97,13 @@ The first candidate passed that exchange on macOS arm64: Python-Blosc2
 The 4.17 wheel uses miniexpr `64e5d180904f87513cead89cbb15bff09d065cab`
 and C-Blosc2 3.8. The miniexpr candidate's
 [hosted qualification](https://github.com/Blosc/miniexpr/actions/runs/45776437750)
-passed. The
-[4.17 wheel matrix](https://github.com/Blosc/python-blosc2/actions/runs/45776669778)
+passed, and `v0.4.0` points to that commit on both remotes. The
+[candidate wheel matrix](https://github.com/Blosc/python-blosc2/actions/runs/45776669778),
+[native tests](https://github.com/Blosc/python-blosc2/actions/runs/45776660663),
 and [WASM tests](https://github.com/Blosc/python-blosc2/actions/runs/45776660763)
-are the remaining hosted gates, not release tags.
+passed. The
+[final wheel run](https://github.com/Blosc/python-blosc2/actions/runs/45779775014)
+qualifies `a32d05852972009736c7a6a1a380a15088f049c7` without uploading to PyPI.
 
 ## 3. Change execution ownership for 5.x without changing storage again
 
