@@ -723,7 +723,8 @@ static void output_aliases(bool jit) {
 }
 static void in_memory_roundtrip(void) {
     const char *expressions[] = {"x + (y - 1)", "x + -0.0 + y", "x + .5 + y", "where(x != 0, y / x, y)",
-        "float32(x) + y", "x < y", "x ** -2 + y", "x - sum(x) + y", "sum(x + y, axis=0, initial=-2.5)"};
+        "float32(x) + y", "x < y", "x ** -2 + y", "x - sum(x) + y", "sum(x + y, axis=0, initial=-2.5)",
+        "x - sum(x + sum(y, axis=0, initial=-2.5), axis=-1)"};
     me_graph_input_metadata metadata[] = {{"x", ME_FLOAT64, 1, {3}}, {"y", ME_FLOAT64, 1, {3}}};
     double x[] = {1, 2, 4}, y[] = {3, 2, 1};
     me_array_view inputs[] = {view("x", ME_FLOAT64, x, sizeof(x), 1, 3, 0),

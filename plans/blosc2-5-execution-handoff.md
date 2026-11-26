@@ -53,9 +53,11 @@ storage format and will not change `b2o`.
    Map and cast kernels now use typed miniexpr signatures directly; the old map
     manifest remains an export, not a preparation input. The internal nodes
     now carry decoded dtypes, scalar bytes and mask references; map lowering
-    and partitionability checks no longer consult the wire nodes. The text
-    frontend still builds a yyjson tree, and automatic staging still rewrites
-    and reparses JSON. Keep explicit graph interchange and canonical cache
+    and partitionability checks no longer consult the wire nodes. Automatic
+    stage construction and child dtype resolution now pass in-memory trees
+    instead of serializing and reparsing JSON text. The text frontend and the
+    staged planner still depend on yyjson trees; the next step is to pass
+    typed nodes directly. Keep explicit graph interchange and canonical cache
     identity as separate compatibility concerns.
 3. Run the Python v1 importer in differential tests against the native adapter
    before making it the default. Preserve duplicate-key and UTF-8 rejection,

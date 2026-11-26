@@ -1601,6 +1601,11 @@ void me_graph_schedule_free(me_graph_schedule *s) {
 static me_dtype g_result_dtype(const me_graph_plan *p) {
     return p->conversion ? me_artifact_output_dtype(p->conversion) : p->inferred;
 }
+static bool g_stage_input(yyjson_mut_doc *doc, yyjson_mut_val *input, const char *name, const char *dtype) {
+    return yyjson_mut_obj_add_strcpy(doc, input, "name", name) &&
+        yyjson_mut_obj_add_str(doc, input, "dtype", dtype);
+}
+
 static me_graph_status g_split_graph(yyjson_val *root, graph_node *nodes, int count, int result,
     const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error) {
     yyjson_val *wire_nodes = yyjson_obj_get(root, "nodes");
@@ -1627,83 +1632,96 @@ static me_graph_status g_split_graph(yyjson_val *root, graph_node *nodes, int co
     }
     if (!g_equal(yyjson_obj_get(yyjson_obj_get(root, "output"), "dtype"), "auto"))
         return g_error(error, result, ME_GRAPH_ERR_UNSUPPORTED, "staged results require auto output; use explicit cast nodes");
-    graph_buffer json = {0};
-    g_add(&json, "{\"format\":\"" ME_GRAPH_STAGED_FORMAT "\",\"semantics\":\"" ME_GRAPH_SEMANTICS
-        "\",\"requires\":[\"numeric\",\"staged\"],\"inputs\":[");
-    bool first = true;
-    for (int i = 0; i < count; i++) if (!strcmp(nodes[i].op, "input")) {
-        if (!first) g_add(&json, ",");
-        first = false;
-        yyjson_val *wire = yyjson_arr_get(wire_nodes, (size_t)i);
-        g_add(&json, "{\"name\":"); g_json(&json, yyjson_obj_get(wire, "name"));
-        g_add(&json, ",\"dtype\":"); g_json(&json, yyjson_obj_get(wire, "dtype")); g_add(&json, "}");
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    if (!doc) return g_error(error, -1, ME_GRAPH_ERR_OOM, "automatic stage allocation failed");
+    yyjson_mut_val *staged = yyjson_mut_obj(doc), *requires = yyjson_mut_arr(doc);
+    yyjson_mut_val *inputs = yyjson_mut_arr(doc), *stages = yyjson_mut_arr(doc);
+    bool ok = yyjson_mut_obj_add_str(doc, staged, "format", ME_GRAPH_STAGED_FORMAT) &&
+        yyjson_mut_obj_add_str(doc, staged, "semantics", ME_GRAPH_SEMANTICS) &&
+        yyjson_mut_arr_add_str(doc, requires, "numeric") && yyjson_mut_arr_add_str(doc, requires, "staged") &&
+        yyjson_mut_obj_add_val(doc, staged, "requires", requires) &&
+        yyjson_mut_obj_add_val(doc, staged, "inputs", inputs) &&
+        yyjson_mut_obj_add_val(doc, staged, "stages", stages) &&
+        yyjson_mut_obj_add_uint(doc, staged, "root", (uint64_t)(nstages - 1));
+    for (int i = 0; ok && i < count; i++) if (!strcmp(nodes[i].op, "input")) {
+        yyjson_mut_val *input = yyjson_mut_obj(doc);
+        ok = g_stage_input(doc, input, nodes[i].name, g_dtype_name(nodes[i].dtype)) &&
+            yyjson_mut_arr_append(inputs, input);
     }
-    g_add(&json, "],\"stages\":[");
-    for (int stage = 0; stage < nstages; stage++) {
+    for (int stage = 0; ok && stage < nstages; stage++) {
         int stage_root = roots[stage], mapped[ME_GRAPH_MAX_NODES];
         bool needed[ME_GRAPH_MAX_NODES] = {0};
         needed[stage_root] = true;
         for (int i = stage_root; i >= 0; i--) if (needed[i] && (i == stage_root || !boundary[i])) {
             for (int j = 0; j < nodes[i].nargs; j++) needed[nodes[i].args[j]] = true;
         }
-        char text[96];
-        snprintf(text, sizeof(text), "%s{\"id\":%d,\"kind\":\"graph\",\"inputs\":{", stage ? "," : "", stage);
-        g_add(&json, text);
-        first = true;
-        for (int i = 0; i <= stage_root; i++) if (needed[i]) {
+        yyjson_mut_val *region = yyjson_mut_obj(doc), *bindings = yyjson_mut_obj(doc);
+        yyjson_mut_val *graph = yyjson_mut_obj(doc), *region_nodes = yyjson_mut_arr(doc);
+        yyjson_mut_val *region_requires = yyjson_mut_arr(doc);
+        ok = yyjson_mut_obj_add_uint(doc, region, "id", (uint64_t)stage) &&
+            yyjson_mut_obj_add_str(doc, region, "kind", "graph") &&
+            yyjson_mut_obj_add_val(doc, region, "inputs", bindings) &&
+            yyjson_mut_obj_add_val(doc, region, "graph", graph) &&
+            yyjson_mut_arr_append(stages, region) &&
+            yyjson_mut_obj_add_str(doc, graph, "format", ME_GRAPH_FORMAT) &&
+            yyjson_mut_obj_add_str(doc, graph, "semantics", ME_GRAPH_SEMANTICS) &&
+            yyjson_mut_arr_add_str(doc, region_requires, "numeric") &&
+            yyjson_mut_obj_add_val(doc, graph, "requires", region_requires) &&
+            yyjson_mut_obj_add_val(doc, graph, "nodes", region_nodes);
+        if (ok && g_equal(yyjson_obj_get(root, "optimization"), "aggressive"))
+            ok = yyjson_mut_obj_add_str(doc, graph, "optimization", "aggressive");
+        for (int i = 0; ok && i <= stage_root; i++) if (needed[i]) {
             bool intermediate = boundary[i] && i != stage_root;
             if (!intermediate && strcmp(nodes[i].op, "input")) continue;
-            if (!first) g_add(&json, ",");
-            first = false;
+            yyjson_mut_val *binding = yyjson_mut_obj(doc);
+            const char *name = nodes[i].name;
+            char generated[32];
             if (intermediate) {
-                snprintf(text, sizeof(text), "\"_me_stage_%d\":{\"stage\":%d}", i, stage_ids[i]);
-                g_add(&json, text);
+                snprintf(generated, sizeof(generated), "_me_stage_%d", i);
+                name = generated;
+                ok = yyjson_mut_obj_add_uint(doc, binding, "stage", (uint64_t)stage_ids[i]);
             } else {
-                yyjson_val *name = yyjson_obj_get(yyjson_arr_get(wire_nodes, (size_t)i), "name");
-                const char *s = nodes[i].name;
-                if (!strncmp(s, "_me_stage_", strlen("_me_stage_"))) {
-                    free(json.data);
+                if (!strncmp(name, "_me_stage_", strlen("_me_stage_"))) {
+                    yyjson_mut_doc_free(doc);
                     return g_error(error, i, ME_GRAPH_ERR_BINDING, "input name collides with automatic stage namespace");
                 }
-                g_json(&json, name); g_add(&json, ":{\"input\":"); g_json(&json, name); g_add(&json, "}");
+                ok = yyjson_mut_obj_add_strcpy(doc, binding, "input", name);
             }
+            yyjson_mut_val *key = yyjson_mut_strcpy(doc, name);
+            ok = ok && key && yyjson_mut_obj_add(bindings, key, binding);
         }
-        g_add(&json, "},\"graph\":{\"format\":\"" ME_GRAPH_FORMAT "\",\"semantics\":\"" ME_GRAPH_SEMANTICS "\"");
-        if (g_equal(yyjson_obj_get(root,"optimization"),"aggressive"))
-            g_add(&json,",\"optimization\":\"aggressive\"");
-        g_add(&json,",\"requires\":[\"numeric\"],\"nodes\":[");
         int n = 0;
-        for (int i = 0; i <= stage_root; i++) if (needed[i]) {
+        for (int i = 0; ok && i <= stage_root; i++) if (needed[i]) {
             mapped[i] = n++;
-            if (mapped[i]) g_add(&json, ",");
+            yyjson_mut_val *node;
             if (boundary[i] && i != stage_root) {
-                snprintf(text, sizeof(text), "{\"id\":%d,\"op\":\"input\",\"name\":\"_me_stage_%d\",\"dtype\":\"auto\"}", mapped[i], i);
-                g_add(&json, text);
+                char name[32];
+                snprintf(name, sizeof(name), "_me_stage_%d", i);
+                node = yyjson_mut_obj(doc);
+                ok = yyjson_mut_obj_add_uint(doc, node, "id", (uint64_t)mapped[i]) &&
+                    yyjson_mut_obj_add_str(doc, node, "op", "input") &&
+                    g_stage_input(doc, node, name, "auto");
             } else {
-                yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
-                yyjson_mut_val *node = doc ? yyjson_val_mut_copy(doc, yyjson_arr_get(wire_nodes, (size_t)i)) : NULL;
-                bool ok = node && yyjson_mut_obj_put(node, yyjson_mut_str(doc, "id"), yyjson_mut_uint(doc, (uint64_t)mapped[i]));
+                node = yyjson_val_mut_copy(doc, yyjson_arr_get(wire_nodes, (size_t)i));
+                ok = node && yyjson_mut_obj_put(node, yyjson_mut_str(doc, "id"), yyjson_mut_uint(doc, (uint64_t)mapped[i]));
                 if (ok && nodes[i].nargs) {
                     yyjson_mut_val *args = yyjson_mut_arr(doc);
                     for (int j = 0; ok && j < nodes[i].nargs; j++)
-                        ok = yyjson_mut_arr_add_int(doc, args, mapped[nodes[i].args[j]]);
+                        ok = yyjson_mut_arr_add_uint(doc, args, (uint64_t)mapped[nodes[i].args[j]]);
                     ok = ok && yyjson_mut_obj_put(node, yyjson_mut_str(doc, "args"), args);
                 }
-                char *encoded = ok ? yyjson_mut_val_write(node, 0, NULL) : NULL;
-                if (!encoded) json.failed = json.oom = true;
-                else g_add(&json, encoded);
-                free(encoded); yyjson_mut_doc_free(doc);
             }
+            ok = ok && yyjson_mut_arr_append(region_nodes, node);
         }
-        snprintf(text, sizeof(text), "],\"root\":%d,\"output\":", mapped[stage_root]);
-        g_add(&json, text);
-        g_json(&json, yyjson_obj_get(root, "output")); g_add(&json, "}}");
+        ok = ok && yyjson_mut_obj_add_uint(doc, graph, "root", (uint64_t)mapped[stage_root]) &&
+            yyjson_mut_obj_add_val(doc, graph, "output", yyjson_val_mut_copy(doc, yyjson_obj_get(root, "output")));
     }
-    char end[32]; snprintf(end, sizeof(end), "],\"root\":%d}", nstages - 1); g_add(&json, end);
-    me_graph_status rc = json.failed ? g_error(error, -1, json.oom ? ME_GRAPH_ERR_OOM : ME_GRAPH_ERR_FORMAT,
-        "automatic stage allocation or byte limit exceeded") :
-        me_graph_prepare_json(json.data, json.size, options, out, error);
-    free(json.data);
+    yyjson_mut_doc_set_root(doc, staged);
+    yyjson_doc *lowered = ok ? yyjson_mut_doc_imut_copy(doc, NULL) : NULL;
+    yyjson_mut_doc_free(doc);
+    me_graph_status rc = lowered ? dsl_graph_prepare_root(yyjson_doc_get_root(lowered), options, out, error) :
+        g_error(error, -1, ME_GRAPH_ERR_OOM, "automatic stage allocation failed");
+    yyjson_doc_free(lowered);
     return rc;
 }
 static int g_source(const me_graph_plan *p, yyjson_val *binding, int stage) {
@@ -1778,9 +1796,22 @@ static me_graph_status g_prepare_staged(yyjson_val *root, const me_graph_prepare
         !yyjson_is_arr(requires) || yyjson_arr_size(requires) != 2 ||
         !g_equal(yyjson_arr_get(requires, 0), "numeric") || !g_equal(yyjson_arr_get(requires, 1), "staged"))
         return g_error(error, -1, ME_GRAPH_ERR_CAPABILITY, "staged graphs require explicit numeric/staged capabilities and supported semantics");
+    /* Bound synthesized stages too, before preparing any child region. */
+    graph_buffer canonical = {0};
+    g_json(&canonical, root);
+    if (canonical.failed) {
+        free(canonical.data);
+        return g_error(error, -1, canonical.oom ? ME_GRAPH_ERR_OOM : ME_GRAPH_ERR_FORMAT,
+            "staged graph export allocation or byte limit exceeded");
+    }
     me_graph_plan *p = calloc(1, sizeof(*p));
-    if (!p) return g_error(error, -1, ME_GRAPH_ERR_OOM, "staged plan allocation failed");
+    if (!p) {
+        free(canonical.data);
+        return g_error(error, -1, ME_GRAPH_ERR_OOM, "staged plan allocation failed");
+    }
     atomic_init(&p->references, 1);
+    p->json = canonical.data;
+    p->json_size = canonical.size;
     p->mask = -1;
     p->ninputs = (int)yyjson_arr_size(inputs);
     p->nstages = (int)yyjson_arr_size(stages);
@@ -1841,12 +1872,11 @@ static me_graph_status g_prepare_staged(yyjson_val *root, const me_graph_prepare
                     }
                 }
             }
-            size_t length = 0;
-            char *json = yyjson_mut_write(copy, 0, &length);
+            yyjson_doc *region = yyjson_mut_doc_imut_copy(copy, NULL);
             yyjson_mut_doc_free(copy);
-            if (!json) { rc = ME_GRAPH_ERR_OOM; goto failure; }
-            rc = me_graph_prepare_json(json, length, options, &p->stages[i], error);
-            free(json);
+            if (!region) { rc = ME_GRAPH_ERR_OOM; goto failure; }
+            rc = dsl_graph_prepare_root(yyjson_doc_get_root(region), options, &p->stages[i], error);
+            yyjson_doc_free(region);
         }
         if (rc) goto nested_failure;
         me_graph_plan *child = p->stages[i];
@@ -1872,11 +1902,6 @@ static me_graph_status g_prepare_staged(yyjson_val *root, const me_graph_prepare
     }
     for (int i = 0; i < p->nstages; i++) if (!reachable[i]) goto failure;
     for (int i = 0; i < p->ninputs; i++) if (!used[i]) goto failure;
-    graph_buffer canonical = {0};
-    g_json(&canonical, root);
-    if (canonical.failed) { free(canonical.data); rc = ME_GRAPH_ERR_OOM; goto failure; }
-    p->json = canonical.data;
-    p->json_size = canonical.size;
     p->inferred = g_result_dtype(p->stages[p->nstages - 1]);
     *out = p;
     return ME_GRAPH_SUCCESS;
