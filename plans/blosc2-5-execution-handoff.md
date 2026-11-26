@@ -54,8 +54,9 @@ storage format and will not change `b2o`.
    links one miniexpr core archive. An independent C consumer also found the
    wheel's static packages and ran the grid fixture. The same opt-in build
    exposes a private Python probe for a context-free float64 elementwise
-   map over a compressed 1-D array. It prepares the typed core kernel,
-   uses C-Blosc2 callbacks for block reads and a NumPy result sink, and agrees
+   map over a compressed 1-D array. It borrows the core owned by an already
+   prepared `MenudetKernel`, without compiling source again. It uses
+   C-Blosc2 callbacks for block reads and a NumPy result sink, and agrees
    with the existing adapter on full and padded grids. The pilot also now
    executes 1-D logical partitions with block-scalar outputs: a persisted
    three-item partition recipe produces the same results on two different
