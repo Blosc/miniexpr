@@ -19,7 +19,7 @@ me_graph_status dsl_graph_prepare_root(yyjson_val *root,
     const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error);
 me_artifact_status dsl_graph_load_map_root(yyjson_val *root,
     me_jit_mode jit, me_artifact **out, me_artifact_error *error);
-me_artifact_status dsl_graph_scalar(const char *json, size_t length, me_dtype *dtype, void *value);
+me_artifact_status dsl_graph_scalar(yyjson_val *root, me_dtype *dtype, void *value);
 me_artifact_status dsl_array_preflight(const me_artifact *artifact,
     const me_array_view *inputs, int ninputs, int rank, const int64_t *shape,
     const me_array_options *options, void *output, size_t capacity, me_artifact_error *error);

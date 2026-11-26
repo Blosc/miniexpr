@@ -204,38 +204,27 @@ static const char *g_dtype_name(me_dtype d) {
 }
 static int g_conversion(me_dtype source, me_dtype target, const char *casting,
     me_artifact **out, me_artifact_error *error) {
-    char json[1024];
-    int n = snprintf(json, sizeof(json),
-        "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
-        "\"requires\":[\"numeric\"],\"source\":\"def convert(value):\\n    return value\\n\","
-        "\"entry_point\":\"convert\",\"inputs\":[{\"name\":\"value\",\"dtype\":\"%s\"}],\"constants\":[],"
-        "\"output\":{\"dtype\":\"%s\",\"contract\":\"elementwise\"},\"context\":{\"ndim\":0},"
-        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"%s\"}}",
-        g_dtype_name(source), g_dtype_name(target), casting);
-    return me_artifact_load(json, (size_t)n, ME_JIT_OFF, out, error);
+    me_input_spec input = {"value", source, 0};
+    me_signature signature = ME_SIGNATURE_INITIALIZER;
+    signature.inputs = &input;
+    signature.ninputs = 1;
+    signature.output_dtype = target;
+    signature.cardinality = ME_ELEMENTWISE;
+    signature.casting = !strcmp(casting, "safe") ? ME_CAST_SAFE :
+        !strcmp(casting, "same_kind") ? ME_CAST_SAME_KIND : ME_CAST_UNSAFE;
+    return me_artifact_prepare_menudet("0.1", "# me:fp=strict\ndef convert(value):\n    return value\n",
+        &signature, ME_JIT_OFF, NULL, out, error);
 }
-static int g_initial_conversion(yyjson_val *initial, me_dtype target,
+static int g_initial_conversion(const void *initial, me_dtype source, bool weak, me_dtype target,
     me_artifact **out, me_artifact_error *error) {
-    graph_buffer json = {0};
-    g_add(&json, "{\"schema_version\":\"0.1\",\"language\":{\"name\":\"menudet\",\"version\":\"0.1\"},"
-        "\"requires\":[\"numeric\"],\"source\":\"def convert(initial):\\n    return initial\\n\","
-        "\"entry_point\":\"convert\",\"inputs\":[],\"constants\":[{\"name\":\"initial\"");
-    const char *fields[] = {"dtype", "category", "encoding", "value"};
-    for (int i = 0; i < 4; i++) {
-        g_add(&json, ",\""); g_add(&json, fields[i]); g_add(&json, "\":");
-        g_json(&json, yyjson_obj_get(initial, fields[i]));
-    }
-    g_add(&json, "}],\"output\":{\"dtype\":\""); g_add(&json, g_dtype_name(target));
-    g_add(&json, "\",\"contract\":\"elementwise\"},\"context\":{\"ndim\":0},"
-        "\"semantics\":{\"fp\":\"strict\",\"numeric\":\"numpy-2.5\",\"casting\":\"unsafe\"}}");
-    int rc = json.failed ? ME_ARTIFACT_ERR_OOM :
-        me_artifact_load(json.data, json.size, ME_JIT_OFF, out, error);
-    if (json.failed && error) {
-        memset(error, 0, sizeof(*error));
-        snprintf(error->message, sizeof(error->message), "initial conversion allocation failed");
-    }
-    free(json.data);
-    return rc;
+    me_capture capture = {{"initial", source, 0}, initial, weak ? ME_CAPTURE_WEAK : ME_CAPTURE_TYPED};
+    me_signature signature = ME_SIGNATURE_INITIALIZER;
+    signature.captures = &capture;
+    signature.ncaptures = 1;
+    signature.output_dtype = target;
+    signature.cardinality = ME_ELEMENTWISE;
+    return me_artifact_prepare_menudet("0.1", "# me:fp=strict\ndef convert(initial):\n    return initial\n",
+        &signature, ME_JIT_OFF, NULL, out, error);
 }
 static bool g_product(int rank, const int64_t *shape, size_t width, size_t *bytes) {
     if (rank < 0 || rank > ME_ARRAY_MAX_RANK || (rank && !shape)) return false;
@@ -435,6 +424,73 @@ static bool g_partitionable(graph_node *nodes, int count) {
     }
     return count && runtime[count-1];
 }
+static me_artifact_status g_prepare_map(const char *source, const graph_node *nodes,
+    const int *input_nodes, int ni, const int *constant_nodes, int nc, int mask_node,
+    bool integer_powers, const char *math_backend, me_jit_mode jit,
+    me_artifact **out, me_artifact_error *error) {
+    me_input_spec inputs[ME_MAX_VARS];
+    me_capture captures[ME_MAX_VARS];
+    char capture_names[ME_MAX_VARS][32];
+    uint64_t values[ME_MAX_VARS];
+    size_t ninputs = 0;
+    for (int i = 0; i < ni; i++) {
+        int id = input_nodes[i];
+        if (id == mask_node && nodes[id].uses == 1) continue;
+        yyjson_val *node = nodes[id].value;
+        inputs[ninputs++] = (me_input_spec){g_str(yyjson_obj_get(node, "name")),
+            g_dtype(g_str(yyjson_obj_get(node, "dtype"))), 0};
+    }
+    for (int i = 0; i < nc; i++) {
+        int id = constant_nodes[i];
+        yyjson_val *node = nodes[id].value;
+        me_dtype dtype;
+        values[i] = 0;
+        if (dsl_graph_scalar(node, &dtype, &values[i]) != ME_ARTIFACT_SUCCESS) {
+            memset(error, 0, sizeof(*error));
+            snprintf(error->message, sizeof(error->message), "invalid graph scalar encoding");
+            return ME_ARTIFACT_ERR_FORMAT;
+        }
+        snprintf(capture_names[i], sizeof(capture_names[i]), "_me_capture_%d", id);
+        captures[i] = (me_capture){{capture_names[i], dtype, 0}, &values[i],
+            g_equal(yyjson_obj_get(node, "category"), "weak") ? ME_CAPTURE_WEAK : ME_CAPTURE_TYPED};
+    }
+    if (math_backend && strcmp(math_backend, "auto") && strcmp(math_backend, "system") &&
+        strcmp(math_backend, "sleef") && strcmp(math_backend, "accelerate")) {
+        memset(error, 0, sizeof(*error));
+        snprintf(error->message, sizeof(error->message), "unsupported graph math policy");
+        return ME_ARTIFACT_ERR_UNSUPPORTED;
+    }
+    graph_buffer lowered = {0};
+    g_add(&lowered, "# me:fp=strict\n");
+    if (math_backend) {
+        g_add(&lowered, "# me:math=");
+        g_add(&lowered, math_backend);
+        g_add(&lowered, "\n");
+    }
+    g_add(&lowered, source);
+    me_artifact_status status;
+    if (lowered.failed) {
+        memset(error, 0, sizeof(*error));
+        snprintf(error->message, sizeof(error->message), "map lowering allocation or byte limit exceeded");
+        status = lowered.oom ? ME_ARTIFACT_ERR_OOM : ME_ARTIFACT_ERR_FORMAT;
+    } else {
+        me_signature signature = ME_SIGNATURE_INITIALIZER;
+        signature.inputs = inputs;
+        signature.ninputs = ninputs;
+        signature.captures = captures;
+        signature.ncaptures = (size_t)nc;
+        signature.cardinality = ME_ELEMENTWISE;
+        signature.integer_powers = integer_powers;
+        /* Legacy graph DEFAULT did not request compilation. Keep AUTO explicit. */
+        status = me_artifact_prepare_menudet("0.1", lowered.data, &signature,
+            jit == ME_JIT_DEFAULT ? ME_JIT_OFF : jit, NULL, out, error);
+    }
+    free(lowered.data);
+    return status;
+}
+
+/* Build the legacy interchange document only for a map that can export it.
+ * Preparation above never consumes this document. */
 static yyjson_doc *g_map_root(const char *source, graph_node *nodes,
     const int *input_nodes, int ni, const int *constant_nodes, int nc, int mask_node, bool integer_powers,
     const char *math_backend) {
@@ -687,11 +743,8 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
             if (!g_fields(initial, initial_fields, 4, 4) ||
                 !(g_equal(yyjson_obj_get(initial, "category"), "typed_scalar") ||
                   g_equal(yyjson_obj_get(initial, "category"), "weak"))) goto done;
-            char *s = yyjson_val_write(initial, 0, NULL);
-            me_artifact_status scalar_status = s ? dsl_graph_scalar(s, strlen(s), &p->initial_dtype, &p->initial) : ME_ARTIFACT_ERR_OOM;
-            free(s);
+            me_artifact_status scalar_status = dsl_graph_scalar(initial, &p->initial_dtype, &p->initial);
             if (scalar_status) {
-                rc = scalar_status == ME_ARTIFACT_ERR_OOM ? ME_GRAPH_ERR_OOM : ME_GRAPH_ERR_FORMAT;
                 message = "initial scalar decode failed"; goto done;
             }
             if (g_equal(yyjson_obj_get(initial, "category"), "weak") && p->initial_dtype != ME_BOOL &&
@@ -728,15 +781,16 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
         message = "lowering allocation or byte limit exceeded"; goto done;
     }
     const char *math_backend = options && options->struct_size == sizeof(*options) ? options->math_backend : NULL;
-    map_doc = g_map_root(source.data, nodes, input_nodes, ni, constant_nodes, nc, mask_node,
-        optimization != NULL, math_backend);
-    if (!map_doc) { rc = ME_GRAPH_ERR_OOM; message = "map allocation failed"; goto done; }
     me_artifact_error native;
-    yyjson_val *map = yyjson_doc_get_root(map_doc);
-    int status = dsl_graph_load_map_root(map, options ? options->jit : ME_JIT_OFF, &p->map, &native);
+    int status = g_prepare_map(source.data, nodes, input_nodes, ni, constant_nodes, nc, mask_node,
+        optimization != NULL, math_backend, options ? options->jit : ME_JIT_OFF, &p->map, &native);
     if (status) { rc = g_native(error, map_root, status, &native); message = NULL; goto done; }
     p->inferred = me_artifact_inferred_dtype(p->map);
     if (!reduction && final_dtype == ME_AUTO) {
+        map_doc = g_map_root(source.data, nodes, input_nodes, ni, constant_nodes, nc, mask_node,
+            optimization != NULL, math_backend);
+        if (!map_doc) { rc = ME_GRAPH_ERR_OOM; message = "map export allocation failed"; goto done; }
+        yyjson_val *map = yyjson_doc_get_root(map_doc);
         yyjson_set_str(yyjson_obj_get(yyjson_obj_get(map, "output"), "dtype"), g_dtype_name(p->inferred));
         g_json(&manifest, map);
         if (manifest.failed) { rc = manifest.oom ? ME_GRAPH_ERR_OOM : ME_GRAPH_ERR_FORMAT; message = "map export allocation or byte limit exceeded"; goto done; }
@@ -759,8 +813,9 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
             rc = ME_GRAPH_ERR_SIGNATURE; message = "invalid accumulator, axes or initial dtype"; goto done;
         }
         if (p->reduction.initial && p->initial_dtype != dtype) {
-            status = g_initial_conversion(yyjson_obj_get(nodes[result].value, "initial"), dtype,
-                &p->initial_conversion, &native);
+            yyjson_val *initial = yyjson_obj_get(nodes[result].value, "initial");
+            bool weak = g_equal(yyjson_obj_get(initial, "category"), "weak");
+            status = g_initial_conversion(&p->initial, p->initial_dtype, weak, dtype, &p->initial_conversion, &native);
             if (status) { rc = g_native(error, result, status, &native); message = NULL; goto done; }
         }
         p->inferred = dtype;

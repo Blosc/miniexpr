@@ -410,20 +410,16 @@ static bool artifact_constant(yyjson_val *object, artifact_binding *binding) {
     }
 }
 
-me_artifact_status dsl_graph_scalar(const char *json, size_t length, me_dtype *dtype, void *value) {
-    yyjson_read_err error;
-    yyjson_doc *doc = yyjson_read_opts((char *)json, length, 0, NULL, &error);
-    if (!doc) return error.code == YYJSON_READ_ERROR_MEMORY_ALLOCATION ? ME_ARTIFACT_ERR_OOM : ME_ARTIFACT_ERR_FORMAT;
+me_artifact_status dsl_graph_scalar(yyjson_val *root, me_dtype *dtype, void *value) {
     artifact_binding binding = {0};
-    binding.variable.dtype = artifact_dtype1(yyjson_obj_get(yyjson_doc_get_root(doc), "dtype"));
+    binding.variable.dtype = artifact_dtype1(yyjson_obj_get(root, "dtype"));
     bool ok = artifact_itemsize(binding.variable.dtype) &&
         binding.variable.dtype != ME_COMPLEX64 && binding.variable.dtype != ME_COMPLEX128 &&
-        artifact_constant(yyjson_doc_get_root(doc), &binding);
+        artifact_constant(root, &binding);
     if (ok) {
         *dtype = binding.variable.dtype;
         memcpy(value, &binding.value, artifact_itemsize(*dtype));
     }
-    yyjson_doc_free(doc);
     return ok ? ME_ARTIFACT_SUCCESS : ME_ARTIFACT_ERR_FORMAT;
 }
 

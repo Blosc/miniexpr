@@ -776,11 +776,33 @@ static void math_policy(void) {
     CHECK(me_graph_prepare_expression(source, strlen(source), inputs, 1, &options, &p, &error) != ME_GRAPH_SUCCESS);
     CHECK(p == NULL);
 }
+
+static void typed_map_interchange(void) {
+    me_graph_input_metadata input = {"x", ME_FLOAT32, 1, {3}};
+    me_graph_plan *plan = prepare("x * 2.0 + .5", &input, 1, false);
+    const char *json = me_graph_export_map_json(plan);
+    me_artifact *legacy = NULL;
+    CHECK(json && me_artifact_load(json, strlen(json), ME_JIT_OFF, &legacy, NULL) == ME_ARTIFACT_SUCCESS);
+    CHECK(me_graph_inferred_dtype(plan) == ME_FLOAT32 && me_artifact_output_dtype(legacy) == ME_FLOAT32);
+    me_graph_schedule *schedule = NULL;
+    CHECK(me_graph_specialize(plan, &input, 1, NULL, &schedule, &error) == ME_GRAPH_SUCCESS);
+    float x[] = {-1.25f, -0.0f, 2.125f}, actual[3], expected[3];
+    me_array_view binding = view("x", ME_FLOAT32, x, sizeof(x), 1, 3, 0);
+    me_artifact_input legacy_input = {"x", ME_FLOAT32, x, 3};
+    CHECK(me_graph_execute(schedule, &binding, 1, actual, sizeof(actual), NULL, NULL, &error) == ME_GRAPH_SUCCESS);
+    CHECK(me_artifact_eval(legacy, &legacy_input, 1, expected, 3, NULL) == ME_ARTIFACT_SUCCESS);
+    CHECK(!memcmp(actual, expected, sizeof(actual)));
+    me_artifact_free(legacy);
+    me_graph_schedule_free(schedule);
+    me_graph_plan_free(plan);
+}
+
 int main(void) {
 #define RUN_CASE(call) do { fprintf(stderr, "graph preparation: %s\n", #call); fflush(stderr); call; } while (0)
     RUN_CASE(maps(false)); RUN_CASE(lazy(false)); RUN_CASE(reductions(false));
     RUN_CASE(identity_destinations(false)); RUN_CASE(identity_destinations(true));
     RUN_CASE(partition_policies());
+    RUN_CASE(typed_map_interchange());
     RUN_CASE(dynamic_maps());
     RUN_CASE(integer_extrema(false)); RUN_CASE(integer_extrema(true));
     RUN_CASE(validation()); RUN_CASE(limits());
