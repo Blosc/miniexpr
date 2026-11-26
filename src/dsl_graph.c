@@ -17,15 +17,6 @@ typedef struct {
     size_t size, capacity;
     bool failed, oom;
 } graph_buffer;
-/* Frontend-lowered node. Strings are borrowed for preparation only; the
- * original wire nodes are kept separately for compatibility exports. */
-typedef struct {
-    const char *op, *name, *power_literal;
-    me_dtype dtype;
-    uint64_t scalar;
-    int args[3], nargs, uses, depth, mask;
-    bool reachable, weak, scalar_valid;
-} graph_node;
 typedef struct {
     me_array_options options;
     me_dtype initial_dtype;
@@ -588,16 +579,37 @@ static bool g_decode_reduction(yyjson_val *wire, int op, graph_reduction *reduct
     return true;
 }
 
+static bool g_prepare_options_valid(const me_graph_prepare_options *options) {
+    return !options || ((options->struct_size == sizeof(*options) ||
+        options->struct_size == offsetof(me_graph_prepare_options, math_backend)) && options->version == ME_GRAPH_VERSION &&
+        (options->jit == ME_JIT_OFF || options->jit == ME_JIT_ON ||
+         options->jit == ME_JIT_AUTO || options->jit == ME_JIT_DEFAULT));
+}
+
+static const char *g_link_arguments(graph_node *nodes, int id) {
+    graph_node *n = &nodes[id];
+    for (int j = 0; j < n->nargs; j++) {
+        int arg = n->args[j];
+        if (arg < 0 || arg >= id) return "forward, cyclic or missing node reference";
+        graph_node *child = &nodes[arg];
+        child->uses++;
+        if (child->depth + 1 > n->depth) n->depth = child->depth + 1;
+    }
+    return n->depth > ME_GRAPH_MAX_DEPTH ? "graph nesting limit exceeded" : NULL;
+}
+
+static me_graph_status g_prepare_nodes(yyjson_val *root, graph_node *nodes, int count, int result,
+    const int *input_nodes, int ni, const int *constant_nodes, int nc, int mask_node,
+    bool staged_capability, bool needs_stages, bool aggressive, me_dtype final_dtype, const char *casting,
+    const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error);
+
 static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_val *root,
     const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error) {
     if (out) *out = NULL;
     g_error(error, -1, ME_GRAPH_SUCCESS, "");
     if (!out || (!root && (!json || !length || length > ME_GRAPH_MAX_BYTES || memchr(json, 0, length))))
         return g_error(error, -1, ME_GRAPH_ERR_FORMAT, "invalid graph buffer or byte limit");
-    if (options && ((options->struct_size != sizeof(*options) &&
-        options->struct_size != offsetof(me_graph_prepare_options, math_backend)) || options->version != ME_GRAPH_VERSION ||
-        (options->jit != ME_JIT_OFF && options->jit != ME_JIT_ON &&
-         options->jit != ME_JIT_AUTO && options->jit != ME_JIT_DEFAULT)))
+    if (!g_prepare_options_valid(options))
         return g_error(error, -1, ME_GRAPH_ERR_FORMAT, "invalid preparation options");
     yyjson_read_err decode_error;
     yyjson_doc *doc = root ? NULL : yyjson_read_opts((char *)json, length, 0, NULL, &decode_error);
@@ -605,9 +617,6 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
         decode_error.code == YYJSON_READ_ERROR_MEMORY_ALLOCATION ? ME_GRAPH_ERR_OOM : ME_GRAPH_ERR_FORMAT,
         "graph JSON decode failed");
     me_graph_status rc = ME_GRAPH_ERR_FORMAT;
-    me_graph_plan *p = NULL;
-    yyjson_doc *map_doc = NULL;
-    graph_buffer source = {0}, manifest = {0}, canonical = {0};
     graph_node nodes[ME_GRAPH_MAX_NODES] = {0};
     int input_nodes[ME_MAX_VARS], constant_nodes[ME_MAX_VARS], ni = 0, nc = 0;
     int current = -1, mask_node = -1;
@@ -721,12 +730,31 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
                 yyjson_val *arg = yyjson_arr_get(args, (size_t)j);
                 if (!yyjson_is_uint(arg) || yyjson_get_uint(arg) >= (uint64_t)i) { message = "forward, cyclic or missing node reference"; goto done; }
                 n->args[j] = (int)yyjson_get_uint(arg);
-                graph_node *child = &nodes[n->args[j]]; child->uses++;
-                if (child->depth + 1 > n->depth) n->depth = child->depth + 1;
             }
-            if (n->depth > ME_GRAPH_MAX_DEPTH) { message = "graph nesting limit exceeded"; goto done; }
+            const char *invalid = g_link_arguments(nodes, i);
+            if (invalid) { message = invalid; goto done; }
         }
     }
+    rc = g_prepare_nodes(root, nodes, count, result, input_nodes, ni, constant_nodes, nc, mask_node,
+        staged_capability, needs_stages, optimization != NULL, final_dtype, casting, options, out, error);
+    message = NULL;
+done:
+    if (rc && message) g_error(error, current, rc, message);
+    yyjson_doc_free(doc);
+    return rc;
+}
+
+static me_graph_status g_prepare_nodes(yyjson_val *root, graph_node *nodes, int count, int result,
+    const int *input_nodes, int ni, const int *constant_nodes, int nc, int mask_node,
+    bool staged_capability, bool needs_stages, bool aggressive, me_dtype final_dtype, const char *casting,
+    const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error) {
+    me_graph_status rc = ME_GRAPH_ERR_FORMAT;
+    me_graph_plan *p = NULL;
+    yyjson_doc *map_doc = NULL;
+    yyjson_val *array = yyjson_obj_get(root, "nodes");
+    graph_buffer source = {0}, manifest = {0}, canonical = {0};
+    int current = -1;
+    const char *message = "invalid graph schema, fields, keys or nesting";
     nodes[result].reachable = true;
     if (mask_node >= 0) nodes[mask_node].reachable = true;
     for (int i = count - 1; i >= 0; i--) if (nodes[i].reachable) {
@@ -802,12 +830,12 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
     const char *math_backend = options && options->struct_size == sizeof(*options) ? options->math_backend : NULL;
     me_artifact_error native;
     int status = g_prepare_map(source.data, nodes, input_nodes, ni, constant_nodes, nc, mask_node,
-        optimization != NULL, math_backend, options ? options->jit : ME_JIT_OFF, &p->map, &native);
+        aggressive, math_backend, options ? options->jit : ME_JIT_OFF, &p->map, &native);
     if (status) { rc = g_native(error, map_root, status, &native); message = NULL; goto done; }
     p->inferred = me_artifact_inferred_dtype(p->map);
     if (!reduction && final_dtype == ME_AUTO) {
         map_doc = g_map_root(source.data, nodes, array, input_nodes, ni, constant_nodes, nc, mask_node,
-            optimization != NULL, math_backend);
+            aggressive, math_backend);
         if (!map_doc) { rc = ME_GRAPH_ERR_OOM; message = "map export allocation failed"; goto done; }
         yyjson_val *map = yyjson_doc_get_root(map_doc);
         yyjson_set_str(yyjson_obj_get(yyjson_obj_get(map, "output"), "dtype"), g_dtype_name(p->inferred));
@@ -852,26 +880,92 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
 done:
     if (rc && message) g_error(error, current, rc, message);
     me_graph_plan_free(p);
-    free(source.data); free(manifest.data); free(canonical.data); yyjson_doc_free(map_doc); yyjson_doc_free(doc);
+    free(source.data); free(manifest.data); free(canonical.data); yyjson_doc_free(map_doc);
     return rc;
 }
-static me_graph_status g_prepare(const char *json, size_t length, yyjson_val *root,
-    const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error) {
-    if (out) *out = NULL;
+static const char *g_prepare_fenv(fenv_t *saved) {
     /* Even malformed JSON can contain exceptional real tokens. Decoding and
      * validation must not leak parser/compiler FP flags or caller rounding. */
-    fenv_t saved;
-    if (feholdexcept(&saved)) return g_error(error, -1, ME_GRAPH_ERR_CAPABILITY, "cannot preserve preparation floating environment");
+    if (feholdexcept(saved)) return "cannot preserve preparation floating environment";
     if (fesetround(FE_TONEAREST)) {
-        fesetenv(&saved);
-        return g_error(error, -1, ME_GRAPH_ERR_CAPABILITY, "cannot establish preparation rounding");
+        fesetenv(saved);
+        return "cannot establish preparation rounding";
     }
-    me_graph_status rc = g_prepare_json(json, length, root, options, out, error);
-    if (fesetenv(&saved)) {
+    return NULL;
+}
+
+static me_graph_status g_finish_prepare(fenv_t *saved, me_graph_status rc,
+    me_graph_plan **out, me_graph_error *error) {
+    if (fesetenv(saved)) {
         if (out) { me_graph_plan_free(*out); *out = NULL; }
         return g_error(error, -1, ME_GRAPH_ERR_CAPABILITY, "cannot restore preparation floating environment");
     }
     return rc;
+}
+
+static me_graph_status g_prepare(const char *json, size_t length, yyjson_val *root,
+    const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error) {
+    if (out) *out = NULL;
+    fenv_t saved;
+    const char *failure = g_prepare_fenv(&saved);
+    if (failure) return g_error(error, -1, ME_GRAPH_ERR_CAPABILITY, failure);
+    me_graph_status rc = g_prepare_json(json, length, root, options, out, error);
+    return g_finish_prepare(&saved, rc, out, error);
+}
+
+/* The text parser supplies typed nodes; its tree is used for export and the
+ * remaining staged/reduction compatibility paths, not for node validation. */
+me_graph_status dsl_graph_prepare_nodes(graph_node *nodes, int count, int result, bool staged,
+    yyjson_val *interchange, const me_graph_prepare_options *options, me_graph_plan **out,
+    me_graph_error *error) {
+    if (out) *out = NULL;
+    g_error(error, -1, ME_GRAPH_SUCCESS, "");
+    if (!out || count < 1 || count > ME_GRAPH_MAX_NODES || result < 0 || result >= count)
+        return g_error(error, -1, ME_GRAPH_ERR_FORMAT, "invalid graph buffer or byte limit");
+    if (!g_prepare_options_valid(options))
+        return g_error(error, -1, ME_GRAPH_ERR_FORMAT, "invalid preparation options");
+    int input_nodes[ME_MAX_VARS], constant_nodes[ME_MAX_VARS], ni = 0, nc = 0, mask = -1;
+    for (int i = 0; i < count; i++) {
+        graph_node *n = &nodes[i];
+        bool input = !strcmp(n->op, "input");
+        if (input || !strcmp(n->op, "constant")) {
+            if (ni + nc == ME_MAX_VARS) return g_error(error, i, ME_GRAPH_ERR_FORMAT, "binding limit exceeded");
+            if (input) {
+                for (int j = 0; j < ni; j++) if (!strcmp(nodes[input_nodes[j]].name, n->name))
+                    return g_error(error, i, ME_GRAPH_ERR_FORMAT, "duplicate binding name");
+                input_nodes[ni++] = i;
+            } else {
+                constant_nodes[nc++] = i;
+            }
+            continue;
+        }
+        int arity = -1;
+        if (g_reduce(n->op)) {
+            arity = 1;
+            if (n->mask >= 0) {
+                mask = n->mask;
+                if (mask >= i) return g_error(error, i, ME_GRAPH_ERR_FORMAT, "invalid mask reference");
+                if (strcmp(nodes[mask].op, "input") || nodes[mask].dtype != ME_BOOL)
+                    return g_error(error, i, ME_GRAPH_ERR_UNSUPPORTED, "participation requires a strong Boolean input");
+                nodes[mask].uses++;
+            }
+        } else if (!g_operator(n->op, &arity)) {
+            if (!strcmp(n->op, "select")) arity = 3;
+            else if (!strcmp(n->op, "cast")) arity = 1;
+            else if (!g_name(n->name))
+                return g_error(error, i, ME_GRAPH_ERR_FORMAT, "invalid graph schema, fields, keys or nesting");
+        }
+        if (arity >= 0 && n->nargs != arity)
+            return g_error(error, i, ME_GRAPH_ERR_FORMAT, "invalid operation arity");
+        const char *invalid = g_link_arguments(nodes, i);
+        if (invalid) return g_error(error, i, ME_GRAPH_ERR_FORMAT, invalid);
+    }
+    fenv_t saved;
+    const char *failure = g_prepare_fenv(&saved);
+    if (failure) return g_error(error, -1, ME_GRAPH_ERR_CAPABILITY, failure);
+    me_graph_status rc = g_prepare_nodes(interchange, nodes, count, result, input_nodes, ni, constant_nodes, nc, mask,
+        staged, staged, false, ME_AUTO, "unsafe", options, out, error);
+    return g_finish_prepare(&saved, rc, out, error);
 }
 me_graph_status me_graph_prepare_json(const char *json, size_t length,
     const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error) {

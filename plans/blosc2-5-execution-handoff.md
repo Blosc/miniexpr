@@ -55,10 +55,11 @@ storage format and will not change `b2o`.
     now carry decoded dtypes, scalar bytes and mask references; map lowering
     and partitionability checks no longer consult the wire nodes. Automatic
     stage construction and child dtype resolution now pass in-memory trees
-    instead of serializing and reparsing JSON text. The text frontend and the
-    staged planner still depend on yyjson trees; the next step is to pass
-    typed nodes directly. Keep explicit graph interchange and canonical cache
-    identity as separate compatibility concerns.
+    instead of serializing and reparsing JSON text. The text frontend passes
+    typed nodes directly to the shared planner. Its compatibility tree still
+    supplies exports and metadata for reductions and staged regions. Keep
+    explicit graph interchange and canonical cache identity as separate
+    compatibility concerns.
 3. Run the Python v1 importer in differential tests against the native adapter
    before making it the default. Preserve duplicate-key and UTF-8 rejection,
    JSON limits, binding order, weak/typed captures, context/rank, width and

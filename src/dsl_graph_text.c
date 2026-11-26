@@ -1,8 +1,10 @@
-/* Syntax-only frontend sharing graph validation through an in-memory tree. */
+/* Expression frontend. Typed nodes drive preparation; the accompanying
+ * interchange tree still supplies export and staged/reduction metadata. */
 #include "miniexpr_graph.h"
 #include "dsl_graph_internal.h"
 #include "yyjson.h"
 #include <ctype.h>
+#include <errno.h>
 #include <fenv.h>
 #include <math.h>
 #include <stdio.h>
@@ -14,6 +16,7 @@ typedef struct {
     char token[80], names[ME_MAX_VARS][64];
     yyjson_mut_doc *doc;
     yyjson_mut_val *nodes[ME_GRAPH_MAX_NODES];
+    graph_node typed[ME_GRAPH_MAX_NODES];
     bool oom;
     int kind, ninputs, count, depth;
     bool reductions[ME_GRAPH_MAX_NODES];
@@ -91,6 +94,7 @@ static int t_node(text_parser *p, const char *op) {
     if (p->count == ME_GRAPH_MAX_NODES) { p->error = "expression node limit exceeded"; return -1; }
     int id = p->count++;
     p->reductions[id] = false;
+    p->typed[id] = (graph_node){.op = op, .mask = -1};
     p->nodes[id] = yyjson_mut_obj(p->doc);
     t_add(p, p->nodes[id], "id", yyjson_mut_uint(p->doc, (uint64_t)id));
     t_string(p, p->nodes[id], "op", op);
@@ -99,6 +103,8 @@ static int t_node(text_parser *p, const char *op) {
 static int t_arguments(text_parser *p, const char *op, const int *args, int count) {
     int id = t_node(p, op);
     if (id < 0) return id;
+    p->typed[id].nargs = count;
+    for (int i = 0; i < count; i++) p->typed[id].args[i] = args[i];
     yyjson_mut_val *array = yyjson_mut_arr(p->doc);
     t_add(p, p->nodes[id], "args", array);
     for (int i = 0; i < count; i++) t_append(p, array, yyjson_mut_uint(p->doc, (uint64_t)args[i]));
@@ -108,10 +114,12 @@ static int t_op(text_parser *p, const char *op, int a, int b) {
     int args[] = {a, b};
     return t_arguments(p, op, args, b < 0 ? 1 : 2);
 }
-static int t_constant(text_parser *p, const char *dtype, const char *encoding, yyjson_mut_val *value) {
+static int t_constant(text_parser *p, me_dtype dtype, const char *encoding, yyjson_mut_val *value) {
     int id = t_node(p, "constant");
     if (id < 0) return id;
-    t_string(p, p->nodes[id], "dtype", dtype);
+    p->typed[id].dtype = dtype;
+    p->typed[id].weak = true;
+    t_string(p, p->nodes[id], "dtype", t_dtype(dtype));
     t_string(p, p->nodes[id], "category", "weak");
     t_string(p, p->nodes[id], "encoding", encoding);
     t_add(p, p->nodes[id], "value", value);
@@ -142,12 +150,33 @@ static int t_literal(text_parser *p, bool negative) {
         yyjson_doc_free(literal);
         if (!valid) { p->error = "invalid or nonfinite weak real literal"; return -1; }
         char hex[17]; snprintf(hex, sizeof(hex), "%016llx", (unsigned long long)bits);
-        id = t_constant(p, "float64", "ieee754-hex", yyjson_mut_strcpy(p->doc, hex));
+        id = t_constant(p, ME_FLOAT64, "ieee754-hex", yyjson_mut_strcpy(p->doc, hex));
+        if (id >= 0) {
+            p->typed[id].scalar = bits;
+            p->typed[id].scalar_valid = true;
+            if (bits == UINT64_C(0x4000000000000000)) p->typed[id].power_literal = "2.0";
+        }
     } else {
         const char *digits = text + negative;
         if (digits[0] == '0' && digits[1]) { p->error = "noncanonical integer literal"; return -1; }
         if (negative && !strcmp(digits, "0")) strcpy(text, "0");
-        id = t_constant(p, "int64", "decimal", yyjson_mut_strcpy(p->doc, text));
+        yyjson_mut_val *wire = yyjson_mut_strcpy(p->doc, text);
+        id = t_constant(p, ME_INT64, "decimal", wire);
+        if (id >= 0) {
+            char *end;
+            int saved_errno = errno;
+            errno = 0;
+            long long parsed = strtoll(text, &end, 10);
+            bool valid = !errno && end != text && !*end && parsed >= INT64_MIN && parsed <= INT64_MAX;
+            errno = saved_errno;
+            if (valid) {
+                int64_t value = (int64_t)parsed;
+                memcpy(&p->typed[id].scalar, &value, sizeof(value));
+                p->typed[id].scalar_valid = true;
+                if (value >= -INT32_MAX && value <= INT32_MAX)
+                    p->typed[id].power_literal = yyjson_mut_get_str(wire);
+            }
+        }
     }
     t_next(p); return id;
 }
@@ -193,11 +222,11 @@ static int t_call(text_parser *p, const char *name) {
                  * initial expressions; nested reduction keywords must not
                  * bypass the expression recursion bound. */
                 int before = p->count, id = t_expr(p, 0);
-                yyjson_mut_val *v = id >= before && p->count == before + 1 ? p->nodes[id] : NULL;
-                const char *op = yyjson_mut_get_str(yyjson_mut_obj_get(v, "op"));
+                bool literal = id >= before && p->count == before + 1;
+                const char *op = literal ? p->typed[id].op : NULL;
                 if (!op || strcmp(op, "constant")) p->error = "initial requires a scalar literal";
                 else {
-                    initial = yyjson_mut_val_mut_copy(p->doc, v);
+                    initial = yyjson_mut_val_mut_copy(p->doc, p->nodes[id]);
                     if (!initial) { p->oom = true; p->error = "literal allocation failed"; }
                     yyjson_mut_obj_remove_key(initial, "id");
                     yyjson_mut_obj_remove_key(initial, "op");
@@ -209,6 +238,8 @@ static int t_call(text_parser *p, const char *name) {
         int id = t_arguments(p, name, &map, 1);
         if (id < 0) return id;
         yyjson_mut_val *node = p->nodes[id];
+        p->typed[id].op = yyjson_mut_get_str(yyjson_mut_obj_get(node, "op"));
+        p->typed[id].mask = where;
         t_add(p, node, "axes", axes);
         t_add(p, node, "keepdims", yyjson_mut_bool(p->doc, keepdims));
         t_string(p, node, "dtype", dtype);
@@ -223,11 +254,18 @@ static int t_call(text_parser *p, const char *name) {
             args[n++] = t_expr(p, 0);
         } while (t_take(p, ","));
         t_expect(p, ")");
-        bool cast = false;
+        me_dtype cast = ME_AUTO;
         me_dtype types[] = {ME_BOOL, ME_INT8, ME_INT16, ME_INT32, ME_INT64, ME_UINT8, ME_UINT16, ME_UINT32, ME_UINT64, ME_FLOAT32, ME_FLOAT64};
-        for (int i = 0; i < 11; i++) if (!strcmp(name, t_dtype(types[i]))) cast = true;
-        int id = t_arguments(p, cast ? "cast" : !strcmp(name, "where") ? "select" : "function", args, n);
-        if (id >= 0 && (cast || strcmp(name, "where"))) t_string(p, p->nodes[id], cast ? "dtype" : "name", name);
+        for (int i = 0; i < 11; i++) if (!strcmp(name, t_dtype(types[i]))) cast = types[i];
+        int id = t_arguments(p, cast != ME_AUTO ? "cast" : !strcmp(name, "where") ? "select" : "function", args, n);
+        if (id >= 0 && cast != ME_AUTO) {
+            p->typed[id].dtype = cast;
+            t_string(p, p->nodes[id], "dtype", name);
+        } else if (id >= 0 && strcmp(name, "where")) {
+            yyjson_mut_val *wire = yyjson_mut_strcpy(p->doc, name);
+            t_add(p, p->nodes[id], "name", wire);
+            p->typed[id].name = yyjson_mut_get_str(wire);
+        }
         return id;
     }
 }
@@ -251,7 +289,13 @@ static int t_primary(text_parser *p) {
         char name[80]; strcpy(name, p->token); t_next(p);
         if (t_take(p, "(")) return t_call(p, name);
         if (!strcmp(name, "True") || !strcmp(name, "False") || !strcmp(name, "true") || !strcmp(name, "false")) {
-            return t_constant(p, "bool", "boolean", yyjson_mut_bool(p->doc, name[0] == 'T' || name[0] == 't'));
+            bool value = name[0] == 'T' || name[0] == 't';
+            int id = t_constant(p, ME_BOOL, "boolean", yyjson_mut_bool(p->doc, value));
+            if (id >= 0) {
+                memcpy(&p->typed[id].scalar, &value, sizeof(value));
+                p->typed[id].scalar_valid = true;
+            }
+            return id;
         }
         for (int i = 0; i < p->ninputs; i++) if (!strcmp(name, p->names[i])) return i;
         p->error = "unbound expression name"; return -1;
@@ -306,6 +350,8 @@ me_graph_status me_graph_prepare_expression(const char *expression, size_t lengt
         strcpy(p->names[i], inputs[i].name);
         int id = t_node(p, "input");
         if (id < 0) break;
+        p->typed[id].name = p->names[i];
+        p->typed[id].dtype = inputs[i].dtype;
         t_string(p, p->nodes[id], "name", inputs[i].name);
         t_string(p, p->nodes[id], "dtype", dtype);
     }
@@ -332,7 +378,8 @@ me_graph_status me_graph_prepare_expression(const char *expression, size_t lengt
         yyjson_doc *doc = p->error ? NULL : yyjson_mut_doc_imut_copy(p->doc, NULL);
         if (!doc) { p->oom = true; p->error = "expression allocation failed"; }
         else {
-            rc = dsl_graph_prepare_root(yyjson_doc_get_root(doc), options, out, error);
+            rc = dsl_graph_prepare_nodes(p->typed, p->count, root, staged,
+                yyjson_doc_get_root(doc), options, out, error);
             yyjson_doc_free(doc);
         }
     }

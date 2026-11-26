@@ -3,6 +3,19 @@
 #include "miniexpr_artifact.h"
 #include "miniexpr_graph.h"
 #include "yyjson.h"
+/* Private frontend descriptor. Strings are borrowed only during prepare;
+ * wire nodes are kept separately for compatibility exports. */
+typedef struct {
+    const char *op, *name, *power_literal;
+    me_dtype dtype;
+    uint64_t scalar;
+    int args[3], nargs, uses, depth, mask;
+    bool reachable, weak, scalar_valid;
+} graph_node;
+
+me_graph_status dsl_graph_prepare_nodes(graph_node *nodes, int count, int result, bool staged,
+    yyjson_val *interchange, const me_graph_prepare_options *options, me_graph_plan **out,
+    me_graph_error *error);
 me_artifact_status dsl_array_output_validate(const me_array_output *output,
     int rank, const int64_t *shape, me_dtype dtype, me_artifact_error *error);
 me_artifact_status dsl_array_run_into(const me_artifact *artifact,

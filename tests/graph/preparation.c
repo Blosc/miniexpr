@@ -724,7 +724,8 @@ static void output_aliases(bool jit) {
 static void in_memory_roundtrip(void) {
     const char *expressions[] = {"x + (y - 1)", "x + -0.0 + y", "x + .5 + y", "where(x != 0, y / x, y)",
         "float32(x) + y", "x < y", "x ** -2 + y", "x - sum(x) + y", "sum(x + y, axis=0, initial=-2.5)",
-        "x - sum(x + sum(y, axis=0, initial=-2.5), axis=-1)"};
+        "x - sum(x + sum(y, axis=0, initial=-2.5), axis=-1)",
+        "x ** 2.0 + y", "where(True, x + 9223372036854775807, y)"};
     me_graph_input_metadata metadata[] = {{"x", ME_FLOAT64, 1, {3}}, {"y", ME_FLOAT64, 1, {3}}};
     double x[] = {1, 2, 4}, y[] = {3, 2, 1};
     me_array_view inputs[] = {view("x", ME_FLOAT64, x, sizeof(x), 1, 3, 0),
@@ -754,6 +755,11 @@ static void in_memory_roundtrip(void) {
         CHECK(actual_report.array.fp_flags == expected_report.array.fp_flags);
         free(actual); free(expected); me_graph_schedule_free(a); me_graph_schedule_free(b);
     }
+    const char *overflow = "x + y + 9223372036854775808";
+    me_graph_plan *rejected = NULL;
+    CHECK(me_graph_prepare_expression(overflow, strlen(overflow), metadata, 2, NULL,
+        &rejected, &error) == ME_GRAPH_ERR_SIGNATURE);
+    CHECK(!rejected && strstr(error.native.message, "invalid graph scalar encoding"));
 }
 static void math_policy(void) {
     me_graph_input_metadata inputs[] = {{"x", ME_FLOAT64, 1, {2}}};
