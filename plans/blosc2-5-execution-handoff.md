@@ -51,9 +51,12 @@ storage format and will not change `b2o`.
    retained fields during prepare. The JSON and text frontends currently feed
    yyjson trees into the planner; each must instead lower to this descriptor.
    Map and cast kernels now use typed miniexpr signatures directly; the old map
-   manifest remains an export, not a preparation input. The frontends still
-   use yyjson for the graph tree itself. Keep explicit graph interchange and
-   canonical cache identity as separate compatibility concerns.
+    manifest remains an export, not a preparation input. The internal nodes
+    now carry decoded dtypes, scalar bytes and mask references; map lowering
+    and partitionability checks no longer consult the wire nodes. The text
+    frontend still builds a yyjson tree, and automatic staging still rewrites
+    and reparses JSON. Keep explicit graph interchange and canonical cache
+    identity as separate compatibility concerns.
 3. Run the Python v1 importer in differential tests against the native adapter
    before making it the default. Preserve duplicate-key and UTF-8 rejection,
    JSON limits, binding order, weak/typed captures, context/rank, width and

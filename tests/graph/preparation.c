@@ -797,12 +797,38 @@ static void typed_map_interchange(void) {
     me_graph_plan_free(plan);
 }
 
+static void typed_graph_capture(void) {
+    const char *json =
+        "{\"format\":\"" ME_GRAPH_FORMAT "\",\"semantics\":\"" ME_GRAPH_SEMANTICS "\","
+        "\"requires\":[\"numeric\"],\"nodes\":["
+        "{\"id\":0,\"op\":\"input\",\"name\":\"x\",\"dtype\":\"int64\"},"
+        "{\"id\":1,\"op\":\"constant\",\"dtype\":\"int64\",\"category\":\"typed_scalar\","
+        "\"encoding\":\"decimal\",\"value\":\"9223372036854775807\"},"
+        "{\"id\":2,\"op\":\"add\",\"args\":[0,1]}],\"root\":2,"
+        "\"output\":{\"dtype\":\"auto\",\"casting\":\"safe\"}}";
+    me_graph_plan *plan = NULL;
+    CHECK(!me_graph_prepare_json(json, strlen(json), NULL, &plan, &error));
+    const char *map = me_graph_export_map_json(plan);
+    CHECK(map && strstr(map, "\"value\":\"9223372036854775807\"") &&
+          strstr(map, "\"category\":\"typed_scalar\""));
+    me_graph_input_metadata input = {"x", ME_INT64, 1, {2}};
+    me_graph_schedule *schedule = NULL;
+    CHECK(!me_graph_specialize(plan, &input, 1, NULL, &schedule, &error));
+    me_graph_plan_free(plan);
+    int64_t x[] = {0, -1}, result[2];
+    me_array_view binding = view("x", ME_INT64, x, sizeof(x), 1, 2, 0);
+    CHECK(!me_graph_execute(schedule, &binding, 1, result, sizeof(result), NULL, NULL, &error));
+    CHECK(result[0] == INT64_MAX && result[1] == INT64_MAX - 1);
+    me_graph_schedule_free(schedule);
+}
+
 int main(void) {
 #define RUN_CASE(call) do { fprintf(stderr, "graph preparation: %s\n", #call); fflush(stderr); call; } while (0)
     RUN_CASE(maps(false)); RUN_CASE(lazy(false)); RUN_CASE(reductions(false));
     RUN_CASE(identity_destinations(false)); RUN_CASE(identity_destinations(true));
     RUN_CASE(partition_policies());
     RUN_CASE(typed_map_interchange());
+    RUN_CASE(typed_graph_capture());
     RUN_CASE(dynamic_maps());
     RUN_CASE(integer_extrema(false)); RUN_CASE(integer_extrema(true));
     RUN_CASE(validation()); RUN_CASE(limits());

@@ -17,12 +17,21 @@ typedef struct {
     size_t size, capacity;
     bool failed, oom;
 } graph_buffer;
+/* Frontend-lowered node. Strings are borrowed for preparation only; the
+ * original wire nodes are kept separately for compatibility exports. */
 typedef struct {
-    yyjson_val *value;
-    const char *op;
-    int args[3], nargs, uses, depth;
-    bool reachable;
+    const char *op, *name, *power_literal;
+    me_dtype dtype;
+    uint64_t scalar;
+    int args[3], nargs, uses, depth, mask;
+    bool reachable, weak, scalar_valid;
 } graph_node;
+typedef struct {
+    me_array_options options;
+    me_dtype initial_dtype;
+    uint64_t initial;
+    bool has_initial, initial_weak;
+} graph_reduction;
 struct me_graph_plan {
     atomic_uint references;
     me_artifact *map;
@@ -270,23 +279,21 @@ static const char *g_operator(const char *op, int *arity) {
     }
     return NULL;
 }
-static const char *g_power_literal(graph_node *node) {
-    const char *text=g_str(yyjson_obj_get(node->value,"value"));
-    if (strcmp(node->op,"constant") || !g_equal(yyjson_obj_get(node->value,"category"),"weak")) return NULL;
-    if (g_equal(yyjson_obj_get(node->value,"dtype"),"float64") &&
-        g_equal(yyjson_obj_get(node->value,"encoding"),"ieee754-hex") &&
-        g_equal(yyjson_obj_get(node->value,"value"),"4000000000000000")) return "2.0";
-    if (!g_equal(yyjson_obj_get(node->value,"dtype"),"int64") ||
-        !g_equal(yyjson_obj_get(node->value,"encoding"),"decimal") || !text || strlen(text)>11) return NULL;
+static const char *g_power_literal(yyjson_val *value, const graph_node *node) {
+    const char *text = g_str(yyjson_obj_get(value, "value"));
+    if (!node->weak || !node->scalar_valid || !text) return NULL;
+    if (node->dtype == ME_FLOAT64 && !strcmp(text, "4000000000000000")) return "2.0";
+    if (node->dtype != ME_INT64 || strlen(text)>11) return NULL;
     const char *digits=text+(*text == '-');
     if (!*digits || strspn(digits,"0123456789") != strlen(digits)) return NULL;
-    int64_t value=strtoll(text,NULL,10);
-    return value >= -INT32_MAX && value <= INT32_MAX ? text : NULL;
+    int64_t exponent;
+    memcpy(&exponent, &node->scalar, sizeof(exponent));
+    return exponent >= -INT32_MAX && exponent <= INT32_MAX ? text : NULL;
 }
 static void g_expr(graph_buffer *b, graph_node *nodes, int id) {
     graph_node *n = &nodes[id];
     if (!strcmp(n->op, "input") || !strcmp(n->op, "constant")) {
-        if (!strcmp(n->op, "input")) g_add(b, g_str(yyjson_obj_get(n->value, "name")));
+        if (!strcmp(n->op, "input")) g_add(b, n->name);
         else { char name[32]; snprintf(name, sizeof(name), "_me_capture_%d", id); g_add(b, name); }
         return;
     }
@@ -297,7 +304,7 @@ static void g_expr(graph_buffer *b, graph_node *nodes, int id) {
         g_expr(b, nodes, n->args[0]);
         if (arity == 2) {
             g_add(b, " "); g_add(b, symbol); g_add(b, " ");
-            const char *literal=!strcmp(n->op,"pow") ? g_power_literal(&nodes[n->args[1]]) : NULL;
+            const char *literal=!strcmp(n->op,"pow") ? nodes[n->args[1]].power_literal : NULL;
             /* Preserve weak source integer exponents as literals so typed power
              * lowering can specialize them. Strong captures remain bindings. */
             if (literal) {
@@ -305,11 +312,12 @@ static void g_expr(graph_buffer *b, graph_node *nodes, int id) {
             } else g_expr(b, nodes, n->args[1]);
         }
     } else {
-        const char *name = !strcmp(n->op, "select") ? "where" : g_str(yyjson_obj_get(n->value, !strcmp(n->op, "cast") ? "dtype" : "name"));
+        const char *name = !strcmp(n->op, "select") ? "where" :
+            !strcmp(n->op, "cast") ? g_dtype_name(n->dtype) : n->name;
         g_add(b, name); g_add(b, "(");
         for (int i = 0; i < n->nargs; i++) {
             if (i) g_add(b, ", ");
-            const char *literal=i == 1 && name && !strcmp(name,"pow") ? g_power_literal(&nodes[n->args[i]]) : NULL;
+            const char *literal=i == 1 && name && !strcmp(name,"pow") ? nodes[n->args[i]].power_literal : NULL;
             if (literal) {
                 g_add(b,"("); g_add(b,literal); g_add(b,")");
             }
@@ -335,7 +343,7 @@ static bool g_partitionable(graph_node *nodes, int count) {
     int64_t integer_min = INT64_MIN, integer_max = INT64_MAX;
     bool floating = true;
     for (int i = 0; i < count; i++) if (!strcmp(nodes[i].op,"input")) {
-        me_dtype dtype = g_dtype(g_str(yyjson_obj_get(nodes[i].value,"dtype")));
+        me_dtype dtype = nodes[i].dtype;
         if (dtype != ME_FLOAT32 && dtype != ME_FLOAT64) {
             floating = false;
             if (dtype == ME_AUTO) return false;
@@ -359,20 +367,17 @@ static bool g_partitionable(graph_node *nodes, int count) {
         graph_node *node = &nodes[i];
         if (!strcmp(node->op,"input")) { runtime[i] = true; continue; }
         if (!strcmp(node->op,"constant")) {
-            if (!g_equal(yyjson_obj_get(node->value,"category"),"weak")) return false;
-            me_dtype dtype = g_dtype(g_str(yyjson_obj_get(node->value,"dtype")));
+            if (!node->weak || !node->scalar_valid) return false;
+            me_dtype dtype = node->dtype;
             if (dtype == ME_FLOAT64) {
-                const char *text=g_str(yyjson_obj_get(node->value,"value"));
-                if (!text || !g_equal(yyjson_obj_get(node->value,"encoding"),"ieee754-hex")) return false;
-                uint64_t bits=strtoull(text,NULL,16) & UINT64_C(0x7fffffffffffffff);
+                uint64_t bits = node->scalar & UINT64_C(0x7fffffffffffffff);
                 if (bits > UINT64_C(0x47efffffe0000000)) return false;
                 continue;
             }
             if (!floating) {
-                if (dtype != ME_INT64 || !g_equal(yyjson_obj_get(node->value,"encoding"),"decimal")) return false;
-                const char *text = g_str(yyjson_obj_get(node->value,"value"));
-                if (!text) return false;
-                int64_t value = strtoll(text,NULL,10);
+                if (dtype != ME_INT64) return false;
+                int64_t value;
+                memcpy(&value, &node->scalar, sizeof(value));
                 /* The promoted input type does not describe every intermediate:
                  * (uint8_input + 300) + int16_input still checks 300 as uint8.
                  * Until this proof tracks consuming-node types, require literals
@@ -398,7 +403,7 @@ static bool g_partitionable(graph_node *nodes, int count) {
              * fail, unlike checked float-to-int casts or integer division/pow.
              * Integer subtrees admitted above remain same-width modular maps. */
             if (!strcmp(node->op,"function")) {
-                const char *name=g_str(yyjson_obj_get(node->value,"name"));
+                const char *name = node->name;
                 const char *promoted[]={"sqrt","cbrt","exp","exp2","expm1","log","log1p","log2","log10",
                     "sin","cos","tan","asin","acos","atan","atan2","sinh","cosh","tanh","asinh","acosh","atanh",
                     "arcsin","arccos","arctan","arctan2","arcsinh","arccosh","arctanh","hypot","fmod","copysign","nextafter",
@@ -410,7 +415,7 @@ static bool g_partitionable(graph_node *nodes, int count) {
         } else if (!strcmp(node->op,"cast") || g_reduce(node->op) ||
                    !strcmp(node->op,"lshift") || !strcmp(node->op,"rshift")) return false;
         if (!strcmp(node->op,"function")) {
-            const char *name = g_str(yyjson_obj_get(node->value,"name"));
+            const char *name = node->name;
             const char *allowed[] = {"abs","fabs","sqrt","cbrt","exp","exp2","expm1","log","log1p","log2","log10",
                 "sin","cos","tan","asin","acos","atan","atan2","sinh","cosh","tanh","asinh","acosh","atanh",
                 "arcsin","arccos","arctan","arctan2","arcsinh","arccosh","arctanh","fma","rint",
@@ -431,28 +436,23 @@ static me_artifact_status g_prepare_map(const char *source, const graph_node *no
     me_input_spec inputs[ME_MAX_VARS];
     me_capture captures[ME_MAX_VARS];
     char capture_names[ME_MAX_VARS][32];
-    uint64_t values[ME_MAX_VARS];
     size_t ninputs = 0;
     for (int i = 0; i < ni; i++) {
         int id = input_nodes[i];
         if (id == mask_node && nodes[id].uses == 1) continue;
-        yyjson_val *node = nodes[id].value;
-        inputs[ninputs++] = (me_input_spec){g_str(yyjson_obj_get(node, "name")),
-            g_dtype(g_str(yyjson_obj_get(node, "dtype"))), 0};
+        inputs[ninputs++] = (me_input_spec){nodes[id].name, nodes[id].dtype, 0};
     }
     for (int i = 0; i < nc; i++) {
         int id = constant_nodes[i];
-        yyjson_val *node = nodes[id].value;
-        me_dtype dtype;
-        values[i] = 0;
-        if (dsl_graph_scalar(node, &dtype, &values[i]) != ME_ARTIFACT_SUCCESS) {
+        const graph_node *node = &nodes[id];
+        if (!node->scalar_valid) {
             memset(error, 0, sizeof(*error));
             snprintf(error->message, sizeof(error->message), "invalid graph scalar encoding");
             return ME_ARTIFACT_ERR_FORMAT;
         }
         snprintf(capture_names[i], sizeof(capture_names[i]), "_me_capture_%d", id);
-        captures[i] = (me_capture){{capture_names[i], dtype, 0}, &values[i],
-            g_equal(yyjson_obj_get(node, "category"), "weak") ? ME_CAPTURE_WEAK : ME_CAPTURE_TYPED};
+        captures[i] = (me_capture){{capture_names[i], node->dtype, 0}, &node->scalar,
+            node->weak ? ME_CAPTURE_WEAK : ME_CAPTURE_TYPED};
     }
     if (math_backend && strcmp(math_backend, "auto") && strcmp(math_backend, "system") &&
         strcmp(math_backend, "sleef") && strcmp(math_backend, "accelerate")) {
@@ -491,7 +491,7 @@ static me_artifact_status g_prepare_map(const char *source, const graph_node *no
 
 /* Build the legacy interchange document only for a map that can export it.
  * Preparation above never consumes this document. */
-static yyjson_doc *g_map_root(const char *source, graph_node *nodes,
+static yyjson_doc *g_map_root(const char *source, const graph_node *nodes, yyjson_val *wire_nodes,
     const int *input_nodes, int ni, const int *constant_nodes, int nc, int mask_node, bool integer_powers,
     const char *math_backend) {
     yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
@@ -513,14 +513,14 @@ static yyjson_doc *g_map_root(const char *source, graph_node *nodes,
         int id = input_nodes[j];
         if (id == mask_node && nodes[id].uses == 1) continue;
         yyjson_mut_val *input = yyjson_mut_obj(doc);
-        ok &= yyjson_mut_obj_add_str(doc, input, "name", g_str(yyjson_obj_get(nodes[id].value, "name")));
-        ok &= yyjson_mut_obj_add_str(doc, input, "dtype", g_str(yyjson_obj_get(nodes[id].value, "dtype")));
+        ok &= yyjson_mut_obj_add_str(doc, input, "name", nodes[id].name);
+        ok &= yyjson_mut_obj_add_str(doc, input, "dtype", g_dtype_name(nodes[id].dtype));
         ok &= yyjson_mut_arr_append(inputs, input);
     }
     ok &= yyjson_mut_obj_add_val(doc, root, "inputs", inputs);
     for (int j = 0; j < nc; j++) {
         int id = constant_nodes[j];
-        yyjson_mut_val *constant = yyjson_val_mut_copy(doc, nodes[id].value);
+        yyjson_mut_val *constant = yyjson_val_mut_copy(doc, yyjson_arr_get(wire_nodes, (size_t)id));
         yyjson_mut_obj_remove_key(constant, "id");
         yyjson_mut_obj_remove_key(constant, "op");
         char name[32]; snprintf(name, sizeof(name), "_me_capture_%d", id);
@@ -544,6 +544,50 @@ static yyjson_doc *g_map_root(const char *source, graph_node *nodes,
     yyjson_mut_doc_free(doc);
     return result;
 }
+static bool g_decode_reduction(yyjson_val *wire, int op, graph_reduction *reduction,
+    const char **message) {
+    me_array_options *opts = &reduction->options;
+    opts->version = ME_ARTIFACT_ARRAY_VERSION;
+    opts->reduction = (me_array_reduction)op;
+    if (!op) return true;
+    opts->naxes = -1;
+    yyjson_val *axes = yyjson_obj_get(wire, "axes");
+    yyjson_val *keepdims = yyjson_obj_get(wire, "keepdims");
+    if (!yyjson_is_bool(keepdims)) return false;
+    opts->keepdims = yyjson_get_bool(keepdims);
+    if (!yyjson_is_null(axes)) {
+        if (!yyjson_is_arr(axes) || yyjson_arr_size(axes) > ME_ARRAY_MAX_RANK) return false;
+        opts->naxes = (int)yyjson_arr_size(axes);
+        for (int i = 0; i < opts->naxes; i++) {
+            yyjson_val *axis = yyjson_arr_get(axes, (size_t)i);
+            if (!yyjson_is_int(axis) || yyjson_get_sint(axis) < -ME_ARRAY_MAX_RANK ||
+                yyjson_get_sint(axis) >= ME_ARRAY_MAX_RANK) return false;
+            opts->axes[i] = (int)yyjson_get_sint(axis);
+        }
+    }
+    yyjson_val *dtype = yyjson_obj_get(wire, "dtype");
+    opts->accumulator = g_dtype(g_str(dtype));
+    if (opts->accumulator == ME_AUTO && !g_equal(dtype, "auto")) return false;
+    yyjson_val *initial = yyjson_obj_get(wire, "initial");
+    if (yyjson_is_null(initial)) return true;
+    const char *const initial_fields[] = {"dtype", "encoding", "value", "category"};
+    yyjson_val *category = yyjson_obj_get(initial, "category");
+    reduction->initial_weak = g_equal(category, "weak");
+    if (!g_fields(initial, initial_fields, 4, 4) ||
+        !(reduction->initial_weak || g_equal(category, "typed_scalar"))) return false;
+    if (dsl_graph_scalar(initial, &reduction->initial_dtype, &reduction->initial)) {
+        *message = "initial scalar decode failed";
+        return false;
+    }
+    if (reduction->initial_weak && reduction->initial_dtype != ME_BOOL &&
+        reduction->initial_dtype != ME_INT64 && reduction->initial_dtype != ME_FLOAT64) {
+        *message = "invalid weak initial transport dtype";
+        return false;
+    }
+    reduction->has_initial = true;
+    return true;
+}
+
 static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_val *root,
     const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error) {
     if (out) *out = NULL;
@@ -604,9 +648,11 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
     bool needs_stages = false;
     for (int i = 0; i < count; i++) {
         current = i;
-        graph_node *n = &nodes[i]; n->value = yyjson_arr_get(array, (size_t)i);
-        yyjson_val *id = yyjson_obj_get(n->value, "id");
-        n->op = g_str(yyjson_obj_get(n->value, "op"));
+        graph_node *n = &nodes[i];
+        yyjson_val *wire = yyjson_arr_get(array, (size_t)i);
+        yyjson_val *id = yyjson_obj_get(wire, "id");
+        n->op = g_str(yyjson_obj_get(wire, "op"));
+        n->mask = -1;
         if (!n->op || !yyjson_is_uint(id) || yyjson_get_uint(id) != (uint64_t)i) goto done;
         bool input = !strcmp(n->op, "input"), constant = !strcmp(n->op, "constant");
         int reduction = g_reduce(n->op), arity = -1;
@@ -617,52 +663,57 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
         const char *const cast_fields[] = {"id", "op", "args", "dtype"};
         const char *const reduction_fields[] = {"id", "op", "args", "axes", "keepdims", "dtype", "initial", "where"};
         if (input || constant) {
-            if (!g_fields(n->value, input ? input_fields : constant_fields, input ? 4 : 6, input ? 4 : 6)) goto done;
-            me_dtype dtype = g_dtype(g_str(yyjson_obj_get(n->value, "dtype")));
+            if (!g_fields(wire, input ? input_fields : constant_fields, input ? 4 : 6, input ? 4 : 6)) goto done;
+            me_dtype dtype = n->dtype = g_dtype(g_str(yyjson_obj_get(wire, "dtype")));
             if (dtype == ME_AUTO) { rc = ME_GRAPH_ERR_SIGNATURE; message = "unsupported input/constant dtype"; goto done; }
             if (ni + nc == ME_MAX_VARS) { message = "binding limit exceeded"; goto done; }
             if (input) {
-                const char *name = g_str(yyjson_obj_get(n->value, "name"));
+                const char *name = n->name = g_str(yyjson_obj_get(wire, "name"));
                 if (!g_name(name)) { message = "invalid binding name"; goto done; }
-                for (int j = 0; j < ni; j++) if (g_equal(yyjson_obj_get(nodes[input_nodes[j]].value, "name"), name)) {
+                for (int j = 0; j < ni; j++) if (!strcmp(nodes[input_nodes[j]].name, name)) {
                     message = "duplicate binding name"; goto done;
                 }
                 input_nodes[ni++] = i;
             } else {
-                yyjson_val *category = yyjson_obj_get(n->value, "category");
-                if (!(g_equal(category, "typed_scalar") || (g_equal(category, "weak") &&
+                yyjson_val *category = yyjson_obj_get(wire, "category");
+                n->weak = g_equal(category, "weak");
+                if (!(g_equal(category, "typed_scalar") || (n->weak &&
                     (dtype == ME_BOOL || dtype == ME_INT64 || dtype == ME_FLOAT64)))) {
                     rc = ME_GRAPH_ERR_SIGNATURE; message = "invalid scalar category or weak transport dtype"; goto done;
                 }
+                me_dtype decoded_dtype;
+                n->scalar_valid = dsl_graph_scalar(wire, &decoded_dtype, &n->scalar) == ME_ARTIFACT_SUCCESS;
+                n->power_literal = g_power_literal(wire, n);
                 constant_nodes[nc++] = i;
             }
         } else {
             if (reduction) {
                 if (i != result) needs_stages = true;
-                if (!g_fields(n->value, reduction_fields, 8, 8)) goto done;
+                if (!g_fields(wire, reduction_fields, 8, 8)) goto done;
                 arity = 1;
-                yyjson_val *where = yyjson_obj_get(n->value, "where");
+                yyjson_val *where = yyjson_obj_get(wire, "where");
                 if (!yyjson_is_null(where)) {
                     if (!yyjson_is_uint(where) || yyjson_get_uint(where) >= (uint64_t)i) goto done;
-                    mask_node = (int)yyjson_get_uint(where);
-                    if (strcmp(nodes[mask_node].op, "input") || !g_equal(yyjson_obj_get(nodes[mask_node].value, "dtype"), "bool")) {
+                    mask_node = n->mask = (int)yyjson_get_uint(where);
+                    if (strcmp(nodes[mask_node].op, "input") || nodes[mask_node].dtype != ME_BOOL) {
                         rc = ME_GRAPH_ERR_UNSUPPORTED; message = "participation requires a strong Boolean input"; goto done;
                     }
                     nodes[mask_node].uses++;
                 }
             } else if (g_operator(n->op, &arity)) {
-                if (!g_fields(n->value, op_fields, 3, 3)) goto done;
+                if (!g_fields(wire, op_fields, 3, 3)) goto done;
             } else if (!strcmp(n->op, "select")) {
-                arity = 3; if (!g_fields(n->value, op_fields, 3, 3)) goto done;
+                arity = 3; if (!g_fields(wire, op_fields, 3, 3)) goto done;
             } else if (!strcmp(n->op, "cast")) {
                 arity = 1;
-                if (!g_fields(n->value, cast_fields, 4, 4) || g_dtype(g_str(yyjson_obj_get(n->value, "dtype"))) == ME_AUTO) goto done;
+                n->dtype = g_dtype(g_str(yyjson_obj_get(wire, "dtype")));
+                if (!g_fields(wire, cast_fields, 4, 4) || n->dtype == ME_AUTO) goto done;
             } else if (!strcmp(n->op, "function")) {
-                const char *name = g_str(yyjson_obj_get(n->value, "name"));
-                if (!g_fields(n->value, function_fields, 4, 4) || !g_name(name)) goto done;
+                const char *name = n->name = g_str(yyjson_obj_get(wire, "name"));
+                if (!g_fields(wire, function_fields, 4, 4) || !g_name(name)) goto done;
                 if (g_reduce(name)) { rc = ME_GRAPH_ERR_UNSUPPORTED; message = "reductions must be graph nodes"; goto done; }
             } else { rc = ME_GRAPH_ERR_UNSUPPORTED; message = "unknown graph opcode"; goto done; }
-            yyjson_val *args = yyjson_obj_get(n->value, "args");
+            yyjson_val *args = yyjson_obj_get(wire, "args");
             if (!yyjson_is_arr(args) || yyjson_arr_size(args) > 3 ||
                 (arity >= 0 && yyjson_arr_size(args) != (size_t)arity)) { message = "invalid operation arity"; goto done; }
             n->nargs = (int)yyjson_arr_size(args);
@@ -680,10 +731,7 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
     if (mask_node >= 0) nodes[mask_node].reachable = true;
     for (int i = count - 1; i >= 0; i--) if (nodes[i].reachable) {
         for (int j = 0; j < nodes[i].nargs; j++) nodes[nodes[i].args[j]].reachable = true;
-        if (g_reduce(nodes[i].op)) {
-            yyjson_val *where = yyjson_obj_get(nodes[i].value, "where");
-            if (!yyjson_is_null(where)) nodes[(int)yyjson_get_uint(where)].reachable = true;
-        }
+        if (nodes[i].mask >= 0) nodes[nodes[i].mask].reachable = true;
     }
     for (int i = 0; i < count; i++) {
         current = i;
@@ -705,54 +753,25 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
     atomic_init(&p->references, 1);
     p->declared_staged = staged_capability;
     p->mask = -1; p->ninputs = ni;
-    p->reduction.version = ME_ARTIFACT_ARRAY_VERSION;
     int reduction = g_reduce(nodes[result].op), map_root = reduction ? nodes[result].args[0] : result;
     p->direct_reduction = !strcmp(nodes[map_root].op, "input");
     p->partitionable = !reduction && final_dtype == ME_AUTO && g_partitionable(nodes,count);
     for (int i=0; i<count; i++) if (nodes[i].reachable && !strcmp(nodes[i].op,"function")) {
-        const char *name=g_str(yyjson_obj_get(nodes[i].value,"name"));
+        const char *name = nodes[i].name;
         const char *costly[]={"sin","cos","tan","sinh","cosh","tanh","asin","acos","atan","atan2",
             "asinh","acosh","atanh","arcsin","arccos","arctan","arctan2","arcsinh","arccosh","arctanh",
             "exp","exp2","expm1","log","log1p","log2","log10","cbrt","hypot","fmod"};
         for (size_t j=0; name && j<sizeof(costly)/sizeof(*costly); j++)
             p->costly_map |= !strcmp(name,costly[j]);
     }
-    p->reduction.reduction = (me_array_reduction)reduction;
-    p->reduction.naxes = reduction ? -1 : 0;
-    if (reduction) {
-        current = result;
-        yyjson_val *v = nodes[result].value, *axes = yyjson_obj_get(v, "axes");
-        yyjson_val *keepdims = yyjson_obj_get(v, "keepdims");
-        if (!yyjson_is_bool(keepdims)) goto done;
-        p->reduction.keepdims = yyjson_get_bool(keepdims);
-        if (!yyjson_is_null(axes)) {
-            if (!yyjson_is_arr(axes) || yyjson_arr_size(axes) > ME_ARRAY_MAX_RANK) goto done;
-            p->reduction.naxes = (int)yyjson_arr_size(axes);
-            for (int i = 0; i < p->reduction.naxes; i++) {
-                yyjson_val *axis = yyjson_arr_get(axes, (size_t)i);
-                if (!yyjson_is_int(axis) || yyjson_get_sint(axis) < -ME_ARRAY_MAX_RANK || yyjson_get_sint(axis) >= ME_ARRAY_MAX_RANK) goto done;
-                p->reduction.axes[i] = (int)yyjson_get_sint(axis);
-            }
-        }
-        yyjson_val *dtype = yyjson_obj_get(v, "dtype");
-        p->reduction.accumulator = g_dtype(g_str(dtype));
-        if (p->reduction.accumulator == ME_AUTO && !g_equal(dtype, "auto")) goto done;
-        yyjson_val *initial = yyjson_obj_get(v, "initial");
-        if (!yyjson_is_null(initial)) {
-            const char *const initial_fields[] = {"dtype", "encoding", "value", "category"};
-            if (!g_fields(initial, initial_fields, 4, 4) ||
-                !(g_equal(yyjson_obj_get(initial, "category"), "typed_scalar") ||
-                  g_equal(yyjson_obj_get(initial, "category"), "weak"))) goto done;
-            me_artifact_status scalar_status = dsl_graph_scalar(initial, &p->initial_dtype, &p->initial);
-            if (scalar_status) {
-                message = "initial scalar decode failed"; goto done;
-            }
-            if (g_equal(yyjson_obj_get(initial, "category"), "weak") && p->initial_dtype != ME_BOOL &&
-                p->initial_dtype != ME_INT64 && p->initial_dtype != ME_FLOAT64) {
-                message = "invalid weak initial transport dtype"; goto done;
-            }
-            p->reduction.initial = &p->initial;
-        }
+    graph_reduction reduced = {0};
+    if (reduction) current = result;
+    if (!g_decode_reduction(yyjson_arr_get(array, (size_t)result), reduction, &reduced, &message)) goto done;
+    p->reduction = reduced.options;
+    if (reduced.has_initial) {
+        p->initial = reduced.initial;
+        p->initial_dtype = reduced.initial_dtype;
+        p->reduction.initial = &p->initial;
     }
     g_add(&source, "def graph_map(");
     int binding = 0;
@@ -760,15 +779,15 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
         int id = kind ? constant_nodes[j] : input_nodes[j];
         if (id == mask_node && nodes[id].uses == 1) continue;
         if (binding++) g_add(&source, ", ");
-        if (!kind) g_add(&source, g_str(yyjson_obj_get(nodes[id].value, "name")));
+        if (!kind) g_add(&source, nodes[id].name);
         else { char name[32]; snprintf(name, sizeof(name), "_me_capture_%d", id); g_add(&source, name); }
     }
     g_add(&source, "):\n    return "); g_expr(&source, nodes, map_root); g_add(&source, "\n");
     int map_index = 0;
     for (int j = 0; j < ni; j++) {
-        int id = input_nodes[j]; yyjson_val *v = nodes[id].value;
-        p->names[j] = g_copy(g_str(yyjson_obj_get(v, "name")));
-        p->types[j] = g_dtype(g_str(yyjson_obj_get(v, "dtype")));
+        int id = input_nodes[j];
+        p->names[j] = g_copy(nodes[id].name);
+        p->types[j] = nodes[id].dtype;
         p->map_indices[j] = -1;
         if (!p->names[j]) { rc = ME_GRAPH_ERR_OOM; message = "binding allocation failed"; goto done; }
         if (id == mask_node) p->mask = j;
@@ -787,7 +806,7 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
     if (status) { rc = g_native(error, map_root, status, &native); message = NULL; goto done; }
     p->inferred = me_artifact_inferred_dtype(p->map);
     if (!reduction && final_dtype == ME_AUTO) {
-        map_doc = g_map_root(source.data, nodes, input_nodes, ni, constant_nodes, nc, mask_node,
+        map_doc = g_map_root(source.data, nodes, array, input_nodes, ni, constant_nodes, nc, mask_node,
             optimization != NULL, math_backend);
         if (!map_doc) { rc = ME_GRAPH_ERR_OOM; message = "map export allocation failed"; goto done; }
         yyjson_val *map = yyjson_doc_get_root(map_doc);
@@ -813,9 +832,7 @@ static me_graph_status g_prepare_json(const char *json, size_t length, yyjson_va
             rc = ME_GRAPH_ERR_SIGNATURE; message = "invalid accumulator, axes or initial dtype"; goto done;
         }
         if (p->reduction.initial && p->initial_dtype != dtype) {
-            yyjson_val *initial = yyjson_obj_get(nodes[result].value, "initial");
-            bool weak = g_equal(yyjson_obj_get(initial, "category"), "weak");
-            status = g_initial_conversion(&p->initial, p->initial_dtype, weak, dtype, &p->initial_conversion, &native);
+            status = g_initial_conversion(&p->initial, p->initial_dtype, reduced.initial_weak, dtype, &p->initial_conversion, &native);
             if (status) { rc = g_native(error, result, status, &native); message = NULL; goto done; }
         }
         p->inferred = dtype;
@@ -1586,6 +1603,7 @@ static me_dtype g_result_dtype(const me_graph_plan *p) {
 }
 static me_graph_status g_split_graph(yyjson_val *root, graph_node *nodes, int count, int result,
     const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error) {
+    yyjson_val *wire_nodes = yyjson_obj_get(root, "nodes");
     bool boundary[ME_GRAPH_MAX_NODES] = {0};
     bool strong_dependency[ME_GRAPH_MAX_NODES] = {0};
     int stage_ids[ME_GRAPH_MAX_NODES], roots[ME_GRAPH_MAX_STAGES], nstages = 0;
@@ -1594,7 +1612,7 @@ static me_graph_status g_split_graph(yyjson_val *root, graph_node *nodes, int co
         strong_dependency[i] = !strcmp(nodes[i].op, "input") || g_reduce(nodes[i].op);
         for (int j = 0; j < nodes[i].nargs; j++) strong_dependency[i] |= strong_dependency[nodes[i].args[j]];
         if (!strcmp(nodes[i].op, "select") || !strcmp(nodes[i].op, "and") || !strcmp(nodes[i].op, "or") ||
-            (g_reduce(nodes[i].op) && !yyjson_is_null(yyjson_obj_get(nodes[i].value, "where"))))
+            nodes[i].mask >= 0)
             return g_error(error, i, ME_GRAPH_ERR_UNSUPPORTED, "automatic stages reject conditional or masked participation domains; declare independent stages explicitly");
         boundary[i] = i == result || g_reduce(nodes[i].op) ||
             (nodes[i].uses > 1 && strcmp(nodes[i].op, "input") && strcmp(nodes[i].op, "constant"));
@@ -1616,8 +1634,9 @@ static me_graph_status g_split_graph(yyjson_val *root, graph_node *nodes, int co
     for (int i = 0; i < count; i++) if (!strcmp(nodes[i].op, "input")) {
         if (!first) g_add(&json, ",");
         first = false;
-        g_add(&json, "{\"name\":"); g_json(&json, yyjson_obj_get(nodes[i].value, "name"));
-        g_add(&json, ",\"dtype\":"); g_json(&json, yyjson_obj_get(nodes[i].value, "dtype")); g_add(&json, "}");
+        yyjson_val *wire = yyjson_arr_get(wire_nodes, (size_t)i);
+        g_add(&json, "{\"name\":"); g_json(&json, yyjson_obj_get(wire, "name"));
+        g_add(&json, ",\"dtype\":"); g_json(&json, yyjson_obj_get(wire, "dtype")); g_add(&json, "}");
     }
     g_add(&json, "],\"stages\":[");
     for (int stage = 0; stage < nstages; stage++) {
@@ -1640,8 +1659,8 @@ static me_graph_status g_split_graph(yyjson_val *root, graph_node *nodes, int co
                 snprintf(text, sizeof(text), "\"_me_stage_%d\":{\"stage\":%d}", i, stage_ids[i]);
                 g_add(&json, text);
             } else {
-                yyjson_val *name = yyjson_obj_get(nodes[i].value, "name");
-                const char *s = g_str(name);
+                yyjson_val *name = yyjson_obj_get(yyjson_arr_get(wire_nodes, (size_t)i), "name");
+                const char *s = nodes[i].name;
                 if (!strncmp(s, "_me_stage_", strlen("_me_stage_"))) {
                     free(json.data);
                     return g_error(error, i, ME_GRAPH_ERR_BINDING, "input name collides with automatic stage namespace");
@@ -1662,7 +1681,7 @@ static me_graph_status g_split_graph(yyjson_val *root, graph_node *nodes, int co
                 g_add(&json, text);
             } else {
                 yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
-                yyjson_mut_val *node = doc ? yyjson_val_mut_copy(doc, nodes[i].value) : NULL;
+                yyjson_mut_val *node = doc ? yyjson_val_mut_copy(doc, yyjson_arr_get(wire_nodes, (size_t)i)) : NULL;
                 bool ok = node && yyjson_mut_obj_put(node, yyjson_mut_str(doc, "id"), yyjson_mut_uint(doc, (uint64_t)mapped[i]));
                 if (ok && nodes[i].nargs) {
                     yyjson_mut_val *args = yyjson_mut_arr(doc);
