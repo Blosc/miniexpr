@@ -41,7 +41,10 @@ storage format and will not change `b2o`.
    build off. Introduce a C-Blosc2 array scheduling pilot behind a separate
    build/test path; compare with the current Python-facing array scheduler
    before replacing it. Include a contiguous input, padded grid and a
-   source-backed case with a bounded tile.
+   source-backed case with a bounded tile. The initial internal grid pilot
+   covers one compressed source, padding and a block-scalar result with bounded
+   scheduler buffers. Its physical blocks are its groups; it is not a
+   replacement for arbitrary persisted logical partitions.
 2. Replace the scheduler's **input** with a typed, bounded, topologically
    ordered node array: operand slots, exact scalar captures and typed operation
    parameters; root and staged reduction references are node IDs. Copy the

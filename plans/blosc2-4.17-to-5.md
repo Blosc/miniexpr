@@ -1,7 +1,7 @@
 # Python-Blosc2 4.17 to 5.x: storage first, execution second
 
-Status: agreed direction; proposed release gates. No release or branch cut is
-implied by this document.
+Status: the storage backport is under release-candidate qualification. The
+execution handoff is in development, not enabled in standard 5.x builds.
 
 ## Local checkout convention
 
@@ -89,6 +89,17 @@ The local wheel gate is reproducible with
 `../python-blosc2.codeberg/scripts/qualify_menudet_migration.py`: use the 4.17
 wheel to `write` a directory and the `next` wheel to `check` it, then reverse
 the roles with a fresh directory.
+
+The first candidate passed that exchange on macOS arm64: Python-Blosc2
+`7a31db15b14eb1f3ee6826f997ad377becbd88e7` (4.17) and
+`518adb33d52181f3835b7af473b85857a294006b` (`next`).
+The 4.17 wheel uses miniexpr `64e5d180904f87513cead89cbb15bff09d065cab`
+and C-Blosc2 3.8. The miniexpr candidate's
+[hosted qualification](https://github.com/Blosc/miniexpr/actions/runs/45776437750)
+passed. The
+[4.17 wheel matrix](https://github.com/Blosc/python-blosc2/actions/runs/45776669778)
+and [WASM tests](https://github.com/Blosc/python-blosc2/actions/runs/45776660763)
+are the remaining hosted gates, not release tags.
 
 ## 3. Change execution ownership for 5.x without changing storage again
 
