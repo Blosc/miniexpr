@@ -36,9 +36,6 @@ me_artifact_status dsl_array_run_into(const me_artifact *artifact,
  * public artifact schemas and validation remain unchanged. */
 me_artifact_status dsl_graph_load_map(const char *json, size_t length,
     me_jit_mode jit, me_artifact **out, me_artifact_error *error);
-/* In-process frontends share validation without encoding and reparsing JSON. */
-me_graph_status dsl_graph_prepare_root(yyjson_val *root,
-    const me_graph_prepare_options *options, me_graph_plan **out, me_graph_error *error);
 me_artifact_status dsl_graph_load_map_root(yyjson_val *root,
     me_jit_mode jit, me_artifact **out, me_artifact_error *error);
 me_artifact_status dsl_graph_scalar(yyjson_val *root, me_dtype *dtype, void *value);

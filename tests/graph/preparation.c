@@ -604,6 +604,25 @@ static void trusted(bool jit) {
     CHECK(size > 0 && (size_t)size < capacity);
     me_graph_prepare_options options = {sizeof(options), ME_GRAPH_VERSION, jit ? ME_JIT_ON : ME_JIT_OFF, false, true};
     CHECK(!me_graph_prepare_json(json, (size_t)size, &options, &p, &error));
+    char *binding = strstr(json, "\"y\":{\"stage\":0}");
+    CHECK(binding);
+    binding[1] = 'z';
+    me_graph_plan *rejected = NULL;
+    CHECK(me_graph_prepare_json(json, (size_t)size, &options, &rejected, &error) == ME_GRAPH_ERR_FORMAT);
+    CHECK(!rejected && error.stage == 1);
+    binding[1] = 'y';
+    const char *auto_dtype = "\"dtype\":\"auto\"";
+    char *dtype = strstr(json, auto_dtype);
+    CHECK(dtype);
+    size_t offset = (size_t)(dtype - json);
+    char *wrong = malloc(capacity + 4);
+    CHECK(wrong);
+    int wrong_size = snprintf(wrong, capacity + 4, "%.*s\"dtype\":\"float64\"%s",
+        (int)offset, json, dtype + strlen(auto_dtype));
+    CHECK(wrong_size > 0 && (size_t)wrong_size < capacity + 4);
+    CHECK(me_graph_prepare_json(wrong, (size_t)wrong_size, &options, &rejected, &error) == ME_GRAPH_ERR_SIGNATURE);
+    CHECK(!rejected && error.stage == 1);
+    free(wrong);
     free(json); me_graph_plan_free(map);
     CHECK(!strcmp(me_graph_stage_kind(p, 0), "menudet"));
     me_graph_schedule *s = NULL;
