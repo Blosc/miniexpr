@@ -66,6 +66,11 @@ storage format and will not change `b2o`.
    through ordinary `group_sum(x)[:]` syntax. Partial reads, legacy handles,
    and partitions over the pilot's 64 KiB scheduler buffer limit retain the
    old route. Standard builds still use the adapter.
+   The logical-partition pilot can report the bitwise union of floating-point
+   flags across groups. The interpreter test agrees with explicit artifact
+   evaluation for divide-by-zero and overflow in different groups, including
+   a short final group. Prepared backend metadata is not a per-group JIT
+   trace; JIT parity and wider dispatch remain to be qualified.
 2. Replace the scheduler's **input** with a typed, bounded, topologically
    ordered node array: operand slots, exact scalar captures and typed operation
    parameters; root and staged reduction references are node IDs. Copy the
