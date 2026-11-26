@@ -218,7 +218,13 @@ if(MINIEXPR_DEFAULT_LIB)
   add_library(miniexpr::core ALIAS ${MINIEXPR_DEFAULT_LIB})
 endif()
 
+set(_miniexpr_install_core_default OFF)
 if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+  set(_miniexpr_install_core_default ON)
+endif()
+# Embedding hosts opt in when their own installed targets depend on the core.
+option(MINIEXPR_INSTALL_CORE "Install the core libraries, headers and CMake package" ${_miniexpr_install_core_default})
+if(MINIEXPR_INSTALL_CORE)
   foreach(_miniexpr_install_target miniexpr miniexpr_static)
     if(TARGET ${_miniexpr_install_target})
       if(NOT EMSCRIPTEN)
@@ -265,7 +271,7 @@ if(MINIEXPR_BUILD_ARTIFACT)
   install(FILES "${yyjson_SOURCE_DIR}/LICENSE"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/miniexpr/licenses" RENAME LICENSE-YYJSON)
   # Standalone distribution only: embedding hosts own their install layout.
-  if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+  if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR AND MINIEXPR_INSTALL_CORE)
     if(NOT EMSCRIPTEN)
       install(TARGETS miniexpr_artifact
         EXPORT miniexprTargets
@@ -286,7 +292,7 @@ if(MINIEXPR_BUILD_ARTIFACT)
   endif()
 endif()
 
-if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR AND NOT EMSCRIPTEN AND MINIEXPR_DEFAULT_LIB)
+if(MINIEXPR_INSTALL_CORE AND NOT EMSCRIPTEN AND MINIEXPR_DEFAULT_LIB)
   install(EXPORT miniexprTargets
     FILE miniexprTargets.cmake
     NAMESPACE miniexpr::
