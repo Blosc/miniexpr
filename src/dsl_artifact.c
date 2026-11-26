@@ -69,6 +69,10 @@ struct me_artifact {
     me_dsl_semantic_profile profile;
 };
 
+const me_kernel *me_artifact_borrow_core(const me_artifact *artifact) {
+    return artifact ? artifact->core_owner : NULL;
+}
+
 /* Test-only bulk compilation borrows the same typed program as normal execution. */
 void *dsl_artifact_program_for_tests(void *opaque) {
     me_artifact *artifact = opaque;

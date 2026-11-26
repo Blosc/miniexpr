@@ -104,6 +104,10 @@ typedef struct {
 me_artifact_status me_artifact_prepare_menudet(const char *version, const char *source,
     const me_signature *signature, int jit_mode, const me_jit_options *options,
     me_artifact **out, me_artifact_error *error);
+/* Transitional borrow for native schedulers. Only direct-prepared adapters
+ * have a core kernel. The pointer is valid until the artifact is freed. */
+#define ME_ARTIFACT_BORROW_CORE_VERSION 1
+const me_kernel *me_artifact_borrow_core(const me_artifact *artifact);
 #define ME_ARTIFACT_INFER_OUTPUT_VERSION 1
 me_artifact_status me_artifact_load_options(const char *json, size_t length, me_jit_mode jit_mode,
     const me_jit_options *options, me_artifact **out, me_artifact_error *error);

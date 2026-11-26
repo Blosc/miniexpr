@@ -280,6 +280,20 @@ int main(void) {
     schema1_string_arena_fixture();
     char *json = read_fixture();
     me_artifact *artifact = load(json);
+    assert(me_artifact_borrow_core(NULL) == NULL);
+    assert(me_artifact_borrow_core(artifact) == NULL);
+    me_artifact *direct = NULL;
+    me_input_spec slot = {"x", ME_FLOAT64, 0};
+    me_signature signature = ME_SIGNATURE_INITIALIZER;
+    signature.inputs = &slot;
+    signature.ninputs = 1;
+    assert(me_artifact_prepare_menudet("0.2", "def f(x):\n    return x + 1.0\n",
+        &signature, ME_JIT_OFF, NULL, &direct, NULL) == ME_ARTIFACT_SUCCESS);
+    const me_kernel *borrowed = me_artifact_borrow_core(direct);
+    me_kernel_info borrowed_info = ME_KERNEL_INFO_INITIALIZER;
+    assert(borrowed && me_describe(borrowed, &borrowed_info) == ME_SUCCESS);
+    assert(borrowed_info.output_dtype == ME_FLOAT64 && me_artifact_borrow_core(direct) == borrowed);
+    me_artifact_free(direct);
     assert(me_artifact_ninputs(artifact) == 1);
     assert(!strcmp(me_artifact_entry_point(artifact), "affine"));
     assert(!strcmp(me_artifact_input_name(artifact, 0), "x"));
