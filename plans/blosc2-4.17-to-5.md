@@ -1,10 +1,10 @@
 # Python-Blosc2 4.17 to 5.x: storage first, execution second
 
 Status: the storage backport passed candidate qualification and the final
-4.17.0 wheel run. `v4.17.0` is tagged. The execution handoff is in
-development, not enabled in standard 5.x builds; Python-Blosc2 `next` now pins
-miniexpr's typed graph preparation and passed an isolated-wheel integration
-slice.
+4.17.0 wheel run. `v4.17.0` is tagged and live on PyPI. The execution handoff
+is in development, not enabled in standard 5.x builds; Python-Blosc2 `next`
+now pins miniexpr's typed graph preparation and passed an isolated-wheel
+integration slice.
 
 ## Local checkout convention
 
@@ -106,7 +106,9 @@ and [WASM tests](https://github.com/Blosc/python-blosc2/actions/runs/45776660763
 passed. The
 [final wheel run](https://github.com/Blosc/python-blosc2/actions/runs/45779775014)
 qualified `a32d05852972009736c7a6a1a380a15088f049c7` without uploading to PyPI,
-and `v4.17.0` is tagged at that commit on both remotes.
+and `v4.17.0` is tagged at that commit on both remotes. The released 4.17.0
+wheel is live on PyPI; after tagging, the released 4.17.0 wheel and the 5.x
+wheel exchanged the fixture in both directions.
 
 ## 3. Change execution ownership for 5.x without changing storage again
 

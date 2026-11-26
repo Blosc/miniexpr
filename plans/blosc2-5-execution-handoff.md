@@ -90,5 +90,7 @@ preparation without an intermediate manifest). An isolated 5.0.0a1 wheel built
 from that pin passed 596 of 597 focused Menudet, graph and expression tests.
 The single failure was a local editable-install artifact in a subprocess test;
 the same script passes when run against the wheel. The C-Blosc2 pilot at
-`985a2676` passed its hosted job. The typed node array described in step 2 is
-the next implementation step.
+`985a2676` passed its hosted job. The 4.17.0 storage release is tagged and live
+on PyPI; the released wheel and the 5.x wheel exchanged the fixture in both
+directions. The typed node array described in step 2 is the next implementation
+step.
