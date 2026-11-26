@@ -85,6 +85,11 @@ and Codeberg `main` in sync does not change this local split.
    candidate, including existing native graph and array callers. Verify the
    installed CMake version and C header agree with the proposed tag.
 
+The local wheel gate is reproducible with
+`../python-blosc2.codeberg/scripts/qualify_menudet_migration.py`: use the 4.17
+wheel to `write` a directory and the `next` wheel to `check` it, then reverse
+the roles with a fresh directory.
+
 ## 3. Change execution ownership for 5.x without changing storage again
 
 - Miniexpr 1.0 `next` owns formula and Menudet preparation, block evaluation,
@@ -106,11 +111,6 @@ and Codeberg `main` in sync does not change this local split.
 
 ## Decisions still needed during implementation
 
-Select the release-candidate SHA and inventory 4.x entry points forwarding
-`version=` (distinguish source authoring from explicit JSON export). For the
-5.x work, inventory scheduler/graph callers and settle the C-Blosc2 API and
-performance gates before removing their old implementation. Decide which layer
-owns the miniexpr dependency and prepared-handle lifetime. Choose an in-memory
-graph representation independently of its wire encoding: the current JSON and
-text frontends both use yyjson trees. Moving the executor must not silently
-make yyjson a required C-Blosc2 dependency.
+The 5.x [execution handoff](blosc2-5-execution-handoff.md) records the dependency
+boundary, current callers, implementation sequence and proposed acceptance
+gates. Moving the executor must not make yyjson a required C-Blosc2 dependency.
