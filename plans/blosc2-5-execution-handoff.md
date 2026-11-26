@@ -83,13 +83,29 @@ storage format and will not change `b2o`.
     scratch and eight bytes of reducer state. Integer-only execution does not
     probe floating-point status. This is a specialized input-to-min plan, not
     the general typed graph boundary or compressed/staged executor migration.
-    It requires local C-Blosc2 and miniexpr source overrides in the opt-in
-    build; the pinned dependencies and standard build are unchanged.
+    The opt-in build pins the supporting C-Blosc2 and miniexpr revisions;
+    the standard build is unchanged.
+    The mapped slice extends this to `min(x + integer)`,
+    `min(x - integer)` and `min(x * integer)`. C-Blosc2 now owns the prepared
+    interpreter kernel, immutable geometry, one reusable mapped tile and the
+    reduction loop. The frontend supplies only the admitted map source; C
+    preparation proves its inferred int64 elementwise output. No array/graph
+    execution or JSON parsing is delegated back to the artifact adapter.
+    Scheduler scratch is at most 64 KiB, excluding core/compiler scratch;
+    oversized requests retain the adapter before execution. Repeated execution
+    binds current resident values and reports flags from completed map calls.
+    Native tests pass with the artifact adapter disabled, and Python differential
+    tests cover scalar shape/dtype/value parity, tile counts, scratch, FP status,
+    changed values and invalid bindings. This remains a specialized two-node
+    map-to-min plan rather than a general node-array planner.
     `bench/resident_min_pilot.py` in Python-Blosc2 compares uncached preparation,
     warmed execution and ordinary compute against the interpreter graph adapter
     using interleaved medians. On macOS arm64, the million-item native loops
     were approximately equal; lower preparation/dispatch overhead helped small
     arrays. This is not the cross-platform performance gate.
+    Its `--expression 'min(x + 1)'` and `--expression 'min(x * 2)'` cases also
+    matched the adapter's million-item warmed execution time within 1% in local
+    interleaved runs, while reducing preparation overhead.
 2. Replace the scheduler's **input** with a typed, bounded, topologically
    ordered node array: operand slots, exact scalar captures and typed operation
    parameters; root and staged reduction references are node IDs. Copy the
