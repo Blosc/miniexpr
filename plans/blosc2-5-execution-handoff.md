@@ -52,8 +52,12 @@ storage format and will not change `b2o`.
    `-DB2_EXPERIMENTAL_SHARED_MINIEXPR_CORE=ON` on native bundled builds.
    The opt-in macOS arm64 wheel passed the 4.17 exchange and its extension
    links one miniexpr core archive. An independent C consumer also found the
-   wheel's static packages and ran the grid fixture. This tests dependency
-   wiring only; Python still uses the old adapter to schedule execution.
+   wheel's static packages and ran the grid fixture. The same opt-in build
+   exposes a private Python probe for a context-free float64 elementwise
+   map over a compressed 1-D array. It prepares the typed core kernel,
+   uses C-Blosc2 callbacks for block reads and a NumPy result sink, and agrees
+   with the existing adapter on full and padded grids. An undersized scratch
+   budget is rejected. Default Python execution still uses the adapter.
 2. Replace the scheduler's **input** with a typed, bounded, topologically
    ordered node array: operand slots, exact scalar captures and typed operation
    parameters; root and staged reduction references are node IDs. Copy the
