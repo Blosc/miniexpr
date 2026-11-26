@@ -1332,7 +1332,7 @@ static int p_reduce(const me_expr *n, p_eval_context *ctx, me_scalar *out) {
                     kind == ME_REDUCE_ALL, kind == ME_REDUCE_ALL, &out->b)) return ME_EVAL_SUCCESS;
             } else if (extrema) {
                 uint64_t result;
-                if (dsl_menudet_extrema(arg->dtype, values, count, 0, false,
+                if (me_extrema_span(arg->dtype, values, count, 0, false,
                     kind == ME_REDUCE_MIN, &result)) {
                     if (acc_dtype == ME_BOOL) out->b = result != 0;
                     else memcpy(out, &result, sizeof(result));

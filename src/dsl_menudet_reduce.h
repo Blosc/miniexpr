@@ -158,40 +158,6 @@ static inline bool dsl_menudet_no_nan(me_dtype dtype, const void *values, size_t
     }
     return true;
 }
-static inline bool dsl_menudet_extrema(me_dtype dtype, const void *values, size_t count,
-    uint64_t initial, bool initialized, bool minimum, uint64_t *out) {
-    const unsigned char *data = values;
-#define EXTREMA(type, expression) do { \
-    uint64_t best = initial; \
-    for (size_t i = 0; i < count; i++) { \
-        type raw; memcpy(&raw, data + i * sizeof(raw), sizeof(raw)); \
-        expression value = raw, current; memcpy(&current, &best, sizeof(current)); \
-        if (!initialized || (minimum ? value < current : value > current)) best = (uint64_t)value; \
-        initialized = true; \
-    } \
-    *out = best; \
-} while (0)
-    switch (dtype) {
-    case ME_BOOL: EXTREMA(bool, uint64_t); break;
-    case ME_INT8: EXTREMA(int8_t, int64_t); break;
-    case ME_INT16: EXTREMA(int16_t, int64_t); break;
-    case ME_INT32: EXTREMA(int32_t, int64_t); break;
-    case ME_INT64: EXTREMA(int64_t, int64_t); break;
-    case ME_UINT8: EXTREMA(uint8_t, uint64_t); break;
-    case ME_UINT16: EXTREMA(uint16_t, uint64_t); break;
-    case ME_UINT32: EXTREMA(uint32_t, uint64_t); break;
-    case ME_UINT64: EXTREMA(uint64_t, uint64_t); break;
-    case ME_FLOAT32: {
-        return me_extrema_float(dtype, values, count, initial, initialized, minimum, out);
-    }
-    case ME_FLOAT64: {
-        return me_extrema_float(dtype, values, count, initial, initialized, minimum, out);
-    }
-    default: return false;
-    }
-#undef EXTREMA
-    return initialized;
-}
 static inline bool dsl_menudet_truth_reduce(me_dtype dtype, const void *values, size_t count,
     bool initial, bool all, bool *out) {
     if (!dsl_menudet_no_nan(dtype, values, count)) return false;

@@ -1,5 +1,4 @@
 #include "miniexpr_reduce.h"
-#include "dsl_menudet_reduce.h"
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -10,6 +9,11 @@
 #define CHECK_TYPE(TYPE, DTYPE) do { \
     TYPE values[] = {3, 1, 1, 4, 4}; \
     for (int minimum = 0; minimum <= 1; minimum++) { \
+        uint64_t whole, split_value; \
+        assert(me_extrema_span(DTYPE, values, 5, 0, false, minimum, &whole)); \
+        assert(me_extrema_span(DTYPE, values, 2, 0, false, minimum, &split_value)); \
+        assert(me_extrema_span(DTYPE, values + 2, 3, split_value, true, minimum, &split_value)); \
+        assert(whole == split_value); \
         me_argextrema_state serial = {0}, split = {0}, tail = {0}; \
         assert(me_argextrema_update(DTYPE, values, 5, 100, minimum, &serial)); \
         assert(serial.index == (minimum ? 101 : 103)); \
@@ -56,7 +60,7 @@ static void test_floating(me_dtype dtype) {
         float f[] = {-0.0f, 0.0f, -0.0f};
         double d[] = {-0.0, 0.0, -0.0};
         const void *values = dtype == ME_FLOAT32 ? (void *)f : (void *)d;
-        assert(dsl_menudet_extrema(dtype, values, 3, 0, false, minimum, &result));
+        assert(me_extrema_span(dtype, values, 3, 0, false, minimum, &result));
         if (dtype == ME_FLOAT32) {
             float v; memcpy(&v, &result, 4);
             assert(!!signbit(v) == !!minimum);
@@ -78,7 +82,7 @@ static void test_floating(me_dtype dtype) {
         state.initialized = false;
         assert(me_argextrema_update(dtype, values, 3, 0, minimum, &state));
         assert(state.index == 1);
-        assert(dsl_menudet_extrema(dtype, values, 3, 0, false, minimum, &result));
+        assert(me_extrema_span(dtype, values, 3, 0, false, minimum, &result));
         assert(result == state.value);
         /* Unaligned input and nonzero initial state use the same rules. */
         unsigned char unaligned[25] = {0};

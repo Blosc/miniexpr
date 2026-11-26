@@ -583,7 +583,7 @@ static me_artifact_status a_run(const me_artifact *a, const me_array_view *input
                 dtype == me_artifact_output_dtype(a)) {
                 uint64_t normalized = acc, result;
                 if (!a_float(dtype)) normalized = a_integer(dtype, &acc);
-                handled = dsl_menudet_extrema(dtype, values, count, normalized,
+                handled = me_extrema_span(dtype, values, count, normalized,
                     initialized, o->reduction == ME_ARRAY_MIN, &result);
                 if (handled) {
                     if (a_float(dtype)) acc = result;

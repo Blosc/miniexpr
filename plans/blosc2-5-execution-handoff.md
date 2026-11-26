@@ -70,7 +70,26 @@ storage format and will not change `b2o`.
    flags across groups. The interpreter test agrees with explicit artifact
    evaluation for divide-by-zero and overflow in different groups, including
    a short final group. Prepared backend metadata is not a per-group JIT
-   trace; JIT parity and wider dispatch remain to be qualified.
+    trace; JIT parity and wider dispatch remain to be qualified.
+
+    A development-only resident reduction slice now admits whole-domain
+    `min(x)` over a nonempty, aligned, contiguous 1-D native int64 NumPy input,
+    with interpreter execution explicitly selected (`compute(jit=False)`).
+    C-Blosc2 prepares immutable size/tile metadata and executes the tile loop;
+    miniexpr supplies the same value-only extrema primitive as the adapter.
+    Cached plans retain no input values. Unsupported layouts, mapped operands,
+    reduction options, outputs and backend policies retain existing dispatch.
+    The route reports `c-blosc2-resident-min`, zero materialization/allocation
+    scratch and eight bytes of reducer state. Integer-only execution does not
+    probe floating-point status. This is a specialized input-to-min plan, not
+    the general typed graph boundary or compressed/staged executor migration.
+    It requires local C-Blosc2 and miniexpr source overrides in the opt-in
+    build; the pinned dependencies and standard build are unchanged.
+    `bench/resident_min_pilot.py` in Python-Blosc2 compares uncached preparation,
+    warmed execution and ordinary compute against the interpreter graph adapter
+    using interleaved medians. On macOS arm64, the million-item native loops
+    were approximately equal; lower preparation/dispatch overhead helped small
+    arrays. This is not the cross-platform performance gate.
 2. Replace the scheduler's **input** with a typed, bounded, topologically
    ordered node array: operand slots, exact scalar captures and typed operation
    parameters; root and staged reduction references are node IDs. Copy the
@@ -133,5 +152,8 @@ The single failure was a local editable-install artifact in a subprocess test;
 the same script passes when run against the wheel. The C-Blosc2 pilot at
 `985a2676` passed its hosted job. The 4.17.0 storage release is tagged and live
 on PyPI; the released wheel and the 5.x wheel exchanged the fixture in both
-directions. The typed node array described in step 2 is the next implementation
-step.
+directions. The internal typed preparation described in step 2 is now
+implemented, including automatic staging without interchange documents, but
+still links the artifact adapter. General C-Blosc2-owned graph plans and
+schedules, importer takeover and the standard artifact-off wheel gate remain
+unfinished; the resident minimum prototype above does not close those gates.
