@@ -1,8 +1,10 @@
 # Python-Blosc2 4.17 to 5.x: storage first, execution second
 
 Status: the storage backport passed candidate qualification. The final
-4.17.0 build is undergoing release qualification. The
-execution handoff is in development, not enabled in standard 5.x builds.
+4.17.0 wheel run is the remaining release gate. The execution handoff is in
+development, not enabled in standard 5.x builds; Python-Blosc2 `next` now pins
+miniexpr's typed graph preparation and passed an isolated-wheel integration
+slice.
 
 ## Local checkout convention
 

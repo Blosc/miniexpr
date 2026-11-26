@@ -82,3 +82,13 @@ counts and peak scratch. Record medians over interleaved runs; investigate a
 repeatable regression exceeding 5% on a representative production path
 before switching defaults. Do not trade bounded scratch or deterministic
 reduction order for a benchmark improvement.
+
+## Status
+
+Python-Blosc2 `next` pins miniexpr `9eb1349` (typed map and conversion
+preparation without an intermediate manifest). An isolated 5.0.0a1 wheel built
+from that pin passed 596 of 597 focused Menudet, graph and expression tests.
+The single failure was a local editable-install artifact in a subprocess test;
+the same script passes when run against the wheel. The C-Blosc2 pilot at
+`985a2676` passed its hosted job. The typed node array described in step 2 is
+the next implementation step.
