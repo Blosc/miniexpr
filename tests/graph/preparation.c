@@ -1,4 +1,5 @@
 #include "miniexpr_graph.h"
+#include "dsl_graph_plan.h"
 #include <fenv.h>
 #include <float.h>
 #include <math.h>
@@ -405,6 +406,31 @@ static void staged_shared_node(void) {
     CHECK(actual[0] == 1 && actual[1] == 25 && !memcmp(actual, expected, sizeof(actual)));
     me_graph_schedule_free(a); me_graph_schedule_free(b);
     me_graph_plan_free(plan); me_graph_plan_free(imported);
+}
+
+static void staged_without_wire(void) {
+    char name[] = "x";
+    graph_node nodes[] = {
+        {.op = "input", .name = name, .dtype = ME_FLOAT64, .mask = -1},
+        {.op = "sum", .args = {0}, .nargs = 1, .mask = -1,
+            .reduction = {.options = {.version = ME_ARTIFACT_ARRAY_VERSION,
+                .reduction = ME_ARRAY_SUM, .naxes = -1, .accumulator = ME_AUTO}}},
+        {.op = "sub", .args = {0, 1}, .nargs = 2, .mask = -1},
+    };
+    me_graph_plan *plan = NULL;
+    CHECK(!dsl_graph_prepare_typed(nodes, 3, 2, true, NULL, &plan, &error));
+    CHECK(me_graph_stage_count(plan) == 2 && me_graph_stage_last_consumer(plan, 0) == 1);
+    CHECK(!me_graph_export_json(plan, NULL) && !me_graph_export_map_json(plan));
+    name[0] = 'z';
+    me_graph_input_metadata input = {"x", ME_FLOAT64, 1, {2}};
+    me_graph_schedule *schedule = NULL;
+    CHECK(!me_graph_specialize(plan, &input, 1, NULL, &schedule, &error));
+    me_graph_plan_free(plan);
+    double x[] = {2, 5}, result[2];
+    me_array_view binding = view("x", ME_FLOAT64, x, sizeof(x), 1, 2, 0);
+    CHECK(!me_graph_execute(schedule, &binding, 1, result, sizeof(result), NULL, NULL, &error));
+    CHECK(result[0] == -5 && result[1] == -2);
+    me_graph_schedule_free(schedule);
 }
 /* Compare the optimized graph route against the unchanged artifact-array
  * reducer, including exact serial rounding and floating status. */
@@ -895,6 +921,7 @@ int main(void) {
     RUN_CASE(maps(true)); RUN_CASE(lazy(true)); RUN_CASE(reductions(true));
     RUN_CASE(staged(false)); RUN_CASE(staged(true));
     RUN_CASE(staged_shared_node());
+    RUN_CASE(staged_without_wire());
     RUN_CASE(direct_reductions());
     RUN_CASE(weak_capture_conversions());
     RUN_CASE(dsl_direct_sum());

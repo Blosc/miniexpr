@@ -63,7 +63,10 @@ storage format and will not change `b2o`.
     compilation and automatic stage plan assembly take no wire document;
     the compatibility path attaches exports separately. Explicit staged JSON
     imports decode bindings once into typed sources; inferred child input
-    dtypes no longer require copying or rewriting a child tree. Keep
+    dtypes no longer require copying or rewriting a child tree. The private
+    `dsl_graph_prepare_typed()` entry can prepare and execute an automatically
+    staged graph without constructing interchange data. It still links the
+    artifact adapter; this is not the artifact-off build gate. Keep
     explicit graph interchange and canonical cache identity as separate
     compatibility concerns.
 3. Run the Python v1 importer in differential tests against the native adapter
