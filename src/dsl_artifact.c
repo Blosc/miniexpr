@@ -410,14 +410,6 @@ static bool artifact_constant(yyjson_val *object, artifact_binding *binding) {
     }
 }
 
-static unsigned artifact_expr_capabilities(const me_expr *expr) {
-    if (!expr) return 0;
-    unsigned required = is_reduction_node(expr) ? 4 : 0;
-    if (is_string_dtype(expr->dtype) || TYPE_MASK(expr->type) == ME_STRING_CONSTANT) required |= 16;
-    for (int i = 0; i < ARITY(expr->type); i++) required |= artifact_expr_capabilities(expr->parameters[i]);
-    return required;
-}
-
 me_artifact_status dsl_graph_scalar(const char *json, size_t length, me_dtype *dtype, void *value) {
     yyjson_read_err error;
     yyjson_doc *doc = yyjson_read_opts((char *)json, length, 0, NULL, &error);
@@ -436,40 +428,13 @@ me_artifact_status dsl_graph_scalar(const char *json, size_t length, me_dtype *d
 }
 
 static unsigned artifact_block_capabilities(const me_dsl_compiled_block *block) {
-    unsigned required = 1;
-    for (int i = 0; i < block->nstmts; i++) {
-        const me_dsl_compiled_stmt *stmt = block->stmts[i];
-        const me_expr *expr = NULL;
-        switch (stmt->kind) {
-        case ME_DSL_STMT_ASSIGN: expr = stmt->as.assign.value.expr; break;
-        case ME_DSL_STMT_RETURN: expr = stmt->as.return_stmt.expr.expr; break;
-        case ME_DSL_STMT_EXPR: expr = stmt->as.expr_stmt.expr.expr; break;
-        case ME_DSL_STMT_BREAK: case ME_DSL_STMT_CONTINUE: expr = stmt->as.flow.cond.expr; required |= 2; break;
-        case ME_DSL_STMT_IF:
-            expr = stmt->as.if_stmt.cond.expr;
-            required |= 2 | artifact_block_capabilities(&stmt->as.if_stmt.then_block);
-            if (stmt->as.if_stmt.has_else) required |= artifact_block_capabilities(&stmt->as.if_stmt.else_block);
-            for (int j = 0; j < stmt->as.if_stmt.n_elifs; j++) {
-                required |= artifact_expr_capabilities(stmt->as.if_stmt.elif_branches[j].cond.expr);
-                required |= artifact_block_capabilities(&stmt->as.if_stmt.elif_branches[j].block);
-            }
-            break;
-        case ME_DSL_STMT_WHILE:
-            expr = stmt->as.while_loop.cond.expr;
-            required |= 2 | artifact_block_capabilities(&stmt->as.while_loop.body);
-            break;
-        case ME_DSL_STMT_FOR:
-            expr = stmt->as.for_loop.start.expr;
-            required |= artifact_expr_capabilities(stmt->as.for_loop.stop.expr) | artifact_expr_capabilities(stmt->as.for_loop.step.expr);
-            required |= 2 | artifact_block_capabilities(&stmt->as.for_loop.body);
-            break;
-        default: break;
-        }
-        required |= artifact_expr_capabilities(expr);
-    }
+    unsigned features = dsl_menudet_block_features(block);
+    unsigned required = ME_ARTIFACT_CAP_NUMERIC;
+    if (features & ME_MENUDET_FEATURE_CONTROL_FLOW) required |= ME_ARTIFACT_CAP_CONTROL_FLOW;
+    if (features & ME_MENUDET_FEATURE_BLOCK_REDUCTIONS) required |= ME_ARTIFACT_CAP_BLOCK_REDUCTIONS;
+    if (features & ME_MENUDET_FEATURE_FIXED_STRINGS) required |= ME_ARTIFACT_CAP_FIXED_STRINGS;
     return required;
 }
-
 static me_artifact_status artifact_load(const char *json, size_t length, me_jit_mode jit_mode,
                                    me_artifact **out, me_artifact_error *error, bool graph_infer, yyjson_val *root) {
     artifact_clear_error(error);

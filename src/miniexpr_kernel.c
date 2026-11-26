@@ -57,6 +57,60 @@ static bool kernel_output_type(me_dtype dtype, size_t itemsize) {
     return kernel_width(dtype, itemsize) != 0;
 }
 
+static unsigned kernel_expr_features(const me_expr *expr) {
+    if (!expr) return 0;
+    unsigned features = is_reduction_node(expr) ? ME_MENUDET_FEATURE_BLOCK_REDUCTIONS : 0;
+    if (is_string_dtype(expr->dtype) || TYPE_MASK(expr->type) == ME_STRING_CONSTANT) {
+        features |= ME_MENUDET_FEATURE_FIXED_STRINGS;
+    }
+    for (int i = 0; i < ARITY(expr->type); i++) features |= kernel_expr_features(expr->parameters[i]);
+    return features;
+}
+
+unsigned dsl_menudet_block_features(const me_dsl_compiled_block *block) {
+    unsigned features = 0;
+    for (int i = 0; i < block->nstmts; i++) {
+        const me_dsl_compiled_stmt *stmt = block->stmts[i];
+        const me_expr *expr = NULL;
+        switch (stmt->kind) {
+        case ME_DSL_STMT_ASSIGN: expr = stmt->as.assign.value.expr; break;
+        case ME_DSL_STMT_RETURN: expr = stmt->as.return_stmt.expr.expr; break;
+        case ME_DSL_STMT_EXPR: expr = stmt->as.expr_stmt.expr.expr; break;
+        case ME_DSL_STMT_BREAK: case ME_DSL_STMT_CONTINUE:
+            expr = stmt->as.flow.cond.expr;
+            features |= ME_MENUDET_FEATURE_CONTROL_FLOW;
+            break;
+        case ME_DSL_STMT_IF:
+            expr = stmt->as.if_stmt.cond.expr;
+            features |= ME_MENUDET_FEATURE_CONTROL_FLOW |
+                dsl_menudet_block_features(&stmt->as.if_stmt.then_block);
+            if (stmt->as.if_stmt.has_else) {
+                features |= dsl_menudet_block_features(&stmt->as.if_stmt.else_block);
+            }
+            for (int j = 0; j < stmt->as.if_stmt.n_elifs; j++) {
+                features |= kernel_expr_features(stmt->as.if_stmt.elif_branches[j].cond.expr);
+                features |= dsl_menudet_block_features(&stmt->as.if_stmt.elif_branches[j].block);
+            }
+            break;
+        case ME_DSL_STMT_WHILE:
+            expr = stmt->as.while_loop.cond.expr;
+            features |= ME_MENUDET_FEATURE_CONTROL_FLOW |
+                dsl_menudet_block_features(&stmt->as.while_loop.body);
+            break;
+        case ME_DSL_STMT_FOR:
+            expr = stmt->as.for_loop.start.expr;
+            features |= kernel_expr_features(stmt->as.for_loop.stop.expr);
+            features |= kernel_expr_features(stmt->as.for_loop.step.expr);
+            features |= ME_MENUDET_FEATURE_CONTROL_FLOW |
+                dsl_menudet_block_features(&stmt->as.for_loop.body);
+            break;
+        default: break;
+        }
+        features |= kernel_expr_features(expr);
+    }
+    return features;
+}
+
 static bool kernel_identifier(const char *name) {
     if (!name || !*name) return false;
     for (size_t i = 0; name[i]; i++) {
@@ -195,6 +249,15 @@ static me_status kernel_prepare(const char *version, const char *source,
     if (!formula && strcmp(version, "0.1") && strcmp(version, "0.2")) {
         return kernel_error(error, ME_ERR_UNSUPPORTED, "unsupported Menudet version");
     }
+    unsigned forbidden = 0;
+    if (options && options->struct_size >= ME_PREPARE_OPTIONS_V2_SIZE) {
+        forbidden = options->menudet_forbidden_features;
+    }
+    const unsigned known_features = ME_MENUDET_FEATURE_CONTROL_FLOW |
+        ME_MENUDET_FEATURE_BLOCK_REDUCTIONS | ME_MENUDET_FEATURE_FIXED_STRINGS;
+    if ((forbidden & ~known_features) || (formula && forbidden)) {
+        return kernel_error(error, ME_ERR_INVALID_ARG, "invalid Menudet feature restrictions");
+    }
     me_kernel *kernel = NULL;
     me_variable variables[ME_MAX_VARS];
     me_status status = kernel_signature(sig, options, &kernel, variables, error);
@@ -288,6 +351,16 @@ static me_status kernel_prepare(const char *version, const char *source,
         kernel->info.context_ndim = nd ? sig->context_ndim : 0;
     }
     status = kernel_result(kernel, sig, inferred, error);
+    if (status == ME_SUCCESS && forbidden) {
+        unsigned features = dsl_menudet_block_features(&kernel->program->block);
+        if (is_string_dtype(kernel->info.output_dtype)) features |= ME_MENUDET_FEATURE_FIXED_STRINGS;
+        for (size_t i = 0; i < kernel->nbindings; i++) {
+            if (is_string_dtype(kernel->dtypes[i])) features |= ME_MENUDET_FEATURE_FIXED_STRINGS;
+        }
+        if (features & forbidden) {
+            status = kernel_error(error, ME_ERR_SIGNATURE, "source uses a forbidden Menudet feature");
+        }
+    }
     if (status == ME_SUCCESS && kernel->program && kernel->program->jit_request_mode == ME_JIT_ON) {
         dsl_menudet_fp_state saved;
         if (!dsl_menudet_fp_begin(&saved)) {

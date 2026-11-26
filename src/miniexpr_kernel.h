@@ -93,16 +93,27 @@ typedef enum {
     ME_EXEC_REQUIRE_JIT = 2
 } me_execution_policy;
 
+/* Restrictions on a typed Menudet program, independent of its wire format. */
+enum {
+    ME_MENUDET_FEATURE_CONTROL_FLOW = 1u << 0,
+    ME_MENUDET_FEATURE_BLOCK_REDUCTIONS = 1u << 1,
+    ME_MENUDET_FEATURE_FIXED_STRINGS = 1u << 2
+};
+
 typedef struct {
     size_t struct_size;
     me_execution_policy execution;
     bool inherit_environment; /* False: deterministic strict/system defaults. */
     uint8_t reserved[3]; /* Zero-initialize; new fields must follow this storage. */
+    uint32_t menudet_forbidden_features; /* Optional; checked before JIT. */
+    uint32_t reserved_features;
 } me_prepare_options;
 
-#define ME_PREPARE_OPTIONS_INITIALIZER { sizeof(me_prepare_options), ME_EXEC_INTERPRET, false, {0} }
+#define ME_PREPARE_OPTIONS_INITIALIZER { sizeof(me_prepare_options), ME_EXEC_INTERPRET, false, {0}, 0, 0 }
 #define ME_PREPARE_OPTIONS_V1_SIZE \
     (offsetof(me_prepare_options, reserved) + sizeof(((me_prepare_options *)0)->reserved))
+#define ME_PREPARE_OPTIONS_V2_SIZE \
+    (offsetof(me_prepare_options, reserved_features) + sizeof(((me_prepare_options *)0)->reserved_features))
 
 typedef struct {
     size_t struct_size;

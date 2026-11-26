@@ -140,6 +140,10 @@ dtype before final conversion.
   `ME_SIMD_MATH_BACKEND`; this does not add a ULP environment variable.
   Optional JIT falls back before execution; required JIT rejects unavailable
   lowering. Numerical failures never cause execution replay.
+- A host may set `menudet_forbidden_features` to reject compiled control flow,
+  block reductions or fixed strings before JIT. This is an optional
+  preparation-options suffix; v1 sizes and a zero mask impose no restriction.
+  These flags describe typed source, not container or JSON capability numbers.
 - Invalid preparation/run options report `ME_ERR_INVALID_ARG`. Input-count,
   annotation, context-coverage and result-contract mismatches report
   `ME_ERR_SIGNATURE`; source-language errors remain `ME_ERR_SOURCE`.

@@ -457,6 +457,11 @@ static void rejected_jit_contracts(void) {
     sig.cardinality = ME_BLOCK_SCALAR;
     assert(me_prepare_menudet("0.1", source, &sig, &options, &kernel, &error) == ME_ERR_SIGNATURE);
     assert(!kernel);
+    sig.cardinality = ME_ELEMENTWISE;
+    options.menudet_forbidden_features = ME_MENUDET_FEATURE_CONTROL_FLOW;
+    source = "# me:compiler=cc\ndef reject_flow(x):\n    if x > 0:\n        return x\n    return -x\n";
+    assert(me_prepare_menudet("0.1", source, &sig, &options, &kernel, &error) == ME_ERR_SIGNATURE);
+    assert(!kernel && strstr(error.message, "forbidden Menudet feature"));
 #ifdef ME_TEST_HAS_ARTIFACT
     /* The fixed v1 reader must reject the same contracts before backend/cache
      * activity; the compiler-invocation probe exercises both entry routes. */
@@ -482,6 +487,31 @@ static void rejected_jit_contracts(void) {
         }
     }
 #endif
+}
+
+static void menudet_feature_options(void) {
+    me_input_spec input = {"x", ME_FLOAT64, 0};
+    me_signature sig = ME_SIGNATURE_INITIALIZER;
+    sig.inputs = &input;
+    sig.ninputs = 1;
+    me_prepare_options options = ME_PREPARE_OPTIONS_INITIALIZER;
+    me_kernel *kernel = NULL;
+    const char *reduction = "def k(x):\n    return block_sum(x)\n";
+    options.menudet_forbidden_features = ME_MENUDET_FEATURE_BLOCK_REDUCTIONS;
+    assert(me_prepare_menudet("0.1", reduction, &sig, &options, &kernel, NULL) == ME_ERR_SIGNATURE);
+    assert(!kernel);
+    options.struct_size = ME_PREPARE_OPTIONS_V1_SIZE;
+    assert(me_prepare_menudet("0.1", reduction, &sig, &options, &kernel, NULL) == ME_SUCCESS);
+    me_kernel_free(kernel);
+    options.struct_size = sizeof(options);
+    options.menudet_forbidden_features = ME_MENUDET_FEATURE_FIXED_STRINGS;
+    input = (me_input_spec){"x", ME_BYTES, 4};
+    assert(me_prepare_menudet("0.1", "def k(x):\n    return x\n", &sig,
+        &options, &kernel, NULL) == ME_ERR_SIGNATURE);
+    assert(!kernel);
+    options.menudet_forbidden_features = UINT32_MAX;
+    assert(me_prepare_menudet("0.1", reduction, &sig, &options, &kernel, NULL) == ME_ERR_INVALID_ARG);
+    assert(!kernel);
 }
 
 static void signature_errors(void) {
@@ -547,7 +577,8 @@ static void formula_environment(void) {
 
 static void descriptor_prefixes(void) {
     assert(ME_SIGNATURE_V1_SIZE == sizeof(me_signature));
-    assert(ME_PREPARE_OPTIONS_V1_SIZE == sizeof(me_prepare_options));
+    assert(ME_PREPARE_OPTIONS_V1_SIZE == offsetof(me_prepare_options, menudet_forbidden_features));
+    assert(ME_PREPARE_OPTIONS_V2_SIZE == sizeof(me_prepare_options));
     assert(ME_KERNEL_INFO_V1_SIZE == sizeof(me_kernel_info));
     assert(ME_BLOCK_V1_SIZE == sizeof(me_block));
     assert(ME_RUN_OPTIONS_V1_SIZE == sizeof(me_run_options));
@@ -893,6 +924,7 @@ int main(int argc, char **argv) {
     descriptor_prefixes();
     me_test_kernel_v1_caller(receive_v1_descriptors);
     formula_accuracy();
+    menudet_feature_options();
     rejected_jit_contracts();
 #ifdef ME_TEST_HAS_ARTIFACT
     direct_scheduler_adapter();

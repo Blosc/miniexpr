@@ -26,6 +26,8 @@ me_status me_kernel_prepare_menudet(const char *version, const char *source,
     const me_signature *signature, const me_prepare_options *options, int jit_mode,
     me_kernel **out, me_error *error);
 
+unsigned dsl_menudet_block_features(const me_dsl_compiled_block *block);
+
 static inline size_t me_kernel_alignment(me_dtype dtype) {
     if (dtype == ME_BYTES) return 1;
     if (dtype == ME_STRING) return 4;
