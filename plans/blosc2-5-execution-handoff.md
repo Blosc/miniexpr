@@ -45,6 +45,15 @@ storage format and will not change `b2o`.
    covers one compressed source, padding and a block-scalar result with bounded
    scheduler buffers. Its physical blocks are its groups; it is not a
    replacement for arbitrary persisted logical partitions.
+
+   The C-Blosc2 pilot accepts a parent-provided `miniexpr::core` target and
+   can install both static CMake packages from the same build. Python-Blosc2
+   `next` can test that configuration with
+   `-DB2_EXPERIMENTAL_SHARED_MINIEXPR_CORE=ON` on native bundled builds.
+   The opt-in macOS arm64 wheel passed the 4.17 exchange and its extension
+   links one miniexpr core archive. An independent C consumer also found the
+   wheel's static packages and ran the grid fixture. This tests dependency
+   wiring only; Python still uses the old adapter to schedule execution.
 2. Replace the scheduler's **input** with a typed, bounded, topologically
    ordered node array: operand slots, exact scalar captures and typed operation
    parameters; root and staged reduction references are node IDs. Copy the
