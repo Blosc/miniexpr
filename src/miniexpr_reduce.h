@@ -52,6 +52,21 @@ bool me_sum_span(me_dtype source, const void *values, size_t count,
 bool me_prod_span(me_dtype source, const void *values, size_t count,
     uint64_t initial, bool checked, uint64_t *out);
 
+/* Non-short-circuiting graph/array truth reduction over a native span.
+ * Evaluates every lane so floating-point diagnostics (e.g. signaling NaNs)
+ * are preserved. Quiet and signaling NaNs are truthy (matching NumPy and
+ * dsl_array.c). Complex dtypes are not admitted here. */
+#define ME_TRUTH_REDUCE_API 1
+bool me_truth_span(me_dtype source, const void *values, size_t count,
+    bool initial, bool all, bool *out);
+
+/* Store a reduced scalar from host-order uint64_t accumulator storage into
+ * native output bytes of dtype's width, safely on both little- and
+ * big-endian hosts. Float32/float64 values live in the first 4/8 bytes of
+ * `value` (as written by me_sum_span/me_prod_span/me_extrema_span). */
+#define ME_REDUCE_STORE_SCALAR_API 1
+bool me_reduce_store_scalar(me_dtype dtype, uint64_t value, void *out);
+
 enum {
     ME_PAIRWISE_SUM_SUCCESS = 0,
     ME_PAIRWISE_SUM_ERR_INVALID_ARG = -4

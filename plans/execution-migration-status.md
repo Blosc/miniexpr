@@ -9,8 +9,8 @@ format changed.
 | M0 | Route/test/capability inventory in `execution-migration-contracts.md`; explicit direct-handle baseline; separate benchmark preparation/specialization phases | Cross-platform performance qualification remains a later gate |
 | M1 | C-Blosc2 internal `blosc/b2nd-exec.h` / `.c`; bounded typed nodes, exact captures, topology/slot/arity/width validation, copied ownership, borrowed metadata-only schedules; optional Cython conversion and strong Python schedule owner | Descriptor will need additional typed options/operations/stages as subsequent families are implemented; it is not installed/frozen |
 | M2 | Serial multiple-input fused arithmetic maps and whole-domain minimum; zero-scratch direct maps; exact inferred-width reduction scratch; shared core strict FP scope and end-of-traversal raise masks; ordinary expression lowering reuses `GraphAdapter`; direct authored-kernel ownership transfer feeds the same scheduler; explicit `NativeGraph(..., _executor="c-blosc2")` facade whose metadata, specialization and execution use the typed plan, with adapter-backed compatibility exports and `MenudetError`/`fp_status` parity | Default wrapper dispatch and pilot API retirement are not complete; the facade covers only the typed resident family |
-| M3 | Scalar/ranked same-shape contiguous domains, empty maps and explicit disjoint NumPy outputs; allocation-owner extent checks; default serial sum/prod/min/max with authoritative core accumulator typing and empty sum/product identities | Broadcasting, strided/non-native gathering, aliases, axes/masks/initial/keepdims, any/all and fixed-leaf sums stay on the adapter |
-| M4 | C-owned resident jobs: a request is capped to the aggregate mapped-scratch budget, only order-independent reducers/disjoint map tiles partition, partials combine by logical task ID, each job owns its FP scope, and started jobs always join before return | JIT/backend qualification, partitionability proof and storage/compressed jobs pending; ordered sums/products stay serial |
+| M3 | Scalar/ranked and N-D right-aligned broadcast domains, empty maps and explicit disjoint NumPy outputs; strided, reversed, transposed, unaligned and non-native input views with bounded per-job gather scratch; allocation-owner extent checks (including underflow/overflow bounds); default serial `sum`/`prod` and parallel `min`/`max`/`any`/`all` with authoritative core accumulator typing (`me_truth_span`, `me_reduce_store_scalar`, host-order `me_reduce_identity`, and accumulator-typed multi-task combine inside FP scope) and empty sum/product/truth identities | Strided/aliased outputs, axes/masks/initial/keepdims, explicit accumulator conversions and fixed-leaf pairwise sums stay on the adapter |
+| M4 | C-owned resident jobs: `partitionable` enforced in plan metadata and `b2nd_exec_execute_views` (direct authored kernels and ordered `sum`/`prod` stay serial), job count capped at `B2ND_EXEC_MAX_TASKS` (64) and aggregate mapped + gather scratch budget, partials combined in logical task order inside strict FP scope before `raise_mask`, each job owns its FP scope, started jobs always join before return, and Windows clamps `ntasks = 1` before partitioning | JIT/backend qualification, `math_backend` policy, core `partitionable` facts for richer expressions and storage/compressed jobs pending |
 | M5 | No compressed family migrated | Existing grid pilot/adapter remain; general compressed maps/reductions pending |
 | M6 | No generic source/sink family migrated | Source callbacks, logical partitions and array bridge handoff pending |
 | M7 | No staged family migrated | Stage planning, intermediate budgets and staged execution pending |
@@ -23,16 +23,20 @@ boundary when built with the matching local C-Blosc2 header. Standard builds
 compile unsupported stubs and keep existing dispatch. The checked-in dependency
 pins have not been advanced to unpublished local commits.
 
-The new ordinary path admits only explicitly interpreted, native aligned,
-same-shape contiguous scalar/ranked domains (up to rank 16), whole-domain reductions
+The new ordinary path admits only explicitly interpreted, native/non-native
+aligned/unaligned resident NumPy inputs across scalar, ranked and N-D
+right-aligned broadcast shapes (up to rank 16), whole-domain reductions
 and whole-domain map reads or explicit disjoint NumPy outputs
 with numeric inputs and exact typed/weak captures. Maps support add, subtract,
 multiply and negate. A 64 KiB mapped-scratch admission bound uses the core-inferred
-width and applies only to computed maps feeding reductions. Direct-output maps
-and identity reductions need no mapped scratch. Reductions now include default
-whole-domain serial sum/product/minimum/maximum. Sum/product accumulator promotion
-and empty identities come from miniexpr core; map tile width stays separate from
-result width. Other syntax, layouts, options and backend policies
+width and applies only to computed maps feeding reductions. Non-direct inputs
+(broadcast, strided, reversed, unaligned or byte-swapped) use bounded per-job
+gather scratch (`<= 64 KiB` aggregate per-job mapped + gather admitted). Direct-output maps
+and same-shape native contiguous identity reductions need no mapped or gather scratch.
+Reductions now include default whole-domain serial `sum`/`prod` and partitionable
+`min`/`max`/`any`/`all`. Sum/product/truth accumulator promotion, non-short-circuiting
+truth spans, endian-safe scalar stores and empty identities come from miniexpr core;
+map tile width stays separate from result width. Other syntax, layouts, options and backend policies
 retain their old route during metadata-only admission. Once preparation or
 execution begins, errors propagate; no backend retry is performed.
 
@@ -110,17 +114,12 @@ Reports expose `tasks` and `worker_scratch_bytes` alongside the per-tile
   bitwise values, reduction metadata, single-stage metadata, canonical JSON,
   `MenudetError` status and `fp_status`, plus tests that block adapter
   preparation or artifact borrowing during metadata and execution.
-- Native partitioned jobs under ASan/UBSan: identical results for 1..7 jobs,
-  capped scratch, rejected ordered sums, rejected short inputs, and a budget
-  below one job. Python checks worker-count invariance against the adapter for
-  min/max/maps, ordered-reduction rejection, and `tasks * scratch <= 65536`.
-- Standard (non-opt-in) builds keep their existing dispatch; typed tests skip.
-- Full miniexpr artifact-on core suite (376 tests) after extracting accumulator
-  typing and serial reducers.
-- Opt-in Python regression subset (771 passed, 39 JIT-dependent skips) covering
-  typed plans, native graph preparation/maps/truth/extrema/captures/output/
-  sources/stages and expression-graph lifetime.
-- Ruff lint and formatting checks for edited Python/benchmark/test files.
+- Native partitioned jobs under ASan/UBSan (`-Wall -Wextra -Werror`, 2/2 `tests/exec-plan` passed): identical results for 1..7 jobs, task cap at `B2ND_EXEC_MAX_TASKS`, capped scratch, rejected ordered sums and unproven direct kernels, multi-task float `min` with `sNaN`/`-0.0`, narrow-integer `sum`/`prod` overflow beyond input width, `any`/`all` with late `sNaN`, N-D broadcast + strided/reversed/unaligned/non-native `b2nd_exec_execute_views`, forged underflow/overflow rejection, and OOM fault injection across mapped/gather/job allocations.
+- Installed static consumer (`tests/installed-miniexpr` linked against `blosc2_static` and artifact-off `miniexpr::core`): 3/3 passed (`installed_miniexpr_consumer`, `installed_kernel_grid`, `installed_exec_plan`).
+- Standard (non-opt-in) builds keep their existing dispatch; `b2nd_exec_bridge.h` `#else` stubs verified with `cc -fsyntax-only -Wall -Wextra -Werror -Wno-unused-function`.
+- Full miniexpr artifact-on core suite: 470/470 tests passed (including `me_truth_span`, `me_reduce_store_scalar`, and host-order `me_reduce_identity`).
+- Isolated opt-in Python regression suite (`746 passed` across `test_b2nd_exec_plan.py`, `test_native_graph_preparation.py`, `test_native_graph_maps.py`, `test_native_graph_extrema.py`, `test_native_graph_truth.py`, `test_native_graph_weak_captures.py`, `test_native_graph_output.py`, `test_expression_graph.py`, and `test_expression_graph_lifetime.py`).
+- Ruff lint and formatting checks passed for edited Python/test files.
 
 JIT-dependent tests are skipped in these interpreter-focused builds. Existing
 Python extension warnings include Cython unreachable/declarator warnings,

@@ -952,6 +952,56 @@ static void public_serial_reducers(void) {
     result = 42;
     assert(!me_sum_span(ME_COMPLEX128, floats, 0, 0, false, &result) && result == 42);
     assert(me_sum_span(ME_INT64, NULL, 0, 17, false, &result) && result == 17);
+
+    /* Non-short-circuiting truth reductions and endian-safe scalar stores. */
+    bool truth = false;
+    uint8_t bools[] = {0, 0, 1};
+    assert(me_truth_span(ME_BOOL, bools, 3, false, false, &truth) && truth);
+    assert(me_truth_span(ME_BOOL, bools, 3, true, true, &truth) && !truth);
+    assert(me_truth_span(ME_INT16, NULL, 0, true, true, &truth) && truth);
+    int16_t i16_vals[] = {0, -5};
+    assert(me_truth_span(ME_INT16, i16_vals, 2, false, false, &truth) && truth);
+    uint64_t u64_vals[] = {1, 2};
+    assert(me_truth_span(ME_UINT64, u64_vals, 2, true, true, &truth) && truth);
+    double qnan_vals[] = {0.0, NAN};
+    assert(me_fp_scope_begin(&scope, &fp, NULL) == ME_SUCCESS);
+    assert(me_truth_span(ME_FLOAT64, qnan_vals, 2, false, false, &truth) && truth);
+    assert(me_fp_scope_end(&scope, NULL) == ME_SUCCESS);
+    assert(fp.flags == 0);
+#ifndef __EMSCRIPTEN__
+    uint32_t snan32_bits = UINT32_C(0x7f800001);
+    float snan32;
+    memcpy(&snan32, &snan32_bits, sizeof(snan32));
+    float late_snan32[] = {1.0f, snan32};
+    assert(me_fp_scope_begin(&scope, &fp, NULL) == ME_SUCCESS);
+    assert(me_truth_span(ME_FLOAT32, late_snan32, 2, false, false, &truth) && truth);
+    assert(me_fp_scope_end(&scope, NULL) == ME_SUCCESS);
+    assert(fp.flags & ME_FP_INVALID);
+    double zero_snan64[2] = {0.0, 0.0};
+    uint64_t snan64_bits = UINT64_C(0x7ff0000000000001);
+    memcpy(&zero_snan64[1], &snan64_bits, sizeof(snan64_bits));
+    assert(me_fp_scope_begin(&scope, &fp, NULL) == ME_SUCCESS);
+    assert(me_truth_span(ME_FLOAT64, zero_snan64, 2, true, true, &truth) && !truth);
+    assert(me_fp_scope_end(&scope, NULL) == ME_SUCCESS);
+    assert(fp.flags & ME_FP_INVALID);
+#endif
+    assert(!me_truth_span(ME_COMPLEX64, floats, 0, false, false, &truth));
+    assert(!me_truth_span(ME_STRING, NULL, 0, false, false, &truth));
+
+    int8_t s8 = 0;
+    uint16_t u16 = 0;
+    int64_t s64 = 0;
+    float f32_out = 0;
+    uint8_t b_out = 9;
+    assert(me_reduce_store_scalar(ME_INT8, (uint64_t)(int64_t)-5, &s8) && s8 == -5);
+    assert(me_reduce_store_scalar(ME_UINT16, 40000u, &u16) && u16 == 40000u);
+    assert(me_reduce_store_scalar(ME_INT64, (uint64_t)(int64_t)-1234567890123LL, &s64) && s64 == -1234567890123LL);
+    assert(me_reduce_store_scalar(ME_BOOL, 1u, &b_out) && b_out == 1);
+    float f32_src = 3.5f;
+    uint64_t f32_store = 0;
+    memcpy(&f32_store, &f32_src, sizeof(f32_src));
+    assert(me_reduce_store_scalar(ME_FLOAT32, f32_store, &f32_out) && f32_out == 3.5f);
+    assert(!me_reduce_store_scalar(ME_COMPLEX64, 0, &s64));
 }
 
 int main(int argc, char **argv) {

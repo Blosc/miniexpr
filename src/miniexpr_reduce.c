@@ -48,9 +48,7 @@ bool me_reduce_identity(me_reduction_kind kind, me_dtype accumulator, uint64_t *
             double one = 1;
             memcpy(&result, &one, sizeof(one));
         } else {
-            uint64_t one = 1;
-            uint16_t endian = 1;
-            memcpy(&result, (const unsigned char *)&one + (*(unsigned char *)&endian ? 0 : 8 - width), width);
+            result = 1;
         }
     }
     *out = result;
@@ -94,4 +92,74 @@ bool me_sum_span(me_dtype source, const void *values, size_t count,
 bool me_prod_span(me_dtype source, const void *values, size_t count,
                   uint64_t initial, bool checked, uint64_t *out) {
     return serial_span(source, values, count, initial, checked, true, out);
+}
+
+bool me_truth_span(me_dtype source, const void *values, size_t count,
+                   bool initial, bool all, bool *out) {
+    if (!out || (count && !values) || source < ME_BOOL || source > ME_FLOAT64) {
+        return false;
+    }
+    const unsigned char *data = (const unsigned char *)values;
+    bool result = initial;
+#define TRUTH_SPAN(TYPE) do { \
+    for (size_t i = 0; i < count; i++) { \
+        TYPE value; \
+        memcpy(&value, data + i * sizeof(value), sizeof(value)); \
+        bool lane = value != 0; \
+        result = all ? (result && lane) : (result || lane); \
+    } \
+} while (0)
+    switch (source) {
+    case ME_BOOL:
+        for (size_t i = 0; i < count; i++) {
+            bool lane = data[i] != 0;
+            result = all ? (result && lane) : (result || lane);
+        }
+        break;
+    case ME_INT8: TRUTH_SPAN(int8_t); break;
+    case ME_INT16: TRUTH_SPAN(int16_t); break;
+    case ME_INT32: TRUTH_SPAN(int32_t); break;
+    case ME_INT64: TRUTH_SPAN(int64_t); break;
+    case ME_UINT8: TRUTH_SPAN(uint8_t); break;
+    case ME_UINT16: TRUTH_SPAN(uint16_t); break;
+    case ME_UINT32: TRUTH_SPAN(uint32_t); break;
+    case ME_UINT64: TRUTH_SPAN(uint64_t); break;
+    case ME_FLOAT32:
+        for (size_t i = 0; i < count; i++) {
+            float raw;
+            memcpy(&raw, data + i * sizeof(raw), sizeof(raw));
+            double value = raw;
+            bool lane = value != 0.0;
+            result = all ? (result && lane) : (result || lane);
+        }
+        break;
+    case ME_FLOAT64:
+        for (size_t i = 0; i < count; i++) {
+            double value;
+            memcpy(&value, data + i * sizeof(value), sizeof(value));
+            bool lane = value != 0.0;
+            result = all ? (result && lane) : (result || lane);
+        }
+        break;
+    default:
+        return false;
+    }
+#undef TRUTH_SPAN
+    *out = result;
+    return true;
+}
+
+bool me_reduce_store_scalar(me_dtype dtype, uint64_t value, void *out) {
+    size_t width = me_extrema_itemsize(dtype);
+    if (!out || !width) {
+        return false;
+    }
+    if (dtype == ME_FLOAT32 || dtype == ME_FLOAT64) {
+        memcpy(out, &value, width);
+        return true;
+    }
+    uint16_t endian = 1;
+    size_t offset = *(const unsigned char *)&endian ? 0 : sizeof(value) - width;
+    memcpy(out, (const unsigned char *)&value + offset, width);
+    return true;
 }
