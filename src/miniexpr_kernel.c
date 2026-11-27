@@ -465,6 +465,84 @@ bool me_kernel_has_jit(const me_kernel *kernel) {
     return kernel && kernel->program && kernel->program->jit_kernel_fn != NULL;
 }
 
+static bool kernel_real_dtype(me_dtype dtype) {
+    return dtype >= ME_BOOL && dtype <= ME_FLOAT64;
+}
+
+static bool kernel_partition_cast(const me_expr *arg, me_dtype output) {
+    if (!kernel_real_dtype(arg->dtype) || !kernel_real_dtype(output)) return false;
+    if (output == arg->dtype) return true;
+    if (output == ME_FLOAT32 || output == ME_FLOAT64) {
+        /* Strong real conversions have total IEEE results. Weak floating
+         * narrowing may instead reject an out-of-range scalar at evaluation. */
+        return !(output == ME_FLOAT32 && arg->dtype == ME_FLOAT64 &&
+            (arg->flags & (ME_EXPR_FLAG_WEAK_SCALAR | ME_EXPR_FLAG_WEAK_LITERAL)));
+    }
+    return dsl_numpy_can_cast(arg->dtype, output, "safe");
+}
+
+static bool kernel_partition_expr(const me_expr *expr, const bool *defined,
+                                  size_t count, int depth, int *budget) {
+    if (!expr || depth > 128 || --*budget < 0 || !kernel_real_dtype(expr->dtype) ||
+        is_reduction_node(expr)) return false;
+    int kind = TYPE_MASK(expr->type);
+    if (kind == ME_VARIABLE) {
+        int slot = dsl_synthetic_var_index(expr->bound);
+        return slot >= 0 && (size_t)slot < count && defined[slot];
+    }
+    if (kind == ME_CONSTANT) return true;
+    if (!IS_FUNCTION(expr->type)) return false;
+    int arity = ARITY(expr->type);
+    if (arity < 1 || arity > 2) return false;
+    for (int i = 0; i < arity; i++) {
+        if (!kernel_partition_expr(expr->parameters[i], defined, count, depth + 1, budget)) return false;
+    }
+    if (!expr->function) {
+        return arity == 1 && kernel_partition_cast(expr->parameters[0], expr->dtype);
+    }
+    const char *op = me_menudet_operator(expr);
+    if (!op || (strcmp(op, "+") && strcmp(op, "-") && strcmp(op, "*"))) return false;
+    for (int i = 0; i < arity; i++) {
+        if (!kernel_partition_cast(expr->parameters[i], expr->dtype)) return false;
+    }
+    return true;
+}
+
+bool me_kernel_is_partitionable(const me_kernel *kernel) {
+    if (!kernel || kernel->info.context_ndim ||
+        kernel->info.cardinality != ME_ELEMENTWISE) return false;
+    bool defined[ME_MAX_VARS] = {false};
+    for (size_t i = 0; i < kernel->nbindings; i++) {
+        if (!kernel_real_dtype(kernel->dtypes[i])) return false;
+        defined[i] = true;
+    }
+    int budget = 65536;
+    if (kernel->formula) {
+        return kernel_partition_expr(kernel->formula, defined, kernel->nbindings, 0, &budget);
+    }
+    const me_dsl_compiled_program *program = kernel->program;
+    if (!program || program->vars.count > ME_MAX_VARS || program->fp_mode != ME_DSL_FP_STRICT) return false;
+    for (int i = 0; i < program->block.nstmts; i++) {
+        const me_dsl_compiled_stmt *stmt = program->block.stmts[i];
+        if (stmt->kind == ME_DSL_STMT_ASSIGN) {
+            int slot = program->local_var_indices[stmt->as.assign.local_slot];
+            const me_expr *expr = stmt->as.assign.value.expr;
+            if (slot < 0 || slot >= program->vars.count ||
+                !kernel_partition_expr(expr, defined, (size_t)program->vars.count, 0, &budget) ||
+                !kernel_partition_cast(expr, program->vars.dtypes[slot])) return false;
+            defined[slot] = true;
+        } else if (stmt->kind == ME_DSL_STMT_RETURN) {
+            const me_expr *expr = stmt->as.return_stmt.expr.expr;
+            return i == program->block.nstmts - 1 &&
+                kernel_partition_expr(expr, defined, (size_t)program->vars.count, 0, &budget) &&
+                kernel_partition_cast(expr, kernel->info.output_dtype);
+        } else {
+            return false;
+        }
+    }
+    return false;
+}
+
 me_status me_describe_input(const me_kernel *kernel, size_t slot, me_input_spec *out) {
     if (!kernel || !out || slot >= kernel->ninputs) {
         return ME_ERR_INVALID_ARG;

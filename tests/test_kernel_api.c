@@ -59,6 +59,45 @@ static me_kernel_info describe(me_kernel *kernel) {
     return info;
 }
 
+static void partition_proof(void) {
+    assert(!me_kernel_is_partitionable(NULL));
+    me_input_spec input = {"x", ME_INT64, 0};
+    me_signature sig = ME_SIGNATURE_INITIALIZER;
+    sig.inputs = &input;
+    sig.ninputs = 1;
+    me_kernel *kernel = prepare(NULL, "x * 2", &sig);
+    assert(me_kernel_is_partitionable(kernel));
+    me_kernel_free(kernel);
+    kernel = prepare("0.2", "def k(x):\n    value = x * 2\n    return value + x\n", &sig);
+    assert(me_kernel_is_partitionable(kernel));
+    me_kernel_free(kernel);
+    kernel = prepare("0.2", "def k(x):\n    if x > 0:\n        return x\n    return -x\n", &sig);
+    assert(!me_kernel_is_partitionable(kernel));
+    me_kernel_free(kernel);
+    input.dtype = ME_UINT8;
+    int64_t capture = 300;
+    me_capture scalar = {{"c", ME_INT64, 0}, &capture, ME_CAPTURE_WEAK};
+    sig.captures = &scalar;
+    sig.ncaptures = 1;
+    kernel = prepare("0.2", "def k(x, c):\n    return x + c\n", &sig);
+    assert(!me_kernel_is_partitionable(kernel));
+    me_kernel_free(kernel);
+    sig.captures = NULL;
+    sig.ncaptures = 0;
+    input.dtype = ME_FLOAT64;
+    kernel = prepare(NULL, "x * 2", &sig);
+    assert(me_kernel_is_partitionable(kernel));
+    me_kernel_free(kernel);
+    sig.output_dtype = ME_INT64;
+    kernel = prepare(NULL, "x", &sig);
+    assert(!me_kernel_is_partitionable(kernel));
+    me_kernel_free(kernel);
+    sig.output_dtype = ME_AUTO;
+    kernel = prepare(NULL, "sin(x)", &sig);
+    assert(!me_kernel_is_partitionable(kernel));
+    me_kernel_free(kernel);
+}
+
 static void formula(void) {
     /* Declaration order differs from use order; one input is unused. */
     me_input_spec inputs[] = {{"unused", ME_INT16, 0}, {"b", ME_FLOAT32, 0}, {"a", ME_FLOAT32, 0}};
@@ -1088,6 +1127,7 @@ static void public_serial_reducers(void) {
 }
 
 int main(int argc, char **argv) {
+    partition_proof();
     public_serial_reducers();
     /* Host reducers use precisely the kernel strict-FP scope. */
     me_fp_scope scope;

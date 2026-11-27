@@ -236,6 +236,13 @@ me_status me_describe_input(const me_kernel *kernel, size_t slot, me_input_spec 
 #define ME_KERNEL_BACKEND_INFO_API 1
 bool me_kernel_has_jit(const me_kernel *kernel);
 
+/* Conservative sufficient proof, not a cardinality/JIT heuristic. False means
+ * unproven. Currently certifies context-free straight-line real arithmetic
+ * without potentially failing conversions; callers still own reducer order
+ * and final FP raise policy. Does not certify callback concurrency. */
+#define ME_KERNEL_PARTITION_INFO_API 1
+bool me_kernel_is_partitionable(const me_kernel *kernel);
+
 typedef enum {
     ME_BACKEND_NONE = 0,
     ME_BACKEND_INTERPRETER = 1,

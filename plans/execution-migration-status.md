@@ -10,7 +10,7 @@ format changed.
 | M1 | C-Blosc2 internal `blosc/b2nd-exec.h` / `.c`; bounded typed nodes, exact captures, topology/slot/arity/width validation, copied ownership, borrowed metadata-only schedules; optional Cython conversion and strong Python schedule owner | Descriptor will need additional typed options/operations/stages as subsequent families are implemented; it is not installed/frozen |
 | M2 | Serial multiple-input fused arithmetic maps and whole-domain minimum; zero-scratch direct maps; exact inferred-width reduction scratch; shared core strict FP scope and end-of-traversal raise masks; ordinary expression lowering reuses `GraphAdapter`; direct authored-kernel ownership transfer feeds the same scheduler; explicit `NativeGraph(..., _executor="c-blosc2")` facade whose metadata, specialization and execution use the typed plan, with adapter-backed compatibility exports and `MenudetError`/`fp_status` parity | Default wrapper dispatch and pilot API retirement are not complete; the facade covers only the typed resident family |
 | M3 | Scalar/ranked and N-D right-aligned broadcast domains, empty maps and explicit disjoint NumPy outputs; strided, reversed, transposed, unaligned and non-native input views with bounded per-job gather scratch; allocation-owner extent checks (including underflow/overflow bounds); whole-domain and partial-axis reductions (`axes`, `keepdims`, `initial` with core conversion kernel, opt-in fixed-leaf `pairwise_sum` via `b2nd_exec_specialize_ex`); disjoint strided/transposed/reversed outputs (`b2nd_exec_execute_into`) and separately budgeted transactional alias staging (`b2nd_exec_execute_alias`); serial `sum`/`prod` and parallel `min`/`max`/`any`/`all` with authoritative core accumulator typing (`me_truth_span`, `me_reduce_store_scalar`, host-order `me_reduce_identity`, and accumulator-typed multi-task combine inside FP scope) and empty identities | `where` masks and explicit reduction `dtype` accumulator casts stay on the adapter |
-| M4 | C-owned resident jobs: `partitionable` enforced in plan metadata and `b2nd_exec_execute_views` (direct authored kernels and ordered `sum`/`prod` stay serial), job count capped at `B2ND_EXEC_MAX_TASKS` (64) and aggregate mapped + gather scratch budget (also enforced for explicit single-worker requests), partials combined in logical task order inside strict FP scope before `raise_mask`, each job owns its FP scope, started jobs always join before return, and Windows clamps `ntasks = 1` before partitioning. Core invocation backend reporting, interpreter/preferred/required-system-compiler fixture, submission-failure injection and simultaneous Python calls sharing a schedule are tested. Typed compiler/math preparation options feed core, C plans and explicit Python facade; policy is part of plan cache keys | Core `partitionable` facts for richer expressions, non-default FP accuracy, storage/compressed jobs and cross-platform backend qualification pending |
+| M4 | C-owned resident jobs: `partitionable` enforced in plan metadata and `b2nd_exec_execute_views` (unproven kernels and ordered `sum`/`prod` stay serial), job count capped at `B2ND_EXEC_MAX_TASKS` (64) and aggregate mapped + gather scratch budget (also enforced for explicit single-worker requests), partials combined in logical task order inside strict FP scope before `raise_mask`, each job owns its FP scope, started jobs always join before return, and Windows clamps `ntasks = 1` before partitioning. Core invocation backend reporting, interpreter/preferred/required-system-compiler fixture, submission-failure injection and simultaneous Python calls sharing a schedule are tested. Typed compiler/math preparation options feed core, C plans and explicit Python facade; policy is part of plan cache keys. `me_kernel_is_partitionable` supplies a conservative core proof for straight-line real arithmetic and proven conversions, including authored kernels | Richer control-flow/math/value-dependent conversion proofs, non-default FP accuracy, storage/compressed jobs and cross-platform backend qualification pending |
 | M5 | No compressed family migrated | Existing grid pilot/adapter remain; general compressed maps/reductions pending |
 | M6 | No generic source/sink family migrated | Source callbacks, logical partitions and array bridge handoff pending |
 | M7 | No staged family migrated | Stage planning, intermediate budgets and staged execution pending |
@@ -95,7 +95,12 @@ not Python, partitions tiles, bounds scratch and combines partials:
 
 - Ordered reducers (`sum`, `prod`) reject `workers > 1` before any read. Their
   strict serial leaves/combine order are not redefined by worker count.
-- `min`/`max`, identity reductions and disjoint map tiles partition freely.
+- `min`/`max`/truth reducers and disjoint map tiles partition only when their
+  numerical kernel has the core's sufficient proof. Identity traversal is proven.
+  Lane locality alone no longer certifies a graph containing a potentially
+  failing weak conversion. Narrow weak captures retain serial admission even
+  when their values happen to fit; explicit parallel requests reject before
+  reads/writes. Proven straight-line authored kernels can now partition too.
 - The job count is capped so `tasks * mapped_bytes` stays within the aggregate
   budget; a budget below one job is rejected. Identity maps/reductions need none.
 - Each job opens its own strict FP scope on its own thread and reports its own
@@ -147,7 +152,7 @@ This closes a diagnostic prerequisite, not the complete M4 backend gate.
 - Installed static consumer (`tests/installed-miniexpr` linked against `blosc2_static` and artifact-off `miniexpr::core`): 3/3 passed (`installed_miniexpr_consumer`, `installed_kernel_grid`, `installed_exec_plan`).
 - Standard (non-opt-in) builds keep their existing dispatch; `b2nd_exec_bridge.h` `#else` stubs verified with `cc -fsyntax-only -Wall -Wextra -Werror -Wno-unused-function`.
 - Latest configured artifact-on miniexpr suite: 377/377 passed, including interpreter and required-system-compiler backend diagnostics. Other earlier configurations had different test counts.
-- Latest isolated opt-in Python regression suite: `713 passed, 39 skipped` across `test_b2nd_exec_plan.py`, `test_native_graph_preparation.py`, `test_native_graph_maps.py`, `test_native_graph_extrema.py`, `test_native_graph_truth.py`, `test_native_graph_weak_captures.py`, `test_native_graph_output.py`, `test_expression_graph.py`, and `test_expression_graph_lifetime.py`. This includes concurrent calls sharing a schedule, actual backend counters, typed policy/cache separation and explicit single-worker scratch-budget rejection.
+- Latest isolated opt-in Python regression suite: `714 passed, 39 skipped` across `test_b2nd_exec_plan.py`, `test_native_graph_preparation.py`, `test_native_graph_maps.py`, `test_native_graph_extrema.py`, `test_native_graph_truth.py`, `test_native_graph_weak_captures.py`, `test_native_graph_output.py`, `test_expression_graph.py`, and `test_expression_graph_lifetime.py`. This includes concurrent calls sharing a schedule, actual backend counters, typed policy/cache separation, explicit single-worker scratch-budget rejection and conservative weak-conversion partition rejection.
 - Artifact-off native fixture: 3/3 passed with `EXEC_PLAN_TEST_JIT=ON`, including required-system-compiler execution and failed submissions at each of three task-start positions; every earlier task is joined and reduction output stays unpublished.
 - Ruff lint and formatting checks passed for edited Python/test files.
 
@@ -180,8 +185,8 @@ logs and timing results remain outside the repositories.
 - **M7 stages:** region splitting, lifetimes, intermediate budgets and staged
   diagnostics without an interchange tree.
 - **M4 remainder:** broader backend/platform qualification, non-default accuracy,
-  conservative partitionability facts for
-  richer maps, and storage-backed jobs.
+  richer control-flow/math/value-dependent conversion proofs, and storage-backed
+  jobs.
 - **M8 remainder:** default wrapper dispatch and retirement of the specialized
   int64 pilots once every migrated route has its gate.
 

@@ -152,6 +152,13 @@ dtype before final conversion.
   per invocation, including failed evaluations. Preflight rejection and empty
   elementwise blocks report `NONE`; forced interpretation and empty scalar
   control-flow fallbacks report `INTERPRETER`. No shared kernel state is mutated.
+- `me_kernel_is_partitionable` is a conservative sufficient proof over prepared
+  types and dependencies, independent of JIT availability. It currently certifies
+  strict, context-free straight-line real add/subtract/multiply kernels with
+  proven conversions. Control flow, math functions, block reductions, checked
+  float-to-integer conversions and value-dependent narrow weak captures are
+  unproven. `false` does not mean the kernel is intrinsically unsafe. Hosts still
+  own reduction order, callback concurrency and final FP raise policy.
 - A host may set `menudet_forbidden_features` to reject compiled control flow,
   block reductions or fixed strings before JIT. This is an optional
   preparation-options suffix; v1 sizes and a zero mask impose no restriction.
