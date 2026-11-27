@@ -322,16 +322,22 @@ static void scalar_and_errors(void) {
     me_run_options run = ME_RUN_OPTIONS_INITIALIZER;
     run.fp_status = &fp;
     run.raise_mask = ME_FP_DIVIDE;
+    me_execution_backend backend = ME_BACKEND_JIT;
+    assert(!me_kernel_has_jit(kernel) && !me_kernel_has_jit(NULL));
 #ifndef __EMSCRIPTEN__
     feclearexcept(FE_ALL_EXCEPT);
     feraiseexcept(FE_INVALID);
     int flags = fetestexcept(FE_ALL_EXCEPT);
-    assert(me_eval_block(kernel, &buffer, 1, (me_mut_buffer){&out, sizeof(out)}, &block, &run, &error) == ME_ERR_EVAL);
+    assert(me_eval_block_backend(kernel, &buffer, 1, (me_mut_buffer){&out, sizeof(out)},
+        &block, &run, &backend, &error) == ME_ERR_EVAL);
+    assert(backend == ME_BACKEND_INTERPRETER);
     assert(fp.supported && (fp.flags & ME_FP_DIVIDE));
     assert(fetestexcept(FE_ALL_EXCEPT) == flags);
     feclearexcept(FE_ALL_EXCEPT);
 #else
-    assert(me_eval_block(kernel, &buffer, 1, (me_mut_buffer){&out, sizeof(out)}, &block, &run, &error) == ME_ERR_UNSUPPORTED);
+    assert(me_eval_block_backend(kernel, &buffer, 1, (me_mut_buffer){&out, sizeof(out)},
+        &block, &run, &backend, &error) == ME_ERR_UNSUPPORTED);
+    assert(backend == ME_BACKEND_NONE);
 #endif
     me_kernel_free(kernel);
 }
@@ -381,17 +387,32 @@ static void execution_options(bool require_jit, bool tcc) {
     me_buffer buffer = {x, sizeof(x)};
     me_block block = ME_BLOCK_INITIALIZER;
     block.nitems = 3;
-    assert(me_eval_block(kernel, &buffer, 1, (me_mut_buffer){out, sizeof(out)}, &block, NULL, NULL) == ME_SUCCESS);
+    me_execution_backend backend = ME_BACKEND_NONE;
+    bool prepared_jit = me_kernel_has_jit(kernel);
+    assert(!require_jit || prepared_jit);
+    assert(me_eval_block_backend(kernel, &buffer, 1, (me_mut_buffer){out, sizeof(out)},
+        &block, NULL, &backend, NULL) == ME_SUCCESS);
+    assert(backend == (prepared_jit ? ME_BACKEND_JIT : ME_BACKEND_INTERPRETER));
     assert(out[0] == 4 && out[1] == 8 && out[2] == 16);
     me_run_options run = ME_RUN_OPTIONS_INITIALIZER;
     run.execution = ME_RUN_INTERPRET;
     me_dsl_jit_kernel_fn saved_jit = kernel->program->jit_kernel_fn;
     kernel->program->jit_kernel_fn = forbidden_jit;
     memset(out, 0, sizeof(out));
-    assert(me_eval_block(kernel, &buffer, 1, (me_mut_buffer){out, sizeof(out)},
-        &block, &run, NULL) == ME_SUCCESS);
+    assert(me_eval_block_backend(kernel, &buffer, 1, (me_mut_buffer){out, sizeof(out)},
+        &block, &run, &backend, NULL) == ME_SUCCESS);
+    assert(backend == ME_BACKEND_INTERPRETER);
     assert(out[0] == 4 && out[1] == 8 && out[2] == 16);
     kernel->program->jit_kernel_fn = saved_jit;
+    block.nitems = 0;
+    assert(me_eval_block_backend(kernel, &buffer, 1, (me_mut_buffer){NULL, 0},
+        &block, NULL, &backend, NULL) == ME_SUCCESS);
+    assert(backend == ME_BACKEND_NONE);
+    block.nitems = 3;
+    backend = ME_BACKEND_JIT;
+    assert(me_eval_block_backend(kernel, &buffer, 1, (me_mut_buffer){out, 0},
+        &block, NULL, &backend, NULL) == ME_ERR_INVALID_ARG);
+    assert(backend == ME_BACKEND_NONE);
     uint8_t mask[] = {1, 1, 1};
     block.valid_mask = mask;
     block.valid_mask_capacity = sizeof(mask);
@@ -426,6 +447,26 @@ static void execution_options(bool require_jit, bool tcc) {
     options.execution = ME_EXEC_REQUIRE_JIT;
     sig.captures = NULL;
     sig.ncaptures = 0;
+    snprintf(source, sizeof(source), "# me:compiler=%s\ndef k(x):\n"
+        "    if block_sum(x) > 0:\n"
+        "        return block_sum(x)\n"
+        "    return block_sum(x)\n", tcc ? "tcc" : "cc");
+    options.execution = require_jit ? ME_EXEC_REQUIRE_JIT : ME_EXEC_PREFER_JIT;
+    assert(me_prepare_menudet("0.2", source, &sig, &options, &kernel, &error) == ME_SUCCESS);
+    assert(!require_jit || me_kernel_has_jit(kernel));
+    block.nitems = 0;
+    block.valid_mask = NULL;
+    block.valid_mask_capacity = 0;
+    float empty_result = -1;
+    assert(me_eval_block_backend(kernel, &buffer, 1,
+        (me_mut_buffer){&empty_result, sizeof(empty_result)}, &block, NULL,
+        &backend, &error) == ME_SUCCESS);
+    assert(empty_result == 0 && backend == ME_BACKEND_INTERPRETER);
+    me_kernel_free(kernel);
+    block.nitems = 3;
+    block.valid_mask = mask;
+    block.valid_mask_capacity = sizeof(mask);
+    options.execution = ME_EXEC_REQUIRE_JIT;
     assert(me_prepare_formula("2 * x", &sig, &options, &kernel, &error) == ME_ERR_UNSUPPORTED && !kernel);
     sig.context_ndim = 1;
     snprintf(source, sizeof(source), "# me:compiler=%s\ndef k(x):\n    return x + _flat_idx\n",

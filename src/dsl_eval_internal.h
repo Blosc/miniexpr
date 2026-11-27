@@ -12,6 +12,7 @@
 #define MINIEXPR_DSL_EVAL_INTERNAL_H
 
 #include "dsl_compile_internal.h"
+#include "miniexpr_kernel.h"
 
 #include <complex.h>
 #include <stdbool.h>
@@ -26,6 +27,7 @@ typedef struct {
     const int64_t *block_origin;
     const int64_t *block_extent;
     bool force_interpreter;
+    me_execution_backend *actual_backend; /* Optional invocation-local route report. */
 } me_dsl_menudet_eval_descriptor;
 
 /* Internal capacity-aware 1.0 evaluation; legacy nitems-output ABI is unchanged. */

@@ -209,6 +209,17 @@ me_status me_describe(const me_kernel *kernel, me_kernel_info *out);
 me_status me_describe_input_count(const me_kernel *kernel, size_t *count);
 me_status me_describe_input(const me_kernel *kernel, size_t slot, me_input_spec *out);
 
+/* Prepared availability is not an invocation route: empty blocks and scalar
+ * control flow may run no generated code even when this returns true. */
+#define ME_KERNEL_BACKEND_INFO_API 1
+bool me_kernel_has_jit(const me_kernel *kernel);
+
+typedef enum {
+    ME_BACKEND_NONE = 0,
+    ME_BACKEND_INTERPRETER = 1,
+    ME_BACKEND_JIT = 2
+} me_execution_backend;
+
 /* Native aligned buffers, disjoint output, synchronous execution. Input slots
  * are in signature order, including unused inputs. Masked outputs retain lane
  * spacing; inactive output values are unspecified. A scalar block always needs
@@ -222,6 +233,14 @@ me_status me_describe_input(const me_kernel *kernel, size_t slot, me_input_spec 
 me_status me_eval_block(const me_kernel *kernel, const me_buffer *inputs,
     size_t ninputs, me_mut_buffer output, const me_block *block,
     const me_run_options *options, me_error *error);
+
+/* Same contract as me_eval_block. backend is optional, invocation-local and
+ * reset to NONE before validation. It records the route actually entered,
+ * including failed evaluations, not the preparation preference. Empty
+ * elementwise blocks report NONE. No kernel state is mutated. */
+me_status me_eval_block_backend(const me_kernel *kernel, const me_buffer *inputs,
+    size_t ninputs, me_mut_buffer output, const me_block *block,
+    const me_run_options *options, me_execution_backend *backend, me_error *error);
 
 void me_kernel_free(me_kernel *kernel); /* NULL-safe; not concurrent with use. */
 

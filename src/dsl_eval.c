@@ -1707,6 +1707,9 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
         dsl_menudet_fp_state saved;
         int rc = ME_EVAL_ERR_INVALID_ARG;
         if (dsl_menudet_fp_begin(&saved)) {
+            if (descriptor && descriptor->actual_backend) {
+                *descriptor->actual_backend = ME_BACKEND_JIT;
+            }
             rc = program->jit_kernel_fn(inputs,output_block,(int64_t)jit_nitems);
             if (!dsl_menudet_fp_end(&saved)) rc = ME_EVAL_ERR_INVALID_ARG;
         }
@@ -1828,6 +1831,9 @@ static int dsl_eval_program_impl(const me_dsl_compiled_program *program,
 
     /* JIT retains precedence. All descriptor/binding validation remains outside
      * this dispatch, and numerical errors are returned, never retried. */
+    if (descriptor && descriptor->actual_backend) {
+        *descriptor->actual_backend = ME_BACKEND_INTERPRETER;
+    }
     const me_expr *single_return = dsl_simple_single_return(program, descriptor);
     if (single_return) {
         if (program->output_is_scalar) {
@@ -2481,6 +2487,9 @@ static int dsl_eval_program_menudet_body(const me_dsl_compiled_program *program,
      * pure overhead (and duplicate the same range validation). */
     bool jit_direct = program->jit_kernel_fn != NULL && !descriptor->force_interpreter;
     if (!jit_direct && !descriptor->valid_mask && program->menudet_direct_ramp && ndim >= 1) {
+        if (descriptor->actual_backend) {
+            *descriptor->actual_backend = ME_BACKEND_INTERPRETER;
+        }
         return dsl_eval_menudet_direct_ramp(program, inputs, ninputs, output, descriptor, strides);
     }
     if (!jit_direct) {

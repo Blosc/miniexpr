@@ -437,6 +437,10 @@ me_status me_describe_input_count(const me_kernel *kernel, size_t *count) {
     return ME_SUCCESS;
 }
 
+bool me_kernel_has_jit(const me_kernel *kernel) {
+    return kernel && kernel->program && kernel->program->jit_kernel_fn != NULL;
+}
+
 me_status me_describe_input(const me_kernel *kernel, size_t slot, me_input_spec *out) {
     if (!kernel || !out || slot >= kernel->ninputs) {
         return ME_ERR_INVALID_ARG;
@@ -562,6 +566,13 @@ me_status me_kernel_run_begin(const me_run_options *options, me_fp_status *statu
 me_status me_eval_block(const me_kernel *kernel, const me_buffer *inputs,
     size_t ninputs, me_mut_buffer output, const me_block *block,
     const me_run_options *options, me_error *error) {
+    return me_eval_block_backend(kernel, inputs, ninputs, output, block, options, NULL, error);
+}
+
+me_status me_eval_block_backend(const me_kernel *kernel, const me_buffer *inputs,
+    size_t ninputs, me_mut_buffer output, const me_block *block,
+    const me_run_options *options, me_execution_backend *backend, me_error *error) {
+    if (backend) *backend = ME_BACKEND_NONE;
     me_fp_status status;
     me_status result = me_kernel_run_begin(options, &status, error);
     if (result != ME_SUCCESS) return result;
@@ -576,6 +587,7 @@ me_status me_eval_block(const me_kernel *kernel, const me_buffer *inputs,
     unsigned *previous = dsl_menudet_status_begin(&status.flags);
     int rc;
     if (kernel->formula) {
+        if (backend) *backend = ME_BACKEND_INTERPRETER;
         const me_math_dispatch *math = me_math_dispatch_set(&kernel->formula_math);
         me_simd_accuracy_state accuracy;
         me_simd_accuracy_push(kernel->formula_math.ulp, &accuracy);
@@ -586,13 +598,16 @@ me_status me_eval_block(const me_kernel *kernel, const me_buffer *inputs,
         me_math_dispatch_set(math);
     }
     else {
+        me_execution_backend actual_backend = ME_BACKEND_NONE;
         me_dsl_menudet_eval_descriptor native = {
             .nitems = (int)block->nitems, .valid_mask = all_active ? NULL : block->valid_mask,
             .output_capacity = output.capacity, .ndim = block->ndim,
             .logical_shape = block->logical_shape, .block_origin = block->origin,
             .block_extent = block->extent,
-            .force_interpreter = options && options->execution == ME_RUN_INTERPRET};
+            .force_interpreter = options && options->execution == ME_RUN_INTERPRET,
+            .actual_backend = backend ? &actual_backend : NULL};
         rc = dsl_eval_program_menudet(kernel->program, data, (int)kernel->nbindings, output.data, &native);
+        if (backend) *backend = actual_backend;
     }
     dsl_menudet_status_end(previous);
     if (options && options->fp_status) *options->fp_status = status;
