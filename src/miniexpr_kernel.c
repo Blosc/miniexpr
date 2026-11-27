@@ -502,6 +502,10 @@ static bool kernel_partition_expr(const me_expr *expr, const bool *defined,
     }
     const char *op = me_menudet_operator(expr);
     if (!op || (strcmp(op, "+") && strcmp(op, "-") && strcmp(op, "*"))) return false;
+    if (expr->dtype != ME_FLOAT32 && expr->dtype != ME_FLOAT64 &&
+        (!(expr->flags & ME_EXPR_FLAG_NUMPY_1_1) || (expr->flags & ME_EXPR_FLAG_WEAK_SCALAR))) {
+        return false;
+    }
     for (int i = 0; i < arity; i++) {
         if (!kernel_partition_cast(expr->parameters[i], expr->dtype)) return false;
     }
