@@ -22,6 +22,7 @@ Paths below are relative to the repository named in the first column.
 | Python-Blosc2 `MenudetLazyArray`, Cython `evaluate_array*`, prefilter bridges | Python adaptation; miniexpr artifact and array execution | `test_menudet_arrays.py`, `test_menudet_lazy.py`, `test_menudet_recipe.py`, `test_menudet_descriptor_host.py` |
 | Python-Blosc2 resident min/map-min pilots | C-Blosc2 specialized resident loops, core arithmetic | `test_native_graph_preparation.py` resident pilot tests |
 | Python-Blosc2 opt-in `typed_exec.py` resident maps/min | Python expression adaptation; `b2nd-exec.c` prepares the core kernel and owns specialization/traversal | `test_b2nd_exec_plan.py`, C-Blosc2 `tests/installed-miniexpr/exec-plan.c` and `tests/exec-plan/faults.c` |
+| Python-Blosc2 explicit typed `NativeGraph.evaluate_sources` | C-Blosc2 `b2nd-exec-storage.c` binds native compressed arrays to the same schedule; `b2nd-exec.c` owns traversal and reduction | `test_b2nd_exec_storage.py`, C-Blosc2 `tests/exec-storage` and installed `exec-storage.c`; initial serial in-memory float64 slice only |
 | Python-Blosc2 compressed grid/logical partition pilot | C-Blosc2 pilot traversal, core grid/kernel evaluation | `test_b2nd_kernel_pilot.py` |
 | Python-Blosc2 formula/full-DSL/legacy and explicit artifact imports | Compatibility paths, not graph migration admission | `test_evaluate_menudet_routes.py`, `test_menudet_legacy.py`, `test_menudet_artifact.py`, `test_menudet_interop.py` |
 
@@ -49,8 +50,8 @@ support for the cross-product of these rows.
 
 ### M2 closeout contracts (acceptance targets)
 
-The typed resident path currently supports fused arithmetic maps and whole-domain
-min; the following are qualification requirements, not claims of current parity:
+These are the initial M2 family acceptance targets, not claims of complete
+resident parity. Current coverage and remaining gaps live in the status document:
 
 | Case | What to compare in the same build |
 | --- | --- |
@@ -60,6 +61,56 @@ min; the following are qualification requirements, not claims of current parity:
 | Strict FP | Compare flags, raise timing, completed tiles and caller state after success/failure with altered rounding modes, subnormals and signaling NaNs. Match unavailable-reporting semantics on WASM; include Windows/MSVC and WASM FP/alignment checks in M2–M3. |
 | Wrapper handoff | Metadata, specialization and execution for an admitted expression come from the same typed plan. Compare against an explicit adapter handle; block the old executor in new-path tests. |
 | Future direct-kernel entry | Preserve input widths, context/rank, elementwise versus block-scalar cardinality and persisted group boundaries; test kernel owner lifetime independently of the DAG frontend. |
+
+## Resident gaps and first storage gate (review 2)
+
+Reduction masks describe participation, not just ternary map selection:
+masked-out lanes must not evaluate a potentially failing/flag-raising map.
+Masks and explicit accumulator `dtype` casts retain the adapter until their
+individual gates pass. Partial selections and other recorded gaps also remain;
+implementing masks and accumulator casts alone does not establish full M3 parity.
+
+The first M5 gate is a serial storage binding over the existing typed schedule:
+`min(x + y)` with independently padded/chunked native `b2nd_array_t` inputs,
+different physical layouts, and a short final logical span. Compare to resident
+execution of that same plan and, at Python qualification, the explicit adapter.
+Physical padding never participates. No new storage-owned numerical reducer or
+whole-array operand materialization is permitted.
+
+Preflight storage metadata, all bindings and decode/gather/mapped budgets before
+the first compressed read. Decode scratch, gather/mapped scratch and codec-private
+allocations are distinct accounting categories. Report decode activity/cache
+reuse honestly. Reductions publish only on success; storage failures propagate
+without replay. Compressed sinks, mixed inputs, parallel storage and ordered
+reducers each need explicit admission/tests rather than inheriting this first
+slice's qualification.
+
+Keep test evidence by configuration, including TCC/system-compiler availability,
+artifact-on/off, optional required-JIT fixtures, sanitizers and installed static
+consumers. A two-test sanitizer run does not establish the optional third
+required-JIT test ran.
+
+### Launcher and compressed-sink contracts (review 3)
+
+The launcher transports invocation-local jobs; it does not choose partitions,
+reduction leaves, workspace or FP policy. A synchronous return guarantees every
+accepted callback has returned, including on failure. Jobs execute at most once,
+may complete out of order, and a failed submission is never retried elsewhere.
+Count actual entered jobs rather than assuming a contiguous started prefix.
+No executor-specific mutable global launcher setter is introduced.
+
+The production portable/callback dispatcher and a standalone/test override must
+share this contract. `blosc2_run_parallel` is currently per-call thread dispatch
+unless a host callback supplies its own executor, not a persistent-pool API.
+Generic shared-pool reuse, nested-call deadlock prevention and Windows FP parity
+remain separate qualification gates. Budget outer jobs and inner codec workers
+together; one inner codec thread remains the initial storage policy.
+
+Use prefilters only when optimizing an admitted compressed sink, never as fake
+compression passes for resident/read scheduling. Preserve logical masks,
+padding, FP reports and sink publication semantics. Run-copy reader optimization
+must preserve logical order and counter definitions, with a measured scalar
+baseline and the existing padding/failure suite retained.
 
 ## Native preservation suites
 
@@ -76,10 +127,11 @@ not as a duplicate Python numerical matrix.
 
 ## Explicit comparison selection and timing
 
-At the current checkpoint, `NativeGraph.from_expression(..., jit=False)` and
-`specialize(...).execute(...)` reach the adapter. Before repointing this wrapper,
-give qualification tests and benchmarks a dedicated adapter selector in the same
-build. Use `_TypedExecPlan` directly for the typed resident comparator.
+`NativeGraph.from_expression(..., _executor="adapter")` explicitly selects the
+baseline; `... _executor="c-blosc2"` selects the opt-in typed facade. The default
+remains the adapter. `evaluate_sources` respects that selector too: the typed
+storage slice rejects unsupported bindings rather than replaying the adapter.
+`_TypedExecPlan` remains a direct low-level comparator.
 Instantiate `_ResidentMinI64Plan` / `_ResidentMapMinI64Plan` directly to select
 the **pilot explicitly**. Neither selector uses automatic dispatch.
 `_require_native=True` is not an enduring old/new selector and must not be used

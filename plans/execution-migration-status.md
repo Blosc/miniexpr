@@ -11,7 +11,7 @@ format changed.
 | M2 | Serial multiple-input fused arithmetic maps and whole-domain minimum; zero-scratch direct maps; exact inferred-width reduction scratch; shared core strict FP scope and end-of-traversal raise masks; ordinary expression lowering reuses `GraphAdapter`; direct authored-kernel ownership transfer feeds the same scheduler; explicit `NativeGraph(..., _executor="c-blosc2")` facade whose metadata, specialization and execution use the typed plan, with adapter-backed compatibility exports and `MenudetError`/`fp_status` parity | Default wrapper dispatch and pilot API retirement are not complete; the facade covers only the typed resident family |
 | M3 | Scalar/ranked and N-D right-aligned broadcast domains, empty maps and explicit disjoint NumPy outputs; strided, reversed, transposed, unaligned and non-native input views with bounded per-job gather scratch; allocation-owner extent checks (including underflow/overflow bounds); whole-domain and partial-axis reductions (`axes`, `keepdims`, `initial` with core conversion kernel, opt-in fixed-leaf `pairwise_sum` via `b2nd_exec_specialize_ex`); disjoint strided/transposed/reversed outputs (`b2nd_exec_execute_into`) and separately budgeted transactional alias staging (`b2nd_exec_execute_alias`); serial `sum`/`prod` and parallel `min`/`max`/`any`/`all` with authoritative core accumulator typing (`me_truth_span`, `me_reduce_store_scalar`, host-order `me_reduce_identity`, and accumulator-typed multi-task combine inside FP scope) and empty identities | `where` masks and explicit reduction `dtype` accumulator casts stay on the adapter |
 | M4 | C-owned resident jobs: `partitionable` enforced in plan metadata and `b2nd_exec_execute_views` (unproven kernels and ordered `sum`/`prod` stay serial), job count capped at `B2ND_EXEC_MAX_TASKS` (64) and aggregate mapped + gather scratch budget (also enforced for explicit single-worker requests), partials combined in logical task order inside strict FP scope before `raise_mask`, each job owns its FP scope, started jobs always join before return, and Windows clamps `ntasks = 1` before partitioning. Core invocation backend reporting, interpreter/preferred/required-system-compiler fixture, submission-failure injection and simultaneous Python calls sharing a schedule are tested. Typed compiler/math preparation options feed core, C plans and explicit Python facade; policy is part of plan cache keys. `me_kernel_is_partitionable` supplies a conservative core proof for straight-line real arithmetic and proven conversions, including authored kernels | Richer control-flow/math/value-dependent conversion proofs, non-default FP accuracy, storage/compressed jobs and cross-platform backend qualification pending |
-| M5 | No compressed family migrated | Existing grid pilot/adapter remain; general compressed maps/reductions pending |
+| M5 | First serial storage slice: `b2nd_exec_execute_arrays` binds same-shape native float64 in-memory chunked arrays to the existing schedule, with separate bounded decoded-chunk caches and logical gather tiles. Multiple padded physical layouts, maps to resident outputs and whole-domain reducers reuse the resident traversal/core primitives. Explicit Python `NativeGraph(..., _executor="c-blosc2").evaluate_sources` calls it with the GIL released; no Python source reads or whole-array operand materialization | Frame-backed/mixed inputs, other dtypes, broadcast/axes, compressed sinks, parallel jobs, moments/arg-extrema and performance/platform gates remain; no ordinary dispatch/default cutover |
 | M6 | No generic source/sink family migrated | Source callbacks, logical partitions and array bridge handoff pending |
 | M7 | No staged family migrated | Stage planning, intermediate budgets and staged execution pending |
 | M8 | No wrapper cutover | Existing `NativeGraphHandle`, `NativeGraphSchedule` and artifact compatibility handles remain |
@@ -106,12 +106,35 @@ not Python, partitions tiles, bounds scratch and combines partials:
 - Each job opens its own strict FP scope on its own thread and reports its own
   counters and flags; the union is taken in task order, and raise masks still
   apply only after successful traversal.
-- Threads are started only after every validation and allocation succeeded; a
-  partially started set is joined before returning the error, with no retry.
+- Jobs are submitted only after validation and job-workspace allocation.
+  Every accepted callback is drained before returning, including after a
+  partial/non-prefix failure; no retry occurs.
 - Windows keeps the serial path (no thread job support compiled).
 
 Reports expose `tasks` and `worker_scratch_bytes` alongside the per-tile
 `temporary_bytes`, keeping "one bounded tile" distinct from aggregate scratch.
+`tasks` counts callbacks actually entered, not a presumed submitted prefix.
+
+### Launcher boundary (review 3 increment)
+
+The production build selects `b2nd_exec_launch_host` at build/link time. It
+uses the existing synchronous Blosc2 thread callback or portable
+`blosc2_run_parallel` dispatcher. This is **not** codec shared-pool reuse:
+without a host callback that supplies a pool, threads are still created per
+call. No latency improvement or Windows parallel qualification is claimed.
+Windows admission remains serial.
+
+Numerical job geometry, scratch, strict per-job FP scopes, combination and
+publication remain in `b2nd-exec.c`. All callbacks drain before return. Entered
+jobs are counted explicitly, including non-prefix partial execution; a launcher
+that returns success without running every job is rejected without replay.
+The standalone backend and deterministic compile-time override remain independent
+of the codec library. There is no process-global executor launcher setter.
+
+Invocation-local job wrappers and thread-local depth tracking execute nested
+executor jobs inline before any nested submission, avoiding recursive waits on
+a bounded host callback pool. This does not qualify arbitrary nested codec jobs
+or complete the future generic shared-pool backend.
 
 ### Actual backend diagnostics
 
@@ -132,6 +155,68 @@ This closes a diagnostic prerequisite, not the complete M4 backend gate.
 
 ## Validation performed
 
+Review 2 follow-ups (`8324ca4`, C-Blosc2 `16070bca`, Python-Blosc2 `1579d370`)
+fix checked weak-integer arithmetic proof, FP-support merging on partial task
+submission failure, and omitted versus explicit single-worker scratch budgets.
+The explicit facade's omitted single-worker aggregate budget is unbounded
+(individual mapped/gather bounds still apply); explicit budgets remain enforced.
+
+The reviewer reports an additional TCC-enabled configuration: 470/470 core tests,
+754 Python passes without skips, artifact-off installed consumer 3/3, sanitizer
+fixture 2/2, standard stubs and Ruff passing. This supplements the non-TCC
+configuration below; it does not establish the optional required-system-JIT
+fixture ran under sanitizers.
+
+### First M5 storage increment (local, non-TCC configuration)
+
+- `tests/exec-storage`: 2/2 passed with `-Wall -Wextra -Werror`; the same 2/2
+  passed with ASan/UBSan on the new executor/storage owner (installed core and
+  codec archives are not sanitizer-instrumented).
+- Artifact-off installed static consumer: 4/4 passed, including the new
+  `installed_exec_storage` target linked against the actual C-Blosc2 archive.
+- Isolated opt-in Python: 759 passed, 39 skipped across the preceding nine
+  regression files plus `test_native_graph_sources.py` and
+  `test_b2nd_exec_storage.py`. Verified isolated package/extension locations;
+  these counts are a different selection/configuration from the reviewer's
+  TCC-enabled 754-pass run.
+- Native storage tests compare the same plan/schedule with resident execution
+  for map and sum/prod/min/max/any/all, multiple tile widths, differing padded
+  chunk/block layouts and short tails. Signaling-NaN physical padding must never
+  participate. Allocation/decode failure injection verifies no scalar
+  publication and completed map-prefix writes, without replay.
+- Python compares compressed execution to the explicitly selected adapter,
+  blocks Python readers/adapter replay, checks preferred-system-JIT reporting,
+  shared-schedule concurrent calls, late signaling-NaN failure/recovery, special
+  zero chunks, budgets and unsupported dtype/frame-backed bindings.
+- Decoder contexts and one-chunk-per-operand caches are invocation-local,
+  use one codec thread and do not mutate shared `current_nchunk` or array caches.
+  `decode_bytes` is cache allocation, `decoded_bytes` counts successful decode
+  traffic (including revisits), and cache hits count logical item lookups.
+  Codec-private allocation is not included. Compressed headers are metadata
+  inspected during preflight; no payload is decoded before binding/budget checks.
+- Standard bridge stubs pass syntax checking. Existing extension warnings and
+  an empty Zstd threading-object libtool warning remain; new owner fixtures
+  compile with warnings treated as errors.
+
+### Launcher qualification (review 3)
+
+- Standalone native suite: 5/5 passed, including the optional required-system-JIT
+  fixture. ASan/UBSan suite: 4/4 passed without that optional JIT fixture.
+- Tests cover reverse order, non-prefix partial submission, incomplete callback
+  dispatch, worker failure, allocation failure, no replay, accurate entered-job
+  counters and recovery. Host transport nesting is tested on the calling thread
+  and a worker thread.
+- Artifact-off installed static consumer: 5/5 passed. The added launcher consumer
+  uses the actual archive and the real Blosc2 thread-callback API, including a
+  nested executor call, incomplete-dispatch rejection and recovery.
+- Isolated Python regression selection remains 759 passed, 39 skipped with the
+  production launcher wired in; resident shared-schedule concurrency and the
+  storage/adapter comparisons remain covered.
+- Persistent generic shared-pool reuse, compressed sinks, run-copy optimization
+  and Windows/WASM platform qualification are not implied by these results.
+
+### Earlier resident qualification
+
 - Artifact-off native descriptor/execution fixture, including exact int64
   captures beyond double precision, multiple inputs and width variants.
 - Planner/specialization/execution allocation failure injection.
@@ -151,8 +236,8 @@ This closes a diagnostic prerequisite, not the complete M4 backend gate.
 - Native partitioned jobs under ASan/UBSan (`-Wall -Wextra -Werror`, 2/2 `tests/exec-plan` passed): identical results for 1..7 jobs, task cap at `B2ND_EXEC_MAX_TASKS`, capped scratch, rejected ordered sums and unproven direct kernels, multi-task float `min` with `sNaN`/`-0.0`, multi-worker `any`/`all` with late `sNaN`, narrow-integer `sum`/`prod` overflow beyond input width, N-D broadcast + strided/reversed/unaligned/non-native `b2nd_exec_execute_views`, `axes`/`keepdims`/`initial`/`pairwise_sum` (`b2nd_exec_specialize_ex`), disjoint strided/reversed `b2nd_exec_execute_into`, transactional `b2nd_exec_execute_alias` (with staging budget and `raise_mask` preservation), forged underflow/overflow rejection, and OOM fault injection across mapped/gather/scatter/staging/job allocations.
 - Installed static consumer (`tests/installed-miniexpr` linked against `blosc2_static` and artifact-off `miniexpr::core`): 3/3 passed (`installed_miniexpr_consumer`, `installed_kernel_grid`, `installed_exec_plan`).
 - Standard (non-opt-in) builds keep their existing dispatch; `b2nd_exec_bridge.h` `#else` stubs verified with `cc -fsyntax-only -Wall -Wextra -Werror -Wno-unused-function`.
-- Latest configured artifact-on miniexpr suite: 377/377 passed, including interpreter and required-system-compiler backend diagnostics. Other earlier configurations had different test counts.
-- Latest isolated opt-in Python regression suite: `714 passed, 39 skipped` across `test_b2nd_exec_plan.py`, `test_native_graph_preparation.py`, `test_native_graph_maps.py`, `test_native_graph_extrema.py`, `test_native_graph_truth.py`, `test_native_graph_weak_captures.py`, `test_native_graph_output.py`, `test_expression_graph.py`, and `test_expression_graph_lifetime.py`. This includes concurrent calls sharing a schedule, actual backend counters, typed policy/cache separation, explicit single-worker scratch-budget rejection and conservative weak-conversion partition rejection.
+- Earlier non-TCC artifact-on miniexpr suite: 377/377 passed, including interpreter and required-system-compiler backend diagnostics. The reviewer's TCC-enabled configuration has different test coverage/counts.
+- Earlier non-TCC opt-in Python regression suite: `714 passed, 39 skipped` across `test_b2nd_exec_plan.py`, `test_native_graph_preparation.py`, `test_native_graph_maps.py`, `test_native_graph_extrema.py`, `test_native_graph_truth.py`, `test_native_graph_weak_captures.py`, `test_native_graph_output.py`, `test_expression_graph.py`, and `test_expression_graph_lifetime.py`. This includes concurrent calls sharing a schedule, actual backend counters, typed policy/cache separation, explicit single-worker scratch-budget rejection and conservative weak-conversion partition rejection.
 - Artifact-off native fixture: 3/3 passed with `EXEC_PLAN_TEST_JIT=ON`, including required-system-compiler execution and failed submissions at each of three task-start positions; every earlier task is joined and reduction output stays unpublished.
 - Ruff lint and formatting checks passed for edited Python/test files.
 
@@ -173,20 +258,20 @@ single-use expressions while retaining shared DAG temporaries. Local Debug
 smoke timings are not the ARM64/x86-64 production performance gate. Raw build
 logs and timing results remain outside the repositories.
 
-## Next increments (not started)
+## Remaining increments
 
-- **M5 compressed/storage:** C-Blosc2 storage adapters over the same schedule,
-  padded/chunked reads, mixed resident/compressed operands, direct sinks and
-  ordered compressed partials. Requires new C storage bindings; the grid pilot
-  stays the comparison until then.
+- **M5 compressed/storage:** qualify frame-backed and mixed resident/compressed
+  operands, other dtypes/layouts, direct compressed sinks, parallel storage and
+  moments/arg-extrema. The initial serial in-memory binding is not the M5 exit
+  gate; the grid pilot/adapter remain comparisons and ordinary dispatch owners.
 - **M6 sources/sinks and logical partitions:** metadata-only callbacks, GIL
   discipline, bounded gather buffers, `MenudetLazyArray`/`evaluate_array*`
   handoff, persisted partition recipes.
 - **M7 stages:** region splitting, lifetimes, intermediate budgets and staged
   diagnostics without an interchange tree.
 - **M4 remainder:** broader backend/platform qualification, non-default accuracy,
-  richer control-flow/math/value-dependent conversion proofs, and storage-backed
-  jobs.
+  richer control-flow/math/value-dependent conversion proofs, a persistent generic
+  shared-pool backend, and storage-backed jobs.
 - **M8 remainder:** default wrapper dispatch and retirement of the specialized
   int64 pilots once every migrated route has its gate.
 
