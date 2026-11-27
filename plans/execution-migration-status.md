@@ -9,7 +9,7 @@ format changed.
 | M0 | Route/test/capability inventory in `execution-migration-contracts.md`; explicit direct-handle baseline; separate benchmark preparation/specialization phases | Cross-platform performance qualification remains a later gate |
 | M1 | C-Blosc2 internal `blosc/b2nd-exec.h` / `.c`; bounded typed nodes, exact captures, topology/slot/arity/width validation, copied ownership, borrowed metadata-only schedules; optional Cython conversion and strong Python schedule owner | Descriptor will need additional typed options/operations/stages as subsequent families are implemented; it is not installed/frozen |
 | M2 | Serial multiple-input fused arithmetic maps and whole-domain minimum; zero-scratch direct maps; exact inferred-width reduction scratch; shared core strict FP scope and end-of-traversal raise masks; ordinary expression lowering reuses `GraphAdapter`; direct authored-kernel ownership transfer feeds the same scheduler | General `NativeGraph` metadata/frontend migration and pilot API retirement are not complete; this is the initial resident family, not the entire M2 wrapper handoff |
-| M3 | Initial scalar/ranked same-shape contiguous domains, empty maps and explicit disjoint NumPy outputs; input/output allocation extents checked against buffer owners without normalization copies | Broadcasting, strided/non-native gathering, aliases, axes/masks/initial/keepdims, remaining reducers and fixed-leaf sums stay on the adapter |
+| M3 | Scalar/ranked same-shape contiguous domains, empty maps and explicit disjoint NumPy outputs; allocation-owner extent checks; default serial sum/prod/min/max with authoritative core accumulator typing and empty sum/product identities | Broadcasting, strided/non-native gathering, aliases, axes/masks/initial/keepdims, any/all and fixed-leaf sums stay on the adapter |
 | M4 | No job/backend family migrated | C-owned parallel jobs, aggregate workspace and full backend qualification pending |
 | M5 | No compressed family migrated | Existing grid pilot/adapter remain; general compressed maps/reductions pending |
 | M6 | No generic source/sink family migrated | Source callbacks, logical partitions and array bridge handoff pending |
@@ -24,12 +24,15 @@ compile unsupported stubs and keep existing dispatch. The checked-in dependency
 pins have not been advanced to unpublished local commits.
 
 The new ordinary path admits only explicitly interpreted, native aligned,
-same-shape contiguous scalar/ranked domains (up to rank 16), nonempty reductions
+same-shape contiguous scalar/ranked domains (up to rank 16), whole-domain reductions
 and whole-domain map reads or explicit disjoint NumPy outputs
 with numeric inputs and exact typed/weak captures. Maps support add, subtract,
 multiply and negate. A 64 KiB mapped-scratch admission bound uses the core-inferred
 width and applies only to computed maps feeding reductions. Direct-output maps
-and identity reductions need no mapped scratch. Other syntax, layouts, options and backend policies
+and identity reductions need no mapped scratch. Reductions now include default
+whole-domain serial sum/product/minimum/maximum. Sum/product accumulator promotion
+and empty identities come from miniexpr core; map tile width stays separate from
+result width. Other syntax, layouts, options and backend policies
 retain their old route during metadata-only admission. Once preparation or
 execution begins, errors propagate; no backend retry is performed.
 

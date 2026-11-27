@@ -186,18 +186,18 @@ static bool a_axes(int rank, const me_array_options *o, bool *axes) {
     return true;
 }
 static me_dtype a_dtype(me_dtype source, const me_array_options *o) {
-    if (o->reduction == ME_ARRAY_ANY || o->reduction == ME_ARRAY_ALL) return o->accumulator == ME_AUTO ? ME_BOOL : ME_AUTO;
-    if (o->accumulator != ME_AUTO) {
-        bool compatible = a_float(source) ? a_float(o->accumulator) :
-                          a_complex(source) ? (a_float(o->accumulator) || a_complex(o->accumulator)) :
-                          true;
-        return a_width(o->accumulator) && compatible ? o->accumulator : ME_AUTO;
+    me_reduction_kind kind;
+    switch (o->reduction) {
+        case ME_ARRAY_NONE: kind = ME_REDUCTION_NONE; break;
+        case ME_ARRAY_SUM: case ME_ARRAY_SUM_PAIRWISE: kind = ME_REDUCTION_SUM; break;
+        case ME_ARRAY_PROD: kind = ME_REDUCTION_PROD; break;
+        case ME_ARRAY_MIN: kind = ME_REDUCTION_MIN; break;
+        case ME_ARRAY_MAX: kind = ME_REDUCTION_MAX; break;
+        case ME_ARRAY_ANY: kind = ME_REDUCTION_ANY; break;
+        case ME_ARRAY_ALL: kind = ME_REDUCTION_ALL; break;
+        default: return ME_AUTO;
     }
-    if ((o->reduction == ME_ARRAY_SUM || o->reduction == ME_ARRAY_SUM_PAIRWISE || o->reduction == ME_ARRAY_PROD) &&
-        !a_float(source) && !a_complex(source)) {
-        return a_unsigned(source) && source != ME_BOOL ? ME_UINT64 : ME_INT64;
-    }
-    return source;
+    return me_reduce_accumulator_dtype(source, kind, o->accumulator);
 }
 me_artifact_status me_array_result_shape(const me_artifact *a, int rank, const int64_t *shape,
     const me_array_options *o, int *out_rank, int64_t *out_shape, me_dtype *dtype, me_artifact_error *error) {

@@ -23,6 +23,35 @@ extern "C" {
 #define ME_PAIRWISE_SUM_API 1
 #define ME_PAIRWISE_SUM_LEAF_ITEMS 128
 
+/* Shared graph accumulator policy, independent of array traversal/artifacts.
+ * ME_AUTO means an invalid/unsupported request. Explicit truth accumulator
+ * requests retain the adapter's rejection contract. */
+#define ME_SERIAL_REDUCE_API 1
+typedef enum {
+    ME_REDUCTION_NONE,
+    ME_REDUCTION_SUM,
+    ME_REDUCTION_PROD,
+    ME_REDUCTION_MIN,
+    ME_REDUCTION_MAX,
+    ME_REDUCTION_ANY,
+    ME_REDUCTION_ALL
+} me_reduction_kind;
+me_dtype me_reduce_accumulator_dtype(me_dtype source, me_reduction_kind kind, me_dtype requested);
+/* Native scalar bytes in uint64_t storage; false for extrema (no identity) or
+ * non-real accumulator dtypes. */
+bool me_reduce_identity(me_reduction_kind kind, me_dtype accumulator, uint64_t *out);
+
+/* Serial default-accumulator spans. The caller validates buffers, supplies
+ * initial accumulator bytes in uint64_t storage and owns the FP scope.
+ * Floating sums/products preserve each rounding step and span order.
+ * Integer checked=false is graph modulo arithmetic; checked=true retains DSL
+ * range errors. Complex values/explicit accumulator conversions are not
+ * supported by these two span entry points. Output publishes only on success. */
+bool me_sum_span(me_dtype source, const void *values, size_t count,
+    uint64_t initial, bool checked, uint64_t *out);
+bool me_prod_span(me_dtype source, const void *values, size_t count,
+    uint64_t initial, bool checked, uint64_t *out);
+
 enum {
     ME_PAIRWISE_SUM_SUCCESS = 0,
     ME_PAIRWISE_SUM_ERR_INVALID_ARG = -4

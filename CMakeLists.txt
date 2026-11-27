@@ -26,6 +26,7 @@ set(MINIEXPR_SOURCES
   src/miniexpr_kernel.c
   src/miniexpr_grid.c
   src/miniexpr_pairwise_sum.c
+  src/miniexpr_reduce.c
   src/miniexpr_eval_nd.c
   src/miniexpr_eval_dsl_nd.c
   src/miniexpr_eval_reduce.c
@@ -55,10 +56,10 @@ set(MINIEXPR_SOURCES
 )
 
 if(MSVC)
-  set_source_files_properties(src/dsl_menudet_batch.c src/miniexpr_pairwise_sum.c PROPERTIES
+  set_source_files_properties(src/dsl_menudet_batch.c src/miniexpr_pairwise_sum.c src/miniexpr_reduce.c PROPERTIES
     COMPILE_OPTIONS "/fp:precise")
 else()
-  set_source_files_properties(src/dsl_menudet_batch.c src/miniexpr_pairwise_sum.c PROPERTIES
+  set_source_files_properties(src/dsl_menudet_batch.c src/miniexpr_pairwise_sum.c src/miniexpr_reduce.c PROPERTIES
     COMPILE_OPTIONS "-fno-fast-math;-ffp-contract=off")
 endif()
 

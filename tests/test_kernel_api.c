@@ -16,6 +16,7 @@
 #include <string.h>
 #include "miniexpr_kernel.h"
 #include "miniexpr_grid.h"
+#include "miniexpr_reduce.h"
 #include "miniexpr_kernel_internal.h"
 #include "functions-simd.h"
 #ifndef _WIN32
@@ -915,7 +916,46 @@ static void fiber_scratch(void) {
 }
 #endif
 
+static void public_serial_reducers(void) {
+    assert(me_reduce_accumulator_dtype(ME_BOOL, ME_REDUCTION_SUM, ME_AUTO) == ME_INT64);
+    assert(me_reduce_accumulator_dtype(ME_INT8, ME_REDUCTION_PROD, ME_AUTO) == ME_INT64);
+    assert(me_reduce_accumulator_dtype(ME_UINT16, ME_REDUCTION_SUM, ME_AUTO) == ME_UINT64);
+    assert(me_reduce_accumulator_dtype(ME_FLOAT32, ME_REDUCTION_SUM, ME_AUTO) == ME_FLOAT32);
+    assert(me_reduce_accumulator_dtype(ME_COMPLEX64, ME_REDUCTION_PROD, ME_AUTO) == ME_COMPLEX64);
+    assert(me_reduce_accumulator_dtype(ME_COMPLEX128, ME_REDUCTION_SUM, ME_FLOAT64) == ME_FLOAT64);
+    assert(me_reduce_accumulator_dtype(ME_FLOAT32, ME_REDUCTION_SUM, ME_INT64) == ME_AUTO);
+    assert(me_reduce_accumulator_dtype(ME_INT64, ME_REDUCTION_ANY, ME_AUTO) == ME_BOOL);
+    assert(me_reduce_accumulator_dtype(ME_INT64, ME_REDUCTION_ALL, ME_BOOL) == ME_AUTO);
+    assert(me_reduce_accumulator_dtype(ME_STRING, ME_REDUCTION_SUM, ME_AUTO) == ME_AUTO);
+    int16_t narrow[] = {-32768, 32767, 2};
+    uint64_t result = 42;
+    assert(me_sum_span(ME_INT16, narrow, 3, 0, false, &result) && result == 1);
+    int64_t signed_values[] = {INT64_MAX, 1};
+    assert(me_sum_span(ME_INT64, signed_values, 2, 0, false, &result));
+    assert(result == (UINT64_C(1) << 63));
+    result = 42;
+    assert(!me_sum_span(ME_INT64, signed_values, 2, 0, true, &result) && result == 42);
+    uint64_t unsigned_values[] = {UINT64_MAX, 2};
+    assert(me_prod_span(ME_UINT64, unsigned_values, 2, 1, false, &result) && result == UINT64_MAX - 1);
+    result = 42;
+    assert(!me_prod_span(ME_UINT64, unsigned_values, 2, 1, true, &result) && result == 42);
+    float floats[] = {16777216.0f, 1, -16777216.0f, 3};
+    me_fp_scope scope;
+    me_fp_status fp;
+    assert(me_fp_scope_begin(&scope, &fp, NULL) == ME_SUCCESS);
+    assert(me_sum_span(ME_FLOAT32, floats, 2, 0, false, &result));
+    assert(me_sum_span(ME_FLOAT32, floats + 2, 2, result, false, &result));
+    float total;
+    memcpy(&total, &result, sizeof(total));
+    assert(total == 3);
+    assert(me_fp_scope_end(&scope, NULL) == ME_SUCCESS);
+    result = 42;
+    assert(!me_sum_span(ME_COMPLEX128, floats, 0, 0, false, &result) && result == 42);
+    assert(me_sum_span(ME_INT64, NULL, 0, 17, false, &result) && result == 17);
+}
+
 int main(int argc, char **argv) {
+    public_serial_reducers();
     /* Host reducers use precisely the kernel strict-FP scope. */
     me_fp_scope scope;
     me_fp_status fp;
