@@ -21,7 +21,7 @@ int main(void) {
     const void *inputs[] = {values};
     const me_dsl_semantic_profile profiles[] = {
         ME_DSL_PROFILE_MENUDET_0_1};
-    for (size_t j = 0; j < 2; j++) {
+    for (size_t j = 0; j < sizeof(profiles) / sizeof(profiles[0]); j++) {
         for (size_t i = 0; i < 7; i++) {
             char source[128];
             snprintf(source, sizeof(source), "def k(x):\n    return %s(x)\n", names[i]);
