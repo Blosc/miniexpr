@@ -159,6 +159,7 @@ typedef struct {
 /* Invocation-local host arithmetic scope. Uses the same strict IEEE policy as
  * kernel evaluation; restores caller flags/rounding and nests collectors.
  * Keep the scope and status alive until end; do not copy an active scope.
+ * Begin/end on the same thread in LIFO order.
  * On begin failure no scope is active. Reporting may be unavailable (WASM). */
 #define ME_FP_SCOPE_API 1
 typedef union {

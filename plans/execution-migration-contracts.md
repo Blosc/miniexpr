@@ -21,6 +21,7 @@ Paths below are relative to the repository named in the first column.
 | Python-Blosc2 automatic/explicit stages | miniexpr graph stage planning and intermediate ownership | `test_native_graph_stages.py` |
 | Python-Blosc2 `MenudetLazyArray`, Cython `evaluate_array*`, prefilter bridges | Python adaptation; miniexpr artifact and array execution | `test_menudet_arrays.py`, `test_menudet_lazy.py`, `test_menudet_recipe.py`, `test_menudet_descriptor_host.py` |
 | Python-Blosc2 resident min/map-min pilots | C-Blosc2 specialized resident loops, core arithmetic | `test_native_graph_preparation.py` resident pilot tests |
+| Python-Blosc2 opt-in `typed_exec.py` resident maps/min | Python expression adaptation; `b2nd-exec.c` prepares the core kernel and owns specialization/traversal | `test_b2nd_exec_plan.py`, C-Blosc2 `tests/installed-miniexpr/exec-plan.c` and `tests/exec-plan/faults.c` |
 | Python-Blosc2 compressed grid/logical partition pilot | C-Blosc2 pilot traversal, core grid/kernel evaluation | `test_b2nd_kernel_pilot.py` |
 | Python-Blosc2 formula/full-DSL/legacy and explicit artifact imports | Compatibility paths, not graph migration admission | `test_evaluate_menudet_routes.py`, `test_menudet_legacy.py`, `test_menudet_artifact.py`, `test_menudet_interop.py` |
 
@@ -29,10 +30,12 @@ Paths below are relative to the repository named in the first column.
 “Adapter” below means retain the existing capability checks, not unconditional
 support for the cross-product of these rows.
 
-| Contract | Baseline / preservation | New resident pilots |
+| Contract | Baseline / preservation | Original resident pilots (M0 baseline) |
 | --- | --- | --- |
 | Syntax | Restricted text and declarative graphs; explicit/automatic stages | `min(x)`, `min(x +/- integer)`, `min(x * integer)` only |
 | Dtypes/captures | Native numeric inference, exact typed/weak scalar payloads and width checks | Native int64 input/output, weak signed int64 literal |
+| Complex values | Preserve `complex64`/`complex128` only for operations and conversions the adapter admits; no blanket extrema support | Not admitted |
+| Fixed-width strings | Preserve `ME_STRING`/`ME_BYTES` widths and authored Menudet array semantics on the direct-kernel path; do not widen numeric graph syntax | Not admitted |
 | Layout/rank | Broadcast/scalar/ranked views; supported strides, endian and alignment conversion via bounded gathering | Nonempty aligned contiguous native 1-D |
 | Reducers/options | sum/prod/min/max/any/all, admitted axes/keepdims/initial/where; separate moments and arg-extrema orchestration | Whole-domain min; no options |
 | Reduction order | Strict serial or explicit fixed-leaf pairwise; logical order independent of tiles/workers | Serial min |
@@ -43,6 +46,20 @@ support for the cross-product of these rows.
 | FP/errors | Union of actual evaluation flags, raise masks, original callback exceptions and committed-write reports | Completed map-call flags; no FP probe for direct integer min |
 | Lifetime/cache | No operand/result caching; old native schedules retain plans | Immutable plans, invocation-local buffers |
 | Memory | Separate gathering, mapped tiles, workers, alias staging and stage budgets | Direct min has no mapped scratch; computed map tile <= 64 KiB |
+
+### M2 closeout contracts (acceptance targets)
+
+The typed resident path currently supports fused arithmetic maps and whole-domain
+min; the following are qualification requirements, not claims of current parity:
+
+| Case | What to compare in the same build |
+| --- | --- |
+| Identity `min(x)` | No map call or mapped allocation, including large tiles; scalar published only on success |
+| Computed map, disjoint contiguous destination | Direct kernel output and zero mapped scratch; validate extents/overlap before evaluation. Earlier writes may remain and the failing tile may be partially written. Transactional aliases require a separate contract. |
+| Computed map feeding min | Bound mapped scratch by actual tile lanes times inferred map itemsize, excluding reducer/core storage. Test narrow dtypes at and just over budget, without replay or partial scalar publication. |
+| Strict FP | Compare flags, raise timing, completed tiles and caller state after success/failure with altered rounding modes, subnormals and signaling NaNs. Match unavailable-reporting semantics on WASM; include Windows/MSVC and WASM FP/alignment checks in M2–M3. |
+| Wrapper handoff | Metadata, specialization and execution for an admitted expression come from the same typed plan. Compare against an explicit adapter handle; block the old executor in new-path tests. |
+| Future direct-kernel entry | Preserve input widths, context/rank, elementwise versus block-scalar cardinality and persisted group boundaries; test kernel owner lifetime independently of the DAG frontend. |
 
 ## Native preservation suites
 
@@ -59,8 +76,10 @@ not as a duplicate Python numerical matrix.
 
 ## Explicit comparison selection and timing
 
-Until M8, instantiate `NativeGraph.from_expression(..., jit=False)` and call
-`specialize(...).execute(...)` to select the **adapter baseline explicitly**.
+At the current checkpoint, `NativeGraph.from_expression(..., jit=False)` and
+`specialize(...).execute(...)` reach the adapter. Before repointing this wrapper,
+give qualification tests and benchmarks a dedicated adapter selector in the same
+build. Use `_TypedExecPlan` directly for the typed resident comparator.
 Instantiate `_ResidentMinI64Plan` / `_ResidentMapMinI64Plan` directly to select
 the **pilot explicitly**. Neither selector uses automatic dispatch.
 `_require_native=True` is not an enduring old/new selector and must not be used
@@ -71,6 +90,8 @@ separately from warmed execution. The pilot still combines compilation and
 geometry preparation: that scope is labelled, not presented as like-for-like
 preparation. Ordinary compute is a separate dispatch measurement, not the
 baseline ownership selector. Raw timings stay outside the repositories.
+`bench/resident_typed_plan.py` additionally separates typed frontend lowering,
+uncached preparation, specialization and warmed execution for the M2 family.
 
 ## Gates
 

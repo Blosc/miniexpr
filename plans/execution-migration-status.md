@@ -8,7 +8,7 @@ format changed.
 | --- | --- | --- |
 | M0 | Route/test/capability inventory in `execution-migration-contracts.md`; explicit direct-handle baseline; separate benchmark preparation/specialization phases | Cross-platform performance qualification remains a later gate |
 | M1 | C-Blosc2 internal `blosc/b2nd-exec.h` / `.c`; bounded typed nodes, exact captures, topology/slot/arity/width validation, copied ownership, borrowed metadata-only schedules; optional Cython conversion and strong Python schedule owner | Descriptor will need additional typed options/operations/stages as subsequent families are implemented; it is not installed/frozen |
-| M2 | Serial multiple-input fused arithmetic maps and whole-domain minimum; zero-scratch direct maps; exact inferred-width reduction scratch; shared core strict FP scope and end-of-traversal raise masks; ordinary expression lowering reuses `GraphAdapter`; direct authored-kernel ownership transfer feeds the same scheduler | General `NativeGraph` metadata/frontend migration and pilot API retirement are not complete; this is the initial resident family, not the entire M2 wrapper handoff |
+| M2 | Serial multiple-input fused arithmetic maps and whole-domain minimum; zero-scratch direct maps; exact inferred-width reduction scratch; shared core strict FP scope and end-of-traversal raise masks; ordinary expression lowering reuses `GraphAdapter`; direct authored-kernel ownership transfer feeds the same scheduler; explicit `NativeGraph(..., _executor="c-blosc2")` facade whose metadata, specialization and execution use the typed plan, with adapter-backed compatibility exports and `MenudetError`/`fp_status` parity | Default wrapper dispatch and pilot API retirement are not complete; the facade covers only the typed resident family |
 | M3 | Scalar/ranked same-shape contiguous domains, empty maps and explicit disjoint NumPy outputs; allocation-owner extent checks; default serial sum/prod/min/max with authoritative core accumulator typing and empty sum/product identities | Broadcasting, strided/non-native gathering, aliases, axes/masks/initial/keepdims, any/all and fixed-leaf sums stay on the adapter |
 | M4 | No job/backend family migrated | C-owned parallel jobs, aggregate workspace and full backend qualification pending |
 | M5 | No compressed family migrated | Existing grid pilot/adapter remain; general compressed maps/reductions pending |
@@ -56,6 +56,22 @@ external buffer extents), not a view's possibly fictitious `nbytes`. Unknown
 owners are rejected without copying. Forged contiguous `as_strided` input and
 output extents are tested to fail before numerical evaluation or output writes.
 
+`NativeGraph.from_expression(..., _executor="c-blosc2")` is an explicit
+comparison selector, not a default. Its handle prepares a typed plan directly:
+metadata queries, specialization and execution never borrow an artifact handle.
+Its compatibility `to_json()`/`map_json()` deliberately instantiate the adapter
+and are never reached from prepare/queries/specialize/execute. Restricted-text
+literals are parsed inside the shared strict-FP scope with a fresh AST rather
+than a cache keyed by expression text, so a caller's rounding mode cannot leak
+into a cached literal. Unreachable input bindings are rejected in both executors.
+Admission is narrower than the adapter: no JIT/backend/accuracy overrides, no
+environment overrides, no partial selections, no parallel `workers`, and no
+stage diagnostics beyond the single resident stage. Evaluation failures raise
+`MenudetError` with `evaluation_error` status and `fp_status`, matching the
+adapter. Identity integer reductions still report `fp_supported=False` because
+no FP status is observed; the adapter reports an observable environment instead.
+They do not yet differ in published values or flags.
+
 ## Validation performed
 
 - Artifact-off native descriptor/execution fixture, including exact int64
@@ -70,6 +86,13 @@ output extents are tested to fail before numerical evaluation or output writes.
   exact scalar transport, binding errors, changed values, shared DAGs, unreachable
   arithmetic, FP failure/recovery and no old-executor replay.
 - Existing preparation/map/capture/output/source/stage Python regression suites.
+- Named typed-graph parity against explicit adapter handles: shape, dtype,
+  bitwise values, reduction metadata, single-stage metadata, canonical JSON,
+  `MenudetError` status and `fp_status`, plus tests that block adapter
+  preparation or artifact borrowing during metadata and execution.
+- Standard (non-opt-in) builds keep their existing dispatch; typed tests skip.
+- Full miniexpr artifact-on core suite (343 tests) after extracting accumulator
+  typing and serial reducers.
 - Ruff lint and formatting checks for edited Python/benchmark/test files.
 
 JIT-dependent tests are skipped in these interpreter-focused builds. Existing
