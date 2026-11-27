@@ -9,7 +9,7 @@ format changed.
 | M0 | Route/test/capability inventory in `execution-migration-contracts.md`; explicit direct-handle baseline; separate benchmark preparation/specialization phases | Cross-platform performance qualification remains a later gate |
 | M1 | C-Blosc2 internal `blosc/b2nd-exec.h` / `.c`; bounded typed nodes, exact captures, topology/slot/arity/width validation, copied ownership, borrowed metadata-only schedules; optional Cython conversion and strong Python schedule owner | Descriptor will need additional typed options/operations/stages as subsequent families are implemented; it is not installed/frozen |
 | M2 | Serial multiple-input fused arithmetic maps and whole-domain minimum; zero-scratch direct maps; exact inferred-width reduction scratch; shared core strict FP scope and end-of-traversal raise masks; ordinary expression lowering reuses `GraphAdapter`; direct authored-kernel ownership transfer feeds the same scheduler | General `NativeGraph` metadata/frontend migration and pilot API retirement are not complete; this is the initial resident family, not the entire M2 wrapper handoff |
-| M3 | No new layout/reducer family migrated | Broadcasting, strided/non-native gathering, outputs/aliases, axes/masks/initial/keepdims, remaining reducers and fixed-leaf sums stay on the adapter |
+| M3 | Initial scalar/ranked same-shape contiguous domains, empty maps and explicit disjoint NumPy outputs; input/output allocation extents checked against buffer owners without normalization copies | Broadcasting, strided/non-native gathering, aliases, axes/masks/initial/keepdims, remaining reducers and fixed-leaf sums stay on the adapter |
 | M4 | No job/backend family migrated | C-owned parallel jobs, aggregate workspace and full backend qualification pending |
 | M5 | No compressed family migrated | Existing grid pilot/adapter remain; general compressed maps/reductions pending |
 | M6 | No generic source/sink family migrated | Source callbacks, logical partitions and array bridge handoff pending |
@@ -24,7 +24,8 @@ compile unsupported stubs and keep existing dispatch. The checked-in dependency
 pins have not been advanced to unpublished local commits.
 
 The new ordinary path admits only explicitly interpreted, native aligned,
-same-shape contiguous nonempty rank-one reductions and whole-domain map reads
+same-shape contiguous scalar/ranked domains (up to rank 16), nonempty reductions
+and whole-domain map reads or explicit disjoint NumPy outputs
 with numeric inputs and exact typed/weak captures. Maps support add, subtract,
 multiply and negate. A 64 KiB mapped-scratch admission bound uses the core-inferred
 width and applies only to computed maps feeding reductions. Direct-output maps
@@ -46,6 +47,11 @@ typed core, not trusted caller duplicates. Context/block-scalar kernels can be
 prepared and inspected, but resident specialization explicitly rejects them
 until logical-group scheduling is implemented. This does not yet migrate
 `MenudetLazyArray` or its Python wrappers.
+
+The Python typed buffer bridge checks actual owning allocations (including
+external buffer extents), not a view's possibly fictitious `nbytes`. Unknown
+owners are rejected without copying. Forged contiguous `as_strided` input and
+output extents are tested to fail before numerical evaluation or output writes.
 
 ## Validation performed
 
