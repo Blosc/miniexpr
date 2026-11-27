@@ -13,11 +13,62 @@ format changed.
 | M4 | C-owned resident jobs: `partitionable` enforced in plan metadata and `b2nd_exec_execute_views` (unproven kernels and ordered `sum`/`prod` stay serial), job count capped at `B2ND_EXEC_MAX_TASKS` (64) and aggregate mapped + gather scratch budget (also enforced for explicit single-worker requests), partials combined in logical task order inside strict FP scope before `raise_mask`, each job owns its FP scope, started jobs always join before return, and Windows clamps `ntasks = 1` before partitioning. POSIX `blosc2_run_parallel` / `b2nd_exec_launch_host` dispatches via C-Blosc2's persistent shared pool (`blosc_shared_pool` + `generic_dojob`) when no user `threads_callback` is active, with nesting guard and clean `blosc2_destroy()` teardown. Core invocation backend reporting, interpreter/preferred/required-system-compiler fixture, submission-failure injection and simultaneous Python calls sharing a schedule are tested. Typed compiler/math preparation options feed core, C plans and explicit Python facade; policy is part of plan cache keys. `me_kernel_is_partitionable` supplies a conservative core proof for straight-line real arithmetic and proven conversions, including authored kernels | Richer control-flow/math/value-dependent conversion proofs, non-default FP accuracy, and Windows/WASM backend qualification pending |
 | M5 | Compressed storage execution (`b2nd_exec_execute_arrays` / `_ex`, `b2nd_exec_execute_to_array`): binds in-memory and frame-backed (`cframe` `contiguous=True` and `urlpath` on-disk, without mutating `current_nchunk`) chunked arrays across native numeric dtypes (`bool`, `int8..64`, `uint8..64`, `float32`, `float64`), right-aligned N-D broadcasting, partial-axis reductions (`axis`, `keepdims`, `initial`, `pairwise_sum`, parallel extrema, `argmin`/`argmax`, `var`/`std` with `ddof`), mixed compressed + resident inputs, and parallel partitionable jobs over the persistent shared pool with `max_decode_bytes` task clamping and contiguous inner-block run copies in `storage_read`; direct elementwise compressed sinks (`out` = `b2nd_array_t` / `NDArray`) evaluate blocks inside Blosc2's compression prefilter with matched-layout zero-copy block reads (`blosc2_getitem_ctx`, `gather_bytes=0`), 4-slot LRU block cache for mismatched/broadcast compressed inputs, resident box gathering, and padded live compaction without mutating output before validation. Explicit Python `NativeGraph(..., _executor="c-blosc2")` lowers `argmin`/`argmax`/`var`/`std` (`ddof`), executes resident/compressed/frame-backed inputs and sinks with the GIL released; no Python source/sink reads or whole-array operand materialization | Cross-platform Windows/WASM performance/FP qualification and ordinary default dispatch cutover (M8/M9) remain |
 | M6 | Metadata-only generic source/sink callbacks (`b2nd_exec_execute_sources`), GIL-safe Cython trampolines, bounded index/gather/output buffers, and explicit persisted logical partitions (`b2nd_exec_prepare_borrowed_kernel`, `b2nd_exec_specialize_partitions`, `b2nd_exec_execute_partitions`) with `MenudetLazyArray` / `MenudetArtifactHandle.evaluate_array` & `evaluate_sources` handoff across real, complex, fixed-width string, block-scalar, 2-D context, 0-D scalar, and generator kernels | Full M7 staged-family migration and M8/M9 wrapper/default cutover remain |
-| M7 | First native-only reduction-to-map slice: typed region/slot remapping into two ordinary plans, inferred intermediate dtype/shape, exact intermediate budget and last consumer, resident/source preflight for both stages, invocation-local lifetime, original-node diagnostics and per-stage reports | Python facade integration, compressed stages, multiple/nested reductions, masks, explicit imported stages and the full M7 exit gate remain pending |
+| M7 | General multi-stage typed graph planner and executor (`b2nd-exec-stages.h`/`.c`, up to `B2ND_EXEC_MAX_STAGES` = 32): direct node/slot remapping without child serialization; automatic region splitting at reductions and strong-dependent shared computed nodes; explicit `b2nd_exec_staged_assemble`/`_ex` composition (including authored Menudet kernels and single-stage resident masked reductions); inferred intermediate dtypes, casts, `initial`, `keepdims`, unary/binary/bitwise/comparison/`select`/`and`/`or`/`pos`/`function` ops; specialization-time intermediate sizing, `last_consumer` analysis, and upfront budget rejection before source reads; invocation-local last-consumer intermediate freeing; stage/node diagnostics across prepare, assemble, specialize, and execute (`b2nd_exec_stage_diagnostic`); `AND`-combined `has_jit` and `fp_observed` support; explicit compressed-stage, automatic conditional/masked multi-stage, shared scalar-only, and reader-backed mask rejections before reads; Python opt-in `NativeGraph(..., _executor="c-blosc2")` facade and Python-owned JSON envelope/stage import (`typed_stage_import.py`, `b2nd_exec_stages_bridge.h`) without consulting the native artifact/interchange parser | M8/M9 default wrapper cutover, compressed/parallel staged execution, and cross-platform Windows/WASM qualification remain |
 | M8 | No wrapper cutover | Existing `NativeGraphHandle`, `NativeGraphSchedule` and artifact compatibility handles remain |
 | M9 | Artifact-off installed C consumers tested; no default switch | Clean artifact-off standard wheel, original exchange fixtures, dependency/provider audit and cross-platform performance gates remain |
 
-## Latest qualification: review 4 follow-ups and bounded chunk LRU
+## Latest qualification: M7 completion
+
+M7 staged graph planning, composition, diagnostics and opt-in Python integration are
+complete and verified across C-Blosc2 (`blosc/b2nd-exec-stages.*`, `b2nd-exec.*`,
+`b2nd-exec-storage.c`) and Python-Blosc2 (`src/blosc2/typed_stage_import.py`,
+`typed_graph.py`, `typed_exec.py`, `b2nd_exec_stages_bridge.h`, `b2nd_exec.pxi`).
+Production defaults, dependency pins and persisted formats remain unchanged.
+
+Key fixes completed for M7 closing:
+
+- **Stage/node diagnostics**: added `b2nd_exec_stage_diagnostic` and `_ex` entry points
+  (`b2nd_exec_staged_prepare_ex`, `b2nd_exec_staged_assemble_ex`,
+  `b2nd_exec_staged_specialize_ex`) propagated through Cython as `MenudetError.stage`/`.node`.
+- **Adapter parity**: changed plan `has_jit` aggregation to `AND` across stages,
+  added `uses[where]` and strong-dependency checks rejecting shared scalar-only stage
+  materialization, aligned automatic conditional/masked domain rejections (`select`,
+  `and`, `or`, `where` when `nstages > 1`) with `dsl_graph.c`, rejected non-`auto`
+  `output.dtype` on imported automatic staged `menudet-graph-1` graphs, added unary `pos`,
+  and restored pre-M7 single-stage `_TypedExecSchedule.info()` keys.
+- **Wide-record partition decode (`typesize > 255`)**: fixed `storage_validate_chunks`
+  and `storage_read_box_cached` in `blosc/b2nd-exec-storage.c` for chunk headers with
+  `typesize == 1` (e.g. `U100` strings), plus `ninputs == 0` source validation.
+- **Trusted stage JSON import**: fixed `typed_stage_import.py` passing only `dtype`/`itemsize`
+  into `recipe_dtype` for Menudet stage inputs/outputs without touching the native adapter.
+
+Validation (macOS ARM64):
+
+- **Artifact-off installed static consumers**: `6/6` passed (`installed_miniexpr_consumer`,
+  `installed_kernel_grid`, `installed_exec_plan`, `installed_exec_storage`,
+  `installed_exec_launcher`, `installed_exec_stages`). Note: `installed_exec_launcher`
+  exhibited one earlier transient assertion abort at `exec-launch.c:139` before
+  passing 5/5 standalone runs and the final `ctest` run.
+- **ASan/UBSan native owner fixtures**: `exec-plan` `4/4`, `exec-storage` `2/2`,
+  `exec-stages` `3/3` (including `exec_stages_faults` and `exec_stages_adapter`
+  running `STAGE_ADAPTER_TEST` differential checks against `libminiexpr_artifact.a`).
+  Owner fixtures compiled cleanly with `-Wall -Wextra -Werror`.
+- **Opt-in Python (`B2_EXPERIMENTAL_SHARED_MINIEXPR_CORE=ON`)**:
+  - Focused M6/M7/staged selection (`tests/test_b2nd_exec_stages.py`,
+    `tests/test_b2nd_exec_m6.py`, `tests/test_native_graph_stages.py`): `132 passed`.
+  - Broader graph/menudet/executor/lazyexpr selection (`tests/test_*graph*.py`,
+    `tests/test_*menudet*.py`, `tests/test_*b2nd_exec*.py`, `tests/test_lazyexpr*.py`):
+    `1732 passed, 59 skipped` (0 failures; JIT-dependent cases skipped in this
+    configuration).
+- **Standard non-opt-in Python build**: clean wheel build with `_b2nd_exec_available() == False`;
+  smoke check across `test_menudet_lazy.py`, `test_menudet_generator.py`,
+  `test_menudet_string_prefilter.py` and `test_b2nd_exec_stages.py`: `44 passed, 76 skipped`;
+  `cc -fsyntax-only -Wall -Wextra` passes on `b2nd_exec_bridge.h` `#else` stubs.
+- **Lint & formatting**: `ruff check` and `ruff format --check` pass cleanly across all
+  modified and added Python files. Pre-existing Cython/libtool empty-`threading.c.o`
+  archive warnings remain.
+
+## Earlier qualification: review 4 follow-ups and bounded chunk LRU
 
 The same three working trees now address all six findings in
 `execution-plan-migration-review4.md`. This remains an opt-in/native increment:
