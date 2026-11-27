@@ -10,7 +10,7 @@ format changed.
 | M1 | C-Blosc2 internal `blosc/b2nd-exec.h` / `.c`; bounded typed nodes, exact captures, topology/slot/arity/width validation, copied ownership, borrowed metadata-only schedules; optional Cython conversion and strong Python schedule owner | Descriptor will need additional typed options/operations/stages as subsequent families are implemented; it is not installed/frozen |
 | M2 | Serial multiple-input fused arithmetic maps and whole-domain minimum; zero-scratch direct maps; exact inferred-width reduction scratch; shared core strict FP scope and end-of-traversal raise masks; ordinary expression lowering reuses `GraphAdapter`; direct authored-kernel ownership transfer feeds the same scheduler; explicit `NativeGraph(..., _executor="c-blosc2")` facade whose metadata, specialization and execution use the typed plan, with adapter-backed compatibility exports and `MenudetError`/`fp_status` parity | Default wrapper dispatch and pilot API retirement are not complete; the facade covers only the typed resident family |
 | M3 | Scalar/ranked same-shape contiguous domains, empty maps and explicit disjoint NumPy outputs; allocation-owner extent checks; default serial sum/prod/min/max with authoritative core accumulator typing and empty sum/product identities | Broadcasting, strided/non-native gathering, aliases, axes/masks/initial/keepdims, any/all and fixed-leaf sums stay on the adapter |
-| M4 | No job/backend family migrated | C-owned parallel jobs, aggregate workspace and full backend qualification pending |
+| M4 | C-owned resident jobs: a request is capped to the aggregate mapped-scratch budget, only order-independent reducers/disjoint map tiles partition, partials combine by logical task ID, each job owns its FP scope, and started jobs always join before return | JIT/backend qualification, partitionability proof and storage/compressed jobs pending; ordered sums/products stay serial |
 | M5 | No compressed family migrated | Existing grid pilot/adapter remain; general compressed maps/reductions pending |
 | M6 | No generic source/sink family migrated | Source callbacks, logical partitions and array bridge handoff pending |
 | M7 | No staged family migrated | Stage planning, intermediate budgets and staged execution pending |
@@ -72,6 +72,26 @@ adapter. Identity integer reductions still report `fp_supported=False` because
 no FP status is observed; the adapter reports an observable environment instead.
 They do not yet differ in published values or flags.
 
+### Resident job partitioning (M4 slice)
+
+`b2nd_exec_execute` accepts an optional `b2nd_exec_jobs` request. The executor,
+not Python, partitions tiles, bounds scratch and combines partials:
+
+- Ordered reducers (`sum`, `prod`) reject `workers > 1` before any read. Their
+  strict serial leaves/combine order are not redefined by worker count.
+- `min`/`max`, identity reductions and disjoint map tiles partition freely.
+- The job count is capped so `tasks * mapped_bytes` stays within the aggregate
+  budget; a budget below one job is rejected. Identity maps/reductions need none.
+- Each job opens its own strict FP scope on its own thread and reports its own
+  counters and flags; the union is taken in task order, and raise masks still
+  apply only after successful traversal.
+- Threads are started only after every validation and allocation succeeded; a
+  partially started set is joined before returning the error, with no retry.
+- Windows keeps the serial path (no thread job support compiled).
+
+Reports expose `tasks` and `worker_scratch_bytes` alongside the per-tile
+`temporary_bytes`, keeping "one bounded tile" distinct from aggregate scratch.
+
 ## Validation performed
 
 - Artifact-off native descriptor/execution fixture, including exact int64
@@ -90,6 +110,10 @@ They do not yet differ in published values or flags.
   bitwise values, reduction metadata, single-stage metadata, canonical JSON,
   `MenudetError` status and `fp_status`, plus tests that block adapter
   preparation or artifact borrowing during metadata and execution.
+- Native partitioned jobs under ASan/UBSan: identical results for 1..7 jobs,
+  capped scratch, rejected ordered sums, rejected short inputs, and a budget
+  below one job. Python checks worker-count invariance against the adapter for
+  min/max/maps, ordered-reduction rejection, and `tasks * scratch <= 65536`.
 - Standard (non-opt-in) builds keep their existing dispatch; typed tests skip.
 - Full miniexpr artifact-on core suite (343 tests) after extracting accumulator
   typing and serial reducers.
