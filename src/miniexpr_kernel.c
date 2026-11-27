@@ -164,6 +164,11 @@ static me_status kernel_signature(const me_signature *sig, const me_prepare_opti
         options->execution < ME_EXEC_INTERPRET || options->execution > ME_EXEC_REQUIRE_JIT)) {
         return kernel_error(error, ME_ERR_INVALID_ARG, "invalid preparation options");
     }
+    if (options && options->struct_size >= ME_PREPARE_OPTIONS_V3_SIZE &&
+        (options->math_backend < ME_MATH_DEFAULT || options->math_backend > ME_MATH_SCALAR ||
+         options->jit_compiler < ME_COMPILER_DEFAULT || options->jit_compiler > ME_COMPILER_CC)) {
+        return kernel_error(error, ME_ERR_INVALID_ARG, "invalid compiler or math policy");
+    }
     me_kernel *kernel = calloc(1, sizeof(*kernel));
     if (!kernel) return kernel_error(error, ME_ERR_OOM, "out of memory preparing kernel");
     *out = kernel;
@@ -267,6 +272,12 @@ static me_status kernel_prepare(const char *version, const char *source,
     }
     me_dtype inferred = ME_AUTO;
     me_execution_policy execution = options ? options->execution : ME_EXEC_INTERPRET;
+    me_math_backend math_policy = ME_MATH_DEFAULT;
+    me_jit_compiler compiler_policy = ME_COMPILER_DEFAULT;
+    if (options && options->struct_size >= ME_PREPARE_OPTIONS_V3_SIZE) {
+        math_policy = options->math_backend;
+        compiler_policy = options->jit_compiler;
+    }
     char reason[256] = {0};
     int position = -1;
     if (formula) {
@@ -278,6 +289,10 @@ static me_status kernel_prepare(const char *version, const char *source,
         me_dsl_declared_policy policy = {
             .has_fp = !options || !options->inherit_environment, .fp = ME_DSL_FP_STRICT,
             .has_math = !options || !options->inherit_environment, .math = ME_DSL_MATH_SYSTEM};
+        if (math_policy != ME_MATH_DEFAULT) {
+            policy.has_math = true;
+            policy.math = (me_dsl_math_backend)(math_policy - ME_MATH_AUTO);
+        }
         me_dsl_fp_mode fp;
         me_dsl_math_backend math;
         me_dsl_sleef_ulp ulp;
@@ -331,6 +346,15 @@ static me_status kernel_prepare(const char *version, const char *source,
             .has_fp = !options || !options->inherit_environment, .fp = ME_DSL_FP_STRICT,
             .has_math = !options || !options->inherit_environment, .math = ME_DSL_MATH_SYSTEM,
             .integer_powers = sig->integer_powers};
+        if (math_policy != ME_MATH_DEFAULT) {
+            policy.has_math = true;
+            policy.math = (me_dsl_math_backend)(math_policy - ME_MATH_AUTO);
+        }
+        if (compiler_policy != ME_COMPILER_DEFAULT) {
+            policy.has_compiler = true;
+            policy.compiler = compiler_policy == ME_COMPILER_CC ?
+                ME_DSL_COMPILER_CC : ME_DSL_COMPILER_LIBTCC;
+        }
         bool binding_error = false;
         int jit = jit_mode == ME_JIT_DEFAULT ?
             (execution == ME_EXEC_INTERPRET ? ME_JIT_OFF : ME_JIT_ON) : jit_mode;

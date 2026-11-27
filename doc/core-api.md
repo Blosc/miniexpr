@@ -140,6 +140,18 @@ dtype before final conversion.
   `ME_SIMD_MATH_BACKEND`; this does not add a ULP environment variable.
   Optional JIT falls back before execution; required JIT rejects unavailable
   lowering. Numerical failures never cause execution replay.
+- The optional v3 preparation-options suffix supplies typed `math_backend`
+  (`DEFAULT`, `AUTO`, `SYSTEM`, `SLEEF`, `ACCELERATE`, `SCALAR`) and
+  `jit_compiler` (`DEFAULT`, `TCC`, `CC`). Zero/default values preserve earlier
+  behavior. Explicit selections override environment defaults; authored
+  Menudet pragmas retain precedence. Invalid enum values are rejected before
+  compilation. Older option prefixes omit these selections without reading the
+  suffix. Formula compilation remains interpreted regardless of compiler policy.
+- `me_kernel_has_jit` reports prepared availability, not actual execution.
+  `me_eval_block_backend` additionally reports `NONE`, `INTERPRETER`, or `JIT`
+  per invocation, including failed evaluations. Preflight rejection and empty
+  elementwise blocks report `NONE`; forced interpretation and empty scalar
+  control-flow fallbacks report `INTERPRETER`. No shared kernel state is mutated.
 - A host may set `menudet_forbidden_features` to reject compiled control flow,
   block reductions or fixed strings before JIT. This is an optional
   preparation-options suffix; v1 sizes and a zero mask impose no restriction.

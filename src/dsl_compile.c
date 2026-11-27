@@ -3128,6 +3128,9 @@ static me_dsl_compiled_program *dsl_compile_program_profile_impl(const char *sou
          * eligibility decision. Source pragmas override artifact declarations,
          * which override the environment. */
         char policy_error[256];
+        if (!parsed->compiler_explicit && declared && declared->has_compiler) {
+            program->compiler = declared->compiler;
+        }
         if (parsed->math_explicit || parsed->ulp_explicit) {
             if (!dsl_menudet_typed_profile(profile)) {
                 if (error_reason && error_reason_cap) {

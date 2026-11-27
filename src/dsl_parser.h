@@ -67,6 +67,8 @@ typedef struct {
     bool has_ulp;
     me_dsl_sleef_ulp ulp;
     bool integer_powers;
+    bool has_compiler;
+    me_dsl_compiler compiler;
 } me_dsl_declared_policy;
 
 typedef struct me_dsl_expr {

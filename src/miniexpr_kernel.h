@@ -100,6 +100,24 @@ enum {
     ME_MENUDET_FEATURE_FIXED_STRINGS = 1u << 2
 };
 
+/* DEFAULT preserves the existing preparation contract; explicit selections
+ * override environment defaults, but authored source pragmas retain precedence. */
+#define ME_KERNEL_PREPARE_POLICY_API 1
+typedef enum {
+    ME_MATH_DEFAULT = 0,
+    ME_MATH_AUTO = 1,
+    ME_MATH_SYSTEM = 2,
+    ME_MATH_SLEEF = 3,
+    ME_MATH_ACCELERATE = 4,
+    ME_MATH_SCALAR = 5
+} me_math_backend;
+
+typedef enum {
+    ME_COMPILER_DEFAULT = 0,
+    ME_COMPILER_TCC = 1,
+    ME_COMPILER_CC = 2
+} me_jit_compiler;
+
 typedef struct {
     size_t struct_size;
     me_execution_policy execution;
@@ -107,13 +125,17 @@ typedef struct {
     uint8_t reserved[3]; /* Zero-initialize; new fields must follow this storage. */
     uint32_t menudet_forbidden_features; /* Optional; checked before JIT. */
     uint32_t reserved_features;
+    me_math_backend math_backend;
+    me_jit_compiler jit_compiler;
 } me_prepare_options;
 
-#define ME_PREPARE_OPTIONS_INITIALIZER { sizeof(me_prepare_options), ME_EXEC_INTERPRET, false, {0}, 0, 0 }
+#define ME_PREPARE_OPTIONS_INITIALIZER { sizeof(me_prepare_options), ME_EXEC_INTERPRET, false, {0}, 0, 0, ME_MATH_DEFAULT, ME_COMPILER_DEFAULT }
 #define ME_PREPARE_OPTIONS_V1_SIZE \
     (offsetof(me_prepare_options, reserved) + sizeof(((me_prepare_options *)0)->reserved))
 #define ME_PREPARE_OPTIONS_V2_SIZE \
     (offsetof(me_prepare_options, reserved_features) + sizeof(((me_prepare_options *)0)->reserved_features))
+#define ME_PREPARE_OPTIONS_V3_SIZE \
+    (offsetof(me_prepare_options, jit_compiler) + sizeof(((me_prepare_options *)0)->jit_compiler))
 
 typedef struct {
     size_t struct_size;

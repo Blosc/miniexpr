@@ -10,7 +10,7 @@ format changed.
 | M1 | C-Blosc2 internal `blosc/b2nd-exec.h` / `.c`; bounded typed nodes, exact captures, topology/slot/arity/width validation, copied ownership, borrowed metadata-only schedules; optional Cython conversion and strong Python schedule owner | Descriptor will need additional typed options/operations/stages as subsequent families are implemented; it is not installed/frozen |
 | M2 | Serial multiple-input fused arithmetic maps and whole-domain minimum; zero-scratch direct maps; exact inferred-width reduction scratch; shared core strict FP scope and end-of-traversal raise masks; ordinary expression lowering reuses `GraphAdapter`; direct authored-kernel ownership transfer feeds the same scheduler; explicit `NativeGraph(..., _executor="c-blosc2")` facade whose metadata, specialization and execution use the typed plan, with adapter-backed compatibility exports and `MenudetError`/`fp_status` parity | Default wrapper dispatch and pilot API retirement are not complete; the facade covers only the typed resident family |
 | M3 | Scalar/ranked and N-D right-aligned broadcast domains, empty maps and explicit disjoint NumPy outputs; strided, reversed, transposed, unaligned and non-native input views with bounded per-job gather scratch; allocation-owner extent checks (including underflow/overflow bounds); whole-domain and partial-axis reductions (`axes`, `keepdims`, `initial` with core conversion kernel, opt-in fixed-leaf `pairwise_sum` via `b2nd_exec_specialize_ex`); disjoint strided/transposed/reversed outputs (`b2nd_exec_execute_into`) and separately budgeted transactional alias staging (`b2nd_exec_execute_alias`); serial `sum`/`prod` and parallel `min`/`max`/`any`/`all` with authoritative core accumulator typing (`me_truth_span`, `me_reduce_store_scalar`, host-order `me_reduce_identity`, and accumulator-typed multi-task combine inside FP scope) and empty identities | `where` masks and explicit reduction `dtype` accumulator casts stay on the adapter |
-| M4 | C-owned resident jobs: `partitionable` enforced in plan metadata and `b2nd_exec_execute_views` (direct authored kernels and ordered `sum`/`prod` stay serial), job count capped at `B2ND_EXEC_MAX_TASKS` (64) and aggregate mapped + gather scratch budget, partials combined in logical task order inside strict FP scope before `raise_mask`, each job owns its FP scope, started jobs always join before return, and Windows clamps `ntasks = 1` before partitioning. Core invocation backend reporting, interpreter/preferred/required-system-compiler fixture, submission-failure injection and simultaneous Python calls sharing a schedule are tested | `math_backend` policy, explicit compiler policy, core `partitionable` facts for richer expressions and storage/compressed jobs pending; no cross-platform backend qualification claimed |
+| M4 | C-owned resident jobs: `partitionable` enforced in plan metadata and `b2nd_exec_execute_views` (direct authored kernels and ordered `sum`/`prod` stay serial), job count capped at `B2ND_EXEC_MAX_TASKS` (64) and aggregate mapped + gather scratch budget (also enforced for explicit single-worker requests), partials combined in logical task order inside strict FP scope before `raise_mask`, each job owns its FP scope, started jobs always join before return, and Windows clamps `ntasks = 1` before partitioning. Core invocation backend reporting, interpreter/preferred/required-system-compiler fixture, submission-failure injection and simultaneous Python calls sharing a schedule are tested. Typed compiler/math preparation options feed core, C plans and explicit Python facade; policy is part of plan cache keys | Core `partitionable` facts for richer expressions, non-default FP accuracy, storage/compressed jobs and cross-platform backend qualification pending |
 | M5 | No compressed family migrated | Existing grid pilot/adapter remain; general compressed maps/reductions pending |
 | M6 | No generic source/sink family migrated | Source callbacks, logical partitions and array bridge handoff pending |
 | M7 | No staged family migrated | Stage planning, intermediate budgets and staged execution pending |
@@ -77,8 +77,11 @@ and are never reached from prepare/queries/specialize/execute. Restricted-text
 literals are parsed inside the shared strict-FP scope with a fresh AST rather
 than a cache keyed by expression text, so a caller's rounding mode cannot leak
 into a cached literal. Unreachable input bindings are rejected in both executors.
-Admission is narrower than the adapter: no JIT/backend/accuracy overrides, no
-environment overrides, no partial selections, and no
+The explicit facade additionally supports interpreted/preferred/required JIT
+with typed `cc`/`tcc` and system/SLEEF/Accelerate mathematical policy. The
+ordinary automatic route still admits only explicitly interpreted policy.
+Admission is narrower than the adapter: no non-default FP accuracy or
+environment overrides, no automatic-JIT heuristic, no partial selections, and no
 stage diagnostics beyond the single resident stage. Evaluation failures raise
 `MenudetError` with `evaluation_error` status and `fp_status`, matching the
 adapter. Identity integer reductions still report `fp_supported=False` because
@@ -111,8 +114,9 @@ The core's `me_kernel_has_jit` reports immutable prepared availability.
 `me_eval_block_backend` reports the route actually entered, including failures;
 empty elementwise blocks and rejected preflight report `ME_BACKEND_NONE`.
 Interpreter overrides and empty scalar control-flow groups are not reported as
-JIT merely because generated code exists. Existing option and metadata struct
-layouts are unchanged.
+JIT merely because generated code exists. Backend reporting does not change
+existing metadata/run-option layouts; compiler/math preparation policy is an
+optional append-only suffix preserving the v1/v2 option prefixes.
 
 C-Blosc2 reports `interpreter_calls` / `jit_calls` independently of successful
 `map_calls`; identity traversal increments neither backend counter. Python
@@ -143,13 +147,15 @@ This closes a diagnostic prerequisite, not the complete M4 backend gate.
 - Installed static consumer (`tests/installed-miniexpr` linked against `blosc2_static` and artifact-off `miniexpr::core`): 3/3 passed (`installed_miniexpr_consumer`, `installed_kernel_grid`, `installed_exec_plan`).
 - Standard (non-opt-in) builds keep their existing dispatch; `b2nd_exec_bridge.h` `#else` stubs verified with `cc -fsyntax-only -Wall -Wextra -Werror -Wno-unused-function`.
 - Latest configured artifact-on miniexpr suite: 377/377 passed, including interpreter and required-system-compiler backend diagnostics. Other earlier configurations had different test counts.
-- Latest isolated opt-in Python regression suite: `712 passed, 39 skipped` across `test_b2nd_exec_plan.py`, `test_native_graph_preparation.py`, `test_native_graph_maps.py`, `test_native_graph_extrema.py`, `test_native_graph_truth.py`, `test_native_graph_weak_captures.py`, `test_native_graph_output.py`, `test_expression_graph.py`, and `test_expression_graph_lifetime.py`. This includes concurrent calls sharing a schedule and actual backend counters.
+- Latest isolated opt-in Python regression suite: `713 passed, 39 skipped` across `test_b2nd_exec_plan.py`, `test_native_graph_preparation.py`, `test_native_graph_maps.py`, `test_native_graph_extrema.py`, `test_native_graph_truth.py`, `test_native_graph_weak_captures.py`, `test_native_graph_output.py`, `test_expression_graph.py`, and `test_expression_graph_lifetime.py`. This includes concurrent calls sharing a schedule, actual backend counters, typed policy/cache separation and explicit single-worker scratch-budget rejection.
 - Artifact-off native fixture: 3/3 passed with `EXEC_PLAN_TEST_JIT=ON`, including required-system-compiler execution and failed submissions at each of three task-start positions; every earlier task is joined and reduction output stays unpublished.
 - Ruff lint and formatting checks passed for edited Python/test files.
 
 Some Python JIT-dependent tests are skipped in the interpreter-focused build.
 System-compiler JIT is available and exercised by the native fixtures; disabling
-TCC is not evidence that no JIT compiler exists. Existing
+TCC is not evidence that no JIT compiler exists. Core policy tests check typed
+compiler selection, available/unavailable math policies, source pragma
+precedence, invalid enum rejection and v1/v2 prefix compatibility. Existing
 Python extension warnings include Cython unreachable/declarator warnings,
 integer `abs` width warnings, const-pointer qualifier warnings and macOS CBLAS
 deprecation warnings; the standalone new native owner builds with
@@ -173,8 +179,8 @@ logs and timing results remain outside the repositories.
   handoff, persisted partition recipes.
 - **M7 stages:** region splitting, lifetimes, intermediate budgets and staged
   diagnostics without an interchange tree.
-- **M4 remainder:** explicit compiler/math policy and broader backend/platform
-  qualification, conservative partitionability facts for
+- **M4 remainder:** broader backend/platform qualification, non-default accuracy,
+  conservative partitionability facts for
   richer maps, and storage-backed jobs.
 - **M8 remainder:** default wrapper dispatch and retirement of the specialized
   int64 pilots once every migrated route has its gate.

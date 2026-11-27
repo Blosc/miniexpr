@@ -18,6 +18,7 @@
 #include "miniexpr_grid.h"
 #include "miniexpr_reduce.h"
 #include "miniexpr_kernel_internal.h"
+#include "dsl_math_policy.h"
 #include "functions-simd.h"
 #ifndef _WIN32
 #ifndef __EMSCRIPTEN__
@@ -364,8 +365,8 @@ static void execution_options(bool require_jit, bool tcc) {
     me_kernel *kernel = NULL;
     me_error error;
     char source[512];
-    snprintf(source, sizeof(source), "# me:compiler=%s\ndef k(x: float32) -> float64:\n    return 2 * x\n",
-        tcc ? "tcc" : "cc");
+    snprintf(source, sizeof(source), "def k(x: float32) -> float64:\n    return 2 * x\n");
+    options.jit_compiler = tcc ? ME_COMPILER_TCC : ME_COMPILER_CC;
     if (require_jit) options.execution = ME_EXEC_REQUIRE_JIT;
 #ifndef __EMSCRIPTEN__
     fenv_t caller_environment;
@@ -382,6 +383,7 @@ static void execution_options(bool require_jit, bool tcc) {
 #endif
     if (rc) fprintf(stderr, "execution policy failed: %s\n", error.message);
     assert(rc == ME_SUCCESS);
+    assert(kernel->program->compiler == (tcc ? ME_DSL_COMPILER_LIBTCC : ME_DSL_COMPILER_CC));
     float x[] = {2, 4, 8};
     double out[3] = {0};
     me_buffer buffer = {x, sizeof(x)};
@@ -589,6 +591,17 @@ static void signature_errors(void) {
     options.struct_size = sizeof(options);
     options.execution = (me_execution_policy)99;
     assert(me_prepare_formula("x", &sig, &options, &kernel, &error) == ME_ERR_INVALID_ARG);
+    options.execution = ME_EXEC_INTERPRET;
+    options.math_backend = (me_math_backend)99;
+    assert(me_prepare_formula("x", &sig, &options, &kernel, &error) == ME_ERR_INVALID_ARG);
+    options.math_backend = ME_MATH_DEFAULT;
+    options.jit_compiler = (me_jit_compiler)99;
+    assert(me_prepare_formula("x", &sig, &options, &kernel, &error) == ME_ERR_INVALID_ARG);
+    /* Old prefixes must neither validate nor read future fields. */
+    options.math_backend = (me_math_backend)99;
+    options.struct_size = ME_PREPARE_OPTIONS_V2_SIZE;
+    assert(me_prepare_formula("x", &sig, &options, &kernel, &error) == ME_SUCCESS);
+    me_kernel_free(kernel);
 }
 
 static void set_math_environment(const char *backend) {
@@ -626,12 +639,41 @@ static void formula_environment(void) {
     assert(me_eval_block(kernel, &buffer, 1, (me_mut_buffer){&out, sizeof(out)}, &block, NULL, &error) == ME_SUCCESS);
     assert(fabs(out - sin(x)) <= DBL_EPSILON);
     me_kernel_free(kernel);
+    for (int backend = ME_MATH_AUTO; backend <= ME_MATH_SCALAR; backend++) {
+        options.math_backend = (me_math_backend)backend;
+        me_dsl_math_backend expected = (me_dsl_math_backend)(backend - ME_MATH_AUTO);
+        me_status status = me_prepare_formula("sin(x)", &sig, &options, &kernel, &error);
+        if (!dsl_math_backend_available(expected)) {
+            assert(status == ME_ERR_UNSUPPORTED && !kernel);
+            continue;
+        }
+        assert(status == ME_SUCCESS && kernel->formula_math.backend == expected);
+        assert(me_eval_block(kernel, &buffer, 1, (me_mut_buffer){&out, sizeof(out)},
+            &block, NULL, &error) == ME_SUCCESS);
+        assert(isfinite(out));
+        me_kernel_free(kernel);
+    }
+    options.math_backend = ME_MATH_SYSTEM;
+    options.jit_compiler = ME_COMPILER_CC;
+    assert(me_prepare_menudet("0.2", "def k(x):\n    return sin(x)\n",
+        &sig, &options, &kernel, &error) == ME_SUCCESS);
+    assert(kernel->program->compiler == ME_DSL_COMPILER_CC);
+    assert(kernel->program->math_backend == ME_DSL_MATH_SYSTEM);
+    me_kernel_free(kernel);
+    /* Authored source remains higher precedence than host default policy. */
+    options.math_backend = ME_MATH_SLEEF;
+    assert(me_prepare_menudet("0.2", "# me:compiler=tcc\n# me:math=system\n"
+        "def k(x):\n    return sin(x)\n", &sig, &options, &kernel, &error) == ME_SUCCESS);
+    assert(kernel->program->compiler == ME_DSL_COMPILER_LIBTCC);
+    assert(kernel->program->math_backend == ME_DSL_MATH_SYSTEM);
+    me_kernel_free(kernel);
 }
 
 static void descriptor_prefixes(void) {
     assert(ME_SIGNATURE_V1_SIZE == sizeof(me_signature));
     assert(ME_PREPARE_OPTIONS_V1_SIZE == offsetof(me_prepare_options, menudet_forbidden_features));
-    assert(ME_PREPARE_OPTIONS_V2_SIZE == sizeof(me_prepare_options));
+    assert(ME_PREPARE_OPTIONS_V2_SIZE == offsetof(me_prepare_options, math_backend));
+    assert(ME_PREPARE_OPTIONS_V3_SIZE == sizeof(me_prepare_options));
     assert(ME_KERNEL_INFO_V1_SIZE == sizeof(me_kernel_info));
     assert(ME_BLOCK_V1_SIZE == sizeof(me_block));
     assert(ME_RUN_OPTIONS_V1_SIZE == sizeof(me_run_options));
