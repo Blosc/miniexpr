@@ -429,6 +429,22 @@ me_status me_describe(const me_kernel *kernel, me_kernel_info *out) {
     return ME_SUCCESS;
 }
 
+me_status me_describe_input_count(const me_kernel *kernel, size_t *count) {
+    if (!kernel || !count) {
+        return ME_ERR_INVALID_ARG;
+    }
+    *count = kernel->ninputs;
+    return ME_SUCCESS;
+}
+
+me_status me_describe_input(const me_kernel *kernel, size_t slot, me_input_spec *out) {
+    if (!kernel || !out || slot >= kernel->ninputs) {
+        return ME_ERR_INVALID_ARG;
+    }
+    *out = (me_input_spec){NULL, kernel->dtypes[slot], kernel->widths[slot]};
+    return ME_SUCCESS;
+}
+
 static me_status kernel_preflight(const me_kernel *kernel, const me_buffer *inputs,
     size_t ninputs, me_mut_buffer output, const me_block *block, bool *all_active, me_error *error) {
     if (!kernel || !block || block->struct_size < ME_BLOCK_V1_SIZE ||
@@ -480,6 +496,47 @@ static me_status kernel_preflight(const me_kernel *kernel, const me_buffer *inpu
         }
     }
     return ME_SUCCESS;
+}
+
+typedef struct {
+    dsl_menudet_fp_state saved;
+    unsigned *previous;
+} kernel_fp_scope;
+typedef char kernel_fp_scope_size_check[sizeof(kernel_fp_scope) <= sizeof(me_fp_scope) ? 1 : -1];
+
+me_status me_fp_scope_begin(me_fp_scope *scope, me_fp_status *status, me_error *error) {
+    if (error) {
+        memset(error, 0, sizeof(*error));
+    }
+    if (!scope || !status) {
+        return kernel_error(error, ME_ERR_INVALID_ARG, "invalid floating scope");
+    }
+    *status = (me_fp_status){0};
+    kernel_fp_scope state = {0};
+    if (!dsl_menudet_fp_begin(&state.saved)) {
+        return kernel_error(error, ME_ERR_UNSUPPORTED, "cannot establish strict floating environment");
+    }
+#ifndef __EMSCRIPTEN__
+    status->supported = true;
+#endif
+    state.previous = dsl_menudet_status_begin(&status->flags);
+    memcpy(scope->opaque, &state, sizeof(state));
+    return ME_SUCCESS;
+}
+
+me_status me_fp_scope_end(me_fp_scope *scope, me_error *error) {
+    if (error) {
+        memset(error, 0, sizeof(*error));
+    }
+    if (!scope) {
+        return kernel_error(error, ME_ERR_INVALID_ARG, "invalid floating scope");
+    }
+    kernel_fp_scope state;
+    memcpy(&state, scope->opaque, sizeof(state));
+    bool restored = dsl_menudet_fp_end(&state.saved);
+    dsl_menudet_status_end(state.previous);
+    return restored ? ME_SUCCESS :
+        kernel_error(error, ME_ERR_UNSUPPORTED, "cannot restore floating environment");
 }
 
 me_status me_kernel_run_begin(const me_run_options *options, me_fp_status *status,

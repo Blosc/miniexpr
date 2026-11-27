@@ -8,7 +8,7 @@ format changed.
 | --- | --- | --- |
 | M0 | Route/test/capability inventory in `execution-migration-contracts.md`; explicit direct-handle baseline; separate benchmark preparation/specialization phases | Cross-platform performance qualification remains a later gate |
 | M1 | C-Blosc2 internal `blosc/b2nd-exec.h` / `.c`; bounded typed nodes, exact captures, topology/slot/arity/width validation, copied ownership, borrowed metadata-only schedules; optional Cython conversion and strong Python schedule owner | Descriptor will need additional typed options/operations/stages as subsequent families are implemented; it is not installed/frozen |
-| M2 | Serial multiple-input fused arithmetic maps and whole-domain minimum; identity-slot fast path; bounded mapped tile; native int16/int64/float32/float64 representative tests; ordinary opt-in Python map reads and min compute; no execution replay | General `NativeGraph` metadata/frontend migration and pilot API retirement are not complete; this is the initial resident family, not the entire M2 wrapper handoff |
+| M2 | Serial multiple-input fused arithmetic maps and whole-domain minimum; zero-scratch direct maps; exact inferred-width reduction scratch; shared core strict FP scope and end-of-traversal raise masks; ordinary expression lowering reuses `GraphAdapter`; direct authored-kernel ownership transfer feeds the same scheduler | General `NativeGraph` metadata/frontend migration and pilot API retirement are not complete; this is the initial resident family, not the entire M2 wrapper handoff |
 | M3 | No new layout/reducer family migrated | Broadcasting, strided/non-native gathering, outputs/aliases, axes/masks/initial/keepdims, remaining reducers and fixed-leaf sums stay on the adapter |
 | M4 | No job/backend family migrated | C-owned parallel jobs, aggregate workspace and full backend qualification pending |
 | M5 | No compressed family migrated | Existing grid pilot/adapter remain; general compressed maps/reductions pending |
@@ -26,18 +26,26 @@ pins have not been advanced to unpublished local commits.
 The new ordinary path admits only explicitly interpreted, native aligned,
 same-shape contiguous nonempty rank-one reductions and whole-domain map reads
 with numeric inputs and exact typed/weak captures. Maps support add, subtract,
-multiply and negate. A conservative 64 KiB mapped-scratch admission bound
-precedes native preparation. Other syntax, layouts, options and backend policies
+multiply and negate. A 64 KiB mapped-scratch admission bound uses the core-inferred
+width and applies only to computed maps feeding reductions. Direct-output maps
+and identity reductions need no mapped scratch. Other syntax, layouts, options and backend policies
 retain their old route during metadata-only admission. Once preparation or
 execution begins, errors propagate; no backend retry is performed.
 
 The native schedule retains no operand values. Each invocation validates
 capacities, pointer overflow, alignment and disjoint output before evaluation.
 Minimum publishes only on success; map output may contain earlier committed
-tiles after a later failure. Input arrays are not materialized for admission.
+tiles and a partially written failing tile after a later failure. Input arrays are not materialized for admission.
 Reports distinguish map calls from direct identity traversal and separate
 mapped bytes from reducer state; core/compiler allocations are not included
 in that tile bound.
+
+Authored formula/Menudet kernels can transfer ownership into a C plan without
+source rewriting or a graph descriptor. Runtime slots are queried from the
+typed core, not trusted caller duplicates. Context/block-scalar kernels can be
+prepared and inspected, but resident specialization explicitly rejects them
+until logical-group scheduling is implemented. This does not yet migrate
+`MenudetLazyArray` or its Python wrappers.
 
 ## Validation performed
 

@@ -156,6 +156,18 @@ typedef struct {
     bool supported;
 } me_fp_status;
 
+/* Invocation-local host arithmetic scope. Uses the same strict IEEE policy as
+ * kernel evaluation; restores caller flags/rounding and nests collectors.
+ * Keep the scope and status alive until end; do not copy an active scope.
+ * On begin failure no scope is active. Reporting may be unavailable (WASM). */
+#define ME_FP_SCOPE_API 1
+typedef union {
+    long double alignment;
+    unsigned char opaque[256];
+} me_fp_scope;
+me_status me_fp_scope_begin(me_fp_scope *scope, me_fp_status *status, me_error *error);
+me_status me_fp_scope_end(me_fp_scope *scope, me_error *error);
+
 typedef enum {
     ME_RUN_PREPARED = 0,
     ME_RUN_INTERPRET = 1
@@ -188,6 +200,13 @@ me_status me_prepare_menudet(const char *version, const char *source,
 /* O(1), allocation-free; reports final output, not intermediate arithmetic.
  * Initialize out with ME_KERNEL_INFO_INITIALIZER. */
 me_status me_describe(const me_kernel *kernel, me_kernel_info *out);
+
+/* Typed runtime-slot introspection for host planners. Captures are excluded.
+ * Input names are not runtime bindings; describe_input returns name=NULL.
+ * No allocations, retained pointers or artifact dependency. */
+#define ME_KERNEL_INPUT_INFO_API 1
+me_status me_describe_input_count(const me_kernel *kernel, size_t *count);
+me_status me_describe_input(const me_kernel *kernel, size_t slot, me_input_spec *out);
 
 /* Native aligned buffers, disjoint output, synchronous execution. Input slots
  * are in signature order, including unused inputs. Masked outputs retain lane

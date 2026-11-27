@@ -37,6 +37,17 @@ static me_kernel *prepare(const char *version, const char *source, me_signature 
         me_prepare_formula(source, sig, NULL, &kernel, &error);
     if (rc) fprintf(stderr, "prepare failed (%d): %s\n", rc, error.message);
     assert(rc == ME_SUCCESS && kernel);
+    size_t count = SIZE_MAX;
+    assert(me_describe_input_count(kernel, &count) == ME_SUCCESS);
+    assert(count == sig->ninputs);
+    for (size_t i = 0; i < count; i++) {
+        me_input_spec input;
+        assert(me_describe_input(kernel, i, &input) == ME_SUCCESS);
+        assert(!input.name && input.dtype == sig->inputs[i].dtype && input.itemsize);
+        assert(!sig->inputs[i].itemsize || input.itemsize == sig->inputs[i].itemsize);
+    }
+    me_input_spec invalid;
+    assert(me_describe_input(kernel, count, &invalid) == ME_ERR_INVALID_ARG);
     return kernel;
 }
 
@@ -905,6 +916,43 @@ static void fiber_scratch(void) {
 #endif
 
 int main(int argc, char **argv) {
+    /* Host reducers use precisely the kernel strict-FP scope. */
+    me_fp_scope scope;
+    me_fp_status fp;
+    me_error scope_error;
+    assert(me_fp_scope_begin(NULL, &fp, &scope_error) == ME_ERR_INVALID_ARG);
+#ifndef __EMSCRIPTEN__
+    int original_rounding = fegetround();
+    assert(fesetround(FE_DOWNWARD) == 0);
+    assert(me_fp_scope_begin(&scope, &fp, &scope_error) == ME_SUCCESS);
+    assert(fp.supported && fegetround() == FE_TONEAREST);
+    feraiseexcept(FE_INVALID);
+    assert(me_fp_scope_end(&scope, &scope_error) == ME_SUCCESS);
+    assert(fp.flags & ME_FP_INVALID);
+    assert(fegetround() == FE_DOWNWARD);
+    assert(fesetround(original_rounding) == 0);
+#if defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
+    uint64_t original_fpcr;
+    __asm__ __volatile__("mrs %0, fpcr" : "=r"(original_fpcr) :: "memory");
+    uint64_t flush_fpcr = original_fpcr | (UINT64_C(1) << 24);
+    __asm__ __volatile__("msr fpcr, %0" :: "r"(flush_fpcr) : "memory");
+    me_status flush_status = me_fp_scope_begin(&scope, &fp, &scope_error);
+    __asm__ __volatile__("msr fpcr, %0" :: "r"(original_fpcr) : "memory");
+    assert(flush_status == ME_ERR_UNSUPPORTED);
+#elif defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+    uint32_t original_mxcsr;
+    __asm__ __volatile__("stmxcsr %0" : "=m"(original_mxcsr) :: "memory");
+    uint32_t flush_mxcsr = original_mxcsr | 0x8040u;
+    __asm__ __volatile__("ldmxcsr %0" :: "m"(flush_mxcsr) : "memory");
+    me_status flush_status = me_fp_scope_begin(&scope, &fp, &scope_error);
+    __asm__ __volatile__("ldmxcsr %0" :: "m"(original_mxcsr) : "memory");
+    assert(flush_status == ME_ERR_UNSUPPORTED);
+#endif
+#else
+    assert(me_fp_scope_begin(&scope, &fp, &scope_error) == ME_SUCCESS);
+    assert(!fp.supported);
+    assert(me_fp_scope_end(&scope, &scope_error) == ME_SUCCESS);
+#endif
     if (argc > 1 && !strcmp(argv[1], "--formula-environment")) {
         formula_environment();
         return 0;
