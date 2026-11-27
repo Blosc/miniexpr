@@ -11,7 +11,7 @@ format changed.
 | M2 | Serial multiple-input fused arithmetic maps and whole-domain minimum; zero-scratch direct maps; exact inferred-width reduction scratch; shared core strict FP scope and end-of-traversal raise masks; ordinary expression lowering reuses `GraphAdapter`; direct authored-kernel ownership transfer feeds the same scheduler; explicit `NativeGraph(..., _executor="c-blosc2")` facade whose metadata, specialization and execution use the typed plan, with adapter-backed compatibility exports and `MenudetError`/`fp_status` parity | Default wrapper dispatch and pilot API retirement are not complete; the facade covers only the typed resident family |
 | M3 | Scalar/ranked and N-D right-aligned broadcast domains, empty maps and explicit disjoint NumPy outputs; strided, reversed, transposed, unaligned and non-native input views with bounded per-job gather scratch; allocation-owner extent checks (including underflow/overflow bounds); whole-domain and partial-axis reductions (`axes`, `keepdims`, `initial` with core conversion kernel, opt-in fixed-leaf `pairwise_sum` via `b2nd_exec_specialize_ex`); disjoint strided/transposed/reversed outputs (`b2nd_exec_execute_into`) and separately budgeted transactional alias staging (`b2nd_exec_execute_alias`); serial `sum`/`prod` and parallel `min`/`max`/`any`/`all` with authoritative core accumulator typing (`me_truth_span`, `me_reduce_store_scalar`, host-order `me_reduce_identity`, and accumulator-typed multi-task combine inside FP scope) and empty identities | `where` masks and explicit reduction `dtype` accumulator casts stay on the adapter |
 | M4 | C-owned resident jobs: `partitionable` enforced in plan metadata and `b2nd_exec_execute_views` (unproven kernels and ordered `sum`/`prod` stay serial), job count capped at `B2ND_EXEC_MAX_TASKS` (64) and aggregate mapped + gather scratch budget (also enforced for explicit single-worker requests), partials combined in logical task order inside strict FP scope before `raise_mask`, each job owns its FP scope, started jobs always join before return, and Windows clamps `ntasks = 1` before partitioning. POSIX `blosc2_run_parallel` / `b2nd_exec_launch_host` dispatches via C-Blosc2's persistent shared pool (`blosc_shared_pool` + `generic_dojob`) when no user `threads_callback` is active, with nesting guard and clean `blosc2_destroy()` teardown. Core invocation backend reporting, interpreter/preferred/required-system-compiler fixture, submission-failure injection and simultaneous Python calls sharing a schedule are tested. Typed compiler/math preparation options feed core, C plans and explicit Python facade; policy is part of plan cache keys. `me_kernel_is_partitionable` supplies a conservative core proof for straight-line real arithmetic and proven conversions, including authored kernels | Richer control-flow/math/value-dependent conversion proofs, non-default FP accuracy, compressed sinks, and Windows/WASM backend qualification pending |
-| M5 | Compressed storage execution (`b2nd_exec_execute_arrays` / `_ex`): binds same-shape in-memory chunked arrays across native numeric dtypes (`bool`, `int8..64`, `uint8..64`, `float32`, `float64`), mixed compressed + resident inputs, and parallel partitionable jobs over the persistent shared pool with `max_decode_bytes` task clamping and contiguous inner-block run copies in `storage_read`. Explicit Python `NativeGraph(..., _executor="c-blosc2").evaluate_sources` calls it with the GIL released; no Python source reads or whole-array operand materialization | Chunk-order traversal, frame-backed inputs, broadcast/axes, compressed sinks (prefilter), moments/arg-extrema and performance/platform gates remain; no ordinary dispatch/default cutover |
+| M5 | Compressed storage execution (`b2nd_exec_execute_arrays` / `_ex`, `b2nd_exec_execute_to_array`): binds same-shape in-memory chunked arrays across native numeric dtypes (`bool`, `int8..64`, `uint8..64`, `float32`, `float64`), mixed compressed + resident inputs, and parallel partitionable jobs over the persistent shared pool with `max_decode_bytes` task clamping and contiguous inner-block run copies in `storage_read`; direct elementwise compressed sinks (`out` = `b2nd_array_t` / `NDArray`) evaluate blocks inside Blosc2's compression prefilter with matched-layout zero-copy block reads (`blosc2_getitem_ctx`, `gather_bytes=0`), mismatched/resident box gathering, and padded live compaction without mutating output before validation. Explicit Python `NativeGraph(..., _executor="c-blosc2").evaluate_sources` calls both with the GIL released; no Python source/sink reads or whole-array operand materialization | Chunk-order read traversal, frame-backed operands/sinks, compressed broadcast/axes, moments/arg-extrema and performance/platform gates remain; no ordinary dispatch/default cutover |
 | M6 | No generic source/sink family migrated | Source callbacks, logical partitions and array bridge handoff pending |
 | M7 | No staged family migrated | Stage planning, intermediate budgets and staged execution pending |
 | M8 | No wrapper cutover | Existing `NativeGraphHandle`, `NativeGraphSchedule` and artifact compatibility handles remain |
@@ -242,6 +242,34 @@ fixture ran under sanitizers.
   and check passed; opt-in TCC-enabled Python wheel (`MINIEXPR_ENABLE_TCC_JIT=ON`)
   passed `802 passed` in 2.88s across the 11 regression/storage pytest files.
 
+### M5 compressed sinks (prefilter increment 3)
+
+- `b2nd_exec_execute_to_array` evaluates elementwise schedules directly into
+  in-memory compressed `b2nd_array_t` destinations (`out=NDArray` in Python,
+  reporting `route="c-blosc2-typed-storage-sink"`) inside Blosc2's compression
+  prefilter (`blosc2_set_prefilter_full_write(compressor, true)`), validating
+  output parameters/geometry, non-aliasing, input chunks/views, decode/gather/
+  worker-scratch budgets, and `raise_mask` support before mutating the sink.
+- Matched chunk/block inputs decode single blocks via `blosc2_getitem_ctx` with
+  zero gather scratch (`gather_bytes == 0`) and in-place compaction on padded
+  edge blocks (`memmove`); unpadded blocks write directly to the compressor block
+  output buffer. Mismatched compressed inputs use logical box reads
+  (`storage_read_box`), and resident views use `b2nd_exec_gather_box` (with
+  arbitrary strides, byte-swapping, and right-aligned broadcasting).
+- Release (`-DCMAKE_BUILD_TYPE=Release`) benchmark (`1001x1003` float64 `x + y` ->
+  `b2nd_array_t`):
+  - Matched (`chunks={128,128}`, `blocks={32,32}`): `w1 = 6.605 ms` ->
+    `w4 = 1.850 ms` (`tasks=4`, `decodes=2048`, ~3.57x speedup).
+  - Mismatched (`chunks={127,129}`, `blocks={31,33}`): `w1 = 150.197 ms` ->
+    `w4 = 42.939 ms` (`tasks=4`, `decodes=15382`, ~3.50x speedup).
+- Verification after edits: `exec_plan` ASan/UBSan 4/4 passed; `exec_storage`
+  ASan/UBSan 2/2 passed (matched/mismatched/empty sinks, padded poisoned
+  `sNaN`, late `sNaN` `ME_ERR_EVAL`, budget/aliasing/reduction preflight
+  rejections); artifact-off installed static consumers 5/5 passed; `#else` bridge
+  stubs `-fsyntax-only -Wall -Wextra -Werror -Wno-unused-function` passed; Ruff
+  format/check passed; opt-in TCC-enabled Python wheel passed `804 passed` in
+  3.01s across the 11 pytest files.
+
 ### Earlier resident qualification
 
 - Artifact-off native descriptor/execution fixture, including exact int64
@@ -287,10 +315,10 @@ logs and timing results remain outside the repositories.
 
 ## Remaining increments
 
-- **M5 compressed/storage:** chunk-order traversal to eliminate row-wise
-  chunk re-decoding, frame-backed operands, broadcast/axes for storage, direct
-  compressed sinks (prefilters), and moments/arg-extrema. No ordinary
-  dispatch/default cutover yet.
+- **M5 compressed/storage:** chunk-order read traversal (and multi-chunk read
+  cache for mismatched sink inputs), frame-backed operands/sinks, broadcast/axes
+  for compressed storage, and moments/arg-extrema. No ordinary dispatch/default
+  cutover yet.
 - **M6 sources/sinks and logical partitions:** metadata-only callbacks, GIL
   discipline, bounded gather buffers, `MenudetLazyArray`/`evaluate_array*`
   handoff, persisted partition recipes.
