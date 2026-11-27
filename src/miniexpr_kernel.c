@@ -13,6 +13,7 @@
 #include "functions-simd.h"
 
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -469,20 +470,136 @@ static bool kernel_real_dtype(me_dtype dtype) {
     return dtype >= ME_BOOL && dtype <= ME_FLOAT64;
 }
 
-static bool kernel_partition_cast(const me_expr *arg, me_dtype output) {
+static bool kernel_int_fits(int64_t value, me_dtype output) {
+    switch (output) {
+        case ME_INT8: return value >= INT8_MIN && value <= INT8_MAX;
+        case ME_INT16: return value >= INT16_MIN && value <= INT16_MAX;
+        case ME_INT32: return value >= INT32_MIN && value <= INT32_MAX;
+        case ME_INT64: return true;
+        case ME_UINT8: return value >= 0 && value <= UINT8_MAX;
+        case ME_UINT16: return value >= 0 && value <= UINT16_MAX;
+        case ME_UINT32: return value >= 0 && (uint64_t)value <= UINT32_MAX;
+        case ME_UINT64: return value >= 0;
+        default: return false;
+    }
+}
+
+static const void *kernel_weak_capture_data(const me_kernel *kernel, const me_expr *arg) {
+    if (!kernel || !arg || !(arg->flags & (ME_EXPR_FLAG_WEAK_SCALAR | ME_EXPR_FLAG_WEAK_LITERAL)) ||
+        TYPE_MASK(arg->type) != ME_VARIABLE) {
+        return NULL;
+    }
+    int slot = dsl_synthetic_var_index(arg->bound);
+    if (slot < (int)kernel->ninputs || (size_t)slot >= kernel->nbindings) {
+        return NULL;
+    }
+    return kernel->captures[slot];
+}
+
+static bool kernel_partition_cast(const me_kernel *kernel, const me_expr *arg, me_dtype output) {
     if (!kernel_real_dtype(arg->dtype) || !kernel_real_dtype(output)) return false;
     if (output == arg->dtype) return true;
+    bool weak = (arg->flags & (ME_EXPR_FLAG_WEAK_SCALAR | ME_EXPR_FLAG_WEAK_LITERAL)) != 0;
+    const void *capture = kernel_weak_capture_data(kernel, arg);
     if (output == ME_FLOAT32 || output == ME_FLOAT64) {
         /* Strong real conversions have total IEEE results. Weak floating
-         * narrowing may instead reject an out-of-range scalar at evaluation. */
-        return !(output == ME_FLOAT32 && arg->dtype == ME_FLOAT64 &&
-            (arg->flags & (ME_EXPR_FLAG_WEAK_SCALAR | ME_EXPR_FLAG_WEAK_LITERAL)));
+         * narrowing is proven safe when the constant value is representable. */
+        if (output == ME_FLOAT32 && arg->dtype == ME_FLOAT64 && weak) {
+            if (TYPE_MASK(arg->type) == ME_CONSTANT) {
+                return isfinite(arg->value) && isfinite((float)arg->value);
+            }
+            if (capture) {
+                double value = *(const double *)capture;
+                return isfinite(value) && isfinite((float)value);
+            }
+            return false;
+        }
+        return true;
+    }
+    if (weak && arg->dtype == ME_INT64) {
+        if (capture) {
+            return kernel_int_fits(*(const int64_t *)capture, output);
+        }
+        if (TYPE_MASK(arg->type) == ME_CONSTANT && isfinite(arg->value) &&
+            trunc(arg->value) == arg->value && arg->value >= (double)INT64_MIN &&
+            arg->value < 9223372036854775808.0) {
+            return kernel_int_fits((int64_t)arg->value, output);
+        }
+        return false;
     }
     return dsl_numpy_can_cast(arg->dtype, output, "safe");
 }
 
-static bool kernel_partition_expr(const me_expr *expr, const bool *defined,
-                                  size_t count, int depth, int *budget) {
+static bool kernel_in_list(const char *value, const char *const *items, size_t count) {
+    if (!value) {
+        return false;
+    }
+    for (size_t i = 0; i < count; i++) {
+        if (!strcmp(value, items[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool kernel_partition_operator(const char *op, int arity, bool *is_total_bool) {
+    static const char *const unary[] = {"+", "-", "~", "not"};
+    static const char *const binary[] = {"+", "-", "*", "/", "&", "|", "^"};
+    static const char *const cmp_logic[] = {"==", "!=", "<", "<=", ">", ">=", "and", "or"};
+    *is_total_bool = false;
+    if (!op) {
+        return false;
+    }
+    if (arity == 1) {
+        *is_total_bool = !strcmp(op, "not");
+        return kernel_in_list(op, unary, sizeof(unary) / sizeof(*unary));
+    }
+    if (arity == 2) {
+        if (kernel_in_list(op, cmp_logic, sizeof(cmp_logic) / sizeof(*cmp_logic))) {
+            *is_total_bool = true;
+            return true;
+        }
+        return kernel_in_list(op, binary, sizeof(binary) / sizeof(*binary));
+    }
+    return arity == 3 && !strcmp(op, "where");
+}
+
+static bool kernel_partition_math(const char *name, int arity, me_dtype dtype, bool *is_total_bool) {
+    static const char *const predicates[] = {"isfinite", "isnan", "isinf", "signbit"};
+    static const char *const unary_float[] = {
+        "abs", "fabs", "floating_abs", "sqrt", "cbrt", "exp", "exp2", "expm1",
+        "log", "log1p", "log2", "log10", "sin", "cos", "tan", "asin", "acos", "atan",
+        "sinh", "cosh", "tanh", "asinh", "acosh", "atanh", "arcsin", "arccos", "arctan",
+        "arcsinh", "arccosh", "arctanh", "floor", "ceil", "trunc", "round", "rint", "sign"
+    };
+    static const char *const binary_float[] = {
+        "atan2", "arctan2", "hypot", "fmod", "copysign", "nextafter", "fmin", "fmax"
+    };
+    static const char *const binary_ordered[] = {"minimum", "maximum"};
+    *is_total_bool = false;
+    if (!name) {
+        return false;
+    }
+    if (arity == 1) {
+        if (dtype == ME_BOOL && kernel_in_list(name, predicates, sizeof(predicates) / sizeof(*predicates))) {
+            *is_total_bool = true;
+            return true;
+        }
+        return (dtype == ME_FLOAT32 || dtype == ME_FLOAT64) &&
+               kernel_in_list(name, unary_float, sizeof(unary_float) / sizeof(*unary_float));
+    }
+    if (arity == 2) {
+        if (kernel_in_list(name, binary_ordered, sizeof(binary_ordered) / sizeof(*binary_ordered))) {
+            return true;
+        }
+        return (dtype == ME_FLOAT32 || dtype == ME_FLOAT64) &&
+               kernel_in_list(name, binary_float, sizeof(binary_float) / sizeof(*binary_float));
+    }
+    return arity == 3 && (dtype == ME_FLOAT32 || dtype == ME_FLOAT64) && !strcmp(name, "fma");
+}
+
+static bool kernel_partition_expr(const me_kernel *kernel, const me_expr *expr,
+                                  const bool *defined, size_t count, int depth, int *budget) {
     if (!expr || depth > 128 || --*budget < 0 || !kernel_real_dtype(expr->dtype) ||
         is_reduction_node(expr)) return false;
     int kind = TYPE_MASK(expr->type);
@@ -493,21 +610,33 @@ static bool kernel_partition_expr(const me_expr *expr, const bool *defined,
     if (kind == ME_CONSTANT) return true;
     if (!IS_FUNCTION(expr->type)) return false;
     int arity = ARITY(expr->type);
-    if (arity < 1 || arity > 2) return false;
+    if (arity < 1 || arity > 3) return false;
     for (int i = 0; i < arity; i++) {
-        if (!kernel_partition_expr(expr->parameters[i], defined, count, depth + 1, budget)) return false;
+        if (!kernel_partition_expr(kernel, expr->parameters[i], defined, count, depth + 1, budget)) return false;
     }
     if (!expr->function) {
-        return arity == 1 && kernel_partition_cast(expr->parameters[0], expr->dtype);
+        return arity == 1 && kernel_partition_cast(kernel, expr->parameters[0], expr->dtype);
     }
-    const char *op = me_menudet_operator(expr);
-    if (!op || (strcmp(op, "+") && strcmp(op, "-") && strcmp(op, "*"))) return false;
     if (expr->dtype != ME_FLOAT32 && expr->dtype != ME_FLOAT64 &&
         (!(expr->flags & ME_EXPR_FLAG_NUMPY_1_1) || (expr->flags & ME_EXPR_FLAG_WEAK_SCALAR))) {
         return false;
     }
-    for (int i = 0; i < arity; i++) {
-        if (!kernel_partition_cast(expr->parameters[i], expr->dtype)) return false;
+    const char *op = me_menudet_operator(expr);
+    bool is_total_bool = false;
+    bool is_where = false;
+    if (op) {
+        if (!kernel_partition_operator(op, arity, &is_total_bool)) {
+            return false;
+        }
+        is_where = arity == 3 && !strcmp(op, "where");
+    } else if (!kernel_partition_math(me_menudet_math_name(expr), arity, expr->dtype, &is_total_bool)) {
+        return false;
+    }
+    if (is_total_bool) {
+        return true;
+    }
+    for (int i = is_where ? 1 : 0; i < arity; i++) {
+        if (!kernel_partition_cast(kernel, expr->parameters[i], expr->dtype)) return false;
     }
     return true;
 }
@@ -522,7 +651,7 @@ bool me_kernel_is_partitionable(const me_kernel *kernel) {
     }
     int budget = 65536;
     if (kernel->formula) {
-        return kernel_partition_expr(kernel->formula, defined, kernel->nbindings, 0, &budget);
+        return kernel_partition_expr(kernel, kernel->formula, defined, kernel->nbindings, 0, &budget);
     }
     const me_dsl_compiled_program *program = kernel->program;
     if (!program || program->vars.count > ME_MAX_VARS || program->fp_mode != ME_DSL_FP_STRICT) return false;
@@ -532,14 +661,14 @@ bool me_kernel_is_partitionable(const me_kernel *kernel) {
             int slot = program->local_var_indices[stmt->as.assign.local_slot];
             const me_expr *expr = stmt->as.assign.value.expr;
             if (slot < 0 || slot >= program->vars.count ||
-                !kernel_partition_expr(expr, defined, (size_t)program->vars.count, 0, &budget) ||
-                !kernel_partition_cast(expr, program->vars.dtypes[slot])) return false;
+                !kernel_partition_expr(kernel, expr, defined, (size_t)program->vars.count, 0, &budget) ||
+                !kernel_partition_cast(kernel, expr, program->vars.dtypes[slot])) return false;
             defined[slot] = true;
         } else if (stmt->kind == ME_DSL_STMT_RETURN) {
             const me_expr *expr = stmt->as.return_stmt.expr.expr;
             return i == program->block.nstmts - 1 &&
-                kernel_partition_expr(expr, defined, (size_t)program->vars.count, 0, &budget) &&
-                kernel_partition_cast(expr, kernel->info.output_dtype);
+                kernel_partition_expr(kernel, expr, defined, (size_t)program->vars.count, 0, &budget) &&
+                kernel_partition_cast(kernel, expr, kernel->info.output_dtype);
         } else {
             return false;
         }

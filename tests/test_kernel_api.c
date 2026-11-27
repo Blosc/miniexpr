@@ -108,7 +108,74 @@ static void partition_proof(void) {
     assert(!me_kernel_is_partitionable(kernel));
     me_kernel_free(kernel);
     sig.output_dtype = ME_AUTO;
+    input.dtype = ME_FLOAT32;
+    kernel = prepare(NULL, "x * 0.5", &sig);
+    assert(me_kernel_is_partitionable(kernel));
+    me_kernel_free(kernel);
+    input.dtype = ME_FLOAT64;
     kernel = prepare(NULL, "sin(x)", &sig);
+    assert(me_kernel_is_partitionable(kernel));
+    me_kernel_free(kernel);
+    const char *partitionable[] = {
+        "sin(x) + cos(x)",
+        "sqrt(x * x + 1.0)",
+        "x / (x + 1.0)",
+        "where(x > 0.5, x + 1.0, x - 1.0)",
+        "fmod(x, x + 0.1)",
+        "isfinite(x) and not isnan(x)"
+    };
+    for (size_t i = 0; i < sizeof(partitionable) / sizeof(*partitionable); i++) {
+        kernel = prepare(NULL, partitionable[i], &sig);
+        assert(me_kernel_is_partitionable(kernel));
+        me_kernel_free(kernel);
+    }
+    const char *non_partitionable[] = {"x // 2.0", "x % 2.0", "x ** 2.0", "tgamma(x)"};
+    for (size_t i = 0; i < sizeof(non_partitionable) / sizeof(*non_partitionable); i++) {
+        kernel = prepare(NULL, non_partitionable[i], &sig);
+        assert(!me_kernel_is_partitionable(kernel));
+        me_kernel_free(kernel);
+    }
+    input.dtype = ME_INT64;
+    const char *int_partitionable[] = {
+        "sin(x)", "x / 2", "(x & 7) ^ 3", "where(x > 0, x + 1, -x)", "minimum(x, 42)"
+    };
+    for (size_t i = 0; i < sizeof(int_partitionable) / sizeof(*int_partitionable); i++) {
+        kernel = prepare(NULL, int_partitionable[i], &sig);
+        assert(me_kernel_is_partitionable(kernel));
+        me_kernel_free(kernel);
+    }
+    const char *int_non_partitionable[] = {"x // 2", "x % 2", "x ** 2", "x << 1", "x >> 1"};
+    for (size_t i = 0; i < sizeof(int_non_partitionable) / sizeof(*int_non_partitionable); i++) {
+        kernel = prepare(NULL, int_non_partitionable[i], &sig);
+        assert(!me_kernel_is_partitionable(kernel));
+        me_kernel_free(kernel);
+    }
+
+    /* Weak captures: representable float64->float32 and int64->int16 are partitionable;
+     * out-of-range int64->int16 is rejected. */
+    me_input_spec pair_inputs[] = {{"x", ME_FLOAT32, 0}, {"y", ME_FLOAT32, 0}};
+    double weak_f64 = 0.5;
+    me_capture weak_f64_cap = {{"c", ME_FLOAT64, 0}, &weak_f64, ME_CAPTURE_WEAK};
+    me_signature cap_sig = ME_SIGNATURE_INITIALIZER;
+    cap_sig.inputs = pair_inputs;
+    cap_sig.ninputs = 2;
+    cap_sig.captures = &weak_f64_cap;
+    cap_sig.ncaptures = 1;
+    kernel = prepare("0.2", "def k(x, y, c):\n    return x * c + y\n", &cap_sig);
+    assert(me_kernel_is_partitionable(kernel));
+    me_kernel_free(kernel);
+
+    pair_inputs[0].dtype = ME_INT16;
+    pair_inputs[1].dtype = ME_INT16;
+    int64_t weak_i64 = 1;
+    me_capture weak_i64_cap = {{"c", ME_INT64, 0}, &weak_i64, ME_CAPTURE_WEAK};
+    cap_sig.captures = &weak_i64_cap;
+    kernel = prepare("0.2", "def k(x, y, c):\n    return x + (y - c)\n", &cap_sig);
+    assert(me_kernel_is_partitionable(kernel));
+    me_kernel_free(kernel);
+
+    weak_i64 = 40000;
+    kernel = prepare("0.2", "def k(x, y, c):\n    return x + (y - c)\n", &cap_sig);
     assert(!me_kernel_is_partitionable(kernel));
     me_kernel_free(kernel);
 }
