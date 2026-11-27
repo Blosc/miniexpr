@@ -115,8 +115,11 @@ Reports expose `tasks` and `worker_scratch_bytes` alongside the per-tile
   below one job. Python checks worker-count invariance against the adapter for
   min/max/maps, ordered-reduction rejection, and `tasks * scratch <= 65536`.
 - Standard (non-opt-in) builds keep their existing dispatch; typed tests skip.
-- Full miniexpr artifact-on core suite (343 tests) after extracting accumulator
+- Full miniexpr artifact-on core suite (376 tests) after extracting accumulator
   typing and serial reducers.
+- Opt-in Python regression subset (771 passed, 39 JIT-dependent skips) covering
+  typed plans, native graph preparation/maps/truth/extrema/captures/output/
+  sources/stages and expression-graph lifetime.
 - Ruff lint and formatting checks for edited Python/benchmark/test files.
 
 JIT-dependent tests are skipped in these interpreter-focused builds. Existing
@@ -131,3 +134,23 @@ per-node-temporary lowering regression was identified and removed by fusing
 single-use expressions while retaining shared DAG temporaries. Local Debug
 smoke timings are not the ARM64/x86-64 production performance gate. Raw build
 logs and timing results remain outside the repositories.
+
+## Next increments (not started)
+
+- **M5 compressed/storage:** C-Blosc2 storage adapters over the same schedule,
+  padded/chunked reads, mixed resident/compressed operands, direct sinks and
+  ordered compressed partials. Requires new C storage bindings; the grid pilot
+  stays the comparison until then.
+- **M6 sources/sinks and logical partitions:** metadata-only callbacks, GIL
+  discipline, bounded gather buffers, `MenudetLazyArray`/`evaluate_array*`
+  handoff, persisted partition recipes.
+- **M7 stages:** region splitting, lifetimes, intermediate budgets and staged
+  diagnostics without an interchange tree.
+- **M4 remainder:** qualified JIT/math policy (this environment has no JIT
+  compiler, so that path is untested), conservative partitionability facts for
+  richer maps, and storage-backed jobs.
+- **M8 remainder:** default wrapper dispatch and retirement of the specialized
+  int64 pilots once every migrated route has its gate.
+
+Each needs its own differential, failure-injection and cross-platform work; none
+is implied by the current checkpoint.
