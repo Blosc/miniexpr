@@ -33,7 +33,7 @@ defaults remain unchanged. CI records its native pair in
 
 - MiniExpr `adfbdf4752fec9a6a59ab71461e824de36ea239d`.
 - C-Blosc2 `9d7b9206f426bd979a5978c2333a31c8638abe7f`.
-- Python-Blosc2 qualification candidate `7c16a1f062b15368a8dd2031cc78425e99290d4e`.
+- Python-Blosc2 qualification candidate `828a7eb453b89f6294bbf82a77374905ef628005`.
 
 The workflow builds isolated artifact-off/on wheels, checks installed headers,
 exports/link inputs, compression-only stubs and external C/C++ consumers, and
@@ -68,16 +68,47 @@ locations while keeping NumExpr imports blocked, with no duplicated persistence
 or kernel-roundtrip matrix.
 
 Final-candidate CI:
-[regular tests](https://github.com/Blosc/python-blosc2/actions/runs/46149888819),
-[execution migration](https://github.com/Blosc/python-blosc2/actions/runs/46149888865).
-Completion and performance evidence are still pending; do not infer an ABI
-freeze, stable-hardware performance acceptance or M9 default cutover from this
-rollout. The optional performance workflow is diagnostic on shared runners.
-The interleaved performance runner also completes locally against isolated
-candidate/reference wheels. An exploratory macOS ARM64 run flagged compressed
-`min(x + 1)` above the 5% investigation threshold; it is not performance acceptance
-for the final native pair. Rebuild both wheels at the recorded checkpoint and
-investigate this path before any corresponding default cutover.
+[regular tests](https://github.com/Blosc/python-blosc2/actions/runs/46150819001)
+passed all six jobs: Linux x86-64 (Python 3.12/3.14 and NumPy 1.26), Linux ARM64,
+macOS ARM64 and Windows clang-cl. The NumExpr smoke test passes, and Windows
+compatibility tests now retain the legacy adapter's parallel-worker expectations.
+The [execution migration matrix](https://github.com/Blosc/python-blosc2/actions/runs/46150818902)
+passed all 15 required jobs (the optional performance job was not selected).
+This closes the recorded C4 installed-consumer/cross-platform correctness matrix,
+not ABI freeze, stable-hardware performance acceptance or M9 default cutover.
+These results supersede the platform-correctness gaps in the historical milestone
+ledger above for the admitted routes; documented unsupported families remain
+unsupported.
+
+| Final-candidate configuration | Result |
+| --- | --- |
+| Linux x86-64 GCC Release / Clang ASan+UBSan | Core `434/434`, installed consumers `7/7`, public API/example `2/2`, numerical and stub shared consumers `1/1` each, compression-only `2123/2123` in each configuration |
+| Linux x86-64 sanitizer owner fixtures | Executor `5/5`, storage `2/2`, stages `2/2`; native core and codec builds are also instrumented in this job |
+| macOS ARM64 native Release | Core `434/434`, installed consumers `7/7`, public API/example `2/2`, numerical/stub shared consumers passed, compression-only `1682/1682` |
+| Windows MSVC consumers / clang-cl consumers | Installed consumers `6` passed + `1` explicit POSIX-launcher skip in each configuration; public API/example `2/2`, strict C/C++ shared/DLL and stub consumers passed; compression-only `1698/1698` with each compiler; numerical core `341/341` built with clang-cl |
+| WASM Emscripten installed static consumers | `6` passed + `1` explicit POSIX-launcher skip; public API/example `2/2`, numerical and compression-only stub consumers passed |
+| Linux/macOS isolated Python artifact-off / artifact-on | `1806 passed, 87 skipped` / `1847 passed, 46 skipped` per platform |
+| Windows isolated Python artifact-off / artifact-on | `1654 passed, 239 skipped` / `1695 passed, 198 skipped`; unavailable JIT capabilities remain explicit skips |
+| Pyodide artifact-off / artifact-on | `143 passed, 80 skipped` / `176 passed, 47 skipped`, including explicit unavailable-FP and inline-logical-job checks |
+
+Native Python selections still deselect the optional `584`-case semantic reference
+matrix. WASM runtime selection is bounded rather than the full native Python
+suite. Export/link audits, header version checks and capability reports are
+retained in workflow artifacts, not copied into this repository.
+Warnings remain visible in CI logs, including existing codec/Cython diagnostics,
+WASM platform/compiler-option warnings, and an unused POSIX generic-pool wrapper
+in the WASM build. Passing CI is not a warning-free-build claim.
+
+The optional Linux x86-64 shared-runner performance diagnostic was dispatched as
+[46153143461](https://github.com/Blosc/python-blosc2/actions/runs/46153143461);
+its results remain pending and cannot close the stable-hardware gate.
+The interleaved performance runner completes locally against rebuilt isolated
+candidate/reference wheels. Four rounds on macOS ARM64 reproduce a roughly 27%
+slowdown for compressed `min(x + 1)` with four workers; one/eight-worker probes
+are within 5%. Both paths use JIT; the typed path uses full-chunk decode/gather
+scratch and decodes 65 chunks versus 62 prefilter fetches. This identifies a
+route/memory-traffic investigation, not a proven single cause or accepted
+regression. Retain the gate before any corresponding default cutover.
 
 ## Earlier qualification: C-Blosc2 public execution API (C1–C3) & C4/cross-platform handoff (2026-11-28)
 

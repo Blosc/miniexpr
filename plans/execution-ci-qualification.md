@@ -1,5 +1,11 @@
 # Execution migration: CI qualification plan
 
+**Implementation status:** the dedicated workflow and qualification runners are
+implemented and published. The C4/native and Python correctness matrix passes at
+Python-Blosc2 `828a7eb4` with the exact native pair recorded in
+[`execution-migration-status.md`](execution-migration-status.md). Performance
+acceptance and release/ABI/default-cutover approvals remain separate gates.
+
 ## Goal and agreed scope
 
 Complete C4 and the outstanding cross-platform correctness gates for
