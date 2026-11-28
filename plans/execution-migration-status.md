@@ -118,6 +118,47 @@ scratch and decodes 65 chunks versus 62 prefilter fetches. This identifies a
 route/memory-traffic investigation, not a proven single cause or accepted
 regression. Retain the gate before any corresponding default cutover.
 
+### Revised compressed-reader checkpoint under qualification
+
+C-Blosc2 `1f28149072640130a0842a2772894efff58a37fe` caps matching, monotonic
+1-D map/plain-reduction scans at one decoded chunk per task. It also borrows
+contiguous decoded spans rather than copying them into gather scratch, and aligns
+single-input parallel task boundaries to chunks when they coincide with logical
+tiles. N-D/broadcast traversal retains the existing gather/LRU policy; masked
+reads never borrow, and multi-scan moments/arg-extrema retain their LRU budget.
+These are internal reader changes, not public ABI changes.
+
+On macOS ARM64, the rebuilt isolated Release candidate passes the public API and
+example (`2/2`), installed consumers (`7/7`), core (`434/434`), shared public
+consumer (`1/1`), and isolated artifact-off migration selection (`1806 passed,
+87 skipped, 584 deselected`). ASan/UBSan storage/fault fixtures pass (`2/2`;
+executor/storage fixture sources instrumented, installed dependencies not rebuilt
+with sanitizers for this local run). The fixtures cover padded chunks, short tails,
+aligned/unaligned task boundaries, exact copy/decode reports, insufficient-budget
+rejection before reads/writes, and a failed borrowed decode without fallback replay.
+Existing duplicate `-lm` linker warnings remain; storage fixtures compile with
+`-Wall -Wextra -Werror`.
+
+The one-slot cache alone reduced compressed `min(x + 1)` from the earlier roughly
+27% regression to `1.138x`; borrowing alone reduced it further to `1.074x`.
+With chunk-aligned jobs, four interleaved Release rounds measure `9.749 / 9.660 ms`
+candidate/reference (`1.009x`). All five cases are within 5% or improve: resident
+map `1.043x`, resident min `0.974x`, compressed map `0.308x`, compressed min
+`1.009x`, compressed sink `0.993x`. A separate invocation confirms zero gathered
+bytes, 8 MiB decode cache (formerly 64 MiB), and 62 decodes (formerly 65) for
+62 chunks, four tasks and 3907 JIT calls. These local results are diagnostic,
+not stable-hardware acceptance.
+
+An attempted ordinary-caller one-worker sweep stops because that route supplies
+no `_native_execution_report`; it is not a passing typed-route comparison.
+The revised native commit is published and pinned by Python-Blosc2 `985f224f`
+alongside unchanged MiniExpr `adfbdf4752fec9a6a59ab71461e824de36ea239d`.
+[46158208829](https://github.com/Blosc/python-blosc2/actions/runs/46158208829)
+is the pending full-matrix requalification with Linux x86-64 interleaved Release
+performance enabled; it does not yet supersede the passing matrix above.
+Cross-platform requalification and stable-hardware performance acceptance remain
+open. Production defaults and shipping pins are unchanged.
+
 ## Earlier qualification: C-Blosc2 public execution API (C1–C3) & C4/cross-platform handoff (2026-11-28)
 
 ### Current local branch/commit baseline (unpushed)
