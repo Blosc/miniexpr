@@ -22,7 +22,64 @@ is deferred; local source overrides remain the development configuration.
 | M9 | Clean Release artifact-off candidate built/installed in isolation; original v1 and 4.17.0 v2 exchange fixtures execute; one core archive/provider, no native JSON/adapter/pilot symbols or downloads; installed C consumers `5/5` + superbuild `1/1`; independent compression-only C-Blosc2 `1681/1681`; stub/core-only syntax checks pass; C1–C3 public C-Blosc2 execution API and `python-blosc2` cutover complete locally on macOS ARM64 | C4 cross-platform installed-consumer / ABI gate (Linux x86-64, Windows/MSVC, WASM), exact published dependency pins, cross-platform Release/performance gates, standard non-experimental artifact-off default cutover, and non-opt-in compatibility helper removal remain |
 | C1–C4 | Public self-contained [`include/b2nd_exec.h`](file:///Users/faltet/blosc/c-blosc2.codeberg/include/b2nd_exec.h) (`B2ND_EXEC_API_VERSION 1`) + optional [`include/b2nd_exec_kernel.h`](file:///Users/faltet/blosc/c-blosc2.codeberg/include/b2nd_exec_kernel.h), atomic-refcounted `b2nd_plan_t` / `b2nd_schedule_t` facade, one-shot `b2nd_eval` / `b2nd_eval_into`, always-built compression-only stubs, pure-C installed consumers (`7/7`, ASan+UBSan `7/7`), and `python-blosc2` C3 cutover with zero private `blosc/b2nd-exec*.h` includes locally qualified on macOS ARM64 (artifact-off, artifact-on, and `USE_SYSTEM_BLOSC2=ON` compression-only) | C4 cross-platform installed-consumer, compression-only link/stub, and ABI checks on Linux x86-64, Windows/MSVC, and WASM before freezing the public ABI in a C-Blosc2 release |
 
-## Latest qualification: C-Blosc2 public execution API (C1–C3) & C4/cross-platform handoff (2026-11-28)
+## CI qualification rollout (2026-11-28)
+
+The dedicated workflow in Python-Blosc2 is
+`.github/workflows/execution-migration.yml`, implementing
+[`execution-ci-qualification.md`](execution-ci-qualification.md).
+Development branches have been published to GitHub; shipping pins and production
+defaults remain unchanged. CI records its native pair in
+`.github/execution-native-refs.json`:
+
+- MiniExpr `adfbdf4752fec9a6a59ab71461e824de36ea239d`.
+- C-Blosc2 `9d7b9206f426bd979a5978c2333a31c8638abe7f`.
+- Python-Blosc2 qualification candidate `7c16a1f062b15368a8dd2031cc78425e99290d4e`.
+
+The workflow builds isolated artifact-off/on wheels, checks installed headers,
+exports/link inputs, compression-only stubs and external C/C++ consumers, and
+retains CTest/pytest reports, capabilities and build logs. Linux has Release and
+ASan/UBSan jobs; Windows has clang-cl numerical builds and independent MSVC
+installed-C/DLL consumers plus compression-only builds. MiniExpr's native C99
+complex implementation still requires clang-cl; this is not an MSVC numerical
+core port. WASM runs installed static consumers and a separate Pyodide selection.
+
+CI-exposed fixes include Release assertions in all installed fixtures, Windows
+pool-cleanup guards, deterministic persistent-worker probes, portable frame paths,
+Emscripten installed CMake exports and inline logical-job transport, SIMD cache
+thread-exit cleanup, and capability-specific FP/JIT/worker-count expectations.
+WASM's unavailable FP flags are tested explicitly: unsupported raise masks reject
+without publishing output. The POSIX pool fixture is explicitly skipped on
+Windows/WASM; this is not parallel-execution qualification on those platforms.
+
+Evidence before the final candidate:
+
+| Run / configuration | Result |
+| --- | --- |
+| [46145284552](https://github.com/Blosc/python-blosc2/actions/runs/46145284552), Python `ce61af49` | All native C4 jobs passed, including WASM installed static consumers and both Windows compiler configurations; all six native Python artifact-off/on jobs passed; Pyodide artifact-off passed. Artifact-on exposed two remaining FP-observation-only test assumptions. |
+| [46148198120](https://github.com/Blosc/python-blosc2/actions/runs/46148198120), Python `c35c9892` | Both Pyodide artifact modes and all other completed jobs passed after those assumptions were corrected. The pending native WASM job was cancelled by the next push; this run is not an all-green matrix. |
+| Local isolated artifact-off Python selection | `1802 passed, 87 skipped, 584 deselected`; optional native-semantic reference cases remain deselected. |
+| Local installed native consumers | `7/7` passed; WASM `6` passed plus `1` explicit POSIX-launcher skip. |
+| NumExpr-free subprocess regression | Simplified native-expression smoke test passes with installed wheels (`9/9` for its file) and an explicit split-editable/finder-only extension reproducer (`1/1`). |
+
+The regular compatibility workflow exposed an editable-import isolation bug:
+copying `sys.path` under `python -S` did not preserve the extension finder.
+The final candidate explicitly selects the parent's package and compiled-module
+locations while keeping NumExpr imports blocked, with no duplicated persistence
+or kernel-roundtrip matrix.
+
+Final-candidate CI:
+[regular tests](https://github.com/Blosc/python-blosc2/actions/runs/46149888819),
+[execution migration](https://github.com/Blosc/python-blosc2/actions/runs/46149888865).
+Completion and performance evidence are still pending; do not infer an ABI
+freeze, stable-hardware performance acceptance or M9 default cutover from this
+rollout. The optional performance workflow is diagnostic on shared runners.
+The interleaved performance runner also completes locally against isolated
+candidate/reference wheels. An exploratory macOS ARM64 run flagged compressed
+`min(x + 1)` above the 5% investigation threshold; it is not performance acceptance
+for the final native pair. Rebuild both wheels at the recorded checkpoint and
+investigate this path before any corresponding default cutover.
+
+## Earlier qualification: C-Blosc2 public execution API (C1–C3) & C4/cross-platform handoff (2026-11-28)
 
 ### Current local branch/commit baseline (unpushed)
 
