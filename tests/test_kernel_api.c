@@ -106,6 +106,8 @@ static void partition_proof(void) {
     sig.output_dtype = ME_INT64;
     kernel = prepare(NULL, "x", &sig);
     assert(!me_kernel_is_partitionable(kernel));
+    assert(me_kernel_inferred_dtype(kernel) == ME_FLOAT64);
+    assert(describe(kernel).output_dtype == ME_INT64);
     me_kernel_free(kernel);
     sig.output_dtype = ME_AUTO;
     input.dtype = ME_FLOAT32;
@@ -178,6 +180,69 @@ static void partition_proof(void) {
     kernel = prepare("0.2", "def k(x, y, c):\n    return x + (y - c)\n", &cap_sig);
     assert(!me_kernel_is_partitionable(kernel));
     me_kernel_free(kernel);
+}
+
+static void loop_partition_proof(void) {
+    me_input_spec input = {"x", ME_FLOAT32, 0};
+    me_signature sig = ME_SIGNATURE_INITIALIZER;
+    sig.inputs = &input;
+    sig.ninputs = 1;
+    me_kernel *kernel = prepare("0.2",
+        "def k(x) -> float32:\n"
+        "    acc = 0.0\n"
+        "    for i in range(4):\n"
+        "        if i % 2 == 0:\n"
+        "            acc = acc + x + i\n"
+        "        else:\n"
+        "            acc = acc - x\n"
+        "    return acc\n", &sig);
+    assert(me_kernel_is_partitionable(kernel));
+    assert(me_kernel_inferred_dtype(kernel) == ME_FLOAT64);
+    assert(describe(kernel).output_dtype == ME_FLOAT32);
+    me_kernel_free(kernel);
+    kernel = prepare("0.2",
+        "def k(x):\n"
+        "    acc = x\n"
+        "    for i in range(1000000):\n"
+        "        acc = acc + i\n"
+        "    return acc\n", &sig);
+    assert(!me_kernel_is_partitionable(kernel)); /* Proof work remains bounded. */
+    me_kernel_free(kernel);
+}
+
+static void preparation_fp_policy(void) {
+    me_input_spec input = {"x", ME_FLOAT64, 0};
+    me_signature sig = ME_SIGNATURE_INITIALIZER;
+    sig.inputs = &input;
+    sig.ninputs = 1;
+    me_prepare_options opts = ME_PREPARE_OPTIONS_INITIALIZER;
+    me_kernel *kernel = NULL;
+    me_error error;
+    const char *modes[] = {"strict", "contract", "fast"};
+    opts.jit_compiler = ME_COMPILER_CC;
+    for (int mode = ME_FP_STRICT; mode <= ME_FP_FAST; mode++) {
+        opts.fp_mode = (me_fp_mode)mode;
+        assert(me_prepare_menudet("0.2", "def k(x):\n    return sin(x)\n",
+            &sig, &opts, &kernel, &error) == ME_SUCCESS);
+        assert(!strcmp(me_kernel_fp_mode(kernel), modes[mode - ME_FP_STRICT]));
+        me_kernel_free(kernel);
+    }
+    /* Authored policy retains precedence over the runtime preference. */
+    assert(me_prepare_menudet("0.2", "# me:fp=strict\ndef k(x):\n    return sin(x)\n",
+        &sig, &opts, &kernel, &error) == ME_SUCCESS);
+    assert(!strcmp(me_kernel_fp_mode(kernel), "strict"));
+    me_kernel_free(kernel);
+    opts.struct_size = ME_PREPARE_OPTIONS_V4_SIZE;
+    opts.fp_mode = (me_fp_mode)999;
+    opts.math_accuracy = (me_math_accuracy)999;
+    assert(me_prepare_menudet("0.2", "def k(x):\n    return sin(x)\n",
+        &sig, &opts, &kernel, &error) == ME_SUCCESS);
+    assert(!strcmp(me_kernel_fp_mode(kernel), "strict"));
+    me_kernel_free(kernel);
+    opts.struct_size = ME_PREPARE_OPTIONS_V5_SIZE;
+    assert(me_prepare_menudet("0.2", "def k(x):\n    return sin(x)\n",
+        &sig, &opts, &kernel, &error) == ME_ERR_INVALID_ARG);
+    assert(!kernel);
 }
 
 static void formula(void) {
@@ -685,9 +750,36 @@ static void menudet_feature_options(void) {
     assert(me_prepare_menudet("0.1", "def k(x):\n    return x\n", &sig,
         &options, &kernel, NULL) == ME_ERR_SIGNATURE);
     assert(!kernel);
+    input = (me_input_spec){"x", ME_FLOAT64, 0};
+    options.menudet_forbidden_features = ME_MENUDET_FEATURE_ND_CONTEXT;
+    sig.context_ndim = 1;
+    assert(me_prepare_menudet("0.1", "def k(x):\n    return x\n", &sig,
+        &options, &kernel, NULL) == ME_ERR_SIGNATURE);
+    assert(!kernel);
+    sig.context_ndim = 0;
+    options.menudet_forbidden_features = ME_MENUDET_FEATURE_FLEXIBLE_MATH;
+    assert(me_prepare_menudet("0.1", "# me:compiler=cc\n# me:fp=fast\ndef k(x):\n    return x\n",
+        &sig, &options, &kernel, NULL) == ME_ERR_UNSUPPORTED);
+    assert(!kernel);
     options.menudet_forbidden_features = UINT32_MAX;
     assert(me_prepare_menudet("0.1", reduction, &sig, &options, &kernel, NULL) == ME_ERR_INVALID_ARG);
     assert(!kernel);
+
+    options = (me_prepare_options)ME_PREPARE_OPTIONS_INITIALIZER;
+    options.execution = ME_EXEC_AUTO;
+    me_jit_options jit_opts = {0};
+    jit_opts.math_backend = "system";
+    options.jit_options = &jit_opts;
+    assert(me_prepare_menudet("0.1", "def entry_fn(x):\n    return x + 1\n", &sig,
+        &options, &kernel, NULL) == ME_SUCCESS);
+    assert(kernel != NULL);
+    assert(me_kernel_inferred_dtype(kernel) == ME_FLOAT64);
+    assert(!strcmp(me_kernel_entry_point(kernel), "entry_fn"));
+    assert(!strcmp(me_kernel_execution_kind(kernel), "expression"));
+    assert(!strcmp(me_kernel_math_backend(kernel), "system"));
+    assert(!strcmp(me_kernel_sleef_accuracy(kernel), ""));
+    assert(!strcmp(me_kernel_fp_mode(kernel), "strict"));
+    me_kernel_free(kernel);
 }
 
 static void signature_errors(void) {
@@ -794,7 +886,9 @@ static void descriptor_prefixes(void) {
     assert(ME_SIGNATURE_V1_SIZE == sizeof(me_signature));
     assert(ME_PREPARE_OPTIONS_V1_SIZE == offsetof(me_prepare_options, menudet_forbidden_features));
     assert(ME_PREPARE_OPTIONS_V2_SIZE == offsetof(me_prepare_options, math_backend));
-    assert(ME_PREPARE_OPTIONS_V3_SIZE == sizeof(me_prepare_options));
+    assert(ME_PREPARE_OPTIONS_V3_SIZE == offsetof(me_prepare_options, jit_options));
+    assert(ME_PREPARE_OPTIONS_V4_SIZE == offsetof(me_prepare_options, fp_mode));
+    assert(ME_PREPARE_OPTIONS_V5_SIZE == sizeof(me_prepare_options));
     assert(ME_KERNEL_INFO_V1_SIZE == sizeof(me_kernel_info));
     assert(ME_BLOCK_V1_SIZE == sizeof(me_block));
     assert(ME_RUN_OPTIONS_V1_SIZE == sizeof(me_run_options));
@@ -1210,6 +1304,8 @@ static void public_serial_reducers(void) {
 
 int main(int argc, char **argv) {
     partition_proof();
+    loop_partition_proof();
+    preparation_fp_policy();
     public_serial_reducers();
     /* Host reducers use precisely the kernel strict-FP scope. */
     me_fp_scope scope;

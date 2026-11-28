@@ -18,6 +18,7 @@ struct me_kernel {
     void *captures[ME_MAX_VARS];
     char *entry_point;
     me_math_dispatch formula_math;
+    me_dtype inferred_dtype; /* Before an explicit formula output conversion. */
     me_kernel_info info;
 };
 

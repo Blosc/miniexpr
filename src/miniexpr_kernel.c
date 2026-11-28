@@ -6,6 +6,7 @@
 #include "miniexpr_kernel_internal.h"
 #include "dsl_compile_internal.h"
 #include "dsl_eval_internal.h"
+#include "dsl_jit_runtime_internal.h"
 #include "dsl_menudet_expr.h"
 #include "dsl_menudet_fp.h"
 #include "dsl_menudet_types.h"
@@ -17,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "dsl_partition_internal.h"
 
 static me_status kernel_error(me_error *error, me_status status, const char *message) {
     if (error) {
@@ -162,13 +164,18 @@ static me_status kernel_signature(const me_signature *sig, const me_prepare_opti
         return kernel_error(error, ME_ERR_SIGNATURE, "invalid signature");
     }
     if (options && (options->struct_size < ME_PREPARE_OPTIONS_V1_SIZE ||
-        options->execution < ME_EXEC_INTERPRET || options->execution > ME_EXEC_REQUIRE_JIT)) {
+        options->execution < ME_EXEC_INTERPRET || options->execution > ME_EXEC_AUTO)) {
         return kernel_error(error, ME_ERR_INVALID_ARG, "invalid preparation options");
     }
     if (options && options->struct_size >= ME_PREPARE_OPTIONS_V3_SIZE &&
         (options->math_backend < ME_MATH_DEFAULT || options->math_backend > ME_MATH_SCALAR ||
          options->jit_compiler < ME_COMPILER_DEFAULT || options->jit_compiler > ME_COMPILER_CC)) {
         return kernel_error(error, ME_ERR_INVALID_ARG, "invalid compiler or math policy");
+    }
+    if (options && options->struct_size >= ME_PREPARE_OPTIONS_V5_SIZE &&
+        (options->fp_mode < ME_FP_DEFAULT || options->fp_mode > ME_FP_FAST ||
+         options->math_accuracy < ME_ACCURACY_DEFAULT || options->math_accuracy > ME_ACCURACY_U35)) {
+        return kernel_error(error, ME_ERR_INVALID_ARG, "invalid floating-point preparation policy");
     }
     me_kernel *kernel = calloc(1, sizeof(*kernel));
     if (!kernel) return kernel_error(error, ME_ERR_OOM, "out of memory preparing kernel");
@@ -239,8 +246,8 @@ static me_status kernel_result(me_kernel *kernel, const me_signature *sig,
     }
     if (sig->cardinality != ME_CARDINALITY_INFER && sig->cardinality != kernel->info.cardinality) {
         return kernel_error(error, ME_ERR_SIGNATURE, kernel->info.cardinality == ME_BLOCK_SCALAR ?
-            "declared elementwise result disagrees with block scalar source" :
-            "declared block scalar result disagrees with elementwise source");
+            "declared elementwise cardinality disagrees with block scalar source" :
+            "declared block scalar cardinality disagrees with elementwise source");
     }
     return ME_SUCCESS;
 }
@@ -260,7 +267,8 @@ static me_status kernel_prepare(const char *version, const char *source,
         forbidden = options->menudet_forbidden_features;
     }
     const unsigned known_features = ME_MENUDET_FEATURE_CONTROL_FLOW |
-        ME_MENUDET_FEATURE_BLOCK_REDUCTIONS | ME_MENUDET_FEATURE_FIXED_STRINGS;
+        ME_MENUDET_FEATURE_BLOCK_REDUCTIONS | ME_MENUDET_FEATURE_FIXED_STRINGS |
+        ME_MENUDET_FEATURE_ND_CONTEXT | ME_MENUDET_FEATURE_FLEXIBLE_MATH;
     if ((forbidden & ~known_features) || (formula && forbidden)) {
         return kernel_error(error, ME_ERR_INVALID_ARG, "invalid Menudet feature restrictions");
     }
@@ -271,17 +279,33 @@ static me_status kernel_prepare(const char *version, const char *source,
         me_kernel_free(kernel);
         return status;
     }
+    const me_jit_options *prev_jit_opts = NULL;
+    bool exchanged_jit_opts = false;
+    if (options && options->struct_size >= ME_PREPARE_OPTIONS_V4_SIZE && options->jit_options) {
+        prev_jit_opts = dsl_jit_exchange_options(options->jit_options);
+        exchanged_jit_opts = true;
+    }
     me_dtype inferred = ME_AUTO;
     me_execution_policy execution = options ? options->execution : ME_EXEC_INTERPRET;
     me_math_backend math_policy = ME_MATH_DEFAULT;
     me_jit_compiler compiler_policy = ME_COMPILER_DEFAULT;
+    me_fp_mode fp_policy = ME_FP_DEFAULT;
+    me_math_accuracy accuracy = ME_ACCURACY_DEFAULT;
     if (options && options->struct_size >= ME_PREPARE_OPTIONS_V3_SIZE) {
         math_policy = options->math_backend;
         compiler_policy = options->jit_compiler;
     }
+    if (options && options->struct_size >= ME_PREPARE_OPTIONS_V5_SIZE) {
+        fp_policy = options->fp_mode;
+        accuracy = options->math_accuracy;
+    }
     char reason[256] = {0};
     int position = -1;
     if (formula) {
+        if (fp_policy != ME_FP_DEFAULT && fp_policy != ME_FP_STRICT) {
+            status = kernel_error(error, ME_ERR_UNSUPPORTED, "formula preparation requires strict FP");
+            goto cleanup;
+        }
         if (sig->context_ndim || sig->cardinality == ME_BLOCK_SCALAR || sig->integer_powers) {
             status = kernel_error(error, ME_ERR_UNSUPPORTED, "formula context and reductions are not yet supported");
             goto cleanup;
@@ -294,6 +318,8 @@ static me_status kernel_prepare(const char *version, const char *source,
             policy.has_math = true;
             policy.math = (me_dsl_math_backend)(math_policy - ME_MATH_AUTO);
         }
+        policy.has_ulp = accuracy != ME_ACCURACY_DEFAULT;
+        policy.ulp = (me_dsl_sleef_ulp)accuracy;
         me_dsl_fp_mode fp;
         me_dsl_math_backend math;
         me_dsl_sleef_ulp ulp;
@@ -324,6 +350,7 @@ static me_status kernel_prepare(const char *version, const char *source,
             }
             else {
                 inferred = me_get_dtype(kernel->formula);
+                kernel->inferred_dtype = inferred;
                 if (sig->output_dtype != ME_AUTO && sig->output_dtype != inferred &&
                     !dsl_menudet_convert_expr(&kernel->formula, sig->output_dtype)) {
                     status = kernel_error(error, ME_ERR_SIGNATURE, "unsupported formula output conversion");
@@ -347,6 +374,12 @@ static me_status kernel_prepare(const char *version, const char *source,
             .has_fp = !options || !options->inherit_environment, .fp = ME_DSL_FP_STRICT,
             .has_math = !options || !options->inherit_environment, .math = ME_DSL_MATH_SYSTEM,
             .integer_powers = sig->integer_powers};
+        if (fp_policy != ME_FP_DEFAULT) {
+            policy.has_fp = true;
+            policy.fp = (me_dsl_fp_mode)(fp_policy - ME_FP_STRICT);
+        }
+        policy.has_ulp = accuracy != ME_ACCURACY_DEFAULT;
+        policy.ulp = (me_dsl_sleef_ulp)accuracy;
         if (math_policy != ME_MATH_DEFAULT) {
             policy.has_math = true;
             policy.math = (me_dsl_math_backend)(math_policy - ME_MATH_AUTO);
@@ -358,7 +391,8 @@ static me_status kernel_prepare(const char *version, const char *source,
         }
         bool binding_error = false;
         int jit = jit_mode == ME_JIT_DEFAULT ?
-            (execution == ME_EXEC_INTERPRET ? ME_JIT_OFF : ME_JIT_ON) : jit_mode;
+            (execution == ME_EXEC_AUTO ? ME_JIT_AUTO :
+             execution == ME_EXEC_INTERPRET ? ME_JIT_OFF : ME_JIT_ON) : jit_mode;
         kernel->program = dsl_compile_menudet_deferred(source, !strcmp(version, "0.2"),
             variables, (int)kernel->nbindings, sig->output_dtype, sig->context_ndim, jit,
             &policy, &position, &binding_error, &kernel->entry_point, reason, sizeof(reason));
@@ -373,6 +407,13 @@ static me_status kernel_prepare(const char *version, const char *source,
         kernel->info.cardinality = kernel->program->output_is_scalar ? ME_BLOCK_SCALAR : ME_ELEMENTWISE;
         bool nd = kernel->program->uses_i_mask || kernel->program->uses_n_mask ||
             kernel->program->uses_ndim || kernel->program->uses_flat_idx;
+        if (nd) {
+            unsigned symbols = (unsigned)(kernel->program->uses_i_mask | kernel->program->uses_n_mask);
+            if (!sig->context_ndim || (symbols >> sig->context_ndim)) {
+                status = kernel_error(error, ME_ERR_SIGNATURE, "reserved symbols exceed declared ND context");
+                goto cleanup;
+            }
+        }
         kernel->info.context_ndim = nd ? sig->context_ndim : 0;
     }
     status = kernel_result(kernel, sig, inferred, error);
@@ -382,8 +423,27 @@ static me_status kernel_prepare(const char *version, const char *source,
         for (size_t i = 0; i < kernel->nbindings; i++) {
             if (is_string_dtype(kernel->dtypes[i])) features |= ME_MENUDET_FEATURE_FIXED_STRINGS;
         }
-        if (features & forbidden) {
-            status = kernel_error(error, ME_ERR_SIGNATURE, "source uses a forbidden Menudet feature");
+        if (sig->context_ndim > 0 || kernel->info.context_ndim > 0 ||
+            kernel->program->uses_i_mask || kernel->program->uses_n_mask ||
+            kernel->program->uses_ndim || kernel->program->uses_flat_idx) {
+            features |= ME_MENUDET_FEATURE_ND_CONTEXT;
+        }
+        if (kernel->program->fp_mode != ME_DSL_FP_STRICT ||
+            (kernel->program->math_backend != ME_DSL_MATH_SYSTEM &&
+             kernel->program->math_backend != ME_DSL_MATH_AUTO) ||
+            kernel->program->math_explicit || kernel->program->ulp_explicit ||
+            kernel->program->sleef_ulp != ME_DSL_ULP_OMIT) {
+            features |= ME_MENUDET_FEATURE_FLEXIBLE_MATH;
+        }
+        unsigned blocked = features & forbidden;
+        if (blocked) {
+            if (blocked == ME_MENUDET_FEATURE_FLEXIBLE_MATH) {
+                status = kernel_error(error, ME_ERR_UNSUPPORTED,
+                    "flexible math policy requires the 'flexible-math' capability");
+            } else {
+                status = kernel_error(error, ME_ERR_SIGNATURE,
+                    "source uses a forbidden Menudet feature; missing source capability declaration");
+            }
         }
     }
     if (status == ME_SUCCESS && kernel->program && kernel->program->jit_request_mode == ME_JIT_ON) {
@@ -419,6 +479,9 @@ static me_status kernel_prepare(const char *version, const char *source,
         status = kernel_error(error, ME_ERR_UNSUPPORTED, "JIT is required but unavailable for this kernel");
     }
 cleanup:
+    if (exchanged_jit_opts) {
+        dsl_jit_exchange_options(prev_jit_opts);
+    }
     if (status == ME_SUCCESS) *out = kernel;
     else me_kernel_free(kernel);
     return status;
@@ -641,7 +704,7 @@ static bool kernel_partition_expr(const me_kernel *kernel, const me_expr *expr,
     return true;
 }
 
-bool me_kernel_is_partitionable(const me_kernel *kernel) {
+static bool kernel_straight_partitionable(const me_kernel *kernel) {
     if (!kernel || kernel->info.context_ndim ||
         kernel->info.cardinality != ME_ELEMENTWISE) return false;
     bool defined[ME_MAX_VARS] = {false};
@@ -674,6 +737,41 @@ bool me_kernel_is_partitionable(const me_kernel *kernel) {
         }
     }
     return false;
+}
+
+bool me_kernel_is_partitionable(const me_kernel *kernel) {
+    if (kernel_straight_partitionable(kernel)) return true;
+    if (!kernel || !kernel->program || kernel->info.context_ndim ||
+        kernel->info.cardinality != ME_ELEMENTWISE ||
+        (kernel->info.output_dtype != ME_FLOAT32 && kernel->info.output_dtype != ME_FLOAT64 &&
+         kernel->info.output_dtype != ME_BOOL)) return false;
+    const me_dsl_compiled_program *p = kernel->program;
+    if (p->vars.count > ME_MAX_VARS || p->fp_mode != ME_DSL_FP_STRICT ||
+        p->output_is_scalar || p->uses_i_mask || p->uses_n_mask || p->uses_ndim ||
+        p->uses_flat_idx) return false;
+    /* Reuse the adapter's bounded loop/control-flow proof, including checked
+     * counter arithmetic and weak final-narrowing guards. No source replay. */
+    int budget = 65536;
+    artifact_proof proof = {.program = p, .budget = &budget};
+    for (size_t i = 0; i < kernel->nbindings; i++) {
+        me_dtype dtype = kernel->dtypes[i];
+        if (i < kernel->ninputs) {
+            if (dtype != ME_FLOAT32 && dtype != ME_FLOAT64) return false;
+            proof.values[i] = (artifact_proof_value){.valid = true};
+        } else if (dtype == ME_INT64) {
+            int64_t value;
+            memcpy(&value, kernel->captures[i], sizeof(value));
+            proof.values[i] = artifact_proof_integer(value);
+        } else if (dtype == ME_BOOL) {
+            bool value;
+            memcpy(&value, kernel->captures[i], sizeof(value));
+            proof.values[i] = artifact_proof_integer(value);
+        } else if (dtype == ME_FLOAT32 || dtype == ME_FLOAT64) {
+            proof.values[i] = artifact_proof_floating(dtype, kernel->captures[i]);
+        }
+    }
+    artifact_proof_flow flow = ARTIFACT_FLOW_NEXT;
+    return artifact_proof_block(&proof, &p->block, 0, 0, &flow, NULL, NULL);
 }
 
 me_status me_describe_input(const me_kernel *kernel, size_t slot, me_input_spec *out) {
@@ -853,4 +951,42 @@ me_status me_eval_block_backend(const me_kernel *kernel, const me_buffer *inputs
         return kernel_error(error, ME_ERR_EVAL, "floating exception selected by raise policy");
     }
     return ME_SUCCESS;
+}
+
+me_dtype me_kernel_inferred_dtype(const me_kernel *kernel) {
+    if (!kernel) return ME_AUTO;
+    if (kernel->formula) return kernel->inferred_dtype;
+    return kernel->program ? kernel->program->inferred_dtype : ME_AUTO;
+}
+
+const char *me_kernel_entry_point(const me_kernel *kernel) {
+    return kernel ? kernel->entry_point : NULL;
+}
+
+const char *me_kernel_execution_kind(const me_kernel *kernel) {
+    if (!kernel) return NULL;
+    if (kernel->formula) return "expression";
+    return kernel->program ? (kernel->program->expression_only ? "expression" : "program") : NULL;
+}
+
+const char *me_kernel_math_backend(const me_kernel *kernel) {
+    if (!kernel) return "unknown";
+    if (kernel->formula) return dsl_math_backend_name(kernel->formula_math.backend);
+    return kernel->program ? dsl_math_backend_name(kernel->program->math_backend) : "unknown";
+}
+
+const char *me_kernel_sleef_accuracy(const me_kernel *kernel) {
+    if (!kernel) return "";
+    if (kernel->formula) {
+        return kernel->formula_math.backend == ME_DSL_MATH_SLEEF ?
+            dsl_sleef_ulp_name(kernel->formula_math.ulp) : "";
+    }
+    if (!kernel->program || kernel->program->math_backend != ME_DSL_MATH_SLEEF) return "";
+    return dsl_sleef_ulp_name(kernel->program->sleef_ulp);
+}
+
+const char *me_kernel_fp_mode(const me_kernel *kernel) {
+    if (!kernel) return "unknown";
+    if (kernel->formula) return "strict";
+    return kernel->program ? dsl_fp_mode_name(kernel->program->fp_mode) : "unknown";
 }

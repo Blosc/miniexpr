@@ -90,14 +90,17 @@ typedef struct {
 typedef enum {
     ME_EXEC_INTERPRET = 0,
     ME_EXEC_PREFER_JIT = 1,
-    ME_EXEC_REQUIRE_JIT = 2
+    ME_EXEC_REQUIRE_JIT = 2,
+    ME_EXEC_AUTO = 3
 } me_execution_policy;
 
 /* Restrictions on a typed Menudet program, independent of its wire format. */
 enum {
     ME_MENUDET_FEATURE_CONTROL_FLOW = 1u << 0,
     ME_MENUDET_FEATURE_BLOCK_REDUCTIONS = 1u << 1,
-    ME_MENUDET_FEATURE_FIXED_STRINGS = 1u << 2
+    ME_MENUDET_FEATURE_FIXED_STRINGS = 1u << 2,
+    ME_MENUDET_FEATURE_ND_CONTEXT = 1u << 3,
+    ME_MENUDET_FEATURE_FLEXIBLE_MATH = 1u << 4
 };
 
 /* DEFAULT preserves the existing preparation contract; explicit selections
@@ -118,6 +121,22 @@ typedef enum {
     ME_COMPILER_CC = 2
 } me_jit_compiler;
 
+struct me_jit_options;
+
+#define ME_KERNEL_FP_POLICY_API 1
+typedef enum {
+    ME_FP_DEFAULT = 0,
+    ME_FP_STRICT,
+    ME_FP_CONTRACT,
+    ME_FP_FAST
+} me_fp_mode;
+
+typedef enum {
+    ME_ACCURACY_DEFAULT = 0,
+    ME_ACCURACY_U10,
+    ME_ACCURACY_U35
+} me_math_accuracy;
+
 typedef struct {
     size_t struct_size;
     me_execution_policy execution;
@@ -127,15 +146,22 @@ typedef struct {
     uint32_t reserved_features;
     me_math_backend math_backend;
     me_jit_compiler jit_compiler;
+    const struct me_jit_options *jit_options;
+    me_fp_mode fp_mode;
+    me_math_accuracy math_accuracy;
 } me_prepare_options;
 
-#define ME_PREPARE_OPTIONS_INITIALIZER { sizeof(me_prepare_options), ME_EXEC_INTERPRET, false, {0}, 0, 0, ME_MATH_DEFAULT, ME_COMPILER_DEFAULT }
+#define ME_PREPARE_OPTIONS_INITIALIZER { sizeof(me_prepare_options), ME_EXEC_INTERPRET, false, {0}, 0, 0, ME_MATH_DEFAULT, ME_COMPILER_DEFAULT, NULL, ME_FP_DEFAULT, ME_ACCURACY_DEFAULT }
 #define ME_PREPARE_OPTIONS_V1_SIZE \
     (offsetof(me_prepare_options, reserved) + sizeof(((me_prepare_options *)0)->reserved))
 #define ME_PREPARE_OPTIONS_V2_SIZE \
     (offsetof(me_prepare_options, reserved_features) + sizeof(((me_prepare_options *)0)->reserved_features))
 #define ME_PREPARE_OPTIONS_V3_SIZE \
     (offsetof(me_prepare_options, jit_compiler) + sizeof(((me_prepare_options *)0)->jit_compiler))
+#define ME_PREPARE_OPTIONS_V4_SIZE \
+    (offsetof(me_prepare_options, jit_options) + sizeof(((me_prepare_options *)0)->jit_options))
+#define ME_PREPARE_OPTIONS_V5_SIZE \
+    (offsetof(me_prepare_options, math_accuracy) + sizeof(((me_prepare_options *)0)->math_accuracy))
 
 typedef struct {
     size_t struct_size;
@@ -236,8 +262,19 @@ me_status me_describe_input(const me_kernel *kernel, size_t slot, me_input_spec 
 #define ME_KERNEL_BACKEND_INFO_API 1
 bool me_kernel_has_jit(const me_kernel *kernel);
 
+/* Extended kernel metadata getters without artifact/JSON linkage.
+ * Inferred dtype precedes any explicit final output conversion. */
+#define ME_KERNEL_METADATA_API 1
+me_dtype me_kernel_inferred_dtype(const me_kernel *kernel);
+const char *me_kernel_entry_point(const me_kernel *kernel);
+const char *me_kernel_execution_kind(const me_kernel *kernel);
+const char *me_kernel_math_backend(const me_kernel *kernel);
+const char *me_kernel_sleef_accuracy(const me_kernel *kernel);
+const char *me_kernel_fp_mode(const me_kernel *kernel);
+
 /* Conservative sufficient proof, not a cardinality/JIT heuristic. False means
- * unproven. Currently certifies context-free straight-line real arithmetic
+ * unproven. Certifies context-free straight-line real arithmetic and bounded
+ * floating loop/control-flow programs with proven checked integer counters,
  * without potentially failing conversions; callers still own reducer order
  * and final FP raise policy. Does not certify callback concurrency. */
 #define ME_KERNEL_PARTITION_INFO_API 1

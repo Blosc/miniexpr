@@ -1,23 +1,232 @@
 # Execution migration implementation status
 
-This is a checkpoint, **not completion of M0–M8**. The migration plan's
+This records implementation and local qualification, **not cross-platform completion of M0–M9**. The migration plan's
 acceptance gates remain authoritative. No production default or persisted
 format changed.
 
-| Milestone | Landed work | Remaining gate / gap |
+This records the locally qualified migration checkpoint; revision IDs in earlier
+qualification sections identify their historical baselines. Release preparation
+is deferred; local source overrides remain the development configuration.
+
+| Milestone | Implemented / locally qualified work | Remaining gate / gap |
 | --- | --- | --- |
 | M0 | Route/test/capability inventory in `execution-migration-contracts.md`; explicit direct-handle baseline; separate benchmark preparation/specialization phases | Cross-platform performance qualification remains a later gate |
 | M1 | C-Blosc2 internal `blosc/b2nd-exec.h` / `.c`; bounded typed nodes, exact captures, topology/slot/arity/width validation, copied ownership, borrowed metadata-only schedules; optional Cython conversion and strong Python schedule owner | Descriptor will need additional typed options/operations/stages as subsequent families are implemented; it is not installed/frozen |
-| M2 | Serial multiple-input fused arithmetic maps and whole-domain minimum; zero-scratch direct maps; exact inferred-width reduction scratch; shared core strict FP scope and end-of-traversal raise masks; ordinary expression lowering reuses `GraphAdapter`; direct authored-kernel ownership transfer feeds the same scheduler; explicit `NativeGraph(..., _executor="c-blosc2")` facade whose metadata, specialization and execution use the typed plan, with adapter-backed compatibility exports and `MenudetError`/`fp_status` parity | Default wrapper dispatch and pilot API retirement are not complete; the facade covers only the typed resident family |
-| M3 | Scalar/ranked and N-D right-aligned broadcast domains, empty maps and explicit disjoint NumPy outputs; strided, reversed, transposed, unaligned and non-native input views with bounded per-job gather scratch; allocation-owner extent checks (including underflow/overflow bounds); whole-domain and partial-axis reductions (`axes`, `keepdims`, `initial` with core conversion kernel, opt-in fixed-leaf `pairwise_sum` via `b2nd_exec_specialize_ex`); disjoint strided/transposed/reversed outputs (`b2nd_exec_execute_into`) and separately budgeted transactional alias staging (`b2nd_exec_execute_alias`); serial `sum`/`prod` and parallel `min`/`max`/`any`/`all` with authoritative core accumulator typing (`me_truth_span`, `me_reduce_store_scalar`, host-order `me_reduce_identity`, and accumulator-typed multi-task combine inside FP scope) and empty identities | `where` masks and explicit reduction `dtype` accumulator casts stay on the adapter |
-| M4 | C-owned resident jobs: `partitionable` enforced in plan metadata and `b2nd_exec_execute_views` (unproven kernels and ordered `sum`/`prod` stay serial), job count capped at `B2ND_EXEC_MAX_TASKS` (64) and aggregate mapped + gather scratch budget (also enforced for explicit single-worker requests), partials combined in logical task order inside strict FP scope before `raise_mask`, each job owns its FP scope, started jobs always join before return, and Windows clamps `ntasks = 1` before partitioning. POSIX `blosc2_run_parallel` / `b2nd_exec_launch_host` dispatches via C-Blosc2's persistent shared pool (`blosc_shared_pool` + `generic_dojob`) when no user `threads_callback` is active, with nesting guard and clean `blosc2_destroy()` teardown. Core invocation backend reporting, interpreter/preferred/required-system-compiler fixture, submission-failure injection and simultaneous Python calls sharing a schedule are tested. Typed compiler/math preparation options feed core, C plans and explicit Python facade; policy is part of plan cache keys. `me_kernel_is_partitionable` certifies straight-line arithmetic, unary/binary/ternary real math (`sin`, `cos`, `sqrt`, `fmod`, `atan2`, `fma`, predicates, `minimum`/`maximum`), division, comparisons/logic, bitwise ops, `where`, promoted NumPy integer math (`ME_EXPR_FLAG_NUMPY_1_1`), and representable weak `float64 -> float32` / bounded weak `int64` captures (`kernel_int_fits`) on both formula ASTs and authored kernels; standalone pthread fallback excludes `__EMSCRIPTEN__` via `!defined(__EMSCRIPTEN__)` | Live Windows and Emscripten/WASM CI/runtime execution, plus non-default FP accuracy modes (`fast`/`ulp`) |
+| M2 | Fused multiple-input arithmetic maps, zero-scratch direct maps, inferred-width reduction scratch, core FP scopes and end-of-traversal raise masks; `GraphAdapter` lowering and direct authored-kernel handoff share the typed scheduler; Python canonical exports and `MenudetError`/`fp_status` compatibility now work without native artifact ownership | Wrapper dispatch is implemented (M8); final obsolete-pilot/wiring cleanup and cross-platform qualification remain |
+| M3 | Scalar/ranked/N-D broadcasting; empty domains; strided, reversed, transposed, unaligned and non-native views with checked allocation extents and bounded gather scratch; whole/partial-axis reductions with `initial`, `keepdims`, pairwise sum, core accumulator typing and empty identities; disjoint strided outputs and separately budgeted transactional alias staging. Resident `where` masks and explicit accumulator casts now use typed plans, including borrowed kernels | Reader-backed masks and automatic conditional/masked multi-stage domains remain rejected; platform qualification remains |
+| M4 | C-owned jobs enforce partition proofs, the 64-task cap, aggregate scratch bounds, per-job FP scopes, logical-order partial combination and joining before return. POSIX uses C-Blosc2's persistent pool with nesting guards; Windows remains serial. Backend reporting, submission failures and shared-schedule concurrency are tested. Core partition proofs cover supported straight-line numeric operations and bounded floating loops/control flow; typed compiler/FP/ULP policy is captured in preparation/cache identity | Live Windows/WASM and x86-64 qualification, including non-default FP policies, remains. Non-strict kernels and ordered sum/prod remain conservatively serial; broader proofs are optional extensions |
 | M5 | Compressed storage execution (`b2nd_exec_execute_arrays` / `_ex`, `b2nd_exec_execute_to_array`): binds in-memory and frame-backed (`cframe` `contiguous=True` and `urlpath` on-disk, without mutating `current_nchunk`) chunked arrays across native numeric dtypes (`bool`, `int8..64`, `uint8..64`, `float32`, `float64`), right-aligned N-D broadcasting, partial-axis reductions (`axis`, `keepdims`, `initial`, `pairwise_sum`, parallel extrema, `argmin`/`argmax`, `var`/`std` with `ddof`), mixed compressed + resident inputs, and parallel partitionable jobs over the persistent shared pool with bounded 8-slot chunk LRU decode cache, `max_decode_bytes` task clamping, contiguous inner-block run copies in `storage_read`, and empty `0`-item / `chunkshape=0` storage validation; direct elementwise compressed sinks (`out` = `b2nd_array_t` / `NDArray`) evaluate blocks inside Blosc2's compression prefilter with matched-layout zero-copy block reads (`blosc2_getitem_ctx`, `gather_bytes=0`), 4-slot LRU block cache for mismatched/broadcast compressed inputs, resident box gathering, and padded live compaction without mutating output before validation. Explicit Python `NativeGraph(..., _executor="c-blosc2")` lowers `argmin`/`argmax`/`var`/`std` (`ddof`), executes resident/compressed/frame-backed inputs and sinks with the GIL released; Release ARM64 sweep confirms `1.00x` chunk decode amplification and 22x–60x speedups over Python adapter sources; no Python source/sink reads or whole-array operand materialization | Cross-platform Windows/WASM performance/FP qualification and x86-64 Release confirmation remain |
 | M6 | Metadata-only generic source/sink callbacks (`b2nd_exec_execute_sources`), GIL-safe Cython trampolines, bounded index/gather/output buffers, and explicit persisted logical partitions (`b2nd_exec_prepare_borrowed_kernel`, `b2nd_exec_specialize_partitions`, `b2nd_exec_execute_partitions`) with `MenudetLazyArray` / `MenudetArtifactHandle.evaluate_array` & `evaluate_sources` handoff across real, complex, fixed-width string, block-scalar, 2-D context, 0-D scalar, and generator kernels | Cross-platform Windows/WASM qualification and M9 adapter retirement remain |
 | M7 | General multi-stage typed graph planner and executor (`b2nd-exec-stages.h`/`.c`, up to `B2ND_EXEC_MAX_STAGES` = 32): direct node/slot remapping without child serialization; automatic region splitting at reductions and strong-dependent shared computed nodes; explicit `b2nd_exec_staged_assemble`/`_ex` composition (including authored Menudet kernels and single-stage resident masked reductions); inferred intermediate dtypes, casts, `initial`, `keepdims`, unary/binary/bitwise/comparison/`select`/`and`/`or`/`pos`/`function` ops; specialization-time intermediate sizing, `last_consumer` analysis, and upfront budget rejection before source reads; invocation-local last-consumer intermediate freeing; stage/node diagnostics across prepare, assemble, specialize, and execute (`b2nd_exec_stage_diagnostic`); `AND`-combined `has_jit` and `fp_observed` support; explicit compressed-stage, automatic conditional/masked multi-stage, shared scalar-only, and reader-backed mask rejections before reads; arbitrary non-contiguous / F-order staged `out=` views via `b2nd_exec_staged_execute_sources_into`; Python-owned canonical JSON (`to_json()`/`map_json()`) and stage import (`typed_stage_import.py`, `b2nd_exec_stages_bridge.h`) without consulting the native artifact/interchange parser | Compressed/parallel staged execution and cross-platform Windows/WASM qualification remain |
-| M8 | Default wrapper cutover (`_executor="auto"`): `NativeGraph.__init__`, `from_json`, and `from_expression` prefer `"c-blosc2"` and fall back to `"adapter"` only on `NotImplementedError`; supports M6 and legacy `execute_sources` contracts cleanly; JSON-reimport-free `resident_map_kernel` and prefilter artifact bridge; explicit reduction `dtype=` accumulator casts (`SUM`/`PROD`/`MIN`/`MAX`), F-contiguous direct map fast path, `integer_powers` optimization threading, `max_worker_scratch` lift for `>32 KiB`/scatter cases; single-case specialized pilots (`_scalar_pilot_values`, `compute_c_blosc2_min_if_eligible`) retired from normal caller dispatch when `_b2nd_exec_available()` | Full M9 adapter symbol removal, x86-64/Windows/WASM qualification |
-| M9 | Artifact-off installed C consumers tested; clean non-opt-in standard wheel (`_b2nd_exec_available() == False`) verified; `#else` bridge stubs verified (`cc -fsyntax-only`) | Original exchange fixtures removal, dependency/provider audit, adapter retirement, and cross-platform performance gates remain |
+| M8 | Default wrapper cutover, core Menudet ownership, Python-owned v1 import, compiler environment selection, resident masks/explicit accumulators, sparse participation reads, artifact-off direct `NativeGraphHandle` compatibility, comparison-only adapter gating, and typed HIGH/MEDIUM plus strict/contract/fast FP preparation locally qualified | x86-64/Windows/WASM qualification remains; production default changes belong to M9 |
+| M9 | Clean Release artifact-off candidate built/installed in isolation; original v1 and 4.17.0 v2 exchange fixtures execute; one core archive/provider, no native JSON/adapter symbols/downloads; installed C consumers `6/6`; independent compression-only C-Blosc2 `1688/1688`; stub/core-only syntax checks pass | Exact published dependency pins, cross-platform Release/performance gates, standard non-experimental artifact-off default cutover, and final superseded-wiring removal remain |
 
-## Latest qualification: M4 remainder, Release ARM64 sweep, M8 readiness & default cutover
+## Latest qualification: review 5 follow-ups (2026-11-28)
+
+- Math backend environment selection now overrides compute options, matching
+  compiler selection and Menudet execution snapshots. Environment-only `auto`
+  and `scalar` values remain admitted; `compute_options` still accepts only its
+  existing documented backend values. Explicit NativeGraph MEDIUM policy leaves
+  automatic backend selection to the core; the ordinary-expression frontend's
+  platform-specific preference is not newly imposed on explicit graph handles.
+- Artifact-off direct handles preserve AUTO JIT instead of converting mode `3`
+  to `False`; invalid modes are rejected. Typed preparation now passes
+  `ME_EXEC_AUTO` through C-Blosc2 to native structural classification. Explicit
+  environment JIT overrides are captured before cache lookup, preventing reuse
+  of an interpreted plan after `ME_DSL_JIT` changes.
+- Assembled-plan FP/math metadata is explicitly documented as root-stage policy,
+  not a guarantee that producer policies agree. A heterogeneous fast/strict
+  native-stage regression verifies this contract. Backend counters explicitly
+  include internal accumulator-conversion calls; these are not hidden from the
+  interpreter counts.
+- Removed the unreachable non-shared artifact-off link branch. No dependency
+  pins or production defaults changed.
+
+Combined-tree local qualification (installed wheels use isolated `-S` imports):
+
+| Configuration | Result |
+| --- | --- |
+| Artifact-off shared-core wheel | `1767 passed, 83 skipped, 584 deselected` |
+| Artifact-on shared-core comparison wheel | `1806 passed, 44 skipped, 584 deselected` |
+| Standard non-opt-in wheel, selected graph/Menudet compatibility tests | `262 passed, 23 skipped` |
+| MiniExpr artifact-off / artifact-on suites | `343/343` / `377/377` |
+| Installed artifact-off C consumers | `6/6` |
+| Native executor / storage ASan+UBSan fixtures | `4/4` / `2/2` |
+| Native staged ASan+UBSan fixture, including adapter differential | `3/3` |
+
+Sanitizer instrumentation covers the fixture executor/storage/stage sources, not
+the installed static core/codec dependencies or comparison-adapter archive.
+The artifact-on wheel's additional skip relative to earlier runs
+is the new artifact-off-only direct-handle delegation regression.
+The standard wheel's first build attempt encountered a stale Make/Ninja
+FetchContent cache; rebuilding in a fresh external build directory succeeded.
+These runs replace the pre-V5-only evidence for the listed configurations, not
+the still-outstanding cross-platform/performance gates.
+Ruff lint/format, three-repository whitespace checks and the core-only bridge
+syntax check with warnings treated as errors also pass.
+
+## Earlier qualification: non-default graph FP policies (2026-11-28)
+
+The artifact-off wheel now admits HIGH/MEDIUM accuracy and environment-selected
+strict/contract/fast (`relaxed` alias) policy without adapter fallback:
+
+- MiniExpr's append-only `ME_PREPARE_OPTIONS_V5_SIZE` adds typed FP mode and SLEEF
+  accuracy preferences. V1–V4 callers retain their previous defaults; authored
+  source policy retains precedence. Formula preparation remains strict-only.
+- C-Blosc2 graph options pass those preferences to core preparation, including
+  automatically split stages, rather than imposing a generated strict pragma.
+  Native plan metadata reports effective FP mode, math backend and SLEEF accuracy.
+- HIGH prefers available SLEEF u10; explicit SLEEF uses u10/u35 for HIGH/MEDIUM.
+  An unavailable optional SLEEF preference keeps system math, while explicit
+  backend requests remain authoritative. Capability probing is metadata-only
+  and independent of the caller's environment/compiler mode.
+- Runtime policy participates in typed plan cache identity and propagates through
+  JSON import and canonical map export. Core v1 import now inherits the runtime
+  environment after Python's deliberate policy-override normalization.
+- TCC's existing strict-only restriction remains fail-closed. Contract/fast tests
+  use the system compiler, including required-JIT execution; no adapter replay is
+  used to hide an invalid compiler/FP combination.
+
+The newly installed artifact-off wheel passes **`1764 passed, 83 skipped, 584
+deselected`**, including resident/compressed input, staged execution, JSON/map
+roundtrips, SLEEF u10/u35, required system JIT, unavailable-preference fallback,
+cache separation and invalid TCC/non-strict policy tests. Ruff and native validation
+results are recorded with the local qualification below.
+
+**Release-only follow-up (deferred): qualify exact dependency revisions without source overrides.**
+Neither MiniExpr HEAD `1cc0063539f8c0c0dcd374726906cd8b4f09f814` nor C-Blosc2 HEAD
+`2ac1978b1a5b644db123ecf576dcf2ccd1e18844` contains the required FP policy API;
+it currently exists in the working trees. The checked shared-core dependency pins
+also predate this migration increment. Exact published revisions containing these
+changes are required before any future pin advancement and clean no-source-override
+wheel qualification. This is not a blocker to development or a request to release.
+Build guards now reject older native FP APIs explicitly. Production pins/defaults
+have not been changed.
+
+The latest FP increment also passes the artifact-off MiniExpr C suite (`343/343`),
+Ruff lint/format checks, diff whitespace checks and core-only bridge syntax checks
+with warnings treated as errors. The older artifact-on wheel, standard wheel,
+installed C consumer and sanitizer counts below predate the V5 FP-policy
+increment; the review 5 section above records their combined-tree requalification.
+
+## Earlier qualification: public-entry-point closure and clean artifact-off candidate
+
+The remaining M8 public-route regressions are closed locally on macOS ARM64.
+This section supersedes the historical M8/M9 gaps in the ledger above for compiler
+environment selection, resident masks, explicit accumulators, direct handle
+compatibility, comparison-test gating and local dependency/provider auditing.
+Production build defaults and dependency pins remain unchanged.
+
+- **MiniExpr:** formula inferred dtype is retained before final conversion.
+  The adapter's bounded floating loop/control-flow partition proof is shared with
+  the core, preserving prefilter eligibility for proven loops with final narrowing.
+- **C-Blosc2:** `b2nd_exec_prepare_borrowed_kernel_ex` appends a resident Boolean
+  participation slot without changing the borrowed kernel signature. Explicit
+  accumulator conversions use a separate core conversion tile, counted in the
+  mapped scratch budget. Callback readers read only participating runs; reader-backed
+  masks still reject before callbacks. Both map and conversion FP flags are observed.
+- **Python:** artifact-off direct `NativeGraphHandle` calls use typed ownership;
+  auto admission preserves its original error when no adapter exists. Temporary
+  legacy handles are acquired inside cleanup scope. `ME_DSL_JIT_COMPILER` is admitted
+  as preparation policy. Unsupported typed operations retain both the public
+  `MenudetError` contract and `NotImplementedError` admission classification;
+  required-JIT failure remains a non-fallback `MenudetError`. JSON import rejects
+  unreachable constants as well as unreachable computed nodes.
+- **Test separation:** only tests explicitly exercising legacy comparisons,
+  borrowed legacy artifacts or Python adapter pool submission require the adapter.
+  The default-dispatch test runs artifact-off. Subprocess tests preserve the chosen
+  installed package instead of processing unrelated editable-install startup hooks.
+
+Validation:
+
+| Configuration | Result |
+| --- | --- |
+| Clean Release artifact-off wheel, isolated installation | `1750 passed, 83 skipped, 584 deselected` |
+| Artifact-on typed comparison wheel, isolated installation | `1790 passed, 43 skipped, 584 deselected` |
+| Native artifact-off MiniExpr suite | `343/343` |
+| Native artifact-on MiniExpr suite | `377/377` |
+| Installed artifact-off C consumers | `6/6` |
+| Native owner ASan/UBSan fixtures | executor `4/4`, storage `2/2`, stages `3/3` (including adapter differential) |
+| Standalone compression-only C-Blosc2, no MiniExpr | `1688/1688` |
+| Independent core-vs-legacy v1 import differential | `10/10` valid/invalid cases match values, inferred dtype, cardinality, FP status and error locations |
+| Original 4.17.0 exchange directory | Original v1 carrier and v2 maps, grouped partitions, CFrame and table computed metadata reopen and execute without the adapter |
+
+The Python selections use the existing default native-semantic deselection policy;
+they are not claims that the optional 584-case reference matrix ran. The 40 additional
+artifact-off skips are explicit adapter-only qualification tests.
+The native owner sanitizer fixtures use the candidate's installed static core/codec
+dependencies; those dependencies are not themselves sanitizer-instrumented.
+Edited Python files pass Ruff lint/format checks, and bridge stubs plus core-only
+headers pass `cc -fsyntax-only -Wall -Wextra -Werror` (unused static helpers excluded).
+
+The clean artifact-off build has no yyjson source/download directory, no
+`yyjson_*`/`me_artifact_*`/`me_graph_*` extension symbols, one core archive in the
+extension link command, and one `me_prepare_formula` provider. Its dynamic dependencies
+are only Accelerate and the system library. Compression-only C-Blosc2 is qualified
+separately, not inferred from the numerical build.
+
+Reproduction lives in Python-Blosc2's `scripts/qualify_execution_migration.py`,
+`scripts/compare_menudet_v1.py` and `scripts/qualify_menudet_migration.py`.
+Build candidate/reference wheels with the same local source overrides and install
+with `pip --target`; the runners use conda Python with `-S`, assert package/extension
+locations and do not modify the shared editable installation. Raw logs and wheels
+remain outside the repositories.
+
+**Still release gates:** the clean candidate uses explicit local source overrides,
+not newly published dependency pins. Publish/qualify the exact native revisions
+before advancing pins. x86-64/Windows/WASM qualification,
+the production artifact-off default switch and final
+superseded-wiring removal remain open. No platform/performance gate is waived.
+
+## Earlier qualification: M8 Part 2 — Core Menudet decoupling & first artifact-off Python wheel
+
+Following the M8 wrapper cutover, M8 Part 2 decoupled `MenudetArtifactHandle`, `MenudetKernel`,
+Menudet prefilters (`MenudetResidentPrefilter`, `_execute_menudet_prefilter`), and
+`_evaluate_b2nd_kernel_pilot` from `miniexpr_artifact` onto MiniExpr core `me_kernel` + `b2nd-exec`,
+making `MINIEXPR_BUILD_ARTIFACT` an optional CMake toggle in `python-blosc2`:
+
+- **MiniExpr Core API (`miniexpr.codeberg`)**:
+  - Extended `src/miniexpr_kernel.h` and `src/miniexpr_kernel.c` with `ME_EXEC_AUTO = 3`,
+    `ME_MENUDET_FEATURE_ND_CONTEXT` / `ME_MENUDET_FEATURE_FLEXIBLE_MATH`, `me_prepare_options.jit_options`
+    (`ME_PREPARE_OPTIONS_V4_SIZE`), and the six `ME_KERNEL_METADATA_API` getters
+    (`me_kernel_inferred_dtype`, `me_kernel_entry_point`, `me_kernel_execution_kind`,
+    `me_kernel_math_backend`, `me_kernel_sleef_accuracy`, `me_kernel_fp_mode`).
+  - Extended `tests/test_kernel_api.c` to cover `V3_SIZE`/`V4_SIZE` prefixes and the new feature restrictions.
+- **Python-Blosc2 Core Menudet & Artifact-Off Build (`python-blosc2.codeberg`)**:
+  - Added Python-owned Menudet 0.1 v1 manifest validation and pragma normalization (`src/blosc2/menudet_v1.py`),
+    plus C-side `b2_core_kernel_*` wrappers (`src/blosc2/dsl_artifact_bridge.h`), `b2_exec_prepare_core_kernel`
+    (`src/blosc2/b2nd_exec_bridge.h`, `b2nd_exec.pxi`), and `is_core` dispatch in `b2nd_kernel_pilot.h` and
+    `blosc2_ext.pyx` (`MenudetArtifactHandle`, prefilters, and explicit legacy fallback guards for
+    unmigrated masked `evaluate_array` / `evaluate_sources`).
+  - Updated `CMakeLists.txt` (`option(MINIEXPR_BUILD_ARTIFACT ... ON)` with core `miniexpr` headers/linkage
+    when `OFF`), added `menudet_legacy_adapter_available()`, allowed typed `where` graphs when the legacy
+    adapter is absent (`src/blosc2/graph_plan.py`), and added v1 parity + core execution coverage in
+    `tests/test_b2nd_exec_m8.py`.
+
+Validation (macOS ARM64):
+
+- **MiniExpr & C-Blosc2 C / ASan suites**: `test_kernel_api|kernel_` passed; installed artifact-off
+  consumer tests `6/6` passed; ASan/UBSan `exec-plan` `4/4`, `exec-storage` `2/2`, `exec-stages` `3/3` passed.
+- **C header stub & core-only syntax checks**: `dsl_artifact_bridge.h`, `b2nd_exec_bridge.h`,
+  `b2nd_kernel_pilot.h`, and `b2nd_exec_stages_bridge.h` compiled cleanly with
+  `cc -x c -std=c99 -Wall -Wextra -Wno-unused-function -Werror -fsyntax-only` both without
+  `B2_HAVE_B2ND_EXEC` (`#else` stubs) and with `-DB2_HAVE_B2ND_EXEC=1` (without `B2_HAVE_MENUDET_ARTIFACT`).
+- **Opt-in Artifact-ON Python wheel (`B2_EXPERIMENTAL_SHARED_MINIEXPR_CORE=ON`, `MINIEXPR_BUILD_ARTIFACT=ON`)**:
+  `1808 passed, 44 skipped` across the full Menudet/graph/b2nd-exec/lazyexpr/resident/pilot suite, plus
+  `14 passed` on updated `tests/test_b2nd_exec_m8.py` and `tests/test_b2nd_exec_m6.py`.
+- **Opt-in Artifact-OFF Python wheel (`B2_EXPERIMENTAL_SHARED_MINIEXPR_CORE=ON`, `MINIEXPR_BUILD_ARTIFACT=OFF`)**:
+  - `nm` symbol audit on `blosc2_ext.abi3.so` confirmed **0** `yyjson_*`, `me_artifact_*`, and `me_graph_*` symbols.
+  - Isolated subprocess pytest on core Menudet / b2nd-exec / stages / pilot / resident / scalar-dispatch /
+    expression-graph suites passed **`832 passed, 14 skipped` (`0` failures)**. (Full cross-suite run
+    observed `1637 passed, 134 skipped`; remaining failures/errors are confined to legacy adapter comparison
+    tests using `_executor="adapter"`, direct `NativeGraphHandle` tests, `ME_DSL_JIT_COMPILER` env tests
+    falling back from `typed_graph_policy`, and masked `evaluate_array`/reader-mask legacy paths.)
+- **Standard non-opt-in Python wheel (`B2_EXPERIMENTAL_SHARED_MINIEXPR_CORE=OFF`)**:
+  confirmed `_b2nd_exec_available() is False` and `menudet_legacy_adapter_available() is True`;
+  smoke suite `156 passed, 13 skipped` (`0` failures).
+- **`ruff check` / `ruff format --check`**: clean across all edited/added Python files.
+
+## Earlier qualification: M4 remainder, Release ARM64 sweep, M8 readiness & default cutover
 
 Following M7 completion, this increment completed the M8 readiness gaps in MiniExpr/C-Blosc2,
 cut `NativeGraph` over to `_executor="auto"` by default (preferring `"c-blosc2"` with
@@ -604,18 +813,63 @@ logs and timing results remain outside the repositories.
 
 ## Remaining increments
 
-- **M7 stages:** integrate the native reduction-to-map slice into the explicit
-  Python facade; extend planning/lifetimes/budgets to multiple and nested stages,
-  masks and imported bindings, with compressed/source capability gates and
-  staged diagnostics without an interchange tree.
-- **M5 reduction performance:** qualify the bounded chunk LRU in Release builds
-  across ARM64/x86-64, larger/differing working sets, multiple inputs and worker
-  counts; tune the eight-slot cap only with explicit budget/traffic evidence.
-- **M4 remainder:** broader backend/platform qualification (including Windows/WASM
-  parallel dispatch and FP qualification), non-default accuracy, and richer
-  control-flow/math/value-dependent conversion proofs.
-- **M8 remainder:** default wrapper dispatch and retirement of the specialized
-  int64 pilots once every migrated route has its gate.
+### Development and qualification
 
-Each needs its own differential, failure-injection and cross-platform work; none
-is implied by the current checkpoint.
+- **Keep combined-tree regression current:** review 5 requalifies both shared-core
+  wheel variants, the ordinary non-opt-in compatibility selection, installed C
+  consumers and native owner sanitizer fixtures after the V5 FP-policy changes.
+  Further code changes should rerun the affected configurations; older counts
+  below remain historical rather than substitutes for these latest results.
+- **Cross-platform M4–M8 gates:** x86-64 Release confirmation and live Windows/WASM
+  execution remain. Check compiler/backend availability, FP flags and unsupported
+  raise masks, alignment, concurrency, and the documented Windows serial path.
+  HIGH/MEDIUM and strict/contract/fast policy plumbing is implemented locally;
+  remaining work is broader qualification, not another initial implementation.
+- **M5 performance matrix:** extend the completed ARM64 Release measurements to
+  x86-64 and larger/differing working sets, multiple compressed inputs and worker
+  counts. Preserve ordered reduction leaves and explicit scratch/decode budgets;
+  investigate repeatable production-path regressions above the plan's threshold.
+- **M8 cleanup audit:** verify that normal callers no longer enter superseded
+  Python scheduling loops or specialized int64 pilots, then remove obsolete
+  Blosc2-specific wiring where compatibility permits. Default `auto` dispatch,
+  core Menudet ownership, direct-handle compatibility, resident masks/explicit
+  accumulators, compiler environment selection and Python canonical interchange
+  are implemented; they are no longer outstanding implementation increments.
+
+### Capability extensions — not prerequisites unless a supported route needs them
+
+- **M7 storage/parallel stages:** compressed and parallel staged execution remain
+  unimplemented. General multi-stage Python integration, nested reductions,
+  intermediate lifetimes/budgets, imported bindings and stage/node diagnostics
+  are already present. Automatic conditional/masked multi-stage domains and
+  reader-backed masks remain explicitly rejected before numerical reads.
+- **Additional partition proofs:** extend conservative control-flow/conversion
+  proofs only where needed. Straight-line numeric maps and bounded floating
+  loop/control-flow programs already have proofs. Non-strict FP kernels remain
+  conservatively non-partitionable; TCC remains strict-only. Changing those
+  restrictions is separate from forwarding a supported FP preparation policy.
+- **Cache tuning:** changing the existing eight-chunk/four-block LRU caps is an
+  optional optimization requiring budget and decode-traffic evidence, not missing
+  initial cache implementation.
+
+### Deferred release preparation
+
+- Select exact dependency revisions containing the qualified changes, advance
+  pins only when those revisions are available, and rebuild without local source
+  overrides. Existing pins do not yet describe the current working trees.
+- After the migration plan's installation, compatibility and cross-platform
+  performance gates pass, separately decide the standard non-experimental
+  artifact-off default switch and final release cleanup. No release, publication,
+  dependency-pin advancement or production-default change is currently requested.
+
+## Implementation included in this checkpoint
+
+These changes comprise the migration implementation, rather than an additional
+list of unimplemented features:
+
+| Repository | What the checkpoint changes do |
+| --- | --- |
+| MiniExpr | Add core metadata and AUTO preparation support; retain pre-conversion inferred dtype; expose append-only V5 FP/ULP preferences; share the bounded floating partition proof between core and adapter; add native API/prefix/policy tests. The large deletion in `dsl_artifact.c` moves the proof into `dsl_partition_internal.h`, rather than removing that behavior. |
+| C-Blosc2 | Add borrowed-kernel resident masks and accumulator conversion tiles with truthful scratch accounting; perform sparse participation reads and preflight mask rejection; forward typed FP/ULP policy through graph preparation; report effective core policy; extend installed-consumer tests. |
+| Python-Blosc2 | Decouple Menudet preparation/prefilters from the native artifact library; add Python-owned v1 manifest validation; support optional artifact-off builds and early native API guards; complete typed dispatch/direct-handle/error/ownership parity; carry FP policy through preparation, caches and interchange; add isolated-wheel and v1 differential runners and separate adapter-only tests. |
+| Migration documentation | Record the migration plan and reviews, implemented behavior, configuration-specific test results, remaining qualification and deferred release work. Unrelated planning documents remain outside this checkpoint. |
