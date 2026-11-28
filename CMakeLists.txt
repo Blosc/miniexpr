@@ -228,20 +228,19 @@ option(MINIEXPR_INSTALL_CORE "Install the core libraries, headers and CMake pack
 if(MINIEXPR_INSTALL_CORE)
   foreach(_miniexpr_install_target miniexpr miniexpr_static)
     if(TARGET ${_miniexpr_install_target})
-      if(NOT EMSCRIPTEN)
-        install(TARGETS ${_miniexpr_install_target}
-          EXPORT miniexprTargets
-          ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-          LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-          RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-      else()
-        install(TARGETS ${_miniexpr_install_target}
-          ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-          LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-          RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-      endif()
+      install(TARGETS ${_miniexpr_install_target}
+        EXPORT miniexprTargets
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
     endif()
   endforeach()
+  # Installed Emscripten static consumers need the same transitive target graph
+  # as native consumers, including the optional wasm32 compiler archive.
+  if(TARGET miniexpr_wasm_libtcc)
+    install(TARGETS miniexpr_wasm_libtcc EXPORT miniexprTargets
+      ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+  endif()
   install(FILES src/miniexpr.h src/miniexpr_types.h src/miniexpr_kernel.h src/miniexpr_grid.h src/miniexpr_reduce.h
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 endif()
@@ -273,18 +272,11 @@ if(MINIEXPR_BUILD_ARTIFACT)
     DESTINATION "${CMAKE_INSTALL_DATADIR}/miniexpr/licenses" RENAME LICENSE-YYJSON)
   # Standalone distribution only: embedding hosts own their install layout.
   if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR AND MINIEXPR_INSTALL_CORE)
-    if(NOT EMSCRIPTEN)
-      install(TARGETS miniexpr_artifact
-        EXPORT miniexprTargets
-        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-    else()
-      install(TARGETS miniexpr_artifact
-        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-    endif()
+    install(TARGETS miniexpr_artifact
+      EXPORT miniexprTargets
+      ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+      LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+      RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
     install(FILES src/miniexpr_artifact.h src/miniexpr_graph.h
       DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
     install(FILES doc/native-graph-1.schema.json doc/native-staged-graph-1.schema.json
@@ -293,7 +285,7 @@ if(MINIEXPR_BUILD_ARTIFACT)
   endif()
 endif()
 
-if(MINIEXPR_INSTALL_CORE AND NOT EMSCRIPTEN AND MINIEXPR_DEFAULT_LIB)
+if(MINIEXPR_INSTALL_CORE AND MINIEXPR_DEFAULT_LIB)
   install(EXPORT miniexprTargets
     FILE miniexprTargets.cmake
     NAMESPACE miniexpr::

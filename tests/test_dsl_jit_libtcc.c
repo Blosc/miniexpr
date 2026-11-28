@@ -6,6 +6,12 @@
 #include <string.h>
 #include "../src/dsl_jit_runtime_internal.h"
 
+/* TCC-generated functions do not carry Clang's UBSan function-type prefix.
+ * Checking that prefix before this deliberate raw JIT call can read unmapped
+ * memory; retain ASan and the other undefined-behavior checks. */
+#if defined(__clang__)
+__attribute__((no_sanitize("function")))
+#endif
 int main(void) {
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
     me_dsl_compiled_program program;

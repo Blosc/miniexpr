@@ -199,8 +199,124 @@ typedef struct {
     int cap;
 } me_sincos_cache_f32;
 
-static ME_THREAD_LOCAL me_sincos_cache_f64 me_sincos_cache_dp = {0};
-static ME_THREAD_LOCAL me_sincos_cache_f32 me_sincos_cache_sp = {0};
+typedef struct {
+    me_sincos_cache_f64 dp;
+    me_sincos_cache_f32 sp;
+} me_sincos_thread_cache;
+
+/* Keep the fast TLS lookup, but register owned buffers for thread-exit cleanup.
+ * Plain compiler TLS does not run a destructor for heap allocations. */
+#if !defined(__EMSCRIPTEN__)
+static ME_THREAD_LOCAL me_sincos_thread_cache *me_sincos_cache;
+
+static void me_sincos_cache_free(void *value) {
+    me_sincos_thread_cache *cache = value;
+    if (cache) {
+        free(cache->dp.sin_buf);
+        free(cache->dp.cos_buf);
+        free(cache->sp.sin_buf);
+        free(cache->sp.cos_buf);
+        free(cache);
+    }
+}
+
+#if defined(_WIN32)
+#include <windows.h>
+static DWORD me_sincos_key = FLS_OUT_OF_INDEXES;
+static INIT_ONCE me_sincos_once = INIT_ONCE_STATIC_INIT;
+
+static void WINAPI me_sincos_cache_release(PVOID value) {
+    me_sincos_cache_free(value);
+}
+
+static void me_sincos_cache_exit(void) {
+    if (me_sincos_key != FLS_OUT_OF_INDEXES) {
+        FlsFree(me_sincos_key);
+        me_sincos_key = FLS_OUT_OF_INDEXES;
+        me_sincos_cache = NULL;
+    }
+}
+
+static BOOL CALLBACK me_sincos_cache_init(PINIT_ONCE once, PVOID param, PVOID *ctx) {
+    (void)once;
+    (void)param;
+    (void)ctx;
+    me_sincos_key = FlsAlloc(me_sincos_cache_release);
+    if (me_sincos_key != FLS_OUT_OF_INDEXES) {
+        atexit(me_sincos_cache_exit);
+    }
+    return TRUE;
+}
+#else
+#include <pthread.h>
+static pthread_key_t me_sincos_key;
+static pthread_once_t me_sincos_once = PTHREAD_ONCE_INIT;
+static int me_sincos_key_ready;
+
+static void me_sincos_cache_exit(void) {
+    if (me_sincos_key_ready) {
+        void *value = pthread_getspecific(me_sincos_key);
+        pthread_setspecific(me_sincos_key, NULL);
+        me_sincos_cache_free(value);
+        pthread_key_delete(me_sincos_key);
+        me_sincos_key_ready = 0;
+        me_sincos_cache = NULL;
+    }
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+static __attribute__((destructor)) void me_sincos_cache_fini(void) {
+    me_sincos_cache_exit();
+}
+#endif
+
+static void me_sincos_cache_init(void) {
+    me_sincos_key_ready = pthread_key_create(&me_sincos_key, me_sincos_cache_free) == 0;
+#if !defined(__GNUC__) && !defined(__clang__)
+    if (me_sincos_key_ready) {
+        atexit(me_sincos_cache_exit);
+    }
+#endif
+}
+#endif
+
+static me_sincos_thread_cache *me_sincos_cache_get(void) {
+    if (me_sincos_cache) {
+        return me_sincos_cache;
+    }
+#if defined(_WIN32)
+    InitOnceExecuteOnce(&me_sincos_once, me_sincos_cache_init, NULL, NULL);
+    if (me_sincos_key == FLS_OUT_OF_INDEXES) {
+        return NULL;
+    }
+#else
+    pthread_once(&me_sincos_once, me_sincos_cache_init);
+    if (!me_sincos_key_ready) {
+        return NULL;
+    }
+#endif
+    me_sincos_thread_cache *cache = calloc(1, sizeof(*cache));
+    if (!cache) {
+        return NULL;
+    }
+#if defined(_WIN32)
+    bool registered = FlsSetValue(me_sincos_key, cache) != 0;
+#else
+    bool registered = pthread_setspecific(me_sincos_key, cache) == 0;
+#endif
+    if (!registered) {
+        free(cache);
+        return NULL;
+    }
+    me_sincos_cache = cache;
+    return cache;
+}
+#else
+static me_sincos_thread_cache *me_sincos_cache_get(void) {
+    static ME_THREAD_LOCAL me_sincos_thread_cache cache;
+    return &cache;
+}
+#endif
 
 static int me_simd_use_u35_active(void) {
     if (me_simd_use_u35_override >= 0) {
@@ -4023,7 +4139,12 @@ void vec_sin_cached(const double* a, double* out, int n) {
         return;
     }
     me_init_simd();
-    me_sincos_cache_f64 *cache = &me_sincos_cache_dp;
+    me_sincos_thread_cache *owner = me_sincos_cache_get();
+    if (!owner) {
+        vec_sin_scalar(a, out, n);
+        return;
+    }
+    me_sincos_cache_f64 *cache = &owner->dp;
     if (cache->cookie != me_eval_cookie || cache->key != a || cache->nitems != n) {
         if (cache->cap < n) {
             int new_cap = n;
@@ -4058,7 +4179,12 @@ void vec_cos_cached(const double* a, double* out, int n) {
         return;
     }
     me_init_simd();
-    me_sincos_cache_f64 *cache = &me_sincos_cache_dp;
+    me_sincos_thread_cache *owner = me_sincos_cache_get();
+    if (!owner) {
+        vec_cos_scalar(a, out, n);
+        return;
+    }
+    me_sincos_cache_f64 *cache = &owner->dp;
     if (cache->cookie != me_eval_cookie || cache->key != a || cache->nitems != n) {
         if (cache->cap < n) {
             int new_cap = n;
@@ -4093,7 +4219,12 @@ void vec_sin_f32_cached(const float* a, float* out, int n) {
         return;
     }
     me_init_simd();
-    me_sincos_cache_f32 *cache = &me_sincos_cache_sp;
+    me_sincos_thread_cache *owner = me_sincos_cache_get();
+    if (!owner) {
+        vec_sin_f32_scalar(a, out, n);
+        return;
+    }
+    me_sincos_cache_f32 *cache = &owner->sp;
     if (cache->cookie != me_eval_cookie || cache->key != a || cache->nitems != n) {
         if (cache->cap < n) {
             int new_cap = n;
@@ -4128,7 +4259,12 @@ void vec_cos_f32_cached(const float* a, float* out, int n) {
         return;
     }
     me_init_simd();
-    me_sincos_cache_f32 *cache = &me_sincos_cache_sp;
+    me_sincos_thread_cache *owner = me_sincos_cache_get();
+    if (!owner) {
+        vec_cos_f32_scalar(a, out, n);
+        return;
+    }
+    me_sincos_cache_f32 *cache = &owner->sp;
     if (cache->cookie != me_eval_cookie || cache->key != a || cache->nitems != n) {
         if (cache->cap < n) {
             int new_cap = n;

@@ -35,6 +35,7 @@ static void check_runtime_status(bool reserved_input) {
     if (reserved_input) {
         /* Force the buffered JIT path: reserved input is not synthesized in JIT. */
         program->jit_nparams = 1;
+        free(program->jit_param_bindings);
         program->jit_param_bindings = calloc(1, sizeof(*program->jit_param_bindings));
         assert(program->jit_param_bindings);
         program->jit_param_bindings[0].kind = ME_DSL_JIT_BIND_RESERVED_I;
