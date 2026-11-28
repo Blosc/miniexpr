@@ -99,9 +99,17 @@ Warnings remain visible in CI logs, including existing codec/Cython diagnostics,
 WASM platform/compiler-option warnings, and an unused POSIX generic-pool wrapper
 in the WASM build. Passing CI is not a warning-free-build claim.
 
-The optional Linux x86-64 shared-runner performance diagnostic was dispatched as
-[46153143461](https://github.com/Blosc/python-blosc2/actions/runs/46153143461);
-its results remain pending and cannot close the stable-hardware gate.
+The optional Linux x86-64 shared-runner performance diagnostic
+[46153143461](https://github.com/Blosc/python-blosc2/actions/runs/46153143461)
+completed successfully, including the repeated correctness matrix and performance
+job. Its four-round interleaved results flag compressed `min(x + 1)` at `1.47x`
+reference time; the other four representative cases are within the 5% threshold
+or faster (`1.03x` resident map, `0.97x` resident min, `0.79x` compressed map,
+`0.99x` compressed sink). The ordered compressed-sum cache probe reaches `1.00x`
+decode amplification (`64` decodes for `64` chunks) with its eight-slot budget.
+These are diagnostic observations, not stable-hardware performance acceptance.
+The CI qualification implementation and its execution are complete; performance
+acceptance, ABI freeze and M9's release/default changes remain open.
 The interleaved performance runner completes locally against rebuilt isolated
 candidate/reference wheels. Four rounds on macOS ARM64 reproduce a roughly 27%
 slowdown for compressed `min(x + 1)` with four workers; one/eight-worker probes
