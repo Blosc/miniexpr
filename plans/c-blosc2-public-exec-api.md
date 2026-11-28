@@ -1,6 +1,6 @@
 # C-Blosc2 Public Compute API Plan (`include/b2nd_exec.h`)
 
-**Status:** Design agreed; M8 ordinary-caller handoffs and pilot retirement are complete, and C1–C3 are now included in M9's pre-CI rollout (with C4 / ABI freeze gated on cross-platform CI) per [`plans/execution-plan-migration.md`](execution-plan-migration.md).
+**Status:** C1–C3 implemented and locally qualified on macOS ARM64 (`c-blosc2` + `python-blosc2`); C4 / cross-platform CI remains open before ABI freeze per [`plans/execution-plan-migration.md`](execution-plan-migration.md) and [`plans/execution-migration-status.md`](execution-migration-status.md).
 
 **Goal:** Expose a minimal, ABI-stable, public C-Blosc2 array compute interface (`include/b2nd_exec.h`, plus optional `include/b2nd_exec_kernel.h`) over the existing internal executor (`blosc/b2nd-exec*.c`), usable directly by pure-C/FFI applications and as the sole backend for `python-blosc2`—replacing direct inclusion of private `blosc/b2nd-exec*.h` headers.
 
