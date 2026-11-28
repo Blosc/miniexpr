@@ -503,6 +503,14 @@ qualification configuration, not as an invisible runtime fallback.
   metadata; exercise real maps, grouped arrays and staged graphs.
 - Qualify the installed static C consumer and compression-only C-Blosc2 without
   miniexpr as separate configurations.
+- Include the C-Blosc2 public compute API rollout ([`plans/c-blosc2-public-exec-api.md`](c-blosc2-public-exec-api.md)):
+  implement C1–C3 (public `include/b2nd_exec.h`, optional `include/b2nd_exec_kernel.h`,
+  compression-only stubs, unified refcounted facade + `b2nd_eval`/`b2nd_eval_into`,
+  and `python-blosc2` cutover off private `blosc/b2nd-exec*.h` onto installed public
+  headers) ahead of cross-platform CI qualification and the M9 default switch, so
+  x86-64/Windows/WASM CI qualifies the final installed-header packaging and
+  `BLOSC_EXPORT` ABI in one pass; keep C4 (public ABI freeze) gated on cross-platform
+  CI alongside M9's final dependency pinning and default cutover.
 - Run the correctness/performance matrix below on ARM64 and x86-64.
 - Switch defaults only after those gates pass. Remove superseded Blosc2 wiring
   and pilot-specific APIs, while preserving independently supported miniexpr
@@ -614,6 +622,8 @@ grouping, reduction ordering or backend policy for a timing improvement.
    retirement and wrapper gaps explicitly. Non-default accuracy, richer kernel
    proofs and Windows/WASM qualification remain M4/platform work; they do not
    prevent testing the restricted serial M5 family.
+5. Roll out [`plans/c-blosc2-public-exec-api.md`](c-blosc2-public-exec-api.md)
+   (C1–C3 before cross-platform CI; C4 ABI freeze and M9 default switch on CI).
 
 The migration is complete only when M9 passes. A specialized plan, a successful
 native artifact-off fixture, or a fast microbenchmark alone is not completion.
