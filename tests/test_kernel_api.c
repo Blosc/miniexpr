@@ -529,7 +529,7 @@ static void scalar_and_errors(void) {
     me_kernel_free(kernel);
 }
 
-#ifdef __EMSCRIPTEN__
+#if ME_USE_WASM32_JIT
 static int forbidden_jit(const void **inputs, void *output, int count) {
 #else
 static int forbidden_jit(const void **inputs, void *output, int64_t count) {
@@ -640,8 +640,23 @@ static void execution_options(bool require_jit, bool tcc) {
         "        return block_sum(x)\n"
         "    return block_sum(x)\n", tcc ? "tcc" : "cc");
     options.execution = require_jit ? ME_EXEC_REQUIRE_JIT : ME_EXEC_PREFER_JIT;
-    assert(me_prepare_menudet("0.2", source, &sig, &options, &kernel, &error) == ME_SUCCESS);
+#ifdef __EMSCRIPTEN__
+    /* wasm32 deliberately interprets block reductions, unlike elementwise JIT
+     * above. Required JIT must reject this family rather than silently fall back. */
+    if (require_jit) {
+        assert(me_prepare_menudet("0.2", source, &sig, &options, &kernel, &error) == ME_ERR_UNSUPPORTED);
+        assert(!kernel);
+    }
+    options.execution = ME_EXEC_PREFER_JIT;
+#endif
+    rc = me_prepare_menudet("0.2", source, &sig, &options, &kernel, &error);
+    if (rc) fprintf(stderr, "empty block preparation failed: %s\n", error.message);
+    assert(rc == ME_SUCCESS);
+#ifndef __EMSCRIPTEN__
     assert(!require_jit || me_kernel_has_jit(kernel));
+#else
+    assert(!me_kernel_has_jit(kernel));
+#endif
     block.nitems = 0;
     block.valid_mask = NULL;
     block.valid_mask_capacity = 0;

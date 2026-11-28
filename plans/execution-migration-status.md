@@ -18,10 +18,50 @@ is deferred; local source overrides remain the development configuration.
 | M5 | Compressed storage execution (`b2nd_exec_execute_arrays` / `_ex`, `b2nd_exec_execute_to_array`): binds in-memory and frame-backed (`cframe` `contiguous=True` and `urlpath` on-disk, without mutating `current_nchunk`) chunked arrays across native numeric dtypes (`bool`, `int8..64`, `uint8..64`, `float32`, `float64`), right-aligned N-D broadcasting, partial-axis reductions (`axis`, `keepdims`, `initial`, `pairwise_sum`, parallel extrema, `argmin`/`argmax`, `var`/`std` with `ddof`), mixed compressed + resident inputs, and parallel partitionable jobs over the persistent shared pool with bounded 8-slot chunk LRU decode cache, `max_decode_bytes` task clamping, contiguous inner-block run copies in `storage_read`, and empty `0`-item / `chunkshape=0` storage validation; direct elementwise compressed sinks (`out` = `b2nd_array_t` / `NDArray`) evaluate blocks inside Blosc2's compression prefilter with matched-layout zero-copy block reads (`blosc2_getitem_ctx`, `gather_bytes=0`), 4-slot LRU block cache for mismatched/broadcast compressed inputs, resident box gathering, and padded live compaction without mutating output before validation. Explicit Python `NativeGraph(..., _executor="c-blosc2")` lowers `argmin`/`argmax`/`var`/`std` (`ddof`), executes resident/compressed/frame-backed inputs and sinks with the GIL released; Release ARM64 sweep confirms `1.00x` chunk decode amplification and 22x–60x speedups over Python adapter sources; no Python source/sink reads or whole-array operand materialization | Cross-platform Windows/WASM performance/FP qualification and x86-64 Release confirmation remain |
 | M6 | Metadata-only generic source/sink callbacks (`b2nd_exec_execute_sources`), GIL-safe Cython trampolines, bounded index/gather/output buffers, and explicit persisted logical partitions (`b2nd_exec_prepare_borrowed_kernel`, `b2nd_exec_specialize_partitions`, `b2nd_exec_execute_partitions`) with `MenudetLazyArray` / `MenudetArtifactHandle.evaluate_array` & `evaluate_sources` handoff across real, complex, fixed-width string, block-scalar, 2-D context, 0-D scalar, and generator kernels | Cross-platform Windows/WASM qualification and M9 adapter retirement remain |
 | M7 | General multi-stage typed graph planner and executor (`b2nd-exec-stages.h`/`.c`, up to `B2ND_EXEC_MAX_STAGES` = 32): direct node/slot remapping without child serialization; automatic region splitting at reductions and strong-dependent shared computed nodes; explicit `b2nd_exec_staged_assemble`/`_ex` composition (including authored Menudet kernels and single-stage resident masked reductions); inferred intermediate dtypes, casts, `initial`, `keepdims`, unary/binary/bitwise/comparison/`select`/`and`/`or`/`pos`/`function` ops; specialization-time intermediate sizing, `last_consumer` analysis, and upfront budget rejection before source reads; invocation-local last-consumer intermediate freeing; stage/node diagnostics across prepare, assemble, specialize, and execute (`b2nd_exec_stage_diagnostic`); `AND`-combined `has_jit` and `fp_observed` support; explicit compressed-stage, automatic conditional/masked multi-stage, shared scalar-only, and reader-backed mask rejections before reads; arbitrary non-contiguous / F-order staged `out=` views via `b2nd_exec_staged_execute_sources_into`; Python-owned canonical JSON (`to_json()`/`map_json()`) and stage import (`typed_stage_import.py`, `b2nd_exec_stages_bridge.h`) without consulting the native artifact/interchange parser | Compressed/parallel staged execution and cross-platform Windows/WASM qualification remain |
-| M8 | Default wrapper cutover, core Menudet ownership, Python-owned v1 import, compiler environment selection, resident masks/explicit accumulators, sparse participation reads, artifact-off direct `NativeGraphHandle` compatibility, comparison-only adapter gating, and typed HIGH/MEDIUM plus strict/contract/fast FP preparation locally qualified | x86-64/Windows/WASM qualification remains; production default changes belong to M9 |
-| M9 | Clean Release artifact-off candidate built/installed in isolation; original v1 and 4.17.0 v2 exchange fixtures execute; one core archive/provider, no native JSON/adapter symbols/downloads; installed C consumers `6/6`; independent compression-only C-Blosc2 `1688/1688`; stub/core-only syntax checks pass | Exact published dependency pins, cross-platform Release/performance gates, standard non-experimental artifact-off default cutover, and final superseded-wiring removal remain |
+| M8 | Ordinary caller handoff (resident & large compressed `LazyExpr`, `_ConfiguredResidentSchedule`, authored `MenudetLazyArray` lane-local maps + `_cblosc2_partition_values`), explicit NativeGraph default dispatch, core Menudet ownership, Python-owned v1 import, compiler environment selection, resident masks/explicit accumulators, sparse participation reads, artifact-off direct `NativeGraphHandle` compatibility, comparison-only adapter gating, typed HIGH/MEDIUM plus strict/contract/fast FP preparation, and coordinated pilot & pilot-only native build retirement locally qualified | x86-64/Windows/WASM qualification remains; production build-default changes belong to M9 |
+| M9 | Clean Release artifact-off candidate built/installed in isolation; original v1 and 4.17.0 v2 exchange fixtures execute; one core archive/provider, no native JSON/adapter/pilot symbols or downloads; installed C consumers `5/5` + superbuild `1/1`; independent compression-only C-Blosc2 `1681/1681`; stub/core-only syntax checks pass | Exact published dependency pins, cross-platform Release/performance gates, standard non-experimental artifact-off default cutover, and non-opt-in compatibility helper removal remain |
 
-## Latest qualification: review 5 follow-ups (2026-11-28)
+## Latest qualification: ordinary-caller handoff & pilot retirement (2026-11-28)
+
+- **Ordinary-caller handoffs (`python-blosc2`):**
+  - `compute_native_graph` routes admitted typed plans directly to C-owned whole-domain schedules (`TypedGraphSchedule.execute` / `execute_arrays` / staged execution) with metadata-only admission via shared `resident_execution.typed_storage_inputs_eligible`, keeping compatibility readers for postfiltered, non-native-endian, and plugin codec/filter (`codec > ZSTD`, `filter > DELTA`) inputs.
+  - `MenudetArtifactHandle.typed_plan()` and `resident_execution.prepare_kernel_schedule()` borrow compiled lane-local numeric kernels without recompiling compiler/FP policy, serving both `_ConfiguredResidentSchedule.execute` (checked after `self.partitionable`) and whole-domain `MenudetLazyArray._values` ahead of `_cblosc2_partition_values` and compatibility fallbacks.
+  - Ownership-guard tests (`tests/test_execution_cleanup.py`) forbid Python pool submission (`resident_pool`, `run_dynamic`), `_parallel_*`, `_execute_resident_kernel`, `_prefilter_compressed_map`, and `evaluate_prefilter_numpy` on admitted typed routes; existing route/failure-injection assertions in `test_resident_prefilter.py`, `test_lazyexpr_output_dispatch.py`, `test_lazyexpr_resident.py`, `test_native_first.py`, and `test_storage_readers.py` are ported while preserving non-opt-in compatibility coverage.
+- **Native fixes (`c-blosc2`):**
+  - `blosc/b2nd-exec.c`: `plan->owns_kernel = true` is set immediately upon `me_prepare_menudet` success so post-prepare validation failures do not leak the kernel.
+  - `blosc/b2nd-exec-storage.c`: an explicit `jobs->max_worker_scratch == 0` cap rejects scratch-requiring execution before decoding or sink writes instead of acting as unlimited.
+  - `tests/installed-miniexpr/exec-plan.c` adds `#undef NDEBUG` so `assert(...)` checks execute under Release builds (including `superbuild`).
+- **Coordinated single-case pilot & pilot-only native build retirement:**
+  - Removed C-Blosc2 internal `blosc/b2nd-kernel.{h,c}`, `tests/installed-miniexpr/kernel-grid.c`, and their CMake entries (replacing `parent_kernel_grid` with `parent_exec_plan`); ported `int64` overflow wrap-before-min and 1-D logical partition `{7}/{3}` `block_sum` `{6, 15, 7}` + exact budget-1 rejection into `exec-plan.c` and `exec-storage.c`.
+  - Removed Python-Blosc2 `src/blosc2/b2nd_kernel_pilot.h`, `B2_HAVE_B2ND_KERNEL_PILOT`, pilot-only `CMakeLists.txt` fallback (now requiring `b2nd-exec.h` whenever `B2_EXPERIMENTAL_SHARED_MINIEXPR_CORE=ON`), `_ResidentMinI64Plan`, `_ResidentMapMinI64Plan`, `_evaluate_b2nd_kernel_pilot`, `_scalar_pilot_values`, `compute_c_blosc2_min_if_eligible`, `bench/resident_min_pilot.py`, and `tests/test_b2nd_kernel_pilot.py` (porting persisted-partition, multi-group FP status, and empty-domain contracts to `tests/test_execution_cleanup.py` and converting `test_native_graph_preparation.py` + `test_b2nd_exec_m8.py`).
+
+Combined-tree local qualification (macOS ARM64, isolated `-S` wheel imports):
+
+| Configuration | Result |
+| --- | --- |
+| Artifact-off shared-core wheel (`qualify_execution_migration.py`) | `1765 passed, 83 skipped, 584 deselected` |
+| Artifact-off shared-core wheel (`test_execution_cleanup.py`, `test_resident_prefilter.py`) | `36 passed, 2 skipped` |
+| Artifact-on shared-core wheel (`qualify_execution_migration.py`) | `1804 passed, 44 skipped, 584 deselected` |
+| Artifact-on shared-core wheel (`test_execution_cleanup.py`, `test_resident_prefilter.py`) | `38 passed` |
+| Standard non-opt-in wheel (`qualify_execution_platform.py` selection / 13-file ported compatibility selection) | `262 passed, 23 skipped` / `642 passed, 24 skipped` |
+| MiniExpr artifact-off / artifact-on C suites | `343/343` / `470/470` |
+| Installed artifact-off C consumers / superbuild `parent_exec_plan` | `5/5` / `1/1` |
+| Native executor / storage / stages ASan+UBSan fixtures | `5/5` / `2/2` / `2/2` |
+| Standalone compression-only C-Blosc2 (no MiniExpr) | `1681/1681` |
+
+`nm` symbol audit on the artifact-off extension (`blosc2_ext.abi3.so`) confirms `0` `yyjson_*`, `me_artifact_*`, `me_graph_*`, `b2nd_min_i64*`, `b2nd_map_min_i64*`, `b2nd_eval_kernel_grid`, and `b2nd_eval_kernel_partitions_1d` symbols.
+Ruff lint/format checks and C syntax checks (`cc -std=c99 -Wall -Wextra -Wno-unused-function -Werror -fsyntax-only` on `dsl_artifact_bridge.h`, `b2nd_exec_bridge.h`, and `b2nd_exec_stages_bridge.h` in stub and core-only modes) pass cleanly.
+
+Release macOS ARM64 `bench/execution_handoff.py` (`16,000,019` float64 items, `workers=8`, JIT, artifact-off typed wheel vs standard non-opt-in wheel):
+
+| Case | Artifact-off typed (`route`, `tasks`, `warmed_ms`) | Standard non-opt-in (`route`, `tasks`, `warmed_ms`) |
+| --- | --- | --- |
+| Resident `x + 1` | `c-blosc2-typed-resident`, `tasks=8`, `5.217 ms` | `parallel-resident`, `tasks=8`, `5.015 ms` |
+| Resident `min(x + 1)` | `c-blosc2-typed-resident`, `tasks=8`, `3.364 ms` | `parallel-resident-reduction`, `tasks=1`, `3.450 ms` |
+| Compressed `x + 1` | `c-blosc2-typed-storage`, `tasks=8`, `9.493 ms` | `menudet-prefilter`, `tasks=8`, `37.474 ms` (`3.95x` speedup) |
+| Compressed `min(x + 1)` | `c-blosc2-typed-storage`, `tasks=8`, `7.377 ms` | `parallel-graph-bounded-readers`, `tasks=8`, `7.122 ms` |
+
+## Earlier qualification: review 5 follow-ups (2026-11-28)
 
 - Math backend environment selection now overrides compute options, matching
   compiler selection and Menudet execution snapshots. Environment-only `auto`
@@ -815,6 +855,22 @@ logs and timing results remain outside the repositories.
 
 ### Development and qualification
 
+- **Qualification scheduling:** full emulated Linux x86-64 qualification was
+  intentionally aborted at the user's request; the QEMU VM is stopped and its
+  partial logs/build state are retained. Do not treat partial passes as a closed
+  x86-64 gate or restart the full matrix before a separate decision to resume it.
+  Prioritize the ordinary-caller handoffs in the cleanup audit first.
+  The long-running WASM `exec-plan` diagnostic was also intentionally stopped;
+  its logs are preserved and the WASM executor gate remains open. The completed
+  MiniExpr WASM core runs (`98/98` with JIT, `68/68` artifact-off without JIT)
+  do not establish full C-Blosc2/Python WASM migration qualification.
+  Full emulated x86-64 and WASM matrices are not practical default workloads on
+  this ARM64 development box. Prefer bounded, timeout-protected local probes;
+  use native x86-64 hardware and a dedicated WASM test setup for full gates.
+  Linux ARM64 is a practical routine local qualification target: the
+  hardware-virtualized Lima guest completed core, wheel, installed-consumer,
+  sanitizer and compression-only checks, including the affected reruns after
+  fixes. Keep that evidence distinct from macOS ARM64 and performance gates.
 - **Keep combined-tree regression current:** review 5 requalifies both shared-core
   wheel variants, the ordinary non-opt-in compatibility selection, installed C
   consumers and native owner sanitizer fixtures after the V5 FP-policy changes.
@@ -829,12 +885,13 @@ logs and timing results remain outside the repositories.
   x86-64 and larger/differing working sets, multiple compressed inputs and worker
   counts. Preserve ordered reduction leaves and explicit scratch/decode budgets;
   investigate repeatable production-path regressions above the plan's threshold.
-- **M8 cleanup audit:** verify that normal callers no longer enter superseded
-  Python scheduling loops or specialized int64 pilots, then remove obsolete
-  Blosc2-specific wiring where compatibility permits. Default `auto` dispatch,
-  core Menudet ownership, direct-handle compatibility, resident masks/explicit
-  accumulators, compiler environment selection and Python canonical interchange
-  are implemented; they are no longer outstanding implementation increments.
+- **M8 ordinary-call-site handoff and cleanup:** the
+  [cleanup audit](execution-migration-cleanup-audit.md) handoffs and coordinated
+  pilot + pilot-only native build retirements are now complete locally with
+  ownership guards (`tests/test_execution_cleanup.py`) and ARM64 Release handoff
+  benchmarks (`bench/execution_handoff.py`). Non-opt-in standard/comparison
+  compatibility routes remain intact until M9 switches the production build
+  default.
 
 ### Capability extensions — not prerequisites unless a supported route needs them
 

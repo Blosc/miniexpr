@@ -520,6 +520,25 @@ in M2–M3. In particular, verify unavailable FP reporting and raise-mask reject
 where the core cannot observe flags. These checks supplement the later
 ARM64/x86-64 performance and wheel gates.
 
+**Local qualification lesson:** the current ARM64 macOS development box is not
+practical for the full emulated x86-64 or WASM migration matrices: QEMU runs
+became prohibitively slow, and a WASM executor diagnostic remained running for
+roughly 48 minutes before being stopped. Use this box for native ARM64 Linux
+qualification and bounded, targeted x86-64/WASM smoke or reproducer tests with
+explicit timeouts. Run full x86-64 qualification/performance on native x86-64
+hardware and the full WASM matrix in a dedicated, resource-bounded test setup
+(local, remote or CI). Completed targeted WASM core tests remain useful evidence;
+neither interrupted runs nor emulated timings close the platform/performance
+gates. Resume full matrices only by explicit decision, not as a default local
+regression step.
+
+Linux ARM64 qualification is practical on this same box: Lima's ARM64 guest uses
+Apple's hardware virtualization rather than cross-architecture emulation. The
+local core, wheel, installed-consumer, sanitizer and compression-only checks ran
+successfully, including reruns after fixing issues they exposed. Keep this as a
+routine local Linux correctness/packaging gate. Record it separately from macOS
+ARM64 results; VM timings do not substitute for the production performance matrix.
+
 - **miniexpr:** numerical semantics, typed capture/cast behavior, kernel backend
   parity, FP behavior and shared reduction primitive tests.
 - **C-Blosc2:** descriptors, ownership, shapes, scheduling, callbacks, storage
