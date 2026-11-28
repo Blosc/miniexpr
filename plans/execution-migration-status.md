@@ -153,11 +153,30 @@ An attempted ordinary-caller one-worker sweep stops because that route supplies
 no `_native_execution_report`; it is not a passing typed-route comparison.
 The revised native commit is published and pinned by Python-Blosc2 `985f224f`
 alongside unchanged MiniExpr `adfbdf4752fec9a6a59ab71461e824de36ea239d`.
-[46158208829](https://github.com/Blosc/python-blosc2/actions/runs/46158208829)
-is the pending full-matrix requalification with Linux x86-64 interleaved Release
-performance enabled; it does not yet supersede the passing matrix above.
-Cross-platform requalification and stable-hardware performance acceptance remain
-open. Production defaults and shipping pins are unchanged.
+[46158208829](https://github.com/Blosc/python-blosc2/actions/runs/46158208829),
+at Python `985f224fbc678dc941b77c3f35ae9ebf005053a7`, passed all 16 jobs:
+the 15-job correctness/C4 matrix plus the Linux x86-64 performance diagnostic.
+This requalifies the revised native pair across GCC Release, Clang ASan/UBSan,
+macOS ARM64, Windows MSVC consumers/clang-cl numerical builds, WASM installed
+static consumers, and native/Pyodide artifact-off/on Python runtimes.
+The same Python commit also passes the regular
+[Tests](https://github.com/Blosc/python-blosc2/actions/runs/46158204537) and
+[Tests (WASM)](https://github.com/Blosc/python-blosc2/actions/runs/46158205083)
+workflows. The push-triggered migration run was superseded by the successful
+performance-enabled dispatch; its cancellation is not passing evidence.
+
+The Linux four-round interleaved Release diagnostic measures compressed
+`min(x + 1)` at `28.569 / 27.557 ms` candidate/reference (`1.037x`), down from
+the earlier `1.47x`. All five cases are within 5% or improve: resident map
+`0.855x`, resident min `0.964x`, compressed map `0.439x`, compressed min
+`1.037x`, compressed sink `0.979x`. The downloaded `performance.json` explicitly
+labels its scope `diagnostic; not a stable-runner gate`.
+
+The revised cross-platform correctness matrix and the reproducible compressed-min
+regression investigation are complete. Stable-hardware performance acceptance
+remains open: shared-runner Linux and local ARM64 measurements alone cannot close
+it. Production defaults and shipping pins are unchanged; ABI freeze/release
+cutover remain separately authorized gates.
 
 ## Earlier qualification: C-Blosc2 public execution API (C1–C3) & C4/cross-platform handoff (2026-11-28)
 
